@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Wafra, OU=Wafra, O=Wafra, L=Dubai, C=AE
+Signer #1 certificate SHA-256 digest: 782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b
+Signer #1 certificate SHA-1 digest: 11d787181913a7aa248ad888e6c6d577cb84cfa9
+Signer #1 certificate MD5 digest: 6df97cf9f706162e84221340a06e21df
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: fc48e09412e1964cc5f64fc01d9d4b4fb52c13854317aefe836937c259ff1893
+Signer #1 public key SHA-1 digest: ab1f2f6ced3735455d89822447f4da4ed2fb3f41
+Signer #1 public key MD5 digest: 4371fe029be7fe301c118641106619d8

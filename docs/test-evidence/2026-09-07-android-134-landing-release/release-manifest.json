@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "versionCode": 134,
+  "package": "app.wafra.android",
+  "architecture": "arm64-v8a",
+  "sourceCommit": "67f996b24c28a1fe584e86e9bbe207a3f49c11ef",
+  "githubRun": 34144403697,
+  "sha256": "cef7539d45ee25770d85996212212c8754356b5cf8ecb9d97aceb6d31634058f",
+  "bytes": 56514565,
+  "signingCertificateSha256": "782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b",
+  "matchesPreviousRedesignPreview": true,
+  "physicalDeviceVerification": false
+}

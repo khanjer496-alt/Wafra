@@ -1,0 +1,167 @@
+[
+  {
+    "width": 320,
+    "pass": true,
+    "overflow": [],
+    "mainFits": true,
+    "font": "Geist, ui-sans-serif, system-ui, sans-serif",
+    "geist": true,
+    "mono": true,
+    "arabic": true,
+    "background": "rgb(244, 241, 234)",
+    "images": [
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data"
+      }
+    ]
+  },
+  {
+    "width": 390,
+    "pass": true,
+    "overflow": [],
+    "mainFits": true,
+    "font": "Geist, ui-sans-serif, system-ui, sans-serif",
+    "geist": true,
+    "mono": true,
+    "arabic": true,
+    "background": "rgb(244, 241, 234)",
+    "images": [
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data"
+      }
+    ]
+  },
+  {
+    "width": 768,
+    "pass": true,
+    "overflow": [],
+    "mainFits": true,
+    "font": "Geist, ui-sans-serif, system-ui, sans-serif",
+    "geist": true,
+    "mono": true,
+    "arabic": true,
+    "background": "rgb(244, 241, 234)",
+    "images": [
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data"
+      }
+    ]
+  },
+  {
+    "width": 1280,
+    "pass": true,
+    "overflow": [],
+    "mainFits": true,
+    "font": "Geist, ui-sans-serif, system-ui, sans-serif",
+    "geist": true,
+    "mono": true,
+    "arabic": true,
+    "background": "rgb(244, 241, 234)",
+    "images": [
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data"
+      }
+    ]
+  },
+  {
+    "width": 1440,
+    "pass": true,
+    "overflow": [],
+    "mainFits": true,
+    "font": "Geist, ui-sans-serif, system-ui, sans-serif",
+    "geist": true,
+    "mono": true,
+    "arabic": true,
+    "background": "rgb(244, 241, 234)",
+    "images": [
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data"
+      },
+      {
+        "loaded": true,
+        "alt": "Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data"
+      }
+    ]
+  }
+]

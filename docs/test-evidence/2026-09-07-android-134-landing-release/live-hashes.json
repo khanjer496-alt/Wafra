@@ -1,0 +1,71 @@
+{
+  "base": "https://wafra-app-azg.pages.dev",
+  "checkedAt": "2026-09-07T17:08:09.163Z",
+  "results": [
+    {
+      "file": "/",
+      "bytes": 37696,
+      "sha256": "0f0c1690cb6cfb4b5d12e78895facd57343a379d5bdc707c143b02ea366b785d"
+    },
+    {
+      "file": "/wafra-app-home.png",
+      "bytes": 49386,
+      "sha256": "c53db6eee5a07aa160a6c0562036054e4fcbad5121fe6addd7a717f381de11e2"
+    },
+    {
+      "file": "/wafra-app-spending.png",
+      "bytes": 56270,
+      "sha256": "70af4818e0b8c1a905fee584ed0bb5477d5347b5f21fc6b9e51c523f777b1690"
+    },
+    {
+      "file": "/wafra-app-bills.png",
+      "bytes": 59316,
+      "sha256": "a3a524943347b50256c9977861658c1e4360f584e0b43853a70f1813e38aa744"
+    },
+    {
+      "file": "/wafra-app-bills-light.png",
+      "bytes": 57697,
+      "sha256": "fb4cd473147d848677e454fd1b5c9175f8bf8dfcfe123a97848b98f779246011"
+    },
+    {
+      "file": "/wafra-icon.svg",
+      "bytes": 326,
+      "sha256": "dd0e0d2c2d59cd7885ae4e0102df6ff0a9f20c1937b5252a47f91097863e382a"
+    },
+    {
+      "file": "/wafra-social.png",
+      "bytes": 52136,
+      "sha256": "e6e540a0ab4d0c518c118904f5ae60278a774f20560857e8425f842a539c58b4"
+    },
+    {
+      "file": "/wafra-social.svg",
+      "bytes": 1800,
+      "sha256": "2685c4b133365dfc4612e86e4f72f7776d3c0d37fe553ab4984fc1b5b805debf"
+    },
+    {
+      "file": "/robots.txt",
+      "bytes": 76,
+      "sha256": "fb436b4256d321f1c189ed6bfc2598b80aa49f227f913a90121b73567eb5fbf5"
+    },
+    {
+      "file": "/sitemap.xml",
+      "bytes": 240,
+      "sha256": "a2a937a6257c74f94862aafb1cb4a696e1a4406c69f213cdd4bd4d324b8534c1"
+    },
+    {
+      "file": "/_expo/static/css/global-87fd0564cfa78f37afcb8d7603e15d75.css",
+      "bytes": 397,
+      "sha256": "9b0d64d52854397670c4362e4982c442c418c847d39b2c4fad06c49bbf2e9fa8"
+    },
+    {
+      "file": "/_expo/static/css/home.module-eb6b88b91e1a6b970acd4920a8b3c6a5.css",
+      "bytes": 9708,
+      "sha256": "485c62df5c998f83a9945f56c16b7a5bf930381148edba120ed8b7fe844069b2"
+    }
+  ],
+  "apk": {
+    "url": "https://github.com/khanjer496-alt/Wafra/releases/download/android-clarity-67f996b/Wafra-android-67f996b.apk",
+    "status": 200,
+    "bytes": 56514565
+  }
+}
