@@ -3,6 +3,7 @@ on:
   push:
     branches: [release/claude-unified-20260907]
     paths: [.github/workflows/claude-unified-release.yml]
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -12,24 +13,16 @@ jobs:
   integrate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
     outputs:
       source: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Apply the reviewed source reconciliation and verify exact results
+          persist-credentials: false
+      - name: Verify the committed reconciliation without modifying repository files
         id: source
-        env:
-          BRANCH: release/claude-unified-20260907
         run: |
           set -euo pipefail
-          test "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$GITHUB_SHA"
-          echo 'b8812cf8e448297945f120577b19fb42d9eacbb17384bf07255b76b3cd0e5e67  .github/integration/claude-unified.patch' | sha256sum --check
-          git apply --check --unidiff-zero .github/integration/claude-unified.patch
-          git apply --index --unidiff-zero .github/integration/claude-unified.patch
           python3 - <<'PY'
           import hashlib,pathlib
           expected={
@@ -53,14 +46,9 @@ jobs:
             data=pathlib.Path(path).read_bytes()
             actual=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
             assert actual==sha,(path,actual,sha)
-          print('All reconciled source files match the locally checked implementation.')
+          print('All reconciled files match the locally checked implementation.')
           PY
           node scripts/check-design-baseline.mjs
-          git rm .github/integration/claude-unified.patch .github/workflows/claude-unified-source.yml .github/workflows/claude-unified-ios-inputs.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Unify Claude Ledger and Light with current Android and iOS fixes'
-          git push origin "HEAD:refs/heads/$BRANCH"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Unified source: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
   source:
@@ -88,13 +76,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
+          git archive --format=tar.gz HEAD > evidence/source.tar.gz
+          printf '%s\n' '${{ needs.integrate.outputs.source }}' > evidence/source.txt
           node scripts/check-design-baseline.mjs | tee evidence/design.log
           npm run typecheck 2>&1 | tee evidence/typecheck.log
           npm run lint 2>&1 | tee evidence/lint.log
           npm test 2>&1 | tee evidence/tests.log
           node --test scripts/test/ios-journey/*.test.cjs 2>&1 | tee evidence/ios-journey.log
           npm --prefix server run build:check 2>&1 | tee evidence/relay-dry-run.log
-          printf '%s\n' '${{ needs.integrate.outputs.source }}' > evidence/source.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -27,8 +27,8 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
       const count = group.sections.reduce((sum, section) => sum + section.items.length, 0);
       return <View key={group.key} style={styles.section} testID={`bills-${group.key}`}>
         <View style={styles.sectionHeading}>
-          <View style={[styles.sectionIcon, { backgroundColor: theme.primarySoft }]}>
-            <Icon name={groupIcons[group.key]} size={20} color={theme.primary} /></View>
+          <View style={styles.sectionIcon}>
+            <Icon name={groupIcons[group.key]} size={20} color={theme.textSecondary} /></View>
           <View style={styles.grow}>
             <ThemedText type="heading">{w[group.key]}</ThemedText>
             {(group.key === 'subscriptions' || group.key === 'utilities') &&
@@ -73,9 +73,9 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
 const styles = StyleSheet.create({
   root: { gap: 30 }, section: { gap: 10 },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  sectionIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  sectionIcon: { width: 32, height: 42, alignItems: 'center', justifyContent: 'center' },
   statusHeading: { paddingTop: 8, paddingBottom: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 80, paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 80, paddingVertical: 16, borderBottomWidth: 1 },
   content: { flex: 1, minWidth: 0, gap: 5 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   grow: { flex: 1, minWidth: 0, gap: 3 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   stack: { flexDirection: 'column', alignItems: 'flex-start' }, empty: { paddingVertical: 12 },

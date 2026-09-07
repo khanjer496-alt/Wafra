@@ -64,6 +64,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require the approved Claude design baseline
+        run: node scripts/check-design-baseline.mjs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3

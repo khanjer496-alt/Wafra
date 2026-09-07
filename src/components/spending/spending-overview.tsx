@@ -68,7 +68,7 @@ export function SpendingOverview(p: Props) {
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
         accessibilityLabel={`${categoryLabel(row.category, language)}. ${formatAED(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${formatAED(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
-        style={({ pressed }) => [styles.category, { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+        style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
         <CategoryAvatar category={row.category} size={44} />
         <View style={styles.categoryContent}>
           <View style={[styles.categoryTop, large && styles.stack]}>
@@ -93,13 +93,13 @@ export function SpendingOverview(p: Props) {
           </>}
         </View>
       </Pressable>; })}
-      {rows.length === 0 && <View style={[styles.empty, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+      {rows.length === 0 && <View style={[styles.empty, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
         <Icon name="chart" size={28} color={theme.primary} />
         <ThemedText type="smallBold">{p.rows.length === 0 ? w.empty : w.emptyFilter}</ThemedText>
         {p.rows.length === 0 && <ThemedText type="meta" themeColor="textSecondary">{w.emptyBody}</ThemedText>}
       </View>}
     </View>
-    {limited.count > 0 && <View style={[styles.budgetSummary, { backgroundColor: theme.card, borderColor: theme.cardBorder }]} testID="limited-category-summary">
+    {limited.count > 0 && <View style={[styles.budgetSummary, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]} testID="limited-category-summary">
       <ThemedText type="smallBold">{w.limited} · {limited.count}</ThemedText>
       <View style={[styles.summaryLine, large && styles.stack]}>
         <ThemedText type="meta" tabular>{formatAED(limited.spentFils)} {w.of} {formatAED(limited.limitFils)}</ThemedText>
@@ -112,14 +112,14 @@ export function SpendingOverview(p: Props) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 18 }, overview: { paddingVertical: 12, gap: 12 },
+  root: { gap: 16 }, overview: { paddingVertical: 18, gap: 12 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  budgetSummary: { gap: 10, padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 24, justifyContent: 'center' },
-  categories: { gap: 4 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 2, borderRadius: 12 },
+  budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
+  categories: { gap: 0 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 0, borderTopWidth: 1 },
   categoryContent: { flex: 1, minWidth: 0, gap: 7 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   categoryBottom: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0 }, caption: { fontSize: 12, lineHeight: 18 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
-  empty: { borderWidth: 1, padding: 24, borderRadius: 18, gap: 12 },
+  empty: { paddingVertical: 24, gap: 12 },
 });

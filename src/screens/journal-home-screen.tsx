@@ -1,3 +1,4 @@
+import { HistoryReadingStatus } from '@/components/history-reading-status';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -178,19 +179,7 @@ export default function JournalHomeScreen() {
           onSpending={() => router.push('/flow')} />
 
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
-        {history && <View style={[styles.importNotice, { borderStartColor: history.status === 'failed' ? theme.warning : theme.primary }]}>
-          <View style={styles.grow} accessibilityLiveRegion="polite">
-            <ThemedText type="smallBold">{history.status === 'failed' ? words.attention
-              : history.status === 'paused' ? words.paused : words.progress}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{history.status === 'failed'
-              ? t(history.error === 'inbox-access' ? 'historyImportAccessBody' : 'historyImportSavedBody')
-              : tf('historyImportLiveProgress', { scanned: history.scanned, found: history.found })}</ThemedText>
-          </View>
-          {history.status !== 'running' && <Pressable onPress={retryHistory} accessibilityRole="button" style={styles.smallAction}>
-            <ThemedText type="smallBold" style={{ color: theme.primary }}>{history.error === 'inbox-access'
-              ? t('openPhoneSettings') : words.resume}</ThemedText>
-          </Pressable>}
-        </View>}
+        {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
 
         {payments.length > 0 && <View style={styles.section} testID="journal-payments">
           <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.upcoming}</ThemedText>
@@ -199,7 +188,7 @@ export default function JournalHomeScreen() {
           <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{payments.slice(0, 2).map((item) => <Pressable key={item.id} accessibilityRole="button"
             accessibilityLabel={`${item.title}, ${shortDate(item.dateISO)}, ${formatAmount(item.amountFils)} ${ledgerCurrencyCode()}`}
             onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
-            <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: theme.primarySoft }]}>
+            <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
               <Icon name={item.kind === 'card' ? 'wallet' : 'receipt'} size={20} color={theme.primary} />
             </View>
             <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText>
@@ -272,13 +261,13 @@ const styles = StyleSheet.create({
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 2 },
   sectionTitle: { fontSize: 17, lineHeight: 24 },
   smallAction: { minHeight: 48, minWidth: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  cardGroup: { borderTopWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  cardGroup: { borderTopWidth: 1, overflow: 'hidden' },
   dateLabel: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingTop: 12, paddingBottom: 0 },
   dateDot: { height: 4, width: 4, borderRadius: 2 },
   dateRule: { height: StyleSheet.hairlineWidth, flex: 1 },
   importNotice: { borderStartWidth: 3, paddingStart: 14, paddingVertical: 10, marginBottom: 4, flexDirection: 'row', gap: 12, alignItems: 'center' },
   paymentRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, minHeight: 74, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  paymentDate: { width: 38, height: 38, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  paymentDate: { width: 38, height: 38, borderWidth: 0, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   paymentAmount: { flexShrink: 1 },
   inlineAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
   captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
