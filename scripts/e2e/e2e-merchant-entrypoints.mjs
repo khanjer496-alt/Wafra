@@ -83,7 +83,10 @@ try {
       await viewAll.scrollIntoViewIfNeeded(); await viewAll.click();
       await page.waitForURL(/\/transactions\?type=all&merchant=Careem$/);
       assert.equal(new URL(page.url()).searchParams.get('type'), 'all');
-      await page.getByRole('textbox', { name: language === 'ar' ? 'ابحث في المتاجر أو التصنيفات' : 'Search merchants or categories', exact: true }).waitFor({ state: 'visible' });
+      const activitySearch = page.getByPlaceholder(language === 'ar' ? 'التاجر أو الفئة' : 'Merchant or category', { exact: true });
+      await activitySearch.waitFor({ state: 'visible' });
+      assert.equal(await activitySearch.isEditable(), true);
+      assert.equal(await activitySearch.getAttribute('aria-label'), language === 'ar' ? 'ابحث في المتاجر أو التصنيفات' : 'Search merchants or categories');
       const body = await page.locator('body').innerText();
       assert.ok(!body.includes('Careem Business'), 'An exact merchant filter cannot include a similar business name');
       await page.getByRole('button', { name: language === 'ar'
