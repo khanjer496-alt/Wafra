@@ -42,6 +42,7 @@ jobs:
               - 'scripts/test/ios-history-native-contract.test.js'
               - 'scripts/test/native-history-store.*'
               - 'scripts/test/native-history-protection-probe.swift'
+              - 'scripts/test/support/host-file-protection*'
 
   check:
     runs-on: ubuntu-latest
@@ -101,8 +102,8 @@ jobs:
   native-ios:
     needs: native-paths
     if: needs.native-paths.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
-    # The older macOS 15 filesystem did not retain `.complete` protection
-    # metadata, causing the unmodified iOS store contracts to fail at setup.
+    # Stable current Apple toolchain. Host protocol checks explicitly model
+    # unavailable iPhone protection metadata; the app build stays unmodified.
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -122,7 +123,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify real host file-protection support before the full build
+      - name: Verify the production store fails closed without real protection
         run: |
           set -euo pipefail
           swiftc -warnings-as-errors -parse-as-library \
