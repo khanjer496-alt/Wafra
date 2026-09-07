@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Button } from '@/components/ui/controls';
@@ -21,22 +20,22 @@ export function BalanceOverview(p: BalanceOverviewProps) {
   const [details, setDetails] = useState(false);
   const detailsLabel = t('refDuesAndMovements');
   return <View style={styles.root} testID="reference-account-balance">
-    <LinearGradient colors={['#174D3E', '#082E28']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-      <View style={styles.heroTitle}><ThemedText type="small" style={styles.onDark}>{t('availableBalances')}</ThemedText>
-        <View accessible={false} style={styles.mark}><Icon name="leaf" size={56} color="#6DA18A" strokeWidth={1.5} /></View></View>
+    <View style={[styles.hero, { borderColor: p.theme.cardBorder }]} >
+      <View style={styles.heroTitle}><ThemedText type="micro" themeColor="textSecondary">{t('availableBalances')}</ThemedText>
+</View>
       <View style={[styles.money, p.largeText && styles.stack]} accessible
         accessibilityLabel={p.knownBalanceCount > 0 ? `${ledgerCurrencyDisplay()} ${formatAmount(p.balanceFils)}` : p.balanceCoverageText}>
-        <ThemedText type="heading" style={styles.onDark}>{ledgerCurrencyDisplay()}</ThemedText>
-        <ThemedText type="amount" tabular style={styles.onDark}>{p.knownBalanceCount > 0 ? formatAmount(p.balanceFils) : '—'}</ThemedText>
+        <ThemedText type="heading" style={{ color: p.theme.text }}>{ledgerCurrencyDisplay()}</ThemedText>
+        <ThemedText type="amount" tabular style={{ color: p.theme.text }}>{p.knownBalanceCount > 0 ? formatAmount(p.balanceFils) : '—'}</ThemedText>
       </View>
-      <ThemedText type="meta" style={styles.muted}>{p.balanceCoverageText}</ThemedText>
-    </LinearGradient>
+      <ThemedText type="meta" style={{ color: p.theme.textSecondary }}>{p.balanceCoverageText}</ThemedText>
+    </View>
     {p.activeSourceCount === 0 ? <Button label={t('newAccount')} onPress={p.onAddAccount} icon="plus" /> : <>
       <Pressable accessibilityRole="button" accessibilityLabel={detailsLabel} accessibilityState={{ expanded: details }} onPress={() => setDetails(!details)} style={styles.disclosure}>
         <ThemedText type="meta" themeColor="textSecondary">{detailsLabel}</ThemedText>
         <Icon name={details ? 'chevron-down' : 'chevron-right'} size={16} color={p.theme.textSecondary} />
       </Pressable>
-      {details && <View style={[styles.details, { backgroundColor: p.theme.card, borderColor: p.theme.cardBorder }]}>
+      {details && <View style={[styles.details, { backgroundColor: 'transparent', borderColor: p.theme.cardBorder }]}>
         <Pressable accessibilityRole="button" onPress={p.onOpenBills} style={[styles.detailRow, p.largeText && styles.stack]}>
           <ThemedText type="small">{t('cardPaymentsDue')}</ThemedText>
           <ThemedText type="smallBold" tabular>{formatAED(p.duesTotalFils)}</ThemedText>
@@ -55,9 +54,9 @@ export function BalanceOverview(p: BalanceOverviewProps) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 8 }, hero: { borderRadius: 20, padding: 20, gap: 10, overflow: 'hidden' }, heroTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  onDark: { color: '#F5FBF7' }, muted: { color: '#C4DCD1' }, money: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },
-  mark: { position: 'absolute', right: 2, top: 3, opacity: 0.45 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
+  root: { gap: 8 }, hero: { paddingVertical: 20, gap: 12, borderBottomWidth: 1 }, heroTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+ money: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },
+   stack: { flexDirection: 'column', alignItems: 'flex-start' },
   disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 44 },
-  details: { borderRadius: 18, borderWidth: 1, padding: 16, gap: 12 }, detailRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', minHeight: 44, alignItems: 'center' },
+  details: { paddingVertical: 16, borderTopWidth: 1, gap: 12 }, detailRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', minHeight: 44, alignItems: 'center' },
 });

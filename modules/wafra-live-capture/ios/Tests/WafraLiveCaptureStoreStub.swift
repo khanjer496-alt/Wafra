@@ -10,6 +10,8 @@ public struct WafraLiveCaptureStatus {
   public let setupProofVersion: Int?
   public let setupProofAt: TimeInterval?
   public let firstCapturedAt: TimeInterval?
+  public let lastReceivedAt: TimeInterval?
+  public let lastHandledAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
@@ -32,7 +34,9 @@ public final class WafraLiveCaptureStore {
     warningId: "00000000-0000-0000-0000-000000000009",
     setupProofVersion: 9,
     setupProofAt: 123.25,
-    firstCapturedAt: 987.5
+    firstCapturedAt: 987.5,
+    lastReceivedAt: 1234.5,
+    lastHandledAt: 1244.75
   )
 
   public func reset() {

@@ -27,8 +27,7 @@ export type ThemedTextProps = TextProps & {
   type?: TextType;
   themeColor?: ThemeColor;
   /**
-   * Marks this as a money figure. Beyond tabular numerals it uses proportional Geist at the same weight. Stable-width digits keep money
-   * columns aligned without giving every amount the appearance of code.
+   * Marks this as a money figure. Beyond tabular numerals it uses Geist Mono at the same weight. Stable-width figures are part of Ledger & Light.
    */
   tabular?: boolean;
 };
@@ -144,9 +143,9 @@ const WEIGHT_OF: Record<TextType, 'regular' | 'medium' | 'semi'> = {
 };
 
 const TABULAR_FOR_WEIGHT = {
-  regular: Fonts.sans,
-  medium: Fonts.sansMedium,
-  semi: Fonts.sansSemi,
+  regular: Fonts.mono,
+  medium: Fonts.monoMedium,
+  semi: Fonts.monoSemi,
 } as const;
 
 const ARABIC_FOR_WEIGHT = {
@@ -173,21 +172,21 @@ const ARABIC_FOR_FACE: Record<string, string> = {
 const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   /** Hero amount — the one figure a screen exists to show. */
   display: {
-    fontFamily: Fonts.sansSemi,
+    fontFamily: Fonts.monoSemi,
     fontSize: 36,
     lineHeight: 44,
     letterSpacing: -0.6,
   },
   /** Screen amount: Wallet net worth, a card's outstanding. */
   amount: {
-    fontFamily: Fonts.sansSemi,
+    fontFamily: Fonts.monoSemi,
     fontSize: 32,
     lineHeight: 40,
     letterSpacing: -0.5,
   },
   /** The figure inside a bottom sheet. */
   sheetAmount: {
-    fontFamily: Fonts.sansSemi,
+    fontFamily: Fonts.monoSemi,
     fontSize: 34,
     lineHeight: 38,
     letterSpacing: -0.7,
@@ -241,16 +240,16 @@ const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
     fontFamily: Fonts.sansMedium,
     fontSize: 12.5,
     lineHeight: 15,
-    letterSpacing: 0,
-    textTransform: 'none',
+    letterSpacing: 0.55,
+    textTransform: 'uppercase',
   },
   /** The smallest caps label — chart axes, tab labels, urgency tags. */
   nano: {
     fontFamily: Fonts.sansMedium,
     fontSize: 12,
     lineHeight: 14,
-    letterSpacing: 0,
-    textTransform: 'none',
+    letterSpacing: 0.55,
+    textTransform: 'uppercase',
   },
   link: {
     fontFamily: Fonts.sansMedium,

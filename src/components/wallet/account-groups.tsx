@@ -38,10 +38,10 @@ export function AccountGroups({ rows, onOpen, onManage }: {
   }
   return <View style={styles.root} testID="account-groups">
     {groups.filter((group) => group.rows.length > 0).map((group) => <View key={group.key}
-      style={[styles.group, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+      style={[styles.group, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <View style={[styles.groupHeader, { borderColor: theme.cardBorder }]}>
-        <View style={[styles.groupIcon, { backgroundColor: group.key === 'credit' ? theme.goldSoft : theme.primarySoft }]}>
-          <Icon name={group.icon} size={18} color={group.key === 'credit' ? theme.gold : theme.primary} />
+        <View style={[styles.groupIcon, { backgroundColor: 'transparent' }]}>
+          <Icon name={group.icon} size={18} color={theme.textSecondary} />
         </View>
         <ThemedText type="smallBold" style={styles.grow}>{w[group.key]}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
@@ -71,7 +71,7 @@ export function AccountGroups({ rows, onOpen, onManage }: {
       </View>)}
     </View>)}
     {rows.length === 0 && <ThemedText type="small" themeColor="textSecondary">{w.empty}</ThemedText>}
-    <View style={[styles.note, { backgroundColor: theme.goldSoft }]}>
+    <View style={[styles.note, { backgroundColor: 'transparent' }]}>
       <Icon name="wallet" size={24} color={theme.gold} />
       <View style={styles.grow}><ThemedText type="smallBold">{w.sourceNote}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">{w.sourceBody}</ThemedText></View>
@@ -79,12 +79,12 @@ export function AccountGroups({ rows, onOpen, onManage }: {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 16 }, group: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, overflow: 'hidden' },
+  root: { gap: 16 }, group: { overflow: 'hidden' },
   groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
   groupIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   rowWrapper: { flexDirection: 'row', alignItems: 'center' }, row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   content: { flex: 1, minWidth: 0, gap: 4 }, line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0, gap: 4 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
   manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginEnd: -8 },
-  freshness: { fontSize: 12, lineHeight: 18 }, note: { borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  freshness: { fontSize: 12, lineHeight: 18 }, note: { paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

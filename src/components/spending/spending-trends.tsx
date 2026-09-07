@@ -51,7 +51,7 @@ export function SpendingTrends(p: Props) {
   ) : <ThemedText type="meta" themeColor="textSecondary">— {w.noData}</ThemedText>;
   const weekdayMax = Math.max(1, ...p.weekdays);
   return <View style={styles.root} testID="spending-trends">
-    <View style={[styles.panel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+    <View style={[styles.panel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <ThemedText type="heading">{w.cashflow}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
       <View style={styles.chart}>
@@ -91,10 +91,10 @@ export function SpendingTrends(p: Props) {
     <View style={styles.section}>
       <ThemedText type="heading">{w.merchants}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
-      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-        {p.merchants.map((m, index) => <Pressable key={m.title} accessibilityRole="button"
+      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
+        {p.merchants.map((m) => <Pressable key={m.title} accessibilityRole="button"
           accessibilityLabel={`${m.title}, ${formatAED(m.totalFils)}, ${m.count} ${w.records}`}
-          onPress={() => p.onMerchant(m.title)} style={({ pressed }) => [styles.row, index > 0 && styles.rule,
+          onPress={() => p.onMerchant(m.title)} style={({ pressed }) => [styles.row, styles.rule,
             { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           <MerchantAvatar title={m.title} category={m.category} size={36} />
           <View style={styles.grow}><ThemedText type="smallBold">{m.title}</ThemedText>
@@ -108,10 +108,10 @@ export function SpendingTrends(p: Props) {
     <View style={styles.section}>
       <ThemedText type="heading">{w.change}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>
-      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-        {p.movers.map((m, index) => <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
+      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
+        {p.movers.map((m) => <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
           accessibilityLabel={`${categoryLabel(m.category, lang)}. ${formatAED(m.previousFils)}. ${formatAED(m.currentFils)}`}
-          style={[styles.row, index > 0 && styles.rule, { borderColor: theme.cardBorder }]}>
+          style={[styles.row, styles.rule, { borderColor: theme.cardBorder }]}>
           <CategoryAvatar category={m.category} size={36} />
           <View style={styles.grow}><ThemedText type="smallBold">{categoryLabel(m.category, lang)}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary" tabular>{formatAED(m.previousFils)} → {formatAED(m.currentFils)}</ThemedText></View>
@@ -125,7 +125,7 @@ export function SpendingTrends(p: Props) {
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: patterns }} onPress={() => setPatterns(!patterns)} style={styles.disclosure}>
       <ThemedText type="smallBold">{w.patterns}</ThemedText><Icon name={patterns ? 'chevron-down' : 'chevron-right'} size={18} color={theme.textSecondary} />
     </Pressable>
-    {patterns && <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    {patterns && <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
       {p.weekdays.map((fils, day) => <View key={day} style={styles.weekday} accessible accessibilityLabel={`${weekdayShort(day)}, ${formatAED(fils)}`}>
         <ThemedText type="meta" style={styles.weekdayName}>{weekdayShort(day)}</ThemedText>
         <View style={[styles.weekdayTrack, { backgroundColor: theme.track }]}><View style={{ height: 6, borderRadius: 3, width: `${fils / weekdayMax * 100}%`, backgroundColor: theme.primary }} /></View>
@@ -139,13 +139,13 @@ const styles = StyleSheet.create({
   monthFigures: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   monthFigure: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   monthDetails: { gap: 12 }, monthDetail: { minHeight: 48, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
-  root: { gap: 24 }, panel: { padding: 18, borderRadius: 20, borderWidth: 1, gap: 12 },
+  root: { gap: 24 }, panel: { paddingVertical: 18, gap: 12 },
   chart: { flexDirection: 'row', gap: 6, marginTop: 8 }, column: { flex: 1, minWidth: 0, gap: 8, minHeight: 150 },
   barPair: { height: 140, alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'center', gap: 4, borderBottomWidth: 1 },
-  bar: { width: '32%', borderTopLeftRadius: 5, borderTopRightRadius: 5 }, month: { textAlign: 'center', fontSize: 12, lineHeight: 18 },
+  bar: { width: '32%', borderTopLeftRadius: 2, borderTopRightRadius: 2 }, month: { textAlign: 'center', fontSize: 12, lineHeight: 18 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 }, legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 }, selected: { padding: 12, borderRadius: 12, gap: 6 },
-  section: { gap: 10 }, group: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', paddingHorizontal: 14 },
+  dot: { width: 8, height: 8, borderRadius: 4 }, selected: { paddingVertical: 12, gap: 6 },
+  section: { gap: 10 }, group: { overflow: 'hidden', },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, paddingVertical: 16 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
   grow: { flex: 1, minWidth: 100, gap: 4 }, change: { alignItems: 'flex-end', gap: 4 },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },

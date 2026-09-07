@@ -14,6 +14,12 @@ import {
   normalizeIosLocalCaptureShortcutUrl,
 } from '@/lib/ios-local-capture-protocol';
 
+import {
+  isCaptureTimestamp,
+  readIosCaptureHealth,
+  type IosCaptureHealth,
+} from './ios-capture-health';
+
 export const SHORTCUTS_APP_STORE_URL =
   'https://apps.apple.com/app/shortcuts/id1462947752';
 
@@ -59,6 +65,7 @@ export interface IosSetupModel {
   readiness: IosSetupReadiness;
   opening: boolean;
   failure: IosSetupFailure;
+  captureHealth: IosCaptureHealth | null;
 }
 
 export type IosSetupIntent =
@@ -107,6 +114,7 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   readiness: 'not-added',
   opening: false,
   failure: null,
+  captureHealth: null,
 };
 
 const iosVersionMajor = (): number => {
@@ -135,8 +143,8 @@ const defaultDependencies = (): IosSetupDependencies => ({
 export function resolveIosSetupReadiness(
   status: Pick<WafraLiveCaptureStatus, 'enabled' | 'setupProofVersion' | 'firstCapturedAt'>,
 ): IosSetupReadiness {
-  if (!status.enabled) return 'not-added';
-  if (status.firstCapturedAt !== null) return 'first-alert-captured';
+  if (status.enabled !== true) return 'not-added';
+  if (isCaptureTimestamp(status.firstCapturedAt)) return 'first-alert-captured';
   if (status.setupProofVersion === 1) return 'shortcut-proven';
   return 'not-added';
 }
@@ -156,7 +164,11 @@ export const resolveIosFutureSetupStep = (
   },
   readiness: IosSetupReadiness,
 ): IosFutureSetupStep => {
-  if (readiness !== 'not-added') return 'ready';
+  // Running the no-input Shortcut proves the local action, not the personal
+  // Message automation. Keep its instructions until the user confirms them.
+  if (readiness !== 'not-added') {
+    return progress.futureAutomationConfirmed ? 'ready' : 'create-automation';
+  }
   if (!progress.futureShortcutConfirmed) {
     return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
       ? 'add-shortcut'
@@ -215,6 +227,7 @@ export function createIosCaptureSetup({
         supported: false,
         shortcutAvailable: false,
         readiness: 'not-added',
+        captureHealth: null,
         stage: 'shortcut',
         opening: false,
         failure: null,
@@ -229,6 +242,7 @@ export function createIosCaptureSetup({
         supported: true,
         shortcutAvailable: false,
         readiness: 'not-added',
+        captureHealth: null,
         stage: 'shortcut',
         opening: false,
         failure: 'load',
@@ -245,6 +259,7 @@ export function createIosCaptureSetup({
         supported: true,
         shortcutAvailable: shortcutUrl !== null,
         readiness,
+        captureHealth: readIosCaptureHealth(status),
         stage:
           readiness !== 'not-added' || (!initial && model.stage === 'automation')
             ? 'automation'
@@ -257,6 +272,7 @@ export function createIosCaptureSetup({
         supported: true,
         shortcutAvailable: false,
         readiness: 'not-added',
+        captureHealth: null,
         failure: 'load',
       });
     }

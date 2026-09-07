@@ -162,13 +162,37 @@ export function createLedgerPersistence({
   const writeSnapshot = async (snapshot: AppState): Promise<void> => {
     const { hydrated: _hydrated, transactions, ...meta } = snapshot;
     const transactionsChanged = previousTransactions !== transactions;
-    const chunks: [string, string][] | null = transactionsChanged
-      ? chunkTransactions(transactions).map(
+    // History is read newest-to-oldest: each page appends OLDER transactions.
+    // Tail-anchored (oldest-first) chunks shift on every append, rewriting the
+    // imported history through SQLCipher. Anchor at the newest end while the
+    // durable history job is unfinished, including pause/failure/restart.
+    // Both layouts already have a persisted marker and an exact reader above.
+    // Completion converts once, atomically with the final cursor, to the
+    // ordinary oldest-first layout optimized for future incoming messages.
+    // Unrelated metadata-only saves keep legacy layouts until rows change.
+    const targetOrder: ChunkOrder = snapshot.historyImport
+      ? snapshot.historyImport.status === 'complete' ? currentChunkOrder : 'newest-first'
+      : transactionsChanged ? currentChunkOrder : storedChunkOrder;
+    const layoutChanged = targetOrder !== storedChunkOrder;
+    let chunks: [string, string][] | null = null;
+    if (transactionsChanged || layoutChanged) {
+      if (targetOrder === currentChunkOrder) {
+        chunks = chunkTransactions(transactions).map(
           (body, index): [string, string] => [chunkKey(index), body],
-        )
-      : null;
+        );
+      } else {
+        chunks = [];
+        for (let start = 0; start < transactions.length; start += chunkSize) {
+          chunks.push([
+            chunkKey(chunks.length),
+            JSON.stringify(transactions.slice(start, start + chunkSize)),
+          ]);
+        }
+      }
+    }
     const chunkCount = chunks ? chunks.length : previousChunkCount;
-    const order = chunks ? currentChunkOrder : storedChunkOrder;
+    let order = chunks ? currentChunkOrder : storedChunkOrder;
+    if (chunks && targetOrder === 'newest-first') order = 'newest-first';
 
     try {
       const changed = chunks
@@ -189,7 +213,7 @@ export function createLedgerPersistence({
       if (chunks) {
         previousChunkCount = chunks.length;
         previousChunks = chunks.map(([, body]) => body);
-        storedChunkOrder = currentChunkOrder;
+        storedChunkOrder = order;
       }
       previousTransactions = transactions;
     } catch (error) {

@@ -234,10 +234,9 @@ ok('MotionReveal honours the app reduced-motion policy',
 const tabBar = stripComments(read('src/components/tab-bar.tsx'));
 
 {
-  ok('src/components/tab-bar.tsx: focus motion uses a persistent shared value',
-    /const focus = useSharedValue\(/.test(tabBar) &&
-      /focus\.value = reducedMotion \? next : withSpring\(/.test(tabBar),
-    'focus motion must update the keyed tab button instead of registering a new entrance');
+  ok('src/components/tab-bar.tsx: selection is immediate without shared-value motion',
+    !/useSharedValue|withSpring|withTiming/.test(tabBar) && /focused \? theme\.primary/.test(tabBar),
+    'selection uses the keyed tab state directly, without a new animation');
 
   /**
    * The bar is rebuilt on every navigation state change, so an exiting or
@@ -248,9 +247,9 @@ const tabBar = stripComments(read('src/components/tab-bar.tsx'));
     !/\bentering=\{/.test(tabBar) && !/\bexiting=\{/.test(tabBar) && !/\blayout=\{/.test(tabBar),
     'react-navigation re-renders this component on every navigation state change');
 
-  ok('src/components/tab-bar.tsx: focus motion honours Reduce Motion',
-    /useReducedMotion\(\)/.test(tabBar) && /focus\.value = reducedMotion \?/.test(tabBar),
-    'tab selection must settle immediately for Reduce Motion and screen-reader users');
+  ok('src/components/tab-bar.tsx: selected state is exposed without motion',
+    /accessibilityState=\{\{ selected: focused \}\}/.test(tabBar) && !/Animated|withSpring/.test(tabBar),
+    'selection is immediate for every user including Reduce Motion');
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,247 @@
+name: Unified Claude design native release
+on:
+  push:
+    branches: [release/claude-unified-20260907]
+    paths: [.github/workflows/claude-unified-release.yml]
+permissions:
+  contents: read
+concurrency:
+  group: claude-unified-release
+  cancel-in-progress: false
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply the reviewed source reconciliation and verify exact results
+        id: source
+        env:
+          BRANCH: release/claude-unified-20260907
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$GITHUB_SHA"
+          echo 'b8812cf8e448297945f120577b19fb42d9eacbb17384bf07255b76b3cd0e5e67  .github/integration/claude-unified.patch' | sha256sum --check
+          git apply --check --unidiff-zero .github/integration/claude-unified.patch
+          git apply --index --unidiff-zero .github/integration/claude-unified.patch
+          python3 - <<'PY'
+          import hashlib,pathlib
+          expected={
+            '.github/workflows/build-apk.yml':'0b39aeb1b49620a3df1133bdf43de77a5ad43682',
+            '.github/workflows/ci.yml':'a5bb7e991c654b0666745587740abd8828a75c55',
+            '.github/workflows/ios-testflight.yml':'321217ec18a27cafb6773b21364abbee4d3c2226',
+            'config/design-baseline.json':'a4252ed350536ed960458c8280b3bd810f14a6f0',
+            'scripts/check-design-baseline.mjs':'d63b46b46485035a0dea3d1f362e7ec85c308ea0',
+            'scripts/e2e/e2e-period.mjs':'a089c1f7a845ef144e72dd6ad51db09de2342300',
+            'scripts/e2e/e2e-smoke.mjs':'f3c150e1345ad3f47f7ecd851c3f88f3b0a5e76b',
+            'scripts/test/contracts.test.js':'a96702910162b98932c69b8fd7f04598c9b4741c',
+            'scripts/test/repair/journal-ui.test.cjs':'5c56b4066110d21c6961b0f67bafc608b393aa5f',
+            'src/components/bills/payment-agenda.tsx':'d38c8ee5b034e6feb88707b13bcfbcacd05e2437',
+            'src/components/reference-home-summary.tsx':'460db42f19cb66496613cfb4b9496e6beec21a24',
+            'src/components/spending/spending-overview.tsx':'1bb6619c9c0198dda310be9d410401b6bb38945b',
+            'src/components/spending/spending-trends.tsx':'bcbcbebda88b7323f51351e2d2928de2611e9011',
+            'src/components/tab-bar.tsx':'80bb1f1cc046c1ee5543965942484c93af53faad',
+            'src/screens/journal-home-screen.tsx':'243dbb11410967590d4ed93629182bcffeded514'
+          }
+          for path,sha in expected.items():
+            data=pathlib.Path(path).read_bytes()
+            actual=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+            assert actual==sha,(path,actual,sha)
+          print('All reconciled source files match the locally checked implementation.')
+          PY
+          node scripts/check-design-baseline.mjs
+          git rm .github/integration/claude-unified.patch .github/workflows/claude-unified-source.yml .github/workflows/claude-unified-ios-inputs.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Unify Claude Ledger and Light with current Android and iOS fixes'
+          git push origin "HEAD:refs/heads/$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Unified source: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+  source:
+    needs: integrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get update && sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+      - name: Full source, design and behaviour gates
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/check-design-baseline.mjs | tee evidence/design.log
+          npm run typecheck 2>&1 | tee evidence/typecheck.log
+          npm run lint 2>&1 | tee evidence/lint.log
+          npm test 2>&1 | tee evidence/tests.log
+          node --test scripts/test/ios-journey/*.test.cjs 2>&1 | tee evidence/ios-journey.log
+          npm --prefix server run build:check 2>&1 | tee evidence/relay-dry-run.log
+          printf '%s\n' '${{ needs.integrate.outputs.source }}' > evidence/source.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-unified-source-validation
+          path: evidence/
+          retention-days: 7
+  browser:
+    needs: integrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Full real-browser navigation and UI checks
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          GITHUB_SHA='${{ needs.integrate.outputs.source }}' npm run test:e2e 2>&1 | tee evidence/browser.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-unified-browser-validation
+          path: |
+            evidence/
+            artifacts/
+          retention-days: 7
+  native:
+    needs: integrate
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.integrate.outputs.source }}
+          persist-credentials: false
+      - name: Select stable Apple toolchain
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: |
+          npm ci --no-audit --no-fund
+          npx --no-install expo prebuild --platform ios --no-install
+          npx pod-install
+      - name: Native protected storage, capture receipts and compiled App Intents
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          swiftc -warnings-as-errors -parse-as-library modules/wafra-message-history/ios/WafraMessageHistoryStore.swift scripts/test/native-history-protection-probe.swift -o "$RUNNER_TEMP/protection-probe"
+          "$RUNNER_TEMP/protection-probe" 2>&1 | tee evidence/protection.log
+          bash scripts/test/native-live-capture-receipts.sh 2>&1 | tee evidence/capture-receipts.log
+          bash scripts/test/native-history-store.sh 2>&1 | tee evidence/history-native.log
+          bash scripts/test/native-live-capture-store.sh 2>&1 | tee evidence/live-native.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-unified-native-validation
+          path: evidence/
+          retention-days: 7
+  android:
+    needs: [integrate, source, browser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ needs.integrate.outputs.source }}
+      BRANCH: release/claude-unified-20260907
+    steps:
+      - name: Dispatch and verify the signed Android build from the exact unified source
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)" = "$SOURCE_SHA"
+          gh workflow run build-apk.yml --ref "$BRANCH" -f architecture=arm64 -f corpus=false -f bundle=false
+          RUN=''
+          for i in $(seq 1 30); do
+            RUN=$(gh api "repos/$GH_REPO/actions/workflows/build-apk.yml/runs?head_sha=$SOURCE_SHA&event=workflow_dispatch" --jq '.workflow_runs[0].id // empty')
+            [ -n "$RUN" ] && break
+            sleep 2
+          done
+          test -n "$RUN"
+          gh run watch "$RUN" --exit-status --interval 30
+          mkdir -p evidence
+          gh run download "$RUN" -n wafra-apk -D evidence
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$TOOLS/apksigner" verify --verbose --print-certs evidence/wafra.apk | tee evidence/signature.txt
+          grep -q '782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b' evidence/signature.txt
+          "$TOOLS/aapt" dump badging evidence/wafra.apk > evidence/badging.txt
+          grep -q "package: name='app.wafra.android'" evidence/badging.txt
+          sha256sum evidence/wafra.apk > evidence/sha256.txt
+          printf 'source=%s\nrun=%s\n' "$SOURCE_SHA" "$RUN" > evidence/source.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-unified-android
+          path: evidence/
+          retention-days: 14
+          compression-level: 0
+  ios:
+    needs: [integrate, source, browser, native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ needs.integrate.outputs.source }}
+      BRANCH: release/claude-unified-20260907
+    steps:
+      - name: Build a store-signed iOS beta from the same source without public submission
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)" = "$SOURCE_SHA"
+          gh workflow run ios-testflight.yml --ref "$BRANCH" -f profile=history-beta -f submit=false -f wait=true
+          RUN=''
+          for i in $(seq 1 30); do
+            RUN=$(gh api "repos/$GH_REPO/actions/workflows/ios-testflight.yml/runs?head_sha=$SOURCE_SHA&event=workflow_dispatch" --jq '.workflow_runs[0].id // empty')
+            [ -n "$RUN" ] && break
+            sleep 2
+          done
+          test -n "$RUN"
+          gh run watch "$RUN" --exit-status --interval 30
+          mkdir -p evidence
+          gh run download "$RUN" -n wafra-ios-build-report -D evidence
+          printf 'source=%s\nrun=%s\nsubmitted=false\n' "$SOURCE_SHA" "$RUN" > evidence/source.txt
+          cat evidence/build.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-unified-ios
+          path: evidence/
+          retention-days: 14

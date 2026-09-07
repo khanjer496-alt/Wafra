@@ -498,9 +498,22 @@ grep -q "filePath: 'WafraMessageHistoryIntent.swift'" "$plugin_file" || {
 test_dir="$(mktemp -d /tmp/wafra-native-history.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT
 
+# Host protocol tests use a metadata-only adapter because hosted macOS VMs
+# cannot provide iPhone Data Protection. Production sources and every existing
+# protection/tampering assertion remain unchanged. The Xcode app build below
+# does NOT compile any scripts/test/support source. Real device encryption and
+# locked-phone behavior require separate device testing, not a green host job.
+echo "History host contracts: file-protection metadata modelled; device encryption NOT certified."
+swiftc -warnings-as-errors -parse-as-library \
+  scripts/test/support/host-file-protection.swift \
+  scripts/test/support/host-file-protection.test.swift \
+  -o "$test_dir/host-protection-model-tests"
+"$test_dir/host-protection-model-tests"
+
 swiftc \
   -warnings-as-errors \
   -parse-as-library \
+  scripts/test/support/host-file-protection.swift \
   modules/wafra-message-history/ios/WafraMessageHistoryStore.swift \
   modules/wafra-message-history/ios/WafraPreparedHistoryStore.swift \
   modules/wafra-message-history/ios/WafraMessageHistoryImporter.swift \

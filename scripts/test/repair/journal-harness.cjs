@@ -46,7 +46,7 @@ function harness(options = {}) {
     upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
   };
-  const native = { View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
+  const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
     Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) } };
   const dependencies = {
@@ -104,6 +104,9 @@ function harness(options = {}) {
     dependencies['@/components/ui/merchant-avatar'] = { MerchantAvatar: (props) => CategoryAvatar(props) };
   }
   dependencies['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'), dependencies);
+  dependencies['@/components/wafra-logo'] = { WafraMark: () => null };
+  dependencies['@/lib/ledger-light-copy'] = load(path.join(root, 'src/lib/ledger-light-copy.ts'), dependencies);
+  dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
