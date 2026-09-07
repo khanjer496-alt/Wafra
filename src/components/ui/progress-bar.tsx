@@ -39,7 +39,7 @@ export function ProgressBar({
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
   const clamped = Math.max(0, Math.min(ratio, 1));
-  const animatedRatio = useSharedValue(reducedMotion ? clamped : 0);
+  const animatedRatio = useSharedValue(clamped);
 
   useEffect(() => {
     animatedRatio.value = reducedMotion ? clamped : withSpring(clamped, FILL_SPRING);

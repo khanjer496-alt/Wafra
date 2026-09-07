@@ -129,8 +129,8 @@ try {
     await visible(page.getByText('AED 1000.00', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'Cedar Cafe');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-09-01');
-    await visible(button(page, 'QA Review Card'));
-    await click(page, 'QA Review Card');
+    await visible(page.getByRole('radio', { name: 'QA Review Card', exact: true }));
+    await click(page, 'QA Review Card', 'radio');
     await click(page, 'Dining');
     await fill(page, TITLE_LABEL, 'Cedar Cafe reviewed');
     await fill(page, DATE_LABEL, '2026-09-02');
@@ -172,7 +172,7 @@ try {
   await scenario('unknown direction and posting status each need confirmation', 'unresolved', async (page) => {
     await openReview(page);
     await fill(page, TITLE_LABEL, 'Confirmed account activity');
-    await click(page, 'QA Current Account');
+    await click(page, 'QA Current Account', 'radio');
     await click(page, 'Dining');
     assert.notEqual(await page.getByRole('tab', { name: 'Expense', exact: true }).getAttribute('aria-selected'), 'true');
     assert.notEqual(await page.getByRole('tab', { name: 'Income', exact: true }).getAttribute('aria-selected'), 'true');
@@ -232,7 +232,7 @@ try {
     await visible(page.getByText('EUR 908.20', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'BOULANGERIE DES PINS');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-08-19');
-    await click(page, 'QA Current Account');
+    await click(page, 'QA Current Account', 'radio');
     await click(page, 'Dining');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
@@ -251,7 +251,7 @@ try {
     await visible(page.getByText('JPY 2786', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'こもれび文具');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '');
-    await click(page, 'QA Current Account');
+    await click(page, 'QA Current Account', 'radio');
     await click(page, 'Shopping');
     await expectConfirmationRefusal(page);
     await fill(page, DATE_LABEL, '2026-09-05');
@@ -294,7 +294,7 @@ try {
     await openReview(page);
     await visible(page.getByText('CAD 42.60', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'LANTERN BOOKSHOP');
-    await click(page, 'QA Refund Card');
+    await click(page, 'QA Refund Card', 'radio');
     await click(page, 'Other');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
@@ -311,7 +311,7 @@ try {
 
   await scenario('explicit category correction wins over the merchant suggestion after reload', 'purchase', async (page) => {
     await openReview(page);
-    await click(page, 'QA Review Card');
+    await click(page, 'QA Review Card', 'radio');
     await click(page, 'Dining');
     await click(page, 'Transport');
     await click(page, CONFIRM);

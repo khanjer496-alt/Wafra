@@ -188,14 +188,11 @@ export default function RootLayout() {
     'Geist-Regular': require('../../assets/fonts/Geist-Regular.ttf'),
     'Geist-Medium': require('../../assets/fonts/Geist-Medium.ttf'),
     'Geist-SemiBold': require('../../assets/fonts/Geist-SemiBold.ttf'),
-    'IBMPlexSans': require('../../assets/fonts/IBMPlexSans-Regular.ttf'),
-    'IBMPlexSans-Medm': require('../../assets/fonts/IBMPlexSans-Medium.ttf'),
-    'IBMPlexSans-SmBld': require('../../assets/fonts/IBMPlexSans-SemiBold.ttf'),
     'GeistMono-Regular': require('../../assets/fonts/GeistMono-Regular.ttf'),
     'GeistMono-Medium': require('../../assets/fonts/GeistMono-Medium.ttf'),
     'GeistMono-SemiBold': require('../../assets/fonts/GeistMono-SemiBold.ttf'),
-    'IBMPlexSansArabic': require('../../assets/fonts/IBMPlexSansArabic-Regular.ttf'),
-    'IBMPlexSansArabic-SmBld': require('../../assets/fonts/IBMPlexSansArabic-SemiBold.ttf'),
+    'NotoKufiArabic-Regular': require('../../assets/fonts/NotoKufiArabic-Regular.ttf'),
+    'NotoKufiArabic-Bold': require('../../assets/fonts/NotoKufiArabic-Bold.ttf'),
   });
 
   // A font that fails to decode must not leave the user on the splash forever;

@@ -386,18 +386,19 @@ await tapText(page, /^Netflix$/, 1400);
     return [...scroller.querySelectorAll('div,span')]
       .filter((node) => node.children.length === 0)
       .map((node) => (node.textContent || '').trim())
-      .filter((text) => /^AED [\d,]+$/.test(text));
+      .filter((text) => /^AED [\d,]+(?:\.\d+)?$/.test(text));
   });
   const charges = chargeTexts.map((text) => money(text));
-  const sum = charges.reduce((a, b) => a + b, 0);
+  const sumMinor = charges.reduce((a, b) => a + Math.round(b * 100), 0);
+  const sum = sumMinor / 100;
   ok(`bills: the subscription sheet's total equals its history rows (${total?.t} vs ${sum})`,
-    !!total && charges.length > 0 && money(total.t) === sum);
+    !!total && charges.length > 0 && Math.round(money(total.t) * 100) === sumMinor);
 }
 await tapLabel(page, 'Close', 900);
 
 // ── Wallet ────────────────────────────────────────────────────────────
 await tapTab(page, 'Accounts');
-ok('wallet shows the available-balance snapshot', !!(await visibleText(page, /AVAILABLE ACROSS ACCOUNTS/i)));
+ok('wallet shows the recorded-balance snapshot', !!(await visibleText(page, /^Recorded balances$/i)));
 ok('Accounts separates bank and credit accounts', !!(await visibleText(page, /^Bank accounts$/i)) && !!(await visibleText(page, /^Credit cards$/i)));
 ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 
@@ -465,8 +466,8 @@ await tapLabel(page, 'Back', 1200);
 await tapLabel(page, 'Back', 1200);
 await tapTab(page, 'Accounts');
 await tapText(page, /Paste a bank message|Inbox scanned/, 1600);
-ok('import page loads', !!(await visibleText(page, 'PARSE PASTED TEXT')));
-await tapText(page, 'TRY SAMPLE', 1200);
+ok('import page loads', !!(await visibleText(page, /^Parse pasted text$/i)));
+await tapText(page, /^Try sample$/i, 1200);
 ok('paste parse reports what matched', !!(await visibleText(page, /MATCHED/i)));
 const fileBtn = await visibleText(page, /FILE \d+ ENTR/i);
 ok('import offers to file the plan', !!fileBtn);

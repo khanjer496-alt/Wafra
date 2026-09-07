@@ -1,8 +1,7 @@
 import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
-import { useLanguage } from '@/hooks/use-language';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   AppState as RNAppState,
@@ -56,10 +55,13 @@ import {
   type IosMessageSetupProgress,
 } from '@/lib/ios-message-onboarding';
 import { useStore } from '@/lib/store';
+import { useLanguage } from '@/hooks/use-language';
+import { IosSetupJourney } from '@/components/ios-message-setup/setup-journey';
+import { detectedSetupBanks, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
   version: 1,
-  activeSection: 'future',
+  activeSection: 'history',
   futureShortcutConfirmed: false,
   futureAutomationConfirmed: false,
   futureStatus: 'not-started',
@@ -94,7 +96,11 @@ export default function IosSetupScreen() {
     shortcutResult?: string;
     section?: string;
   }>();
-  const { ensureDurable, setOnboarded, setCaptureOptOut } = useStore();
+  const { state, ensureDurable, setOnboarded, setCaptureOptOut } = useStore();
+  const language = useLanguage();
+  const journeyCopy = iosSetupJourneyCopy(language);
+  const detectedBanks = useMemo(() => detectedSetupBanks(state.accounts, state.transactions),
+    [state.accounts, state.transactions]);
   const fromOnboarding = params.fromOnboarding === '1';
   const requestedSection = params.section === 'history' || params.section === 'future'
     ? params.section : null;
@@ -127,8 +133,9 @@ export default function IosSetupScreen() {
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
+  const futureConfigured = futureSetupConfigured(setup.readiness, progress.futureAutomationConfirmed);
   const setupComplete = progressLoaded && !setup.loading &&
-    setup.readiness !== 'not-added' && progress.historyStatus === 'complete';
+    futureConfigured && progress.historyStatus === 'complete';
 
   useEffect(() => {
     screenActive.current = true;
@@ -276,14 +283,14 @@ export default function IosSetupScreen() {
     if (setup.loading || !progressLoaded) return;
     // Stored completion describes a previous setup attempt. Native admission
     // can be disabled or unavailable later, so never present it as live proof.
-    const status = setup.readiness !== 'not-added'
+    const status = futureConfigured
       ? 'complete'
       : progress.futureStatus === 'complete' ? 'in-progress' : progress.futureStatus;
     if (status === progress.futureStatus) return;
     void updateProgress({ type: 'future-status-changed', status }).catch(() => {
       if (screenActive.current) setLocalError(t('historySetupStateFailed'));
     });
-  }, [progress.futureStatus, progressLoaded, setup.loading, setup.readiness, updateProgress]);
+  }, [futureConfigured, progress.futureStatus, progressLoaded, setup.loading, updateProgress]);
 
   useEffect(() => {
     if (
@@ -505,7 +512,7 @@ export default function IosSetupScreen() {
     !progress.futureShortcutConfirmed
     ? 'add-shortcut'
     : resolveIosFutureSetupStep(progress, setup.readiness);
-  const futureStatus = !setup.loading && setup.readiness === 'not-added' && progress.futureStatus === 'complete'
+  const futureStatus = !setup.loading && !futureConfigured && progress.futureStatus === 'complete'
     ? 'in-progress' : progress.futureStatus;
   const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
@@ -589,31 +596,16 @@ export default function IosSetupScreen() {
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
           ) : (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
+              <IosSetupJourney
+                language={language}
+                historyStatus={progress.historyStatus}
+                futureReadiness={setup.readiness}
+                automationConfirmed={progress.futureAutomationConfirmed}
+                detectedBanks={detectedBanks}
+                captureHealth={setup.captureHealth}
+              />
               <ChecklistRow
                 step={1}
-                title={t('iosMessageFutureTitle')}
-                detail={setup.readiness === 'not-added' ? undefined : futureReadyLabel}
-                status={futureStatus}
-                expanded={progress.activeSection === 'future'}
-                onPress={() => selectSection('future')}>
-                {!setup.supported ? (
-                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUnsupported')}</ThemedText>
-                ) : setup.failure === 'load' ? (
-                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
-                ) : showingAutomation ? (
-                  <>
-                    <AutomationGuide />
-                    <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
-                  </>
-                ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
-                      : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
-                  </ThemedText>
-                ) : null}
-              </ChecklistRow>
-              <ChecklistRow
-                step={2}
                 title={t('iosMessagePastTitle')}
                 detail={historyComplete ? t('iosMessageHistoryDone') : undefined}
                 status={progress.historyStatus}
@@ -631,6 +623,9 @@ export default function IosSetupScreen() {
                         : historyConfirmed ? 'iosMessageHistoryStartHelp'
                           : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp')}
                     </ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">{journeyCopy.historyRequest}</ThemedText>
+                    {historyRunning && <Button label={journeyCopy.configureWhileImporting} variant="ghost"
+                      onPress={() => selectSection('future')} disabled={busy} wrapLabel />}
                     {!historyRunning && (
                       <View style={styles.hints}>
                         <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
@@ -639,6 +634,31 @@ export default function IosSetupScreen() {
                       </View>
                     )}
                   </>
+                ) : null}
+              </ChecklistRow>
+              <ChecklistRow
+                step={2}
+                title={t('iosMessageFutureTitle')}
+                detail={setup.readiness === 'first-alert-captured' ? futureReadyLabel
+                  : futureConfigured ? journeyCopy.waiting : undefined}
+                status={futureStatus}
+                expanded={progress.activeSection === 'future'}
+                onPress={() => selectSection('future')}>
+                {!setup.supported ? (
+                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUnsupported')}</ThemedText>
+                ) : setup.failure === 'load' ? (
+                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
+                ) : showingAutomation ? (
+                  <>
+                    <AutomationGuide />
+                    <ThemedText type="meta" themeColor="textSecondary">{journeyCopy.senderHelp}</ThemedText>
+                    <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
+                  </>
+                ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
+                      : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
+                  </ThemedText>
                 ) : null}
               </ChecklistRow>
             </View>

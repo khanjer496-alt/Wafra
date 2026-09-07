@@ -52,7 +52,8 @@ const execute = (relative, dependencies = {}) => {
     '__dirname',
     output,
   )(
-    (request) => dependencies[request] ?? {},
+    (request) => dependencies[request] ??
+      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') : {}),
     loaded,
     loaded.exports,
     filename,
@@ -99,8 +100,8 @@ eq('iOS message setup: one checklist contains exactly the Future and Past rows',
   ], [1, 2]);
 ok('iOS message setup: both required sections are named plainly and only the active row expands',
   screen.indexOf("title={t('iosMessageFutureTitle')}") >= 0 &&
-    screen.indexOf("title={t('iosMessageFutureTitle')}") <
-      screen.indexOf("title={t('iosMessagePastTitle')}") &&
+    screen.indexOf("title={t('iosMessagePastTitle')}") <
+      screen.indexOf("title={t('iosMessageFutureTitle')}") &&
     /expanded=\{progress\.activeSection === 'future'\}/.test(screen) &&
     /expanded=\{progress\.activeSection === 'history'\}/.test(screen) &&
     translated('iosMessageFutureTitle', 'en') === 'Future alerts' &&
@@ -2031,7 +2032,7 @@ async function messageOnboardingProgressTests() {
 
   const defaults = {
     version: 1,
-    activeSection: 'future',
+    activeSection: 'history',
     futureShortcutConfirmed: false,
     futureAutomationConfirmed: false,
     futureStatus: 'not-started',
@@ -2045,7 +2046,7 @@ async function messageOnboardingProgressTests() {
     defaults,
   );
   const mutableEmptySnapshot = await progress.loadIosMessageSetupProgress(storage);
-  mutableEmptySnapshot.activeSection = 'history';
+  mutableEmptySnapshot.activeSection = 'future';
   mutableEmptySnapshot.futureStatus = 'complete';
   eq(
     'iOS message onboarding: mutating an empty snapshot cannot poison later defaults',

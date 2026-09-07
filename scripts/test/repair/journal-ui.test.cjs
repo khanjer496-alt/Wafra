@@ -30,7 +30,7 @@ test('activity search and full bills remain reachable without duplicate Accounts
 });
 test('failed history exposes resume rather than pretending capture completed', async () => {
   const h = harness({ history: { status: 'failed', scanned: 1000, found: 120, error: 'page-failed' } });
-  assert.match(text(h.tree), /Needs your attention/);
+  assert.match(text(h.tree), /Import interrupted/);
   const button = walk(h.tree).find((node) => node.type === 'Pressable' && text(node.props.children).trim() === 'Resume');
   button.props.onPress();
   await Promise.resolve();
@@ -40,7 +40,8 @@ test('paused history has an explicit resume action; running history does not res
   const paused = harness({ history: { status: 'paused', scanned: 1000, found: 120 } });
   assert.match(text(paused.tree), /History import paused/);
   const running = harness({ history: { status: 'running', scanned: 1000, found: 120 } });
-  assert.match(text(running.tree), /1000 read · 120 found/);
+  assert.match(text(running.tree), /1,000\s+Messages checked/);
+  assert.match(text(running.tree), /120\s+Transactions found/);
   assert.equal(walk(running.tree).filter((n) => n.type === 'Pressable' && text(n.props.children).trim() === 'Resume').length, 0);
 });
 test('capture opt-out changes only after an explicit press and then opens iOS setup', async () => {

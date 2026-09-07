@@ -1,5 +1,7 @@
 import type { WafraLiveCaptureNativeModule } from '../../modules/wafra-live-capture';
 
+import { isCaptureTimestamp } from '@/lib/ios-capture-health';
+
 import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
@@ -255,7 +257,7 @@ export function createIosLocalCaptureCoordinator(
       if (captureOptedOut(input.ledger)) return 'not-needed';
       const status = await input.native.getCaptureStatus();
       if (captureOptedOut(input.ledger)) return 'not-needed';
-      if (status.firstCapturedAt === null) return 'not-needed';
+      if (!isCaptureTimestamp(status.firstCapturedAt)) return 'not-needed';
       return await input.retireShortcutCapture();
     } catch {
       return 'retry-needed';
@@ -299,7 +301,8 @@ export function createIosLocalCaptureCoordinator(
     await input.native.purgeExpired();
     if (captureOptedOut(input.ledger)) return stopped(null);
     const initialStatus = await input.native.getCaptureStatus();
-    let firstCapturedAt = initialStatus.firstCapturedAt;
+    let firstCapturedAt = isCaptureTimestamp(initialStatus.firstCapturedAt)
+      ? initialStatus.firstCapturedAt : null;
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
 
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {

@@ -41,6 +41,8 @@ jobs:
               - 'scripts/test/run.sh'
               - 'scripts/test/ios-history-native-contract.test.js'
               - 'scripts/test/native-history-store.*'
+              - 'scripts/test/native-history-protection-probe.swift'
+              - 'scripts/test/support/host-file-protection*'
 
   check:
     runs-on: ubuntu-latest
@@ -51,6 +53,9 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
       - uses: actions/checkout@v4
+
+      - name: Require the approved Claude design baseline
+        run: node scripts/check-design-baseline.mjs
 
       - uses: actions/setup-node@v4
         with:
@@ -100,15 +105,17 @@ jobs:
   native-ios:
     needs: native-paths
     if: needs.native-paths.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
+    # Stable current Apple toolchain. Host protocol checks explicitly model
+    # unavailable iPhone protection metadata; the app build stays unmodified.
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 26.2 or newer
+      - name: Select stable Xcode 26.2 or newer
         run: |
           set -euo pipefail
-          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
           test -n "$BEST"
           sudo xcode-select -s "$BEST/Contents/Developer"
           VER=$(xcodebuild -version | head -1 | awk '{print $2}')
@@ -118,6 +125,18 @@ jobs:
             echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
             exit 1
           fi
+
+      - name: Verify the production store fails closed without real protection
+        run: |
+          set -euo pipefail
+          swiftc -warnings-as-errors -parse-as-library \
+            modules/wafra-message-history/ios/WafraMessageHistoryStore.swift \
+            scripts/test/native-history-protection-probe.swift \
+            -o "$RUNNER_TEMP/wafra-protection-probe"
+          "$RUNNER_TEMP/wafra-protection-probe"
+
+      - name: Require the approved Claude design baseline
+        run: node scripts/check-design-baseline.mjs
 
       - uses: actions/setup-node@v4
         with:
@@ -133,7 +152,7 @@ jobs:
       - name: Install CocoaPods dependencies
         run: npx pod-install
 
-      - name: Build and verify the protected history bridge and extracted App Intent metadata
+      - name: Verify host storage contracts and built iOS App Intent metadata
         run: |
           bash scripts/test/native-history-store.sh
           bash scripts/test/native-live-capture-store.sh
@@ -149,6 +168,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require the approved Claude design baseline
+        run: node scripts/check-design-baseline.mjs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
@@ -162,3 +184,14 @@ jobs:
 
       - name: End-to-end
         run: npm run test:e2e
+
+      - name: Preserve browser screenshots and verification results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            artifacts/e2e-redesign/
+            artifacts/e2e-merchant-logos/
+          if-no-files-found: warn
+          retention-days: 7

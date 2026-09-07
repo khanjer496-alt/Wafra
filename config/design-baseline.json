@@ -1,0 +1,15 @@
+{
+  "id": "ledger-and-light",
+  "referenceCommit": "934e5cb14bfaf8dedd1b6adb0a7bcbd87d10267f",
+  "restorationCommit": "fc3bf248bc4e8a844a527e35119c73c2f26c1163",
+  "updatesBase": "a2dbc0d8b9cc9c1a218dfa43e6f920d8df4921c1",
+  "iosSetupCommit": "fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc",
+  "assets": {
+    "assets/images/icon.png": "a59485d5d4c9c28802c53e948a1a78639b452e66946d0c84dd6f0db685d47972",
+    "assets/images/android-icon-foreground.png": "ec4859d0257871def812d76ff24619a36b0553efd77ce174a6f1fc35d9883146",
+    "assets/images/android-icon-background.png": "fad46b1bc797499ce11a4154652c772d13752870dfe3ddb7cb8aedc84a2b44dd",
+    "assets/images/android-icon-monochrome.png": "ec4859d0257871def812d76ff24619a36b0553efd77ce174a6f1fc35d9883146",
+    "assets/images/splash-icon.png": "d2d2f171b213240d54fc8631a99332c3a9327b428fe1f64fab65a1b951a1e758",
+    "assets/images/splash-icon-dark.png": "f0ad7b69e5df8d1fb4b52506c999cc565e855267b17548236c66d2ce52c46186"
+  }
+}

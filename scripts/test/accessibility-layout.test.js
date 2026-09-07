@@ -71,9 +71,9 @@ ok('Wallet uses shared sheets and selected choice semantics',
     /accessibilityRole="radio"/.test(wallet) && /accessibilityState=\{\{ selected:/.test(wallet));
 ok('the primary tab bar exposes tab-list and explicit web selected semantics',
   /role="tablist"/.test(tabBar) && /aria-selected=\{focused\}/.test(tabBar));
-ok('navigation E2E activates animated tabs through a hit-tested point',
-  /const tapTab[\s\S]{0,800}tapKey\(page, name/.test(navigationE2e) &&
-    !/const tapTab[\s\S]{0,300}getByRole\('tab',[\s\S]{0,120}\.click/.test(navigationE2e));
+ok('navigation E2E targets the exact actionable tab rather than duplicate body text',
+  /const tapTab[\s\S]{0,800}getByRole\('tab', \{ name, exact: true \}\)\.click\(\{ timeout: 8000 \}\)/.test(navigationE2e) &&
+    !/force:\s*true/.test(navigationE2e));
 ok('navigation E2E waits for the tab selected state instead of animation stability',
   /const tapTab[\s\S]{0,1200}aria-selected/.test(navigationE2e) &&
     /const tapTab[\s\S]{0,1800}elementFromPoint/.test(navigationE2e));

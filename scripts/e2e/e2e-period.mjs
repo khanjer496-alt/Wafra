@@ -200,6 +200,7 @@ await tapText(page, /^Activity$/, 800);
 await tapText(page, 'View all spending', 1600);
 ok('activity: the spending drill-down arrives pre-filtered', /type=expense/.test(page.url()) &&
   !!(await visibleText(page, /\d+ filters?/i)));
+ok('activity: spending handoff preserves the year scope', !!(await visibleText(page, `· ${yr}`)));
 await tapLabel(page, 'Back', 1200);
 
 // 7) Persistence: a reload must not show onboarding again (chunked storage).
