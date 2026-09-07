@@ -1,7 +1,7 @@
 name: Verify requested Ledger & Light APK
 
 # Explicit build handoff only. No phone/inbox access, release, deployment,
-# OTA or main changes. The canonical build has already captured this source.
+# OTA or main changes. This job checks the already compiled APK unchanged.
 on:
   push:
     branches: [restore/ledger-light-20260907]
@@ -14,13 +14,14 @@ permissions:
 jobs:
   verify-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       BUILD_RUN: '34100198676'
       EXPECTED_SHA: '82d02d23e9e07c930ba7f29731813b91737d50f3'
       EXPECTED_VERSION: '133'
+      PREVIOUS_APK_SHA256: 'ed18020c8acc7668a759924805a9ad9db98877896242d899a3afaefab842637f'
       PREVIOUS_CERT_SHA256: '782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b'
     steps:
       - uses: actions/setup-java@v4
@@ -32,8 +33,10 @@ jobs:
           set -euo pipefail
           test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .head_sha)" = "$EXPECTED_SHA"
           gh run watch "$BUILD_RUN" --exit-status --interval 30
-          mkdir -p incoming evidence
+          mkdir -p incoming previous evidence
           gh run download "$BUILD_RUN" --name wafra-apk --dir incoming
+          gh run download 34095667089 --name wafra-ledger-light-verified-apk-132 --dir previous
+          echo "$PREVIOUS_APK_SHA256  previous/Wafra-Ledger-Light-132.apk" | sha256sum -c -
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq '{id,head_sha,path,head_branch,event,status,conclusion,run_number,html_url}' > evidence/build.json
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs" > evidence/build-jobs.json
           gh api "repos/$GH_REPO/actions/runs/34099882506" --jq '{id,head_sha,status,conclusion,html_url}' > evidence/source-tests.json
@@ -51,7 +54,8 @@ jobs:
           assert len(guard)==1 and guard[0]['conclusion']=='success'
           print('Exact-source tests, canonical release build and SQLCipher guard passed.')
           PY
-      - name: Verify APK integrity and update identity against build 132
+      - name: Verify both APKs and require the identical signing certificate
+        id: verify
         run: |
           set -euo pipefail
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -59,21 +63,42 @@ jobs:
           test -x "$TOOLS/apksigner"
           test -x "$TOOLS/aapt2"
           "$TOOLS/apksigner" verify --verbose --print-certs incoming/wafra.apk > evidence/signature.txt
+          "$TOOLS/apksigner" verify --verbose --print-certs previous/Wafra-Ledger-Light-132.apk > evidence/previous-signature-reverified.txt
           "$TOOLS/aapt2" dump badging incoming/wafra.apk > evidence/badging.txt
+          "$TOOLS/aapt2" dump badging previous/Wafra-Ledger-Light-132.apk > evidence/previous-badging-reverified.txt
           "$TOOLS/aapt2" dump xmltree incoming/wafra.apk --file AndroidManifest.xml > evidence/manifest.txt
           "$TOOLS/zipalign" -c -P 16 -v 4 incoming/wafra.apk > evidence/zip-alignment.txt
           grep -q "name='app.wafra.android'" evidence/badging.txt
           grep -q "versionCode='$EXPECTED_VERSION'" evidence/badging.txt
           grep -q "native-code: 'arm64-v8a'" evidence/badging.txt
+          grep -q "name='app.wafra.android' versionCode='132'" evidence/previous-badging-reverified.txt
           ! grep -q 'application-debuggable' evidence/badging.txt
           python3 - <<'PY'
           import json,os,pathlib,re
-          output=pathlib.Path('evidence/signature.txt').read_text()
-          matches=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)$',output,re.M)
-          assert matches==[os.environ['PREVIOUS_CERT_SHA256']], 'Signer differs from build 132; do not advise uninstalling or clearing user data'
+          # Current Android tools label the same value 'V2 Signer:', while
+          # older tools use 'Signer #1'. Preserve signer-count and exact
+          # fingerprint requirements; do not treat a regex miss as evidence
+          # of a genuinely different certificate.
+          pattern=r'^(?:Signer #\d+|V\d+(?:\.\d+)? Signer):? certificate SHA-256 digest: ([a-fA-F0-9]{64})$'
+          fixture='a'*64
+          for label in ['Signer #1','V2 Signer:','V3.1 Signer:']:
+              assert re.findall(pattern,label+' certificate SHA-256 digest: '+fixture,re.M)==[fixture]
+          def certificate(filename):
+              output=pathlib.Path(filename).read_text()
+              assert re.findall(r'^Number of signers: (\d+)$',output,re.M)==['1'], 'Unexpected signer count'
+              matches={s.lower() for s in re.findall(pattern,output,re.M)}
+              assert len(matches)==1, 'Certificate field missing or inconsistent in apksigner output'
+              return matches.pop()
+          before=certificate('evidence/previous-signature-reverified.txt')
+          after=certificate('evidence/signature.txt')
+          print('Verified build-132 certificate:',before)
+          print('Verified build-133 certificate:',after)
+          assert before==os.environ['PREVIOUS_CERT_SHA256']
+          assert after==before, 'Signer differs from build 132; do not uninstall or clear user data'
           pathlib.Path('evidence/update-identity.json').write_text(json.dumps({
             'package':'app.wafra.android','previousVersionCode':132,'versionCode':int(os.environ['EXPECTED_VERSION']),
-            'certificateSha256':matches[0],'matchesProvidedBuild132':True,
+            'certificateSha256':after,'previousApkSha256':os.environ['PREVIOUS_APK_SHA256'],
+            'previousApkReverified':True,'matchesProvidedBuild132':True,
             'actualPhoneUpgradeTested':False,'ledgerResetRequired':False,
           },indent=2))
           PY
@@ -82,10 +107,11 @@ jobs:
           cp incoming/wafra.apk "evidence/Wafra-Import-Fix-$EXPECTED_VERSION.apk"
           cd evidence
           sha256sum "Wafra-Import-Fix-$EXPECTED_VERSION.apk" > SHA256SUMS
-          printf '%s\n' 'Ledger & Light SMS history storage-performance fix, canonical Android build 133.' 'Package app.wafra.android; same certificate as the provided build 132. This is Wafra, not Wafra Preview.' 'Build source 82d02d23e9e07c930ba7f29731813b91737d50f3; exact-source tests and synthetic write benchmark passed.' 'Only shipping change: persistence chooses a stable existing chunk layout during unfinished history and converts once on completion.' 'Parser, duplicate detection, amounts, encryption adapter, native SMS and design unchanged.' 'Keep existing app data and the saved history cursor. Do not uninstall or clear the ledger to work around a rejected update.' 'Byte reduction in synthetic storage tests is not a measured physical-phone speedup.' 'No phone installation, inbox access, release, OTA, deployment or main merge performed.' 'Physical-phone import throughput, frame pacing and upgrade acceptance remain unverified; earlier unrelated browser/iOS gates are not waived.' > README.txt
+          printf '%s\n' 'Ledger & Light SMS history storage-performance fix, canonical Android build 133.' 'Package app.wafra.android; same certificate as the independently reverified build 132. This is Wafra, not Wafra Preview.' 'Build source 82d02d23e9e07c930ba7f29731813b91737d50f3; exact-source tests and synthetic write benchmark passed.' 'Only shipping change: persistence chooses a stable existing chunk layout during unfinished history and converts once on completion.' 'Parser, duplicate detection, amounts, encryption adapter, native SMS and design unchanged.' 'Keep existing app data and the saved history cursor. Do not uninstall or clear the ledger to work around a rejected update.' 'Byte reduction in synthetic storage tests is not a measured physical-phone speedup.' 'No phone installation, inbox access, release, OTA, deployment or main merge performed.' 'Physical-phone import throughput, frame pacing and upgrade acceptance remain unverified; earlier unrelated browser/iOS gates are not waived.' > README.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: wafra-ledger-light-import-verified-apk-133
+          name: wafra-ledger-light-import-apk-check-133
           path: evidence/
           if-no-files-found: error
           retention-days: 14
