@@ -1,0 +1,82 @@
+name: Record validated iOS source objects
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/record-validated-ios-source.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-ios-beta-preparation
+          run-id: 34139556737
+          github-token: ${{ github.token }}
+          path: validated
+      - name: Verify passed gates and record the exact ordinary source tree
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,os,pathlib,subprocess,tarfile,tempfile
+          repo='repos/khanjer496-alt/Wafra'
+          def api(endpoint,payload=None):
+              cmd=['gh','api',repo+'/'+endpoint]
+              if payload is not None: cmd+=['--method','POST','--input','-']
+              return json.loads(subprocess.check_output(cmd,input=None if payload is None else json.dumps(payload).encode()))
+          def sha(data):return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          run=api('actions/runs/34139556737')
+          assert run['head_sha']=='194348d78277b5e195463e35cb6a79f7e3282013'
+          job=next(j for j in api('actions/runs/34139556737/jobs')['jobs'] if j['name']=='source')
+          gate=next(s for s in job['steps'] if s['name']=='Typecheck, lint and every application/server regression suite')
+          assert gate['conclusion']=='success'
+          archive=pathlib.Path('validated/source.tar.gz')
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()=='8bf5090ce38efd4f23262add67d7d5c81a723b92e0700dca2e9bf66da950f16f'
+          assert api('branches/main')['commit']['sha']=='c13fd461073e8139a1dfd79fef5cd039ffbc85d2'
+          base_commit=api('git/commits/c13fd461073e8139a1dfd79fef5cd039ffbc85d2')
+          base=api('git/trees/'+base_commit['tree']['sha']+'?recursive=1')
+          assert not base['truncated']
+          original={p['path']:p for p in base['tree'] if p['type']=='blob'}
+          entries=[];files={}
+          with tarfile.open(archive,'r:gz') as tar:
+              for member in tar.getmembers():
+                  if member.isdir():continue
+                  path=member.name
+                  assert not pathlib.PurePosixPath(path).is_absolute() and '..' not in pathlib.PurePosixPath(path).parts
+                  assert member.isfile() or member.issym(),path
+                  data=member.linkname.encode() if member.issym() else tar.extractfile(member).read()
+                  mode='120000' if member.issym() else ('100755' if member.mode & 0o111 else '100644')
+                  digest=sha(data);files[path]={'path':path,'mode':mode,'type':'blob','sha':digest}
+                  prior=original.get(path)
+                  if not prior or prior['sha']!=digest or prior['mode']!=mode:
+                      created=api('git/blobs',{'content':base64.b64encode(data).decode(),'encoding':'base64'})
+                      assert created['sha']==digest,path
+                      entries.append(files[path])
+          assert len(files)==872,len(files)
+          assert not set(original)-set(files),'Unexpected deletion from current main'
+          assert len(entries)==75,len(entries)
+          tree=api('git/trees',{'base_tree':base_commit['tree']['sha'],'tree':entries})
+          assert tree['sha']=='3b5f2113f8a82e8f7db10149c2fbe61bbbec7edc','Source differs from independently verified artifact'
+          helper='.github/workflows/record-validated-ios-source.yml'
+          helper_blob=api('contents/'+helper+'?ref='+os.environ['GITHUB_SHA'])['sha']
+          final=api('git/trees',{'base_tree':tree['sha'],'tree':[{'path':helper,'mode':'100644','type':'blob','sha':helper_blob}]})
+          out=pathlib.Path('source-object-evidence');out.mkdir()
+          report={'validatedRun':34139556737,'archiveSHA256':'8bf5090ce38efd4f23262add67d7d5c81a723b92e0700dca2e9bf66da950f16f','validatedTree':tree['sha'],'tree':final['sha'],'parent':os.environ['GITHUB_SHA'],'additionalParents':['c13fd461073e8139a1dfd79fef5cd039ffbc85d2','fc3bf248bc4e8a844a527e35119c73c2f26c1163','fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc'],'sourceFiles':len(files),'changedFiles':len(entries),'branchUpdated':False,'appleWrites':0}
+          (out/'ready.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          # No ref mutation from the restricted Actions installation. The
+          # connected owner-authorized GitHub action will make that update.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-ios-source-object-record
+          path: source-object-evidence/
+          retention-days: 14
