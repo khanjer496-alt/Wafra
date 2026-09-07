@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply two exact test-only corrections
+      - name: Reconcile the current test revision without replacing its newer money checks
         id: source
         env:
           BRANCH: release/claude-unified-20260907
@@ -29,39 +29,24 @@ jobs:
           from pathlib import Path
           from hashlib import sha1
           p=Path('scripts/e2e/e2e-navigation.mjs');s=p.read_text()
-          def blob(s):
-            b=s.encode();return sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
-          if blob(s)!='9f301f43b8d8adfe23f10d7d4083c9ee7a0c46c5':
-            assert blob(s)=='ba1a876000031d513a0f9ad1734bf9ad4094beb7'
-            old='''    const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
-              for (const heading of headings) {
-                if ((heading.textContent || '').trim() !== want) continue;'''
-            new='''    const home = want === 'Home' || want === 'الرئيسية';
-              const headings = document.querySelectorAll(home ? '[data-testid="home-spending-total"]' : '[role="heading"],h1,h2,h3,h4,h5,h6');
-              for (const heading of headings) {
-                if (!home && (heading.textContent || '').trim() !== want) continue;'''
-            assert s.count(old)==1;s=s.replace(old,new)
-            old="  const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);"
-            new=r'''  // Parse the currency amount, not punctuation or other numbers in its label.
-            const minor = value => {
-              const amount = String(value).replace('−', '-').match(/[+-]?\s*AED\s*[\d,]+(?:\.\d+)?/)?.[0];
-              return amount === undefined ? NaN : Math.round(money(amount) * 100);
-            };'''
-            assert s.count(old)==1;s=s.replace(old,new)
-            assert blob(s)=='9f301f43b8d8adfe23f10d7d4083c9ee7a0c46c5',blob(s)
-            p.write_text(s)
+          b=s.encode();assert sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()=='e6c344d397dac331fdd369520d2a7fe9214f234f'
+          old="  // The Home tab renders the Wafra wordmark as its heading in both languages.\n  const headingName = name === 'Home' || name === 'الرئيسية' ? 'Wafra' : name;"
+          new="  // Home's wordmark is not a semantic heading. Verify its actionable content.\n  if (name === 'Home' || name === 'الرئيسية') {\n    await page.getByTestId('home-spending-total').waitFor({ state: 'visible', timeout: 8000 });\n    return;\n  }\n  const headingName = name;"
+          assert s.count(old)==1;s=s.replace(old,new)
+          old="  ok('settings: switching back returns the app to English',\n    (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');"
+          new=old+"\n  ok('English Settings Back action works', await tapKey(page, 'Back') === true);\n  await page.waitForURL(/\\/$/);"
+          assert s.count(old)==1;s=s.replace(old,new)
+          p.write_text(s)
           PY
           node --check scripts/e2e/e2e-navigation.mjs
           node scripts/check-design-baseline.mjs
           node scripts/test/accessibility-layout.test.js
           git diff --exit-code 9c0056230f784771b42d4bb420d8b851aaf29a4a -- src modules assets plugins server/src app.json app.config.ts eas.json package.json package-lock.json server/package.json server/package-lock.json babel.config.js metro.config.js
           git add scripts/e2e/e2e-navigation.mjs
-          if ! git diff --cached --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'Test actionable Home content and parse currency labels without sentence punctuation'
-            git push origin "HEAD:refs/heads/$BRANCH"
-          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Validate actionable Home content and return from Settings before testing tabs'
+          git push origin "HEAD:refs/heads/$BRANCH"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   navigation:
     needs: prepare
