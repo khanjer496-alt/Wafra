@@ -91,8 +91,12 @@ const tapTab = async (page, name) => {
     }
     return false;
   }, name, { timeout: 8000 });
-  // The Home tab renders the Wafra wordmark as its heading in both languages.
-  const headingName = name === 'Home' || name === 'الرئيسية' ? 'Wafra' : name;
+  // Home's wordmark is not a semantic heading. Verify its actionable content.
+  if (name === 'Home' || name === 'الرئيسية') {
+    await page.getByTestId('home-spending-total').waitFor({ state: 'visible', timeout: 8000 });
+    return;
+  }
+  const headingName = name;
   await page.waitForFunction((want) => {
     const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
     for (const heading of headings) {
@@ -705,6 +709,8 @@ for (const [name, enter] of [
   await page.waitForTimeout(1200);
   ok('settings: switching back returns the app to English',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');
+  ok('English Settings Back action works', await tapKey(page, 'Back') === true);
+  await page.waitForURL(/\/$/);
 }
 
 /* ── Nothing may be pushed off the right edge ──────────────────────────
