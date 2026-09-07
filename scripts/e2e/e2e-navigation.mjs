@@ -91,6 +91,8 @@ const tapTab = async (page, name) => {
     }
     return false;
   }, name, { timeout: 8000 });
+  // The Home tab renders the Wafra wordmark as its heading in both languages.
+  const headingName = name === 'Home' || name === 'الرئيسية' ? 'Wafra' : name;
   await page.waitForFunction((want) => {
     const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
     for (const heading of headings) {
@@ -103,7 +105,7 @@ const tapTab = async (page, name) => {
       if (top && (heading.contains(top) || top.contains(heading))) return true;
     }
     return false;
-  }, name, { timeout: 8000 });
+  }, headingName, { timeout: 8000 });
 };
 
 /**
@@ -371,6 +373,7 @@ const homeFactControl = (name) => {
 };
 const homeFact = async (name) => {
   const row = homeFactControl(name);
+  if (await row.getAttribute('role') !== 'button') throw new Error(`${name} is not actionable`);
   await row.scrollIntoViewIfNeeded();
   await row.click();
 };
@@ -715,7 +718,7 @@ for (const [name, enter] of [
 {
   const overflow = [];
   for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
-    await tapKey(page, key, 5000);
+    await tapTab(page, key);
     await page.waitForTimeout(700);
     overflow.push(...(await clippedText(page, name)));
   }
