@@ -217,7 +217,9 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2200);
 
 // ── Home ──────────────────────────────────────────────────────────────
-ok('home hero states the net result', !!(await visibleText(page, /Net after spending/i)));
+ok('home hero focuses on spending instead of a total balance',
+  await page.getByTestId('home-spending-total').isVisible() &&
+  await page.getByText('Recorded balances', { exact: true }).count() === 0);
 ok('home splits income and spending', await page.getByTestId('home-spending-total').count() === 1 && await page.getByTestId('home-income-summary').count() === 1);
 ok('home lists upcoming obligations', !!(await visibleText(page, /^(Upcoming|Coming up)$/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
@@ -314,8 +316,9 @@ ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
 // The amount itself is an accessible Money group rather than one leaf text
 // node, so resolve it inside the same summary cell as the label instead of
 // depending on how React Native Web happens to split currency and digits.
-const flowTotalHeading = await page.getByTestId('spending-categories')
-  .locator('[aria-label^="AED "]').first().getAttribute('aria-label');
+const flowTotalHeading = (await page.getByTestId('spending-categories').innerText())
+  .match(/\bAED\s*[\d,]+(?:\.\d+)?/)?.[0] ?? '';
+ok('Spending presents a readable total before category rows', Number.isFinite(money(flowTotalHeading)));
 // Categories own budgets now. Keep exact money and drill-down checks.
 ok('Spending shows category limits with their spending', !!(await visibleText(page,/Categories with limits/i)));
 {
@@ -452,7 +455,7 @@ await tapText(page,'Preferences',500);
 }
 
 // ── Import ────────────────────────────────────────────────────────────
-await tapText(page,'Imports',500);
+await tapText(page,'Privacy & data',500);
 await tapText(page, 'Improve accuracy', 1200);
 ok('accuracy screen opens', !!(await visibleText(page, /reads clean|could not be fully read/)));
 await tapLabel(page, 'Back', 1200);

@@ -161,14 +161,14 @@ const monthPeriod = (offset = 0) => {
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: hero reads live', !!(await visibleText(page, /^Net after spending$/i)));
+ok('home: the spending summary is visible', await page.getByTestId('home-spending-total').isVisible());
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
 await tapPeriod(page, monthPeriod(), 1200);
 ok('sheet: reporting period opens', !!(await visibleText(page, /^Reporting period$/i)));
 await tapText(page, /^Last month$/i, 1200);
 ok('home: past month applies beside the hero',
-  !!(await visibleText(page, monthPeriod(-1))) && !!(await visibleText(page, /^Net after spending$/i)));
+  !!(await visibleText(page, monthPeriod(-1))) && await page.getByTestId('home-spending-total').isVisible());
 
 // 3) Spending follows the same period.
 await tapTab(page, 'Spending');
@@ -191,10 +191,15 @@ await tapText(page, 'All activity', 1600);
 ok('activity: header carries the selected scope', !!(await visibleText(page, `· ${yr}`)));
 await tapLabel(page, 'Back', 1200);
 
-// 6) Home's Spent cell deep-links to Activity, pre-filtered to spending. Caps
-// are a CSS transform, so the DOM text is still "Spent".
-await tapText(page, /^Spent$/, 1600);
-ok('activity: Spent deep-link arrives pre-filtered', !!(await visibleText(page, /\d+ filters?/i)));
+// 6) The spending-first Home opens the category breakdown; its activity view
+// preserves the same period and provides an explicitly expense-filtered ledger.
+await page.getByTestId('home-spending-total').click();
+await page.waitForTimeout(1000);
+ok('Home spending opens the category breakdown', /\/flow/.test(page.url()));
+await tapText(page, /^Activity$/, 800);
+await tapText(page, 'View all spending', 1600);
+ok('activity: the spending drill-down arrives pre-filtered', /type=expense/.test(page.url()) &&
+  !!(await visibleText(page, /\d+ filters?/i)));
 await tapLabel(page, 'Back', 1200);
 
 // 7) Persistence: a reload must not show onboarding again (chunked storage).
@@ -202,7 +207,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 ok('persistence: reload keeps onboarded state',
   !(await visibleText(page, 'Your bank already texts you', 2500)));
-ok('persistence: reload keeps the ledger', !!(await visibleText(page, /Net after spending/i)));
+ok('persistence: reload keeps the ledger', await page.getByTestId('home-spending-total').isVisible());
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));
