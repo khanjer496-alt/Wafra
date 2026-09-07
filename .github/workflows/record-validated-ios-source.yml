@@ -22,16 +22,17 @@ jobs:
           run-id: 34139556737
           github-token: ${{ github.token }}
           path: validated
-      - name: Verify passed gates and record the exact ordinary source tree
+      - name: Verify passed gates and record ordinary source blobs
         run: |
           python3 - <<'PY'
-          import base64,hashlib,json,os,pathlib,subprocess,tarfile,tempfile
+          import base64,hashlib,json,os,pathlib,subprocess,tarfile
           repo='repos/khanjer496-alt/Wafra'
           def api(endpoint,payload=None):
               cmd=['gh','api',repo+'/'+endpoint]
-              if payload is not None: cmd+=['--method','POST','--input','-']
+              if payload is not None:cmd+=['--method','POST','--input','-']
               return json.loads(subprocess.check_output(cmd,input=None if payload is None else json.dumps(payload).encode()))
           def sha(data):return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          out=pathlib.Path('source-object-evidence');out.mkdir()
           run=api('actions/runs/34139556737')
           assert run['head_sha']=='194348d78277b5e195463e35cb6a79f7e3282013'
           job=next(j for j in api('actions/runs/34139556737/jobs')['jobs'] if j['name']=='source')
@@ -52,6 +53,13 @@ jobs:
                   assert not pathlib.PurePosixPath(path).is_absolute() and '..' not in pathlib.PurePosixPath(path).parts
                   assert member.isfile() or member.issym(),path
                   data=member.linkname.encode() if member.issym() else tar.extractfile(member).read()
+                  if path=='.github/workflows/ios-testflight.yml':
+                      assert sha(data)=='fc1541fef176dbea98c531e5635f776fd69a8404'
+                      text=data.decode();start=text.index('      - name: Record exact completed beta build');end=text.index('      # The key is in RUNNER_TEMP',start)
+                      chunk='\n'.join('          '+line if line and not line.startswith(' ') else line for line in text[start:end].split('\n'))
+                      data=(text[:start]+chunk+text[end:]).encode()
+                      assert sha(data)=='262d761b01d58b19b673e79c4de8ba7ac7ed9978'
+                      (out/'ios-testflight.yml').write_bytes(data)
                   mode='120000' if member.issym() else ('100755' if member.mode & 0o111 else '100644')
                   digest=sha(data);files[path]={'path':path,'mode':mode,'type':'blob','sha':digest}
                   prior=original.get(path)
@@ -62,18 +70,17 @@ jobs:
           assert len(files)==872,len(files)
           assert not set(original)-set(files),'Unexpected deletion from current main'
           assert len(entries)==75,len(entries)
-          tree=api('git/trees',{'base_tree':base_commit['tree']['sha'],'tree':entries})
-          assert tree['sha']=='3b5f2113f8a82e8f7db10149c2fbe61bbbec7edc','Source differs from independently verified artifact'
           helper='.github/workflows/record-validated-ios-source.yml'
-          helper_blob=api('contents/'+helper+'?ref='+os.environ['GITHUB_SHA'])['sha']
-          final=api('git/trees',{'base_tree':tree['sha'],'tree':[{'path':helper,'mode':'100644','type':'blob','sha':helper_blob}]})
-          out=pathlib.Path('source-object-evidence');out.mkdir()
-          report={'validatedRun':34139556737,'archiveSHA256':'8bf5090ce38efd4f23262add67d7d5c81a723b92e0700dca2e9bf66da950f16f','validatedTree':tree['sha'],'tree':final['sha'],'parent':os.environ['GITHUB_SHA'],'additionalParents':['c13fd461073e8139a1dfd79fef5cd039ffbc85d2','fc3bf248bc4e8a844a527e35119c73c2f26c1163','fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc'],'sourceFiles':len(files),'changedFiles':len(entries),'branchUpdated':False,'appleWrites':0}
+          entries.append({'path':helper,'mode':'100644','type':'blob','sha':api('contents/'+helper+'?ref='+os.environ['GITHUB_SHA'])['sha']})
+          report={'validatedRun':34139556737,'archiveSHA256':'8bf5090ce38efd4f23262add67d7d5c81a723b92e0700dca2e9bf66da950f16f','validatedSourceTree':'3b5f2113f8a82e8f7db10149c2fbe61bbbec7edc','formattedSourceTree':'e81ae00695a427351ebbb79bdf9605bf606099d6','baseTree':base_commit['tree']['sha'],'parent':os.environ['GITHUB_SHA'],'additionalParents':['c13fd461073e8139a1dfd79fef5cd039ffbc85d2','fc3bf248bc4e8a844a527e35119c73c2f26c1163','fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc'],'sourceFiles':len(files),'branchUpdated':False,'appleWrites':0}
           (out/'ready.json').write_text(json.dumps(report,indent=2))
+          (out/'tree-elements.json').write_text(json.dumps(entries,indent=2))
           print(json.dumps(report,indent=2))
-          # No ref mutation from the restricted Actions installation. The
-          # connected owner-authorized GitHub action will make that update.
+          print('All source blobs recorded. No ref or tree mutation attempted by the restricted Actions installation.')
           PY
+      - name: Validate canonical workflow YAML
+        run: |
+          ruby -ryaml -e 'p YAML.load_file("source-object-evidence/ios-testflight.yml")["jobs"].keys'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
