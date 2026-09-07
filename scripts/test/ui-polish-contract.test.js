@@ -149,7 +149,7 @@ assert.match(task3Transactions, /contentContainerStyle=\{listInsets\.contentCont
 assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
 assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
 assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);
-assert.match(task3Transactions, /<TextField[\s\S]*?label=\{tr\('searchMerchants'\)\}/);
+assert.match(task3Transactions, /<TextField[\s\S]*?label=\{tr\('transactionSearchLabel'\)\}[\s\S]*?accessibilityLabel=\{tr\('searchMerchants'\)\}/);
 assert.match(task3Transactions, /<ActionIconButton[\s\S]*?label=\{tr\('clearSearch'\)\}[\s\S]*?variant="plain"/);
 assert.match(task3Transactions, /const clearFilters[\s\S]*?setSmsOnly\(false\)/);
 

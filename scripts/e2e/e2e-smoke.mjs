@@ -406,7 +406,9 @@ ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 await tapTab(page, 'Home');
 await tapText(page, 'All activity', 1600);
 ok('activity opens scoped to the period', !!(await visibleText(page, /\d+ transactions? ·/i)));
-ok('activity offers a search field', !!(await page.getByPlaceholder(/Search merchants/i).count()));
+ok('activity offers a labelled search field', await page.getByRole('textbox', {
+  name: 'Search merchants or categories', exact: true,
+}).isVisible());
 await tapLabel(page, 'Back', 1200);
 
 // ── Settings ──────────────────────────────────────────────────────────

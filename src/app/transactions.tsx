@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -9,6 +10,7 @@ import {
   StyleSheet,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -72,6 +74,9 @@ const transactionKey = (transaction: Transaction) => transaction.id;
 export default function TransactionsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
+  const { width, fontScale } = useWindowDimensions();
+  // Give the search field the full width before its placeholder gets clipped.
+  const narrowSearch = width / Math.max(fontScale, 1) < 360;
   const language = useLanguage();
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback(
@@ -267,7 +272,10 @@ export default function TransactionsScreen() {
   // One stable handler for the whole list. An inline `() => setEditing(item)`
   // is a new function per row per render, which defeats TransactionRow's memo
   // and re-renders every visible row on each keystroke in the search field.
-  const openEntry = useCallback((tx: Transaction) => setEditing(tx), []);
+  const openEntry = useCallback((tx: Transaction) => {
+    Keyboard.dismiss();
+    setEditing(tx);
+  }, []);
   const renderRow = useCallback(
     ({ item, index }: { item: Transaction; index: number }) => (
       <View
@@ -419,15 +427,17 @@ export default function TransactionsScreen() {
           contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={(
             <View style={styles.controls}>
-              <View style={[styles.searchToolbar, largeText && styles.searchToolbarLarge]}>
-                <View style={largeText ? styles.searchFieldLarge : styles.searchField}>
+              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
+                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
                   <TextField
-                    label={tr('searchMerchants')}
+                    label={tr('transactionSearchLabel')}
+                    accessibilityLabel={tr('searchMerchants')}
                     value={query}
                     onChangeText={setQuery}
                     inputMode="search"
                     returnKeyType="search"
-                    placeholder={tr('searchMerchants')}
+                    placeholder={tr('transactionSearchPlaceholder')}
+                    onSubmitEditing={() => Keyboard.dismiss()}
                     leading={<Icon name="search" size={17} color={theme.textSecondary} />}
                     trailing={query.length > 0 ? (
                       <ActionIconButton
@@ -444,9 +454,10 @@ export default function TransactionsScreen() {
                   accessibilityLabel={tr('filtersButton')}
                   accessibilityState={{ selected: activeFilterCount > 0 }}
                   hitSlop={6}
-                  onPress={() => setSheetVisible(true)}
+                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
                   style={({ pressed }) => [
                     styles.filterBtn,
+                    (largeText || narrowSearch) && styles.filterBtnStacked,
                     {
                       backgroundColor: activeFilterCount > 0
                         ? theme.primary
@@ -494,11 +505,8 @@ export default function TransactionsScreen() {
                 </View>
               )}
 
-              <View style={styles.summaryRow}>
-            {/* Takes the space that is left, and no more. Without a flex
-                constraint this line expanded to whatever it needed, wrapped
-                to two lines, and shoved the total clean off the right edge of
-                the screen — the user saw "+A" and nothing else. */}
+              <View testID="transactions-summary" style={styles.summaryRow}>
+            {/* Full-width metadata; money and exclusions have their own lines. */}
             <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
               {trf('transactionsCount', {
                 count: filtered.length,
@@ -518,17 +526,11 @@ export default function TransactionsScreen() {
                     s: activeFilterCount === 1 ? '' : 's',
                   })}`
                 : ''}
-              {excluded.transfers > 0
-                ? ` · ${trf('transfersExcluded', {
-                    count: excluded.transfers,
-                    s: excluded.transfers === 1 ? '' : 's',
-                  })}`
-                : ''}
-              {excluded.hidden > 0
-                ? ` · ${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
-                : ''}
+
             </ThemedText>
             <View style={styles.summaryRight}>
+              <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
+                <ThemedText type="small" themeColor="textSecondary">{tr('transactionNetTotal')}</ThemedText>
               <ThemedText
                 type="smallBold"
                 tabular
@@ -536,6 +538,7 @@ export default function TransactionsScreen() {
                 {totalShown >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(totalShown), { decimals: false })}
               </ThemedText>
+              </View>
               {activeFilterCount > 0 && (
                 <Pressable
                   accessibilityRole="button"
@@ -548,6 +551,19 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>
+              {(excluded.transfers > 0 || excluded.hidden > 0) && (
+                <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
+              {excluded.transfers > 0
+                ? `${trf('transfersExcluded', {
+                    count: excluded.transfers,
+                    s: excluded.transfers === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excluded.hidden > 0
+                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
+                : ''}
+                </ThemedText>
+              )}
               </View>
             </View>
           )}
@@ -559,7 +575,7 @@ export default function TransactionsScreen() {
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
           renderSectionHeader={({ section }) => (
-            <View style={styles.sectionHeader}>
+            <View style={[styles.sectionHeader, largeText && styles.sectionHeaderLarge]}>
               <ThemedText type="micro" themeColor="textSecondary">
                 {section.title}
               </ThemedText>
@@ -834,6 +850,7 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
+  filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
     height: 48,
@@ -850,11 +867,12 @@ const styles = StyleSheet.create({
   searchField: { flex: 1, minWidth: 0 },
   searchFieldLarge: { width: '100%' },
   summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     gap: Spacing.two,
   },
+  summaryValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minWidth: 0, flexShrink: 1 },
+  summaryValueLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   summaryText: {
     flexShrink: 1,
   },
@@ -871,10 +889,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
-    // The figure is the point of the row; it never gives up space.
-    flexShrink: 0,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    minWidth: 0,
   },
+  sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   sectionHeader: {
+    flexWrap: 'wrap',
+    gap: Spacing.two,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

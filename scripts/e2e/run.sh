@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exports the app for web, serves it, and runs both browser suites against it.
+# Exports the app for web, serves it, and runs the browser acceptance suites.
 #
 # These existed for a while and ran only when somebody remembered to. That is
 # the same "nothing checks it" problem the rest of the audit is about, one
@@ -40,6 +40,7 @@ for _ in $(seq 1 60); do
 done
 curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; exit 1; }
 
+node scripts/e2e/e2e-transaction-ui.mjs
 node scripts/e2e/e2e-home-cashflow.mjs
 node scripts/e2e/e2e-merchant-spending.mjs
 node scripts/e2e/e2e-merchant-entrypoints.mjs

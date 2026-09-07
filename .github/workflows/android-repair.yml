@@ -27,6 +27,10 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Compile the shipping modules used by accounting regressions
+        run: |
+          npm --prefix server ci
+          bash scripts/test/build.sh
       - name: Behavioural regressions
         run: |
           set -euo pipefail

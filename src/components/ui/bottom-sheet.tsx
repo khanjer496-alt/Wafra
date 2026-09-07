@@ -263,7 +263,7 @@ export function BottomSheet({
                     />
                   ) : null}
                   <View style={styles.header}>
-                    <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
+                    <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header" style={styles.title}>
                       {title}
                     </ThemedText>
                     {dismissible ? (
@@ -293,7 +293,7 @@ export function BottomSheet({
                 {children}
               </ScrollView>
               {hasFooter ? (
-                <View style={[styles.footer, { paddingBottom: bottomClearance }]}>{footer}</View>
+                <View testID={testID ? `${testID}-footer` : undefined} style={[styles.footer, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>{footer}</View>
               ) : null}
             </Pressable>
           </Animated.View>
@@ -316,7 +316,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   sheetBody: { flexShrink: 1, minHeight: 0 },
+  title: { flex: 1, minWidth: 0 },
   dragRegion: {
+    flexShrink: 0,
     paddingTop: Spacing.two,
     paddingHorizontal: ScreenPadding,
   },
@@ -328,12 +330,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   header: {
+    gap: Spacing.two,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingBottom: Spacing.two,
   },
   close: {
+    flexShrink: 0,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -349,6 +353,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.two,
   },
   footer: {
+    flexShrink: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.four - 4,
     paddingHorizontal: ScreenPadding,
   },

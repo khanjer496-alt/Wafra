@@ -193,5 +193,9 @@ jobs:
           path: |
             artifacts/e2e-redesign/
             artifacts/e2e-merchant-logos/
+            artifacts/e2e-home-cashflow/
+            artifacts/e2e-merchant-spending/
+            artifacts/e2e-merchant-entrypoints/
+            artifacts/e2e-transaction-ui/
           if-no-files-found: warn
           retention-days: 7

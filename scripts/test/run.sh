@@ -185,7 +185,7 @@ for t in "${SUITES[@]}"; do
 done
 
 # Execute new interaction regressions in addition to every original gate.
-node --test repair/*.test.cjs workflows/*.test.cjs
+node --test repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."
