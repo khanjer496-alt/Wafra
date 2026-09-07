@@ -1,0 +1,32 @@
+name: Claude unified iOS and CI inputs
+on:
+  push:
+    branches: [release/claude-unified-20260907]
+    paths: [.github/workflows/claude-unified-ios-inputs.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Archive reviewed source and exact changes
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/inputs"
+          git archive --format=tar.gz fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc > "$RUNNER_TEMP/inputs/ios-guided.tar.gz"
+          git diff --binary a2dbc0d8b9cc9c1a218dfa43e6f920d8df4921c1...fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc > "$RUNNER_TEMP/inputs/ios-guided.patch"
+          git diff --binary a2dbc0d8b9cc9c1a218dfa43e6f920d8df4921c1...9f72a50c911fefa3465efdb419ac681d557f1507 > "$RUNNER_TEMP/inputs/ci-repairs.patch"
+          git archive --format=tar.gz 66d7cfeba14678c1f54fa8ddbd74dbe28a66da3f > "$RUNNER_TEMP/inputs/ios-release.tar.gz"
+          git diff --stat a2dbc0d8b9cc9c1a218dfa43e6f920d8df4921c1 66d7cfeba14678c1f54fa8ddbd74dbe28a66da3f > "$RUNNER_TEMP/inputs/ios-release-v-main.txt"
+          git log -20 --oneline 9f72a50c911fefa3465efdb419ac681d557f1507 > "$RUNNER_TEMP/inputs/ci-history.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-unified-ios-inputs
+          path: ${{ runner.temp }}/inputs/
+          compression-level: 0
+          retention-days: 7
