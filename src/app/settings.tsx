@@ -25,6 +25,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import { buildLedgerCsv } from '@/lib/ledger-export';
+import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1372,6 +1373,7 @@ export default function SettingsScreen() {
             () => router.push('/accuracy'),
           )}
           {linkRow(t('backupJson'), null, backupJson)}
+          <DiagnosticExportControl />
           {linkRow(t('restoreBackup'), null, restoreFromFile)}
           {linkRow(t('exportCsv'), null, exportCsv)}
           {linkRow(

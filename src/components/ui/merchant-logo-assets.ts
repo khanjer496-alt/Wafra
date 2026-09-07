@@ -136,20 +136,37 @@ function keyFor(title: string): string {
 const LOGOS = new Map<string, MerchantLogo>();
 for (const [id, source, aliases] of ENTRIES) {
   const logo: MerchantLogo = Object.freeze({ id, source });
-  for (const alias of aliases) LOGOS.set(keyFor(alias), logo);
+  for (const alias of aliases) {
+    const key = keyFor(alias);
+    if (LOGOS.has(key) && LOGOS.get(key)!.id !== id) throw new Error('merchant_logo_alias_conflict');
+    LOGOS.set(key, logo);
+  }
 }
 
-export function merchantLogoFor(title: string): MerchantLogo | null {
-  if (typeof title !== 'string' || title.length > 240 || !title.trim()) return null;
-  let key = keyFor(title);
+export function merchantLogoDecision(title: string): {
+  logo: MerchantLogo | null; reason: 'exact-alias' | 'location-or-terminal' | 'unknown' | 'unsafe-text';
+} {
+  if (typeof title !== 'string' || title.length > 240 || !title.trim() ||
+    /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/.test(title)) {
+    return { logo: null, reason: 'unsafe-text' };
+  }
+  let candidate = title.normalize('NFKC').trim();
   // Remove only known location/terminal tails, never arbitrary brand substrings
   // or payment-provider prefixes. "Cafe near Carrefour" stays an unknown cafe.
   for (let attempt = 0; attempt < 5; attempt++) {
-    const logo = LOGOS.get(key);
-    if (logo) return logo;
-    const shorter = key.replace(/ (?:dubai|dxb|abu dhabi|sharjah|ajman|riyadh|jeddah|uae|are|ae|ksa|sau|sa|دبي|ابوظبي|ابو ظبي|الشارقة|الرياض|جدة|\d{3,12})$/, '');
-    if (shorter === key) return null;
-    key = shorter;
+    const logo = LOGOS.get(keyFor(candidate));
+    if (logo) return { logo, reason: attempt === 0 ? 'exact-alias' : 'location-or-terminal' };
+    // Trim only separately written location/terminal words. Stripping after
+    // punctuation normalization made amazon.ae.dubai and apple.com/bill/123
+    // impersonate known merchants. A host/path is not a location footer.
+    const shorter = candidate.replace(/\s+(?:dubai|dxb|abu dhabi|sharjah|ajman|riyadh|jeddah|uae|are|ae|ksa|sau|sa|دبي|ابوظبي|ابو ظبي|الشارقة|الرياض|جدة|#?\d{3,12})$/i, '');
+    if (shorter === candidate) return { logo: null, reason: 'unknown' };
+    candidate = shorter;
   }
-  return LOGOS.get(key) ?? null;
+  const logo = LOGOS.get(keyFor(candidate)) ?? null;
+  return { logo, reason: logo ? 'location-or-terminal' : 'unknown' };
+}
+
+export function merchantLogoFor(title: string): MerchantLogo | null {
+  return merchantLogoDecision(title).logo;
 }

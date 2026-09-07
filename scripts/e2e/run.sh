@@ -40,6 +40,7 @@ for _ in $(seq 1 60); do
 done
 curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; exit 1; }
 
+node scripts/e2e/e2e-diagnostic-export.mjs
 node scripts/e2e/e2e-transaction-ui.mjs
 node scripts/e2e/e2e-home-cashflow.mjs
 node scripts/e2e/e2e-merchant-spending.mjs

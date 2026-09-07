@@ -1774,23 +1774,25 @@ ok('the spoken label agrees with the sign on screen',
  */
 {
   const tx = code(read('src/app/transactions.tsx'));
+  const projection = code(read('src/lib/transaction-filter.ts'));
+  ok('the screen uses the tested indexed filter projection', /projectTransactionFilter\(filterIndex, appliedFilters/.test(tx));
 
   ok('the transactions total asks ledger.ts what counts',
-    /countsInTotals\(t, liveAccounts, internal\)/.test(tx) &&
+    /countsInTotals\(row, options\.live, options\.internal\)/.test(projection) &&
       !/!t\.isTransfer && !internal\.has/.test(tx),
     'the local spelling had no live-account check, so a hidden card kept spending');
 
   ok('the category filter matches every part of a split row',
-    /touchesCategories\(t, filters\.categories\)/.test(tx) &&
-      !/filters\.categories\.has\(/.test(tx),
+    /touchesCategories\(row, filters\.categories\)/.test(projection) &&
+      !/filters\.categories\.has\(/.test(projection),
     'reading t.category hides the smaller half of a split from its own list');
 
   ok('the total counts only the filtered categories of a split row',
-    /amountInCategories\(t, filters\.categories\)/.test(tx),
+    /amountInCategories\(row, filters\.categories\)/.test(projection),
     'otherwise a 400-groceries/100-dining charge adds 500 to a groceries total');
 
   ok('"Last 3 months" is bounded at both ends',
-    /k < threeKey \|\| k > currentKey/.test(tx),
+    /month < three \|\| month > options\.currentKey/.test(projection),
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',
@@ -1803,7 +1805,7 @@ ok('the spoken label agrees with the sign on screen',
 
   ok('the SMS restriction is state rather than a route param',
     /useState\(source === 'sms'\)/.test(tx) &&
-      /smsOnly && t\.source !== 'sms'/.test(tx) &&
+      /options\.smsOnly && row\.source !== 'sms'/.test(projection) &&
       !/source === 'sms' && t\.source/.test(tx),
     'a route param cannot be cleared by "Clear all filters"');
   ok('"Clear all filters" clears the SMS restriction and counts it',

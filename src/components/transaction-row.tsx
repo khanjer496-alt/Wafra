@@ -12,6 +12,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
+import { isUnassignedIncome } from '@/lib/ledger';
 
 interface TransactionRowProps {
   transaction: Transaction;
@@ -64,7 +65,8 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
             <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
             {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
           </View>
-          {account ? <ThemedText type="meta" themeColor="textTertiary">{account.name}</ThemedText> : null}
+          {account ? <ThemedText type="meta" themeColor="textTertiary">{account.name}</ThemedText> :
+            isUnassignedIncome(transaction) ? <ThemedText type="meta" themeColor="textSecondary">{t('incomeAccountReview', language)}</ThemedText> : null}
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"

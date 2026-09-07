@@ -109,6 +109,7 @@ function harness(options = {}) {
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
+  dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'));
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
   const { default: Home } = load(path.join(root, 'src/screens/journal-home-screen.tsx'), dependencies);

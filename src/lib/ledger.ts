@@ -1,8 +1,15 @@
 import type { Account, Transaction } from '@/lib/types';
 
+/** A known business receipt with unknown bank attribution. Not a bank account
+ * and never a balance/snapshot target. The user assigns it from entry details. */
+export const UNASSIGNED_INCOME_ACCOUNT_ID = '__unassigned-income__';
+export const isUnassignedIncome = (transaction: Transaction): boolean =>
+  transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type === 'income';
+
 /** Account visibility is applied to totals, never to transfer identity. */
 export function liveAccountIds(accounts: Account[]): Set<string> {
-  return new Set(accounts.filter((account) => !account.archived).map((account) => account.id));
+  return new Set([UNASSIGNED_INCOME_ACCOUNT_ID,
+    ...accounts.filter((account) => !account.archived).map((account) => account.id)]);
 }
 
 export function isTransfer(transaction: Transaction): boolean {
@@ -14,8 +21,9 @@ export function countsInTotals(
   live?: Set<string>,
   internal?: Set<string>,
 ): boolean {
+  if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type !== 'income') return false;
   if (isTransfer(transaction)) return false;
-  if (live && !live.has(transaction.accountId)) return false;
+  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
   if (internal?.has(transaction.id)) return false;
   return true;
 }
@@ -84,7 +92,7 @@ export function internalTransferIds(
 
   for (let order = 0; order < transactions.length; order += 1) {
     const transaction = transactions[order];
-    if (transaction.type !== 'expense' || !accountIds.has(transaction.accountId) ||
+    if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID || transaction.type !== 'expense' || !accountIds.has(transaction.accountId) ||
       !(transaction.isTransfer === true || OUTGOING_TRANSFER.test(transaction.title.trim()))) {
       continue;
     }
@@ -101,7 +109,7 @@ export function internalTransferIds(
   }
 
   for (const transaction of transactions) {
-    if (transaction.type !== 'income' || transaction.isTransfer ||
+    if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID || transaction.type !== 'income' || transaction.isTransfer ||
       !accountIds.has(transaction.accountId) || transaction.category === 'salary' ||
       !INCOMING_TRANSFER.test(transaction.title.trim())) continue;
     const candidates = outgoing.get(transaction.amountFils);

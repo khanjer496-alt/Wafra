@@ -276,8 +276,12 @@ export interface ParsedCard {
  * Preserve completed purchase returns as income through semantic capture;
  * the words Credit Card describe the instrument, not a reversed income credit.
  * No new merchant-name-only income rule; user corrections remain protected.
+ *
+ * 35: recover source-proven business credits whose partially masked account
+ * cannot be resolved. Keep them visible as unassigned income, never invent a
+ * bank identity or write the quoted available balance onto a fallback account.
  */
-export const PARSER_VERSION = 34;
+export const PARSER_VERSION = 35;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

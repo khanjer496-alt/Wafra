@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -27,30 +27,15 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
-import { inPeriod, periodLabel, periodRange } from '@/lib/period';
+import { CATEGORIES, EXPENSE_CATEGORIES } from '@/lib/categories';
+import { formatAED, friendlyDate, monthKey, shortDate, toISODate } from '@/lib/format';
+import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { amountInCategories, touchesCategories } from '@/lib/splits';
+import { internalTransferIds, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
+import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters, type DatePreset, type SortMode } from '@/lib/transaction-filter';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
-
-type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
-type SortMode = 'newest' | 'oldest' | 'largest';
-
-interface Filters {
-  type: TransactionType | null;
-  accountId: string | null;
-  categories: Set<CategoryId>;
-  datePreset: DatePreset;
-  /** Inclusive ISO bounds, used only when datePreset is 'custom'. */
-  dateFrom: string | null;
-  dateTo: string | null;
-  minFils: number | null;
-  sort: SortMode;
-}
 
 const DEFAULT_FILTERS: Filters = {
   type: null,
@@ -194,69 +179,12 @@ export default function TransactionsScreen() {
     (merchantFilter ? 1 : 0) +
     (smsOnly ? 1 : 0);
 
-  const filtered = useMemo(() => {
-    const q = appliedQuery.trim().toLowerCase();
-    const lastKey = shiftMonthKey(currentKey, -1);
-    const threeKey = shiftMonthKey(currentKey, -2);
-    const merchantKey = merchantFilter?.toLowerCase();
-    let list = state.transactions.filter((t) => {
-      if (smsOnly && t.source !== 'sms') return false;
-      if (merchantKey && t.title.trim().toLowerCase() !== merchantKey) return false;
-      if (filters.type && t.type !== filters.type) return false;
-      if (filters.accountId && t.accountId !== filters.accountId) return false;
-      // Every PART of a split row, not just its headline category. Testing
-      // `t.category` dropped the AED 100 groceries share of a mostly-dining
-      // charge out of the groceries drill-down entirely, while Flow's slice —
-      // which reads allocations — had counted it.
-      if (filters.categories.size > 0 && !touchesCategories(t, filters.categories)) return false;
-      if (filters.minFils && t.amountFils < filters.minFils) return false;
-      const k = monthKey(t.date);
-      if (filters.datePreset === 'selected' && !inPeriod(t.date, period)) return false;
-      if (filters.datePreset === 'month' && k !== currentKey) return false;
-      if (filters.datePreset === 'lastMonth' && k !== lastKey) return false;
-      // Bounded at BOTH ends. Only the older one was checked, so a bill dated
-      // next month was listed — and totalled — under "Last 3 months".
-      if (filters.datePreset === '3months' && (k < threeKey || k > currentKey)) return false;
-      // Inclusive on both ends: someone asking for 1-31 Jan means to see the
-      // 31st. ISO dates compare correctly as strings, so no parsing needed.
-      if (filters.datePreset === 'custom') {
-        if (filters.dateFrom && t.date < filters.dateFrom) return false;
-        if (filters.dateTo && t.date > filters.dateTo) return false;
-      }
-      if (!q) return true;
-      return (
-        t.title.toLowerCase().includes(q) ||
-        getCategory(t.category).label.toLowerCase().includes(q) ||
-        categoryLabel(t.category, language).toLowerCase().includes(q)
-      );
-    });
-    if (filters.sort === 'largest') {
-      list = [...list].sort((a, b) => b.amountFils - a.amountFils);
-    } else if (filters.sort === 'oldest') {
-      // Sorted, not reversed. The store orders by `date` alone (store.tsx,
-      // sortTxs), so reversing put the day's rows in reverse IMPORT order —
-      // a coffee at 08:00 below a dinner at 21:00 under "Oldest first". Sort
-      // by the alert timestamp where there is one, which is the only thing
-      // that knows the order within a day.
-      list = [...list].sort(
-        (a, b) =>
-          (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
-          (a.ts ?? Date.parse(`${a.date}T12:00:00Z`)) -
-            (b.ts ?? Date.parse(`${b.date}T12:00:00Z`)),
-      );
-    }
-    return list;
-  }, [
-    state.transactions,
-    appliedQuery,
-    filters,
-    smsOnly,
-    merchantFilter,
-    currentKey,
-    period,
-    language,
-  ]);
-
+  const appliedFilters = useDeferredValue(filters);
+  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language),
+    // monthKey follows the current stored salary-day boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, language, state.monthStartDay]);
+  const hasUnassignedIncome = useMemo(() => state.transactions.some(tx => tx.accountId === UNASSIGNED_INCOME_ACCOUNT_ID), [state.transactions]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
@@ -291,89 +219,16 @@ export default function TransactionsScreen() {
     [accountById, openEntry, theme.cardBorder, internal],
   );
 
-  /**
-   * A row that moves money in or out of the user's world, as opposed to
-   * around inside it.
-   *
-   * `isTransfer` alone is not enough and this screen learned that the hard
-   * way: only the LEAVING side of an own-account move carries the flag, so
-   * the arriving side — worded by the bank exactly like being paid — was
-   * added to the total while its twin was skipped. Moving AED 20,000 between
-   * two of your own accounts read as AED 20,000 earned.
-   *
-   * Asked of ledger.ts rather than spelled out here, which is the point of
-   * that file. The local spelling was missing the live-account check every
-   * other total in the app applies, so archiving a card removed its AED 4,000
-   * from Home's "Out" and left it in the header of the screen Home links to:
-   * tap 12,000, land on −16,000.
-   */
-  const counts = useCallback(
-    (t: Transaction) => countsInTotals(t, liveAccounts, internal),
-    [liveAccounts, internal],
-  );
-
-  /**
-   * What one row adds to the total above it — signed, and scoped to the
-   * category filter when there is one.
-   *
-   * The scoping is the second half of the split fix. A AED 500 charge split
-   * 400 groceries / 100 dining belongs in the groceries list, but only its
-   * 400 belongs in the groceries TOTAL; adding the whole 500 put the header
-   * AED 100 above the Flow row that was tapped to get here.
-   */
-  const contribution = useCallback(
-    (t: Transaction) => {
-      if (!counts(t)) return 0;
-      const fils =
-        filters.categories.size > 0 ? amountInCategories(t, filters.categories) : t.amountFils;
-      return t.type === 'expense' ? -fils : fils;
-    },
-    [counts, filters.categories],
-  );
-
-  const totalShown = useMemo(
-    () => filtered.reduce((s, t) => s + contribution(t), 0),
-    [filtered, contribution],
-  );
-
-  // Transfers are listed — they are real records and the user wants to find
-  // them — but they are money moving between your own accounts, so they do
-  // not count toward a total. The two were silently disagreeing: Home's
-  // "In AED 25,000" links here, a AED 3,000 card payment is an income-side
-  // transfer, and the header read 25,000 above rows summing to 28,000. The
-  // rule is stated now rather than left for the user to work out.
-  //
-  // Rows on a hidden account are the same shape of exception and get their own
-  // half of the caption: they stay listed, because searching for an old charge
-  // should still find it, but they are out of every other total in the app and
-  // so are out of this one.
-  const excluded = useMemo(() => {
-    let transfers = 0;
-    let hidden = 0;
-    for (const t of filtered) {
-      if (counts(t)) continue;
-      if (liveAccounts.has(t.accountId)) transfers += 1;
-      else hidden += 1;
-    }
-    return { transfers, hidden };
-  }, [filtered, counts, liveAccounts]);
-
-  const sections = useMemo<DaySection[]>(() => {
-    if (filters.sort === 'largest') {
-      return [{ title: tr('largestFirst'), totalFils: totalShown, data: filtered }];
-    }
-    const byDay = new Map<string, Transaction[]>();
-    for (const t of filtered) {
-      const list = byDay.get(t.date) ?? [];
-      list.push(t);
-      byDay.set(t.date, list);
-    }
-    return [...byDay.entries()].map(([date, data]) => ({
-      title: friendlyDate(date, todayISO),
-      totalFils: data.reduce((s, t) => s + contribution(t), 0),
-      data,
-    }));
-  }, [filtered, filters.sort, todayISO, totalShown, contribution, tr]);
+  const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, {
+    query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
+    live: liveAccounts, internal,
+  }), [filterIndex, appliedFilters, appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
+  const { filtered, totalShown, excluded } = projection;
+  const resultsPending = appliedFilters !== filters || appliedQuery !== query;
+  const sections = useMemo<DaySection[]>(() => appliedFilters.sort === 'largest'
+    ? [{ title: tr('largestFirst'), totalFils: totalShown, data: filtered }]
+    : projection.days.map(day => ({ title: friendlyDate(day.date, todayISO), totalFils: day.totalFils, data: day.data })),
+  [projection, appliedFilters.sort, filtered, todayISO, totalShown, tr]);
 
   const toggleCategory = (id: CategoryId) => {
     setFilters((current) => {
@@ -505,8 +360,9 @@ export default function TransactionsScreen() {
                 </View>
               )}
 
-              <View testID="transactions-summary" style={styles.summaryRow}>
+              <View testID="transactions-summary" style={styles.summaryRow} accessibilityState={{ busy: resultsPending }}>
             {/* Full-width metadata; money and exclusions have their own lines. */}
+            {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
             <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
               {trf('transactionsCount', {
                 count: filtered.length,
@@ -763,6 +619,9 @@ export default function TransactionsScreen() {
               active={!filters.accountId}
               onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
             />
+            {hasUnassignedIncome && <Chip
+              label={tr('incomeAccountReview')} active={filters.accountId === UNASSIGNED_INCOME_ACCOUNT_ID}
+              onPress={() => setFilters(current => ({ ...current, accountId: UNASSIGNED_INCOME_ACCOUNT_ID }))} />}
             {state.accounts.map((account) => (
               <Chip
                 key={account.id}
@@ -835,6 +694,7 @@ export default function TransactionsScreen() {
           <Button inline variant="outline" label={tr('reset')} onPress={clearFilters} />
           <Button
             inline
+            disabled={resultsPending}
             label={trf('showResults', {
               count: filtered.length,
               s: filtered.length === 1 ? '' : 's',

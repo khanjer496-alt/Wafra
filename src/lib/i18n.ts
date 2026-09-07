@@ -16,6 +16,9 @@ const S = {
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
   transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
+  filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
+  incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },
+  incomeAccountReviewBody: { en: 'This payment counts as income, but the message did not identify its bank account. Edit this entry to select the correct account. No bank balance has been inferred.', ar: 'تُحتسب هذه الدفعة ضمن الدخل، لكن الرسالة لم تحدد حسابها المصرفي. عدّل العملية لاختيار الحساب الصحيح. لم يتم افتراض أي رصيد مصرفي.' },
   // Tabs
   tabHome: { en: 'Home', ar: 'الرئيسية' },
   // Insights and Budgets were two views of the same month; Flow is the merge.

@@ -9,7 +9,7 @@ function createHarness(options = {}) {
   class Clock extends Date { constructor(...args){ super(...(args.length?args:['2026-09-06T12:00:00Z'])); } static now(){return Date.parse('2026-09-06T12:00:00Z');} }
   const events=[]; const lang=options.language??'en'; const theme=themes.Colors[options.theme??'light'];
   let hookIndex=0;
-  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(), useCallback:f=>f, useDeferredValue:v=>v,
+  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(),  useCallback:f=>f, useDeferredValue:v=>v,
     useRef:v=>({current:v}), useEffect(){}, useId:()=>`id-${hookIndex++}`, forwardRef:f=>p=>f(p,null),
     useState: initial => { const i=hookIndex++; return [Object.hasOwn(options.states??{},i) ? options.states[i] : typeof initial==='function'?initial():initial,
       value=>events.push(['state',i,value])]; },
@@ -94,6 +94,7 @@ function createHarness(options = {}) {
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
     recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
+  local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
   deps['@/lib/cards']={openDues:()=>state.cardDues.map(due=>({due,daysLeft:4,remainingFils:due.totalDueFils,status:'upcoming',minimumKnown:true})),recentlySettledDues:()=>[],

@@ -22,6 +22,7 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/categories': { getCategory: id => id, categoryLabel: id => id },
     '@/lib/format': { clockTime: () => '12:30', formatAmount: minor => (minor / 100).toFixed(2) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED' },
+    '@/lib/ledger': load(path.resolve(__dirname, '../../../src/lib/ledger.ts')),
     '@/lib/i18n': { t: key => key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
   });

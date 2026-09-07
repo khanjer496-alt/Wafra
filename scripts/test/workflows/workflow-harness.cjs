@@ -42,6 +42,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],rowCount:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
+ d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};

@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
+import { isUnassignedIncome } from '@/lib/ledger';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -222,6 +223,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 
       {!editing && showMerchantLink && !transaction.isTransfer && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} onClose={onClose} />}
+      {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
+        {t('incomeAccountReviewBody')}</ThemedText>}
 
       {editing ? (
         <>

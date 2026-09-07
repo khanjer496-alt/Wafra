@@ -9,6 +9,7 @@ import {
 import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureInstrument } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
+import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import {
   ledgerMoneyMatchesCurrentMetadata,
   ledgerMoneySpec,
@@ -925,15 +926,30 @@ export function buildImportPlan(
       guard.add(captureCandidate);
       continue;
     }
-    const resolution = resolveAccount(p, prior?.accountId);
+    // A proven business receipt without a readable instrument is money in,
+    // not permission to attach it to the first (possibly hidden) bank account.
+    // Preserve old explicit/user assignments. Only the reproduced partial-mask
+    // format can repair an existing fallback through exact source identity.
+    const partialAccount = p.raw?.match(/\baccount\s+(?:no\.?|number)?\s*[:#]?\s*([0-9xX*]{4,40})(?![0-9xX*])/i)?.[1];
+    const provenPartialMask = !!partialAccount && /[x*][0-9]{1,3}$/i.test(partialAccount);
+    const unassignedIncome = !p.card && p.type === 'income' && p.categoryGuess === 'business' &&
+      p.categoryDeliberate && !p.transferHint && !prior?.userEdited && !prior?.captureInstrument &&
+      (!prior || provenPartialMask || prior.accountId === UNASSIGNED_INCOME_ACCOUNT_ID);
+    const resolution = unassignedIncome
+      ? { accountId: UNASSIGNED_INCOME_ACCOUNT_ID, confident: false }
+      : resolveAccount(p, prior?.accountId);
     const { accountId } = resolution;
     if (!accountId) continue;
     if (resolution.confident) noteSnapshot(accountId, p);
+    const healedAccountId = resolution.confident || unassignedIncome ? accountId : undefined;
+    const accountForMatchedPrior = (matched: Transaction | undefined) =>
+      unassignedIncome && (matched?.captureInstrument || matched?.userEdited)
+        ? undefined : healedAccountId;
     if (!exactPrior && stablePrior) {
       healFromReparse(
         undefined,
         p,
-        resolution.confident ? accountId : undefined,
+        healedAccountId,
         undefined,
         stablePrior,
       );
@@ -950,7 +966,7 @@ export function buildImportPlan(
           matchedId,
           smsKey!,
           p,
-          resolution.confident ? accountId : undefined,
+          accountForMatchedPrior(matchedPrior),
         );
         // One stored row is indexed by both title and capture channel. A
         // history match consumes it in both places or h2 can reuse the push
@@ -964,7 +980,7 @@ export function buildImportPlan(
         healFromReparse(
           smsKey,
           p,
-          resolution.confident ? accountId : undefined,
+          accountForMatchedPrior(matchedPrior),
           undefined,
           matchedPrior,
         );
@@ -982,7 +998,7 @@ export function buildImportPlan(
           title: p.merchant,
           category: p.categoryGuess,
           type: p.type,
-          ...(resolution.confident ? { accountId } : {}),
+          ...(accountForMatchedPrior(priorById.get(supersededId)) ? { accountId } : {}),
           ts: p.smsTs,
           smsKey,
           viaPush: false,
