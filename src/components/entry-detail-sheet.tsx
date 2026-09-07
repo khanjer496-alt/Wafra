@@ -172,7 +172,28 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
         : t('offlineFxEstimate');
 
   return (
-    <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>
+    <BottomSheet
+      visible
+      testID="entry-detail-sheet"
+      onClose={onClose}
+      title={editing ? t('editEntry') : t('entryDetail')}
+      footer={editing ? (
+          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+            <Button inline={!largeText} wrapLabel label={t('saveChanges')} onPress={save} disabled={!canSave} />
+            <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
+          </View>
+      ) : (
+          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+            <Button inline={!largeText} wrapLabel label={t('editEntry')} onPress={() => setEditing(true)} />
+            <Button
+              inline={!largeText}
+              wrapLabel
+              variant="danger"
+              label={t('delete')}
+              onPress={() => setConfirmingDelete(true)}
+            />
+          </View>
+      )}>
       <View style={styles.head}>
         <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
         <View style={styles.headText}>
@@ -309,10 +330,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             />
           </View>
 
-          <View style={styles.actions}>
-            <Button inline label={t('saveChanges')} onPress={save} disabled={!canSave} />
-            <Button inline variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
-          </View>
+
         </>
       ) : (
         <>
@@ -338,12 +356,11 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               },
               {
                 label: t('source'),
-                value: (
-                  <ThemedText type="small">
-                    {sourceLabel}
-                    {transaction.source === 'sms' ? ` · ${tf('filedOn', { date: shortDate(transaction.date) })}` : ''}
-                  </ThemedText>
-                ),
+                value: <ThemedText type="small">{sourceLabel}</ThemedText>,
+              },
+              {
+                label: t('transactionDateLabel'),
+                value: <ThemedText type="small">{stamp}</ThemedText>,
               },
               ...(transaction.originalCurrency &&
               transaction.originalAmountMinor !== undefined &&
@@ -406,15 +423,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             </Block>
           )}
 
-          <View style={styles.actions}>
-            <Button inline label={t('editEntry')} onPress={() => setEditing(true)} />
-            <Button
-              inline
-              variant="danger"
-              label={t('delete')}
-              onPress={() => setConfirmingDelete(true)}
-            />
-          </View>
+
         </>
       )}
 
@@ -518,7 +527,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
   },
+  actionsLarge: { flexDirection: 'column' },
   actions: {
+    flexShrink: 0,
     flexDirection: 'row',
     gap: Spacing.two + 2,
   },

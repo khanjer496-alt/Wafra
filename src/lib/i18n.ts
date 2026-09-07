@@ -11,6 +11,11 @@
 export type Lang = 'en' | 'ar';
 
 const S = {
+  // Transaction list and details: concise visible labels, complete semantics.
+  transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
+  transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
+  transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
+  transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
   // Tabs
   tabHome: { en: 'Home', ar: 'الرئيسية' },
   // Insights and Budgets were two views of the same month; Flow is the merge.

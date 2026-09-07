@@ -145,3 +145,13 @@ test('shared sheet keeps a fixed footer below the shrinking scroll region', () =
   assert.ok(style(footerBox).paddingBottom >= 10);
   assert.equal(walk(scroll).includes(footer), false);
 });
+
+test('narrow screens give search full width without reducing the font size', () => {
+  const h = transactions({ width: 320 });
+  const toolbar = walk(h.tree).find(n => n.props?.testID === 'transaction-search-toolbar');
+  assert.equal(style(toolbar).flexDirection, 'column');
+  const input = walk(toolbar).find(n => n.type === 'TextInput');
+  assert.equal(style(input).fontSize, 17);
+  const filter = labelled(toolbar, h.deps['@/lib/i18n'].t('filtersButton'));
+  assert.equal(style(filter).alignSelf, 'flex-end');
+});
