@@ -962,7 +962,9 @@ function ktSources(dir) {
 
   ok('SMS parsing yields by elapsed time with a bounded fast-device ceiling',
     budget >= 4 && budget <= 12 && maxSlice > 32 && maxSlice <= 96 &&
-      /Date\.now\(\) - state\.startedAt < PARSE_TIME_BUDGET_MS/.test(scan) &&
+      scan.includes("const background = RNAppState?.currentState === 'background'") &&
+      scan.includes('Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS)') &&
+      scan.includes('state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE)') &&
       // Inbox parsing, its proven-duplicate fast path, the retired delivery
       // buffer and trusted bank notifications each keep the same UI yield.
       (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
