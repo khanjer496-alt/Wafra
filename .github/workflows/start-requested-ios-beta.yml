@@ -1,0 +1,39 @@
+name: Start requested updated iOS beta
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/start-requested-ios-beta.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  start:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source and avoid duplicate paid builds
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          git diff --exit-code bbecba561189870f8d56e67b3710c602de1a2432 HEAD -- src modules assets app.json eas.json package.json package-lock.json server scripts
+          test "$(git hash-object .github/workflows/ios-testflight.yml)" = 262d761b01d58b19b673e79c4de8ba7ac7ed9978
+          gh api "repos/khanjer496-alt/Wafra/branches/release%2Fios-ledger-light-beta" > /tmp/branch.json
+          gh api "repos/khanjer496-alt/Wafra/actions/workflows/ios-testflight.yml/runs?branch=release%2Fios-ledger-light-beta&event=workflow_dispatch&per_page=20" > /tmp/runs.json
+          python3 - <<'PY'
+          import json,os
+          assert json.load(open('/tmp/branch.json'))['commit']['sha']==os.environ['GITHUB_SHA'],'Release branch moved; refusing a different build'
+          runs=json.load(open('/tmp/runs.json'))['workflow_runs']
+          assert not any(r['head_sha']==os.environ['GITHUB_SHA'] for r in runs),'This source already has an iOS build request'
+          assert not any(r['status']!='completed' for r in runs),'Another release build is active'
+          PY
+      - name: Request signed build only, without TestFlight submission
+        run: |
+          set -euo pipefail
+          gh workflow run ios-testflight.yml --repo khanjer496-alt/Wafra --ref release/ios-ledger-light-beta -f profile=history-beta -f submit=false -f wait=true
+          printf '%s\n' 'Requested canonical history-beta store build.' "Source: $GITHUB_SHA" 'Apple submission is a separate action after native verification.' >> "$GITHUB_STEP_SUMMARY"
