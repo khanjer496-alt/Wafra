@@ -1,44 +1,57 @@
+/* Ledger & Light: reference 934e5cb. Earlier landing copy is deliberately preserved.
+   This marketing-only theme must not inherit the newer app leaf/forest redesign. */
 @font-face {
-  font-family: IBMPlexSans;
-  src: url("/fonts/IBMPlexSans-Regular.ttf") format("truetype");
+  font-family: Geist;
+  src: url("/fonts/Geist-Regular.ttf") format("truetype");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 
 @font-face {
-  font-family: IBMPlexSans-Medm;
-  src: url("/fonts/IBMPlexSans-Medium.ttf") format("truetype");
+  font-family: Geist-Medium;
+  src: url("/fonts/Geist-Medium.ttf") format("truetype");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 
 @font-face {
-  font-family: IBMPlexSans-SmBld;
-  src: url("/fonts/IBMPlexSans-SemiBold.ttf") format("truetype");
+  font-family: Geist-SemiBold;
+  src: url("/fonts/Geist-SemiBold.ttf") format("truetype");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 
 @font-face {
-  font-family: IBMPlexSansArabic;
-  src: url("/fonts/IBMPlexSansArabic-Regular.ttf") format("truetype");
+  font-family: NotoKufiArabic;
+  src: url("/fonts/NotoKufiArabic-Regular.ttf") format("truetype");
   font-style: normal;
   font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: GeistMono;
+  src: url("/fonts/GeistMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
   font-display: swap;
 }
 
 .page {
-  --ink: #152033;
-  --muted: #4C5A70;
-  --blue: #2855D9;
-  --line: #DCE3EE;
-  --control: #73839C;
-  background: #F6F8FC;
+  --ink: #16130F;
+  --muted: #57524A;
+  --green: #1F6B52;
+  --line: #E3DED2;
+  --control: #8A8172;
+  --paper: #F4F1EA;
+  --charcoal: #14120F;
+  background: var(--paper);
   color: var(--ink);
-  font-family: IBMPlexSans, ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-family: Geist, ui-sans-serif, system-ui, sans-serif;
   height: 100vh;
   height: 100dvh;
   overflow-x: hidden;
@@ -50,13 +63,13 @@
 .page *, .page *::before, .page *::after { box-sizing: border-box; }
 .page a { color: inherit; text-decoration: none; }
 .page a:focus-visible, .page summary:focus-visible {
-  outline: 3px solid var(--blue);
+  outline: 3px solid var(--green);
   outline-offset: 5px;
 }
 
 .nav {
   align-items: center;
-  background: #F6F8FC;
+  background: #F4F1EA;
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 24px;
@@ -68,12 +81,12 @@
   top: 0;
   z-index: 20;
 }
-.brand, .footerBrand { align-items: center; display: flex; font-family: IBMPlexSans-SmBld, sans-serif; gap: 10px; }
+.brand, .footerBrand { align-items: center; display: flex; font-family: Geist-SemiBold, sans-serif; gap: 10px; }
 .brand { font-size: 22px; justify-self: start; min-height: 44px; }
-.arabic { color: var(--muted); font-family: IBMPlexSansArabic, sans-serif; font-size: 15px; margin-left: 2px; }
+.arabic { color: var(--muted); font-family: NotoKufiArabic, sans-serif; font-size: 13px; line-height: 1.8; margin-left: 2px; }
 .navLinks { display: flex; gap: 28px; }
 .navLinks a { align-items: center; color: var(--muted); display: flex; font-size: 14px; min-height: 44px; }
-.navLinks a:hover { color: var(--blue); }
+.navLinks a:hover { color: var(--green); }
 .availability { color: var(--muted); font-size: 13px; justify-self: end; }
 
 .hero {
@@ -86,34 +99,31 @@
   padding: 76px 32px 92px;
 }
 .heroCopy { min-width: 0; }
-.eyebrow, .kicker { color: var(--blue); font-family: IBMPlexSans-Medm, sans-serif; font-size: 14px; }
+.eyebrow, .kicker { color: var(--green); font-family: GeistMono, ui-monospace, monospace; font-size: 12px; letter-spacing: .045em; }
 .eyebrow { margin: 0 0 24px; }
-.hero h1 { font-family: IBMPlexSans-SmBld, sans-serif; font-size: clamp(42px, 4.5vw, 64px); font-weight: normal; letter-spacing: -0.045em; line-height: 1.07; margin: 0; text-wrap: balance; }
+.hero h1 { font-family: Geist-SemiBold, sans-serif; font-size: clamp(42px, 4.5vw, 64px); font-weight: normal; letter-spacing: -0.045em; line-height: 1.07; margin: 0; text-wrap: balance; }
 .lede { color: var(--muted); font-size: 18px; line-height: 1.65; margin: 28px 0 0; max-width: 520px; }
 .heroActions { align-items: stretch; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
-.primaryAction, .secondaryAction { align-items: center; border-radius: 12px; display: grid; font-family: IBMPlexSans-SmBld, sans-serif; font-size: 15px; gap: 4px 16px; grid-template-columns: 1fr auto; min-height: 72px; min-width: 196px; padding: 12px 18px; transition: background 160ms ease; }
-.primaryAction { background: var(--blue); border: 1px solid var(--blue); color: #FFFFFF !important; }
-.primaryAction:hover { background: #2046B6; }
-.secondaryAction { background: #FFFFFF; border: 1px solid var(--control); color: var(--blue) !important; }
-.secondaryAction:hover { background: #E8EEFF; }
-.actionPlatform { font-family: IBMPlexSans, sans-serif; font-size: 12px; grid-column: 1; }
+.primaryAction, .secondaryAction { align-items: center; border-radius: 12px; display: grid; font-family: Geist-SemiBold, sans-serif; font-size: 15px; gap: 4px 16px; grid-template-columns: 1fr auto; min-height: 72px; min-width: 196px; padding: 12px 18px; transition: background 160ms ease; }
+.primaryAction { background: var(--green); border: 1px solid var(--green); color: #FBF9F4 !important; }
+.primaryAction:hover { background: #17513E; }
+.secondaryAction { background: #FBF9F4; border: 1px solid var(--control); color: var(--green) !important; }
+.secondaryAction:hover { background: #E4EDE8; }
+.actionPlatform { font-family: Geist, sans-serif; font-size: 12px; grid-column: 1; }
 .actionArrow { font-size: 20px; grid-column: 2; grid-row: 1 / span 2; }
 .betaNote, .languageNote { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 14px 0 0; }
 .languageNote { margin-top: 4px; }
 
-.productStage {
-  align-items: flex-start;
-  background: #152033;
-  border-radius: 28px;
-  display: flex;
-  gap: 18px;
-  min-width: 0;
-  padding: 28px 22px;
-}
-.phone { background: #FFFFFF; border: 1px solid #BDC9DA; border-radius: 24px; flex: 1; min-width: 0; overflow: hidden; }
+/* Only the phone previews have a frame. Sections use rules, not rounded cards. */
+.productStage { min-width: 0; margin: 0; }
+.phonePair { display: flex; align-items: flex-start; gap: 20px; padding: 0; }
+.phone { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; flex: 1; min-width: 0; overflow: hidden; }
 .phone img { display: block; height: auto; width: 100%; }
 .phoneFront { order: 0; }
-.phoneBack { margin-top: 64px; order: 1; }
+.phoneBack { margin-top: 54px; order: 1; background: var(--charcoal); border-color: #3B362E; }
+.previewCaption { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 20px; text-align: center; }
+.skipLink { position: absolute; left: 16px; top: -100px; z-index: 100; padding: 14px 20px; background: var(--green); color: #FBF9F4 !important; }
+.skipLink:focus { top: 12px; }
 
 .features, .faq, .privacy {
   display: grid;
@@ -126,12 +136,12 @@
 .features { border-top: 1px solid var(--line); }
 .sectionIntro, .privacyCopy { max-width: 430px; }
 .kicker { margin: 0 0 18px; }
-.sectionIntro h2, .privacy h2 { font-family: IBMPlexSans-SmBld, sans-serif; font-size: clamp(32px, 3.2vw, 44px); font-weight: normal; letter-spacing: -0.035em; line-height: 1.14; margin: 0; text-wrap: balance; }
+.sectionIntro h2, .privacy h2 { font-family: Geist-SemiBold, sans-serif; font-size: clamp(32px, 3.2vw, 44px); font-weight: normal; letter-spacing: -0.035em; line-height: 1.14; margin: 0; text-wrap: balance; }
 .sectionIntro > p:last-child, .privacyCopy > p:last-child { color: var(--muted); font-size: 16px; line-height: 1.65; margin: 22px 0 0; }
 .featureList { border-top: 1px solid var(--line); }
 .featureCard { align-items: start; border-bottom: 1px solid var(--line); display: grid; gap: 22px; grid-template-columns: 28px minmax(0, 1fr); padding: 26px 0; }
-.featureCard > span { color: var(--blue); font-family: IBMPlexSans-Medm, sans-serif; font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 6px; }
-.featureCard h3 { font-family: IBMPlexSans-Medm, sans-serif; font-size: 23px; font-weight: normal; letter-spacing: -0.02em; margin: 0 0 8px; }
+.featureCard > span { color: var(--green); font-family: GeistMono, ui-monospace, monospace; font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 6px; }
+.featureCard h3 { font-family: Geist-Medium, sans-serif; font-size: 23px; font-weight: normal; letter-spacing: -0.02em; margin: 0 0 8px; }
 .featureCard p { color: var(--muted); line-height: 1.65; margin: 0; }
 
 .privacy { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -139,14 +149,14 @@
 .privacyList li { border-bottom: 1px solid var(--line); padding: 20px 0; }
 .privacyList li:first-child { padding-top: 0; }
 .privacyList li:last-child { border-bottom: 0; padding-bottom: 0; }
-.privacyList strong { font-family: IBMPlexSans-SmBld, sans-serif; font-size: 16px; font-weight: normal; }
+.privacyList strong { font-family: Geist-SemiBold, sans-serif; font-size: 16px; font-weight: normal; }
 .privacyList p { color: var(--muted); font-size: 15px; line-height: 1.65; margin: 8px 0 0; }
 
 .faqList { border-top: 1px solid var(--line); }
 .faqList details { border-bottom: 1px solid var(--line); }
-.faqList summary { align-items: center; cursor: pointer; display: flex; font-family: IBMPlexSans-Medm, sans-serif; font-size: 19px; gap: 24px; justify-content: space-between; line-height: 1.4; list-style: none; padding: 24px 0; }
+.faqList summary { align-items: center; cursor: pointer; display: flex; font-family: Geist-Medium, sans-serif; font-size: 19px; gap: 24px; justify-content: space-between; line-height: 1.4; list-style: none; padding: 24px 0; }
 .faqList summary::-webkit-details-marker { display: none; }
-.faqList summary span { color: var(--blue); flex-shrink: 0; font-family: IBMPlexSans, sans-serif; font-size: 25px; transition: transform 160ms ease; }
+.faqList summary span { color: var(--green); flex-shrink: 0; font-family: Geist, sans-serif; font-size: 25px; transition: transform 160ms ease; }
 .faqList details[open] summary span { transform: rotate(45deg); }
 .faqList details p { color: var(--muted); line-height: 1.7; margin: 0 36px 24px 0; }
 
@@ -176,7 +186,7 @@
   .lede { font-size: 17px; }
   .heroActions { flex-direction: column; }
   .primaryAction, .secondaryAction { min-width: 0; width: 100%; }
-  .productStage { border-radius: 20px; gap: 12px; padding: 18px 14px; }
+  .phonePair { gap: 12px; }
   .phone { border-radius: 14px; }
   .phoneBack { margin-top: 36px; }
   .features, .faq, .privacy { gap: 32px; padding: 56px 20px; }
@@ -192,5 +202,5 @@
 }
 
 @media (prefers-contrast: more) {
-  .page { --muted: #152033; --line: #73839C; --control: #485D7A; }
+  .page { --muted: #16130F; --line: #8A8172; --control: #57524A; }
 }

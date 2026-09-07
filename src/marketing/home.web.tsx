@@ -1,7 +1,7 @@
 import Head from 'expo-router/head';
 import React from 'react';
 
-import { WafraMark } from '@/components/wafra-logo';
+import { WafraMark } from '@/marketing/wafra-mark.web';
 import styles from '@/marketing/home.module.css';
 import {
   ANDROID_APK_URL,
@@ -35,7 +35,9 @@ export default function MarketingHome() {
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={MARKETING_TITLE} />
         <meta name="twitter:description" content={MARKETING_DESCRIPTION} />
-        <meta name="theme-color" content="#F6F8FC" />
+        <meta name="theme-color" content="#F4F1EA" />
+        <link rel="icon" href="/wafra-icon.svg" type="image/svg+xml" />
+        <meta property="og:image:alt" content="Wafra. Know your spending. Plan what comes next." />
         {SITE_URL ? <link rel="canonical" href={SITE_URL} /> : null}
         {SITE_URL ? <meta property="og:url" content={SITE_URL} /> : null}
         {SITE_URL ? <meta property="og:image" content={`${SITE_URL}/wafra-social.png`} /> : null}
@@ -46,9 +48,10 @@ export default function MarketingHome() {
       <script type="application/ld+json" dangerouslySetInnerHTML={structuredData(FAQ_SCHEMA)} />
 
       <main className={styles.page}>
+        <a className={styles.skipLink} href="#top">Skip to content</a>
         <nav className={styles.nav} aria-label="Primary navigation">
           <a className={styles.brand} href="#top" aria-label="Wafra home">
-            <WafraMark size={32} color="#2855D9" />
+            <WafraMark size={32} color="#1F6B52" />
             <span>Wafra</span>
             <span className={styles.arabic} lang="ar" dir="rtl">وفرة</span>
           </a>
@@ -95,24 +98,29 @@ export default function MarketingHome() {
             <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 
-          <div className={styles.productStage} aria-label="Wafra app previews">
+          <figure className={styles.productStage} aria-label="Wafra app previews">
+            <div className={styles.phonePair}>
             <div className={`${styles.phone} ${styles.phoneBack}`}>
               <img
                 src="/wafra-app-bills.png"
-                alt="Wafra Bills screen with a card statement, remaining balance and payment action"
-                width={1206}
-                height={2622}
+                decoding="async"
+                alt="Wafra Bills in Ledger and Light dark mode, showing upcoming bills and recurring charges with sample data"
+                width={390}
+                height={844}
               />
             </div>
             <div className={`${styles.phone} ${styles.phoneFront}`}>
               <img
                 src="/wafra-app-home.png"
-                alt="Wafra Home screen showing recorded spending, income and recent activity"
-                width={1206}
-                height={2622}
+                fetchPriority="high"
+                alt="Wafra Home in Ledger and Light, showing recorded balances, spending, income and upcoming bills with sample data"
+                width={390}
+                height={844}
               />
             </div>
-          </div>
+            </div>
+            <figcaption className={styles.previewCaption}>App previews · sample data</figcaption>
+          </figure>
         </header>
 
         <section className={styles.features} id="how-it-works">
@@ -162,7 +170,7 @@ export default function MarketingHome() {
         </section>
 
         <footer className={styles.footer}>
-          <div className={styles.footerBrand}><WafraMark size={30} color="#2855D9" /><span>Wafra</span></div>
+          <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra</span></div>
           <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
         </footer>
