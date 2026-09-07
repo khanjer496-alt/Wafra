@@ -1,0 +1,89 @@
+name: Prepare updated iOS beta
+
+# Explicitly requested TestFlight refresh. This workflow prepares and tests the
+# ordinary merged source; it does not upload to Apple or modify main.
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/prepare-ios-ledger-light-beta.yml]
+permissions:
+  contents: write
+concurrency:
+  group: prepare-ios-ledger-light-beta
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - name: Integrate exact reviewed sources without overwriting a working tree
+        id: merge
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test -z "$(git status --porcelain)"
+          git remote get-url origin > evidence/remote.txt
+          git config user.name 'Wafra release preparation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main restore/ledger-light-20260907 work/ios-guided-onboarding
+          test "$(git rev-parse origin/main)" = 3d390633a72d665f74e6b27e6f13f2176087431a
+          test "$(git rev-parse origin/restore/ledger-light-20260907)" = fc3bf248bc4e8a844a527e35119c73c2f26c1163
+          test "$(git rev-parse origin/work/ios-guided-onboarding)" = fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc
+          # merge-tree creates objects only. A nonzero exit refuses conflicts.
+          git merge-tree --write-tree "$GITHUB_SHA" fc3bf248bc4e8a844a527e35119c73c2f26c1163 > evidence/merge-restoration.txt
+          TREE=$(head -1 evidence/merge-restoration.txt)
+          FIRST=$(printf '%s\n' 'Integrate reviewed Ledger & Light and persistence fix' | git commit-tree "$TREE" -p "$GITHUB_SHA" -p fc3bf248bc4e8a844a527e35119c73c2f26c1163)
+          git merge-tree --write-tree "$FIRST" fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc > evidence/merge-ios.txt
+          TREE=$(head -1 evidence/merge-ios.txt)
+          CANDIDATE=$(printf '%s\n' 'Integrate history-first iOS setup and native capture receipts for requested beta' | git commit-tree "$TREE" -p "$FIRST" -p fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc)
+          git worktree add --detach ../wafra-ios-candidate "$CANDIDATE"
+          git diff --stat origin/main "$CANDIDATE" > evidence/changes.txt
+          git diff origin/main "$CANDIDATE" -- src modules app.json eas.json > evidence/source.diff
+          printf '%s\n' "$CANDIDATE" > evidence/candidate.txt
+          echo "candidate=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          git archive --format=tar.gz "$CANDIDATE" > evidence/source.tar.gz
+      - name: Install the exact locked application dependencies
+        working-directory: ../wafra-ios-candidate
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+      - name: Typecheck, lint and all application/server regression suites
+        working-directory: ../wafra-ios-candidate
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/evidence"
+          npm run typecheck 2>&1 | tee "$OUT/typecheck.log"
+          npm run lint 2>&1 | tee "$OUT/lint.log"
+          npm test 2>&1 | tee "$OUT/tests.log"
+          node --test scripts/test/ios-journey/*.test.cjs 2>&1 | tee "$OUT/ios-journey.log"
+          node scripts/check-release-config.mjs --intent build --platform ios --profile history-beta --submit true 2>&1 | tee "$OUT/beta-config.log"
+          node scripts/release/ios-public-shortcut-check.mjs 2>&1 | tee "$OUT/published-shortcuts.log"
+      - name: Publish only the validated source to this isolated release branch
+        env:
+          CANDIDATE: ${{ steps.merge.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/release/ios-ledger-light-beta | cut -f1)" = "$GITHUB_SHA"
+          test -z "$(git -C ../wafra-ios-candidate status --porcelain --untracked-files=no)"
+          git push origin "$CANDIDATE:refs/heads/release/ios-ledger-light-beta"
+          printf '%s\n' "$CANDIDATE" > evidence/published-source.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-ios-beta-preparation
+          path: evidence/
+          retention-days: 14
