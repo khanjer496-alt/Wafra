@@ -406,7 +406,12 @@ ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 await tapTab(page, 'Home');
 await tapText(page, 'All activity', 1600);
 ok('activity opens scoped to the period', !!(await visibleText(page, /\d+ transactions? ·/i)));
-ok('activity offers a search field', !!(await page.getByPlaceholder(/Search merchants/i).count()));
+// Keep the visible wording concise without making search inaccessible.
+const activitySearch = page.getByPlaceholder('Merchant or category', { exact: true });
+ok('activity offers a visible and editable search field',
+  await activitySearch.count() === 1 && await activitySearch.isVisible() && await activitySearch.isEditable());
+ok('activity search retains its full accessible name',
+  await activitySearch.getAttribute('aria-label') === 'Search merchants or categories');
 await tapLabel(page, 'Back', 1200);
 
 // ── Settings ──────────────────────────────────────────────────────────
