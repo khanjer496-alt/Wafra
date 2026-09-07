@@ -1,0 +1,10 @@
+{
+  "baseCommit": "67f996b24c28a1fe584e86e9bbe207a3f49c11ef",
+  "hashes": {
+    "src/components/ui/merchant-logo-assets.ts": "989bd0b20e8e9cdf426a1e3e9d7d99d828e4dd020988c18ddf7b6c7b35854ba9",
+    "scripts/test/merchant-logos.test.js": "7b94576d11ab90ef712c1603aa027e0b4bc62f80e4f0b1c8f8317ac505190b5b",
+    "scripts/test/fixtures/merchant-logo-identities.json": "f5834598a399b7cd6af941784f43b609acb346e6c933320479a5bf90afafef7a",
+    "scripts/e2e/e2e-merchant-logos.mjs": "fa0c5894a4bb37626b437044fe66443404937de391479594be135d5bb2f719fe",
+    "assets/merchants/sources.json": "11f904e62c7379524d9ff8d8dd34acc6094f198147a36a19ca5aa9e001b3b9d4"
+  }
+}

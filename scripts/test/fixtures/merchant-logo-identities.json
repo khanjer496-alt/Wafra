@@ -1,0 +1,658 @@
+[
+  {
+    "id": "adidas",
+    "aliases": [
+      "adidas",
+      "adidas Store",
+      "adidas.com",
+      "اديداس",
+      "أديداس"
+    ]
+  },
+  {
+    "id": "airarabia",
+    "aliases": [
+      "Air Arabia",
+      "AirArabia",
+      "العربية للطيران"
+    ]
+  },
+  {
+    "id": "alibabadotcom",
+    "aliases": [
+      "Alibaba",
+      "Alibaba.com",
+      "علي بابا"
+    ]
+  },
+  {
+    "id": "aliexpress",
+    "aliases": [
+      "AliExpress",
+      "AliExpress.com",
+      "علي اكسبرس"
+    ]
+  },
+  {
+    "id": "anghami",
+    "aliases": [
+      "Anghami",
+      "Anghami Plus",
+      "انغامي",
+      "أنغامي"
+    ]
+  },
+  {
+    "id": "aster",
+    "aliases": [
+      "Aster Pharmacy",
+      "Aster Pharmacies",
+      "صيدلية استر",
+      "صيدلية أستر"
+    ]
+  },
+  {
+    "id": "audible",
+    "aliases": [
+      "Audible",
+      "Audible.com",
+      "Audible Membership"
+    ]
+  },
+  {
+    "id": "binance",
+    "aliases": [
+      "Binance",
+      "Binance.com",
+      "بينانس"
+    ]
+  },
+  {
+    "id": "brandsforless",
+    "aliases": [
+      "Brands For Less",
+      "BFL",
+      "براندز فور لس"
+    ]
+  },
+  {
+    "id": "burgerking",
+    "aliases": [
+      "Burger King",
+      "BurgerKing",
+      "برجر كنج",
+      "برغر كينغ"
+    ]
+  },
+  {
+    "id": "cafu",
+    "aliases": [
+      "CAFU",
+      "CAFU Fuel",
+      "CAFUAE",
+      "كافو"
+    ]
+  },
+  {
+    "id": "canva",
+    "aliases": [
+      "Canva",
+      "Canva Pro",
+      "Canva.com",
+      "كانفا"
+    ]
+  },
+  {
+    "id": "centrepoint",
+    "aliases": [
+      "Centrepoint",
+      "Centrepoint Stores",
+      "سنتر بوينت",
+      "سنتربوينت"
+    ]
+  },
+  {
+    "id": "chatgpt",
+    "aliases": [
+      "ChatGPT",
+      "Chat GPT",
+      "OpenAI",
+      "OpenAI ChatGPT",
+      "ChatGPT Plus",
+      "ChatGPT Pro"
+    ]
+  },
+  {
+    "id": "cloudflare",
+    "aliases": [
+      "Cloudflare",
+      "Cloudflare Inc",
+      "Cloudflare Workers"
+    ]
+  },
+  {
+    "id": "costa",
+    "aliases": [
+      "Costa",
+      "Costa Coffee",
+      "كوستا",
+      "كوستا كوفي"
+    ]
+  },
+  {
+    "id": "coursera",
+    "aliases": [
+      "Coursera",
+      "Coursera Plus",
+      "كورسيرا"
+    ]
+  },
+  {
+    "id": "crunchyroll",
+    "aliases": [
+      "Crunchyroll",
+      "Crunchyroll Premium",
+      "كرانشي رول"
+    ]
+  },
+  {
+    "id": "cryptodotcom",
+    "aliases": [
+      "Crypto.com",
+      "Crypto com"
+    ]
+  },
+  {
+    "id": "cursor",
+    "aliases": [
+      "Cursor",
+      "Cursor AI",
+      "Cursor Pro",
+      "Anysphere"
+    ]
+  },
+  {
+    "id": "deezer",
+    "aliases": [
+      "Deezer",
+      "Deezer Premium",
+      "ديزر"
+    ]
+  },
+  {
+    "id": "digitalocean",
+    "aliases": [
+      "DigitalOcean",
+      "Digital Ocean"
+    ]
+  },
+  {
+    "id": "disney",
+    "aliases": [
+      "Disney+",
+      "Disney Plus",
+      "DisneyPlus",
+      "ديزني بلس"
+    ]
+  },
+  {
+    "id": "dominos",
+    "aliases": [
+      "Dominos",
+      "Domino's",
+      "Dominos Pizza",
+      "Domino's Pizza",
+      "دومينوز",
+      "دومينوز بيتزا"
+    ]
+  },
+  {
+    "id": "doordash",
+    "aliases": [
+      "DoorDash",
+      "DoorDash DashPass",
+      "DashPass"
+    ]
+  },
+  {
+    "id": "dunkindonuts",
+    "aliases": [
+      "Dunkin",
+      "Dunkin Donuts",
+      "Dunkin' Donuts",
+      "دانكن",
+      "دانكن دونتس"
+    ]
+  },
+  {
+    "id": "duolingo",
+    "aliases": [
+      "Duolingo",
+      "Super Duolingo",
+      "Duolingo Plus",
+      "دولينجو"
+    ]
+  },
+  {
+    "id": "epicgames",
+    "aliases": [
+      "Epic Games",
+      "EpicGames",
+      "Epic Games Store"
+    ]
+  },
+  {
+    "id": "etihad",
+    "aliases": [
+      "Etihad",
+      "Etihad Airways",
+      "طيران الاتحاد"
+    ]
+  },
+  {
+    "id": "etoro",
+    "aliases": [
+      "eToro",
+      "eToro.com",
+      "ايتورو"
+    ]
+  },
+  {
+    "id": "fitnessfirst",
+    "aliases": [
+      "Fitness First",
+      "FitnessFirst",
+      "فيتنس فيرست"
+    ]
+  },
+  {
+    "id": "fiverr",
+    "aliases": [
+      "Fiverr",
+      "Fiverr.com"
+    ]
+  },
+  {
+    "id": "flydubai",
+    "aliases": [
+      "flydubai",
+      "Fly Dubai",
+      "فلاي دبي"
+    ]
+  },
+  {
+    "id": "godaddy",
+    "aliases": [
+      "GoDaddy",
+      "GoDaddy.com"
+    ]
+  },
+  {
+    "id": "grab",
+    "aliases": [
+      "Grab",
+      "Grab.com",
+      "Grab Food",
+      "GrabFood",
+      "Grab Transport"
+    ]
+  },
+  {
+    "id": "hetzner",
+    "aliases": [
+      "Hetzner",
+      "Hetzner Online",
+      "Hetzner Cloud"
+    ]
+  },
+  {
+    "id": "instashop",
+    "aliases": [
+      "InstaShop",
+      "Insta Shop",
+      "انستاشوب"
+    ]
+  },
+  {
+    "id": "justlife",
+    "aliases": [
+      "Justlife",
+      "Just Life",
+      "Justmop",
+      "جست لايف"
+    ]
+  },
+  {
+    "id": "keeta",
+    "aliases": [
+      "Keeta",
+      "Keeta Food",
+      "كيتا"
+    ]
+  },
+  {
+    "id": "lifepharmacy",
+    "aliases": [
+      "LIFE Pharmacy",
+      "Life Pharmacies",
+      "صيدلية لايف"
+    ]
+  },
+  {
+    "id": "linkedin",
+    "aliases": [
+      "LinkedIn",
+      "LinkedIn Premium",
+      "LinkedIn Ireland"
+    ]
+  },
+  {
+    "id": "marksandspencer",
+    "aliases": [
+      "Marks & Spencer",
+      "Marks and Spencer",
+      "M&S",
+      "ماركس اند سبنسر"
+    ]
+  },
+  {
+    "id": "namecheap",
+    "aliases": [
+      "Namecheap",
+      "Namecheap.com"
+    ]
+  },
+  {
+    "id": "namshi",
+    "aliases": [
+      "Namshi",
+      "Namshi.com",
+      "نمشي"
+    ]
+  },
+  {
+    "id": "nike",
+    "aliases": [
+      "Nike",
+      "Nike Store",
+      "Nike.com",
+      "نايك"
+    ]
+  },
+  {
+    "id": "openrouter",
+    "aliases": [
+      "OpenRouter",
+      "OpenRouter.ai"
+    ]
+  },
+  {
+    "id": "perplexity",
+    "aliases": [
+      "Perplexity",
+      "Perplexity AI",
+      "Perplexity Pro"
+    ]
+  },
+  {
+    "id": "pizzahut",
+    "aliases": [
+      "Pizza Hut",
+      "PizzaHut",
+      "بيتزا هت"
+    ]
+  },
+  {
+    "id": "playstation",
+    "aliases": [
+      "PlayStation",
+      "PlayStation Network",
+      "PlayStation Plus",
+      "PSN",
+      "بلايستيشن"
+    ]
+  },
+  {
+    "id": "puma",
+    "aliases": [
+      "Puma",
+      "Puma Store",
+      "بوما"
+    ]
+  },
+  {
+    "id": "qatarairways",
+    "aliases": [
+      "Qatar Airways",
+      "QatarAirways",
+      "الخطوط الجوية القطرية",
+      "الخطوط القطرية"
+    ]
+  },
+  {
+    "id": "reelcinemas",
+    "aliases": [
+      "Reel Cinemas",
+      "Reel Cinemas Dubai",
+      "ريل سينما"
+    ]
+  },
+  {
+    "id": "salik",
+    "aliases": [
+      "Salik",
+      "Salik Auto Recharge",
+      "Salik Recharge",
+      "سالك"
+    ]
+  },
+  {
+    "id": "sewa",
+    "aliases": [
+      "SEWA",
+      "SEWA Bill",
+      "Sharjah Electricity Water and Gas Authority",
+      "سيوا",
+      "هيئة كهرباء ومياه وغاز الشارقة"
+    ]
+  },
+  {
+    "id": "shahid",
+    "aliases": [
+      "Shahid",
+      "Shahid VIP",
+      "Shahid.net",
+      "شاهد",
+      "شاهد VIP"
+    ]
+  },
+  {
+    "id": "sharjahcoop",
+    "aliases": [
+      "Sharjah Coop",
+      "Sharjah Co-op",
+      "Sharjah Cooperative Society",
+      "تعاونية الشارقة"
+    ]
+  },
+  {
+    "id": "shein",
+    "aliases": [
+      "SHEIN",
+      "SHEIN.com",
+      "شي ان",
+      "شي إن"
+    ]
+  },
+  {
+    "id": "steam",
+    "aliases": [
+      "Steam",
+      "Steam Games",
+      "Steam Purchase",
+      "Steampowered.com"
+    ]
+  },
+  {
+    "id": "tabby",
+    "aliases": [
+      "Tabby",
+      "Tabby.ai",
+      "Tabby Installment",
+      "تابي"
+    ]
+  },
+  {
+    "id": "tamara",
+    "aliases": [
+      "Tamara",
+      "Tamara.co",
+      "تمارا"
+    ]
+  },
+  {
+    "id": "temu",
+    "aliases": [
+      "Temu",
+      "Temu.com",
+      "تيمو"
+    ]
+  },
+  {
+    "id": "timhortons",
+    "aliases": [
+      "Tim Hortons",
+      "TimHortons",
+      "تيم هورتنز"
+    ]
+  },
+  {
+    "id": "tripdotcom",
+    "aliases": [
+      "Trip.com",
+      "Trip com"
+    ]
+  },
+  {
+    "id": "turkishairlines",
+    "aliases": [
+      "Turkish Airlines",
+      "TurkishAirlines",
+      "الخطوط التركية"
+    ]
+  },
+  {
+    "id": "twitch",
+    "aliases": [
+      "Twitch",
+      "Twitch Interactive",
+      "Twitch.tv"
+    ]
+  },
+  {
+    "id": "udemy",
+    "aliases": [
+      "Udemy",
+      "Udemy.com",
+      "يوديمي"
+    ]
+  },
+  {
+    "id": "underarmour",
+    "aliases": [
+      "Under Armour",
+      "UnderArmour",
+      "اندر ارمور"
+    ]
+  },
+  {
+    "id": "unioncoop",
+    "aliases": [
+      "Union Coop",
+      "Union Cooperative",
+      "تعاونية الاتحاد"
+    ]
+  },
+  {
+    "id": "upwork",
+    "aliases": [
+      "Upwork",
+      "Upwork.com"
+    ]
+  },
+  {
+    "id": "urbancompany",
+    "aliases": [
+      "Urban Company",
+      "UrbanClap",
+      "Urban Clap"
+    ]
+  },
+  {
+    "id": "vercel",
+    "aliases": [
+      "Vercel",
+      "Vercel Inc",
+      "Vercel Pro"
+    ]
+  },
+  {
+    "id": "vox",
+    "aliases": [
+      "VOX",
+      "VOX Cinemas",
+      "فوكس سينما",
+      "فوكس سينماز"
+    ]
+  },
+  {
+    "id": "waitrose",
+    "aliases": [
+      "Waitrose",
+      "Waitrose UAE",
+      "ويتروز"
+    ]
+  },
+  {
+    "id": "wizzair",
+    "aliases": [
+      "Wizz Air",
+      "WizzAir",
+      "ويز اير"
+    ]
+  },
+  {
+    "id": "xbox",
+    "aliases": [
+      "Xbox",
+      "Xbox Game Pass",
+      "Xbox Live",
+      "Microsoft Xbox",
+      "اكس بوكس"
+    ]
+  },
+  {
+    "id": "zara",
+    "aliases": [
+      "Zara",
+      "Zara.com",
+      "زارا"
+    ]
+  },
+  {
+    "id": "zomato",
+    "aliases": [
+      "Zomato",
+      "Zomato Gold",
+      "زوماتو"
+    ]
+  },
+  {
+    "id": "zoom",
+    "aliases": [
+      "Zoom",
+      "Zoom.us",
+      "Zoom Video Communications"
+    ]
+  }
+]

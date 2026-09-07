@@ -19,6 +19,8 @@ function compile(relative, require) {
   return exports;
 }
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'assets/merchants/sources.json'), 'utf8'));
+assert.equal(new Set(manifest.map(row => row.id)).size, manifest.length, 'unique provenance identity');
+assert.equal(new Set(manifest.map(row => row.file)).size, manifest.length, 'unique provenance filename');
 const assets = new Map();
 const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
   assert.match(id, /^\.\.\/\.\.\/\.\.\/assets\/merchants\/[a-z0-9]+\.png$/,
@@ -30,6 +32,8 @@ const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
   assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
   assert.equal(bytes.readUInt32BE(16), 128, `${file}: width`);
   assert.equal(bytes.readUInt32BE(20), 128, `${file}: height`);
+  assert.equal(evidence.width, 128);
+  assert.equal(evidence.height, 128);
   assert.equal(createHash('sha256').update(bytes).digest('hex'), evidence.sha256, `${file}: reviewed bytes`);
   assert.equal(bytes.length, evidence.bytes);
   assert.match(evidence.sourceUrl, /^https:\/\//);
@@ -56,6 +60,17 @@ const matches = {
   'du Home Internet': 'du', 'Etisalat Postpaid': 'etisalat', 'e& UAE': 'etisalat',
   'OSN+': 'osn', 'DEWA Bill': 'dewa', '  Ｃａｒｅｅｍ  ': 'careem',
 };
+const expanded = JSON.parse(fs.readFileSync(path.join(root, 'scripts/test/fixtures/merchant-logo-identities.json'), 'utf8'));
+assert.equal(expanded.length, 78, 'expansion retains every reviewed identity');
+for (const { id, aliases } of expanded) {
+  assert.match(id, /^[a-z0-9]+$/);
+  assert.ok(aliases.length > 0, `${id}: at least one usable title`);
+  for (const title of aliases) {
+    assert.ok(typeof title === 'string' && title.trim().length > 0 && title.length <= 240);
+    assert.ok(!Object.hasOwn(matches, title) || matches[title] === id, `conflicting alias: ${title}`);
+    matches[title] = id;
+  }
+}
 for (const [title, id] of Object.entries(matches)) {
   const logo = catalog.merchantLogoFor(title);
   assert.equal(logo?.id, id, `${title}: correct bundled identity`);
@@ -63,12 +78,15 @@ for (const [title, id] of Object.entries(matches)) {
   assert.equal(logo.source, assets.get(id + '.png'));
   assert.equal(catalog.merchantLogoFor(title), logo, 'stable identity avoids allocations in scrolling rows');
   assert.ok(Object.isFrozen(logo), 'callers cannot mutate shared merchant identity');
+  assert.equal(catalog.merchantLogoFor(`  ${title.toUpperCase()}  `), logo, `${title}: case and whitespace`);
+  assert.equal(catalog.merchantLogoFor('Cafe near ' + title), null, `${title}: never match a brand substring`);
+  assert.equal(catalog.merchantLogoFor(title + ' unrelated merchant'), null, `${title}: reject unknown suffixes`);
 }
 assert.equal(new Set(Object.values(matches)).size, assets.size, 'every shipped brand has a positive test');
-assert.equal(assets.size, 34, 'an empty or accidentally reduced catalogue must fail');
+assert.equal(assets.size, 112, 'an empty or accidentally reduced catalogue must fail');
 assert.equal(manifest.length, assets.size, 'provenance and shipped assets stay in sync');
 assert.deepEqual(fs.readdirSync(path.join(root, 'assets/merchants')).filter(file => file.endsWith('.png')).sort(), [...assets.keys()].sort());
-assert.ok(manifest.reduce((sum, row) => sum + row.bytes, 0) < 512 * 1024, 'keep the offline logo pack small');
+assert.ok(manifest.reduce((sum, row) => sum + row.bytes, 0) < 1024 * 1024, 'keep all 112 offline logos below 1 MiB');
 
 const samples = ['', null, undefined, 123, 'LuLu Exchange', 'Lulu International Exchange',
   'لولو للصرافة', 'كريم للبشرة', 'Cafe near Carrefour', 'PayPal Talabat',
@@ -77,7 +95,11 @@ const samples = ['', null, undefined, 123, 'LuLu Exchange', 'Lulu International 
   'Uberoi Restaurant', 'Notionally Trading', 'Shop at IKEA', 'Google Unknown Shop',
   'ADNOC employee transfer', 'DU BAI CAFE', 'Unknown Place', 'constructor', '__proto__',
   'toString', 'https://merchant.invalid/logo.png', 'Careem' + ' '.repeat(241),
-  'Carrefour\nContact support', 'Talabat; Starbucks'];
+  'Carrefour\nContact support', 'Talabat; Starbucks', 'Etihad Rail', 'Etihad Credit Insurance',
+  'Tabby Tailoring', 'Tamara Restaurant', 'Aster Trading', 'Life Cafe', 'Salik Restaurant',
+  'Microsoft 365', 'Nikee', 'Zaraa', 'PAYPAL *NIKE', 'Noon by Namshi', 'Canva Trading',
+  'Canvas Trading', 'Steam Laundry', 'Crypto.com Cafe', 'OpenAI Cafe', 'Zoom Cafeteria',
+  'Nesto', 'Subway', 'Decathlon'];
 for (const title of samples) {
   assert.equal(catalog.merchantLogoFor(title), null,
     `${title}: ambiguous/unrecognised merchants must use the category fallback`);

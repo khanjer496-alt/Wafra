@@ -92,6 +92,15 @@ try {
     const agenda = page.getByTestId('payment-agenda');
     await agenda.waitFor({ state: 'visible' });
     await check(`Bills ${mode}: payment agenda has logos`, () => decoded(agenda));
+    await page.getByRole('tab', { name: 'All', exact: true }).click();
+    await check(`Bills ${mode}: newly added subscription logo decodes`, async () => {
+      // Fitness First is a recurring subscription in every demo month. Salik
+      // is transport, so it need not be classified into the payment agenda.
+      const logo = agenda.getByTestId('merchant-logo-fitnessfirst').first();
+      await logo.waitFor({ state: 'attached' });
+      await logo.locator('img').evaluate(image => image.decode());
+      assert.equal(await logo.locator('img').evaluate(image => image.naturalWidth), 128);
+    });
     await page.screenshot({ path: path.join(out, `bills-${mode}.png`) });
     await context.setOffline(true);
     await page.getByRole('tab', { name: 'Spending', exact: true }).click();

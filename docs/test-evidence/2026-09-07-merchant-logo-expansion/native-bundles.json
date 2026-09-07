@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "platform": "ios",
+      "passed": true,
+      "bundledMerchantLogos": 112,
+      "bundle": "_expo/static/js/ios/entry-2c158314db1c9ea8fd8b07d7ec95404e.hbc"
+    },
+    {
+      "platform": "android",
+      "passed": true,
+      "bundledMerchantLogos": 112,
+      "bundle": "_expo/static/js/android/entry-6680ffd1c5300e3b78fc87f3821a56af.hbc"
+    }
+  ],
+  "onDeviceTested": false
+}

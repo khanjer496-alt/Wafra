@@ -1,7 +1,7 @@
 # Bundled merchant artwork
 
-The initial catalogue contains 34 merchant/service identities as 128 × 128 PNGs
-(264,858 bytes total). `sources.json` records each source URL, acquisition date,
+The catalogue contains 112 merchant/service identities as 128 × 128 PNGs
+(836,276 bytes total; about 817 KiB). `sources.json` records each source URL, acquisition date,
 transformation, final dimensions, byte count and SHA-256. Publisher app artwork
 also records the reviewed app ID and publisher. These records describe provenance,
 not a licence or an endorsement of Wafra.
@@ -32,9 +32,18 @@ so the decorative logo is hidden from screen readers.
 
 ## Source and usage notes
 
-21 assets were rasterised from Simple Icons' supplied SVGs, preserving their
-supplied colour. 13 came from the reviewed publishers' publicly listed app icons,
+59 assets were rasterised from Simple Icons' supplied SVGs, preserving their
+supplied colour. 53 came from the reviewed publishers' publicly listed app icons,
 resized proportionally. No third-party logo was redrawn or invented.
+
+The 78 additions retain the upstream byte hash as well as the final PNG hash.
+Where it reduced file size, PNGs were losslessly recompressed; decoded RGBA bytes
+were compared before and after. This saved 145,988 bytes without changing pixels.
+Publisher identities were matched by explicit app ID, name and publisher, not
+the first search result. Unverified or unsuitable results were not added: for
+example, a Decathlon fitness-coaching app is not a Decathlon retail logo, and
+Microsoft Copilot is not the generic Microsoft merchant identity. Such names
+continue to use category icons until suitable artwork is reviewed.
 
 Simple Icons' project licence is not a blanket licence to all underlying brand
 artwork or trademarks. Its disclaimer expressly requires considering individual
@@ -51,8 +60,8 @@ References checked on 2026-09-07:
 This implementation does not claim brand-specific permission, sponsorship or
 legal clearance. Review applicable brand-artwork and source terms before public
 distribution; replace or remove any asset that is not suitable for that release.
-Do not call a source manifest entry a permission record. This task changed the
-local working tree only; it did not publish a build or update.
+Do not call a source manifest entry a permission record. Committing this catalogue
+does not publish a mobile build or certify public-distribution permission.
 
 ## Maintaining the catalogue
 
@@ -61,8 +70,10 @@ Use an unmodified-colour, proportional 128 × 128 PNG and update `sources.json`
 with the exact final hash and source evidence. Add a literal Metro require and
 explicit aliases in `merchant-logo-assets.ts`, not an interpolated path or URL.
 Add positive and similarly named negative cases to `merchant-logos.test.js`;
-update its deliberate catalogue count when adding/removing an identity. Keep
-the pack under the test's 512 KiB budget. Do not introduce network acquisition
+update its deliberate catalogue count when adding/removing an identity. Expanded
+aliases also have independent expected identities in
+`scripts/test/fixtures/merchant-logo-identities.json`. Keep
+the pack under the test's 1 MiB budget. Do not introduce network acquisition
 into a render path, parser or user-data service.
 
 Run:
