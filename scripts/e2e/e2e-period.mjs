@@ -161,14 +161,14 @@ const monthPeriod = (offset = 0) => {
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: hero reads live', !!(await visibleText(page, /^Net after spending$/i)));
+ok('home: period net is visible', !!(await visibleText(page, /Net after spending/i)));
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
 await tapPeriod(page, monthPeriod(), 1200);
 ok('sheet: reporting period opens', !!(await visibleText(page, /^Reporting period$/i)));
 await tapText(page, /^Last month$/i, 1200);
 ok('home: past month applies beside the hero',
-  !!(await visibleText(page, monthPeriod(-1))) && !!(await visibleText(page, /^Net after spending$/i)));
+  !!(await visibleText(page, monthPeriod(-1))) && !!(await visibleText(page, /Net after spending/i)));
 
 // 3) Spending follows the same period.
 await tapTab(page, 'Spending');
@@ -193,8 +193,14 @@ await tapLabel(page, 'Back', 1200);
 
 // 6) Home's Spent cell deep-links to Activity, pre-filtered to spending. Caps
 // are a CSS transform, so the DOM text is still "Spent".
-await tapText(page, /^Spent$/, 1600);
+await page.getByTestId('reference-month-cards').getByRole('button', { name: /^Spending,/ }).click();
+await page.getByTestId('spending-categories').waitFor();
+ok('home: Spending opens its current destination', /\/flow/.test(page.url()));
+await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+await page.getByRole('button', { name: 'View all spending', exact: true }).click();
+await page.waitForURL(/\/transactions\?type=expense/);
 ok('activity: Spent deep-link arrives pre-filtered', !!(await visibleText(page, /\d+ filters?/i)));
+ok('activity: spending handoff preserves the year scope', !!(await visibleText(page, `· ${yr}`)));
 await tapLabel(page, 'Back', 1200);
 
 // 7) Persistence: a reload must not show onboarding again (chunked storage).

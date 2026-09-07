@@ -199,7 +199,7 @@ const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
 const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
-const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', reducedMotion: 'reduce' });
 /**
  * Text whose box extends past the right edge of the viewport.
  *
@@ -350,27 +350,44 @@ const flow = async () => { await reload(); await tapTab(page, 'Spending'); };
 const bills = async () => { await reload(); await tapTab(page, 'Bills'); };
 const wallet = async () => { await reload(); await tapTab(page, 'Accounts'); };
 
+const settingsPanel = async (name = 'Preferences') => {
+  await home();
+  if (!(await tapKey(page, 'Settings'))) throw new Error('Settings is unreachable');
+  await page.waitForURL(/\/settings/);
+  if (!(await tapKey(page, name))) throw new Error(`Settings panel missing: ${name}`);
+  await page.waitForTimeout(300);
+};
+const spendingView = async (name) => {
+  await flow();
+  await page.getByRole('tab', { name, exact: true }).click();
+  await page.waitForTimeout(250);
+};
+const homeFact = async (name) => {
+  const row = page.getByTestId('reference-month-cards').getByRole('button', { name: new RegExp(`^${name},`) });
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+};
+const categoryDetails = async (name) => {
+  const row = page.getByTestId('spending-categories').getByRole('button', { name: new RegExp(`^${name}\\. AED `) });
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+  await page.getByTestId('category-history').waitFor();
+};
+
 await pressEverything('home', home);
-await pressEverything('flow', flow);
-await pressEverything('bills · subs', bills);
-await pressEverything('bills · cards', async () => { await bills(); await tapKey(page, 'Cards 1'); await page.waitForTimeout(700); });
-await pressEverything('bills · fixed', async () => {
-  await bills();
-  const fixed = (await visibleControls(page)).find((key) => /^Fixed \d+$/.test(key));
-  if (!fixed || (await tapKey(page, fixed, 5000)) !== true) throw new Error('Fixed bills segment not found');
-  await page.waitForTimeout(700);
+await pressEverything('spending categories', flow);
+await pressEverything('spending activity', () => spendingView('Activity'));
+await pressEverything('spending trends', () => spendingView('Trends'));
+await pressEverything('bills upcoming', bills);
+await pressEverything('bills all obligations', async () => {
+  await bills(); await page.getByRole('tab', { name: 'All', exact: true }).click();
 });
 await pressEverything('wallet', wallet);
-await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForTimeout(1200); });
-await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
-  // Erasing the ledger is the one control here the sweep must not press.
-  // Country and Language are back in: they used to be one-tap cycles that
-  // relabelled every later control on the screen, and are now chooser sheets
-  // that change nothing until an option inside them is picked — so the sweep
-  // covers them, and the closable-sheet assertion covers them too. That is
-  // worth having, because the bug this replaced was a row that opened
-  // nothing at all.
-  { skip: ['Erase everything on this phone'] });
+await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/); });
+for (const panel of ['Preferences', 'Imports', 'Privacy & data', 'Help']) {
+  await pressEverything(`settings ${panel}`, () => settingsPanel(panel),
+    { skip: ['Erase everything on this phone'] });
+}
 
 /**
  * Put the settings back.
@@ -396,11 +413,11 @@ const resetPreferences = async () => {
 await resetPreferences();
 await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
-  await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200);
+  await settingsPanel('Help');
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
 });
 await pressEverything('accuracy', async () => {
-  await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200);
+  await settingsPanel('Privacy & data');
   await tapKey(page, 'Improve accuracy'); await page.waitForTimeout(1300);
 });
 await pressEverything('import', async () => {
@@ -408,121 +425,64 @@ await pressEverything('import', async () => {
 });
 await resetPreferences();
 
-/* ── 2. Nothing offers a destination it is already at ─────────────────── */
-
-/**
- * Flow's "Worth knowing" cards.
- *
- * Each draws a chevron and is a Pressable, so each promises a screen. Seven of
- * twelve insight kinds used to promise `/stats` or `/budgets`, which have never
- * been routes; that was fixed by pointing them all at `/flow` — the screen the
- * section is drawn on, where `router.push` is a no-op. The chevron survived
- * both bugs. This presses every card there is and requires the route to move.
- */
+/* ── 2. Every current drill-down goes to its stated destination ───────── */
+// Stats now belongs to Spending. The old independent insight cards and pooled
+// composition slice no longer exist; exercise the replacement owners instead.
 {
-  await flow();
-  const cards = await page.evaluate(() => {
-    let head = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
-      (e) => !e.children.length && /^worth knowing$/i.test((e.textContent || '').trim()),
-    );
-    // Up to the section that holds the header AND the list under it.
-    for (let i = 0; head && i < 8; i++, head = head.parentElement) {
-      if (head.querySelectorAll?.('[role="button"][aria-label]').length >= 2) break;
-    }
-    return head ? [...head.querySelectorAll('[role="button"][aria-label]')].map((n) => n.getAttribute('aria-label')) : [];
-  });
-  // Four distinct insight routes are enough to make this non-vacuous; the
-  // exact count legitimately changes with the live day of the seeded month.
-  ok(`flow: "Worth knowing" has cards to press (${cards.length})`, cards.length >= 4);
-  const inert = [];
-  for (const label of cards) {
-    await flow();
-    const before = await url(page);
-    if (!(await tapKey(page, label, 4000))) { inert.push(`${label} (unreachable)`); continue; }
-    await page.waitForTimeout(1100);
-    const after = await url(page);
-    if (after === before) inert.push(label);
+  await spendingView('Trends');
+  const merchants = await page.getByTestId('spending-trends').getByRole('button')
+    .evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')).filter(label => /, AED .* transactions$/.test(label || '')));
+  ok(`trends has non-vacuous merchant drill-downs (${merchants.length})`, merchants.length >= 4);
+  for (const label of merchants) {
+    await spendingView('Trends');
+    const reached = await tapKey(page, label, 5000);
+    await page.waitForTimeout(500);
+    const at = new URL(page.url());
+    ok(`trends merchant opens filtered spending: ${label}`, reached === true &&
+      at.pathname === '/transactions' && at.searchParams.get('type') === 'expense' &&
+      label.startsWith(at.searchParams.get('merchant') + ','));
   }
-  ok(`flow: every "Worth knowing" card goes somewhere other than Flow (${cards.length} pressed)`,
-    inert.length === 0, inert.join(' | '));
 }
-
-/**
- * Home carries one insight with its own "See the breakdown" button. It shares
- * the destination with the cards above, so it fails and passes with them —
- * check it separately anyway, because the button is the one control on Home
- * whose entire purpose is to go somewhere.
- */
 {
-  await home();
-  const before = await url(page);
-  ok('home: the insight offers a breakdown', await tapKey(page, 'See the breakdown', 4000));
-  await page.waitForTimeout(1100);
-  ok(`home: "See the breakdown" leaves Home (${before} → ${await url(page)})`, (await url(page)) !== before);
+  await home(); await homeFact('Spending'); await page.waitForURL(/\/flow/);
+  ok('Home spending opens Spending, not a no-op on Home', /\/flow/.test(await url(page)));
+  await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
+  ok('Home income opens the income-filtered ledger', /\/transactions\?type=income/.test(await url(page)));
+  await flow(); await categoryDetails('Rent');
+  if (!(await tapKey(page, 'View activity'))) throw new Error('Category activity action is unreachable');
+  await page.waitForURL(/category=rent/);
+  ok('category detail opens only its own expenses', new URL(page.url()).searchParams.get('type') === 'expense');
 }
-
-/* ── 3. Named destinations land where they say ────────────────────────── */
 
 const goesTo = async (name, enter, key, pattern) => {
   await enter();
   const reached = await tapKey(page, key, 5000);
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(500);
   const at = await url(page);
-  ok(`${name} (${key} → ${at})`, reached && pattern.test(at), reached ? at : 'not reachable');
+  ok(`${name} (${key} → ${at})`, reached === true && pattern.test(at), reached ? at : 'not reachable');
 };
+await goesTo('Home all activity opens the ledger', home, 'All activity', /^\/transactions/);
+await goesTo('Home settings action', home, 'Settings', /^\/settings/);
+await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
+await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
+await goesTo('Settings Pro', () => settingsPanel('Help'), 'Wafra Pro', /^\/pro/);
+await goesTo('Settings accuracy', () => settingsPanel('Privacy & data'), 'Improve accuracy', /^\/accuracy/);
+await goesTo('Settings feedback', () => settingsPanel('Help'), 'Send feedback', /^\/feedback/);
 
-await goesTo('home: the In cell opens income', home, 'In', /type=income/);
-await goesTo('home: the Spent cell opens spending', home, 'Spent', /type=expense/);
-await goesTo('home: "All activity" opens the ledger', home, 'All activity', /^\/transactions/);
-await goesTo('home: the search action opens the ledger', home, 'Search merchants or categories', /^\/transactions/);
-await goesTo('home: the sliders action opens settings', home, 'Settings', /^\/settings/);
-await goesTo('flow: a composition row drills into its category', flow, 'Rent, see entries', /category=rent/);
-await flow();
-const pooledSlice = await page.evaluate(() =>
-  [...document.querySelectorAll('[aria-label]')]
-    .map((node) => node.getAttribute('aria-label'))
-    .find((label) => /^\d+ more, see entries$/i.test(label || '')) ?? null,
-);
-if (pooledSlice) {
-  await goesTo('flow: the pooled slice hands over every category it stands for', flow, pooledSlice, /category=[a-z]+%2C/);
-} else {
-  ok('flow: the pooled slice is absent only when every category is shown', true);
-}
-await goesTo('wallet: the Payment cards action opens the cards screen', wallet, 'Payment cards', /^\/cards/);
-await goesTo('wallet: the scan block opens the import screen', wallet, 'Paste a bank message', /^\/import-sms/);
-await goesTo('settings: Wafra Pro opens the paywall',
-  async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
-  'Wafra Pro', /^\/pro/);
-await goesTo('settings: "Improve accuracy" opens the report screen',
-  async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
-  'Improve accuracy', /^\/accuracy/);
-await goesTo('settings: "Send feedback" opens the feedback screen',
-  async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
-  'Send feedback', /^\/feedback/);
-
-/* Stable labels, not visible-copy selectors, own the core transaction path. */
+/* ── 3. Search, manual entry, cancellation and filter clearing ────────── */
 {
-  await home();
-  const searched = await tapKey(page, 'Search merchants or categories', 5000);
-  await page.waitForTimeout(900);
-  ok('transactions: Search label opens the ledger', searched && /^\/transactions/.test(await url(page)));
-
+  await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/);
+  const search = page.getByPlaceholder('Search merchants or categories', { exact: true }).last();
+  await search.waitFor({ state: 'visible' });
+  ok('Transactions exposes its real merchant search field', await search.isEditable());
   const added = await tapKey(page, 'Add transaction', 5000);
-  await page.waitForTimeout(900);
-  ok('transactions: Add Transaction label opens the form',
-    added && /^\/add-transaction/.test(await url(page)));
-
-  await tapKey(page, 'Close', 5000);
-  await page.waitForTimeout(700);
-  const backed = await tapKey(page, 'Back', 5000);
-  await page.waitForTimeout(700);
-  ok('transactions: Back label returns to Home', backed && /^\/$/.test(await url(page)));
-
-  await home();
-  await tapKey(page, 'In', 5000);
-  await page.waitForTimeout(900);
-  ok('transactions: Clear All label removes an applied route filter',
-    await tapKey(page, 'Clear all filters', 5000));
+  await page.waitForTimeout(500);
+  ok('Add transaction opens the form', added === true && /^\/add-transaction/.test(await url(page)));
+  await tapKey(page, 'Close'); await page.waitForTimeout(300);
+  const backed = await tapKey(page, 'Back'); await page.waitForTimeout(300);
+  ok('Cancelling entry then Back returns Home', backed === true && /^\/$/.test(await url(page)));
+  await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
+  ok('Clear all removes the applied income filter', await tapKey(page, 'Clear all filters', 5000) === true);
 }
 
 /* ── 4. Back gets you out of every pushed screen ──────────────────────── */
@@ -532,7 +492,7 @@ for (const [name, enter] of [
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
   ['cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
-  ['feedback', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); await tapKey(page, 'Send feedback'); }],
+  ['feedback', async () => { await settingsPanel('Help'); await tapKey(page, 'Send feedback'); }],
 ]) {
   await enter();
   await page.waitForTimeout(1300);
@@ -545,28 +505,19 @@ for (const [name, enter] of [
 
 /* ── 5. Totals equal the rows printed under them ──────────────────────── */
 
-/**
- * Home's hero is three figures that have to be one arithmetic. It once read
- * "63,039 in, 8,815 spent, net 54,223" — a subtraction off by one, in 40px
- * type, because each cell rounded itself and the net was measured separately.
- */
+// Net income is not the bank balance. Read the exact displayed period facts
+// and reconcile the separate period-net disclosure, never the balance hero.
 {
   await home();
-  const t = await paintedText(page);
-  const hero = t.find((x) => /^[\d,]+$/.test(x.t) && x.h > 34);
-  const inCell = t.find((x) => /^in$/i.test(x.t));
-  const spentCell = t.find((x) => /^spent$/i.test(x.t));
-  const figureUnder = (label) => {
-    if (!label) return NaN;
-    const c = t.filter((x) => /^[\d,]+$/.test(x.t) && x.y > label.y && x.y < label.y + 60
-      && Math.abs(x.x - label.x) < 40);
-    return c.length ? money(c[0].t) : NaN;
-  };
-  const inFils = figureUnder(inCell), spentFils = figureUnder(spentCell);
-  // Both cells have to carry a real figure, or "0 − 0 = 0" passes and says
-  // nothing — which is exactly what it did when the month had been moved.
-  ok(`home: the hero equals In minus Spent (${inFils} − ${spentFils} = ${money(hero?.t ?? '')})`,
-    !!hero && inFils > 0 && spentFils > 0 && money(hero.t) === inFils - spentFils);
+  const facts = page.getByTestId('reference-month-cards');
+  const income = await facts.getByRole('button', { name: /^Income,/ }).getAttribute('aria-label');
+  const expense = await facts.getByRole('button', { name: /^Spending,/ }).getAttribute('aria-label');
+  const disclosure = await page.getByTestId('reference-period-net').innerText();
+  const matched = disclosure.match(/Net after spending\s*·\s*([−-]?[\d,]+(?:\.\d+)?)/);
+  const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);
+  ok('Home net equals exact income minus exact spending, not bank balances',
+    !!matched && minor(income) > 0 && minor(expense) > 0 &&
+    minor(matched[1]) === minor(income) - minor(expense));
 }
 
 /**
@@ -577,9 +528,9 @@ for (const [name, enter] of [
  */
 {
   await flow();
-  ok('flow: a limit row opens its sheet', await tapKey(page, 'Transport limit', 5000));
+  await categoryDetails('Transport');
+  ok('flow: category detail opens its existing limit editor', await tapKey(page, 'Edit limits', 5000) === true);
   await page.waitForTimeout(1200);
-  const t = await paintedText(page);
   /**
    * Read off the row, not off `paintedText`.
    *
@@ -593,22 +544,39 @@ for (const [name, enter] of [
       (e) => !e.children.length && /^spent this month$/i.test((e.textContent || '').trim()),
     );
     const row = label?.parentElement;
-    const m = (row?.textContent || '').match(/AED\s[\d,]+/);
+    const m = (row?.textContent || '').match(/AED\s[\d,]+(?:\.\d+)?/);
     return m ? m[0] : null;
   });
-  const where = t.find((x) => /^where it went$/i.test(x.t));
-  const rows = where ? t.filter((x) => x.y > where.y && /^AED [\d,]+$/.test(x.t)).map((x) => money(x.t)) : [];
-  const sum = rows.reduce((a, b) => a + b, 0);
+  // The lower part of a scrollable sheet need not be inside the viewport.
+  // Read its complete own list, including the explicit remaining-merchants
+  // row, instead of treating off-screen rows as missing money.
+  const where = page.getByText(/^Where it went$/i).last();
+  await where.scrollIntoViewIfNeeded();
+  const amountTexts = await where.evaluate((label) => {
+    let scope = label.parentElement;
+    while (scope && scope !== document.body) {
+      const values = [...scope.querySelectorAll('div,span')]
+        .filter(node => node.children.length === 0)
+        .map(node => (node.textContent || '').trim())
+        .filter(value => /^AED [\d,]+(?:\.\d+)?$/.test(value));
+      if (values.length) return values;
+      scope = scope.parentElement;
+    }
+    return [];
+  });
+  const rows = amountTexts.map(money);
+  const sumMinor = rows.reduce((a, b) => a + Math.round(b * 100), 0);
+  const sum = sumMinor / 100;
   ok(`flow: the limit sheet's merchant list adds up to what was spent (${spent} vs ${sum} over ${rows.length} rows)`,
-    !!spent && rows.length > 0 && money(spent) === sum);
+    !!spent && rows.length > 0 && Math.round(money(spent) * 100) === sumMinor);
 }
 
 /** Wallet's focal available-balance figure must remain readable. */
 {
   await wallet();
   const t = await paintedText(page);
-  const label = t.find((x) => /^available across accounts$/i.test(x.t));
-  const balance = label && t.find((x) => x.y > label.y && x.y < label.y + 130 && /^[\d,]+$/.test(x.t) && x.h > 30);
+  const label = t.find((x) => /^recorded balances$/i.test(x.t));
+  const balance = label && t.find((x) => x.y > label.y && x.y < label.y + 130 && /^[\d,]+(?:\.\d+)?$/.test(x.t) && x.h > 30);
   ok(`wallet: the available balance remains a complete width-safe figure (${balance?.t})`,
     !!balance && money(balance.t) > 0 && !balance.clipped);
 }
@@ -642,8 +610,9 @@ for (const [name, enter] of [
   await page.waitForTimeout(1200);
   ok('settings: the language switch is written down',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'ar');
-  await tapKey(page, 'Back');
+  ok('Arabic Settings Back action works', await tapKey(page, 'رجوع') === true);
   await page.waitForTimeout(1500);
+  ok('Arabic Back returns Home', /^\/$/.test(await url(page)));
   const arabic = /[؀-ۿ]/;
   /**
    * The tab bar has to be Arabic the moment you come back from Settings.
@@ -677,9 +646,10 @@ for (const [name, enter] of [
 
   for (const [name, tab] of [['home', null], ['flow', 'الإنفاق'], ['bills', 'الفواتير'], ['wallet', 'الحسابات']]) {
     if (tab) {
-      await tapKey(page, tab, 8000);
-      await page.waitForTimeout(1300);
+      await tapTab(page, tab);
     }
+    const expectedPath = { home: '/', flow: '/flow', bills: '/bills', wallet: '/wallet' }[name];
+    ok(`${name}: Arabic tab opens its own route`, (await url(page)).split('?')[0] === expectedPath);
     const painted = await paintedText(page);
     const clipped = painted.filter((x) => x.clipped);
     ok(`${name}: the Arabic face fits its boxes (${painted.length} runs)`,
@@ -763,7 +733,7 @@ for (const [name, enter] of [
 
   await reload();
   await tapTab(page, 'Spending');
-  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(900);
   const dark = await sample();
 
@@ -771,7 +741,7 @@ for (const [name, enter] of [
   await page.waitForTimeout(900);
   const light = await sample();
 
-  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForTimeout(900);
   const back = await sample();
 
@@ -781,7 +751,7 @@ for (const [name, enter] of [
   ok('and follows it back again',
     back.card === dark.card && back.ink === dark.ink,
     `${back.card}/${back.ink}`);
-  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
 }
 
 ok('no page errors across the sweep', errors.length === 0, errors.slice(0, 2).join(' | '));

@@ -383,12 +383,13 @@ await tapText(page, /^Netflix$/, 1400);
     return [...scroller.querySelectorAll('div,span')]
       .filter((node) => node.children.length === 0)
       .map((node) => (node.textContent || '').trim())
-      .filter((text) => /^AED [\d,]+$/.test(text));
+      .filter((text) => /^AED [\d,]+(?:\.\d+)?$/.test(text));
   });
   const charges = chargeTexts.map((text) => money(text));
-  const sum = charges.reduce((a, b) => a + b, 0);
+  const sumMinor = charges.reduce((a, b) => a + Math.round(b * 100), 0);
+  const sum = sumMinor / 100;
   ok(`bills: the subscription sheet's total equals its history rows (${total?.t} vs ${sum})`,
-    !!total && charges.length > 0 && money(total.t) === sum);
+    !!total && charges.length > 0 && Math.round(money(total.t) * 100) === sumMinor);
 }
 await tapLabel(page, 'Close', 900);
 
