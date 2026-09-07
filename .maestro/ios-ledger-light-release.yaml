@@ -1,0 +1,81 @@
+# Disposable simulator only; no real inbox, account or physical device.
+# Unlike the screenshot tour, these acceptance actions are not optional.
+appId: app.wafra.ios
+---
+- launchApp
+- takeScreenshot: ${SHOT_PREFIX}-01-first-launch
+- extendedWaitUntil:
+    visible: 'Start tracking'
+    timeout: 60000
+- assertNotVisible: 'Your ledger could not be opened'
+- tapOn: 'Start tracking'
+- tapOn:
+    text: 'Start manually.*'
+- scrollUntilVisible:
+    element:
+      text: 'Open Wafra'
+    direction: DOWN
+    timeout: 30000
+- tapOn: 'Open Wafra'
+- extendedWaitUntil:
+    visible: 'Home'
+    timeout: 30000
+- takeScreenshot: ${SHOT_PREFIX}-02-home
+- tapOn: 'Accounts'
+- tapOn: 'New account'
+- tapOn:
+    text: 'Account name.*'
+- inputText: 'Beta Test Cash'
+- hideKeyboard
+- tapOn: 'Cash'
+- scrollUntilVisible:
+    element:
+      text: 'Opening balance.*'
+    direction: DOWN
+- tapOn:
+    text: 'Opening balance.*'
+- inputText: '1000.25'
+- hideKeyboard
+- tapOn: 'Add account'
+- extendedWaitUntil:
+    visible: 'Beta Test Cash.*'
+    timeout: 15000
+- takeScreenshot: ${SHOT_PREFIX}-03-account
+- openLink: 'wafra://add-transaction'
+- tapOn: 'Amount in your ledger currency'
+- inputText: '12.50'
+- tapOn:
+    text: 'Description.*'
+- inputText: 'Beta Test Groceries'
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: 'Save transaction'
+    direction: DOWN
+- tapOn: 'Save transaction'
+- openLink: 'wafra://transactions'
+- extendedWaitUntil:
+    visible: '.*Beta Test Groceries.*'
+    timeout: 15000
+- takeScreenshot: ${SHOT_PREFIX}-04-transaction-saved
+- stopApp: app.wafra.ios
+- launchApp
+- openLink: 'wafra://transactions'
+- extendedWaitUntil:
+    visible: '.*Beta Test Groceries.*'
+    timeout: 15000
+- takeScreenshot: ${SHOT_PREFIX}-05-persisted-after-restart
+- openLink: 'wafra://flow'
+- tapOn: 'Activity'
+- assertVisible: '.*Beta Test Groceries.*'
+- tapOn: 'Trends'
+- takeScreenshot: ${SHOT_PREFIX}-06-trends
+- tapOn: 'Categories'
+- takeScreenshot: ${SHOT_PREFIX}-07-categories
+- tapOn: 'Bills'
+- takeScreenshot: ${SHOT_PREFIX}-08-bills
+- tapOn: 'Accounts'
+- assertVisible: 'Beta Test Cash.*'
+- openLink: 'wafra://ios-setup'
+- takeScreenshot: ${SHOT_PREFIX}-09-ios-setup
+- assertNotVisible: 'Your ledger could not be opened'
