@@ -1,0 +1,61 @@
+name: Verify requested Ledger & Light APK
+
+# One explicit build handoff. This job never installs, releases, deploys,
+# changes main, reads inbox data or changes the production app configuration.
+on:
+  push:
+    branches: [restore/ledger-light-20260907]
+    paths: [.github/workflows/ledger-light-apk-verification.yml]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: '34094523239'
+      EXPECTED_SHA: '05f9f7ab12e79bd1fe1a7dd938ca472750452594'
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Require successful completion of the exact canonical build
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .head_sha)" = "$EXPECTED_SHA"
+          gh run watch "$BUILD_RUN" --exit-status --interval 30
+          mkdir -p incoming evidence
+          gh run download "$BUILD_RUN" --name wafra-apk --dir incoming
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq '{id,head_sha,path,head_branch,event,status,conclusion,run_number,html_url}' > evidence/build.json
+          test -s incoming/wafra.apk
+      - name: Verify signature, package, ARM64 content and build provenance
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          TOOLS="$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$TOOLS/apksigner"
+          test -x "$TOOLS/aapt2"
+          "$TOOLS/apksigner" verify --verbose --print-certs incoming/wafra.apk > evidence/signature.txt
+          "$TOOLS/aapt2" dump badging incoming/wafra.apk > evidence/badging.txt
+          "$TOOLS/aapt2" dump xmltree incoming/wafra.apk --file AndroidManifest.xml > evidence/manifest.txt
+          grep -q "name='app.wafra.android'" evidence/badging.txt
+          grep -q "versionCode='132'" evidence/badging.txt
+          grep -q "native-code: 'arm64-v8a'" evidence/badging.txt
+          unzip -t incoming/wafra.apk > evidence/zip-integrity.txt
+          unzip -l incoming/wafra.apk | grep -E 'lib/arm64-v8a/.*(sqlite|sqlcipher)|assets/.*bundle' > evidence/native-libraries.txt
+          cp incoming/wafra.apk evidence/Wafra-Ledger-Light-132.apk
+          cd evidence
+          sha256sum Wafra-Ledger-Light-132.apk > SHA256SUMS
+          printf '%s\n' 'Original Ledger & Light restoration, canonical Android build 132.' 'Package: app.wafra.android. This is Wafra, not the separate Wafra Preview app.' 'Actual build source: 05f9f7ab12e79bd1fe1a7dd938ca472750452594.' 'No device installation, store release, OTA publication or main merge performed.' 'Signature verification does not prove compatibility with an unknown installed certificate.' 'Do not uninstall an existing app or erase its ledger to work around an update rejection.' 'Native iOS history validation and browser Spending selector remain unresolved acceptance gates.' 'Physical-device SMS throughput, frame pacing and data-retaining upgrade have not been verified.' > README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-ledger-light-verified-apk-132
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
