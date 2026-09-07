@@ -1,0 +1,168 @@
+name: Verify requested iOS store artifact
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/verify-requested-ios-store-build.yml]
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    outputs:
+      build_id: ${{ steps.find.outputs.build_id }}
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 80f91f447f93cb2d308027258df5fe69e46b4d26
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Locate only the requested source build
+        id: find
+        run: |
+          node <<'JS'
+          const fs=require('fs'),{spawnSync}=require('child_process');
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          const source='80f91f447f93cb2d308027258df5fe69e46b4d26';
+          function call(args){const p=spawnSync('npx',['--yes','eas-cli@22.4.0',...args],{encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});if(p.status!==0)throw Error('EAS read-only request failed');return JSON.parse(p.stdout);}
+          (async()=>{
+            fs.mkdirSync('ios-build-observation',{recursive:true});
+            for(let n=0;n<18;n++){
+              const builds=call(['build:list','--platform','ios','--limit','20','--json','--non-interactive']);
+              const matches=builds.filter(b=>b.gitCommitHash===source&&b.distribution==='STORE');
+              if(matches.length){
+                if(matches.length!==1)throw Error('Ambiguous builds for exact requested source');
+                const b=matches[0];if(b.platform!=='IOS'||b.appVersion!=='1.0.0'||!(Number(b.appBuildVersion)>52))throw Error('Unexpected iOS identity');
+                const out={source,id:b.id,status:b.status,version:b.appVersion,buildNumber:b.appBuildVersion,platform:b.platform,distribution:b.distribution,createdAt:b.createdAt,checkedAt:new Date().toISOString(),appleWrites:0};
+                fs.writeFileSync('ios-build-observation/build.json',JSON.stringify(out,null,2));
+                fs.appendFileSync(process.env.GITHUB_OUTPUT,'build_id='+b.id+'\n');console.log(JSON.stringify(out,null,2));return;
+              }
+              await sleep(10000);
+            }
+            throw Error('No build exists for the requested source; no replacement build was started');
+          })().catch(e=>{console.error(e.message);process.exitCode=1});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-updated-ios-build-observation
+          path: ios-build-observation/
+          retention-days: 14
+      - name: Verify completion of this exact existing build
+        env:
+          BUILD_ID: ${{ steps.find.outputs.build_id }}
+        run: |
+          node <<'JS'
+          const fs=require('fs'),{spawnSync}=require('child_process');const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          (async()=>{
+            const initial=JSON.parse(fs.readFileSync('ios-build-observation/build.json','utf8'));const deadline=Date.now()+40*60*1000;
+            while(Date.now()<deadline){
+              const p=spawnSync('npx',['--yes','eas-cli@22.4.0','build:view',initial.id,'--json'],{encoding:'utf8',timeout:120000,maxBuffer:4*1024*1024});
+              if(p.status!==0)throw Error('Could not read exact build status');const b=JSON.parse(p.stdout);
+              if(b.id!==initial.id||b.gitCommitHash!==initial.source||b.distribution!=='STORE'||b.platform!=='IOS')throw Error('Build identity changed');
+              const report={...initial,status:b.status,checkedAt:new Date().toISOString(),completedAt:b.completedAt??null};
+              fs.mkdirSync('ios-build-completion',{recursive:true});fs.writeFileSync('ios-build-completion/build.json',JSON.stringify(report,null,2));
+              console.log(report.checkedAt,b.id,b.status);
+              if(b.status==='FINISHED')return;
+              if(['ERRORED','CANCELED'].includes(b.status))throw Error('Requested iOS build ended with '+b.status);
+              await sleep(30000);
+            }
+            throw Error('Completion not established within this verification job; do not rebuild automatically');
+          })().catch(e=>{console.error(e.message);process.exitCode=1});
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-updated-ios-build-completion
+          path: ios-build-completion/
+          retention-days: 14
+  inspect:
+    needs: observe
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      BUILD_ID: ${{ needs.observe.outputs.build_id }}
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 80f91f447f93cb2d308027258df5fe69e46b4d26
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Download exact completed signed artifact to temporary storage
+        run: |
+          set -euo pipefail
+          mkdir -p ios-store-evidence
+          npx --yes eas-cli@22.4.0 build:view "$BUILD_ID" --json > "$RUNNER_TEMP/requested-ios-build.json"
+          node <<'JS'
+          const fs=require('fs'),path=require('path'),{Readable}=require('stream'),{pipeline}=require('stream/promises');
+          (async()=>{
+            const b=JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'requested-ios-build.json'),'utf8'));
+            if(b.id!==process.env.BUILD_ID||b.gitCommitHash!=='80f91f447f93cb2d308027258df5fe69e46b4d26'||b.status!=='FINISHED'||b.distribution!=='STORE'||b.platform!=='IOS'||b.appVersion!=='1.0.0'||!(Number(b.appBuildVersion)>52))throw Error('Wrong store build');
+            const url=new URL(b.artifacts?.applicationArchiveUrl??b.artifacts?.buildUrl);
+            if(url.protocol!=='https:'||!(url.hostname==='expo.dev'||url.hostname.endsWith('.expo.dev')||url.hostname.endsWith('.expo.io')))throw Error('Unexpected artifact host');
+            const res=await fetch(url,{signal:AbortSignal.timeout(180000)});if(!res.ok||Number(res.headers.get('content-length')??0)>300000000)throw Error('Artifact download rejected');
+            await pipeline(Readable.fromWeb(res.body),fs.createWriteStream(path.join(process.env.RUNNER_TEMP,'requested-ios.ipa'),{mode:0o600}));
+            fs.writeFileSync('ios-store-evidence/build.json',JSON.stringify({source:b.gitCommitHash,id:b.id,status:b.status,version:b.appVersion,buildNumber:b.appBuildVersion,platform:b.platform,distribution:b.distribution,appleWrites:0},null,2));
+          })().catch(e=>{console.error(e.message);process.exitCode=1});
+          JS
+      - name: Verify IPA signature, native identity, branding and new setup copy
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/requested-ios-inspection";mkdir -p "$ROOT"
+          ditto -x -k "$RUNNER_TEMP/requested-ios.ipa" "$ROOT"
+          APP=$(find "$ROOT/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$APP";export WAFRA_INSPECT_APP="$APP"
+          codesign --verify --deep --strict "$APP"
+          python3 - <<'PY'
+          import pathlib,plistlib,json,os,hashlib
+          app=pathlib.Path(os.environ['WAFRA_INSPECT_APP']);out=pathlib.Path('ios-store-evidence');report=json.loads((out/'build.json').read_text());info=plistlib.loads((app/'Info.plist').read_bytes())
+          assert info['CFBundleIdentifier']=='app.wafra.ios' and info['CFBundleShortVersionString']==report['version'] and str(info['CFBundleVersion'])==str(report['buildNumber'])
+          bundle=app/'main.jsbundle';assert bundle.is_file();data=bundle.read_bytes()
+          checks={label:value in data for label,value in {'paper':b'#F4F1EA','charcoal':b'#14120F','moneyFont':b'GeistMono','newIosSetup':b'Your past transactions first. New alerts next.'}.items()}
+          assert all(checks.values()),checks
+          ipa=pathlib.Path(os.environ['RUNNER_TEMP'])/'requested-ios.ipa'
+          report.update(bundleId=info['CFBundleIdentifier'],ipaSHA256=hashlib.sha256(ipa.read_bytes()).hexdigest(),ipaBytes=ipa.stat().st_size,signatureVerified=True,compiledChecks=checks,scope='Signed store artifact inspection, not physical iPhone execution')
+          (out/'ipa-inspection.json').write_text(json.dumps(report,indent=2))
+          icons=sorted(app.glob('AppIcon*.png'));(out/'icon-files.json').write_text(json.dumps([p.name for p in icons],indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+          METADATA="$APP/Metadata.appintents/extract.actionsdata";test -f "$METADATA"
+          bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$METADATA" > ios-store-evidence/history-intent-contract.log
+          RESOURCE=$(find "$APP" -type d -name 'WafraMessageHistoryResources.bundle' -print -quit);test -n "$RESOURCE"
+          bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$RESOURCE" > ios-store-evidence/history-resources.log
+          WAFRA_METADATA="$METADATA" node <<'JS'
+          const fs=require('fs');const actions=JSON.parse(fs.readFileSync(process.env.WAFRA_METADATA,'utf8')).actions;
+          for(const name of ['RecordWafraCaptureSetupProofIntent','StageWafraLiveMessageIntent']){const a=actions[name];if(!a||a.openAppWhenRun!==false||a.supportedModes!==1||a.isAuthPolExplicit!==true)throw Error('Invalid live-capture intent '+name);}
+          if(actions.ProbeWafraAutomationInputIntent)throw Error('Debug input probe present');
+          const params=(actions.StageWafraLiveMessageIntent.parameters||[]).map(p=>p.name);
+          if(JSON.stringify(params)!==JSON.stringify(['sender','body','eventId','observedAt']))throw Error('Shortcut input contract changed');
+          const file='ios-store-evidence/ipa-inspection.json';const r=JSON.parse(fs.readFileSync(file,'utf8'));Object.assign(r,{historyIntentContract:'passed',historyArabicResources:'passed',futureIntentContract:'passed',debugProbeAbsent:true});fs.writeFileSync(file,JSON.stringify(r,null,2));
+          JS
+          ICON=$(find "$APP" -maxdepth 1 -name 'AppIcon60x60@3x.png' -print -quit)
+          if [ -n "$ICON" ]; then xcrun pngcrush -revert-iphone-optimizations -q "$ICON" ios-store-evidence/compiled-app-icon.png; fi
+      - name: Remove temporary signed application
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/requested-ios.ipa" "$RUNNER_TEMP/requested-ios-build.json"
+          rm -rf "$RUNNER_TEMP/requested-ios-inspection"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-updated-ios-store-inspection
+          path: ios-store-evidence/
+          retention-days: 14
