@@ -32,7 +32,7 @@ const getSiteUrl = () => {
 export const SITE_URL = getSiteUrl();
 export const TESTFLIGHT_URL = 'https://testflight.apple.com/join/jbwzCgZ6';
 export const ANDROID_APK_URL =
-  'https://github.com/khanjer496-alt/Wafra/releases/download/android-clarity-67f996b/Wafra-android-67f996b.apk';
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ledger-light-135-ios-54/Wafra-Ledger-Light-135.apk';
 export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
 export const MARKETING_DESCRIPTION =
   'Track spending, budgets, bills and subscriptions anywhere without a bank login. Start manually or use optional supported imports.';
