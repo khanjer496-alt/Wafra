@@ -364,8 +364,13 @@ const spendingView = async (name) => {
   await page.getByRole('tab', { name, exact: true }).click();
   await page.waitForTimeout(250);
 };
+const homeFactControl = (name) => {
+  const id = { Spending: 'home-spending-total', Income: 'home-income-summary' }[name];
+  if (!id) throw new Error(`Unknown Home financial control: ${name}`);
+  return page.getByTestId(id);
+};
 const homeFact = async (name) => {
-  const row = page.getByTestId('reference-month-cards').getByRole('button', { name: new RegExp(`^${name},`) });
+  const row = homeFactControl(name);
   await row.scrollIntoViewIfNeeded();
   await row.click();
 };
@@ -507,19 +512,47 @@ for (const [name, enter] of [
 
 /* ── 5. Totals equal the rows printed under them ──────────────────────── */
 
-// Net income is not the bank balance. Read the exact displayed period facts
-// and reconcile the separate period-net disclosure, never the balance hero.
+// Home now shows spending and income, not a bank-balance or net-worth hero.
+// Reconcile both exact displayed amounts against their actual drill-downs;
+// do not keep requiring the retired net disclosure or drop the money checks.
 {
   await home();
-  const facts = page.getByTestId('reference-month-cards');
-  const income = await facts.getByRole('button', { name: /^Income,/ }).getAttribute('aria-label');
-  const expense = await facts.getByRole('button', { name: /^Spending,/ }).getAttribute('aria-label');
-  const disclosure = await page.getByTestId('reference-period-net').innerText();
-  const matched = disclosure.match(/Net after spending\s*·\s*([−-]?[\d,]+(?:\.\d+)?)/);
-  const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);
-  ok('Home net equals exact income minus exact spending, not bank balances',
-    !!matched && minor(income) > 0 && minor(expense) > 0 &&
-    minor(matched[1]) === minor(income) - minor(expense));
+  const minor = (value) => {
+    const matched = String(value).match(/AED\s+([\d,]+(?:\.\d{1,2})?)/);
+    if (!matched) throw new Error(`Missing exact AED amount: ${value}`);
+    return Math.round(money(matched[1]) * 100);
+  };
+  const readFact = async (name) => {
+    const row = homeFactControl(name);
+    await row.scrollIntoViewIfNeeded();
+    const label = await row.getAttribute('aria-label');
+    const shown = await row.innerText();
+    const amount = minor(label);
+    ok(`Home ${name} has the same exact visible and accessible amount`, amount > 0 && minor(shown) === amount);
+    return amount;
+  };
+  const income = await readFact('Income');
+  const expense = await readFact('Spending');
+  ok('Home does not present a bank balance as period spending',
+    await page.getByTestId('reference-period-net').count() === 0 &&
+    await page.getByText('Recorded balances', { exact: true }).count() === 0);
+
+  await homeFact('Spending');
+  await page.getByTestId('spending-categories').waitFor({ state: 'visible' });
+  const spending = page.getByTestId('spending-categories');
+  const total = await spending.locator('[aria-label^="AED "]').first().getAttribute('aria-label');
+  const categoryLabels = await spending.locator('[data-testid^="spending-category-"]')
+    .evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
+  ok('Home spending reconciles to the exact Spending total and complete category breakdown',
+    categoryLabels.length >= 5 && minor(total) === expense &&
+    categoryLabels.reduce((sum, label) => sum + minor(label), 0) === expense);
+
+  await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
+  const caption = page.getByText(/^\d+ transactions?(?: ·|$)/).last();
+  await caption.waitFor({ state: 'visible' });
+  const summary = await caption.evaluate(node => node.parentElement.textContent);
+  ok('Home income reconciles to its income-filtered ledger, including cents',
+    /\+\s*AED/.test(summary) && minor(summary) === income);
 }
 
 /**

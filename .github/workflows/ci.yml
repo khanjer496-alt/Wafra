@@ -184,3 +184,14 @@ jobs:
 
       - name: End-to-end
         run: npm run test:e2e
+
+      - name: Preserve browser screenshots and verification results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            artifacts/e2e-redesign/
+            artifacts/e2e-merchant-logos/
+          if-no-files-found: warn
+          retention-days: 7
