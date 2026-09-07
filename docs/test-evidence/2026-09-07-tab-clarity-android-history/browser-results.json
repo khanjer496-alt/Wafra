@@ -1,0 +1,211 @@
+{
+  "source": "local checked-in-source working tree",
+  "results": [
+    {
+      "name": "Home renders the implemented reference layout",
+      "passed": true,
+      "durationMs": 2278
+    },
+    {
+      "name": "Four bottom tabs are present and actionable",
+      "passed": true,
+      "durationMs": 2550
+    },
+    {
+      "name": "Categories, Activity and Trends stay inside Spending",
+      "passed": true,
+      "durationMs": 1733
+    },
+    {
+      "name": "Every spending category shows its share of total spending",
+      "passed": true,
+      "durationMs": 1680
+    },
+    {
+      "name": "Bills separates subscriptions from utilities and telecom",
+      "passed": true,
+      "durationMs": 1879
+    },
+    {
+      "name": "Spending search responds to input and recovers",
+      "passed": true,
+      "durationMs": 1932
+    },
+    {
+      "name": "A category opens history and an explicit activity action",
+      "passed": true,
+      "durationMs": 1690
+    },
+    {
+      "name": "The old Stats route opens Spending trends",
+      "passed": true,
+      "durationMs": 2176
+    },
+    {
+      "name": "home dark renders without page overflow",
+      "passed": true,
+      "durationMs": 1891
+    },
+    {
+      "name": "spending dark renders without page overflow",
+      "passed": true,
+      "durationMs": 1563
+    },
+    {
+      "name": "bills dark renders without page overflow",
+      "passed": true,
+      "durationMs": 1887
+    },
+    {
+      "name": "accounts dark renders without page overflow",
+      "passed": true,
+      "durationMs": 1569
+    },
+    {
+      "name": "home light renders without page overflow",
+      "passed": true,
+      "durationMs": 1856
+    },
+    {
+      "name": "spending light renders without page overflow",
+      "passed": true,
+      "durationMs": 1553
+    },
+    {
+      "name": "bills light renders without page overflow",
+      "passed": true,
+      "durationMs": 1882
+    },
+    {
+      "name": "accounts light renders without page overflow",
+      "passed": true,
+      "durationMs": 1577
+    },
+    {
+      "name": "Route mounts: /settings",
+      "passed": true,
+      "durationMs": 1583
+    },
+    {
+      "name": "Route mounts: /feedback",
+      "passed": true,
+      "durationMs": 1597
+    },
+    {
+      "name": "Route mounts: /import-sms",
+      "passed": true,
+      "durationMs": 1599
+    },
+    {
+      "name": "Route mounts: /ios-setup",
+      "passed": true,
+      "durationMs": 1572
+    },
+    {
+      "name": "Route mounts: /review-alerts",
+      "passed": true,
+      "durationMs": 1568
+    },
+    {
+      "name": "Route mounts: /categorise",
+      "passed": true,
+      "durationMs": 1575
+    },
+    {
+      "name": "Route mounts: /pro",
+      "passed": true,
+      "durationMs": 1570
+    },
+    {
+      "name": "Route mounts: /add-transaction",
+      "passed": true,
+      "durationMs": 1570
+    },
+    {
+      "name": "Route mounts: /transactions",
+      "passed": true,
+      "durationMs": 1950
+    },
+    {
+      "name": "Route mounts: /cards",
+      "passed": true,
+      "durationMs": 1578
+    },
+    {
+      "name": "Route mounts: /currency",
+      "passed": true,
+      "durationMs": 1570
+    },
+    {
+      "name": "Route mounts: /accuracy",
+      "passed": true,
+      "durationMs": 1589
+    },
+    {
+      "name": "320px route /",
+      "passed": true,
+      "durationMs": 1843
+    },
+    {
+      "name": "320px route /flow",
+      "passed": true,
+      "durationMs": 1541
+    },
+    {
+      "name": "320px route /flow?view=trends",
+      "passed": true,
+      "durationMs": 1835
+    },
+    {
+      "name": "320px route /bills",
+      "passed": true,
+      "durationMs": 1843
+    },
+    {
+      "name": "320px route /wallet",
+      "passed": true,
+      "durationMs": 1533
+    },
+    {
+      "name": "320px route /settings",
+      "passed": true,
+      "durationMs": 1546
+    },
+    {
+      "name": "430px route /",
+      "passed": true,
+      "durationMs": 1838
+    },
+    {
+      "name": "430px route /flow",
+      "passed": true,
+      "durationMs": 1532
+    },
+    {
+      "name": "430px route /flow?view=trends",
+      "passed": true,
+      "durationMs": 1837
+    },
+    {
+      "name": "430px route /bills",
+      "passed": true,
+      "durationMs": 1853
+    },
+    {
+      "name": "430px route /wallet",
+      "passed": true,
+      "durationMs": 1535
+    },
+    {
+      "name": "430px route /settings",
+      "passed": true,
+      "durationMs": 1541
+    },
+    {
+      "name": "No JavaScript page errors across the route sweep",
+      "passed": true,
+      "durationMs": 3
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,19 @@
+{
+  "src/components/reference-home-summary.tsx": "fee3a112ebe32cfeb79eb4a74d095a7081f620f202701343c3418aa0394fa702",
+  "src/screens/journal-home-screen.tsx": "82d4db270a93af63991d8c19288e97c87630888efb4da7d71a7e16a5a7ba561b",
+  "src/components/spending/spending-overview.tsx": "982ba35e9be3c418effc420786450747081b49d775b50d62a54c8ddfc80f6739",
+  "src/components/bills/payment-agenda.tsx": "b47468b9d65433f8ca0bc379e91169d5d54377fdcab1578caaa750dc3d60a070",
+  "src/app/(tabs)/bills.tsx": "3a0dd98cd0c395e77991d1b5a048c7b27cad99791300d4269d3ab072d8ed1878",
+  "src/lib/reference-copy.ts": "9e25a5827d41b62fd9012778260b9ebf9a46b57c0438f27f137cb93fbb9f3e44",
+  "src/lib/reference-presentation.ts": "89669a0f1d7a079575015876822318efbcb5a934b8637edb47c0a247ef94d4af",
+  "src/lib/android-history-background.ts": "50cce2b8b8b8c69ba1c7864f242c7ca224de8b3d4785c95e7fb3b0b6cd34af2f",
+  "src/hooks/use-history-import.ts": "fcabe3078239dcc774388e3063fa48c9516ce5d05f12cae05d01c912e4d68ef0",
+  "src/lib/history-import.ts": "812d54da334cb6b7995f8cb42879de4d73acd14c096138ca4eb61e39ae7ce5c3",
+  "src/lib/auto-import.ts": "2a6359cb561350701e74e02dfdaecf70daabb77d51f759dd4e2e1ccb27c3342b",
+  "src/lib/store.tsx": "afbb53a6f82cd39861b0c110a4f3fe7412c43c9adbd724ffc67944bac9417fb8",
+  "modules/sms-reader/index.ts": "640811348b91834dcfb72fb96670dc780a8f69c9fe2affdf4dca6355019b9f66",
+  "modules/sms-reader/android/build.gradle": "fade0756b4ee9ab9d5e4259f01277e1c2187734c0ac3c61cb92561cb29e2ef2d",
+  "modules/sms-reader/android/src/main/AndroidManifest.xml": "ab645f9c749323c3792016fe4d7781abfb65b6caf7c20fdb9cd9ece5143432d4",
+  "modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt": "e769353a936e64593a2cab154010ab2f8b73566a550e04f1220d5c82e4d779f6",
+  "modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsHistoryImportService.kt": "1dfc267759679e44b8ccb2e92ae5b336e0e20018f56928aace7a0cf51ee79d1d"
+}
