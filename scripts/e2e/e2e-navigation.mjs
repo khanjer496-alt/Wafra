@@ -365,7 +365,10 @@ const spendingView = async (name) => {
   await page.waitForTimeout(250);
 };
 const homeFact = async (name) => {
-  const row = page.getByTestId('reference-month-cards').getByRole('button', { name: new RegExp(`^${name},`) });
+  const id = { Spending: 'home-spending-total', Income: 'home-income-summary' }[name];
+  if (!id) throw new Error(`Unknown Home fact: ${name}`);
+  const row = page.getByTestId(id);
+  if (await row.getAttribute('role') !== 'button') throw new Error(`${name} is not actionable`);
   await row.scrollIntoViewIfNeeded();
   await row.click();
 };
@@ -507,19 +510,30 @@ for (const [name, enter] of [
 
 /* ── 5. Totals equal the rows printed under them ──────────────────────── */
 
-// Net income is not the bank balance. Read the exact displayed period facts
-// and reconcile the separate period-net disclosure, never the balance hero.
+// Home is deliberately spending-first; the old cards and period-net disclosure
+// no longer exist. Reconcile the current visible facts with both real drill-downs
+// and the entire category composition instead of asserting retired UI.
 {
   await home();
-  const facts = page.getByTestId('reference-month-cards');
-  const income = await facts.getByRole('button', { name: /^Income,/ }).getAttribute('aria-label');
-  const expense = await facts.getByRole('button', { name: /^Spending,/ }).getAttribute('aria-label');
-  const disclosure = await page.getByTestId('reference-period-net').innerText();
-  const matched = disclosure.match(/Net after spending\s*·\s*([−-]?[\d,]+(?:\.\d+)?)/);
   const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);
-  ok('Home net equals exact income minus exact spending, not bank balances',
-    !!matched && minor(income) > 0 && minor(expense) > 0 &&
-    minor(matched[1]) === minor(income) - minor(expense));
+  const income = minor(await page.getByTestId('home-income-summary').getAttribute('aria-label'));
+  const expense = minor(await page.getByTestId('home-spending-total').getAttribute('aria-label'));
+  await homeFact('Spending'); await page.waitForURL(/\/flow/);
+  const categoryScope = page.getByTestId('spending-categories');
+  await categoryScope.waitFor({ state: 'visible' });
+  const total = (await categoryScope.innerText()).match(/\bAED\s*[\d,]+(?:\.\d+)?/)?.[0];
+  const categories = await categoryScope.locator('[data-testid^="spending-category-"]')
+    .evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')));
+  const parts = categories.map(label => label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]);
+  ok('Home spending equals the exact Spending total and all category rows',
+    expense > 0 && !!total && parts.length >= 5 && parts.every(Boolean) &&
+    expense === minor(total) && expense === parts.reduce((sum, value) => sum + minor(value), 0));
+  await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
+  const ledgerTotal = await page.evaluate(() => [...document.querySelectorAll('div,span')]
+    .filter(n => n.childElementCount === 0 && n.getBoundingClientRect().width > 0)
+    .map(n => (n.textContent || '').trim()).find(text => /^[+−-]\s?AED/.test(text)) || '');
+  ok('Home income equals its income-filtered ledger total, not recorded balances',
+    income > 0 && !!ledgerTotal && income === minor(ledgerTotal));
 }
 
 /**
@@ -682,7 +696,7 @@ for (const [name, enter] of [
 {
   const overflow = [];
   for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
-    await tapKey(page, key, 5000);
+    await tapTab(page, key);
     await page.waitForTimeout(700);
     overflow.push(...(await clippedText(page, name)));
   }
