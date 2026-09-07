@@ -269,8 +269,15 @@ export interface ParsedCard {
  * 33: a required/enter/use OTP123456 challenge cannot post merely because its
  * code label touches the digits. The shared non-posting classifier supplies
  * bounded repair evidence for retained, unedited legacy SMS rows only.
+ *
+ * 34: re-read retained Android history so legacy business payouts still named
+ * Incoming transfer can recover their source-proven payer. Correcting the
+ * transfer flag alone left generic titles eligible for own-account pairing.
+ * Preserve completed purchase returns as income through semantic capture;
+ * the words Credit Card describe the instrument, not a reversed income credit.
+ * No new merchant-name-only income rule; user corrections remain protected.
  */
-export const PARSER_VERSION = 33;
+export const PARSER_VERSION = 34;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

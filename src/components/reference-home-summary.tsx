@@ -18,6 +18,7 @@ type Props = {
   periodLabel: string;
   incomeFils: number;
   expenseFils: number;
+  netFils: number;
   onPeriod: () => void;
   onAdd: () => void;
   onSettings: () => void;
@@ -25,9 +26,11 @@ type Props = {
   onSpending: () => void;
 };
 
-/** One question on Home: what have I spent? Account balances belong in Accounts. */
+/** One period, three reconciled figures. Account balances belong in Accounts. */
 export function ReferenceHomeSummary(p: Props) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
+  const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
+  const netColor = p.netFils < 0 ? p.theme.expense : p.netFils > 0 ? p.theme.income : p.theme.text;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.header}>
       <View style={styles.wordmark}><WafraMark size={28} /><ThemedText type="title">Wafra</ThemedText></View>
@@ -47,7 +50,7 @@ export function ReferenceHomeSummary(p: Props) {
     </View>
     <View style={styles.summary} testID="journal-summary">
       <View style={styles.summaryTop}>
-        <ThemedText type="small" themeColor="textSecondary">{w.spending}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{w.moneyOut}</ThemedText>
         <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod}
           style={[styles.period, { backgroundColor: p.theme.backgroundSelected }]}>
           <ThemedText type="meta">{p.periodLabel}</ThemedText>
@@ -55,19 +58,28 @@ export function ReferenceHomeSummary(p: Props) {
         </Pressable>
       </View>
       <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
-        accessibilityLabel={`${w.spending}, ${ledgerCurrencyCode()} ${formatAmount(p.expenseFils)}. ${w.viewSpending}`}
+        accessibilityLabel={`${w.moneyOut}, ${ledgerCurrencyCode()} ${formatAmount(p.expenseFils)}. ${w.viewSpending}`}
         style={styles.spending}>
         <Money fils={p.expenseFils} type="display" />
         <View style={styles.link}><ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
           <Icon name="arrow-up-right" size={16} color={p.theme.primary} /></View>
       </Pressable>
       <Pressable accessibilityRole="button" onPress={p.onIncome} testID="home-income-summary"
-        accessibilityLabel={`${w.income}, ${ledgerCurrencyCode()} ${formatAmount(p.incomeFils)}`}
+        accessibilityLabel={`${w.moneyIn}, ${ledgerCurrencyCode()} ${formatAmount(p.incomeFils)}`}
         style={[styles.income, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
         <View style={styles.link}><Icon name="arrow-down-right" size={16} color={p.theme.income} />
-          <ThemedText type="meta" themeColor="textSecondary">{w.income}</ThemedText></View>
+          <ThemedText type="small" themeColor="textSecondary">{w.moneyIn}</ThemedText></View>
         <Money fils={p.incomeFils} type="smallBold" />
       </Pressable>
+      {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
+        {w.noIncome}</ThemedText>}
+      <View testID="home-net-summary" accessible accessibilityRole="text"
+        accessibilityLabel={`${w.netLabel}, ${ledgerCurrencyCode()} ${netSign}${formatAmount(Math.abs(p.netFils))}. ${w.cashflowNote}`}
+        style={[styles.net, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
+        <ThemedText type="smallBold">{w.netLabel}</ThemedText>
+        <Money fils={p.netFils} type="heading" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+      </View>
+      <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
     </View>
   </View>;
 }
@@ -83,6 +95,8 @@ const styles = StyleSheet.create({
   spending: { minHeight: 100, justifyContent: 'center', alignItems: 'flex-start', gap: 10, paddingBottom: 12 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   income: { minHeight: 56, paddingVertical: 12, borderTopWidth: 1,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  net: { minHeight: 60, paddingVertical: 12, borderTopWidth: 1,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
 });

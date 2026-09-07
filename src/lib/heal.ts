@@ -41,6 +41,22 @@ export function healPatch(
   ) {
     patch.title = p.merchant;
   }
+  // Older business payouts could already have the right direction/category,
+  // but still carry a generic transfer title. Clearing isTransfer alone then
+  // leaves them eligible for equal-value own-account pairing. When rereading
+  // the exact source proves a named business payer, retain that identity too.
+  // Never infer income from a merchant name or overwrite a user-owned title.
+  if (
+    !prior.titleEdited &&
+    prior.type === 'income' &&
+    STRUCTURAL_TITLES.has(prior.title.trim()) &&
+    p.kind === 'transaction' && p.type === 'income' &&
+    p.categoryGuess === 'business' && p.categoryDeliberate &&
+    !p.categoryPinned && !p.transferHint &&
+    p.merchant.trim().length > 0 && !STRUCTURAL_TITLES.has(p.merchant.trim())
+  ) {
+    patch.title = p.merchant;
+  }
   if (directionChanged) {
     patch.type = p.type;
     // Direction and category are one parser conclusion. Keeping an old

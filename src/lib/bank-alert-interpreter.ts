@@ -90,6 +90,16 @@ const isCompactCardCreditReturn = (source: string): boolean =>
   /\bcr\b/iu.test(source) && /\bcard\b/iu.test(source) &&
   /\b(?:pos|(?:card\s+)?pur)\b/iu.test(source);
 
+/** Preserve an already-proven return of the purchase, not a reversed credit.
+ * The card must directly precede the completed-return verb in the opening
+ * purchase clause. "Credit Card" is an instrument, not money taken back.
+ * parseSms still owns the amount, date, source and non-posting safeguards. */
+const isCompletedCardPurchaseReturn = (source: string, legacy: ParsedSms): boolean =>
+  legacy.kind === 'transaction' && legacy.type === 'income' &&
+  legacy.categoryGuess === 'other' && !legacy.transferHint &&
+  legacy.card !== null && legacy.card.kind !== 'account' &&
+  /^(?:your\s+)?(?:card\s+|pos\s+)?purchase\s+of\b(?:[^.\n]|\.(?=\d)){0,160}?\b(?:with|using|on)\s+(?:your\s+)?(?:(?:credit|debit|covered)\s+)?card\s+(?:ending(?:\s+with)?\s+)?[x*\d -]{4,32}\s+(?:has\s+been|was)\s+(?:successfully\s+)?(?:reversed|refunded)\b/iu.test(source);
+
 const mistookInstrumentLast4ForAmount = (
   source: string,
   market: 'AE' | 'SA',
@@ -242,6 +252,9 @@ export const interpretBankAlert = ({
   // requires one unambiguous movement amount and a trusted institution.
   const usableLegacy = mistookInstrumentLast4ForAmount(source, market, legacy) ? null : legacy;
   const semanticText = normalizeArabic(source).replace(/\s+/gu, ' ');
+  if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
+    return legacyResult(usableLegacy, 'refund');
+  }
   if (usableLegacy && !SEMANTIC_CANDIDATE_LANGUAGE.test(semanticText)) {
     return legacyResult(usableLegacy);
   }

@@ -173,6 +173,7 @@ export default function JournalHomeScreen() {
         <ReferenceHomeSummary theme={theme} language={language} largeText={largeText}
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
           incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
+          netFils={dashboard.hero.netFils}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
