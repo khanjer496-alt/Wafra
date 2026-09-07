@@ -1,0 +1,162 @@
+name: Claude unified final browser evidence
+on:
+  push:
+    branches: [release/claude-unified-20260907]
+    paths: [.github/workflows/claude-browser-final.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconcile obsolete Home test selectors without changing app code
+        id: source
+        env:
+          BRANCH: release/claude-unified-20260907
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('scripts/e2e/e2e-navigation.mjs')
+          def blob(s):
+            b=s.encode(); return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          s=p.read_text()
+          if blob(s) != 'ba1a876000031d513a0f9ad1734bf9ad4094beb7':
+            assert blob(s)=='389fad8755e48dddf2a943c532f7d5821d353956'
+            s=s.replace("  const row = page.getByTestId('reference-month-cards').getByRole('button', { name: new RegExp(`^${name},`) });", "  const id = { Spending: 'home-spending-total', Income: 'home-income-summary' }[name];\n  if (!id) throw new Error(`Unknown Home fact: ${name}`);\n  const row = page.getByTestId(id);\n  if (await row.getAttribute('role') !== 'button') throw new Error(`${name} is not actionable`);")
+            a=s.index('// Net income is not the bank balance.'); b=s.index('\n/**\n * The limit sheet',a)
+            s=s[:a]+r'''// Home is deliberately spending-first; the old cards and period-net disclosure
+          // no longer exist. Reconcile the current visible facts with both real drill-downs
+          // and the entire category composition instead of asserting retired UI.
+          {
+            await home();
+            const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);
+            const income = minor(await page.getByTestId('home-income-summary').getAttribute('aria-label'));
+            const expense = minor(await page.getByTestId('home-spending-total').getAttribute('aria-label'));
+            await homeFact('Spending'); await page.waitForURL(/\/flow/);
+            const categoryScope = page.getByTestId('spending-categories');
+            await categoryScope.waitFor({ state: 'visible' });
+            const total = (await categoryScope.innerText()).match(/\bAED\s*[\d,]+(?:\.\d+)?/)?.[0];
+            const categories = await categoryScope.locator('[data-testid^="spending-category-"]')
+              .evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')));
+            const parts = categories.map(label => label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]);
+            ok('Home spending equals the exact Spending total and all category rows',
+              expense > 0 && !!total && parts.length >= 5 && parts.every(Boolean) &&
+              expense === minor(total) && expense === parts.reduce((sum, value) => sum + minor(value), 0));
+            await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
+            const ledgerTotal = await page.evaluate(() => [...document.querySelectorAll('div,span')]
+              .filter(n => n.childElementCount === 0 && n.getBoundingClientRect().width > 0)
+              .map(n => (n.textContent || '').trim()).find(text => /^[+−-]\s?AED/.test(text)) || '');
+            ok('Home income equals its income-filtered ledger total, not recorded balances',
+              income > 0 && !!ledgerTotal && income === minor(ledgerTotal));
+          }
+          '''+s[b:]
+            s=s.replace("    await tapKey(page, key, 5000);\n    await page.waitForTimeout(700);", "    await tapTab(page, key);\n    await page.waitForTimeout(700);")
+            assert blob(s)=='ba1a876000031d513a0f9ad1734bf9ad4094beb7',blob(s)
+            p.write_text(s)
+          PY
+          node --check scripts/e2e/e2e-navigation.mjs
+          node scripts/check-design-baseline.mjs
+          git diff --exit-code 9c0056230f784771b42d4bb420d8b851aaf29a4a -- src modules assets plugins server/src app.json app.config.ts eas.json package.json package-lock.json server/package.json server/package-lock.json babel.config.js metro.config.js
+          git add scripts/e2e/e2e-navigation.mjs
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Reconcile Home drill-down and money checks with the spending-first Claude layout'
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p evidence
+          printf 'validation_source=%s\nnative_build_source=9c0056230f784771b42d4bb420d8b851aaf29a4a\nshipping_source_identical=true\n' "$(git rev-parse HEAD)" > evidence/source.txt
+          cp scripts/e2e/e2e-navigation.mjs evidence/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - name: Export the unchanged shipping app once for isolated browser suites
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node scripts/test/accessibility-layout.test.js | tee evidence/accessibility.log
+          EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx --no-install expo export --clear --platform web --output-dir dist
+          tar -czf web-export.tar.gz dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-final-web-export
+          path: web-export.tar.gz
+          retention-days: 3
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-final-source-evidence
+          path: evidence/
+          retention-days: 14
+  browser:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 7
+      matrix:
+        suite: [redesign, merchant-logos, universal-review, smoke, period, persist, navigation]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx --no-install playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-final-web-export
+      - name: Test the real app and preserve this suite's evidence even on failure
+        env:
+          SUITE: ${{ matrix.suite }}
+          GITHUB_SHA: ${{ needs.prepare.outputs.source }}
+          BASE: http://127.0.0.1:8126
+          E2E_ARTIFACT_DIR: artifacts/universal-review
+        run: |
+          set -euo pipefail
+          tar -xzf web-export.tar.gz
+          mkdir -p evidence artifacts
+          node scripts/e2e/serve.mjs dist 8126 > evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fsS "$BASE" >/dev/null && break; sleep 1; done
+          curl -fsS "$BASE" >/dev/null
+          printf 'validation_source=%s\nnative_build_source=9c0056230f784771b42d4bb420d8b851aaf29a4a\n' "$GITHUB_SHA" > evidence/source.txt
+          node "scripts/e2e/e2e-$SUITE.mjs" 2>&1 | tee "evidence/$SUITE.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-final-${{ matrix.suite }}-evidence
+          path: |
+            evidence/
+            artifacts/
+          retention-days: 14
+  verified:
+    needs: [prepare, browser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record complete browser evidence without publishing
+        run: |
+          echo 'All seven browser suites passed. Shipping source is identical to Android 135 and iOS 54.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Physical-device frame pacing remains unverified. No release or store submission was performed.' >> "$GITHUB_STEP_SUMMARY"
