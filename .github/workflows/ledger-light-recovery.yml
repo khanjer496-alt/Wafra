@@ -1,0 +1,49 @@
+name: Ledger & Light recovery build
+
+# Explicitly requested recovery run, scoped to this reviewed branch and this
+# workflow file only. No release, OTA, deployment, main push or phone access.
+on:
+  push:
+    branches: [restore/ledger-light-20260907]
+    paths: [.github/workflows/ledger-light-recovery.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive the exact committed source for offline verification
+        run: |
+          mkdir -p "$RUNNER_TEMP/recovery-source"
+          git rev-parse HEAD > "$RUNNER_TEMP/recovery-source/commit.txt"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/recovery-source/source.tar.gz"
+          cd "$RUNNER_TEMP/recovery-source"
+          sha256sum source.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-ledger-light-current-source
+          path: ${{ runner.temp }}/recovery-source/
+          retention-days: 7
+  build-request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Request the existing canonical Android build, not a reconstructed checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test "$BUILD_REF" = 'restore/ledger-light-20260907'
+          gh workflow run build-apk.yml --ref "$BUILD_REF" -f architecture=arm64 -f corpus=false -f bundle=false
+          echo 'Requested ARM64 APK from the committed restoration branch. This does not install or publish the app.' >> "$GITHUB_STEP_SUMMARY"
