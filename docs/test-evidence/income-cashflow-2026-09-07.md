@@ -41,8 +41,8 @@ and completion of the normal capture flow. User-owned corrections are not undone
 
 - Application and Worker typechecks and repository lint passed.
 - All 71 application test files passed; Worker and numeric-input suites passed.
-- All 272 repair, workflow and iOS-journey tests passed together, including ten
-  payout/period/repair cases, eighteen capture-direction regressions and seventeen
+- All 273 repair, workflow and iOS-journey tests passed together, including ten
+  payout/period/repair cases, nineteen capture-direction regressions and seventeen
   Home cashflow cases.
 - The old business-title assertion failed against the unchanged pre-fix healer;
   all ten payout cases passed after recompiling shipping modules.
