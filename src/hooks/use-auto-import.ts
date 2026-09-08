@@ -587,6 +587,7 @@ export function useAutoImport(
     smsAccessSnapshot,
   );
   const previousCaptureOptOut = useRef(state.captureOptOut);
+  const previousEntitlementActive = useRef(entitlementActive);
   const iosRecoveryInFlight = useRef<Promise<boolean> | null>(null);
 
   const readAndCommitCaptureStatus = useCallback(async (
@@ -1036,10 +1037,17 @@ export function useAutoImport(
     if (Platform.OS !== 'ios' && !state.onboarded) return;
     const captureJustEnabled = previousCaptureOptOut.current && !state.captureOptOut;
     previousCaptureOptOut.current = state.captureOptOut;
+    const entitlementJustActivated = !previousEntitlementActive.current && entitlementActive;
+    // A restored entitlement owes one scan, even within the 30s throttle.
+    // Keep that transition pending while the history owner prevents scanning.
+    // Revocation always clears it; it must never authorize a later scan.
+    if (!entitlementActive || !state.historyImport || state.historyImport.status === 'complete') {
+      previousEntitlementActive.current = entitlementActive;
+    }
 
     /**
      * @param force ignore the freshness throttle. Only the call below passes
-     * it, and only for a ledger with no watermark at all.
+     * it for a reset ledger or when capture becomes eligible again.
      */
     const scan = (force = false) => {
       if (!force && Platform.OS !== 'ios' &&
@@ -1074,7 +1082,9 @@ export function useAutoImport(
     // Do not stamp the freshness throttle for a scan that the durable opt-out
     // will refuse. When capture is explicitly enabled again, force the first
     // real scan even if another scan happened less than 30 seconds earlier.
-    if (!state.captureOptOut) scan(state.lastScanTs <= 0 || captureJustEnabled);
+    if (!state.captureOptOut && entitlementActive) {
+      scan(state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated);
+    }
 
     if (state.onboarded && !sessionSetupRan) {
       sessionSetupRan = true;
@@ -1097,6 +1107,7 @@ export function useAutoImport(
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    entitlementActive,
     state.captureOptOut,
     state.historyImport?.status,
     state.hydrated,

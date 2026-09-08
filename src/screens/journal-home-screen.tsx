@@ -53,6 +53,10 @@ const copy = {
     progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك' },
 } as const;
 
+// A native reminder call cannot be cancelled when Home unmounts. New Home
+// instances join this manual-refresh lane before starting another one.
+let manualReminderTail: Promise<void> = Promise.resolve();
+
 /**
  * A new composition, not a palette swap: open net-position spread, paired money
  * facts, date-grouped activity, then obligations and low-noise capture status.
@@ -67,7 +71,7 @@ export default function JournalHomeScreen() {
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
-  const { state, getStateSnapshot, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
   const { period } = usePeriod();
   // Restores can change denomination while all three figures stay identical.
   // Make it a prop so compiled children cannot retain ambient currency text.
@@ -81,6 +85,31 @@ export default function JournalHomeScreen() {
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const lastFxAttempt = useRef('');
+  const refreshInFlight = useRef<number | null>(null);
+  const reminderSync = useRef<{
+    alive: boolean;
+    epoch: number;
+    running: boolean;
+    pending: {
+      readState: typeof getStateSnapshot;
+      getGeneration: typeof getStateGeneration;
+      generation: number;
+      epoch: number;
+    } | null;
+  }>({ alive: false, epoch: 0, running: false, pending: null });
+
+  useEffect(() => {
+    const sync = reminderSync.current;
+    sync.alive = true;
+    sync.epoch += 1;
+    setRefreshing(false);
+    return () => {
+      sync.alive = false;
+      sync.epoch += 1;
+      sync.pending = null;
+      refreshInFlight.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (focused && privacyGateCleared && state.hydrated && state.onboarded) {
@@ -119,17 +148,60 @@ export default function JournalHomeScreen() {
       .catch(() => { lastFxAttempt.current = ''; });
   }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
 
+  const requestReminderSync = useCallback(() => {
+    const sync = reminderSync.current;
+    if (!sync.alive) return;
+    // A later completed scan queues one newer snapshot without overlapping
+    // native cancel/schedule operations from the previous manual refresh.
+    sync.pending = {
+      readState: getStateSnapshot,
+      getGeneration: getStateGeneration,
+      generation: getStateGeneration(),
+      epoch: sync.epoch,
+    };
+    if (sync.running) return;
+    sync.running = true;
+    manualReminderTail = manualReminderTail.then(async () => {
+      try {
+        while (sync.pending) {
+          const request = sync.pending;
+          sync.pending = null;
+          try {
+            if (!sync.alive || request.epoch !== sync.epoch ||
+              request.generation !== request.getGeneration()) continue;
+            await syncPaymentReminders(request.readState());
+          } catch {
+            // Reminders are best-effort; their failure is not an SMS failure.
+          }
+        }
+      } finally { sync.running = false; }
+    });
+  }, [getStateGeneration, getStateSnapshot]);
+
   const onRefresh = useCallback(async () => {
-    if (refreshing) return;
+    const sync = reminderSync.current;
+    if (!sync.alive || refreshInFlight.current !== null) return;
+    const epoch = sync.epoch;
+    const generation = getStateGeneration();
+    const isCurrent = () => sync.alive && sync.epoch === epoch &&
+      getStateGeneration() === generation;
+    refreshInFlight.current = epoch;
     setRefreshing(true);
     try {
       await runAutoImport(true);
-      await syncPaymentReminders(getStateSnapshot());
+      if (!isCurrent()) return;
       setNow(new Date());
     } catch {
-      toast.show(t('captureRefreshFailed'), { tone: 'error' });
-    } finally { setRefreshing(false); }
-  }, [getStateSnapshot, refreshing, runAutoImport, toast]);
+      if (isCurrent()) toast.show(t('captureRefreshFailed'), { tone: 'error' });
+      return;
+    } finally {
+      if (refreshInFlight.current === epoch) {
+        refreshInFlight.current = null;
+        if (sync.alive && sync.epoch === epoch) setRefreshing(false);
+      }
+    }
+    requestReminderSync();
+  }, [getStateGeneration, requestReminderSync, runAutoImport, toast]);
 
   const openCapture = () => {
     if (status === 'paused') { router.push('/pro'); return; }

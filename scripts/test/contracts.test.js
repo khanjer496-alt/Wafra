@@ -1091,7 +1091,7 @@ function ktSources(dir) {
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
       /Platform\.OS !== 'ios'[\s\S]*Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS/.test(hook) &&
-      /if \(!state\.captureOptOut\) scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled\);/.test(hook));
+      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated\);/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
   // who has just erased everything and is being shown the Shortcut cleanup
