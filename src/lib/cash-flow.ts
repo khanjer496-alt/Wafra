@@ -2,6 +2,7 @@ import { cardPaymentRows } from '@/lib/cards';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, type PeriodLike } from '@/lib/period';
 import type { Account, AppState } from '@/lib/types';
+import { transferOwnership } from '@/lib/transfer-reconciliation';
 
 export interface CashOutflowSummary {
   /** Cash that actually left bank, debit-card, or cash accounts. */
@@ -59,18 +60,18 @@ export function summarizeCashOutflow(
     const settlement = settlements.get(transaction.id);
     const fundingAccountId = settlement?.cashOutAccountId ?? transaction.accountId;
     if (!live.has(fundingAccountId)) continue;
-    if (internal.has(transaction.id)) continue;
+    // Manual repayments carry the legacy transfer flag. The card ledger's
+    // confirmed settlement role takes precedence over that generic flag.
+    if (!settlement && internal.has(transaction.id)) continue;
     // An explicitly owned destination is proof even when the other bank's
     // alert/account is absent from this device. Generic "Bank transfer" and
     // named-person transfers remain cash out; only parser-owned structural
     // titles that state self/own/savings movement qualify.
-    if (
-      transaction.isTransfer === true &&
-      /^(?:own account|self|savings) transfer$/i.test(transaction.title.trim())
-    ) continue;
+    if (!settlement && transferOwnership(transaction) === 'own') continue;
     const isSettlement = settlement !== undefined;
     const isAbsorbedSettlementObservation =
-      transaction.isTransfer === true && transaction.cardPaymentSide !== undefined;
+      transaction.isTransfer === true && transaction.cardPaymentSide !== undefined &&
+      transferOwnership(transaction) === null;
     const leavesCashAccount =
       transaction.type === 'expense' && !isCreditCard(accountById.get(transaction.accountId));
     const movementDate = settlement?.cashOutDate ?? settlement?.date ?? transaction.date;

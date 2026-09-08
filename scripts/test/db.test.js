@@ -363,7 +363,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
       Platform: { OS: 'web' },
     },
     '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
-    '@/lib/backup-validation': execute('src/lib/backup-validation.ts', () => { throw new Error('unexpected validation dependency'); }),
+    '@/lib/backup-validation': require('./build/backup-validation'),
+    '@/lib/transfer-reconciliation': require('./build/transfer-reconciliation'),
     '@/lib/accounts': {
       markCardsDistinct: identityState,
       mergeDuplicateAccounts: identityState,
@@ -2712,6 +2713,47 @@ asyncSuites.push((async () => {
     JSON.stringify({ ...repaired, smsKey: legacyKey }) === JSON.stringify(old) &&
     saved.at(-1).transactions[0].smsKey === 'ha17t' + now);
 })().catch((error) => ok('generic store integration completes', false, String(error))));
+
+// Transfer decisions use the authoritative reducer snapshot and explicit
+// encrypted-write acknowledgement, including edits before React re-renders.
+asyncSuites.push((async () => {
+  const snapshots = [];
+  let writable = true;
+  const runtime = loadHydrationExports({ '@/lib/ledger-persistence': {
+    createLedgerPersistence: () => ({ load: async () => null, block() {}, reset: async () => {}, destroy: async () => {},
+      save: async snapshot => { if (!writable) return false; snapshots.push(JSON.parse(JSON.stringify(snapshot))); return true; } }),
+    LedgerResetError: class LedgerResetError extends Error {},
+  } }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const tx = { id: 'review-transfer', type: 'income', amountFils: 12345, category: 'other',
+    accountId: 'review-bank', title: 'Incoming transfer', date: '2026-09-08', source: 'sms' };
+  const backup = JSON.stringify({ app: 'wafra', version: 1, data: { transactions: [tx], accounts: [
+    { id: tx.accountId, name: 'Test bank', kind: 'bank', openingFils: 0, color: '#123456' },
+  ], ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 } } });
+  ledger.restoreBackup(backup);
+  const { transferFingerprint } = require('./build/transfer-reconciliation');
+  const request = () => ({ ids: [tx.id], ownership: 'external', expectedGeneration: ledger.getStateGeneration(),
+    expectedFingerprints: { [tx.id]: transferFingerprint(ledger.getStateSnapshot().transactions[0]) } });
+  const stale = request();
+  ledger.editTransaction(tx.id, { amountFils: 23456 });
+  let rejected = false;
+  try { await ledger.resolveTransfers(stale); } catch { rejected = true; }
+  ok('transfer resolution rejects a hand edit before React rerenders without applying ownership',
+    rejected && ledger.getStateSnapshot().transactions[0].transferDecision === undefined);
+  await ledger.resolveTransfers(request());
+  ok('transfer resolution acknowledges only the exact saved decision and edited amount',
+    snapshots.at(-1).transactions[0].transferDecision.ownership === 'external' && snapshots.at(-1).transactions[0].amountFils === 23456);
+  const replaced = request(); ledger.restoreBackup(backup);
+  rejected = false; try { await ledger.resolveTransfers(replaced); } catch { rejected = true; }
+  ok('a restored ledger invalidates an earlier transfer confirmation', rejected);
+  writable = false;
+  let failure;
+  try { await ledger.resolveTransfers(request()); } catch (error) { failure = error; }
+  ok('failed transfer persistence exposes retry fingerprints but never durable success',
+    failure?.code === 'transfer-durability' && failure.expectedFingerprints[tx.id] === transferFingerprint(ledger.getStateSnapshot().transactions[0]));
+  writable = true; await ledger.ensureDurable();
+  ok('transfer durability retry persists the decision without reapplying it', snapshots.at(-1).transactions[0].transferDecision.ownership === 'external');
+})().catch(error => ok('transfer store integration completes', false, String(error))));
 
 // The erase-race contract in 2c is behavioural, so it settles after this file
 // finishes executing. Counting before it lands would report a green run that

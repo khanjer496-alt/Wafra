@@ -145,7 +145,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
       };
   const categories = arabic ? ARABIC_CATEGORIES : ENGLISH_CATEGORIES;
   const liveAccounts = liveAccountIds(accounts);
-  const internal = internalTransferIds(options.transactions, liveAccounts);
+  const internal = internalTransferIds(options.transactions, options.accounts);
   const rows = reportExpenses(options.transactions, from, to, liveAccounts, internal);
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const totalFils = rows.reduce((sum, tx) => sum + tx.amountFils, 0);

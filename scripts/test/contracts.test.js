@@ -1422,7 +1422,7 @@ function ktSources(dir) {
 
   ok('the budget editor derives the live-account and internal-transfer sets',
     /liveAccountIds\(state\.accounts\)/.test(sheet) &&
-      /internalTransferIds\(state\.transactions, liveAccounts\)/.test(sheet));
+      /internalTransferIds\(state\.transactions, state\.accounts\)/.test(sheet));
   ok('every spend figure in the budget editor applies both exclusions',
     calls === 2 &&
       flat.includes('spentInMonthForCategory(state.transactions,key,picked,liveAccounts,internal)') &&
@@ -1588,7 +1588,7 @@ function ktSources(dir) {
 for (const rel of ['src/app/cards.tsx']) {
   const screen = read(rel);
   ok(`${rel} derives the internal-transfer set`,
-    /internalTransferIds\(state\.transactions, liveAccounts\)/.test(screen));
+    /internalTransferIds\(state\.transactions, state\.accounts\)/.test(screen));
   ok(`${rel} excludes own-account moves from per-account spend`,
     /isSpending\(\w+, undefined, internal\)/.test(screen),
     screen.match(/isSpending\([^)]*\)/g));
@@ -1621,7 +1621,7 @@ for (const rel of ['src/app/cards.tsx']) {
     /isSpending\(tx, liveAccounts, internalTransfers\)/.test(report));
   ok('buildExpenseReportHtml derives the live-account and internal-transfer sets from its own inputs',
     /liveAccountIds\(accounts\)/.test(report) &&
-      /internalTransferIds\(options\.transactions, liveAccounts\)/.test(report));
+      /internalTransferIds\(options\.transactions, options\.accounts\)/.test(report));
 
   // Every call site that builds subscriptions or the export from a full
   // AppState has to derive both sets and thread them through, or the merchant
@@ -1641,7 +1641,7 @@ for (const rel of ['src/app/cards.tsx']) {
     const flat = text.replace(/\s/g, '');
     ok(`${rel} derives the live-account and internal-transfer sets`,
       /liveAccountIds\(state\.accounts\)/.test(text) &&
-        /internalTransferIds\(state\.transactions, ?liveAccounts\)/.test(text));
+        /internalTransferIds\(state\.transactions, ?state\.accounts\)/.test(text));
     ok(`${rel} threads both sets into its subscription/export call`,
       flat.includes(callNeedle), rel);
   }
@@ -2235,8 +2235,8 @@ ok('the spoken label agrees with the sign on screen',
       parserResearch,
     ) && /rawMessages: false/.test(parserResearchContract) &&
       /timestamps: false/.test(parserResearchContract));
-  const extraMetadataConsumers = new Set(['launch-alert-parser.ts', 'universal-money.ts']);
-  ok('ISO metadata is confined to currency routing and exact-money extraction',
+  const extraMetadataConsumers = new Set(['launch-alert-parser.ts', 'universal-money.ts', 'transfer-reconciliation.ts']);
+  ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
   const globalExtractor = read('src/lib/universal-parser.ts');

@@ -83,7 +83,7 @@ export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[
     if (row.source !== 'sms' || row.type !== 'expense' || !row.paymentFlowSide) continue;
     const bucket = buckets.get(row.amountFils) ?? { funding: [], receipts: [] };
     if (row.paymentFlowSide === 'funding') {
-      if (!row.userEdited && row.isTransfer === true) bucket.funding.push(row);
+      if (!row.userEdited && !row.transferDecision && row.isTransfer === true) bucket.funding.push(row);
     } else {
       if (row.isTransfer !== true) bucket.receipts.push(row);
     }

@@ -225,8 +225,8 @@ export default function WalletScreen() {
 
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
   const cashOut = useMemo(
     () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),

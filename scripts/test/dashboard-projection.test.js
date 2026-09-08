@@ -177,6 +177,7 @@ setActiveMarket('AE');
       isTransfer: true,
     }),
     tx('move-in', {
+      isTransfer: true,
       type: 'income',
       amountFils: 40000,
       category: 'other',

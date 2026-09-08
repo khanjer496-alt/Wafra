@@ -55,7 +55,7 @@ export default function FlowScreen() {
   useEffect(() => { setFilter('all'); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(() => internalTransferIds(state.transactions, live), [state.transactions, live]);
+  const internal = useMemo(() => internalTransferIds(state.transactions, state.accounts), [state.transactions, state.accounts]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const rows = useMemo(() => spendingCategoryRows(summary, state.budgets, period.mode === 'month'), [summary, state.budgets, period.mode]);
   const accountById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts]);

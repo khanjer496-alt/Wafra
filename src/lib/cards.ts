@@ -2,6 +2,7 @@ import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
 import { tf, type Lang } from '@/lib/i18n';
 import { isSpending } from '@/lib/ledger';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
 export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
@@ -216,6 +217,8 @@ function cardAccountIds(state: AppState, accountId: string): Set<string> {
  * said settled while the total shown next to it said otherwise.
  */
 function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>): boolean {
+  // A routed generic bank credit is not evidence of a credit-card repayment.
+  if ((t.source === 'sms' || t.smsKey || t.transferEvidence || t.transferDecision) && isTransferCandidate(t)) return false;
   return (
     t.isTransfer === true &&
     ids.has(t.accountId) &&
@@ -359,6 +362,7 @@ export function cardPaymentRows(state: AppState): Transaction[] {
     .filter(
       (row) =>
         row.isTransfer === true &&
+        !row.transferDecision &&
         row.cardPaymentSide === 'debit' &&
         !creditIds.has(row.accountId),
     )

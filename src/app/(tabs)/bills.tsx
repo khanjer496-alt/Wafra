@@ -158,8 +158,8 @@ export default function BillsScreen() {
     [state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while

@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
@@ -55,7 +55,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const { state, period, now, dismissedInsightId, includeInsights = true } = request;
   const homeOnly = request.surface === 'home';
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, liveAccounts);
+  const internal = internalTransferIds(state.transactions, state.accounts);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
@@ -71,8 +71,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   // rather than allocating a filtered copy of the entire transaction history.
   const activityRows: Transaction[] = [];
   for (const transaction of state.transactions) {
-    if (!transaction.isTransfer && !internal.has(transaction.id) &&
-      liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)) {
+    if (countsInTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
       activityRows.push(transaction);
       if (activityRows.length === 6) break;
     }

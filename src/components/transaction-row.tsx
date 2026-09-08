@@ -12,7 +12,9 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
-import { isUnassignedIncome } from '@/lib/ledger';
+import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
 interface TransactionRowProps {
   transaction: Transaction;
@@ -35,12 +37,14 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const largeText = useLargeTextLayout();
   const meta = getCategory(transaction.category);
   const clock = clockTime(transaction);
-  const isTransfer = transaction.isTransfer || internal === true;
-  const isIncome = transaction.type === 'income' && !isTransfer;
+  const isTransfer = isLedgerTransfer(transaction) || internal === true;
+  const pending = !internal && isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown';
+  const isIncome = transaction.type === 'income' && !isTransfer && !pending;
   // Direction and classification differ: an inbound transfer is positive,
   // but never painted as income. Preserve the shipping accounting distinction.
   const arrived = transaction.type === 'income';
-  const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
+  const where = pending ? transferReviewCopy(language).ownershipUnknown
+    : isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
   const accountReview = isUnassignedIncome(transaction) ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
   const label = [transaction.title, where, accountLabel, clock,
@@ -50,7 +54,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // Two sibling targets, not a link nested inside a button: the merchant
   // identity opens its summary; the exact amount and Details keep the original
   // transaction action. No ledger scan or store subscription belongs in a row.
-  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer) {
+  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer && !pending) {
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
     const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">

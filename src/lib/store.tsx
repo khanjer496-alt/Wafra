@@ -20,6 +20,8 @@ import {
 } from '@/lib/accounts';
 import { cleanupGeneratedExports } from '@/lib/share-text';
 import { isValidBackupState } from '@/lib/backup-validation';
+import { applyTransferDecision, normalizeTransferLinks, transferFingerprint } from '@/lib/transfer-reconciliation';
+import type { TransferDecisionRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
@@ -51,7 +53,7 @@ import {
   normalizeServiceName,
   parseSms,
 } from '@/lib/sms-parser';
-import { internalTransferIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIds } from '@/lib/ledger';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -631,6 +633,7 @@ export function parseBackupForRestore(
 }
 
 type Action =
+  | { type: 'resolveTransfers'; request: TransferDecisionRequest }
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'addTransaction'; transaction: Transaction }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
@@ -732,7 +735,13 @@ function reducer(state: AppState, action: Action): AppState {
   const theme = getThemePreference();
   const language = getLanguage();
   try {
-    return syncLedgerCurrency(reduceState(state, action));
+    const reduced = reduceState(state, action);
+    // Every path that changes identity or rows passes through the same atomic
+    // link cleanup, including restore, account remaps and deletion/undo.
+    const transactions = reduced.transactions !== state.transactions || reduced.accounts !== state.accounts
+      ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
+      : reduced.transactions;
+    return syncLedgerCurrency(transactions === reduced.transactions ? reduced : { ...reduced, transactions });
   } catch (error) {
     restoreMarket();
     applyMonthStartDay(month);
@@ -744,6 +753,8 @@ function reducer(state: AppState, action: Action): AppState {
 
 function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'resolveTransfers':
+      return { ...state, transactions: applyTransferDecision(state.transactions, state.accounts, action.request) };
     case 'hydrate':
     case 'loadDemo':
     case 'restore': {
@@ -1138,6 +1149,7 @@ interface StoreValue {
   retryHydration: () => Promise<boolean>;
   addTransaction: (t: Omit<Transaction, 'id'>) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
+  resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
   deleteTransaction: (id: string) => void;
   /**
    * Bulk import. `durable` resolves only after SQLCipher has committed the
@@ -1688,6 +1700,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const editTransaction = useCallback((id: string, patch: Partial<Omit<Transaction, 'id'>>) => {
     dispatch({ type: 'editTransaction', id, patch });
   }, [dispatch]);
+
+  const resolveTransfers = useCallback(async (
+    request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number },
+  ) => {
+    if (!authoritativeState.current.hydrated ||
+      (request.expectedGeneration !== undefined && request.expectedGeneration !== getStateGeneration())) {
+      throw new Error('Transfer review is out of date');
+    }
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'resolveTransfers', request: { ...request, now: Date.now() } });
+    if (!await persist(next)) {
+      const selected = new Set([...request.ids, ...(request.counterpartId ? [request.counterpartId] : [])]);
+      throw Object.assign(new Error('Encrypted ledger write failed'), {
+        code: 'transfer-durability',
+        expectedFingerprints: Object.fromEntries(next.transactions.filter(row => selected.has(row.id))
+          .map(row => [row.id, transferFingerprint(row)])),
+      });
+    }
+  }, [dispatch, getStateGeneration, persist]);
 
   const deleteTransaction = useCallback((id: string) => {
     dispatch({ type: 'deleteTransaction', id });
@@ -2244,6 +2278,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       retryHydration,
       addTransaction,
       editTransaction,
+      resolveTransfers,
       deleteTransaction,
       importBatch,
       stageReviewAlerts,
@@ -2302,6 +2337,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       retryHydration,
       addTransaction,
       editTransaction,
+      resolveTransfers,
       deleteTransaction,
       importBatch,
       stageReviewAlerts,
@@ -2371,10 +2407,10 @@ export function netWorthAtDate(state: AppState, dateISO: string): number {
   // the arriving side, which the bank words like ordinary income and which
   // therefore carries no transfer flag of its own.
   const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
-  const internal = internalTransferIds(state.transactions, live);
+  const internal = internalTransferIds(state.transactions, state.accounts);
   let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
-    if (t.isTransfer || internal.has(t.id) || !live.has(t.accountId)) continue;
+    if (!countsInTotals(t, live, internal)) continue;
     if (t.date > dateISO) continue;
     total += t.type === 'income' ? t.amountFils : -t.amountFils;
   }

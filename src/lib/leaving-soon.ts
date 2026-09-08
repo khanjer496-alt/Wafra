@@ -105,7 +105,7 @@ export function leavingSoon(
 
   if (kinds.has('subscription')) {
     const liveAccounts = liveAccountIds(state.accounts);
-    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const internal = internalTransferIds(state.transactions, state.accounts);
     const subs = activeSubscriptions(
       detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
     );

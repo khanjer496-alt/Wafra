@@ -289,6 +289,9 @@ export interface ParsedCard {
  * 37: completed cashback credits retain their income role through the launch
  * interpreter. Rechecks name them explicitly and remove obsolete card-payment
  * roles without changing amounts, account identities or user corrections.
+ * Transfer rechecks retain bounded ownership evidence; masked source prefixes
+ * never become account suffixes. Ownership decisions remain separate from
+ * category guesses and survive rereads.
  */
 export const PARSER_VERSION = 37;
 
@@ -1188,8 +1191,14 @@ const POSTED_CLAUSE_RE =
  * to being what they are: a footer on a real purchase.
  */
 function hasPostedEvidence(raw: string, card: ParsedCard | null): boolean {
-  if (!card) return false;
   if (extractAmountFils(raw) === null) return false;
+  if (!card) {
+    // A completed transfer remains money moved when the source is too masked
+    // to identify. Do not make an invented four-digit prefix its admission
+    // ticket; pending requests still fail the shared non-posting classifier.
+    return extractOutgoingTransferParties(raw) !== null &&
+      /\bfunds?\s+transfer\s+request\b(?:[^.\n]|\.\d)*?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:processed|completed)\b/i.test(raw);
+  }
   if (POSTED_CLAUSE_RE.test(raw)) return true;
   // A field-list alert carries an amount, a card, a merchant and a date, and
   // no verb at all — the parser reads it as a purchase everywhere else, so the
@@ -3920,7 +3929,13 @@ export function extractOutgoingTransferParties(message: string): {
       /^(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:[:#]\s*)?[Xx*·•\d.-]+(?:[ -]+\d{4}\b)?(?![\w.*·•-])/i,
     );
     if (!identity) return null;
+    // Four digits before a mask are a prefix, never an account suffix. Keep
+    // this guard before the general extractor, whose short-number fallback
+    // otherwise reads 1234********56 as account 1234.
+    const terminal = identity[0].trim().match(/(\d{4})\.?$/)?.[1];
+    if (!terminal) return null;
     const parsed = extractCard(`${label}${identity[0]}`);
+    if (parsed?.last4 !== terminal) return null;
     // A formatted account number may resemble a masked PAN. The explicit
     // source label is stronger evidence; account/card remains unknown.
     return parsed && /^account$/i.test(label) ? { ...parsed, kind: 'account' } : parsed;

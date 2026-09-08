@@ -141,9 +141,10 @@ for (const [currency, exponent, minorUnits] of [
     type: 'income', title: 'Own account transfer', category: 'business',
     accountId: 'acc-1', betweenOwnAccounts: true,
   }), 'tx-own-transfer', NOW + 1);
-  ok('an explicit own-transfer decision identifies one matching opposite SMS leg',
-    result.outcome === 'added' && result.counterpartId === 'funding-leg' &&
-      result.transaction.isTransfer === true,
+  ok('an explicit own-transfer decision confirms only the reviewed row, never an amount-only partner',
+    result.outcome === 'added' && result.counterpartId === undefined &&
+      result.transaction.isTransfer === true && result.transaction.transferDecision.ownership === 'own' &&
+      base.transactions[0].transferDecision === undefined,
     JSON.stringify(result));
 
   const ambiguous = planReviewPromotion({
