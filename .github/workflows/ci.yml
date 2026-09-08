@@ -199,5 +199,6 @@ jobs:
             artifacts/e2e-transaction-ui/
             artifacts/e2e-diagnostic-export/
             /tmp/wafra-onboarding-e2e/
+            /tmp/wafra-transfer-review-e2e/
           if-no-files-found: warn
           retention-days: 7
