@@ -2821,5 +2821,53 @@ const DECLINE_SMS = [{
     !unbound.batch.updates.some(u => u.id === prior.id), unbound.batch.updates);
 }
 
+// Completed cashback is income, not a repayment or an unnamed own-account leg.
+{
+  const { createLaunchAlertSession } = require('./build/launch-alert-parser.js');
+  const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+  const { cardPaymentRows } = require('./build/cards.js');
+  const { internalTransferIds, isIncome, liveAccountIds } = require('./build/ledger.js');
+  const { healPatch, applyHealPatch } = require('./build/heal.js');
+  const raw = 'Dear Customer, your cashback amount of AED 75.00 has been credited to your credit card account with the card number ending 4321XXXX1234.';
+  const session = createLaunchAlertSession({ regionHint: 'AE', overrides: {} });
+  const parsed = session.parse(raw, 'FAB', session.inspect(raw, 'FAB'));
+  const ts = Date.UTC(2026, 8, 8, 10);
+  const prior = { id: 'cashback-before', type: 'income', amountFils: 7500, category: 'other',
+    accountId: 'credit', title: 'Card payment', source: 'sms', date: '2026-09-08', ts,
+    smsKey: `ha100t${ts}`, isTransfer: true, cardPaymentSide: 'receipt',
+    paymentFlowSide: 'receipt', paymentInstrumentSource: 'alert' };
+  const state = { ...BASE, accounts: [
+    { id: 'credit', name: 'Test credit card', kind: 'card', cardType: 'credit', last4: parsed.card.last4, bankName: 'FAB', openingFils: 0, color: '#000' },
+    { id: 'bank', name: 'Test bank', kind: 'bank', openingFils: 0, color: '#000' },
+  ], transactions: [prior, { id: 'unrelated-transfer', type: 'expense', amountFils: 7500,
+    category: 'other', accountId: 'bank', title: 'Outgoing transfer', source: 'sms',
+    date: '2026-09-08', ts: ts - 1000, isTransfer: true }] };
+  const row = { ...parsed, raw, date: '2026-09-08', smsTs: ts, sender: 'FAB', channel: 'inbox', sourceEventId: 'a100' };
+  const plan = buildImportPlan([row], state, ts);
+  let nextId = 0;
+  const fixed = applyMaterializedImportBatch(state,
+    materializeImportBatch(plan.batch, state, prefix => `${prefix}-${nextId++}`));
+  const cashback = fixed.transactions.find(t => t.id === prior.id);
+  ok('reread repairs cashback in place without creating transactions or accounts',
+    plan.txCount === 0 && plan.batch.newAccounts.length === 0 && fixed.transactions.length === 2 &&
+      cashback.title === 'Cashback' && cashback.amountFils === 7500 && cashback.type === 'income' &&
+      cashback.accountId === 'credit' && cashback.isTransfer === false, cashback);
+  ok('cashback repair removes obsolete card and payment-flow role fields',
+    !('cardPaymentSide' in cashback) && !('paymentFlowSide' in cashback) && !('paymentInstrumentSource' in cashback), cashback);
+  const paired = internalTransferIds(fixed.transactions, fixed.accounts);
+  ok('corrected cashback counts as income and cannot settle a card or pair as own transfer',
+    isIncome(cashback, liveAccountIds(fixed.accounts), paired) && !paired.has(cashback.id) &&
+      !cardPaymentRows(fixed).some(t => t.id === cashback.id));
+  ok('cashback reread is idempotent after role cleanup',
+    buildImportPlan([row], fixed, ts).batch.updates.length === 0);
+  const edited = { ...prior, userEdited: true, title: 'My cashback label' };
+  ok('cashback source repair preserves user edits at planning and apply time',
+    healPatch(edited, parsed) === null &&
+      applyHealPatch(edited, healPatch(prior, parsed)).cardPaymentSide === 'receipt');
+  const titled = { ...prior, titleEdited: true, title: 'My saved title' };
+  ok('cashback role cleanup preserves a separately pinned title',
+    applyHealPatch(titled, healPatch(titled, parsed)).title === 'My saved title');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

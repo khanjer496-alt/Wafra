@@ -285,8 +285,12 @@ export interface ParsedCard {
  * not the earlier beneficiary. A full Android reread repairs uniquely resolved
  * source accounts; guarded legacy identity promotion prevents duplicate rows
  * while preserving user edits and unresolved account-kind ambiguity.
+ *
+ * 37: completed cashback credits retain their income role through the launch
+ * interpreter. Rechecks name them explicitly and remove obsolete card-payment
+ * roles without changing amounts, account identities or user corrections.
  */
-export const PARSER_VERSION = 36;
+export const PARSER_VERSION = 37;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

@@ -30,6 +30,16 @@ const CASH_WITHDRAWAL_LANGUAGE =
   /\b(?:atm\b[\s\S]{0,40}\b(?:withdraw\w*|wdl)|cash\s+wdl\b|cash\s+withdrawal\b[\s\S]{0,32}(?:\b(?:aed|sar|dhs?)\b|\d)|withdraw\w*\b[\s\S]{0,40}\b(?:atm|cash machine))\b|تم\s+سحب\s+نقدي[\s\S]{0,32}(?:\b(?:aed|sar)\b|\d)|سحب[\s\S]{0,32}(?:صراف|جهاز الصراف)/iu;
 const FEE_LANGUAGE =
   /\b(?:bank|account|card|annual|monthly|maintenance|service|membership|renewal|overdraft|overlimit|late payment|insufficient balance|nsf)\s+(?:fee|charge)\b|\b(?:fee|commission)\b(?:[^.\n]|\.(?=\d)){0,56}\b(?:charged|debited|deducted|dr)\b|رسوم|عمول[هة]/iu;
+// A completed cashback credit is an offset, even when the bank calls it an
+// "amount ... credited to your credit card account". That generic wording
+// also matches settlements below; neither a card-product name nor an offer
+// proves this specific completed cashback movement.
+const CASHBACK_CREDIT_LANGUAGE =
+  /\bcashback\s+amount\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:has\s+been|was)\s+credited\s+(?:to|into)\s+your\s+(?:credit|covered)\s+card(?:\s+account)?\b/iu;
+/** Shared source proof for capture normalization and guarded stored-row repair. */
+export const isCompletedCashbackCredit = (source: string, legacy: ParsedSms | null): boolean =>
+  legacy?.kind === 'transaction' && legacy.type === 'income' && !legacy.transferHint &&
+  CASHBACK_CREDIT_LANGUAGE.test(normalizeArabic(source).replace(/\s+/gu, ' '));
 const CARD_SETTLEMENT_LANGUAGE =
   /\b(?:payment|amount)\b[\s\S]{0,80}\b(?:to|towards?|against|for)\b[\s\S]{0,40}\b(?:credit|covered)\s+card\b|\b(?:debited|deducted|paid)\b[\s\S]{0,96}\b(?:to|towards?|against|for)\b[\s\S]{0,40}\b(?:credit|covered)\s+card\b[\s\S]{0,40}\bpayment\b|\b(?:credit|covered)\s+card\b[\s\S]{0,64}\bpayment\b[\s\S]{0,64}\b(?:received|credited|posted|applied|debited|deducted|paid|processed|completed|successful)\b|\bpayment\b[\s\S]{0,64}\b(?:received|credited|posted|applied)\b[\s\S]{0,40}\b(?:to\s+)?(?:your\s+)?(?:credit|covered)\s+card\b|\b(?:credit|covered)\s+card\b[\s\S]{0,40}\bcredited\s+with\s+(?:a\s+)?payment\b|\b(?:cc|card)\s+p(?:ay|y)?mt\b|\bcc\b[^.\n]{0,48}\bcard\s+p(?:ay|y)?mt\b|(?:استلام[\s\S]{0,48})?سداد[\s\S]{0,64}(?:للبطاق[هة]|بطاق[هة])\s+(?:ال)?ا?يتماني[هة]/iu;
 const UTILITY_PAYMENT_LANGUAGE =
@@ -74,6 +84,7 @@ export const automaticMeaning = (
   if (credit && SALARY_LANGUAGE.test(semanticText)) return 'salary-income';
   if (credit && BUSINESS_INCOME_LANGUAGE.test(semanticText)) return 'business-income';
   if (OWN_ACCOUNT_LANGUAGE.test(semanticText)) return 'own-account-transfer';
+  if (credit && isCompletedCashbackCredit(semanticText, legacy)) return null;
   const hasCreditCard =
     (review.instrument?.kind === 'card' && review.instrument.last4) ||
     (legacy?.card?.kind === 'credit' && legacy.card.last4);

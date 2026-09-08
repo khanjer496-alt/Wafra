@@ -644,6 +644,8 @@ export interface TxHealUpdate {
   paymentFlowSide?: 'funding' | 'receipt';
   billIdentity?: string;
   paymentInstrumentSource?: 'alert' | 'user';
+  /** A source-proven ordinary credit was previously misclassified as a card payment. */
+  clearCardPaymentRole?: true;
   /**
    * The stored source text, or `null` to CLEAR it.
    *

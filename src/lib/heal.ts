@@ -4,6 +4,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { Transaction, TxHealUpdate } from '@/lib/types';
+import { isCompletedCashbackCredit } from '@/lib/bank-alert-semantic-rules';
 
 /**
  * What a rescan should change about a row it has already imported.
@@ -145,6 +146,17 @@ export function healPatch(
     patch.isTransfer = false;
   }
 
+  if (p.raw && isCompletedCashbackCredit(p.raw, { ...p, raw: p.raw })) {
+    // A completed cashback is a named credit, not an unnamed transfer that
+    // equal-value pairing may consume. A user-pinned name still wins.
+    if (prior.titleEdited) delete patch.title;
+    else if (prior.title !== 'Cashback') patch.title = 'Cashback';
+    if (prior.cardPaymentSide !== undefined || prior.paymentFlowSide !== undefined ||
+        prior.paymentInstrumentSource !== undefined) {
+      patch.clearCardPaymentRole = true;
+    }
+  }
+
   // A card payment whose wording the parser did not recognize was imported as
   // an EXPENSE carrying a transfer hint. Nothing downstream could use it:
   // `allocatePayments` credits income-side transfers only, so the statement
@@ -250,6 +262,11 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;
   if (patch.paymentInstrumentSource !== undefined) {
     next.paymentInstrumentSource = patch.paymentInstrumentSource;
+  }
+  if (patch.clearCardPaymentRole) {
+    delete next.cardPaymentSide;
+    delete next.paymentFlowSide;
+    delete next.paymentInstrumentSource;
   }
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;

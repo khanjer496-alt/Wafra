@@ -1,7 +1,9 @@
 import {
   automaticMeaning,
+  isCompletedCashbackCredit,
   SEMANTIC_CANDIDATE_LANGUAGE,
 } from '@/lib/bank-alert-semantic-rules';
+import { readMerchantCategoryOverride } from '@/lib/categories';
 import {
   evidenceForMeaning,
   meaningFromParsed,
@@ -250,7 +252,16 @@ export const interpretBankAlert = ({
   // shape that the legacy parser may read as AED 1,234. Treat that specific
   // structural collision as no legacy result; the semantic inspector still
   // requires one unambiguous movement amount and a trusted institution.
-  const usableLegacy = mistookInstrumentLast4ForAmount(source, market, legacy) ? null : legacy;
+  const capturedLegacy = mistookInstrumentLast4ForAmount(source, market, legacy) ? null : legacy;
+  // Keep the explicit offset name, so an unrelated equal-value outgoing
+  // transfer cannot consume this credit through generic transfer pairing.
+  const cashback = capturedLegacy && isCompletedCashbackCredit(source, capturedLegacy);
+  const cashbackCategory = cashback ? readMerchantCategoryOverride(overrides, 'Cashback', 'income') : undefined;
+  const usableLegacy = cashback && capturedLegacy
+    ? { ...capturedLegacy, merchant: 'Cashback', ...(cashbackCategory ? {
+        categoryGuess: cashbackCategory, categoryDeliberate: true, categoryPinned: true as const,
+      } : {}) }
+    : capturedLegacy;
   const semanticText = normalizeArabic(source).replace(/\s+/gu, ' ');
   if (usableLegacy && isCompletedCardPurchaseReturn(semanticText, usableLegacy)) {
     return legacyResult(usableLegacy, 'refund');
