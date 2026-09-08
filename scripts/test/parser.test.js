@@ -2,6 +2,7 @@ const {
   parseSms,
   parseSmsBatch,
   bankProfileForSender,
+  extractOutgoingTransferParties,
   isDeclinedMessage,
   nonPostingReason,
 } = require('./build/sms-parser');
@@ -3709,7 +3710,53 @@ t('a co-op (جمعية) is groceries',
 // between accounts is not this month's spending.
 t('a transfer to an IBAN has no merchant, only a destination label',
   'Dear Customer, your funds transfer request of  AED 4,070.80 to IBAN/Account/Card XXXX5678  has been processed successfully from your account/card XXXX1234 on 16/04/2026 01:18',
-  { merchant: 'Outgoing transfer', amountFils: 407080, date: '2026-04-16', transfer: true });
+  { merchant: 'Outgoing transfer', amountFils: 407080, date: '2026-04-16', transfer: true,
+    card: { last4: '1234', kind: 'unknown' } });
+// Synthetic mutations of that real family exercise party boundaries, not new
+// bank-format coverage. Only the source belongs to this outgoing ledger row;
+// account/card is ambiguous and does not prove either instrument type.
+t('a transfer source explicitly labelled account stays a bank account',
+  'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your account XXXX1234 on 16/04/2026 01:18',
+  { type: 'expense', amountFils: 407080, transfer: true,
+    card: { last4: '1234', kind: 'account' } });
+t('a transfer source credit card keeps its own suffix and kind',
+  'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your Credit Card XXXX1234 on 16/04/2026 01:18',
+  { type: 'expense', amountFils: 407080, transfer: true,
+    card: { last4: '1234', kind: 'credit' } });
+// These are instrument-clause probes, not claims of additional bank formats.
+for (const [label, kind] of [['Debit Card', 'debit'], ['account/card', 'unknown']]) {
+  const parties = extractOutgoingTransferParties(
+    `funds transfer request to Credit Card XXXX5678 from your ${label} XXXX1234`);
+  ok(`a transfer source ${label} does not borrow the destination credit kind`,
+    JSON.stringify(parties) === JSON.stringify({
+      source: { last4: '1234', kind }, destination: { last4: '5678', kind: 'credit' },
+      sourceKindAmbiguous: label === 'account/card',
+    }), JSON.stringify(parties));
+}
+{
+  for (const suffix of ['abc', '_foo', '*abc', '-abc', '.abc']) {
+    const malformed = extractOutgoingTransferParties(
+      `funds transfer request to IBAN/Account/Card XXXX5678 from your account/card XXXX1234${suffix}`);
+    ok(`a malformed transfer source token ending ${suffix} cannot supply account-repair evidence`,
+      malformed?.source === null && malformed?.destination?.last4 === '5678',
+      JSON.stringify(malformed));
+  }
+  const punctuated = extractOutgoingTransferParties(
+    'funds transfer request to IBAN/Account/Card XXXX5678 from your account/card XXXX1234, on 16/04/2026');
+  ok('punctuation after a transfer source keeps the complete identity token',
+    punctuated?.source?.last4 === '1234' && punctuated?.sourceKindAmbiguous === true,
+    JSON.stringify(punctuated));
+}
+t('an unreadable transfer source cannot become the readable beneficiary',
+  'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your account/card XXXX on 16/04/2026 01:18',
+  null);
+t('an unreadable transfer source cannot steal a card from a later footer',
+  'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your account/card XXXX on 16/04/2026 01:18. Credit Card XXXX9012 available limit AED 50,000.00.',
+  null);
+t('an incoming transfer keeps the credited instrument and income direction',
+  'AED 4,070.80 has been credited to your account XXXX1234 on 16/04/2026.',
+  { type: 'income', amountFils: 407080, transfer: false,
+    card: { last4: '1234', kind: 'account' } });
 // 11 occurrences. The merchant grammar was reaching into the CALL-CENTRE
 // FOOTER: "from overseas)" is not a payee, it is the second half of "if
 // calling from overseas".

@@ -2675,5 +2675,151 @@ const DECLINE_SMS = [{
     incoming.batch.transactions[0].type === 'income' && incoming.batch.updates.length === 0, incoming.batch);
 }
 
+// A historical parser attached a transfer to its beneficiary. A full reread
+// must move that original row, not append a second debit under its source.
+{
+  const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+  const ts = Date.UTC(2026, 3, 16, 12);
+  const raw = 'Dear Customer, your funds transfer request of AED 73.25 to IBAN/Account/Card XXXX5678 has been processed successfully from your account/card XXXX1234 on 16/04/2026 12:00';
+  const parsed = parseSms(raw, {}, { sender: 'ENBD' });
+  const fresh = { ...parsed, raw, smsTs: ts, sender: 'ENBD', channel: 'inbox', sourceEventId: 'a42' };
+  const accounts = [
+    { id: 'beneficiary', name: 'Old inferred account', last4: '5678', kind: 'card', bankName: 'Emirates NBD', openingFils: 0, color: '#000' },
+    { id: 'source', name: 'My source account', last4: '1234', kind: 'bank', bankName: 'Emirates NBD', openingFils: 0, color: '#000' },
+  ];
+  const prior = {
+    id: 'original-transfer', type: 'expense', amountFils: 7325, category: 'other',
+    title: 'Outgoing transfer', accountId: 'beneficiary', source: 'sms', isTransfer: true,
+    date: '2026-04-16', ts, smsKey: `s${ts}-7325`,
+    captureInstrument: { last4: '5678', kind: 'unknown' },
+  };
+  const state = { ...BASE, accounts, transactions: [prior] };
+  const repair = buildImportPlan([fresh], state, ts);
+  ok('source-proven legacy transfer reread heals the existing debit without adding another',
+    repair.txCount === 0 && repair.batch.transactions.length === 0 &&
+      repair.batch.updates.some(u => u.id === prior.id && u.accountId === 'source' &&
+        u.captureInstrument?.last4 === '1234' && u.smsKey === `ha42t${ts}`), repair.batch);
+  let nextId = 0;
+  const fixed = applyMaterializedImportBatch(state,
+    materializeImportBatch(repair.batch, state, prefix => `${prefix}-${nextId++}`));
+  ok('materialized transfer repair preserves amount and identity while correcting its source account',
+    fixed.transactions.length === 1 && fixed.transactions[0].id === prior.id &&
+      fixed.transactions[0].accountId === 'source' && fixed.transactions[0].amountFils === 7325,
+    fixed.transactions);
+  ok('a second provider-bound reread after transfer repair remains idempotent',
+    buildImportPlan([fresh], fixed, ts).txCount === 0);
+
+  const edited = { ...state, transactions: [{ ...prior, userEdited: true, title: 'My corrected title', category: 'shopping' }] };
+  const editedRepair = buildImportPlan([fresh], edited, ts);
+  const editedFixed = applyMaterializedImportBatch(edited,
+    materializeImportBatch(editedRepair.batch, edited, prefix => `${prefix}-${nextId++}`));
+  ok('legacy source correction does not duplicate or overwrite a user-edited transfer',
+    editedRepair.txCount === 0 && editedFixed.transactions.length === 1 &&
+      editedFixed.transactions[0].title === 'My corrected title' &&
+      editedFixed.transactions[0].category === 'shopping' &&
+      editedFixed.transactions[0].accountId === 'beneficiary' &&
+      editedFixed.transactions[0].smsKey === `ha42t${ts}`, editedFixed.transactions);
+  ok('protected source migration does not create an unused source account',
+    buildImportPlan([fresh], { ...edited, accounts: [accounts[0]] }, ts).batch.newAccounts.length === 0);
+  const editedMoney = { ...edited, transactions: [{ ...edited.transactions[0], amountFils: 1000, type: 'income', isTransfer: false }] };
+  const editedMoneyPlan = buildImportPlan([fresh], editedMoney, ts);
+  const editedMoneyFixed = applyMaterializedImportBatch(editedMoney,
+    materializeImportBatch(editedMoneyPlan.batch, editedMoney, prefix => `${prefix}-${nextId++}`));
+  ok('source migration preserves a user correction to amount, direction and transfer status',
+    editedMoneyPlan.txCount === 0 && editedMoneyFixed.transactions.length === 1 &&
+      editedMoneyFixed.transactions[0].amountFils === 1000 && editedMoneyFixed.transactions[0].type === 'income' &&
+      editedMoneyFixed.transactions[0].isTransfer === false, editedMoneyFixed.transactions);
+  for (const preserved of [edited.transactions[0], editedMoney.transactions[0]]) {
+    const legacyEdited = { ...state, transactions: [{ ...preserved, captureInstrument: undefined }] };
+    const legacyEditedPlan = buildImportPlan([fresh], legacyEdited, ts);
+    const legacyEditedFixed = applyMaterializedImportBatch(legacyEdited,
+      materializeImportBatch(legacyEditedPlan.batch, legacyEdited, prefix => `${prefix}-${nextId++}`));
+    const fixedRow = legacyEditedFixed.transactions[0];
+    ok(`pre-metadata edited transfer keeps one row and every user field (${preserved.amountFils})`,
+      legacyEditedPlan.txCount === 0 && legacyEditedFixed.transactions.length === 1 &&
+        fixedRow.id === preserved.id && fixedRow.title === preserved.title &&
+        fixedRow.amountFils === preserved.amountFils && fixedRow.type === preserved.type &&
+        fixedRow.category === preserved.category && fixedRow.isTransfer === preserved.isTransfer &&
+        fixedRow.accountId === preserved.accountId && fixedRow.smsKey === `ha42t${ts}`,
+      legacyEditedFixed.transactions);
+    ok('pre-metadata edited transfer stays deduplicated on the next provider reread',
+      buildImportPlan([fresh], legacyEditedFixed, ts).txCount === 0);
+  }
+
+  // Materialize both passes: the first promotes a legacy key, then the exact
+  // provider key takes a different path on every later reread. User edits
+  // must not leave an unused source account behind on that second path.
+  for (const withMetadata of [true, false]) {
+    for (const [editName, correction] of [
+      ['title', { title: 'My transfer title', category: 'shopping' }],
+      ['amount', { amountFils: 1000 }],
+      ['direction', { type: 'income', isTransfer: false }],
+    ]) {
+      const protectedRow = { ...prior, ...correction, userEdited: true,
+        captureInstrument: withMetadata ? prior.captureInstrument : undefined };
+      let rereadState = { ...state, accounts: [accounts[0]], transactions: [protectedRow] };
+      const fields = ['id', 'title', 'category', 'amountFils', 'type', 'isTransfer', 'accountId'];
+      for (let passNumber = 1; passNumber <= 2; passNumber++) {
+        const reread = buildImportPlan([fresh], rereadState, ts);
+        rereadState = applyMaterializedImportBatch(rereadState,
+          materializeImportBatch(reread.batch, rereadState, prefix => `${prefix}-${nextId++}`));
+        ok(`edited ${editName}, metadata ${withMetadata}, reread ${passNumber}: no duplicate or unused source account`,
+          reread.txCount === 0 && reread.batch.newAccounts.length === 0 &&
+            rereadState.transactions.length === 1 && rereadState.accounts.length === 1 &&
+            fields.every(field => rereadState.transactions[0][field] === protectedRow[field]) &&
+            rereadState.transactions[0].smsKey === `ha42t${ts}`,
+          { accounts: rereadState.accounts, transactions: rereadState.transactions });
+      }
+    }
+  }
+  const knownSourceEdited = { ...edited, transactions: [{ ...edited.transactions[0], smsKey: `ha42t${ts}` }] };
+  const knownSourceSnapshot = buildImportPlan([
+    { ...fresh, snapshotFils: 125000, snapshotKind: 'balance' },
+  ], knownSourceEdited, ts);
+  ok('a protected provider reread still updates a uniquely known source balance',
+    knownSourceSnapshot.txCount === 0 && knownSourceSnapshot.batch.newAccounts.length === 0 &&
+      knownSourceSnapshot.batch.snapshots.source?.fils === 125000 &&
+      knownSourceSnapshot.batch.snapshots.source?.kind === 'balance' &&
+      knownSourceSnapshot.batch.updates.every(update => update.accountId === undefined),
+    knownSourceSnapshot.batch);
+  const missingSourceSnapshot = buildImportPlan([
+    { ...fresh, snapshotFils: 125000, snapshotKind: 'balance' },
+  ], { ...knownSourceEdited, accounts: [accounts[0]] }, ts);
+  ok('a protected reread never writes the missing source balance onto the user-assigned account',
+    missingSourceSnapshot.txCount === 0 && missingSourceSnapshot.batch.newAccounts.length === 0 &&
+      Object.keys(missingSourceSnapshot.batch.snapshots).length === 0,
+    missingSourceSnapshot.batch);
+
+  const noMetadata = { ...state, transactions: [{ ...prior, captureInstrument: undefined }] };
+  ok('original legacy rows without instrument metadata still heal on provider reread',
+    buildImportPlan([fresh], noMetadata, ts).txCount === 0);
+  const modern = { ...state, transactions: [{ ...prior, smsKey: `ha42t${ts}` }] };
+  const modernRepair = buildImportPlan([fresh], modern, ts);
+  ok('modern provider-bound rows repair source attribution without adding a debit',
+    modernRepair.txCount === 0 && modernRepair.batch.updates.some(u => u.accountId === 'source'), modernRepair.batch);
+  const sameSuffixBankAndCard = { ...state, accounts: [...accounts, { ...accounts[1], id: 'also-source-card', kind: 'card' }] };
+  const uncertain = buildImportPlan([fresh], sameSuffixBankAndCard, ts);
+  ok('an account/card source with multiple compatible accounts preserves prior attribution',
+    uncertain.txCount === 0 && !uncertain.batch.updates.some(u => u.accountId !== undefined), uncertain.batch);
+
+  for (const [name, changedPrior] of [
+    ['different prior instrument', { ...prior, captureInstrument: { last4: '9999', kind: 'unknown' } }],
+    ['conflicting retained text', { ...prior, raw: 'A different received message' }],
+    ['manual entry', { ...prior, source: 'manual' }],
+    ['push capture', { ...prior, viaPush: true }],
+    ['different bank', { ...prior, captureInstrument: { last4: '5678', kind: 'unknown', bankIdentity: 'ADCB' } }],
+  ]) {
+    const refused = buildImportPlan([fresh], { ...state, transactions: [changedPrior] }, ts);
+    ok(`transfer source repair cannot overwrite ${name}`,
+      !refused.batch.updates.some(u => u.id === prior.id), refused.batch.updates);
+  }
+  const ambiguous = buildImportPlan([fresh], { ...state, transactions: [prior, { ...prior, id: 'another-at-same-time' }] }, ts);
+  ok('same-clock ambiguity cannot authorize a transfer account migration',
+    ambiguous.batch.updates.length === 0, ambiguous.batch.updates);
+  const unbound = buildImportPlan([{ ...fresh, sourceEventId: 'shortcut-guid' }], state, ts);
+  ok('a Shortcut source cannot authorize the Android legacy instrument repair',
+    !unbound.batch.updates.some(u => u.id === prior.id), unbound.batch.updates);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

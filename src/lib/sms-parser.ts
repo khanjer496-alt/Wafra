@@ -280,8 +280,13 @@ export interface ParsedCard {
  * 35: recover source-proven business credits whose partially masked account
  * cannot be resolved. Keep them visible as unassigned income, never invent a
  * bank identity or write the quoted available balance onto a fallback account.
+ *
+ * 36: outgoing transfer-request receipts retain the explicit source instrument,
+ * not the earlier beneficiary. A full Android reread repairs uniquely resolved
+ * source accounts; guarded legacy identity promotion prevents duplicate rows
+ * while preserving user edits and unresolved account-kind ambiguity.
  */
-export const PARSER_VERSION = 35;
+export const PARSER_VERSION = 36;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -3879,7 +3884,57 @@ function cardKindNear(
   return islamicCredit ? 'credit' : 'unknown';
 }
 
+const TRANSFER_PARTY_LABEL =
+  '(?:IBAN\\s*\\/\\s*)?account\\s*\\/\\s*card|account|(?:(?:credit|debit|covered|charge|prepaid)\\s+)?card';
+const OUTGOING_TRANSFER_SOURCE_RE = new RegExp(
+  `\\bfunds?\\s+transfer\\s+request\\b[\\s\\S]*?\\bfrom\\s+your\\s+(${TRANSFER_PARTY_LABEL})\\b`, 'i');
+const TRANSFER_DESTINATION_RE = new RegExp(
+  `\\bto\\s+(?:your\\s+)?(${TRANSFER_PARTY_LABEL})\\b`, 'i');
+
+/**
+ * The two named instruments in an outgoing transfer-request receipt. The
+ * source after "from your" belongs to the row; the earlier destination does
+ * not prove another account belongs to this user. Keep this evidence shared
+ * with guarded reread repair, which must recognize the old beneficiary error.
+ * A matched receipt with unreadable source digits returns source: null so a
+ * caller cannot fall back to the beneficiary or to a later card footer.
+ */
+export function extractOutgoingTransferParties(message: string): {
+  source: ParsedCard | null;
+  destination: ParsedCard | null;
+  /** The bank's account/card label leaves both account kinds possible. */
+  sourceKindAmbiguous: boolean;
+} | null {
+  const raw = normalizeArabic(message);
+  const source = raw.match(OUTGOING_TRANSFER_SOURCE_RE);
+  if (!source) return null;
+  const readParty = (label: string, afterLabel: string): ParsedCard | null => {
+    // Isolate the immediate identity token. Reusing the general extraction
+    // rules on the entire remaining message could steal a footer's card when
+    // the actual source was masked beyond recognition.
+    const identity = afterLabel.match(
+      /^(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:[:#]\s*)?[Xx*·•\d.-]+(?:[ -]+\d{4}\b)?(?![\w.*·•-])/i,
+    );
+    if (!identity) return null;
+    const parsed = extractCard(`${label}${identity[0]}`);
+    // A formatted account number may resemble a masked PAN. The explicit
+    // source label is stronger evidence; account/card remains unknown.
+    return parsed && /^account$/i.test(label) ? { ...parsed, kind: 'account' } : parsed;
+  };
+  const beforeSource = raw.slice(0, endOf(source) - source[1].length);
+  const destination = beforeSource.match(TRANSFER_DESTINATION_RE);
+  return {
+    source: readParty(source[1], raw.slice(endOf(source))),
+    destination: destination
+      ? readParty(destination[1], beforeSource.slice(endOf(destination)))
+      : null,
+    sourceKindAmbiguous: /\baccount\s*\/\s*card$/i.test(source[1]),
+  };
+}
+
 function extractCard(raw: string, bank?: BankProfile | null): ParsedCard | null {
+  const outgoingTransfer = extractOutgoingTransferParties(raw);
+  if (outgoingTransfer) return outgoingTransfer.source;
   const islamicCredit = !!bank?.islamic && LIMIT_EVIDENCE_RE.test(raw);
   // Masked PANs first: CARD_RE would otherwise grab the FIRST four digits of
   // "Credit Card 4782********4833" as the identity.

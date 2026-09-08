@@ -16,6 +16,7 @@ import {
   migrateLegacyLedgerMoney,
 } from '@/lib/ledger-money';
 import {
+  extractOutgoingTransferParties,
   isNonPostingMessage,
   overrideFitsDirection,
   STRUCTURAL_TITLES,
@@ -303,7 +304,12 @@ export function buildImportPlan(
     else rowsByTimestamp.set(ts, [t]);
   }
   const parsedTimestampCounts = new Map<number, number>();
+  const androidTimestampCounts = new Map<number, number>();
   for (const p of parsed) {
+    if (p.channel !== 'push' && Number.isFinite(p.smsTs) &&
+        (!p.sourceEventId || /^a\d+$/.test(p.sourceEventId))) {
+      androidTimestampCounts.set(p.smsTs!, (androidTimestampCounts.get(p.smsTs!) ?? 0) + 1);
+    }
     if (p.sourceEventId || p.channel === 'push' || !Number.isFinite(p.smsTs)) continue;
     parsedTimestampCounts.set(p.smsTs!, (parsedTimestampCounts.get(p.smsTs!) ?? 0) + 1);
   }
@@ -414,6 +420,36 @@ export function buildImportPlan(
       : p.smsTs !== undefined
         ? `s${p.smsTs}-${p.amountFils}`
         : undefined;
+  /** Only the reproduced legacy beneficiary-as-source error can cross an
+   * instrument mismatch. Provider identity and ordinary dedupe stay strict. */
+  const legacyTransferSourcePrior = (p: ScannedSms): Transaction | undefined => {
+    if (!p.sourceEventId || !/^a\d+$/.test(p.sourceEventId) || p.channel === 'push' ||
+        !Number.isFinite(p.smsTs) || !p.raw || !p.card || p.type !== 'expense' || !p.transferHint) return;
+    if (androidTimestampCounts.get(p.smsTs!) !== 1) return;
+    const rows = rowsByTimestamp.get(p.smsTs!);
+    if (rows?.length !== 1) return;
+    const prior = rows[0];
+    if (prior.source !== 'sms' || prior.viaPush || prior.smsKey !== `s${p.smsTs}-${p.amountFils}` ||
+        (!prior.captureInstrument && !prior.userEdited)) return;
+    if (!prior.userEdited && (prior.type !== p.type || prior.amountFils !== p.amountFils || !prior.isTransfer)) return;
+    const parties = extractOutgoingTransferParties(p.raw);
+    if (!parties?.source || !parties.destination || parties.source.last4 === parties.destination.last4 ||
+        p.card.last4 !== parties.source.last4 ||
+        (prior.captureInstrument && prior.captureInstrument.last4 !== parties.destination.last4)) return;
+    if (prior.raw !== undefined && bodyPrint(prior.raw) !== bodyPrint(p.raw)) return;
+    // The old parser got the party wrong, not permission to cross issuers or
+    // contradictory instrument kinds that the alerts explicitly established.
+    if (prior.captureInstrument && !compatibleCaptureInstrument(
+      { ...prior.captureInstrument, last4: parties.source.last4 }, captureInstrumentOf(p),
+    )) return;
+    // Pre-metadata edited rows have no instrument facts to contradict this
+    // exact, unique SMS identity. Its immutable s-key still records the
+    // original amount even if the user changed amount, direction or title.
+    // Only promote identity: the caller preserves every user-facing field.
+    const messageDate = Date.parse(`${p.date ?? toISODate(new Date(p.smsTs!))}T12:00:00Z`);
+    if (!Number.isFinite(messageDate) || Math.abs(messageDate - p.smsTs!) > 7 * 86400000) return;
+    return prior;
+  };
   // Newest bank-quoted balance/limit per account — even from messages whose
   // transaction is already imported (rescans refresh the figures).
   const snapshots: ImportBatchInput['snapshots'] = {};
@@ -504,6 +540,7 @@ export function buildImportPlan(
     p: ScannedSms,
     ambiguousFallbackAccountId?: string,
     refuseAmbiguous = false,
+    createMissing = true,
   ): AccountResolution => {
     if (!p.card) return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
     const { last4 } = p.card;
@@ -511,6 +548,9 @@ export function buildImportPlan(
     // Mada. Reinterpreting its structured result from English-only raw-text
     // heuristics silently downgraded explicit Arabic debit cards to unknown.
     const kind = p.card.kind as ResolvedCardKind;
+    const transferParties = kind === 'unknown' && p.raw ? extractOutgoingTransferParties(p.raw) : null;
+    const sourceKindAmbiguous = transferParties?.sourceKindAmbiguous === true &&
+      transferParties.source?.last4 === last4;
     // A message that spells out its issuer ("Emirates NBD Credit Card Mini
     // Stmt for Card ending 8575") is STATING the bank; a sender ID only
     // suggests one. That distinction is the only thing that can separate two
@@ -543,7 +583,8 @@ export function buildImportPlan(
       return { accountId: ref, confident };
     };
     const compatible = accountCandidates().filter(({ ref, account }) =>
-      matchesCard(ref, account, last4, kind, bank?.name));
+      matchesCard(ref, account, last4, kind, bank?.name) ||
+      (sourceKindAmbiguous && matchesCard(ref, account, last4, 'account', bank?.name)));
     // Explicit type evidence may safely choose the sole account already known
     // to have that type. Untyped candidates remain upgradeable only when no
     // typed account exists.
@@ -597,11 +638,17 @@ export function buildImportPlan(
     // backfill can turn this staging bucket into an asserted attribution.
     // Statements opt into refuseAmbiguous above because an unattached due is
     // not a ledger event; transactions and card payments must be lossless.
-    if (kind !== 'unknown' && eligible.length > 1) {
+    if ((kind !== 'unknown' || sourceKindAmbiguous) && eligible.length > 1) {
       return {
         accountId: unassignedCardRef(bank?.name, last4, kind),
         confident: false,
       };
+    }
+    // A protected existing row keeps the user's account assignment. Resolve
+    // known instruments above so genuine snapshots can still update them,
+    // but do not mint an account that no new or healed row will use.
+    if (!createMissing) {
+      return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
     }
     // Auto-create; reference by index until the store assigns real ids.
     const idx = newAccounts.length;
@@ -900,7 +947,8 @@ export function buildImportPlan(
     // own-account transfer: keep it for balances, exclude it from spending.
     const smsKey = smsKeyOf(p);
     const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
-    const stablePrior = exactPrior ?? stableLocalPrior(p);
+    const sourceCorrectionPrior = exactPrior ? undefined : legacyTransferSourcePrior(p);
+    const stablePrior = exactPrior ?? stableLocalPrior(p) ?? sourceCorrectionPrior;
     const prior = stablePrior;
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
@@ -908,6 +956,14 @@ export function buildImportPlan(
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
+    if (sourceCorrectionPrior?.userEdited && smsKey) {
+      // Promote technical identity only. Resolving a new account first would
+      // create an unused account even though the user's assignment is kept.
+      promoteMatchedHistory(sourceCorrectionPrior.id, smsKey, p);
+      guard.consume(sourceCorrectionPrior.id);
+      guard.add(captureCandidate);
+      continue;
+    }
     const protectedSupersededId = guard.supersedes(captureCandidate);
     if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
       // The fuller SMS still proves the notification was a duplicate, but it
@@ -937,7 +993,7 @@ export function buildImportPlan(
       (!prior || provenPartialMask || prior.accountId === UNASSIGNED_INCOME_ACCOUNT_ID);
     const resolution = unassignedIncome
       ? { accountId: UNASSIGNED_INCOME_ACCOUNT_ID, confident: false }
-      : resolveAccount(p, prior?.accountId);
+      : resolveAccount(p, prior?.accountId, false, !prior?.userEdited);
     const { accountId } = resolution;
     if (!accountId) continue;
     if (resolution.confident) noteSnapshot(accountId, p);
@@ -945,6 +1001,12 @@ export function buildImportPlan(
     const accountForMatchedPrior = (matched: Transaction | undefined) =>
       unassignedIncome && (matched?.captureInstrument || matched?.userEdited)
         ? undefined : healedAccountId;
+    if (sourceCorrectionPrior && smsKey) {
+      promoteMatchedHistory(sourceCorrectionPrior.id, smsKey, p, healedAccountId);
+      guard.consume(sourceCorrectionPrior.id);
+      guard.add({ ...captureCandidate, accountId });
+      continue;
+    }
     if (!exactPrior && stablePrior) {
       healFromReparse(
         undefined,
