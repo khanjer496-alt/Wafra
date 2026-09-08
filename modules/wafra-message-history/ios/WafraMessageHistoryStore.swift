@@ -93,6 +93,16 @@ public final class WafraMessageHistoryStore {
     pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$"
   )
 
+  // This is an explicit producer adapter, never the stored-record validator.
+  private static let shortcutInstant = try! NSRegularExpression(
+    pattern: #"\A([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{3}))?(Z|[+-][0-9]{2}:[0-9]{2})\z"#
+  )
+
+  private enum RecordInputMode {
+    case strictUTC
+    case shortcutOffset
+  }
+
   private enum ManifestState: String, Codable {
     case open
     case complete
@@ -228,6 +238,29 @@ public final class WafraMessageHistoryStore {
     chunkIndex: Int,
     records: [String]
   ) throws -> WafraHistoryChunkCounts {
+    try stageRecords(sessionId: sessionId, authorizationSecret: authorizationSecret,
+      chunkIndex: chunkIndex, records: records, inputMode: .strictUTC)
+  }
+
+  /// Accepts explicit ISO 8601 offsets produced by Shortcuts. Stored records
+  /// remain strict v1 UTC; this does not finish or open an import for review.
+  public func stageShortcutChunk(
+    sessionId: String,
+    authorizationSecret: String,
+    chunkIndex: Int,
+    records: [String]
+  ) throws -> WafraHistoryChunkCounts {
+    try stageRecords(sessionId: sessionId, authorizationSecret: authorizationSecret,
+      chunkIndex: chunkIndex, records: records, inputMode: .shortcutOffset)
+  }
+
+  private func stageRecords(
+    sessionId: String,
+    authorizationSecret: String,
+    chunkIndex: Int,
+    records: [String],
+    inputMode: RecordInputMode
+  ) throws -> WafraHistoryChunkCounts {
     try coordinated(operation: "stage") { root in
       _ = try cleanupUnlocked(root: root, at: nowProvider())
       guard Self.validSessionIdentifier(sessionId) else { throw StoreError.invalidSession }
@@ -256,7 +289,7 @@ public final class WafraMessageHistoryStore {
         // This check deliberately precedes all per-record JSON decoding.
         guard records.count <= Self.maxChunkRecords else { throw StoreError.tooManyRecords }
 
-        let candidate = try makeCandidate(records: records, secretData: secretData)
+        let candidate = try makeCandidate(records: records, secretData: secretData, inputMode: inputMode)
         let key = String(chunkIndex)
         if let existing = manifest.chunks[key] {
           guard existing.requestAuthenticationCode == candidate.requestAuthenticationCode else {
@@ -902,8 +935,16 @@ public final class WafraMessageHistoryStore {
     return (storedDirectories.count, bytes)
   }
 
-  private func makeCandidate(records: [String], secretData: Data) throws -> StagedCandidate {
-    let requestData = try JSONEncoder().encode(records)
+  private func makeCandidate(
+    records: [String], secretData: Data, inputMode: RecordInputMode
+  ) throws -> StagedCandidate {
+    // Authenticate every original input string, including rejected records,
+    // before normalization. Preserve the exact legacy strict-mode HMAC bytes.
+    var requestData = Data()
+    if inputMode == .shortcutOffset {
+      requestData.append(Data("WafraMessageHistoryStore.stageShortcutChunk.v1\u{0}".utf8))
+    }
+    requestData.append(try JSONEncoder().encode(records))
     let authenticationCode = HMAC<SHA256>.authenticationCode(
       for: requestData,
       using: SymmetricKey(data: secretData)
@@ -912,7 +953,9 @@ public final class WafraMessageHistoryStore {
     var recordIDs: [String] = []
     var seen = Set<String>()
     for input in records {
-      guard let decoded = decodeRecord(input) else { continue }
+      let decodedRecord = inputMode == .strictUTC
+        ? decodeRecord(input) : decodeShortcutRecord(input)
+      guard let decoded = decodedRecord else { continue }
       guard seen.insert(decoded.id).inserted else { throw StoreError.duplicateRecord }
       let data = try JSONSerialization.data(
         withJSONObject: decoded.object,
@@ -936,6 +979,27 @@ public final class WafraMessageHistoryStore {
 
   private func decodeRecord(_ input: String) -> (id: String, object: [String: Any])? {
     guard
+      let decoded = decodeRecordFields(input),
+      let receivedAt = decoded.object["receivedAt"] as? String,
+      Self.validInstant(receivedAt, now: nowProvider())
+    else { return nil }
+    return decoded
+  }
+
+  private func decodeShortcutRecord(_ input: String) -> (id: String, object: [String: Any])? {
+    // Duplicate member names and the entire v1 schema are checked on the
+    // original JSON, before an offset timestamp can be replaced.
+    guard
+      var decoded = decodeRecordFields(input),
+      let receivedAt = decoded.object["receivedAt"] as? String,
+      let canonical = Self.normalizeShortcutInstant(receivedAt, now: nowProvider())
+    else { return nil }
+    decoded.object["receivedAt"] = canonical
+    return decoded
+  }
+
+  private func decodeRecordFields(_ input: String) -> (id: String, object: [String: Any])? {
+    guard
       let data = input.data(using: .utf8),
       Self.hasUniqueJSONMemberNames(data),
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -956,8 +1020,7 @@ public final class WafraMessageHistoryStore {
       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       let textData = text.data(using: .utf8),
       textData.count <= Self.maxTextBytes,
-      let receivedAt = object["receivedAt"] as? String,
-      Self.validInstant(receivedAt, now: nowProvider())
+      let receivedAt = object["receivedAt"] as? String
     else { return nil }
 
     var normalized: [String: Any] = [
@@ -1254,6 +1317,60 @@ public final class WafraMessageHistoryStore {
       in: value,
       range: NSRange(value.startIndex..., in: value)
     ) != nil
+  }
+
+  private static func normalizeShortcutInstant(_ value: String, now: Date) -> String? {
+    let range = NSRange(value.startIndex..., in: value)
+    guard let match = shortcutInstant.firstMatch(in: value, range: range) else { return nil }
+    func part(_ index: Int) -> String? {
+      guard let range = Range(match.range(at: index), in: value) else { return nil }
+      return String(value[range])
+    }
+    guard
+      let year = part(1).flatMap(Int.init), year > 0,
+      let month = part(2).flatMap(Int.init), (1...12).contains(month),
+      let day = part(3).flatMap(Int.init),
+      let hour = part(4).flatMap(Int.init), (0...23).contains(hour),
+      let minute = part(5).flatMap(Int.init), (0...59).contains(minute),
+      let second = part(6).flatMap(Int.init), (0...59).contains(second),
+      let zone = part(8)
+    else { return nil }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    let daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    guard (1...daysInMonth[month - 1]).contains(day) else { return nil }
+
+    var offsetSeconds = 0
+    if zone != "Z" {
+      // RFC 3339 -00:00 denotes an unknown offset, not a known UTC instant.
+      // The producer contract supports civil offsets through +/-14:00.
+      guard zone != "-00:00" else { return nil }
+      let bytes = Array(zone.utf8)
+      let hours = Int(bytes[1] - 48) * 10 + Int(bytes[2] - 48)
+      let minutes = Int(bytes[4] - 48) * 10 + Int(bytes[5] - 48)
+      guard hours <= 14, minutes <= 59, hours < 14 || minutes == 0 else { return nil }
+      offsetSeconds = (hours * 3600 + minutes * 60) * (bytes[0] == 45 ? -1 : 1)
+    }
+
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let fields = DateComponents(year: year, month: month, day: day,
+      hour: hour, minute: minute, second: second)
+    guard let wallDate = calendar.date(from: fields) else { return nil }
+    let back = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: wallDate)
+    guard back.year == year, back.month == month, back.day == day,
+      back.hour == hour, back.minute == minute, back.second == second else { return nil }
+    let instant = wallDate.addingTimeInterval(-Double(offsetSeconds))
+    let utcFields = calendar.dateComponents([.era, .year], from: instant)
+    guard utcFields.era == 1, let utcYear = utcFields.year, (1...9999).contains(utcYear) else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.formatOptions = [.withInternetDateTime]
+    let wholeSeconds = formatter.string(from: instant)
+    guard wholeSeconds.hasSuffix("Z") else { return nil }
+    // Carry the exact fraction as text: Date/formatter floating-point rounding
+    // must never turn .001 into .000 or .999 into the following second.
+    let canonical = String(wholeSeconds.dropLast()) + "." + (part(7) ?? "000") + "Z"
+    return validInstant(canonical, now: now) ? canonical : nil
   }
 
   private static func validInstant(_ value: String, now: Date) -> Bool {

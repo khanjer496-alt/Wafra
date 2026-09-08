@@ -42,6 +42,7 @@ const expectedHistoryIdentifiers = [
   'PrepareWafraHistoryMessageV2Intent',
   'PrepareWafraHistoryMessageV3Intent',
   'StageWafraMessageHistoryIntent',
+  'StageWafraShortcutHistoryIntent',
 ];
 const actualHistoryIdentifiers = Object.keys(actions)
   .filter((identifier) => /Wafra.*History.*Intent$/.test(identifier))
@@ -116,6 +117,21 @@ const expectedLowLevelIntents = [
   },
   {
     identifier: 'StageWafraMessageHistoryIntent',
+    authenticationPolicy: 0,
+    outputTypeIdentifier: 0,
+    parameters: [
+      { name: 'sessionId', type: 'primitive', typeIdentifier: 0, isOptional: false,
+        titleKey: 'history.session_id.parameter' },
+      { name: 'authorizationSecret', type: 'primitive', typeIdentifier: 0, isOptional: false,
+        titleKey: 'history.authorization.parameter' },
+      { name: 'chunkIndex', type: 'primitive', typeIdentifier: 2, isOptional: false,
+        titleKey: 'history.chunk.parameter' },
+      { name: 'records', type: 'array', typeIdentifier: 0, isOptional: false,
+        titleKey: 'history.records.parameter' },
+    ],
+  },
+  {
+    identifier: 'StageWafraShortcutHistoryIntent',
     authenticationPolicy: 0,
     outputTypeIdentifier: 0,
     parameters: [
@@ -275,7 +291,7 @@ for (const expected of expectedLowLevelIntents) {
   }
 }
 
-console.log('✓ extracted App Intents metadata has the exact ten-intent history contract');
+console.log('✓ extracted App Intents metadata has the exact eleven-intent history contract');
 NODE
 }
 
@@ -333,6 +349,9 @@ const expectedKeys = [
   'history.stage.description',
   'history.stage.error',
   'history.stage.title',
+  'history.stage_shortcut.title',
+  'history.stage_shortcut.description',
+  'history.stage_shortcut.error',
   'history.total_chunks.parameter',
 ].sort();
 const roots = [
@@ -356,7 +375,7 @@ for (const [label, root] of roots) {
     }
     const keys = Object.keys(table).sort();
     if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
-      console.error(`native-history-store.sh: ${label} ${locale} keys ${JSON.stringify(keys)} do not match the exact 46-key contract.`);
+      console.error(`native-history-store.sh: ${label} ${locale} keys ${JSON.stringify(keys)} do not match the exact ${expectedKeys.length}-key contract.`);
       process.exit(1);
     }
     if (Object.values(table).some((value) => typeof value !== 'string' || value.length === 0)) {
@@ -374,7 +393,7 @@ for (const label of roots.map(([value]) => value)) {
     process.exit(1);
   }
 }
-console.log('✓ app and nested resource bundles contain exact distinct EN+AR 46-key tables');
+console.log(`✓ app and nested resource bundles contain exact distinct EN+AR ${expectedKeys.length}-key tables`);
 NODE
 
   WAFRA_HISTORY_APP_BUNDLE="$app_bundle" \
@@ -382,6 +401,9 @@ NODE
 import Foundation
 let environment = ProcessInfo.processInfo.environment
 let keys = [
+  "history.stage_shortcut.title",
+  "history.stage_shortcut.description",
+  "history.stage_shortcut.error",
   "history.import.title",
   "history.import.description",
   "history.import.error",
@@ -429,7 +451,7 @@ for bundle in [resourceArabic, mainArabic] {
     }
   }
 }
-print("✓ both built bundles resolve all 28 bulk, prepared, and bounded Arabic localizations at runtime")
+print("✓ both built bundles resolve all 31 bulk, prepared, bounded, and Shortcut Arabic localizations at runtime")
 '
 }
 
@@ -450,11 +472,20 @@ if [ "${1:-}" = "--verify-history-resources" ]; then
   exit
 fi
 
+host_only=0
+if [ "${1:-}" = "--host-only" ] && [ "$#" -eq 1 ]; then
+  host_only=1
+elif [ "$#" -ne 0 ]; then
+  echo "usage: native-history-store.sh [--host-only]" >&2
+  exit 2
+fi
+
 if ! command -v swiftc >/dev/null 2>&1; then
   echo "native-history-store.sh: swiftc is required to test the iOS history bridge." >&2
   exit 1
 fi
 
+if [ "$host_only" -eq 0 ]; then
 generated_intent="ios/Wafra/WafraMessageHistoryIntent.swift"
 project_file="ios/Wafra.xcodeproj/project.pbxproj"
 plugin_file="modules/wafra-message-history/plugin/index.js"
@@ -469,6 +500,7 @@ done
 for intent in \
   BeginWafraHistoryImportIntent \
   StageWafraMessageHistoryIntent \
+  StageWafraShortcutHistoryIntent \
   FinishWafraHistoryImportIntent \
   ImportWafraMessageHistoryIntent \
   PrepareWafraHistoryMessageIntent \
@@ -494,6 +526,8 @@ grep -q "filePath: 'WafraMessageHistoryIntent.swift'" "$plugin_file" || {
   echo "native-history-store.sh: config plugin no longer generates the App Intent." >&2
   exit 1
 }
+
+fi
 
 test_dir="$(mktemp -d /tmp/wafra-native-history.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT
@@ -521,6 +555,11 @@ swiftc \
   -o "$test_dir/native-history-store-tests"
 
 "$test_dir/native-history-store-tests"
+
+if [ "$host_only" -eq 1 ]; then
+  echo "Host protocol checks only: app build, extracted metadata, and physical-device behavior NOT verified."
+  exit 0
+fi
 
 if ! command -v xcodebuild >/dev/null 2>&1; then
   echo "native-history-store.sh: xcodebuild is required to verify the iOS resource bundle." >&2

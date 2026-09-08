@@ -488,6 +488,189 @@ struct NativeHistoryStoreTests {
     }
   }
 
+  private static func testShortcutOffsetRecords() throws {
+    let accepted: [(String, String)] = [
+      ("2026-04-30T12:00:00.001+04:00", "2026-04-30T08:00:00.001Z"),
+      ("2026-04-30T12:00:00.999+04:00", "2026-04-30T08:00:00.999Z"),
+      ("2026-04-30T13:30:00.123+05:30", "2026-04-30T08:00:00.123Z"),
+      ("2026-04-30T13:45:00.001+05:45", "2026-04-30T08:00:00.001Z"),
+      ("2026-04-30T04:30:00.999-03:30", "2026-04-30T08:00:00.999Z"),
+      ("2026-05-01T00:00:00.001+14:00", "2026-04-30T10:00:00.001Z"),
+      ("2026-04-29T23:00:00.999-14:00", "2026-04-30T13:00:00.999Z"),
+      ("2026-01-01T00:00:00.001+04:00", "2025-12-31T20:00:00.001Z"),
+      ("2025-12-31T23:30:00.999-01:00", "2026-01-01T00:30:00.999Z"),
+      ("2024-03-01T00:00:00.000+01:00", "2024-02-29T23:00:00.000Z"),
+      ("2000-02-29T12:00:00Z", "2000-02-29T12:00:00.000Z"),
+      ("2024-02-29T12:00:00Z", "2024-02-29T12:00:00.000Z"),
+      ("2026-04-30T08:00:00+00:00", "2026-04-30T08:00:00.000Z"),
+      ("2026-05-01T04:05:00.000+04:00", "2026-05-01T00:05:00.000Z"),
+    ]
+    try withRoot("shortcut-offsets") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-offsets"
+      let secret = try store.beginSession(sessionId: sessionId)
+      let body = "  Synthetic \"quoted\" \\ path\nدفعة 🧾 e\u{301} é\tAED 12.00  "
+      let sender = "بنك TEST"
+      let inputs = accepted.enumerated().map { index, sample in
+        record(id: id("offset-\(index)"), text: body, sender: sender, receivedAt: sample.0)
+      }
+      let counts = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+      check("Shortcut offsets accept every full-field valid record", counts == WafraHistoryChunkCounts(attempted: inputs.count, accepted: inputs.count, skipped: 0))
+      check("Shortcut identical retry preserves receipt", try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs) == counts)
+      check("Shortcut staged records remain unavailable before Finish", try store.completedSession(sessionId: sessionId) == nil)
+      try store.finishSession(sessionId: sessionId, authorizationSecret: secret, totalChunks: 1, found: inputs.count, attempted: inputs.count, accepted: inputs.count, skipped: 0)
+      let stored = try store.readChunk(sessionId: sessionId, chunkIndex: 0)
+      check("Shortcut Finish preserves authoritative totals", try store.completedSession(sessionId: sessionId)?.accepted == inputs.count)
+      for (index, value) in stored.enumerated() {
+        let expected = record(id: id("offset-\(index)"), text: body, sender: sender, receivedAt: accepted[index].1)
+        check("Shortcut date case \(index) canonicalizes timestamp with exact body, sender, ID and milliseconds", Data(value.utf8) == Data(expected.utf8))
+      }
+      check("Shortcut completed manifest keeps existing schema", Set(try manifest(root, sessionId).keys) == Set(["state", "createdAt", "expiresAt", "chunks", "finalTotals"]))
+      try store.eraseAll()
+      check("Shortcut data uses existing full erase lifecycle", try store.completedSession(sessionId: sessionId) == nil)
+    }
+
+    let invalid = [
+      "2026-02-29T12:00:00Z", "1900-02-29T12:00:00Z", "2026-04-31T12:00:00Z",
+      "2026-13-01T12:00:00Z", "2026-00-01T12:00:00Z", "2026-01-00T12:00:00Z",
+      "0000-01-01T00:00:00Z", "0001-01-01T00:00:00+14:00",
+      "2026-04-30T24:00:00Z", "2026-04-30T14:60:00Z", "2026-04-30T14:00:60Z",
+      "2026-04-30T14:00:00", "2026-04-30T14:00:00.1Z", "2026-04-30T14:00:00.12Z",
+      "2026-04-30T14:00:00.9999Z", "2026-04-30T14:00:00-00:00",
+      "2026-04-30T14:00:00+14:01", "2026-04-30T14:00:00-14:01",
+      "2026-04-30T14:00:00+04:60", "2026-04-30T14:00:00+99:00",
+      "2026-04-30T14:00:00+0400", "2026-04-30T14:00:00Z ",
+      "2026-05-01T04:05:00.001+04:00", "2026-04-30T14:00:00Z\n",
+      "2026-04-30 14:00:00Z", "２０２６-04-30T14:00:00Z", "2026-04-30T14:00:00z",
+      "2026-04-30T14:00:00+٠٤:٠٠", "2026-04-30T14:00:00Zsuffix",
+    ]
+    try withRoot("shortcut-invalid") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-invalid"
+      let secret = try store.beginSession(sessionId: sessionId)
+      var inputs = invalid.enumerated().map { index, value in
+        record(id: id("invalid-offset-\(index)"), receivedAt: value)
+      }
+      let offsetRecord = record(id: id("offset-duplicate"), receivedAt: "2026-04-30T12:00:00.001+04:00")
+      inputs += [
+        offsetRecord.replacingOccurrences(of: "{", with: "{\"receivedAt\":\"2026-04-30T08:00:00Z\","),
+        offsetRecord.replacingOccurrences(of: "{", with: "{\"received\\u0041t\":\"2026-04-30T08:00:00Z\","),
+        offsetRecord.replacingOccurrences(of: "\"BANK\"", with: "{\"label\":1,\"label\":2}"),
+        record(receivedAt: "2026-04-30T12:00:00+04:00", version: 2),
+        record(receivedAt: "2026-04-30T12:00:00+04:00", extra: ["unknown": true]),
+        record(text: String(repeating: "x", count: WafraMessageHistoryStore.maxTextBytes + 1), receivedAt: "2026-04-30T12:00:00+04:00"),
+        record(id: "not-a-hash", receivedAt: "2026-04-30T12:00:00+04:00"),
+      ]
+      let counts = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+      check("Shortcut rejects invalid dates, duplicate JSON keys and invalid schema before normalization", counts == WafraHistoryChunkCounts(attempted: inputs.count, accepted: 0, skipped: inputs.count))
+    }
+  }
+
+  private static func testShortcutAuthenticationAndBounds() throws {
+    for reverse in [false, true] {
+      try withRoot("shortcut-cross-mode") { root in
+        let store = store(root: root)
+        let sessionId = "history-shortcut-cross-mode"
+        let secret = try store.beginSession(sessionId: sessionId)
+        let inputs = [record(receivedAt: "2026-04-30T12:00:00+04:00")]
+        let counts = try reverse
+          ? store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+          : store.stageChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+        check("legacy Stage still skips offsets; Shortcut Stage accepts them (reverse \(reverse))", counts.accepted == (reverse ? 1 : 0))
+        expects("cross-mode receipt replay is refused (reverse \(reverse))", .chunkConflict) {
+          _ = try reverse
+            ? store.stageChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+            : store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+        }
+        check("cross-mode conflict erases the invalid session", !FileManager.default.fileExists(atPath: root.appendingPathComponent(sessionId).path))
+      }
+    }
+    for shortcut in [false, true] {
+      try withRoot("shortcut-hmac") { root in
+        let store = store(root: root)
+        let sessionId = "history-shortcut-hmac"
+        let secret = try store.beginSession(sessionId: sessionId)
+        let inputs = [record(receivedAt: "2026-04-30T08:00:00.000Z"), "{\"v\":0}"]
+        _ = try shortcut
+          ? store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+          : store.stageChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs)
+        var requestBytes = Data()
+        if shortcut { requestBytes.append(Data("WafraMessageHistoryStore.stageShortcutChunk.v1\u{0}".utf8)) }
+        requestBytes.append(try JSONEncoder().encode(inputs))
+        let expected = HMAC<SHA256>.authenticationCode(for: requestBytes, using: SymmetricKey(data: decodedBase64URL(secret))).map { String(format: "%02x", $0) }.joined()
+        let chunks = try manifest(root, sessionId)["chunks"] as! [String: Any]
+        let summary = chunks["0"] as! [String: Any]
+        check("request HMAC authenticates original bytes with correct domain (Shortcut \(shortcut))", summary["requestAuthenticationCode"] as? String == expected)
+        if shortcut {
+          expects("equivalent normalized date does not allow a different original input retry", .chunkConflict) {
+            _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: [record(receivedAt: "2026-04-30T12:00:00.000+04:00"), "{\"v\":0}"])
+          }
+        }
+      }
+    }
+    try withRoot("shortcut-bounds") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-bounds"
+      let secret = try store.beginSession(sessionId: sessionId)
+      let inputs = (0..<50).map { record(id: id("fifty-\($0)"), receivedAt: "2026-04-30T12:00:00+04:00") }
+      check("Shortcut Stage accepts exactly 50 records", try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: inputs).accepted == 50)
+      expects("Shortcut Stage rejects more than 50 before decoding", .tooManyRecords) {
+        _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 1, records: Array(repeating: "not-json", count: 51))
+      }
+    }
+    try withRoot("shortcut-stored-strict") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-stored-strict"
+      let secret = try store.beginSession(sessionId: sessionId)
+      let original = record(receivedAt: "2026-04-30T12:00:00+04:00")
+      _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: [original])
+      try finishOne(store, sessionId: sessionId, secret: secret)
+      // Update even the digest and byte count: persisted verification must
+      // still reject the producer-only offset format after normalization.
+      let forgedData = try JSONEncoder().encode([original])
+      try writeProtectedForTest(forgedData, to: root.appendingPathComponent(sessionId).appendingPathComponent("chunk-0.json"))
+      try mutateManifest(root: root, sessionId: sessionId) { value in
+        var chunks = value["chunks"] as! [String: Any]
+        var summary = chunks["0"] as! [String: Any]
+        summary["contentDigest"] = SHA256.hash(data: forgedData).map { String(format: "%02x", $0) }.joined()
+        summary["serializedBytes"] = forgedData.count
+        chunks["0"] = summary
+        value["chunks"] = chunks
+      }
+      expects("stored v1 verification never accepts Shortcut offset strings", .storageFailure) {
+        _ = try store.readChunk(sessionId: sessionId, chunkIndex: 0)
+      }
+    }
+    try withRoot("shortcut-expiry") { root in
+      var now = fixedNow
+      let store = store(root: root, now: { now })
+      let sessionId = "history-shortcut-expiry"
+      let secret = try store.beginSession(sessionId: sessionId)
+      _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: [record()])
+      now = fixedNow.addingTimeInterval(WafraMessageHistoryStore.sessionTTL)
+      expects("Shortcut Stage preserves fixed session expiry", .sessionUnavailable) {
+        _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 1, records: [record(id: id("expired"))])
+      }
+      check("expired Shortcut session is removed", !FileManager.default.fileExists(atPath: root.appendingPathComponent(sessionId).path))
+    }
+    try withRoot("shortcut-duplicate-id") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-duplicate-id"
+      let secret = try store.beginSession(sessionId: sessionId)
+      expects("Shortcut Stage rejects duplicate IDs after date normalization", .duplicateRecord) {
+        _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: secret, chunkIndex: 0, records: [record(), record(receivedAt: "2026-04-30T12:00:00+04:00")])
+      }
+    }
+    try withRoot("shortcut-auth") { root in
+      let store = store(root: root)
+      let sessionId = "history-shortcut-auth"
+      _ = try store.beginSession(sessionId: sessionId)
+      expects("Shortcut Stage requires existing session authorization", .unauthorized) {
+        _ = try store.stageShortcutChunk(sessionId: sessionId, authorizationSecret: "wrong", chunkIndex: 0, records: [record()])
+      }
+    }
+  }
+
   private static func testJSONNestingLimit() throws {
     try withRoot("json-depth-boundary") { root in
       let store = store(root: root)
@@ -3736,6 +3919,8 @@ struct NativeHistoryStoreTests {
     run("core Begin/Stage/Finish protocol", testCoreProtocol)
     run("authorization and duplicate Begin", testAuthorizationAndBegin)
     run("record validation and sender normalization", testValidationAndNormalization)
+    run("Shortcut timestamp adapter", testShortcutOffsetRecords)
+    run("Shortcut authentication and bounds", testShortcutAuthenticationAndBounds)
     run("bounded JSON member scanning", testJSONNestingLimit)
     run("retry, digest, and duplicate-ID handling", testRetriesDigestsAndDuplicates)
     run("finish reconciliation", testFinishReconciliation)
