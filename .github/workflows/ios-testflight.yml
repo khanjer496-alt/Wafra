@@ -41,6 +41,17 @@ name: iOS build (TestFlight)
 on:
   workflow_dispatch:
     inputs:
+      build_host:
+        description: 'eas = hosted EAS build; github-macos = signed local EAS build on a GitHub macOS runner (history-beta only). Does not change an Expo subscription.'
+        type: choice
+        options:
+          - eas
+          - github-macos
+        default: eas
+      source_commit:
+        description: 'GitHub macOS only: optional exact 40-character main-line source commit. Keeps a build-tooling repair separate from the frozen app source.'
+        type: string
+        default: ''
       profile:
         description: 'history-beta = founder beta with current local Shortcuts. production / production-candidate = configured public runtime. preview = registered-device ad-hoc build.'
         type: choice
@@ -69,6 +80,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Two iOS builds at once would both bump the remote build number and race on
 # the same credentials. Never cancel one in flight: EAS has already started
@@ -83,6 +95,7 @@ defaults:
 
 jobs:
   build:
+    if: inputs.build_host != 'github-macos' || inputs.submit_build_id != ''
     runs-on: ubuntu-latest
     # Generous because `wait = true` sits through the EAS queue plus a ~20
     # minute iOS compile. The `wait = false` path exits in about three minutes
@@ -830,3 +843,175 @@ jobs:
       - name: Shred the API key
         if: always()
         run: rm -f "$RUNNER_TEMP/asc-api-key.p8"
+
+  local-build:
+    if: inputs.build_host == 'github-macos' && inputs.submit_build_id == ''
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      EXPO_NO_TELEMETRY: 1
+    steps:
+      - name: Validate the local build request
+        env:
+          PROFILE: ${{ inputs.profile }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          test "$PROFILE" = history-beta || { echo 'Local runner currently supports history-beta only.'; exit 1; }
+          test -n "$EXPO_TOKEN" || { echo 'EXPO_TOKEN is required for existing managed signing credentials.'; exit 1; }
+          if [ -n "$SOURCE_COMMIT" ]; then
+            printf '%s' "$SOURCE_COMMIT" | grep -qE '^[0-9a-f]{40}$' || exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Pin and verify main-line build source
+        run: |
+          SHA=$(git rev-parse HEAD)
+          git merge-base --is-ancestor "$SHA" origin/main
+          echo "SOURCE_COMMIT=$SHA" >> "$GITHUB_ENV"
+          node scripts/check-design-baseline.mjs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Select stable Xcode 26.2 or newer
+        run: |
+          BEST=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
+          test -n "$BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if (!(major>26 || (major===26 && minor>=2))) process.exit(1)' "$VER"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install local build toolchain
+        run: |
+          gem install fastlane -v 2.238.0 --no-document
+          gem install cocoapods -v 1.16.2 --no-document
+          npm ci
+          npm install -g eas-cli@22.4.0
+          eas --version
+          fastlane --version
+          pod --version
+
+      - name: Prepare existing Apple credentials without printing them
+        env:
+          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          python3 <<'PY'
+          import base64,json,os,pathlib
+          env=pathlib.Path(os.environ['GITHUB_ENV'])
+          team=json.loads(pathlib.Path('eas.json').read_text())['submit']['production']['ios']['appleTeamId']
+          values=[os.environ.get(k,'') for k in ('ASC_KEY_P8','ASC_KEY_ID','ASC_ISSUER_ID')]
+          if any(values) and not all(values): raise SystemExit('App Store Connect credentials are incomplete')
+          with env.open('a') as out:
+              out.write('EXPO_APPLE_TEAM_ID='+team+'\n')
+              if all(values):
+                  raw=values[0].encode()
+                  if b'BEGIN PRIVATE KEY' not in raw: raw=base64.b64decode(raw,validate=True)
+                  if b'BEGIN PRIVATE KEY' not in raw: raise SystemExit('Invalid App Store Connect private-key format')
+                  target=pathlib.Path(os.environ['RUNNER_TEMP'])/'wafra-local-asc.p8'
+                  fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+                  with os.fdopen(fd,'wb') as key: key.write(raw)
+                  out.write('EXPO_ASC_API_KEY_PATH='+str(target)+'\n')
+                  out.write('EXPO_ASC_KEY_ID='+values[1]+'\n')
+                  out.write('EXPO_ASC_ISSUER_ID='+values[2]+'\n')
+          PY
+
+      - name: Validate beta configuration and native adapter contract
+        run: |
+          node scripts/check-release-config.mjs --intent build --platform ios --profile history-beta --submit false
+          npm run update:check
+          node scripts/test/ios-history-native-contract.test.js
+
+      - name: Build signed iOS archive on this macOS runner
+        run: |
+          eas build --platform ios --profile history-beta --local --non-interactive \
+            --freeze-credentials --output "$RUNNER_TEMP/Wafra-local.ipa"
+
+      - name: Verify the actual signed IPA and App Intent resources
+        id: ipa
+        run: |
+          unzip -tq "$RUNNER_TEMP/Wafra-local.ipa"
+          mkdir -p "$RUNNER_TEMP/wafra-ipa-check" artifacts/ios-local
+          ditto -x -k "$RUNNER_TEMP/Wafra-local.ipa" "$RUNNER_TEMP/wafra-ipa-check"
+          APP="$RUNNER_TEMP/wafra-ipa-check/Payload/Wafra.app"
+          test -d "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d --entitlements :- "$APP" > "$RUNNER_TEMP/wafra-entitlements.plist"
+          security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"
+          bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$APP/Metadata.appintents/extract.actionsdata"
+          bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$APP/WafraMessageHistoryResources.bundle"
+          export APP
+          python3 <<'PY'
+          import hashlib,json,os,pathlib,plistlib,shutil
+          temp=pathlib.Path(os.environ['RUNNER_TEMP']); app=pathlib.Path(os.environ['APP'])
+          info=plistlib.loads((app/'Info.plist').read_bytes())
+          ent=plistlib.loads((temp/'wafra-entitlements.plist').read_bytes())
+          profile=plistlib.loads((temp/'wafra-profile.plist').read_bytes())
+          team=os.environ['EXPO_APPLE_TEAM_ID']
+          assert info['CFBundleIdentifier']=='app.wafra.ios'
+          assert ent['application-identifier']==team+'.app.wafra.ios'
+          assert ent.get('get-task-allow') is False
+          assert ent.get('aps-environment')=='production'
+          assert team in profile['TeamIdentifier']
+          assert 'ProvisionedDevices' not in profile and not profile.get('ProvisionsAllDevices',False)
+          actions=json.loads((app/'Metadata.appintents/extract.actionsdata').read_text())['actions']
+          assert 'StageWafraLiveMessageIntent' in actions and 'RecordWafraCaptureSetupProofIntent' in actions
+          assert 'ProbeWafraAutomationInputIntent' not in actions
+          number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
+          source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
+          shutil.copyfile(source,target)
+          report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':'history-beta',
+              'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
+              'sha256':hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),'bytes':target.stat().st_size,
+              'intentCount':len(actions),'storeSigningVerified':True,'physicalCaptureVerified':False}
+          pathlib.Path('artifacts/ios-local/verification.json').write_text(json.dumps(report,indent=2)+'\n')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('build_number='+number+'\n'); out.write('ipa_path='+str(target)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+
+      - name: Preserve verified installer before submission
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-ios-local-${{ steps.ipa.outputs.build_number }}
+          path: artifacts/ios-local/
+          retention-days: 14
+
+      - name: Require successful exact-source CI before TestFlight submission
+        if: inputs.submit
+        run: |
+          for attempt in $(seq 1 30); do
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SOURCE_COMMIT" \
+              --limit 10 --json status,conclusion > "$RUNNER_TEMP/wafra-source-ci.json"
+            if node -e 'const r=require(process.argv[1]); process.exit(r.some(x=>x.status==="completed"&&x.conclusion==="success")?0:1)' "$RUNNER_TEMP/wafra-source-ci.json"; then
+              exit 0
+            fi
+            sleep 20
+          done
+          echo 'Exact-source CI has not passed. Verified IPA retained; no TestFlight submission.'
+          exit 1
+
+      - name: Submit the verified existing IPA to TestFlight
+        if: inputs.submit
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.ipa_path }}
+        run: eas submit --platform ios --profile history-beta --path "$IPA_PATH" --non-interactive
+
+      - name: Remove temporary Apple API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/wafra-local-asc.p8"

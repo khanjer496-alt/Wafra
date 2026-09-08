@@ -33,3 +33,19 @@ not evidence of faster real-inbox extraction or complete large-inbox coverage.
 The current published history Shortcut and its existing coverage limitation
 remain unchanged until a replacement producer is separately exercised on an
 iPhone and its graph is deliberately published.
+
+## Signed beta build when hosted EAS capacity is unavailable
+
+The canonical `ios-testflight.yml` also supports an explicitly selected
+`build_host=github-macos` route for `history-beta`. It runs the documented
+`eas build --local` process on a GitHub macOS runner with Xcode 26.2 or newer,
+Node 22.22.3 and existing managed signing credentials. It does not change an
+Expo subscription. GitHub runner usage is still consumed.
+
+An optional full `source_commit` pins a main-line application revision while a
+short-lived build-tooling branch is being repaired. The checkout verifies main
+ancestry; no encoded source replacement or different app branch is used. Before
+submission, the workflow verifies store signing, identity, release entitlements,
+the actual compiled history metadata and EN/AR resources, and successful CI for
+that exact source. The IPA and a source/hash report are retained before upload to
+TestFlight so a submission failure does not require rebuilding.
