@@ -34,6 +34,7 @@ import {
   normalizeUnparsedLaunchTemplate,
 } from '@/lib/unparsed-launch-alert';
 import {
+  isBankNotificationCaptureAvailable,
   trustedBankNotificationMarket,
   trustedBankNotificationSender,
 } from '@/lib/trusted-bank-notification-packages';
@@ -729,7 +730,9 @@ export async function scanInbox(
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
   const notificationReader = NotificationReader;
-  if (inboxHistoryComplete && notificationReader?.isEnabled?.()) {
+  if (inboxHistoryComplete && notificationReader &&
+    isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true) &&
+    notificationReader?.isEnabled?.()) {
     try {
       // This queue has its own explicit acknowledgement. Always read every
       // retained row: using the ledger watermark here could strand an older

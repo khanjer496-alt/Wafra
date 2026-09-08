@@ -57,7 +57,7 @@ import {
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { IosSetupJourney } from '@/components/ios-message-setup/setup-journey';
-import { detectedSetupBanks, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
+import { canFinishIosMessageSetup, detectedSetupBanks, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
   version: 1,
@@ -130,12 +130,13 @@ export default function IosSetupScreen() {
   const [shortcutsMissing, setShortcutsMissing] = useState(false);
   const [showAutomationGuide, setShowAutomationGuide] = useState(false);
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
+  const [skipHistoryVisible, setSkipHistoryVisible] = useState(false);
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
   const futureConfigured = futureSetupConfigured(setup.readiness, progress.futureAutomationConfirmed);
   const setupComplete = progressLoaded && !setup.loading &&
-    futureConfigured && progress.historyStatus === 'complete';
+    canFinishIosMessageSetup(progress, setup.readiness);
 
   useEffect(() => {
     screenActive.current = true;
@@ -446,6 +447,66 @@ export default function IosSetupScreen() {
     }, t('historyCancelCleanupFailed'));
   }, [historySetup.handoffStartedAt, runOperation, updateProgress]);
 
+  const skipHistory = useCallback(() => {
+    setSkipHistoryVisible(false);
+    void runOperation(async () => {
+      // Recheck the native action after the confirmation sheet. This choice
+      // cannot enable capture or replace the owner's automation confirmation.
+      await send({ type: 'refresh-status' });
+      const current = await loadIosMessageSetupProgress();
+      const readiness = controllerRef.current?.getModel().readiness ?? 'not-added';
+      if (!futureSetupConfigured(readiness, current.futureAutomationConfirmed)) {
+        if (screenActive.current) setLocalError(t('iosMessageFutureBeforeSkip'));
+        return;
+      }
+      if (current.historyStatus === 'complete') return;
+      const native = await historyNativeModule();
+      await iosHistorySetupStorageCoordinator.run(async () => {
+        // Read the durable marker under the same lock used by import/reset.
+        // An unavailable lookup must preserve recovery, including expired
+        // handoffs whose completed protected session is still readable.
+        const reconciliation = await reconcileIosHistorySetup({ native });
+        if (screenActive.current) {
+          setHistorySetup({
+            installed: reconciliation.snapshot.installed,
+            handoffStartedAt: reconciliation.snapshot.handoffStartedAt,
+          });
+        }
+        if (reconciliation.snapshot.expired && reconciliation.recoveredSessionId !== null) {
+          // Expiry hides the original timestamp from the visible snapshot.
+          // A late completed session may belong to a different attempt than
+          // the one confirmed here. Preserve it for explicit review/decline.
+          router.replace({ pathname: '/import-sms', params: { history: reconciliation.recoveredSessionId } });
+          return;
+        }
+        if (reconciliation.snapshot.handoffStartedAt !== null &&
+          reconciliation.snapshot.handoffStartedAt !== historySetup.handoffStartedAt) {
+          if (screenActive.current) setLocalError(t('iosMessageSkipHistoryChanged'));
+          return;
+        }
+        await cancelIosHistoryHandoff({
+          recover: async () => reconciliation.recoveredSessionId,
+          discard: (sessionId) => native.discardSession(sessionId),
+          clearHandoff: async () => {
+            await clearIosHistoryHandoff();
+            await clearIosHistoryReturnOrigin();
+          },
+        });
+        if (screenActive.current) {
+          setHistorySetup((value) => ({ ...value, handoffStartedAt: null }));
+        }
+        await updateProgress({ type: 'history-skipped-for-now', readiness });
+      });
+    }, t('historyCancelCleanupFailed'));
+  }, [historySetup.handoffStartedAt, router, runOperation, send, updateProgress]);
+
+  const resumeHistory = useCallback(() => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'history-status-changed', status: 'not-started' });
+      await updateProgress({ type: 'active-section-changed', section: 'history' });
+    });
+  }, [runOperation, updateProgress]);
+
   useEffect(() => {
     const startedAt = historySetup.handoffStartedAt;
     if (startedAt === null || busy) return;
@@ -457,6 +518,11 @@ export default function IosSetupScreen() {
   const finish = useCallback(() => {
     if (!setupComplete) return;
     void runOperation(async () => {
+      await send({ type: 'refresh-status' });
+      const current = await loadIosMessageSetupProgress();
+      if (screenActive.current) setProgress(current);
+      if (!canFinishIosMessageSetup(current,
+        controllerRef.current?.getModel().readiness ?? 'not-added')) return;
       if (fromOnboarding) {
         const outcome = await completeIosMessageOnboardingAttempt({
           retryRequired: finishRetryRequired,
@@ -490,6 +556,7 @@ export default function IosSetupScreen() {
     setupComplete,
     router,
     runOperation,
+    send,
     setOnboarded,
     updateProgress,
   ]);
@@ -518,6 +585,7 @@ export default function IosSetupScreen() {
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
   const historyRunning = historySetup.handoffStartedAt !== null;
   const historyComplete = progress.historyStatus === 'complete';
+  const historyDeferred = progress.historyStatus === 'skipped' && progress.historySkippedForNow === true;
   const showingAutomation = futureStep === 'create-automation' ||
     futureStep === 'prove-shortcut' || showAutomationGuide;
 
@@ -607,11 +675,17 @@ export default function IosSetupScreen() {
               <ChecklistRow
                 step={1}
                 title={t('iosMessagePastTitle')}
-                detail={historyComplete ? t('iosMessageHistoryDone') : undefined}
+                detail={historyComplete ? t('iosMessageHistoryDone')
+                  : historyDeferred ? t('iosMessageHistoryDeferred') : undefined}
                 status={progress.historyStatus}
                 expanded={progress.activeSection === 'history'}
                 onPress={() => selectSection('history')}>
-                {!historySupported || !historyReady || !historyInstallUrl ? (
+                {historyDeferred ? (
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessageHistoryDeferredHelp')}</ThemedText>
+                    <Button label={t('iosMessageResumeHistory')} variant="ghost" onPress={resumeHistory} disabled={busy} wrapLabel />
+                  </>
+                ) : !historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">
                     {t(!historySupported ? 'historyRequiresIos26'
                       : !historyReady ? 'iosLocalUpdateRequired' : 'historyInstallUnavailable')}
@@ -624,8 +698,6 @@ export default function IosSetupScreen() {
                           : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp')}
                     </ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary">{journeyCopy.historyRequest}</ThemedText>
-                    {historyRunning && <Button label={journeyCopy.configureWhileImporting} variant="ghost"
-                      onPress={() => selectSection('future')} disabled={busy} wrapLabel />}
                     {!historyRunning && (
                       <View style={styles.hints}>
                         <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
@@ -635,6 +707,14 @@ export default function IosSetupScreen() {
                     )}
                   </>
                 ) : null}
+                {!historyComplete && !historyDeferred && (
+                  <>
+                    {!futureConfigured && <Button label={t('iosMessageNextFuture')} variant="ghost"
+                      onPress={() => selectSection('future')} disabled={busy} wrapLabel />}
+                    <Button label={t('iosMessageSkipHistory')} variant="ghost"
+                      onPress={() => setSkipHistoryVisible(true)} disabled={busy || !futureConfigured} wrapLabel />
+                  </>
+                )}
               </ChecklistRow>
               <ChecklistRow
                 step={2}
@@ -695,6 +775,14 @@ export default function IosSetupScreen() {
         <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
           <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
         </View>
+        <ConfirmSheet
+          visible={skipHistoryVisible}
+          onClose={() => setSkipHistoryVisible(false)}
+          question={t(historyRunning ? 'iosMessageResetHistoryTitle' : 'iosMessageSkipHistoryTitle')}
+          body={t(historyRunning ? 'iosMessageSkipStoppedHistoryBody' : 'iosMessageSkipHistoryBody')}
+          confirmLabel={t('iosMessageSkipHistory')}
+          onConfirm={skipHistory}
+        />
         <ConfirmSheet
           visible={resetHistoryVisible}
           onClose={() => setResetHistoryVisible(false)}

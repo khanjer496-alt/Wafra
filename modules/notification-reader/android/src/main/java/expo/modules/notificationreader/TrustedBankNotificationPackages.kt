@@ -13,11 +13,10 @@ import android.os.Build
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.
  */
 object TrustedBankNotificationPackages {
-  // Keep the UI/listener unavailable until each enabled package has real,
-  // held-out positive and marketing/OTP/balance negative notification
-  // templates. The encrypted queue can ship dormant without risking false
-  // ledger entries; enabling it is an evidence change, not a code shortcut.
-  const val CAPTURE_ENABLED = false
+  // Production remains closed pending package-specific held-out positive and
+  // marketing/OTP/balance-negative evidence. An explicitly requested test APK
+  // may enable the existing admission path without changing its trust rules.
+  val CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA
 
   val markets: Map<String, String> = mapOf(
     "com.emiratesnbd.android" to "AE",

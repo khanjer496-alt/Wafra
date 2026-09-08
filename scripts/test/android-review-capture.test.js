@@ -72,6 +72,7 @@ let inboxRows = [
 ];
 let receivedRows = [{ address: 'BNPPARIBAS', body: france, date: NOW + 1_500 }];
 let notificationsEnabled = true;
+process.env.EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA = '1';
 const acknowledgedNotifications = [];
 const notificationReadSince = [];
 const inboxReadCursors = [];
@@ -98,6 +99,7 @@ const smsReader = {
   },
 };
 const notificationReader = {
+  isAvailable: () => true,
   isEnabled: () => notificationsEnabled,
   async getCaptured(sinceMs) {
     notificationReadSince.push(sinceMs);

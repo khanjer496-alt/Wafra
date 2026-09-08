@@ -6,10 +6,19 @@ plugins {
 group = 'expo.modules.notificationreader'
 version = '0.1.0'
 
+// Test APKs opt in explicitly on both native and JavaScript sides. Missing,
+// mismatched or ordinary production build environments remain closed.
+def notificationCaptureBetaEnabled = System.getenv('WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1' &&
+    System.getenv('EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1'
+
 android {
   namespace "expo.modules.notificationreader"
+  buildFeatures {
+    buildConfig true
+  }
   defaultConfig {
     versionCode 1
     versionName '0.1.0'
+    buildConfigField 'boolean', 'WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA', notificationCaptureBetaEnabled.toString()
   }
 }

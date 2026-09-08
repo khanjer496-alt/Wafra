@@ -117,6 +117,7 @@ import {
 import { ClearAllError, useStore } from '@/lib/store';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
+import { isBankNotificationCaptureAvailable } from '@/lib/trusted-bank-notification-packages';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
 import {
@@ -559,16 +560,27 @@ export default function SettingsScreen() {
   };
 
   const notifAvailable = Platform.OS === 'android' &&
-    NotificationReader?.isAvailable?.() === true;
-  const notifEnabled = notifAvailable && NotificationReader != null && NotificationReader.isEnabled();
+    isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  useEffect(() => {
+    const refresh = () => {
+      try { setNotifEnabled(notifAvailable && NotificationReader?.isEnabled() === true); }
+      catch { setNotifEnabled(false); }
+    };
+    refresh();
+    const subscription = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') refresh();
+    });
+    return () => subscription.remove();
+  }, [notifAvailable]);
   const onNotificationAccess = () => {
     if (!notifAvailable || !NotificationReader) {
       Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
     setConfirmation({
-      question: t('bankAppNotifsTitle'),
-      body: t('notifAccessFull'),
+      question: t('bankAppNotifsBetaTitle'),
+      body: t('notifAccessBetaFull'),
       confirmLabel: notifEnabled ? t('openSettings') : t('enableAction'),
       onConfirm: () => NotificationReader?.openSettings(),
     });
@@ -1249,8 +1261,8 @@ export default function SettingsScreen() {
             )}
           {notifAvailable &&
             linkRow(
-              t('bankAppNotifsTitle'),
-              t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
+              t('bankAppNotifsBetaTitle'),
+              t(notifEnabled ? 'bankPushBetaOn' : 'bankPushBetaOff'),
               gated(onNotificationAccess),
               { last: true, pro: true },
             )}
@@ -1343,11 +1355,9 @@ export default function SettingsScreen() {
 
         {panel === 'privacy' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('dataHeader')} />
-          {linkRow(
+          {reviewAlertCount > 0 && linkRow(
             t('reviewAlertsTitle'),
-            reviewAlertCount > 0
-              ? tf('reviewAlertsSettingsCount', { count: reviewAlertCount })
-              : t('reviewAlertsNone'),
+            tf('reviewAlertsSettingsCount', { count: reviewAlertCount }),
             () => router.push('/review-alerts'),
           )}
           {linkRow(

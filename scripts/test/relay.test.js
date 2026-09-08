@@ -3281,6 +3281,113 @@ async function queueItem(id, row, publicKey) {
           events, ['stage']);
       }
 
+      // Use the shipping background queue writer and executor together. The
+      // staged queue may be the only copy of already acknowledged rows, so
+      // capacity must reject the entire new delivery before writing or ACK.
+      {
+        const queueHarness = (existing) => {
+          let stored = JSON.stringify(existing);
+          let delivery = [];
+          const events = [];
+          const backgroundModule = execute('src/lib/background-relay.ts', (id) => {
+            if (id === 'expo-constants') return { __esModule: true, default: {} };
+            if (id === 'expo-notifications') return {};
+            if (id === 'expo-task-manager') return { defineTask() {} };
+            if (id === 'react-native') return { Platform: { OS: 'web' } };
+            if (id === '@/lib/capture-executor') return {
+              createCaptureExecutor: ({ background }) => executorModule.createCaptureExecutor({
+                background: {
+                  ...background,
+                  announce: async (rows) => void events.push(`announce:${rows.length}`),
+                },
+                dependencies: {
+                  getBackgroundRelay: async () => ({ setupState: 'verified' }),
+                  sync: async () => ({
+                    parsed: delivery, ids: delivery.map((_, index) => `source-${index}`),
+                    testIds: [], unreadable: 0, testReceived: 0,
+                    shortcutRows: 0, shortcutRowsWithBank: 0,
+                  }),
+                  acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.length}`),
+                },
+              }),
+            };
+            if (id === '@/lib/charge-alert') return { buildChargeAlert: () => null };
+            if (id === '@/lib/i18n') return { detectLanguage: () => 'en', getLanguage: () => 'en' };
+            if (id === '@/lib/notifications') return {};
+            if (id === '@/lib/relay') return {};
+            if (id === '@/lib/background-relay-storage') return {
+              backgroundRelayStorage: {
+                getItem: async () => stored,
+                setItem: async (_key, value) => { events.push('write'); stored = value; },
+              },
+            };
+            throw new Error(`unexpected queue capacity dependency ${id}`);
+          });
+          return {
+            events,
+            snapshot: () => stored,
+            rows: () => JSON.parse(stored),
+            deliver: async (rows) => {
+              delivery = rows;
+              events.length = 0;
+              let rejected = false;
+              try { await backgroundModule.syncRelayInBackground(); } catch { rejected = true; }
+              return rejected;
+            },
+          };
+        };
+        const fullQueue = Array.from({ length: 1000 }, (_, index) => row(index + 1, `QUEUED-${index}`));
+        const full = queueHarness(fullQueue);
+        const original = full.snapshot();
+        ok('background capacity: a new unique row at capacity rejects the delivery',
+          await full.deliver([row(1001, 'NEW')]));
+        ok('background capacity: overflow preserves every acknowledged row byte-for-byte', full.snapshot() === original);
+        eq('background capacity: overflow never writes, announces or acknowledges', full.events, []);
+
+        const retry = queueHarness(fullQueue);
+        const replacement = { ...fullQueue[0], category: 'groceries' };
+        ok('background capacity: a retry at capacity can replace its existing row',
+          !await retry.deliver([replacement]));
+        eq('background capacity: retry preserves all rows and the replacement',
+          [retry.rows().length, retry.rows()[0]], [1000, replacement]);
+        eq('background capacity: retry is durable before ACK and announces no fresh rows',
+          retry.events, ['write', 'announce:0', 'ack:1']);
+
+        const oneSlot = queueHarness(fullQueue.slice(0, 999));
+        const duplicated = row(1000, 'DUPLICATED-DELIVERY');
+        ok('background capacity: duplicate rows consume only one unique slot',
+          !await oneSlot.deliver([duplicated, duplicated]));
+        eq('background capacity: the final slot is saved before both replay IDs are acknowledged',
+          [oneSlot.rows().length, oneSlot.events], [1000, ['write', 'announce:1', 'ack:2']]);
+
+        const oversized = queueHarness([]);
+        const emptySnapshot = oversized.snapshot();
+        ok('background capacity: an oversized unique incoming batch rejects',
+          await oversized.deliver([...fullQueue, row(1001, 'OVERFLOW')]));
+        ok('background capacity: an oversized batch cannot partially persist', oversized.snapshot() === emptySnapshot);
+        eq('background capacity: an oversized batch leaves every server source unacknowledged', oversized.events, []);
+
+        const legacy = queueHarness([...fullQueue, row(1001, 'LEGACY-OVER-CAPACITY')]);
+        const legacySnapshot = legacy.snapshot();
+        ok('background capacity: an already oversized stored queue blocks new staging',
+          await legacy.deliver([replacement]));
+        ok('background capacity: legacy over-capacity rows are never trimmed', legacy.snapshot() === legacySnapshot);
+        eq('background capacity: legacy overflow never crosses the durability boundary', legacy.events, []);
+        const emptyLegacy = queueHarness([...fullQueue, row(1001, 'LEGACY-OVER-CAPACITY')]);
+        ok('background capacity: an empty wake leaves an oversized queue available for foreground drain',
+          !await emptyLegacy.deliver([]) && emptyLegacy.snapshot() === legacySnapshot);
+
+        disk.clear();
+        stage([...fullQueue, row(1001, 'LEGACY-OVER-CAPACITY')]);
+        synced = { parsed: [], ids: [], testIds: [], unreadable: 0, testReceived: 0 };
+        const foreground = await capture.collectNewMessages(state);
+        eq('background capacity: foreground can recover every legacy over-capacity row',
+          foreground.parsed.length, 1001);
+        eq('background capacity: foreground collection retains its source until commit', staged().length, 1001);
+        await foreground.commit();
+        eq('background capacity: successful foreground commit releases the backlog', staged(), []);
+      }
+
       {
         let active = 0;
         let maximumActive = 0;

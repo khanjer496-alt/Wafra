@@ -23,7 +23,7 @@ function ok(name, condition, detail = '') {
 const ROOT = path.join(__dirname, '../..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 const route = read('src/app/review-alerts.tsx');
-const home = read('src/screens/ledger-home-screen.tsx');
+const home = read('src/screens/journal-home-screen.tsx');
 const settings = read('src/app/settings.tsx');
 const add = read('src/app/add-transaction.tsx');
 const store = read('src/lib/store.tsx');
@@ -70,19 +70,19 @@ ok('structured-only privacy is visible on the route',
   /t\('reviewAlertsPrivacy'\)/.test(route) &&
     /The bank-alert text is not stored/.test(copy));
 
-const captureAt = home.indexOf('<AutomaticCapture');
-const reviewAt = home.indexOf('<ReviewAlertsPrompt');
+const captureAt = home.indexOf('testID="journal-import-controls"');
+const reviewAt = home.indexOf('{reviewCount > 0 ?');
 ok('Home shows one aggregate review prompt below capture',
   /state\.reviewTray\.pending/.test(home) &&
-    /reviewAlertsHomeCount/.test(home) &&
+    /\{words\.review\} · \{reviewCount\}/.test(home) &&
     captureAt >= 0 && reviewAt > captureAt &&
     /router\.push\('\/review-alerts'\)/.test(home));
 ok('Home hides the prompt when there is nothing to review',
-  /if \(count === 0\) return null/.test(home));
-ok('Settings keeps a durable review-tray entry including the empty state',
+  /reviewCount > 0 \?/.test(home));
+ok('Settings exposes pending reviews without promoting an empty destination',
   /state\.reviewTray\.pending/.test(settings) &&
     /reviewAlertsSettingsCount/.test(settings) &&
-    /reviewAlertsNone/.test(settings) &&
+    /reviewAlertCount > 0 && linkRow\(/.test(settings) &&
     /router\.push\('\/review-alerts'\)/.test(settings));
 ok('review copy is localized in both supported UI languages',
   /reviewAlertsTitle:\s*\{\s*en:[^\n]+ar:/.test(copy) &&

@@ -37,7 +37,7 @@ test('guidance is translated, is not a bank picker, and retains the history-capa
   assert.match(journey.iosSetupJourneyCopy('en').historyRequest, /coverage/);
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');
   assert.ok(screen.indexOf("title={t('iosMessagePastTitle')}") < screen.indexOf("title={t('iosMessageFutureTitle')}"));
-  assert.match(screen, /futureConfigured && progress.historyStatus === 'complete'/);
+  assert.match(screen, /canFinishIosMessageSetup\(progress, setup\.readiness\)/);
 });
 
 function providerFor(rows) {

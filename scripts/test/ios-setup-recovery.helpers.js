@@ -3,7 +3,7 @@
 // not source spelling or callback mock counts.
 module.exports = async ({ execute, ok, eq, translated }) => {
   const disposers = [];
-  const makeScreen = async ({ available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, params = { fromOnboarding: '1' } } = {}) => {
+  const makeScreen = async ({ available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, params = { fromOnboarding: '1' } } = {}) => {
     const slots = [];
     const effects = [];
     let cursor = 0;
@@ -46,7 +46,12 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     }
     const storage = {
       async getItem(key) { return values.get(key) ?? null; },
-      async setItem(key, value) { values.set(key, value); },
+      async setItem(key, value) {
+        if (skipSaveFails && key === 'wafra/ios-message-setup-progress/v1' && JSON.parse(value).historySkippedForNow) {
+          throw new Error('storage unavailable');
+        }
+        values.set(key, value);
+      },
       async removeItem(key) { values.delete(key); },
     };
     const urls = [];
@@ -79,6 +84,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     const history = execute('src/lib/ios-history-setup.ts', { '@react-native-async-storage/async-storage': storage });
     const progress = execute('src/lib/ios-message-onboarding.ts', {
       '@react-native-async-storage/async-storage': storage, './ios-history-setup': history,
+      './ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),
     });
     const protocol = execute('src/lib/ios-local-capture-protocol.ts');
     const controller = execute('src/lib/ios-capture-setup.ts', {
@@ -182,6 +188,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       onboarded: () => onboarded,
       confirmReset: async () => {
         const sheet = all().find((node) => node.type === 'ConfirmSheet' && node.props.visible);
+        if (!sheet) return false;
+        sheet.props.onConfirm();
+        await settle();
+        return true;
+      },
+      confirmSkip: async () => {
+        const sheet = all().find((node) => node.type === 'ConfirmSheet' && node.props.visible &&
+          node.props.confirmLabel === translated('iosMessageSkipHistory', 'en'));
         if (!sheet) return false;
         sheet.props.onConfirm();
         await settle();
@@ -299,7 +313,148 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     [ready.saved().futureStatus, ready.saved().historyStatus, ready.saved().returnToOnboarding, ready.onboarded()],
     ['complete', 'not-started', true, false]);
 
-  const skippedHistory = await makeScreen({ progress: { historyStatus: 'skipped' } });
+  eq('iOS setup: skipping history is unavailable without configured future capture',
+    await noHistoryBridge.press('iosMessageSkipHistory'), false);
+  ok('iOS setup: an unfinished history can lead to future setup before importing anything',
+    await directHistory.press('iosMessageNextFuture') && directHistory.saved().activeSection === 'future');
+  ok('iOS setup: future-ready users explicitly review the future-only choice',
+    await ready.press('iosMessageSkipHistory'));
+  eq('iOS setup: opening skip confirmation does not change history or finish onboarding',
+    [ready.saved().historyStatus, ready.onboarded()], ['not-started', false]);
+  ok('iOS setup: explicit skip is persisted without importing past messages', await ready.confirmSkip());
+  eq('iOS setup: skipping preserves automation confirmation and truthful history status',
+    [ready.saved().historySkippedForNow, ready.saved().historyStatus, ready.saved().futureAutomationConfirmed,
+      ready.nativeStatus.firstCapturedAt, ready.preferenceEvents],
+    [true, 'skipped', true, null, []]);
+  ok('iOS setup: future-only choice permits the normal durable finish action', await ready.press('iosMessageContinue'));
+  eq('iOS setup: future-only onboarding clears its return marker and reaches Home',
+    [ready.saved().returnToOnboarding, ready.onboarded(), ready.routes.at(-1)], [false, true, '/']);
+
+  const deferredRelaunch = await makeScreen({ params: { section: 'history' }, progress: ready.saved() });
+  deferredRelaunch.nativeStatus.enabled = true;
+  deferredRelaunch.nativeStatus.setupProofVersion = 1;
+  await deferredRelaunch.foreground();
+  ok('iOS setup: relaunch retains the explicit choice and a Settings history resume action',
+    deferredRelaunch.saved().historySkippedForNow && await deferredRelaunch.press('iosMessageResumeHistory'));
+  eq('iOS setup: resuming history removes the skip but preserves future automation',
+    [deferredRelaunch.saved().historySkippedForNow, deferredRelaunch.saved().historyStatus,
+      deferredRelaunch.saved().futureAutomationConfirmed, !!deferredRelaunch.button('historyAddAction')],
+    [undefined, 'not-started', true, true]);
+
+  const staleSkip = await makeScreen({ params: { section: 'history' }, progress: { futureAutomationConfirmed: true } });
+  staleSkip.nativeStatus.enabled = true;
+  staleSkip.nativeStatus.setupProofVersion = 1;
+  await staleSkip.foreground();
+  await staleSkip.press('iosMessageSkipHistory');
+  staleSkip.nativeStatus.enabled = false;
+  await staleSkip.confirmSkip();
+  eq('iOS setup: readiness is refreshed when confirming skip, so stale native proof cannot finish',
+    [staleSkip.saved().historySkippedForNow, staleSkip.saved().historyStatus, staleSkip.onboarded()],
+    [undefined, 'not-started', false]);
+
+  const staleFinish = await makeScreen({ progress: { futureAutomationConfirmed: true,
+    historyStatus: 'skipped', historySkippedForNow: true } });
+  staleFinish.nativeStatus.enabled = true;
+  staleFinish.nativeStatus.setupProofVersion = 1;
+  await staleFinish.foreground();
+  staleFinish.nativeStatus.enabled = false;
+  await staleFinish.press('iosMessageContinue');
+  eq('iOS setup: Finish also refreshes proof while preserving the earlier deliberate history choice',
+    [staleFinish.onboarded(), staleFinish.saved().historySkippedForNow, staleFinish.saved().returnToOnboarding],
+    [false, true, true]);
+
+  const failedSkipSave = await makeScreen({ skipSaveFails: true, params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true } });
+  failedSkipSave.nativeStatus.enabled = true;
+  failedSkipSave.nativeStatus.setupProofVersion = 1;
+  await failedSkipSave.foreground();
+  await failedSkipSave.press('iosMessageSkipHistory');
+  await failedSkipSave.confirmSkip();
+  eq('iOS setup: a failed skip save cannot finish setup or change capture opt-in',
+    [failedSkipSave.saved().historySkippedForNow, failedSkipSave.saved().historyStatus,
+      !!failedSkipSave.button('iosMessageDone'), failedSkipSave.preferenceEvents],
+    [undefined, 'not-started', false, []]);
+
+  const futureWithoutHistory = await makeScreen({ historyAvailable: false, params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true } });
+  futureWithoutHistory.nativeStatus.enabled = true;
+  futureWithoutHistory.nativeStatus.setupProofVersion = 1;
+  await futureWithoutHistory.foreground();
+  await futureWithoutHistory.press('iosMessageSkipHistory');
+  ok('iOS setup: unavailable history with no handoff can be explicitly skipped after future setup',
+    await futureWithoutHistory.confirmSkip() && futureWithoutHistory.saved().historySkippedForNow &&
+      !!futureWithoutHistory.button('iosMessageDone'));
+
+  const stoppedForSkip = await makeScreen({ historyInFlight: true, params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true, historyStatus: 'in-progress' } });
+  stoppedForSkip.nativeStatus.enabled = true;
+  stoppedForSkip.nativeStatus.setupProofVersion = 1;
+  await stoppedForSkip.foreground();
+  await stoppedForSkip.press('iosMessageSkipHistory');
+  ok('iOS setup: stopped empty or over-limit history can explicitly defer after future setup', await stoppedForSkip.confirmSkip());
+  eq('iOS setup: deferral clears stopped handoff markers without inventing imported history',
+    [stoppedForSkip.values.has('wafra/ios-history-handoff-started-at/v1'),
+      stoppedForSkip.values.has('wafra/ios-history-return-origin/v1'), stoppedForSkip.saved().historyStatus],
+    [false, false, 'skipped']);
+
+  const failedSkipCleanup = await makeScreen({ historyInFlight: true, params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true, historyStatus: 'in-progress' } });
+  failedSkipCleanup.nativeStatus.enabled = true;
+  failedSkipCleanup.nativeStatus.setupProofVersion = 1;
+  await failedSkipCleanup.foreground();
+  await failedSkipCleanup.press('iosMessageSkipHistory');
+  failedSkipCleanup.native.recoverCompletedSession = async () => ({ sessionId: 'protected_before_skip' });
+  failedSkipCleanup.native.discardSession = async () => { throw new Error('locked'); };
+  await failedSkipCleanup.confirmSkip();
+  eq('iOS setup: failed skip cleanup preserves history recovery and cannot record a deferral',
+    [failedSkipCleanup.handoffPreserved(), failedSkipCleanup.saved().historySkippedForNow,
+      failedSkipCleanup.saved().historyStatus, failedSkipCleanup.onboarded()],
+    [true, undefined, 'in-progress', false]);
+
+  const newlyStartedHistory = await makeScreen({ params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true } });
+  newlyStartedHistory.nativeStatus.enabled = true;
+  newlyStartedHistory.nativeStatus.setupProofVersion = 1;
+  await newlyStartedHistory.foreground();
+  await newlyStartedHistory.press('iosMessageSkipHistory');
+  newlyStartedHistory.values.set('wafra/ios-history-handoff-started-at/v1', String(Date.now()));
+  newlyStartedHistory.values.set('wafra/ios-history-return-origin/v1', 'onboarding');
+  await newlyStartedHistory.confirmSkip();
+  eq('iOS setup: a handoff created after the confirmation opened cannot be skipped from stale screen state',
+    [newlyStartedHistory.values.has('wafra/ios-history-handoff-started-at/v1'),
+      newlyStartedHistory.saved().historySkippedForNow, newlyStartedHistory.onboarded()],
+    [true, undefined, false]);
+
+  const expiredCompletedHistory = await makeScreen({ params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true } });
+  expiredCompletedHistory.nativeStatus.enabled = true;
+  expiredCompletedHistory.nativeStatus.setupProofVersion = 1;
+  await expiredCompletedHistory.foreground();
+  await expiredCompletedHistory.press('iosMessageSkipHistory');
+  expiredCompletedHistory.values.set('wafra/ios-history-handoff-started-at/v1', String(Date.now() - 3_600_001));
+  expiredCompletedHistory.values.set('wafra/ios-history-return-origin/v1', 'onboarding');
+  let expiredDiscards = 0;
+  expiredCompletedHistory.native.recoverCompletedSession = async () => ({ sessionId: 'late_completed_history' });
+  expiredCompletedHistory.native.discardSession = async () => { expiredDiscards += 1; };
+  await expiredCompletedHistory.confirmSkip();
+  eq('iOS setup: an expired marker with newly recovered history must reach explicit review, not be discarded by stale skip',
+    [expiredDiscards, expiredCompletedHistory.values.has('wafra/ios-history-handoff-started-at/v1'),
+      expiredCompletedHistory.saved().historySkippedForNow, expiredCompletedHistory.routes.at(-1)],
+    [0, true, undefined, { pathname: '/import-sms', params: { history: 'late_completed_history' } }]);
+
+  const failedSkipRecovery = await makeScreen({ historyInFlight: true, params: { section: 'history' },
+    progress: { futureAutomationConfirmed: true, historyStatus: 'in-progress' } });
+  failedSkipRecovery.nativeStatus.enabled = true;
+  failedSkipRecovery.nativeStatus.setupProofVersion = 1;
+  await failedSkipRecovery.foreground();
+  await failedSkipRecovery.press('iosMessageSkipHistory');
+  failedSkipRecovery.native.recoverCompletedSession = async () => { throw new Error('locked'); };
+  await failedSkipRecovery.confirmSkip();
+  eq('iOS setup: failed current history recovery never clears a marker or records skip',
+    [failedSkipRecovery.handoffPreserved(), failedSkipRecovery.saved().historySkippedForNow,
+      failedSkipRecovery.saved().historyStatus], [true, undefined, 'in-progress']);
+
+  const skippedHistory = await makeScreen({ progress: { historyStatus: 'skipped', futureAutomationConfirmed: true } });
   skippedHistory.nativeStatus.enabled = true;
   skippedHistory.nativeStatus.setupProofVersion = 1;
   await skippedHistory.foreground();

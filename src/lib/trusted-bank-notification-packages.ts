@@ -25,6 +25,10 @@ export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {
 export type TrustedBankNotificationMarket =
   typeof TRUSTED_BANK_NOTIFICATION_PACKAGES[keyof typeof TRUSTED_BANK_NOTIFICATION_PACKAGES];
 
+/** Build opt-in never replaces Android notification-access consent. */
+export const isBankNotificationCaptureAvailable = (nativeAvailable: boolean): boolean =>
+  process.env.EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA === '1' && nativeAvailable === true;
+
 export const trustedBankNotificationMarket = (
   packageName: string,
 ): TrustedBankNotificationMarket | null =>

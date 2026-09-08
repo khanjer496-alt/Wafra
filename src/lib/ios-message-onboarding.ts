@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { IosSetupReadiness } from './ios-capture-setup';
+import { futureSetupConfigured } from './ios-setup-journey';
 
 import {
   isIosHistoryShortcutInstalled,
@@ -23,6 +25,8 @@ export interface IosMessageSetupProgress {
   futureStatus: IosMessageSetupStatus;
   historyShortcutConfirmed: boolean;
   historyStatus: IosMessageSetupStatus;
+  /** Explicit future-only choice. Absent on older progress and declined reviews. */
+  historySkippedForNow?: boolean;
   returnToOnboarding: boolean;
 }
 
@@ -33,6 +37,7 @@ export type IosMessageSetupEvent =
   | { type: 'future-status-changed'; status: IosMessageSetupStatus }
   | { type: 'history-shortcut-confirmed' }
   | { type: 'history-status-changed'; status: IosMessageSetupStatus }
+  | { type: 'history-skipped-for-now'; readiness: IosSetupReadiness }
   | { type: 'onboarding-started' }
   | { type: 'onboarding-return-cleared' }
   | { type: 'onboarding-finished' };
@@ -74,7 +79,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       return null;
     }
     const candidate = value as Record<string, unknown>;
-    const keys = Object.keys(candidate).sort();
+    const keys = Object.keys(candidate).filter((key) => key !== 'historySkippedForNow').sort();
     if (
       keys.length !== PROGRESS_KEYS.length ||
       keys.some((key, index) => key !== PROGRESS_KEYS[index]) ||
@@ -85,6 +90,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       !isStatus(candidate.futureStatus) ||
       typeof candidate.historyShortcutConfirmed !== 'boolean' ||
       !isStatus(candidate.historyStatus) ||
+      ('historySkippedForNow' in candidate && typeof candidate.historySkippedForNow !== 'boolean') ||
       typeof candidate.returnToOnboarding !== 'boolean'
     ) return null;
     return {
@@ -96,6 +102,8 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       historyShortcutConfirmed: candidate.historyShortcutConfirmed,
       historyStatus: candidate.historyStatus,
       returnToOnboarding: candidate.returnToOnboarding,
+      ...(candidate.historySkippedForNow === true && candidate.historyStatus === 'skipped'
+        ? { historySkippedForNow: true } : {}),
     };
   } catch {
     return null;
@@ -132,8 +140,17 @@ export function reduceIosMessageSetup(
         historyShortcutConfirmed: true,
         historyStatus: markInProgress(current.historyStatus),
       };
-    case 'history-status-changed':
-      return { ...current, historyStatus: event.status };
+    case 'history-status-changed': {
+      // A fresh attempt, completion, reset or declined review supersedes the
+      // earlier explicit choice. Never turn a declined review into consent.
+      const next = { ...current, historyStatus: event.status };
+      delete next.historySkippedForNow;
+      return next;
+    }
+    case 'history-skipped-for-now':
+      if (current.historyStatus === 'complete' ||
+        !futureSetupConfigured(event.readiness, current.futureAutomationConfirmed)) return current;
+      return { ...current, historyStatus: 'skipped', historySkippedForNow: true };
     case 'onboarding-started':
       return { ...current, returnToOnboarding: true };
     case 'onboarding-return-cleared':

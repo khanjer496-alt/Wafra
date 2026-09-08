@@ -222,8 +222,13 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativePackages.includes('installingPackageName') && nativePackages.includes('com.android.vending') &&
       service.includes('TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)') &&
       scanner.includes('trustedBankNotificationMarket(n.pkg)'));
-  ok('bank-app capture stays unavailable until package-specific templates are benchmarked',
-    nativePackages.includes('const val CAPTURE_ENABLED = false') &&
+  const notificationGradle = read('modules/notification-reader/android/build.gradle');
+  ok('bank-app capture defaults closed and only an explicit paired beta flag opens the native and JS gates',
+    nativePackages.includes('CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') &&
+      notificationGradle.includes("System.getenv('WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1' &&") &&
+      notificationGradle.includes("System.getenv('EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1'") &&
+      jsPackages.includes("process.env.EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA === '1'") &&
+      scanner.includes('isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true)') &&
       nativeModule.includes('Function("isAvailable")'));
   ok('notification erase prevents old shade rows from being swept back in',
     store.includes('CLEARED_THROUGH') && store.includes('.putLong(CLEARED_THROUGH, clearedThrough)') &&

@@ -1,5 +1,11 @@
 # Getting Wafra onto your iPhone via TestFlight, from a phone
 
+> **Archived account-setup reference.** Use
+> [the current iOS beta guide](./ios-beta-readiness.md) for building from
+> canonical main, current local Shortcuts and real-device acceptance.
+> Account, build and capability statements below describe the original setup
+> period and must not be used as current distribution status.
+
 > **CURRENT STATUS — LEGACY RELAY SHORTCUT RETIRED / DO NOT USE FOR NEW SETUP**
 >
 > The general EAS/TestFlight account and build instructions remain reference

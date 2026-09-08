@@ -1,9 +1,20 @@
 import type { Account, Transaction } from './types';
 import type { IosSetupReadiness } from './ios-capture-setup';
+import type { IosMessageSetupProgress } from './ios-message-onboarding';
 
 /** Self-confirmed automation plus a working native action, not delivery proof. */
 export function futureSetupConfigured(readiness: IosSetupReadiness, confirmed: boolean): boolean {
   return confirmed && (readiness === 'shortcut-proven' || readiness === 'first-alert-captured');
+}
+
+/** A declined history review is different from choosing future-only setup. */
+export function canFinishIosMessageSetup(
+  progress: IosMessageSetupProgress,
+  readiness: IosSetupReadiness,
+): boolean {
+  return futureSetupConfigured(readiness, progress.futureAutomationConfirmed) &&
+    (progress.historyStatus === 'complete' ||
+      (progress.historyStatus === 'skipped' && progress.historySkippedForNow === true));
 }
 
 /**

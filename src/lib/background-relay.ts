@@ -93,9 +93,13 @@ async function appendDurable(rows: ScannedSms[]): Promise<ScannedSms[]> {
     if (!merged.has(key)) fresh.push(row);
     merged.set(key, row);
   }
+  // Existing rows may already be acknowledged on the relay. Reject the whole
+  // delivery before writing so neither those rows nor incoming sources are
+  // lost. Foreground capture can drain the backlog; exact retries at capacity
+  // still fit. Never trim a legacy queue that already exceeds this limit.
+  if (merged.size > MAX_LOCAL_ROWS) throw new Error('Relay background inbox is full');
   const value = [...merged.values()]
-    .sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0))
-    .slice(-MAX_LOCAL_ROWS);
+    .sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
   await backgroundRelayStorage.setItem(QUEUE_KEY, JSON.stringify(value));
   return fresh;
 }

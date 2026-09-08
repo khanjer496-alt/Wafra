@@ -18,7 +18,7 @@ class NotificationReaderModule : Module() {
       NotificationCaptureStore.purgeLegacyPlaintext(context)
     }
 
-    /** Hidden until package-specific notification templates pass rollout gates. */
+    /** Only explicitly enabled test APKs expose this experimental surface. */
     Function("isAvailable") {
       TrustedBankNotificationPackages.CAPTURE_ENABLED
     }
@@ -36,6 +36,7 @@ class NotificationReaderModule : Module() {
 
     /** Opens the system Notification access screen for the user to enable it. */
     Function("openSettings") {
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false
       val context = appContext.reactContext
       if (context != null) {
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
@@ -47,6 +48,7 @@ class NotificationReaderModule : Module() {
 
     /** Captured money-related notifications with ts >= sinceMs, oldest first. */
     AsyncFunction("getCaptured") { sinceMs: Double ->
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction emptyList<Map<String, Any>>()
       val context = appContext.reactContext
         ?: return@AsyncFunction emptyList<Map<String, Any>>()
       NotificationCaptureStore.read(context, sinceMs.toLong()).map { row ->
