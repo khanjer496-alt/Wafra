@@ -99,26 +99,146 @@ const rejects = async (name, run, code) => {
   const gradle = fs.readFileSync(path.join(root, 'modules/sms-reader/android/build.gradle'), 'utf8');
   const adapter = fs.readFileSync(path.join(root, 'src/lib/sms-corpus-export.ts'), 'utf8');
   const ts = require('typescript');
-  const shared = [];
-  const loaded = { exports: {} };
   const compiled = ts.transpileModule(adapter, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
-  Function('require', 'module', 'exports', 'process', compiled)((name) => {
-    if (name === 'react-native') return { Platform: { OS: 'android' } };
-    if (name === '../../modules/sms-reader') return {
-      isCorpusExportEnabled: () => true, getInboxCorpusPage: async () => [],
-    };
-    if (name === '@/lib/sms-corpus') return { collectSmsCorpus: async () => [], serializeSmsCorpus: () => '{"fixture":true}' };
-    if (name === '@/lib/share-text') return { shareTextFile: async (...args) => { shared.push(args); } };
-    if (name === 'expo-file-system/legacy') return { cacheDirectory: 'file:///cache/', EncodingType: { UTF8: 'utf8' }, writeAsStringAsync: async () => {} };
-    if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
-    throw new Error(`unexpected dependency ${name}`);
-  }, loaded, loaded.exports, { env: { EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '1' } });
-  await loaded.exports.shareSmsCorpus();
+  const loadAdapter = ({ platform = 'android', flag = '1', native, readPage } = {}) => {
+    const shared = [];
+    const reads = [];
+    const loaded = { exports: {} };
+    const reader = native === undefined ? {
+      isCorpusExportEnabled: () => true,
+      getInboxCorpusPage: async (...args) => {
+        reads.push(args);
+        return readPage ? readPage(...args) : [];
+      },
+    } : native;
+    Function('require', 'module', 'exports', 'process', compiled)((name) => {
+      if (name === 'react-native') return { Platform: { OS: platform } };
+      if (name === '../../modules/sms-reader') return reader;
+      if (name === '@/lib/sms-corpus') return { collectSmsCorpus, serializeSmsCorpus };
+      if (name === '@/lib/share-text') return { shareTextFile: async (...args) => { shared.push(args); } };
+      throw new Error(`unexpected dependency ${name}`);
+    }, loaded, loaded.exports, {
+      env: flag == null ? {} : { EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: flag },
+    });
+    return { api: loaded.exports, shared, reads };
+  };
+  const legacy = loadAdapter();
+  await legacy.api.shareSmsCorpus();
   ok('raw corpus shares through the same owned temporary-file lifecycle',
-    shared.length === 1 && /^wafra-sms-corpus-\d{4}-\d{2}-\d{2}\.json$/.test(shared[0][0]) &&
-    shared[0][1] === '{"fixture":true}' && shared[0][2].mimeType === 'application/json');
+    legacy.shared.length === 1 && /^wafra-sms-corpus-\d{4}-\d{2}-\d{2}\.json$/.test(legacy.shared[0][0]) &&
+    JSON.parse(legacy.shared[0][1]).schema === 'wafra-sms-corpus-v1' &&
+    legacy.shared[0][2].mimeType === 'application/json');
+
+  const fullExportOptions = {
+    getBackup: () => '{"transactions":[]}',
+    shouldContinue: () => true,
+  };
+  for (const [name, config] of [
+    ['Android JavaScript gate disabled', { flag: '0' }],
+    ['Android JavaScript gate missing', { flag: null }],
+    ['Android JavaScript gate not explicitly one', { flag: 'true' }],
+    ['Android native gate disabled', { native: { isCorpusExportEnabled: () => false, getInboxCorpusPage: async () => [] } }],
+    ['Android native module missing', { native: null }],
+    ['Android native page reader missing', { native: { isCorpusExportEnabled: () => true } }],
+    ['Android native capability throws', { native: { isCorpusExportEnabled: () => { throw new Error('missing_native'); } } }],
+    ['iOS with both flags enabled', { platform: 'ios' }],
+    ['web with both flags enabled', { platform: 'web' }],
+  ]) {
+    const disabled = loadAdapter(config);
+    let backupReads = 0;
+    ok(`${name} hides personal export`, disabled.api.isSmsCorpusExportAvailable() === false);
+    await rejects(`${name} rejects direct personal export`, () => disabled.api.sharePersonalDataForReview({
+      ...fullExportOptions,
+      getBackup: () => { backupReads += 1; return '{}'; },
+    }), 'sms_corpus_export_unavailable');
+    ok(`${name} never collects or shares data`,
+      disabled.reads.length === 0 && disabled.shared.length === 0 && backupReads === 0);
+  }
+
+  const rawRows = [
+    { id: 3, address: 'ENBD', body: 'AED 45.75 at CARREFOUR\nRef "90881723004"', date: 1_800_000_000_003 },
+    { id: 2, address: '+971501234567', body: 'Your OTP is 458213. Do not share.', date: 1_800_000_000_002 },
+    { id: 1, address: 'أحمد', body: 'Dinner at eight. مرحبا 👋', date: 1_800_000_000_001 },
+  ];
+  const savedBackup = {
+    version: 1,
+    transactions: [{ id: 'saved-transaction', merchant: 'CARREFOUR', amount: 45.75, category: 'groceries', categorySource: 'user' }],
+    accounts: [{ id: 'saved-account', last4: '3644' }],
+    categoryRules: [{ merchant: 'CARREFOUR', category: 'groceries' }],
+  };
+  const personal = loadAdapter({ readPage: async () => rawRows });
+  const personalProgress = [];
+  const personalShouldContinue = () => true;
+  ok('personal export is available only when Android and both gates agree',
+    personal.api.isSmsCorpusExportAvailable() === true);
+  await personal.api.sharePersonalDataForReview({
+    getBackup: () => JSON.stringify(savedBackup),
+    shouldContinue: personalShouldContinue,
+    onProgress: (count) => personalProgress.push(count),
+    dialogTitle: 'Export my data for review',
+  });
+  const personalDocument = JSON.parse(personal.shared[0][1]);
+  ok('personal review file explicitly identifies the complete received inbox',
+    personalDocument.schema === 'wafra-personal-review-v1' &&
+      personalDocument.sms.scope === 'all-received' &&
+      Number.isFinite(Date.parse(personalDocument.exportedAt)));
+  ok('personal review preserves exact bank, security and personal SMS content',
+    JSON.stringify(personalDocument.sms.messages) === JSON.stringify(rawRows.map((row) => ({
+      sender: row.address, body: row.body, receivedAtMs: row.date,
+    }))));
+  ok('personal review includes saved categories, corrections and app backup without flattening',
+    JSON.stringify(personalDocument.backup) === JSON.stringify(savedBackup));
+  ok('personal review forwards collection progress and shares one local JSON file',
+    JSON.stringify(personalProgress) === '[3]' && personal.shared.length === 1 &&
+      /^wafra-personal-review-\d{4}-\d{2}-\d{2}\.json$/.test(personal.shared[0][0]) &&
+      personal.shared[0][2].mimeType === 'application/json' &&
+      personal.shared[0][2].dialogTitle === 'Export my data for review');
+  ok('personal review keeps cancellation active through the final file-share boundary',
+    personal.shared[0][2].shouldContinue === personalShouldContinue);
+
+  for (const stage of ['before-read', 'during-read', 'after-progress', 'after-backup']) {
+    let active = stage !== 'before-read';
+    let backupReads = 0;
+    const cancelled = loadAdapter({ readPage: async () => {
+      if (stage === 'during-read') active = false;
+      return rawRows;
+    } });
+    await rejects(`personal export cancels ${stage}`, () => cancelled.api.sharePersonalDataForReview({
+      shouldContinue: () => active,
+      onProgress: () => { if (stage === 'after-progress') active = false; },
+      getBackup: () => {
+        backupReads += 1;
+        if (stage === 'after-backup') active = false;
+        return JSON.stringify(savedBackup);
+      },
+    }), 'sms_corpus_cancelled');
+    ok(`personal export shares no file when cancelled ${stage}`,
+      cancelled.shared.length === 0 &&
+        (stage !== 'before-read' || cancelled.reads.length === 0) &&
+        (stage === 'after-backup' || backupReads === 0));
+  }
+
+  let successfulPages = 0;
+  const readFailure = loadAdapter({ readPage: async () => {
+    if (successfulPages++ === 0) return sameTimestamp.slice(0, 500);
+    throw new Error('sms_permission_lost');
+  } });
+  await rejects('permission loss after a successful inbox page aborts personal export',
+    () => readFailure.api.sharePersonalDataForReview(fullExportOptions), 'sms_permission_lost');
+  ok('native inbox failure shares no partial personal file',
+    readFailure.reads.length === 2 && readFailure.shared.length === 0);
+  const malformedBackup = loadAdapter();
+  await rejects('malformed app backup aborts personal export', async () => {
+    try {
+      await malformedBackup.api.sharePersonalDataForReview({ ...fullExportOptions, getBackup: () => '{' });
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error('invalid_backup');
+      throw error;
+    }
+  }, 'invalid_backup');
+  ok('malformed app backup is never shared', malformedBackup.shared.length === 0);
   const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
   const githubBuild = fs.readFileSync(path.join(
     root,
@@ -152,8 +272,12 @@ const rejects = async (name, run, code) => {
       !/\bfetch\s*\(|XMLHttpRequest|uploadAsync|feedback-transport|relay/i.test(adapter));
   ok('the full corpus never falls back to an Android intent text payload',
     !/Share\.share\s*\(/.test(adapter));
-  ok('the raw full-inbox share control is no longer exposed in Settings',
-    !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
+  ok('Settings exposes personal review only through its internal-build availability gate',
+    /\{isSmsCorpusExportAvailable\(\) && \(/.test(settings) &&
+      /sharePersonalDataForReview\(/.test(settings) &&
+      /personalReviewExportTitle/.test(settings) &&
+      /onPress=\{confirmPersonalReviewExport\}/.test(settings) &&
+      /disabled=\{personalReviewBusy \|\| state\.privateMode\}/.test(settings));
   const ordinaryProfiles = Object.entries(eas.build)
     .filter(([name]) => name !== 'corpus-preview');
   ok('only the dedicated internal APK profile enables both corpus gates',

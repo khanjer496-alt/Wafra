@@ -65,6 +65,7 @@ jobs:
       # enable them together.
       EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
       WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
     steps:

@@ -45,6 +45,7 @@ function createWorkflowHarness(options={}) {
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
+ d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
  d['@/lib/background-relay']={clearBackgroundRelayRows:record('clearBackgroundRelayRows'),getChargeAlertPreference:async()=>false,setChargeAlertsEnabled:record('setChargeAlertsEnabled'),disableRelayBackgroundSync:record('disableRelayBackgroundSync')};

@@ -8,6 +8,7 @@ export type TextFileShareErrorCode =
   | 'cache_unavailable'
   | 'share_unavailable'
   | 'write_failed'
+  | 'share_cancelled'
   | 'share_failed';
 
 /** Named so the screen can answer a failed file export without platform detail. */
@@ -111,8 +112,12 @@ export async function cleanupGeneratedExports(options: { eraseAll?: boolean } = 
 export async function shareTextFile(
   filename: string,
   text: string,
-  options: { mimeType?: string; dialogTitle?: string } = {},
+  options: { mimeType?: string; dialogTitle?: string; shouldContinue?: () => boolean } = {},
 ): Promise<void> {
+  const assertActive = () => {
+    if (options.shouldContinue?.() === false) throw new TextFileShareError('share_cancelled');
+  };
+  assertActive();
   const mimeType = options.mimeType ?? 'text/plain';
   if (Platform.OS === 'web') {
     if (typeof document === 'undefined' || typeof Blob === 'undefined' ||
@@ -157,7 +162,9 @@ export async function shareTextFile(
   const uri = `${folder}/${filename}`;
   activeExports.add(folder);
   try {
+    assertActive();
     await FileSystem.makeDirectoryAsync(folder, { intermediates: true });
+    assertActive();
     await FileSystem.writeAsStringAsync(uri, text, {
       encoding: FileSystem.EncodingType.UTF8,
     });
@@ -168,13 +175,16 @@ export async function shareTextFile(
   }
   let completed = false;
   try {
+    // File IO can outlive the caller's screen or consent state.
+    assertActive();
     await Sharing.shareAsync(uri, {
       mimeType,
       dialogTitle: options.dialogTitle ?? filename,
       UTI: mimeType === 'application/json' ? 'public.json' : 'public.plain-text',
     });
     completed = true;
-  } catch {
+  } catch (error) {
+    if (error instanceof TextFileShareError) throw error;
     throw new TextFileShareError('share_failed');
   } finally {
     activeExports.delete(folder);

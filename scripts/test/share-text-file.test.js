@@ -141,6 +141,45 @@ async function main() {
       shares.length === 1 && shares[0][0] === writes[0][0] &&
       shares[0][1]?.mimeType === 'application/json' && shares[0][1]?.UTI === 'public.json' &&
       plainTextShares === 0);
+
+  for (const cancellation of ['before-start', 'during-availability', 'during-directory', 'during-write']) {
+    let allowed = cancellation !== 'before-start';
+    const created = []; const deleted = []; const files = []; const delivered = [];
+    const guardedModule = load({
+      os: 'android',
+      fileSystem: {
+        cacheDirectory: 'file:///cache/', EncodingType: { UTF8: 'utf8' },
+        makeDirectoryAsync: async uri => {
+          created.push(uri);
+          if (cancellation === 'during-directory') allowed = false;
+        },
+        writeAsStringAsync: async uri => {
+          files.push(uri);
+          if (cancellation === 'during-write') allowed = false;
+        },
+        deleteAsync: async uri => { deleted.push(uri); },
+      },
+      sharing: {
+        isAvailableAsync: async () => {
+          if (cancellation === 'during-availability') allowed = false;
+          return true;
+        },
+        shareAsync: async uri => { delivered.push(uri); },
+      },
+    });
+    let failure;
+    await guardedModule.shareTextFile('wafra-personal-review-2026-09-08.json', '{"personal":true}', {
+      mimeType: 'application/json', shouldContinue: () => allowed,
+    }).catch(error => { failure = error; });
+    ok(`withdrawn export consent ${cancellation} never opens a share sheet`,
+      failure?.name === 'TextFileShareError' && delivered.length === 0);
+    ok(`withdrawn export consent ${cancellation} leaves no owned plaintext file`,
+      cancellation === 'during-write'
+        ? files.length === 1 && created.length === 1 && deleted.includes(created[0])
+        : cancellation === 'during-directory'
+          ? files.length === 0 && created.length === 1 && deleted.includes(created[0])
+          : files.length === 0 && created.length === 0);
+  }
   if (typeof nativeModule.copyTextToClipboard === 'function') {
     await nativeModule.copyTextToClipboard('{"safe":true}');
   }

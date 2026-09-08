@@ -27,6 +27,7 @@ import * as Sharing from 'expo-sharing';
 import { buildLedgerCsv } from '@/lib/ledger-export';
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
+import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -154,6 +155,8 @@ export default function SettingsScreen() {
     setMarket,
     setUiLanguage,
     exportBackup,
+    getStateSnapshot,
+    getStateGeneration,
     restoreBackup,
     clearAll,
     setThemePreference,
@@ -207,6 +210,29 @@ export default function SettingsScreen() {
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
   const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(false);
+  const [personalReviewBusy, setPersonalReviewBusy] = useState(false);
+  const [personalReviewCount, setPersonalReviewCount] = useState(0);
+  const personalReviewRunning = useRef(false);
+  const personalReviewEpoch = useRef(0);
+  const personalReviewFocused = useRef(false);
+  const personalReviewBackup = useRef(exportBackup);
+  personalReviewBackup.current = exportBackup;
+  const personalReviewGeneration = getStateGeneration();
+  useFocusEffect(useCallback(() => {
+    personalReviewFocused.current = true;
+    setPersonalReviewBusy(personalReviewRunning.current);
+    return () => {
+      personalReviewFocused.current = false;
+      personalReviewEpoch.current++;
+    };
+  }, []));
+  useEffect(() => { personalReviewEpoch.current++; }, [state.privateMode, panel, personalReviewGeneration]);
+  useEffect(() => {
+    const subscription = RNAppState.addEventListener('change', next => {
+      if (next === 'background') personalReviewEpoch.current++;
+    });
+    return () => subscription.remove();
+  }, []);
 
   const [instantAlerts, setInstantAlerts] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
@@ -685,6 +711,49 @@ export default function SettingsScreen() {
     shareText('wafra-backup.json', exportBackup(), {
       mimeType: 'application/json',
     }).catch(() => {});
+  };
+
+  const exportPersonalReview = async () => {
+    if (personalReviewRunning.current || !isSmsCorpusExportAvailable() || getStateSnapshot().privateMode) return;
+    personalReviewRunning.current = true;
+    setPersonalReviewBusy(true);
+    setPersonalReviewCount(0);
+    const epoch = ++personalReviewEpoch.current;
+    const generation = getStateGeneration();
+    const active = () => personalReviewFocused.current && epoch === personalReviewEpoch.current &&
+      generation === getStateGeneration() && !getStateSnapshot().privateMode && RNAppState.currentState === 'active';
+    try {
+      const granted = await hasSmsPermission() || await requestSmsPermission();
+      if (!active()) return;
+      if (!granted) {
+        Alert.alert(t('smsCorpusPermissionTitle'), t('smsCorpusPermissionBody'));
+        return;
+      }
+      await sharePersonalDataForReview({
+        getBackup: () => personalReviewBackup.current(),
+        shouldContinue: active,
+        onProgress: count => { if (active()) setPersonalReviewCount(count); },
+        dialogTitle: t('personalReviewExportTitle'),
+      });
+    } catch {
+      if (active()) Alert.alert(t('personalReviewExportFailed'), t('smsCorpusFailedBody'));
+    } finally {
+      personalReviewRunning.current = false;
+      if (personalReviewFocused.current) setPersonalReviewBusy(false);
+    }
+  };
+
+  const confirmPersonalReviewExport = () => {
+    if (personalReviewRunning.current || !isSmsCorpusExportAvailable() || getStateSnapshot().privateMode) return;
+    const consentEpoch = personalReviewEpoch.current;
+    setConfirmation({
+      question: t('personalReviewExportConfirmTitle'),
+      body: t('personalReviewExportConfirmBody'),
+      confirmLabel: t('personalReviewExportConfirm'),
+      onConfirm: () => {
+        if (personalReviewFocused.current && consentEpoch === personalReviewEpoch.current) void exportPersonalReview();
+      },
+    });
   };
 
   const exportLaunchMetrics = () => {
@@ -1383,6 +1452,23 @@ export default function SettingsScreen() {
             () => router.push('/accuracy'),
           )}
           {linkRow(t('backupJson'), null, backupJson)}
+          {isSmsCorpusExportAvailable() && (
+            <Block>
+              <Button
+                label={t('personalReviewExportTitle')}
+                wrapLabel
+                icon="download"
+                variant="outline"
+                disabled={personalReviewBusy || state.privateMode}
+                onPress={confirmPersonalReviewExport}
+              />
+              <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">
+                {personalReviewBusy
+                  ? tf('smsCorpusExportProgress', { count: personalReviewCount })
+                  : t(state.privateMode ? 'personalReviewExportPrivateMode' : 'personalReviewExportDetail')}
+              </ThemedText>
+            </Block>
+          )}
           <DiagnosticExportControl />
           {linkRow(t('restoreBackup'), null, restoreFromFile)}
           {linkRow(t('exportCsv'), null, exportCsv)}

@@ -171,8 +171,22 @@ ok('plaintext inbox collection has no file, persistence or network surface',
 ok('the parser-research transport posts only the already-built wire object',
   /submitParserResearchFeedback[\s\S]{0,4000}JSON\.stringify\(wire\)/.test(transport) &&
     !/submitParserResearchFeedback[\s\S]{0,4000}(deviceId|pushToken|installationId)/.test(transport));
-ok('the old full-inbox raw share control is no longer exposed in Settings',
-  !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
+ok('the personal raw export in Settings requires the dedicated internal capability',
+  /isSmsCorpusExportAvailable\(\)/.test(settings) &&
+    /sharePersonalDataForReview\(/.test(settings) &&
+    !/shareSmsCorpus\(/.test(settings));
+ok('personal review has its own explicit confirmation before sharing raw data',
+  /personalReviewExportTitle/.test(settings) &&
+    /question:\s*t\('personalReviewExportConfirmTitle'\)/.test(settings) &&
+    /body:\s*t\('personalReviewExportConfirmBody'\)/.test(settings) &&
+    /confirmLabel:\s*t\('personalReviewExportConfirm'\)/.test(settings) &&
+    /onPress=\{confirmPersonalReviewExport\}/.test(settings));
+ok('personal export rechecks Private Mode and invalidates consent after leaving Settings',
+  /personalReviewRunning\.current \|\| !isSmsCorpusExportAvailable\(\) \|\| getStateSnapshot\(\)\.privateMode/.test(settings) &&
+    /personalReviewFocused\.current = false;\s*personalReviewEpoch\.current\+\+/.test(settings) &&
+    /consentEpoch === personalReviewEpoch\.current/.test(settings) &&
+    /generation === getStateGeneration\(\) && !getStateSnapshot\(\)\.privateMode/.test(settings) &&
+    /shouldContinue: active/.test(settings));
 ok('the tester previews and exports the exact local JSON file instead of sending it',
     /serializeManualParserResearchExport/.test(screen) &&
     /serializeManualParserResearchExportCooperatively/.test(screen) &&

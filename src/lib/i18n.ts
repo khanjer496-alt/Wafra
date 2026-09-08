@@ -1077,6 +1077,28 @@ const S = {
     en: 'Export parser corpus (temporary)',
     ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
   },
+  personalReviewExportTitle: {
+    en: 'Export my data for review',
+    ar: 'تصدير بياناتي للمراجعة',
+  },
+  personalReviewExportDetail: {
+    en: 'Personal test build · full received SMS and Wafra backup in one file. Save it, then attach it to Codex yourself.',
+    ar: 'نسخة اختبار شخصية · الرسائل المستلمة كاملة ونسخة وفرة الاحتياطية في ملف واحد. احفظه ثم أرفقه بنفسك في Codex.',
+  },
+  personalReviewExportConfirmTitle: {
+    en: 'Export your messages and Wafra data?',
+    ar: 'تصدير رسائلك وبيانات وفرة؟',
+  },
+  personalReviewExportConfirmBody: {
+    en: 'This unencrypted JSON file contains every received SMS with its full sender, date and text, including personal messages and verification codes. It also includes your Wafra backup: transactions, account details, balances, saved categories and preferences. Nothing is redacted. Wafra does not upload it; you choose where to save or share it. Sent messages, deleted messages and other apps are not included.',
+    ar: 'يحتوي ملف JSON غير المشفّر على كل رسالة مستلمة مع المرسل والتاريخ والنص الكامل، بما فيها الرسائل الشخصية ورموز التحقق. ويشمل أيضاً نسخة وفرة الاحتياطية: العمليات وتفاصيل الحسابات والأرصدة والتصنيفات المحفوظة والتفضيلات. لا تُحجب أي بيانات. لا يرفعه وفرة؛ أنت تختار أين تحفظه أو تشاركه. لا يشمل الرسائل المرسلة أو المحذوفة أو التطبيقات الأخرى.',
+  },
+  personalReviewExportConfirm: { en: 'Prepare my file', ar: 'تجهيز ملفي' },
+  personalReviewExportPrivateMode: {
+    en: 'Turn off Private Mode to export original messages.',
+    ar: 'أوقف الوضع الخاص لتصدير الرسائل الأصلية.',
+  },
+  personalReviewExportFailed: { en: 'Could not export your data', ar: 'تعذّر تصدير بياناتك' },
   smsCorpusExportDetail: {
     en: 'Share every received SMS from this Android phone',
     ar: 'مشاركة جميع الرسائل المستلمة من هاتف أندرويد هذا',

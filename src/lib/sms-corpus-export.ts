@@ -41,3 +41,44 @@ export const shareSmsCorpus = async (
   });
   return messages.length;
 };
+
+/** Personal testing build only: original inbox evidence alongside saved corrections. */
+export const sharePersonalDataForReview = async (options: {
+  getBackup: () => string;
+  shouldContinue: () => boolean;
+  onProgress?: (count: number) => void;
+  dialogTitle?: string;
+}): Promise<number> => {
+  const reader = SmsReader;
+  if (!isSmsCorpusExportAvailable() || !reader?.getInboxCorpusPage) {
+    throw new Error('sms_corpus_export_unavailable');
+  }
+  const assertActive = () => {
+    if (!options.shouldContinue()) throw new Error('sms_corpus_cancelled');
+  };
+  assertActive();
+  const messages = await collectSmsCorpus(
+    (beforeDateMs, beforeId, max) => reader.getInboxCorpusPage!(beforeDateMs, beforeId, max),
+    options.onProgress,
+    { shouldContinue: options.shouldContinue },
+  );
+  assertActive();
+  // Use the ordinary backup's exclusion of entitlements and transient state.
+  // Credentials live outside that backup and are never read by this exporter.
+  const backup: unknown = JSON.parse(options.getBackup());
+  assertActive();
+  const exportedAt = new Date().toISOString();
+  const text = JSON.stringify({
+    schema: 'wafra-personal-review-v1',
+    exportedAt,
+    sms: { scope: 'all-received', messages },
+    backup,
+  }, null, 2);
+  assertActive();
+  await shareTextFile(`wafra-personal-review-${exportedAt.slice(0, 10)}.json`, text, {
+    mimeType: 'application/json',
+    dialogTitle: options.dialogTitle,
+    shouldContinue: options.shouldContinue,
+  });
+  return messages.length;
+};
