@@ -70,8 +70,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    */
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
 
   const spent = useMemo(

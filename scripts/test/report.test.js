@@ -86,18 +86,24 @@ ok('Arabic category label is translated', arabic.includes('تنقّل'));
 // other total in the app applies. Before this, reportExpenses only ever
 // checked the isTransfer flag and never looked at the account list at all.
 const multiAccounts = [
-  { id: 'work', name: 'Work <Card>', kind: 'card', openingFils: 0, color: '#000' },
-  { id: 'savings', name: 'Savings', kind: 'bank', openingFils: 0, color: '#000' },
+  { id: 'work', name: 'Work <Card>', kind: 'card', cardType: 'debit', bankName: 'ADCB', last4: '1111', openingFils: 0, color: '#000' },
+  { id: 'savings', name: 'Savings', kind: 'bank', bankName: 'ADCB', last4: '2222', openingFils: 0, color: '#000' },
   { id: 'old', name: 'Old Card', kind: 'card', openingFils: 0, color: '#000', archived: true },
 ];
 const sweepRows = [
   {
     id: 'sweep-out', type: 'expense', amountFils: 500000, category: 'other',
     accountId: 'work', title: 'Outgoing transfer', date: '2026-07-15',
+    source: 'sms', ts: Date.parse('2026-07-15T12:00:00Z'),
+    captureInstrument: { last4: '1111', kind: 'debit', bankIdentity: 'ADCB' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'REPORT-SWEEP984512' },
   },
   {
-    id: 'sweep-in', type: 'income', amountFils: 500000, category: 'business',
+    id: 'sweep-in', type: 'income', amountFils: 500000, category: 'other',
     accountId: 'savings', title: 'Incoming transfer', date: '2026-07-15',
+    source: 'sms', ts: Date.parse('2026-07-15T12:00:00Z'),
+    captureInstrument: { last4: '2222', kind: 'account', bankIdentity: 'ADCB' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'REPORT-SWEEP984512' },
   },
   {
     id: 'hidden-spend', type: 'expense', amountFils: 15000, category: 'shopping',
@@ -109,14 +115,20 @@ const sweepRows = [
   },
 ];
 const liveMulti = liveAccountIds(multiAccounts);
-const internalMulti = internalTransferIds(sweepRows, liveMulti);
+const internalMulti = internalTransferIds(sweepRows, multiAccounts);
+ok('independent source instruments and the unique reference prove both sweep legs',
+  internalMulti.size === 2 && internalMulti.has('sweep-out') && internalMulti.has('sweep-in'));
 ok('reportExpenses drops a legacy structural transfer and an archived account',
   (() => {
     const guarded = reportExpenses(sweepRows, '2026-07-01', '2026-07-31', liveMulti, internalMulti);
     return guarded.length === 1 && guarded[0].id === 'real';
   })());
-ok('reportExpenses keeps the sweep without the exclusion, proving it is the guard doing the work',
-  reportExpenses(sweepRows, '2026-07-01', '2026-07-31').some((tx) => tx.id === 'sweep-out'));
+ok('reportExpenses never prints uncertain generic transfers even without supplied pairing context',
+  !reportExpenses(sweepRows, '2026-07-01', '2026-07-31').some((tx) => tx.id === 'sweep-out'));
+const pendingSweep = sweepRows.slice(0, 2).map(({ transferEvidence, ...transaction }) => transaction);
+ok('removing transfer evidence leaves both generic legs pending instead of claiming an own-account pair',
+  internalTransferIds(pendingSweep, multiAccounts).size === 0 &&
+    require('./build/transfer-reconciliation').reconcileTransfers(pendingSweep, multiAccounts).pendingIds.size === 2);
 
 const withSweep = buildExpenseReportHtml({
   transactions: sweepRows,

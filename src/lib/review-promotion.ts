@@ -68,34 +68,9 @@ const validDate = (value: string): boolean => {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
 
-const transactionTime = (transaction: Transaction): number =>
-  transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
-
-const ownTransferCounterpart = (
-  state: AppState,
-  item: ReviewAlert,
-  input: PromoteReviewAlertInput,
-  amountFils: number,
-): string | undefined => {
-  if (!input.betweenOwnAccounts || item.family !== 'transfer') return undefined;
-  const oppositeType: TransactionType = {
-    income: 'expense' as const,
-    expense: 'income' as const,
-  }[input.type];
-  // Opposite bank alerts for one transfer arrive together. A multi-day amount
-  // match is not identity—it can silently rewrite an unrelated payment.
-  const windowMs = 15 * 60 * 1000;
-  const candidates = state.transactions.filter((transaction) =>
-    transaction.type === oppositeType && transaction.amountFils === amountFils &&
-    transaction.accountId !== input.accountId && transaction.source === 'sms' &&
-    !transaction.userEdited && !transaction.cardPaymentSide && !transaction.paymentFlowSide &&
-    transaction.category !== 'salary' &&
-    (transaction.isTransfer === true || transaction.category === 'other' ||
-      /\b(?:transfer|remittance|account movement|savings)\b/i.test(transaction.title)) &&
-    Number.isFinite(transactionTime(transaction)) &&
-    Math.abs(transactionTime(transaction) - item.observedAt) <= windowMs);
-  return candidates.length === 1 ? candidates[0].id : undefined;
-};
+// Selecting own-account movement confirms this row only. A coincident amount
+// and clock cannot authorize rewriting another transaction; reconciliation
+// needs independent bank evidence or a separate explicit user choice.
 
 const accountMatchesInstrument = (
   account: Account,
@@ -274,7 +249,6 @@ export const planReviewPromotion = (
   const amountFils = Number(amount);
   return {
     outcome: 'added',
-    counterpartId: ownTransferCounterpart(state, item, input, amountFils),
     ledgerMoney: state.ledgerMoney ?? expectedMoney,
     reviewTray: rememberTemplateRule(resolvedTray, item, input, now),
     transaction: {
@@ -290,6 +264,9 @@ export const planReviewPromotion = (
       smsKey: sourceKey,
       ...(item.channel === 'push' ? { viaPush: true } : {}),
       ...(input.betweenOwnAccounts ? { isTransfer: true } : {}),
+      ...(item.family === 'transfer' || input.betweenOwnAccounts ? { transferDecision: {
+        version: 1 as const, ownership: input.betweenOwnAccounts ? 'own' as const : 'external' as const, decidedAt: now,
+      } } : {}),
       userEdited: true,
       titleEdited: true,
     },

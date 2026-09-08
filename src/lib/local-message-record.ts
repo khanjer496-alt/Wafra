@@ -22,6 +22,7 @@ import {
 } from '@/lib/markets';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
+import { buildTransferEvidence } from '@/lib/transfer-evidence';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
@@ -307,6 +308,9 @@ export function parseLocalMessageRecord(
     }
     const row: ScannedSms = {
       ...structured,
+      // Capture only masked endpoints/reference before the body is discarded.
+      // Import planning downgrades this if local source routing is ambiguous.
+      transferEvidence: buildTransferEvidence({ ...parsed, bankHint, sender: envelope.sender }, true),
       ...(bankHint ? { bankHint } : {}),
       // Receipt time dates a transaction, never an unstated card deadline.
       date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(observedAt)),

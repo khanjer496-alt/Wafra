@@ -1,6 +1,6 @@
 import { isFixedCommitment } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { internalTransferIds, isSpending } from '@/lib/ledger';
+import { countsInTotals, internalTransferIds, isSpending } from '@/lib/ledger';
 import {
   comparablePreviousPeriod,
   inPeriod,
@@ -155,7 +155,7 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   return keys.map((key) => {
     let fils = opening;
     for (const t of state.transactions) {
-      if (t.isTransfer || internal.has(t.id) || !live.has(t.accountId)) continue;
+      if (!countsInTotals(t, live, internal)) continue;
       if (monthKey(t.date) > key) continue;
       fils += t.type === 'income' ? t.amountFils : -t.amountFils;
     }

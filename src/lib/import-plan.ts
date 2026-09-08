@@ -9,6 +9,8 @@ import {
 import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureInstrument } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
+import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import {
   ledgerMoneyMatchesCurrentMetadata,
@@ -44,6 +46,8 @@ import type { Account, AppState, Bill, CaptureInstrument, CardDue, ImportBatchIn
 export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Present only when parsing happened locally; relay rows discard the body. */
   raw?: string;
+  /** Bounded bank facts retained before native history discards the body. */
+  transferEvidence?: TransferEvidence;
   smsTs?: number;
   sender?: string;
   channel?: CaptureChannel;
@@ -362,12 +366,18 @@ export function buildImportPlan(
     const captureInstrument = mergeCaptureInstrument(captureInstrumentOf(p), prior.captureInstrument);
     const captureChanged = captureInstrument !== undefined &&
       JSON.stringify(captureInstrument) !== JSON.stringify(prior.captureInstrument);
-    if (patch || accountChanged || instrumentProven || captureChanged) {
+    const transferEvidence = buildTransferEvidence(p, resolvedAccountId !== undefined);
+    const transferChanged = transferEvidence !== undefined &&
+      JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
+    const clearTransferEvidence = prior.transferEvidence !== undefined && transferEvidence === undefined;
+    if (patch || accountChanged || instrumentProven || captureChanged || transferChanged || clearTransferEvidence) {
       updates.push({
         ...(patch ?? { id: prior.id }),
         ...(accountChanged ? { accountId: resolvedAccountId } : {}),
         ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
         ...(captureChanged ? { captureInstrument } : {}),
+        ...(transferChanged ? { transferEvidence } : {}),
+        ...(clearTransferEvidence ? { clearTransferEvidence: true as const } : {}),
       });
     }
   };
@@ -402,11 +412,18 @@ export function buildImportPlan(
       p.paymentFlowSide === 'receipt' &&
       p.card != null &&
       prior.paymentInstrumentSource !== 'alert';
-    if (!patch && !accountChanged && !identityChanged && !instrumentProven) return;
+    const transferEvidence = !prior.userEdited
+      ? buildTransferEvidence(p, resolvedAccountId !== undefined) : undefined;
+    const transferChanged = transferEvidence !== undefined &&
+      JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
+    const clearTransferEvidence = !prior.userEdited && prior.transferEvidence !== undefined && transferEvidence === undefined;
+    if (!patch && !accountChanged && !identityChanged && !instrumentProven && !transferChanged && !clearTransferEvidence) return;
     updates.push({
       ...(patch ?? { id: matchedId }),
       ...(accountChanged ? { accountId: resolvedAccountId } : {}),
       ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
+      ...(transferChanged ? { transferEvidence } : {}),
+      ...(clearTransferEvidence ? { clearTransferEvidence: true as const } : {}),
       smsKey,
       ts: p.smsTs,
       viaPush: false,
@@ -770,7 +787,7 @@ export function buildImportPlan(
       // charges for bills that were only ever due.
       const staleKey = smsKeyOf(p);
       const misread = (staleKey ? priorBySmsKey.get(staleKey) : undefined) ?? stableLocalPrior(p);
-      if (misread && !misread.isTransfer && !misread.userEdited) {
+      if (misread && !misread.isTransfer && !misread.userEdited && !misread.transferDecision) {
         updates.push({ id: misread.id, remove: true });
       }
       // A full Android reread and a multi-year iOS history search must not
@@ -791,7 +808,7 @@ export function buildImportPlan(
       // dropped now that the parser recognizes what it is.
       const staleKey = smsKeyOf(p);
       const misread = (staleKey ? priorBySmsKey.get(staleKey) : undefined) ?? stableLocalPrior(p);
-      if (misread && !misread.isTransfer && !misread.userEdited) {
+      if (misread && !misread.isTransfer && !misread.userEdited && !misread.transferDecision) {
         updates.push({ id: misread.id, remove: true });
       }
       if (!p.date) continue;
@@ -1055,6 +1072,7 @@ export function buildImportPlan(
     const supersededId = guard.supersedes(candidate);
     if (supersededId) {
       if (!priorById.get(supersededId)?.userEdited) {
+        const transferEvidence = buildTransferEvidence(p, resolution.confident);
         updates.push({
           id: supersededId,
           title: p.merchant,
@@ -1067,6 +1085,9 @@ export function buildImportPlan(
           ...(p.card ? { captureInstrument: mergeCaptureInstrument(
             captureInstrumentOf(p), priorById.get(supersededId)?.captureInstrument) } : {}),
           isTransfer: p.transferHint,
+          ...(transferEvidence ? { transferEvidence } : {}),
+          ...(priorById.get(supersededId)?.transferEvidence && !transferEvidence
+            ? { clearTransferEvidence: true as const } : {}),
           paymentFlowSide: p.paymentFlowSide,
           billIdentity: p.billIdentity,
           paymentInstrumentSource:
@@ -1115,6 +1136,7 @@ export function buildImportPlan(
       smsKey,
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
+      transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,
       billIdentity: p.billIdentity,
       paymentInstrumentSource:
@@ -1194,7 +1216,7 @@ export function buildImportPlan(
         if (!row || swept.has(row.id)) continue;
         // The scanner already proved byte-identical body, sender, adjacent
         // provider ids and sub-second delivery. Preserve anything user-owned.
-        if (row.source !== 'sms' || row.userEdited || row.splits) continue;
+        if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
         declineReconciledCount += 1;
@@ -1214,7 +1236,7 @@ export function buildImportPlan(
         const row = priorBySmsKey.get(canonicalCaptureSourceKey(`h${d.sourceEventId}`, d.smsTs));
         if (!row || swept.has(row.id)) continue;
         if (row.source !== 'sms') continue;
-        if (row.userEdited || row.isTransfer || row.splits) continue;
+        if (row.userEdited || row.transferDecision || row.isTransfer || row.splits) continue;
         if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
@@ -1234,7 +1256,7 @@ export function buildImportPlan(
       const row = rows[0];
       if (swept.has(row.id)) continue;
       if (row.source !== 'sms') continue;
-      if (row.userEdited || row.isTransfer || row.splits) continue;
+      if (row.userEdited || row.transferDecision || row.isTransfer || row.splits) continue;
       if (Math.abs(Date.parse(`${row.date}T12:00:00Z`) - d.smsTs) > NEAR_MS) continue;
       if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
       swept.add(row.id);

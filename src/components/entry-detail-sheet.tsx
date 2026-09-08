@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { isUnassignedIncome } from '@/lib/ledger';
+import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
+import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -39,6 +42,7 @@ interface EntryDetailSheetProps {
  * comes first now; editing is one tap away.
  */
 export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true }: EntryDetailSheetProps) {
+  const router = useRouter();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, setMerchantOverride } = useStore();
@@ -83,7 +87,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
-    setIsTransfer(!!transaction.isTransfer);
+    setIsTransfer(isLedgerTransfer(transaction));
   }, [transaction]);
 
   /**
@@ -118,6 +122,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
+  const transferReview = isTransferCandidate(transaction);
+  const transferWords = transferReviewCopy();
+  const transferState = reconcileTransfers(state.transactions, state.accounts);
+  const confirmedTransfer = isLedgerTransfer(transaction) || transferState.internalIds.has(transaction.id);
+  const pendingTransfer = transferState.pendingIds.has(transaction.id);
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
   const categories = income ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
@@ -138,7 +147,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       category,
       accountId,
       date: dateText,
-      isTransfer: isTransfer || undefined,
+      ...(!transferReview ? { isTransfer: isTransfer || undefined } : {}),
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
     });
     const merchant = title.trim();
@@ -216,12 +225,19 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           sign={income ? 'plus' : 'minus'}
           prefix
           decimals
-          color={income ? theme.income : theme.text}
+          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : theme.text}
           style={styles.headAmount}
         />
       </View>
 
-      {!editing && showMerchantLink && !transaction.isTransfer && transaction.title.trim() &&
+      {transferReview && <View style={styles.field} testID="entry-transfer-review">
+        {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
+        <Button variant="outline" wrapLabel label={transferWords.title} onPress={() => {
+          onClose();
+          router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
+        }} />
+      </View>}
+      {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
@@ -331,11 +347,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 {t('transferExplainer')}
               </ThemedText>
             </View>
-            <Toggle
+            {!transferReview && <Toggle
               value={isTransfer}
               onChange={setIsTransfer}
               label={t('transferBetweenMine')}
-            />
+            />}
           </View>
 
 
@@ -346,8 +362,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             rows={[
               {
                 label: t('category'),
-                value: transaction.isTransfer ? (
-                  <ThemedText type="small">{t('transferLabel')}</ThemedText>
+                value: confirmedTransfer || pendingTransfer ? (
+                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown : t('transferLabel')}</ThemedText>
                 ) : (
                   <ThemedText
                     type="small"
@@ -418,7 +434,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 
           {/* The merchant override already exists in the store; this is the
               one place the user can see what it will do before using it. */}
-          {!transaction.isTransfer && sameMerchantCount > 0 && (
+          {!confirmedTransfer && !pendingTransfer && sameMerchantCount > 0 && (
             <Block>
               <ThemedText type="default" themeColor="textSecondary">
                 {tf('merchantCategoryRule', {

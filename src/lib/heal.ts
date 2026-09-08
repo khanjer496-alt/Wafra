@@ -268,6 +268,8 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     delete next.paymentFlowSide;
     delete next.paymentInstrumentSource;
   }
+  if (patch.transferEvidence !== undefined) next.transferEvidence = patch.transferEvidence;
+  if (patch.clearTransferEvidence) delete next.transferEvidence;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;
@@ -287,7 +289,7 @@ export function applyHealUpdates(
   if (updates.length === 0) return transactions;
   const patches = new Map(updates.map((update) => [update.id, update]));
   return transactions
-    .filter((transaction) => transaction.userEdited || !patches.get(transaction.id)?.remove)
+    .filter((transaction) => transaction.userEdited || transaction.transferDecision || !patches.get(transaction.id)?.remove)
     .map((transaction) => {
       const patch = patches.get(transaction.id);
       return patch ? applyHealPatch(transaction, patch) : transaction;

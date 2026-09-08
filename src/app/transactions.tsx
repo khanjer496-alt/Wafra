@@ -189,8 +189,8 @@ export default function TransactionsScreen() {
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
 
   const accountById = useMemo(

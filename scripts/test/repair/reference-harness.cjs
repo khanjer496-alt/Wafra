@@ -89,6 +89,12 @@ function createHarness(options = {}) {
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
   local('@/lib/ledger-money','src/lib/ledger-money.ts');
+  const realMarkets = load(path.join(root, 'src/lib/markets.ts'));
+  Object.assign(deps['@/lib/markets'], {bankIdentityForName: realMarkets.bankIdentityForName, bankBrandForName: realMarkets.bankBrandForName});
+  deps['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
+  deps['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
+  local('@/lib/transfer-reconciliation','src/lib/transfer-reconciliation.ts');
+  local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
@@ -121,6 +127,7 @@ function createHarness(options = {}) {
   local('@/components/wafra-logo');
   local('@/lib/ledger-light-copy','src/lib/ledger-light-copy.ts');
   local('@/components/history-reading-status');
+  local('@/components/transfer-review-notice');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');
   local('@/components/bills/payment-agenda');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

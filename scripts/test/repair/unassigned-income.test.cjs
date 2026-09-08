@@ -72,10 +72,13 @@ test('ordinary fully identified business credits retain their real account and s
 });
 test('unassigned income is not a proven own-account transfer; corrupt expenses cannot use its visibility exception', () => {
   const income = { id: 'credit', accountId: UNASSIGNED_INCOME_ACCOUNT_ID, type: 'income', title: 'Incoming transfer',
-    category: 'business', amountFils: 10000, date: '2026-09-01' };
+    category: 'business', amountFils: 10000, date: '2026-09-01', source: 'sms' };
   const expense = { ...income, id: 'debit', accountId: 'bank', type: 'expense', title: 'Outgoing transfer', isTransfer: true };
   assert.equal(internalTransferIds([income, expense], new Set(['bank'])).size, 0);
-  assert.equal(countsInTotals(income, new Set(['bank'])), true);
+  assert.equal(countsInTotals(income, new Set(['bank'])), false, 'generic Business is still ownership-pending');
+  assert.equal(countsInTotals({ ...income, title: 'Talabat Business' }, new Set(['bank'])), true,
+    'named business receipts remain income even while their bank attribution needs review');
+  assert.equal(countsInTotals({ ...income, transferDecision: { version: 1, ownership: 'external', decidedAt: now.getTime() } }, new Set(['bank'])), true);
   assert.equal(countsInTotals({ ...income, type: 'expense' }, liveAccountIds([])), false);
 });
 test('reserved unassigned attribution survives JSON and the existing backup validator', () => {

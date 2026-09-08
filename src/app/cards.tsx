@@ -16,7 +16,7 @@ import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
@@ -93,10 +93,9 @@ export default function CardsScreen() {
     showInactive ? t('hide') : t('show')
   }`;
   const dues = useMemo(() => openDues(state, now), [state, now]);
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
   /**
    * This month's spend per card.

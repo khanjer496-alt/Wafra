@@ -1,6 +1,7 @@
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AlertReviewTrayState } from '@/lib/alert-review-tray';
 import type { HistoryImportProgress } from '@/lib/history-import';
+import type { TransferEvidence, TransferDecision, TransferMatch } from '@/lib/transfer-reconciliation-types';
 
 export type TransactionType = 'expense' | 'income';
 
@@ -99,6 +100,10 @@ export interface CaptureInstrument {
 }
 
 export interface Transaction {
+  /** Bounded bank evidence and explicit user choices, persisted with the encrypted row. */
+  transferEvidence?: TransferEvidence;
+  transferDecision?: TransferDecision;
+  transferMatch?: TransferMatch;
   id: string;
   type: TransactionType;
   /** Amount in fils, always positive. */
@@ -618,6 +623,8 @@ export interface AppState {
  * genuinely changed are present; an absent field is left alone.
  */
 export interface TxHealUpdate {
+  transferEvidence?: TransferEvidence;
+  clearTransferEvidence?: true;
   id: string;
   title?: string;
   category?: CategoryId;

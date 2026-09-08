@@ -22,7 +22,9 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/categories': { getCategory: id => id, categoryLabel: id => id },
     '@/lib/format': { clockTime: () => '12:30', formatAmount: minor => (minor / 100).toFixed(2) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED' },
-    '@/lib/ledger': load(path.resolve(__dirname, '../../../src/lib/ledger.ts')),
+    '@/lib/ledger': require('./load-transfer-ledger.cjs').ledger,
+    '@/lib/transfer-reconciliation': require('./load-transfer-ledger.cjs').core,
+    '@/lib/transfer-review-copy': load(path.resolve(__dirname, '../../../src/lib/transfer-review-copy.ts'), { '@/lib/i18n': { getLanguage: () => language } }),
     '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
       ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),

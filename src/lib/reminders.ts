@@ -83,7 +83,7 @@ export function buildPaymentReminders(
   // the same pair — a charge on an archived card would otherwise reconcile a
   // bill to "Paid" and silence its reminder while the money is still owed.
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, liveAccounts);
+  const internal = internalTransferIds(state.transactions, state.accounts);
 
   // Bills: the day before, and the day itself.
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));

@@ -1756,9 +1756,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
     ],
     transactions: [
       { id: 'o1', type: 'expense', amountFils: 2000000, category: 'other', accountId: 'bank',
-        title: 'Transfer out', date: '2026-07-02', source: 'sms', isTransfer: true },
+        title: 'Transfer out', date: '2026-07-02', source: 'sms', isTransfer: true,
+        transferDecision: { version: 1, ownership: 'own', decidedAt: Date.parse('2026-07-02T12:00:00Z') } },
       { id: 'i1', type: 'income', amountFils: 2000000, category: 'other', accountId: 'bank2',
-        title: 'Incoming transfer', date: '2026-07-02', source: 'sms' },
+        title: 'Incoming transfer', date: '2026-07-02', source: 'sms',
+        transferDecision: { version: 1, ownership: 'own', decidedAt: Date.parse('2026-07-02T12:00:00Z') } },
     ],
   };
   const moved = an.netWorthSeries(between);
@@ -1766,15 +1768,23 @@ ok('stale: a stale statement that gets paid leaves openDues',
     moved[moved.length - 1].fils === base[base.length - 1].fils,
     { moved: moved[moved.length - 1].fils, base: base[base.length - 1].fils });
 
-  // Being genuinely paid still counts, even into a second account.
+  // A missing outgoing alert does not prove income. The user-confirmed
+  // external receipt counts; the otherwise identical unresolved row does not.
   const paid = {
     ...between,
-    transactions: [between.transactions[1]],
+    transactions: [{ ...between.transactions[1], transferDecision: {
+      version: 1, ownership: 'external', decidedAt: Date.parse('2026-07-03T12:00:00Z'),
+    } }],
   };
   const paidSeries = an.netWorthSeries(paid);
-  ok('net worth: real income with no matching outflow still counts',
+  ok('net worth: confirmed external income with no matching outflow still counts',
     paidSeries[paidSeries.length - 1].fils === base[base.length - 1].fils + 2000000,
     paidSeries[paidSeries.length - 1].fils);
+  const pendingSeries = an.netWorthSeries({ ...paid, transactions: [
+    { ...paid.transactions[0], transferDecision: undefined },
+  ] });
+  ok('net worth: an unpaired generic receipt remains pending until ownership is known',
+    pendingSeries[pendingSeries.length - 1].fils === base[base.length - 1].fils);
 }
 
 // ── removing only proven-empty parser account artifacts ──
@@ -4124,36 +4134,42 @@ ok('stale: a stale statement that gets paid leaves openDues',
 
 // ── moving your own money is not income ──
 //
-// A user moved AED 19,000 and AED 5,000 from their FAB •0002 account to their
-// FAB •0004 account. The bank sends one message per side, neither mentions
-// the other, and the arriving one reads exactly like being paid — so June's
-// "In" carried 24,000 of their own savings as business revenue.
+// Synthetic bank events prove two own-account moves using distinct references
+// and independently captured instruments. Equal amounts or a missing partner
+// alone must never determine whether a generic bank receipt is income.
 {
   const ledger = require('./build/ledger');
   const ins = require('./build/insights');
+  const { reconcileTransfers } = require('./build/transfer-reconciliation');
 
   const accounts = [
-    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
-    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', bankName: 'FAB', last4: '0002', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', bankName: 'FAB', last4: '0004', openingFils: 0, color: '#000' },
   ];
   const live = ledger.liveAccountIds(accounts);
-  const row = (id, type, accountId, amountFils, date, over = {}) => ({
-    id, type, amountFils, category: type === 'income' ? 'business' : 'other',
-    accountId, title: 'Incoming transfer', date, source: 'sms', ...over,
-  });
+  const row = (id, type, accountId, amountFils, date, over = {}) => {
+    const { reference = 'UNIT-DEFAULT984512', ...patch } = over;
+    const title = patch.title ?? (type === 'income' ? 'Incoming transfer' : 'Outgoing transfer');
+    return { id, type, amountFils, category: 'other', accountId, title, date, source: 'sms',
+      ts: Date.parse(`${date}T12:00:00Z`),
+      captureInstrument: { last4: accountId === 'a2' ? '0002' : '0004', kind: 'account', bankIdentity: 'FAB' },
+      ...(/^(?:Outgoing transfer|Incoming transfer|Inward remittance)$/.test(title)
+        ? { transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference } } : {}),
+      ...patch };
+  };
 
   const moved = [
-    row('out19', 'expense', 'a2', 1900000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true }),
-    row('in19', 'income', 'a4', 1900000, '2026-06-26'),
-    row('out5', 'expense', 'a2', 500000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true }),
-    row('in5', 'income', 'a4', 500000, '2026-06-26'),
+    row('out19', 'expense', 'a2', 1900000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true, reference: 'UNIT-MOVE19-984512' }),
+    row('in19', 'income', 'a4', 1900000, '2026-06-26', { reference: 'UNIT-MOVE19-984512' }),
+    row('out5', 'expense', 'a2', 500000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true, reference: 'UNIT-MOVE5-984512' }),
+    row('in5', 'income', 'a4', 500000, '2026-06-26', { reference: 'UNIT-MOVE5-984512' }),
     // Real salary, from outside — must survive.
     row('pay', 'income', 'a2', 2882800, '2026-06-26', { category: 'salary' }),
     // Real spending — must survive.
     row('shop', 'expense', 'a2', 12000, '2026-06-27', { title: 'Carrefour', category: 'groceries' }),
   ];
 
-  const internal = ledger.internalTransferIds(moved, live);
+  const internal = ledger.internalTransferIds(moved, accounts);
   ok('internal: both halves of the move are paired',
     internal.size === 4 && internal.has('in19') && internal.has('out19'), [...internal].join(','));
   ok('internal: the salary is untouched', !internal.has('pay'));
@@ -4162,7 +4178,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const period = { mode: 'month', key: '2026-06' };
   const before = ins.summarizeMonth(moved, period, live);
   const after = ins.summarizeMonth(moved, period, live, internal);
-  ok('internal: In counted the arriving move before pairing', before.incomeFils === 2882800 + 2400000, String(before.incomeFils));
+  ok('internal: an unreviewed generic arrival never inflates income even without a supplied pairing set',
+    before.incomeFils === 2882800, String(before.incomeFils));
   ok('internal: In is just the salary now', after.incomeFils === 2882800, String(after.incomeFils));
   ok('internal: Out drops the outgoing half too', after.expenseFils === 12000, String(after.expenseFils));
 
@@ -4170,9 +4187,14 @@ ok('stale: a stale statement that gets paid leaves openDues',
     'external-remit', 'income', 'a4', 730000, '2026-06-27',
     { title: 'Inward remittance', category: 'other', isTransfer: false },
   );
-  const externalInternal = ledger.internalTransferIds([externalRemittance], live);
-  ok('internal: an unpaired inward remittance remains real income',
-    externalInternal.size === 0 && ledger.isIncome(externalRemittance, live, externalInternal));
+  const externalInternal = ledger.internalTransferIds([externalRemittance], accounts);
+  ok('internal: an unpaired inward remittance remains pending rather than definite income',
+    externalInternal.size === 0 && !ledger.isIncome(externalRemittance, live, externalInternal) &&
+      reconcileTransfers([externalRemittance], accounts).pendingIds.has(externalRemittance.id));
+  const confirmedExternal = { ...externalRemittance,
+    transferDecision: { version: 1, ownership: 'external', decidedAt: Date.parse('2026-06-27T13:00:00Z') } };
+  ok('internal: a confirmed external remittance counts as income',
+    ledger.isIncome(confirmedExternal, live, ledger.internalTransferIds([confirmedExternal], accounts)));
 
   const ownRemittance = [
     row('remit-out', 'expense', 'a2', 730000, '2026-06-27', {
@@ -4180,7 +4202,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     }),
     externalRemittance,
   ];
-  const ownRemittanceInternal = ledger.internalTransferIds(ownRemittance, live);
+  const ownRemittanceInternal = ledger.internalTransferIds(ownRemittance, accounts);
   ok('internal: a matched inward remittance is excluded only with its own-account leg',
     ownRemittanceInternal.size === 2 &&
       !ledger.isIncome(externalRemittance, live, ownRemittanceInternal),
@@ -4192,7 +4214,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('i', 'income', 'a2', 50000, '2026-06-10'),
   ];
   ok('internal: one account cannot transfer to itself',
-    ledger.internalTransferIds(sameAccount, live).size === 0);
+    ledger.internalTransferIds(sameAccount, accounts).size === 0);
 
   // Two weeks apart is not one movement.
   const farApart = [
@@ -4200,7 +4222,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('i', 'income', 'a4', 50000, '2026-06-20'),
   ];
   ok('internal: weeks apart is not a pair',
-    ledger.internalTransferIds(farApart, live).size === 0);
+    ledger.internalTransferIds(farApart, accounts).size === 0);
 
   // Each row pairs once: two arrivals cannot both cancel one departure.
   const oneOut = [
@@ -4208,8 +4230,9 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('i1', 'income', 'a4', 50000, '2026-06-10'),
     row('i2', 'income', 'a4', 50000, '2026-06-11'),
   ];
-  ok('internal: one departure cancels one arrival, not two',
-    ledger.internalTransferIds(oneOut, live).size === 2);
+  ok('internal: competing arrivals do not use a greedy first-match tie-break',
+    ledger.internalTransferIds(oneOut, accounts).size === 0 &&
+      reconcileTransfers(oneOut, accounts).pendingIds.size === 3);
 
   // Coincidental money is not a transfer. The old matcher considered every
   // expense a possible outgoing leg, so a same-value purchase could erase a
@@ -4223,7 +4246,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     }),
   ];
   ok('internal: ordinary spend and real income of the same value are not paired',
-    ledger.internalTransferIds(coincidence, live).size === 0);
+    ledger.internalTransferIds(coincidence, accounts).size === 0);
 
   const salaryCoincidence = [
     row('sweep', 'expense', 'a2', 500000, '2026-06-10', {
@@ -4234,7 +4257,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     }),
   ];
   ok('internal: a salary is never consumed as an arriving transfer leg',
-    ledger.internalTransferIds(salaryCoincidence, live).size === 0);
+    ledger.internalTransferIds(salaryCoincidence, accounts).size === 0);
 
   // Older rows can carry the structural title but predate isTransfer. The
   // headline already used the paired set; budgets and insight cards did not,
@@ -4244,11 +4267,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
       title: 'Outgoing transfer', category: 'other',
     }),
     row('legacy-in', 'income', 'a4', 200000, '2026-06-15', {
-      title: 'Incoming transfer', category: 'business',
+      title: 'Incoming transfer', category: 'other',
     }),
   ];
-  const legacyInternal = ledger.internalTransferIds(legacyMove, live);
-  ok('internal: legacy structural transfer titles still pair safely', legacyInternal.size === 2);
+  const legacyInternal = ledger.internalTransferIds(legacyMove, accounts);
+  ok('internal: structural transfers without the legacy flag pair only with independent evidence', legacyInternal.size === 2);
   ok('internal: the category budget agrees with the transfer-safe headline',
     ins.spentInMonthForCategory(legacyMove, period, 'other', live, legacyInternal) === 0);
   const transferInsights = ins.buildInsights(
@@ -4287,8 +4310,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
   fmt.setMonthStartDay(1);
 
   const accounts = [
-    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
-    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', bankName: 'FAB', last4: '0002', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', bankName: 'FAB', last4: '0004', openingFils: 0, color: '#000' },
     { id: 'hidden', name: 'Old card', kind: 'card', openingFils: 0, color: '#000', archived: true },
   ];
   const live = ledger.liveAccountIds(accounts);
@@ -4301,7 +4324,12 @@ ok('stale: a stale statement that gets paid leaves openDues',
 
   const row = (id, type, accountId, amountFils, date, over = {}) => ({
     id, type, amountFils, accountId, date, source: 'sms',
-    category: 'shopping', title: 'Carrefour', ...over,
+    category: 'shopping', title: 'Carrefour',
+    ...(/^(?:Outgoing transfer|Incoming transfer)$/.test(over.title ?? '') ? {
+      ts: Date.parse(`${date}T12:00:00Z`),
+      captureInstrument: { last4: accountId === 'a2' ? '0002' : '0004', kind: 'account', bankIdentity: 'FAB' },
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'UNIT-RESIDUAL984512' },
+    } : {}), ...over,
   });
 
   const rows = [
@@ -4315,7 +4343,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('real', 'expense', 'a2', 30000, day(17), { title: 'Carrefour' }),
     row('apple', 'expense', 'a4', 1900000, day(18), { title: 'Apple Store' }),
   ];
-  const internal = ledger.internalTransferIds(rows, live);
+  const internal = ledger.internalTransferIds(rows, accounts);
   ok('residual: the sweep pairs and nothing else does',
     internal.size === 2 && internal.has('sweep-out') && internal.has('sweep-in'),
     [...internal].join(','));
@@ -4329,7 +4357,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('same-value-buy', 'expense', 'a4', 2400000, day(10), { title: 'Apple Store' }),
     row('leg-in', 'income', 'a4', 2400000, day(10), { title: 'Incoming transfer' }),
   ];
-  const decoyInternal = ledger.internalTransferIds(decoy, live);
+  const decoyInternal = ledger.internalTransferIds(decoy, accounts);
   ok('residual: a same-value purchase is not mistaken for the outgoing leg',
     decoyInternal.size === 2 && decoyInternal.has('leg-out')
       && !decoyInternal.has('same-value-buy'), [...decoyInternal].join(','));
@@ -4340,8 +4368,9 @@ ok('stale: a stale statement that gets paid leaves openDues',
       .find((i) => i.id === 'largest');
 
   const unguarded = biggest([]);
-  ok('residual: unguarded, the biggest purchase was the sweep',
-    !!unguarded && /transfer/i.test(unguarded.body), unguarded && unguarded.body);
+  ok('residual: generic transfers cannot become the biggest purchase even without account context',
+    !!unguarded && /Apple Store/.test(unguarded.body) && !/transfer/i.test(unguarded.body),
+    unguarded && unguarded.body);
 
   const guarded = biggest([live, internal]);
   ok('residual: the biggest purchase is a purchase',
@@ -4366,8 +4395,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
   // site ever slides back to the old shape.
   const trendBefore = an.categoryTrend(rows, 'shopping', 1, period.key);
   const trendAfter = an.categoryTrend(rows, 'shopping', 1, period.key, live, internal);
-  ok('residual: categoryTrend counted the hidden card and the sweep',
-    trendBefore[0].fils === 30000 + 900000 + 1900000 + 2400000, String(trendBefore[0].fils));
+  ok('residual: without account visibility, categoryTrend includes hidden purchases but never uncertain transfers',
+    trendBefore[0].fils === 30000 + 900000 + 1900000, String(trendBefore[0].fils));
   ok('residual: categoryTrend agrees with the month it is drawn under',
     trendAfter[0].fils === summary.expenseFils, String(trendAfter[0].fils));
 
@@ -4407,23 +4436,29 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const report = require('./build/reimbursement-report');
 
   const accounts = [
-    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
-    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', bankName: 'FAB', last4: '0002', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', bankName: 'FAB', last4: '0004', openingFils: 0, color: '#000' },
   ];
   const live = ledger.liveAccountIds(accounts);
 
-  const row = (id, type, accountId, amountFils, date, over = {}) => ({
-    id, type, amountFils, accountId, date, source: 'sms',
-    category: 'other', title: 'Outgoing transfer', ...over,
-  });
+  const row = (id, type, accountId, amountFils, date, over = {}) => {
+    const { reference = 'UNIT-SWEEP-UNUSED984512', ...patch } = over;
+    const title = patch.title ?? 'Outgoing transfer';
+    return { id, type, amountFils, accountId, date, source: 'sms', category: 'other', title,
+      ...(/^(?:Outgoing transfer|Incoming transfer)$/.test(title) ? {
+        ts: Date.parse(`${date}T12:00:00Z`),
+        captureInstrument: { last4: accountId === 'a2' ? '0002' : '0004', kind: 'account', bankIdentity: 'FAB' },
+        transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference },
+      } : {}), ...patch };
+  };
 
   const sweep = [
-    row('sweep-out-1', 'expense', 'a2', 500000, '2026-04-15'),
-    row('sweep-in-1', 'income', 'a4', 500000, '2026-04-15', { title: 'Incoming transfer', category: 'business' }),
-    row('sweep-out-2', 'expense', 'a2', 500000, '2026-05-15'),
-    row('sweep-in-2', 'income', 'a4', 500000, '2026-05-15', { title: 'Incoming transfer', category: 'business' }),
-    row('sweep-out-3', 'expense', 'a2', 500000, '2026-06-15'),
-    row('sweep-in-3', 'income', 'a4', 500000, '2026-06-15', { title: 'Incoming transfer', category: 'business' }),
+    row('sweep-out-1', 'expense', 'a2', 500000, '2026-04-15', { reference: 'UNIT-SWEEP-APR984512' }),
+    row('sweep-in-1', 'income', 'a4', 500000, '2026-04-15', { title: 'Incoming transfer', reference: 'UNIT-SWEEP-APR984512' }),
+    row('sweep-out-2', 'expense', 'a2', 500000, '2026-05-15', { reference: 'UNIT-SWEEP-MAY984512' }),
+    row('sweep-in-2', 'income', 'a4', 500000, '2026-05-15', { title: 'Incoming transfer', reference: 'UNIT-SWEEP-MAY984512' }),
+    row('sweep-out-3', 'expense', 'a2', 500000, '2026-06-15', { reference: 'UNIT-SWEEP-JUN984512' }),
+    row('sweep-in-3', 'income', 'a4', 500000, '2026-06-15', { title: 'Incoming transfer', reference: 'UNIT-SWEEP-JUN984512' }),
     // A legitimate recurring expense on the same cadence — must survive.
     row('netflix-1', 'expense', 'a2', 3999, '2026-04-20', { title: 'Netflix', category: 'entertainment' }),
     row('netflix-2', 'expense', 'a2', 3999, '2026-05-20', { title: 'Netflix', category: 'entertainment' }),
@@ -4435,7 +4470,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
     row('decoy-buy', 'expense', 'a4', 500000, '2026-06-15', { title: 'Furniture Store', category: 'shopping' }),
   ];
 
-  const internal = ledger.internalTransferIds(sweep, live);
+  const internal = ledger.internalTransferIds(sweep, accounts);
   ok('sweep: all three months of the sweep pair off',
     internal.size === 6, [...internal].join(','));
   ok('sweep: the same-value furniture purchase is not swept into the pairing',
@@ -4444,8 +4479,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const today = new Date(2026, 6, 25);
 
   const unguardedSubs = subsLib.detectSubscriptions(sweep, [], today);
-  ok('sweep: without the exclusion, the sweep itself is detected as recurring',
-    unguardedSubs.some((s) => s.title === 'Outgoing transfer'),
+  ok('sweep: uncertain transfers cannot become subscriptions even without supplied pairing context',
+    !unguardedSubs.some((s) => s.title === 'Outgoing transfer'),
     unguardedSubs.map((s) => s.title).join(','));
 
   const guardedSubs = subsLib.detectSubscriptions(sweep, [], today, live, internal);
@@ -4459,8 +4494,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
 
   // ── the expense export applies the same rule ──
   const unguardedRows = report.reportExpenses(sweep, '2026-04-01', '2026-06-30');
-  ok('export: without the exclusion, all three sweep legs print as expenses',
-    unguardedRows.filter((t) => t.title === 'Outgoing transfer').length === 3,
+  ok('export: uncertain transfers cannot print as expenses even without supplied pairing context',
+    unguardedRows.filter((t) => t.title === 'Outgoing transfer').length === 0,
     unguardedRows.map((t) => t.id).join(','));
 
   const guardedRows = report.reportExpenses(sweep, '2026-04-01', '2026-06-30', live, internal);
