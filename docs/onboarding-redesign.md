@@ -8,7 +8,7 @@ Accepted direction, 8 September 2026: an interactive example followed by setup c
 2. **Choose the method.** Two equally accessible actions on phones: iOS local Apple Shortcuts or Android bank SMS, and manual tracking. Android permission and first-three-app-days/Pro terms appear before selection. iOS explains that past messages can wait and retains its detailed privacy sheet. Web previews offer manual tracking only.
 3. **Optional preferences.** Goals and budget style are reached from the setup-choice screen. They use two-step progress. Back returns to the choice that opened them; saved preferences have an explicit edit state. Real amounts still wait for actual currency and credible income.
 4. **Begin with real data.** Successful manual setup offers a first entry or an empty-ledger tour. Permission denial and setup errors offer recovery and an explicit manual choice, without manufacturing capture success.
-5. **iPhone setup.** A single heading precedes the existing actionable checklist. Readiness evidence follows the steps. All history/future readiness, cleanup, deferred-history confirmation, and durable completion handlers remain intact.
+5. **iPhone setup.** A single heading precedes Future alerts first and optional Past messages second. Readiness evidence follows the steps. After future setup is checked, the primary action opens the existing protected history-deferral confirmation; importing history stays an explicit secondary choice. Saved sections and pending-history recovery are preserved. All cleanup and durable completion handlers remain intact.
 
 ## Implementation boundaries
 
@@ -59,3 +59,12 @@ The isolated iPhone development client never reached this app build: its local m
 Only this task’s disposable simulator and regenerable preview/cache intermediates were removed. The original iPhone 17 remains booted and Wafra_Pixel remains present. The existing iPhone data was not changed; only its installed development binary was read to install the separate test simulator.
 
 At that implementation checkpoint, Git status was unavailable because iCloud could not materialize `.git/HEAD` and `.git/index`. During release preparation, the original unavailable index was preserved at `.git/index.icloud-preserved-20260908` and a verified HEAD index restored Git access without changing working files. This record covers implementation checks; release verification and exact commit/build IDs are recorded separately.
+
+## Physical feedback after initial implementation
+
+A build-55 user reported slow extraction and ambiguous early return from a
+manually started Shortcut. The updated order and extraction-stage copy do not
+solve the underlying throughput problem or provide live preparation telemetry.
+No import-speed improvement is claimed. See `ios-beta-readiness.md` for the
+remaining physical acceptance limitations. The future-first follow-up passed
+268 focused setup/recovery checks with real handlers and unchanged native code.

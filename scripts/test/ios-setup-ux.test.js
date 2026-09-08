@@ -98,14 +98,19 @@ eq('iOS message setup: one checklist contains exactly the Future and Past rows',
     (screen.match(/testID="ios-message-setup-checklist"/g) || []).length,
     (screen.match(/<ChecklistRow/g) || []).length,
   ], [1, 2]);
-ok('iOS message setup: both required sections are named plainly and only the active row expands',
+ok('iOS message setup: Future is first, History is optional, and only the selected row expands',
   screen.indexOf("title={t('iosMessageFutureTitle')}") >= 0 &&
-    screen.indexOf("title={t('iosMessagePastTitle')}") <
-      screen.indexOf("title={t('iosMessageFutureTitle')}") &&
+    screen.indexOf("title={t('iosMessageFutureTitle')}") <
+      screen.indexOf("title={t('iosMessagePastTitle')}") &&
     /expanded=\{progress\.activeSection === 'future'\}/.test(screen) &&
     /expanded=\{progress\.activeSection === 'history'\}/.test(screen) &&
     translated('iosMessageFutureTitle', 'en') === 'Future alerts' &&
-    translated('iosMessagePastTitle', 'en') === 'Past alerts');
+    translated('iosMessagePastTitle', 'en') === 'Past messages · Optional');
+ok('iOS history explains Shortcut extraction before app review and keeps the phone-open instruction',
+  /Shortcuts.*reads.*extracts.*Review.*after return/.test(translated('iosMessageHistoryStartHelp', 'en')) &&
+    /Shortcuts.*open.*unlocked.*Review.*after return/.test(translated('iosMessageHistoryRunningHelp', 'en')) &&
+    /الاختصارات.*الرسائل.*المراجعة.*بعد العودة/.test(translated('iosMessageHistoryStartHelp', 'ar')) &&
+    /الاختصارات.*مفتوحاً.*دون قفل.*المراجعة.*بعد العودة/.test(translated('iosMessageHistoryRunningHelp', 'ar')));
 ok('iOS message setup: checklist rows retain 44pt targets without clipping text',
   Number(checklistRow.match(/header:\s*\{\s*minHeight:\s*(\d+)/)?.[1]) >= 44 &&
     !/numberOfLines/.test(checklistRow) &&
@@ -2032,7 +2037,7 @@ async function messageOnboardingProgressTests() {
 
   const defaults = {
     version: 1,
-    activeSection: 'history',
+    activeSection: 'future',
     futureShortcutConfirmed: false,
     futureAutomationConfirmed: false,
     futureStatus: 'not-started',
@@ -2046,13 +2051,24 @@ async function messageOnboardingProgressTests() {
     defaults,
   );
   const mutableEmptySnapshot = await progress.loadIosMessageSetupProgress(storage);
-  mutableEmptySnapshot.activeSection = 'future';
+  mutableEmptySnapshot.activeSection = 'history';
   mutableEmptySnapshot.futureStatus = 'complete';
   eq(
     'iOS message onboarding: mutating an empty snapshot cannot poison later defaults',
     await progress.loadIosMessageSetupProgress(storage),
     defaults,
   );
+
+  const futureConfirmed = progress.reduceIosMessageSetup(defaults, { type: 'future-automation-confirmed' });
+  const futureComplete = progress.reduceIosMessageSetup(futureConfirmed, { type: 'future-status-changed', status: 'complete' });
+  eq('iOS message onboarding: confirming Future does not move to History or manufacture history completion',
+    [futureComplete.activeSection, futureComplete.historyStatus, futureComplete.historySkippedForNow],
+    ['future', 'not-started', undefined]);
+  const savedHistory = { ...defaults, activeSection: 'history', historyStatus: 'in-progress', historyShortcutConfirmed: true };
+  values.set(progress.IOS_MESSAGE_SETUP_PROGRESS_KEY, JSON.stringify(savedHistory));
+  eq('iOS message onboarding: changing fresh defaults preserves an existing History selection',
+    await progress.loadIosMessageSetupProgress(storage), savedHistory);
+  values.clear();
 
   values.set(progress.IOS_MESSAGE_SETUP_PROGRESS_KEY, JSON.stringify({
     ...defaults,

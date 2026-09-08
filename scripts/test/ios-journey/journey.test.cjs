@@ -36,7 +36,7 @@ test('guidance is translated, is not a bank picker, and retains the history-capa
   assert.notEqual(journey.iosSetupJourneyCopy('en').intro, journey.iosSetupJourneyCopy('ar').intro);
   assert.match(journey.iosSetupJourneyCopy('en').historyRequest, /coverage/);
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');
-  assert.ok(screen.indexOf("title={t('iosMessagePastTitle')}") < screen.indexOf("title={t('iosMessageFutureTitle')}"));
+  assert.ok(screen.indexOf("title={t('iosMessageFutureTitle')}") < screen.indexOf("title={t('iosMessagePastTitle')}"));
   assert.match(screen, /canFinishIosMessageSetup\(progress, setup\.readiness\)/);
 });
 

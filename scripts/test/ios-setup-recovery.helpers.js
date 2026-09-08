@@ -3,7 +3,7 @@
 // not source spelling or callback mock counts.
 module.exports = async ({ execute, ok, eq, translated }) => {
   const disposers = [];
-  const makeScreen = async ({ available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, params = { fromOnboarding: '1' } } = {}) => {
+  const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, params = { fromOnboarding: '1' } } = {}) => {
     const slots = [];
     const effects = [];
     let cursor = 0;
@@ -30,15 +30,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         }
       },
     };
-    // These recovery scenarios deliberately restore the Future section. New
-    // installations use History first, covered in the journey regression suite.
+    // Restore saved choices by default; fresh=true exercises the real empty-store defaults.
     react.useMemo = (factory, deps) => react.useCallback(factory, deps)();
     const defaults = {
       version: 1, activeSection: 'future', futureShortcutConfirmed: false,
       futureAutomationConfirmed: false, futureStatus: 'not-started',
       historyShortcutConfirmed: false, historyStatus: 'not-started', returnToOnboarding: params.fromOnboarding === '1',
     };
-    const values = new Map([['wafra/ios-message-setup-progress/v1', JSON.stringify({ ...defaults, ...restored })]]);
+    const values = new Map(fresh ? [] : [['wafra/ios-message-setup-progress/v1', JSON.stringify({ ...defaults, ...restored })]]);
     const startedAt = Date.now();
     if (historyInFlight) {
       values.set('wafra/ios-history-handoff-started-at/v1', String(startedAt));
@@ -62,12 +61,13 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     const foregroundListeners = [];
     const nativeStatus = { enabled: false, entitled: true, setupProofVersion: null, firstCapturedAt: null };
     let statusFailure = false;
+    let historyChunkReads = 0;
     const native = {
       async getCaptureStatus() { if (statusFailure) throw new Error('unavailable'); return { ...nativeStatus }; },
       async setCaptureEnabled(value) { preferenceEvents.push(`native:${value}`); nativeStatus.enabled = value; },
       async recoverCompletedSession() { return null; },
       async getCompletedSession() { return null; },
-      async readChunk() { return []; },
+      async readChunk() { historyChunkReads += 1; return []; },
       async discardSession() {},
     };
     const linking = {
@@ -184,6 +184,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     disposers.push(() => slots.forEach((memo) => memo.cleanup?.()));
     return { all, button, press, urls, routes, nativeStatus, foreground, native, values, preferenceEvents,
       optedOut: () => optedOut,
+      historyChunkReads: () => historyChunkReads,
       help: async (key) => { await press('iosMessageLearnMore'); return press(key); },
       onboarded: () => onboarded,
       confirmReset: async () => {
@@ -209,6 +210,59 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     };
   };
 
+  const fresh = await makeScreen({ fresh: true });
+  eq('iOS setup: a fresh start opens Future first and keeps History collapsed second',
+    fresh.all().filter((node) => node.type === 'ChecklistRow').map((node) =>
+      [node.props.title, node.props.step, node.props.expanded]),
+    [[translated('iosMessageFutureTitle', 'en'), 1, true], [translated('iosMessagePastTitle', 'en'), 2, false]]);
+  eq('iOS setup: Future-first arrival neither opens Shortcuts nor fills setup or history evidence',
+    [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
+      fresh.saved().historySkippedForNow, fresh.nativeStatus.firstCapturedAt, fresh.urls, fresh.onboarded()],
+    ['future', false, 'not-started', undefined, null, [], false]);
+  const persistedHistory = await makeScreen({ historyInFlight: true,
+    progress: { activeSection: 'history', historyStatus: 'in-progress', historyShortcutConfirmed: true } });
+  eq('iOS setup: a saved in-flight History selection survives the new fresh default',
+    [persistedHistory.saved().activeSection, persistedHistory.handoffPreserved()], ['history', true]);
+  ok('iOS setup: a restored in-flight History still resumes its original Shortcut',
+    await persistedHistory.press('historyContinueAction') && persistedHistory.urls.at(-1) === 'shortcuts://' && persistedHistory.handoffPreserved());
+  eq('iOS setup: a Shortcut handoff without completed staging cannot read chunks or open app review',
+    [persistedHistory.historyChunkReads(), persistedHistory.routes, persistedHistory.saved().historyStatus],
+    [0, [], 'in-progress']);
+  ok('iOS setup: a pending handoff explains extraction in Shortcuts before app review',
+    persistedHistory.all().some((node) => node.type === 'ThemedText' &&
+      node.props.children === translated('iosMessageHistoryRunningHelp', 'en')));
+  persistedHistory.native.recoverCompletedSession = async () => ({ sessionId: 'retained_history_for_review' });
+  await persistedHistory.foreground();
+  eq('iOS setup: returning with completed native history still opens its source-bound review',
+    [persistedHistory.routes.at(-1), persistedHistory.saved().historyStatus, persistedHistory.historyChunkReads()],
+    [{ pathname: '/import-sms', params: { history: 'retained_history_for_review' } }, 'in-progress', 0]);
+  const explicitFuture = await makeScreen({ params: { section: 'future' }, progress: { activeSection: 'history' } });
+  eq('iOS setup: an explicit Future link overrides saved History without launching or clearing history',
+    [explicitFuture.saved().activeSection, explicitFuture.urls, explicitFuture.saved().historyStatus], ['future', [], 'not-started']);
+
+  // Exercise the actual confirmation action and its return, not a fabricated
+  // complete flag: the native proof is separate from confirming the automation.
+  fresh.nativeStatus.enabled = true;
+  fresh.nativeStatus.setupProofVersion = 1;
+  await fresh.foreground();
+  ok('iOS setup: local proof still requires the explicit automation confirmation action',
+    await fresh.press('iosLocalAutomationAdded'));
+  await fresh.foreground();
+  eq('iOS setup: confirmation leaves Future selected and makes guarded deferral the primary action',
+    [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
+      fresh.all().filter((node) => node.type === 'Button').at(-1)?.props.label],
+    ['future', true, 'not-started', translated('iosMessageSkipHistory', 'en')]);
+  ok('iOS setup: History remains a secondary deliberate choice after Future confirmation',
+    !!fresh.button('iosMessageNextHistory'));
+  ok('iOS setup: Future-first primary action opens the existing explicit history-deferral confirmation',
+    await fresh.press('iosMessageSkipHistory'));
+  eq('iOS setup: opening Future-only confirmation does not import, defer or finish anything',
+    [fresh.saved().historyStatus, fresh.saved().historySkippedForNow, fresh.onboarded()], ['not-started', undefined, false]);
+  ok('iOS setup: confirming Future-only keeps history unimported and enables the normal finish',
+    await fresh.confirmSkip() && fresh.saved().historySkippedForNow === true &&
+      fresh.saved().historyStatus === 'skipped' && !!fresh.button('iosMessageContinue'));
+  eq('iOS setup: Future-only consent never manufactures an actual bank alert', fresh.nativeStatus.firstCapturedAt, null);
+
   const future = await makeScreen();
   await future.press('iosLocalInstallShortcut');
   await future.foreground(); // User canceled installation in Apple Shortcuts.
@@ -217,6 +271,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS recovery: opening a canceled install again never confirms installation', future.saved().futureShortcutConfirmed, false);
 
   const wordyHistory = await makeScreen({ params: { section: 'history' }, progress: { historyStatus: 'in-progress' } });
+  ok('iOS setup: the first history-start action explains extraction before review and keeping Shortcuts open',
+    wordyHistory.all().some((node) => node.type === 'ThemedText' && node.props.children === translated('iosMessageHistoryStartHelp', 'en')) &&
+      wordyHistory.all().some((node) => node.type === 'ThemedText' && node.props.children === translated('iosMessageHistoryKeepOpen', 'en')));
   const words = wordyHistory.all().flatMap((node) => {
     if (node.type === 'ChecklistRow' && !node.props.expanded) return [node.props.title, node.props.detail];
     if (node.type === 'ScreenHeader') return [node.props.title, node.props.subtitle, ...(node.props.actions ?? []).map((action) => action.label)];

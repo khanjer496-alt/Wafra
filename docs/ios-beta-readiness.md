@@ -55,8 +55,10 @@ This path does not require the relay. Supplemental/legacy relay imports are
 separate; relay health and successful push registration do not prove local
 Message automation delivery.
 
-Setup starts with past-message import. Users may explicitly defer past messages
-and finish once future capture is configured and the automation is confirmed.
+Fresh setup starts with future alerts. Past-message import is a separate, optional
+section. Users may explicitly defer past messages and finish once future capture
+is configured and the automation is confirmed. Existing saved sections and
+protected pending-history recovery keep their prior state.
 Deferral is persisted as a choice, never as a completed history import or proof
 of a real received SMS. Past-message import remains available from Settings;
 starting it again clears the deferral. Any protected partial session must be
@@ -101,3 +103,13 @@ Building an artifact does not automatically publish it or deploy the website.
 Production iOS preflight still requires the real RevenueCat Apple key, hosted
 privacy/terms/support URLs and completed contact/operator/jurisdiction/store
 details. Do not insert invented values to make that gate green.
+
+## History extraction UX limitation
+
+The current Shortcut extracts messages before returning to Wafra for review.
+Keep Shortcuts foreground and the iPhone unlocked during extraction. The app
+does not have live preparation counts before native staging. An app-started
+handoff reopens Shortcuts without launching another run; a run started manually
+inside Shortcuts before that handoff cannot be identified during preparation.
+Future-first ordering and optionality do not improve extraction throughput.
+Fast first useful real transactions remain a physical-device acceptance target.

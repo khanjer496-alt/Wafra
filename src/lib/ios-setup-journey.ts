@@ -45,7 +45,7 @@ export function detectedSetupBanks(
 // contracts elsewhere. No fixed duration or recent-only default is promised.
 const COPY = {
   en: {
-    intro: 'Your past transactions first. New alerts next.',
+    intro: 'New alerts first. Past messages when you’re ready.',
     historyRequest: 'Checks all retained history within this Shortcut’s coverage—not a 30-day sample.',
     historyPending: 'History not imported yet.',
     historyRunning: 'History unfinished. New-alert setup is still available.',
@@ -63,7 +63,7 @@ const COPY = {
     proofHelp: 'A local check tests the action only. A real bank alert is separate evidence. You do not need to make a purchase to finish setup.',
   },
   ar: {
-    intro: 'معاملاتك السابقة أولاً، ثم التنبيهات الجديدة.',
+    intro: 'التنبيهات الجديدة أولاً، والرسائل السابقة عندما تكون مستعداً.',
     historyRequest: 'يفحص السجل المحتفظ به ضمن نطاق تغطية الاختصار، وليس عيّنة من آخر ٣٠ يوماً.',
     historyPending: 'لم يُستورد السجل بعد.',
     historyRunning: 'السجل غير مكتمل. يمكنك إعداد التنبيهات الجديدة دون إعادة ضبط هذا الاستيراد.',
