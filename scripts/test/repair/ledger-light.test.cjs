@@ -60,7 +60,7 @@ for(const language of ['en','ar']) {
    assert.equal(action.length,['paused','failed'].includes(status)?1:0);
    assert.equal(walk(tree).filter(n=>n.type==='ActivityIndicator').length,status==='running'?1:0);
    if(action.length){action[0].props.onPress();assert.deepEqual(h.events,[['resume']]);}
-   if(language==='ar')assert.doesNotMatch(text(tree),/Messages checked|Transactions found|Reading SMS/);
+   if(language==='ar')assert.doesNotMatch(text(tree),/Messages checked|Alerts found|Reading SMS/);
   });
  }
 }

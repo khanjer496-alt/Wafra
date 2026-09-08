@@ -64,11 +64,20 @@ test('categorisation displays affected count and applies merchant rule only afte
  assert.ok(picker,'category choice exists');picker.props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
 });
-for(const language of ['en','ar'])test(`onboarding shows reference artwork, not fake balances: ${language}`,()=>{
- const h=createWorkflowHarness({language,state:{onboarded:false},states:{2:true}}),tree=h.renderScreen('onboarding');
- const words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
- assert.ok(text(tree).includes(words.welcomeTitle));assert.ok(!text(tree).includes('42,500'));assert.deepEqual(h.events,[]);
- assert.ok(walk(tree).some(n=>n.props?.testID==='setup-illustration'));
+for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null},states:{2:true}}),tree=h.renderScreen('onboarding');
+ const t=h.deps['@/lib/i18n'].t;
+ assert.ok(text(tree).includes(t('onboardHeadline')));assert.ok(!text(tree).includes('42,500'));
+ const example=walk(tree).find(n=>n.props?.testID==='onboarding-example');
+ assert.ok(example,'the actual local sample is embedded on welcome');
+ assert.ok(text(example).includes(t('onboardSampleLabel')));
+ assert.ok(text(example).includes(t('onboardSampleNote')));
+ assert.ok(text(example).includes('AED 24.50'));
+ assert.ok(byLabel(example,t('onboardSampleAction')),'the sample offers its real reveal action');
+ assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available before trying the example');
+ assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));
+ assert.equal(h.state.transactions.length,0);assert.equal(h.state.accounts.length,0);
+ assert.deepEqual(h.events,[],'rendering sample and setup controls performs no writes or setup actions');
 });
 test('import progress labels only the supplied current step',()=>{
  const h=createWorkflowHarness(),{ImportSteps}=h.deps['@/components/workflows/workflow-surfaces'];

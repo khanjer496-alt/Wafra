@@ -12,6 +12,7 @@ function createWorkflowHarness(options={}) {
  native.FlatList=p=>jsx('View',{...p,children:[p.ListHeaderComponent,p.data.length?p.data.map((item,index)=>p.renderItem({item,index})):p.ListEmptyComponent]});
  native.I18nManager={isRTL:h.lang==='ar'};native.Linking={openURL:record('openURL'),canOpenURL:async()=>true};
  native.Share={share:record('share')};native.AccessibilityInfo={announceForAccessibility:record('announce')};
+ d['@/hooks/use-reduced-motion']={useReducedMotion:()=>true,useMotionPreference:()=>({ready:true,reducedMotion:true})};
  d.react.useLayoutEffect=()=>{};
  d['expo-router'].useFocusEffect=()=>{};
  d['expo-router'].useGlobalSearchParams=()=>options.params??{};

@@ -1,5 +1,3 @@
-import { SetupIllustration } from '@/components/workflows/workflow-surfaces';
-import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useLanguage } from '@/hooks/use-language';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -25,7 +23,7 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { MoneyPreview } from '@/components/onboarding/money-preview';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import {
   isSmsScanningAvailable,
   requestSmsPermission,
@@ -45,7 +43,6 @@ import {
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
-import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
@@ -54,7 +51,7 @@ type Step =
   | 'capture'
   | 'scanning'
   | 'complete';
-const QUESTION_STEPS: readonly Step[] = ['goals', 'budget', 'capture'];
+const QUESTION_STEPS: readonly Step[] = ['goals', 'budget'];
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
@@ -78,9 +75,11 @@ function captureCopy(): { title: StringKey; body: StringKey } {
 
 function StartOption({
   automatic,
+  disabled,
   onPress,
 }: {
   automatic: boolean;
+  disabled: boolean;
   onPress: () => void;
 }) {
   const title = t(automatic
@@ -88,31 +87,28 @@ function StartOption({
     : Platform.OS === 'ios' ? 'onboardManualChoiceIos' : 'onboardManualChoice');
   const body = t(automatic
     ? Platform.OS === 'ios' ? 'onboardAutomaticChoiceIosBody' : 'onboardAutomaticChoiceAndroidBody'
-    : Platform.OS === 'ios' ? 'onboardManualChoiceIosBody' : 'onboardManualChoiceBody');
+    : Platform.OS === 'web' ? 'onboardManualChoiceWebBody'
+      : Platform.OS === 'ios' ? 'onboardManualChoiceIosBody' : 'onboardManualChoiceBody');
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${title}. ${body}`}
+      accessibilityState={{ disabled, busy: disabled }}
+      disabled={disabled}
       onPress={() => {
         tapped();
         onPress();
       }}
       style={({ pressed }) => [
         styles.startOption,
-        automatic && styles.startOptionFeatured,
-        { opacity: pressed ? 0.72 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] },
+        { opacity: disabled ? 0.5 : pressed ? 0.72 : 1 },
       ]}>
       <View style={[styles.startOptionIcon, automatic && styles.startOptionIconFeatured]}>
-        <Icon name={automatic ? 'spark' : 'plus'} size={20} color={automatic ? night.primary : night.textSecondary} />
+        <Icon name={automatic ? Platform.OS === 'ios' ? 'bolt' : 'mail' : 'plus'} size={20} color={automatic ? night.primary : night.textSecondary} />
       </View>
       <View style={styles.startOptionCopy}>
         <View style={styles.startOptionTitleLine}>
           <ThemedText style={styles.startOptionTitle}>{title}</ThemedText>
-          {automatic && (
-            <View style={styles.recommendedPill}>
-              <ThemedText style={styles.recommendedText}>{t('recommended')}</ThemedText>
-            </View>
-          )}
         </View>
         <ThemedText style={styles.startOptionBody}>{body}</ThemedText>
       </View>
@@ -143,7 +139,8 @@ function SelectionRow({
       accessibilityRole={role}
       accessibilityLabel={`${title}. ${detail}`}
       accessibilityHint={hint}
-      accessibilityState={role === 'checkbox' ? { checked: selected } : { selected }}
+      accessibilityState={{ checked: selected }}
+      aria-checked={selected}
       onPress={() => {
         tapped();
         onPress();
@@ -154,7 +151,6 @@ function SelectionRow({
           backgroundColor: selected ? night.primarySoft : night.backgroundElement,
           borderColor: selected ? night.primary : night.cardBorder,
           opacity: pressed ? 0.82 : 1,
-          transform: [{ scale: pressed ? 0.99 : 1 }],
         },
       ]}>
       <View
@@ -182,8 +178,8 @@ function SelectionRow({
   );
 }
 
-function BackHeader({ step, onBack, showProgress }: {
-  step: Step; onBack: () => void; showProgress: boolean;
+function BackHeader({ step, onBack, showProgress, disabled }: {
+  step: Step; onBack: () => void; showProgress: boolean; disabled: boolean;
 }) {
   const index = QUESTION_STEPS.indexOf(step);
   const visibleIndex = index < 0 ? QUESTION_STEPS.length - 1 : index;
@@ -193,6 +189,8 @@ function BackHeader({ step, onBack, showProgress }: {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('onboardBack')}
+          accessibilityState={{ disabled }}
+          disabled={disabled}
           hitSlop={10}
           onPress={() => {
             tapped();
@@ -235,11 +233,12 @@ function BackHeader({ step, onBack, showProgress }: {
  * iOS return from its first-class Shortcut setup to the personalised summary.
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const words = workflowCopy(useLanguage());
+  useLanguage();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ onboarding?: string }>();
   const router = useRouter();
-  const reducedMotion = useReducedMotion();
+  const motion = useMotionPreference();
+  const reducedMotion = !motion.ready || motion.reducedMotion;
   const {
     state,
     storageFailure,
@@ -269,7 +268,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
   const [learnMoreVisible, setLearnMoreVisible] = useState(false);
-  const [exampleVisible, setExampleVisible] = useState(false);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const setupBusyRef = useRef(false);
+  const [finishing, setFinishing] = useState(false);
+  const [finishSaveFailed, setFinishSaveFailed] = useState(false);
+  const requestedFirstEntry = useRef(false);
 
   useEffect(() => {
     if (!state.hydrated || hydrationFailed) return;
@@ -352,10 +355,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const showOverlay =
     !showRecovery &&
     state.hydrated &&
-    !state.onboarded &&
+    (!state.onboarded || finishing) &&
     !isIosSetupRoute;
-  const notifAvailable = Platform.OS === 'android' &&
-    NotificationReader?.isAvailable?.() === true;
+  // Serialize permission, cleanup and durable completion actions. A second tap
+  // must never start the other capture choice while the first is unresolved.
+  const runSetupAction = async (action: () => Promise<void>) => {
+    if (setupBusyRef.current) return;
+    setupBusyRef.current = true;
+    setSetupBusy(true);
+    try {
+      await action();
+    } finally {
+      setupBusyRef.current = false;
+      setSetupBusy(false);
+    }
+  };
 
   const chooseGoal = (id: OnboardingGoalId) => {
     setGoalLimitAnnounced(false);
@@ -373,6 +387,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const finishPreferences = () => {
     setOnboardingPlan(plan);
+    setPersonalizing(false);
     setStep('capture');
   };
 
@@ -399,9 +414,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       await setCaptureOptOut(false);
       await beginHistoryImport();
       setCompletionOutcome('automatic');
-      setOnboarded();
-      await ensureDurable();
-      committed();
+      await openWafra();
     } catch {
       setResult({ tx: 0, accounts: 0 });
       setCompletionOutcome('failed');
@@ -424,10 +437,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       return;
     }
     if (Platform.OS === 'android' && isSmsScanningAvailable()) {
-      void startScan();
+      await startScan();
       return;
     }
-    setCompletionOutcome('manual');
+    setCompletionOutcome('failed');
     setStep('complete');
   };
 
@@ -485,9 +498,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (activeStep === 'complete') {
       setStep('capture');
       if (params.onboarding) router.setParams({ onboarding: undefined });
-    } else if (activeStep === 'capture' && !personalizing) {
+    } else if (activeStep === 'capture') {
       setStep('welcome');
-    } else if (activeStep === 'scanning') {
+    } else if (activeStep === 'goals' || activeStep === 'scanning') {
       setStep('capture');
     } else if (index > 0) {
       setStep(QUESTION_STEPS[index - 1]);
@@ -496,9 +509,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const openWafra = () => {
-    committed();
-    setOnboarded();
+  const openWafra = async (addFirstEntry = false) => {
+    setFinishing(true);
+    requestedFirstEntry.current = addFirstEntry;
+    try {
+      setOnboarded();
+      await ensureDurable();
+      committed();
+      if (addFirstEntry) router.push('/add-transaction');
+      setFinishSaveFailed(false);
+      setFinishing(false);
+    } catch {
+      setFinishSaveFailed(true);
+      setCompletionOutcome('failed');
+      setStep('complete');
+    }
   };
 
   /**
@@ -530,7 +555,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           {t(resumeFailed ? 'onboardResumeError' : 'loadingLedger')}
         </ThemedText>
         {resumeFailed && (
-          <Button label={t('storageRecoveryRetry')} onPress={() => {
+          <Button wrapLabel label={t('storageRecoveryRetry')} onPress={() => {
             setResumeFailed(false);
             setResumeAttempt((value) => value + 1);
           }} />
@@ -563,6 +588,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             <Animated.ScrollView
               entering={reducedMotion || Platform.OS === 'android' ? undefined : FadeIn.duration(180)}
               showsVerticalScrollIndicator={false}
+              testID="onboarding-welcome"
               contentContainerStyle={styles.welcomeBody}>
               <View style={styles.welcomeTop}>
                 <View style={styles.brandLine}>
@@ -571,46 +597,34 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   </View>
                   <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
                 </View>
-                <SetupIllustration />
                 <ThemedText
                   style={styles.headline}
-                  accessibilityRole="header"
-                  // Display type must still fit as a heading at the largest
-                  // accessibility sizes; body/list text below remains fully
-                  // scalable and the whole surface remains scrollable.
-                  maxFontSizeMultiplier={1.6}>
-                  {words.welcomeTitle}
+                  accessibilityRole="header">
+                  {t('onboardHeadline')}
                 </ThemedText>
                 <ThemedText style={styles.sub}>
-                  {words.welcomeBody}
+                  {t('onboardWelcomeBody')}
                 </ThemedText>
               </View>
+              <MoneyPreview reducedMotion={reducedMotion} />
               <View style={styles.welcomeActions}>
-                <Button
-                  label={t('onboardStartNow')}
+                <Button wrapLabel
+                  label={t('onboardChooseStart')}
                   onPress={() => { setPersonalizing(false); setStep('capture'); }}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
-                <Button
-                  variant="outline"
-                  label={t('onboardPersonalizeOptional')}
-                  onPress={() => { setPersonalizing(true); setStep('goals'); }}
-                  labelColor={night.text}
-                  style={styles.ghost}
-                />
-                <Button variant="outline" label={t('refTryExample')}
-                  onPress={() => setExampleVisible(true)} labelColor={night.text} style={styles.ghost} />
                 <View style={styles.setupTime}>
                   <Icon name="lock" size={14} color={night.textTertiary} />
-                  <ThemedText style={styles.setupTimeText}>{words.welcomeFootnote}</ThemedText>
+                  <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
                 </View>
               </View>
             </Animated.ScrollView>
           ) : (
             <>
-              {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack} showProgress={personalizing} />}
-              <ScrollView
+              {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack}
+                disabled={setupBusy || finishing} showProgress={personalizing && QUESTION_STEPS.includes(activeStep)} />}
+              <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
@@ -647,14 +661,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                       )}
                       <View style={styles.questionActions}>
-                        <Button
+                        <Button wrapLabel
                           label={t('continueWord')}
                           disabled={plan.goalIds.length === 0}
                           onPress={() => setStep('budget')}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
-                        <Button variant="outline" label={t('onboardSkipPersonalization')}
+                        <Button wrapLabel variant="outline" label={t('onboardSkipPersonalization')}
                           onPress={() => { setPersonalizing(false); setStep('capture'); }}
                           labelColor={night.text} style={styles.ghost} />
                       </View>
@@ -700,7 +714,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                       </View>
                       <View style={styles.questionActions}>
-                        <Button
+                        <Button wrapLabel
                           label={t('onboardBudgetContinue')}
                           onPress={finishPreferences}
                           labelColor={night.onPrimary}
@@ -725,12 +739,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
                       </View>
-                      <View style={styles.startOptions}>
-                        <StartOption automatic onPress={() => void beginCapture()} />
+                      <View style={styles.startOptions} testID="onboarding-start-options">
                         {Platform.OS !== 'web' && (
-                          <StartOption automatic={false} onPress={() => void continueManually()} />
+                          <StartOption automatic disabled={setupBusy} onPress={() => void runSetupAction(beginCapture)} />
                         )}
+                        <StartOption automatic={false} disabled={setupBusy} onPress={() => void runSetupAction(continueManually)} />
                       </View>
+                      {setupBusy && <ThemedText style={styles.inlineNote} accessibilityLiveRegion="polite">
+                        {t('onboardSetupWorking')}
+                      </ThemedText>}
                       {Platform.OS !== 'web' && (
                         <View style={styles.capturePrivacy}>
                           <Icon name="lock" size={17} color={night.textSecondary} />
@@ -742,7 +759,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </View>
                       )}
                       {Platform.OS === 'ios' && (
-                        <Button
+                        <Button wrapLabel
                           variant="outline"
                           label={t('onboardCaptureLearnMoreAction')}
                           onPress={() => setLearnMoreVisible(true)}
@@ -750,16 +767,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           style={[styles.learnMoreButton, styles.ghost]}
                         />
                       )}
-                      {Platform.OS === 'web' && (
-                        <View style={styles.captureActions}>
-                          <Button
-                            label={t('continueWord')}
-                            onPress={() => void beginCapture()}
-                            labelColor={night.onPrimary}
-                            style={styles.primaryButton}
-                          />
+                      <Pressable accessibilityRole="button" disabled={setupBusy}
+                        accessibilityState={{ disabled: setupBusy }}
+                        accessibilityLabel={t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
+                        accessibilityHint={t(state.onboardingPlan ? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote')}
+                        onPress={() => { tapped(); setPersonalizing(true); setStep('goals'); }}
+                        style={({ pressed }) => [styles.personalizeRow, { opacity: pressed ? 0.65 : 1 }]}>
+                        <View style={styles.choiceCopy}>
+                          <ThemedText style={styles.choiceTitle}>
+                            {t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
+                          </ThemedText>
+                          <ThemedText style={styles.choiceDetail}>
+                            {t(state.onboardingPlan ? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote')}
+                          </ThemedText>
                         </View>
-                      )}
+                        <Icon name="chevron-right" size={18} color={night.textSecondary} />
+                      </Pressable>
                     </>
                   )}
 
@@ -805,10 +828,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         <View
                           style={[
                             styles.completeMark,
-                            failedCompletion && { backgroundColor: night.warning },
+                            (failedCompletion || smsDenied) && { backgroundColor: night.warning },
                           ]}>
                           <Icon
-                            name={failedCompletion ? 'alert' : 'check'}
+                            name={failedCompletion || smsDenied ? 'alert' : 'check'}
                             size={30}
                             color={night.onPrimary}
                             strokeWidth={2.1}
@@ -816,8 +839,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </View>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
                           {t(
-                            automaticCompletion
+                            finishSaveFailed ? 'onboardFinishSaveFailedTitle'
+                              : automaticCompletion
                                 ? 'onboardCompleteTitle'
+                                : smsDenied ? 'onboardPermissionChoiceTitle'
                                 : completionOutcome === 'failed'
                                   ? 'onboardCompleteNeedsAttentionTitle'
                                   : 'onboardCompleteManualTitle'
@@ -825,8 +850,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>
                           {t(
-                            automaticCompletion
+                            finishSaveFailed ? 'onboardFinishSaveFailedBody'
+                              : automaticCompletion
                                 ? 'onboardCompleteBodyAutomatic'
+                                : smsDenied ? 'onboardPermissionChoiceBody'
                                 : completionOutcome === 'failed'
                                   ? 'onboardCompleteNeedsAttentionBody'
                                   : 'onboardCompleteManualBody'
@@ -839,14 +866,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                               style={[styles.inlineNote, { color: night.warning }]}>
                               {t('onboardSmsDenied')}
                             </ThemedText>
-                            <Button
+                            <Button wrapLabel
                               variant="outline"
                               label={t('retryHistoryRead')}
-                              onPress={() => void startScan()}
+                              onPress={() => void runSetupAction(startScan)} disabled={setupBusy}
                               labelColor={night.text}
                               style={styles.ghost}
                             />
-                            <Button
+                            <Button wrapLabel
                               variant="outline"
                               label={t('openPhoneSettings')}
                               onPress={() => void Linking.openSettings().catch(() => {})}
@@ -883,23 +910,27 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       </View>
 
                       <View style={styles.captureActions}>
-                        {notifAvailable && !NotificationReader?.isEnabled?.() && (
-                          <>
-                            <ThemedText style={styles.notifNote}>{t('notifNoteOnboard')}</ThemedText>
-                            <Button
-                              label={t('alsoReadNotifs')}
-                              onPress={() => NotificationReader?.openSettings()}
-                              labelColor={night.text}
-                              style={styles.ghost}
-                            />
-                          </>
-                        )}
-                        <Button
-                          label={t('openWafra')}
-                          onPress={openWafra}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
+                        {finishSaveFailed ? <Button wrapLabel label={t('storageRecoveryRetry')}
+                          onPress={() => void runSetupAction(() => openWafra(requestedFirstEntry.current))}
+                          disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
+                        : completionOutcome === 'manual' && !automaticCompletion ? <>
+                          <Button wrapLabel label={t('onboardAddFirstEntry')}
+                            onPress={() => void runSetupAction(() => openWafra(true))}
+                            disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
+                          <Button wrapLabel variant="ghost" label={t('onboardExploreLedger')}
+                            onPress={() => void runSetupAction(() => openWafra())}
+                            disabled={setupBusy} labelColor={night.text} />
+                        </> : failedCompletion || smsDenied ? <>
+                          <Button wrapLabel label={t('onboardRetrySetup')}
+                            onPress={goBack} disabled={setupBusy}
+                            labelColor={night.onPrimary} style={styles.primaryButton} />
+                          <Button wrapLabel variant="outline" label={t('onboardManualChoice')}
+                            onPress={() => void runSetupAction(continueManually)} disabled={setupBusy}
+                            labelColor={night.text} style={styles.ghost} />
+                        </> : <Button wrapLabel label={t('openWafra')}
+                          onPress={() => void runSetupAction(() => openWafra())} disabled={setupBusy}
+                          labelColor={night.onPrimary} style={styles.primaryButton} />}
+
                       </View>
                     </>
                   )}
@@ -907,9 +938,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               </ScrollView>
             </>
           )}
-          <BottomSheet visible={exampleVisible} onClose={() => setExampleVisible(false)} title={t('refTryExample')}>
-            <View style={{ backgroundColor: Colors.dark.background, padding: 16, borderRadius: 18 }}><MoneyPreview reducedMotion={reducedMotion} /></View>
-          </BottomSheet>
           <BottomSheet
             visible={learnMoreVisible}
             onClose={() => setLearnMoreVisible(false)}
@@ -962,7 +990,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: Spacing.four,
   },
-  welcomeTop: { paddingTop: Spacing.three, gap: Spacing.two },
+  welcomeTop: { paddingTop: Spacing.three, gap: Spacing.three },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   markHalo: {
     width: 44,
@@ -1001,13 +1029,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  back: { minHeight: 44, flexDirection: 'row', gap: 4, alignItems: 'center' },
+  back: { minHeight: 48, flexDirection: 'row', gap: 4, alignItems: 'center' },
   backLabel: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12 },
   stepLabel: { color: night.textTertiary, fontFamily: Fonts.monoMedium, fontSize: 11 },
   progressTrack: { flexDirection: 'row', gap: 5 },
   progressSegment: { flex: 1, height: 3, borderRadius: 2 },
   scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
-  questionBody: { flex: 1, paddingTop: Spacing.five },
+  questionBody: { flex: 1, paddingTop: Spacing.four },
   questionTop: { gap: Spacing.two, marginBottom: Spacing.four },
   questionTitle: {
     fontFamily: Fonts.sansSemi,
@@ -1060,7 +1088,7 @@ const styles = StyleSheet.create({
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
   permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { marginTop: Spacing.four, backgroundColor: night.primary },
-  captureHero: { gap: Spacing.three, alignItems: 'flex-start' },
+  captureHero: { gap: Spacing.two, alignItems: 'flex-start' },
   captureIcon: {
     width: 58,
     height: 58,
@@ -1069,6 +1097,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  personalizeRow: { marginTop: Spacing.four, paddingVertical: Spacing.three,
+    minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.five, gap: Spacing.two },
   startOptions: { paddingTop: Spacing.three, gap: Spacing.two },
   startOption: {
@@ -1080,10 +1111,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sheet,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: night.cardBorder,
+    borderColor: night.controlBorder,
     backgroundColor: night.backgroundElement,
   },
-  startOptionFeatured: { borderColor: night.primary, backgroundColor: night.primarySoft },
   startOptionIcon: {
     width: 44,
     height: 44,
@@ -1093,12 +1123,10 @@ const styles = StyleSheet.create({
     backgroundColor: night.backgroundSelected,
   },
   startOptionIconFeatured: { backgroundColor: night.backgroundElement },
-  startOptionCopy: { flex: 1, gap: Spacing.one },
+  startOptionCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
   startOptionTitleLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 21 },
-  recommendedPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: Radius.full, backgroundColor: night.primary },
-  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   scanStats: {
     width: '100%',
@@ -1123,7 +1151,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  notifNote: { color: night.textSecondary, fontSize: 12, lineHeight: 18 },
   resultCard: {
     width: '100%',
     minHeight: 96,

@@ -1,5 +1,5 @@
 {
-  "description": "AST fingerprints from the prior continuation snapshot. These guard retained handler bodies; they do not test native or service behavior.",
+  "description": "AST fingerprints from the prior continuation snapshot, with individually documented reviewed changes. These guard handler bodies; native and service behavior is covered by separate tests.",
   "records": [
     {
       "file": "src/app/settings.tsx",
@@ -269,17 +269,20 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "finishPreferences",
-      "sha256": "8f00ddfb00da010f33bd4f694ae32788b5a55221f5208ae5a8883347a901d5c9"
+      "sha256": "1166ebb27bad2430e5944444963ace4d0fddcc1f18b0ae8a962f1a71fd8573cb",
+      "reviewedChange": "2026-09-08: Save the optional plan, hide optional progress, and return to capture; executed by workflow-source.test.cjs."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "72d72498dea6dd94ab7f6614571f15f9f8dc691a115b9de2863be75cf9892a03"
+      "sha256": "e5e5410dd310c465753f454f4c7387fbd764697a64cc754ce6776c5a5a35b253",
+      "reviewedChange": "Final save uses the guarded completion action; save-only retry never re-scans."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "beginCapture",
-      "sha256": "f801f607fdfb2f08c3aa802e14f18a2ca12ecbb33c4d778eca8674fe421d24f2"
+      "sha256": "8da94e29e5cf837932db7f198e98e8e0b5ce0724d8433b04af475e5c2ab3aea5",
+      "reviewedChange": "Await the scan for serialization; an unavailable bridge requires explicit manual choice."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
@@ -289,12 +292,14 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "5822e937d709ed47f8b46adb48d4b8cffffc3069fe382b16a6a01dfb78cb2b39"
+      "sha256": "6a7e168fefdab2657a7ad60da8af0f8237d23798ce33a6d0ee9af3a4507a85f0",
+      "reviewedChange": "2026-09-08: Two optional preference steps return to their capture entry point; executed by workflow-source.test.cjs."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "82819d715ac3509cfc95f4031333b97d1b7fd5539e99b8779daabf8bf20ed173"
+      "sha256": "cda2068902ebc11bdf48d86e44c14b85473c3cfb86638ce437f4bd10d69ad135",
+      "reviewedChange": "2026-09-08: Hold completion through persistence, retain save retry and requested Add route; executed by onboarding-actions.test.cjs."
     },
     {
       "file": "src/app/review-alerts.tsx",

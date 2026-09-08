@@ -41,7 +41,7 @@ test('paused history has an explicit resume action; running history does not res
   assert.match(text(paused.tree), /History import paused/);
   const running = harness({ history: { status: 'running', scanned: 1000, found: 120 } });
   assert.match(text(running.tree), /1,000\s+Messages checked/);
-  assert.match(text(running.tree), /120\s+Transactions found/);
+  assert.match(text(running.tree), /120\s+Alerts found/);
   assert.equal(walk(running.tree).filter((n) => n.type === 'Pressable' && text(n.props.children).trim() === 'Resume').length, 0);
 });
 test('capture opt-out changes only after an explicit press and then opens iOS setup', async () => {

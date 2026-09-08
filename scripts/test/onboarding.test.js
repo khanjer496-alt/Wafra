@@ -235,8 +235,8 @@ const moneyPreviewSource = fs.readFileSync(
 );
 
 ok(
-  'first run collects goals and a budget plan without forcing a country',
-  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['goals', 'budget', 'capture']") &&
+  'optional personalization collects two steps without forcing a country',
+  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['goals', 'budget']") &&
     gateSource.includes('setOnboardingPlan(plan)') &&
     !gateSource.includes('setMarket(plan.answers.marketId)') &&
     !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
@@ -253,21 +253,34 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'first run offers an explicitly labeled interactive example without ledger writes',
+  'welcome embeds an explicitly labeled interactive example without ledger or setup writes',
   /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
     /onboardSampleMessage/.test(moneyPreviewSource) &&
     /onboardSampleNote/.test(moneyPreviewSource) &&
     /setRevealed/.test(moneyPreviewSource) &&
-    !/useStore|importBatch|addTransaction/.test(moneyPreviewSource) &&
+    /activeStep === 'welcome'[\s\S]*?<MoneyPreview reducedMotion=\{reducedMotion\}[\s\S]*?onboardChooseStart/.test(gateSource) &&
+    !/exampleVisible|SetupIllustration/.test(gateSource) &&
+    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(moneyPreviewSource) &&
     !/function points\(/.test(gateSource),
 );
 ok(
   'capture choice is presented as two explicit accessible start modes',
-  /<StartOption automatic onPress=/.test(gateSource) &&
-    /<StartOption automatic=\{false\}/.test(gateSource) &&
+  /<StartOption automatic disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
+    /<StartOption automatic=\{false\} disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /accessibilityRole="button"/.test(gateSource) &&
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
+);
+ok(
+  'web preview offers manual tracking without a nonfunctional automatic choice',
+  /Platform\.OS !== 'web' && \([\s\S]{0,180}<StartOption automatic disabled=/.test(gateSource) &&
+    /<StartOption automatic=\{false\} disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
+    /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
+);
+ok(
+  'capture options are equally weighted and notification beta setup remains outside first run',
+  !/styles\.startOptionFeatured|recommendedPill|t\('recommended'\)/.test(gateSource) &&
+    !/NotificationReader|alsoReadNotifs|notifNoteOnboard/.test(gateSource),
 );
 ok(
   'first-run gate exempts guided history routes only on iOS',
@@ -275,9 +288,10 @@ ok(
     /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
 );
 eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Start your way');
-eq('iOS onboarding uses the compact bank-alert subtitle', i18n.t('onboardCaptureBodyIos', 'en'), 'Bank alerts or manual entries.');
-eq('iOS automatic choice describes past and future alerts', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Past and future bank messages.');
-eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'No Messages access. Connect later.');
+eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Choose what works for you. You can change this later.');
+eq('iOS automatic choice names local setup and permits later history', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Set up local bank alerts. Past messages can wait.');
+eq('iOS automatic action names Apple Shortcuts rather than direct inbox access', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Set up Apple Shortcuts');
+eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'Add entries yourself. No Messages access. Connect later.');
 eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
 eq(
   'Learn more distinguishes 30-day logical expiry from later physical cleanup',
@@ -351,12 +365,19 @@ ok(
     !/setTimeout/i.test(gateSource),
 );
 ok(
-  'first run waits for encrypted hydration and shows truthful three-step progress',
+  'first run waits for encrypted hydration and shows progress only for optional goals and budget',
   /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
     /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
-    /QUESTION_STEPS\.length/.test(gateSource),
+    /QUESTION_STEPS\.length/.test(gateSource) &&
+    /showProgress=\{personalizing && QUESTION_STEPS\.includes\(activeStep\)\}/.test(gateSource),
+);
+ok(
+  'manual completion keeps the gate visible through a failed durable save',
+  /const showOverlay\s*=[\s\S]{0,220}\(!state\.onboarded \|\| finishing\)/.test(gateSource) &&
+    /const openWafra = async[\s\S]*?setFinishing\(true\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setFinishing\(false\)[\s\S]*?catch[\s\S]*?setFinishSaveFailed\(true\)/.test(gateSource) &&
+    /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current\)/.test(gateSource),
 );
 ok(
   'completion copy matches automatic, manual, denied, and failed outcomes',
@@ -369,7 +390,7 @@ ok(
 ok(
   'the no-SMS onboarding choice durably opts out before completion',
   /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
-    gateSource.includes('onPress={() => void continueManually()}'),
+    gateSource.includes('onPress={() => void runSetupAction(continueManually)}'),
 );
 ok(
   'choosing automatic capture clears a prior durable opt-out before either platform starts',
@@ -378,12 +399,12 @@ ok(
 );
 ok(
   'Android opens Home after durable setup instead of blocking on inbox parsing',
-  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setOnboarded\(\)/.test(gateSource) &&
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?await openWafra\(\)/.test(gateSource) &&
     !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource),
 );
 ok(
   'denied SMS onboarding can retry or open the exact app settings',
-  /smsDenied[\s\S]*?retryHistoryRead[\s\S]*?startScan\(\)[\s\S]*?openPhoneSettings[\s\S]*?Linking\.openSettings/.test(gateSource),
+  /smsDenied[\s\S]*?retryHistoryRead[\s\S]*?runSetupAction\(startScan\)[\s\S]*?openPhoneSettings[\s\S]*?Linking\.openSettings/.test(gateSource),
 );
 ok(
   'iOS manual opt-out revokes a setup that was started before returning to onboarding',

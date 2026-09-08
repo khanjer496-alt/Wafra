@@ -24,6 +24,7 @@ const navigationE2e = source('scripts/e2e/e2e-navigation.mjs');
 const themeTokens = source('src/constants/theme.ts');
 const themeHook = source('src/hooks/use-theme.ts');
 const onboardingGate = source('src/components/onboarding-gate.tsx');
+const onboardingExample = source('src/components/onboarding/money-preview.tsx');
 const controls = source('src/components/ui/controls.tsx');
 const addTransaction = source('src/app/add-transaction.tsx');
 const transactionRow = source('src/components/transaction-row.tsx');
@@ -94,31 +95,29 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-const defaultCaptureLayoutHeight = () => {
-  const header = declaredStyleValue(onboardingGate, 'progressHeader', 'paddingTop') +
-    declaredStyleValue(onboardingGate, 'progressTopline', 'minHeight') +
-    declaredStyleValue(onboardingGate, 'progressSegment', 'height');
-  const hero = declaredStyleValue(onboardingGate, 'captureIcon', 'height') +
-    declaredStyleValue(onboardingGate, 'questionTitle', 'lineHeight') +
-    declaredStyleValue(onboardingGate, 'questionBodyCopy', 'lineHeight') +
-    declaredStyleValue(onboardingGate, 'captureHero', 'gap') * 2;
-  const choices = declaredStyleValue(onboardingGate, 'startOptions', 'paddingTop') +
-    declaredStyleValue(onboardingGate, 'startOption', 'minHeight') * 2 +
-    declaredStyleValue(onboardingGate, 'startOptions', 'gap');
-  const footer = declaredStyleValue(onboardingGate, 'capturePrivacyText', 'lineHeight') +
-    declaredStyleValue(onboardingGate, 'learnMoreButton', 'marginTop') +
-    declaredStyleValue(controls, 'button', 'minHeight');
-  return header +
-    declaredStyleValue(onboardingGate, 'questionBody', 'paddingTop') +
-    hero + choices + footer +
-    declaredStyleValue(onboardingGate, 'scrollContent', 'paddingBottom');
-};
-ok('onboarding choice cards fit the 402×874 default viewport from their declared layout budget',
-  Number.isFinite(defaultCaptureLayoutHeight()) && defaultCaptureLayoutHeight() > 0 &&
-    defaultCaptureLayoutHeight() <= 874 - 96 &&
-    !/numberOfLines/.test(onboardingGate) &&
-    /<ScrollView/.test(onboardingGate) &&
+// Font metrics, wrapping, locale and safe areas determine actual screen height.
+// The browser onboarding suite measures viewport overflow; these source checks
+// preserve the structural accessibility guarantees without inventing a height.
+ok('onboarding keeps welcome and every setup step scrollable at larger text sizes',
+  /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
+    /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
+    /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
+    /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
     /<BottomSheet/.test(onboardingGate));
+ok('onboarding text and its sample can grow without truncation or a scale ceiling',
+  [onboardingGate, onboardingExample].every((code) =>
+    !/numberOfLines|maxFontSizeMultiplier|adjustsFontSizeToFit|minimumFontScale/.test(code)));
+const onboardingButtons = onboardingGate.match(/<Button\b[^>]*>/g) ?? [];
+ok('every shared onboarding button permits its localized label to wrap',
+  onboardingButtons.length > 0 && onboardingButtons.every((button) => /\bwrapLabel\b/.test(button)));
+ok('onboarding action targets retain native accessibility size floors',
+  declaredStyleValue(onboardingGate, 'startOption', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'personalizeRow', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'back', 'minHeight') >= 44 &&
+    declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
+    declaredStyleValue(controls, 'button', 'minHeight') >= 48);
+ok('optional-plan choices expose the explanation to assistive technology',
+  /accessibilityLabel=\{t\(state\.onboardingPlan \? 'onboardEditPlan' : 'onboardPersonalizeOptional'\)\}[\s\S]{0,200}accessibilityHint=\{t\(state\.onboardingPlan \? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote'\)\}/.test(onboardingGate));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
   /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&

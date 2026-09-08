@@ -2894,11 +2894,31 @@ struct WafraBankSenderRegistryTests {
         enabled: true, setupProofVersion: null, firstCapturedAt: null, dropped: 0,
         corrupt: false, retirementPending: false,
       }, 'needs-automation'],
-      ['proof without a qualifying row waits for the first real alert', {
+      ['proof alone still needs Message automation confirmation', {
+        hydrated: true, supported: true, proActive: true, captureOptOut: false,
+        enabled: true, setupProofVersion: 1, firstCapturedAt: null, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: false,
+      }, 'needs-automation'],
+      ['missing confirmation defaults to unfinished automation', {
         hydrated: true, supported: true, proActive: true, captureOptOut: false,
         enabled: true, setupProofVersion: 1, firstCapturedAt: null, dropped: 0,
         corrupt: false, retirementPending: false,
+      }, 'needs-automation'],
+      ['confirmed automation and native proof wait for the first real alert', {
+        hydrated: true, supported: true, proActive: true, captureOptOut: false,
+        enabled: true, setupProofVersion: 1, firstCapturedAt: null, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true,
       }, 'waiting-for-alert'],
+      ['automation confirmation cannot replace missing native proof', {
+        hydrated: true, supported: true, proActive: true, captureOptOut: false,
+        enabled: true, setupProofVersion: null, firstCapturedAt: null, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true,
+      }, 'needs-automation'],
+      ['an actual captured milestone survives absent self-confirmation', {
+        hydrated: true, supported: true, proActive: true, captureOptOut: false,
+        enabled: true, setupProofVersion: 1, firstCapturedAt: 1, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: false,
+      }, 'first-alert-captured'],
       ['a qualifying durable milestone is first-alert-captured', {
         hydrated: true, supported: true, proActive: true, captureOptOut: false,
         enabled: true, setupProofVersion: 1, firstCapturedAt: 1, dropped: 0,
@@ -3372,9 +3392,18 @@ struct WafraBankSenderRegistryTests {
       publishToSelf = false,
       replayEffectsBeforeHydration = false,
       warningAckFails = false,
+      automationConfirmed = false,
+      progressReadFails = false,
+      nextFocusProgress,
+      expectedAfterFocus,
     }) => {
       const runtime = createHookRuntime();
       const statusListeners = new Set();
+      let confirmed = automationConfirmed;
+      let progressReadFailure = progressReadFails;
+      let progressReads = 0;
+      let focusEnter;
+      let focusLeave;
       let storeState = {
         hydrated: false,
         captureOptOut: false,
@@ -3441,7 +3470,13 @@ struct WafraBankSenderRegistryTests {
         if (id === 'react') return runtime.react;
         if (id === 'expo-router') {
           return {
-            useFocusEffect: (effect) => runtime.react.useEffect(effect, [effect]),
+            useFocusEffect: (effect) => {
+              focusEnter = effect;
+              runtime.react.useEffect(() => {
+                focusLeave = effect();
+                return () => { if (typeof focusLeave === 'function') focusLeave(); };
+              }, [effect]);
+            },
             useRouter: () => ({ push: () => {} }),
           };
         }
@@ -3495,6 +3530,15 @@ struct WafraBankSenderRegistryTests {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
         }
         if (id === '@/lib/purchases') return { isProActive: () => true };
+        if (id === '@/lib/ios-message-onboarding') {
+          return {
+            loadIosMessageSetupProgress: async () => {
+              progressReads += 1;
+              if (progressReadFailure) throw new Error('setup progress unavailable');
+              return { futureAutomationConfirmed: confirmed };
+            },
+          };
+        }
         if (id === '@/lib/relay') {
           return {
             getRelayConfig: async () => null,
@@ -3526,10 +3570,52 @@ struct WafraBankSenderRegistryTests {
       model = render();
       ok(`mounted local status: ${label}`,
         model.captureState === expected && statusReads === (supported && !captureOptOut ? 1 : 0) &&
-          purges === (supported && captureOptOut ? 1 : 0) && drains === 0,
-        JSON.stringify({ state: model.captureState, expected, statusReads, purges, drains }));
+          purges === (supported && captureOptOut ? 1 : 0) && drains === 0 &&
+          progressReads === (supported && !captureOptOut ? 1 : 0),
+        JSON.stringify({ state: model.captureState, expected, statusReads, purges, drains, progressReads }));
+      if (nextFocusProgress !== undefined) {
+        if (typeof focusLeave === 'function') focusLeave();
+        confirmed = nextFocusProgress === true;
+        progressReadFailure = nextFocusProgress === 'error';
+        focusLeave = focusEnter();
+        await runtime.flush();
+        model = render();
+        ok(`mounted local status: ${label} after returning to Home`,
+          model.captureState === expectedAfterFocus && progressReads === 2 &&
+            statusReads === 2 && drains === 0,
+          JSON.stringify({ state: model.captureState, expectedAfterFocus, statusReads, progressReads, drains }));
+      }
       runtime.cleanup();
     };
+    await mountedHydrationCase({
+      label: 'local proof alone opens unfinished setup until confirmation is saved',
+      expected: 'needs-automation', nativeStatus: status(),
+      captureOptOut: false, supported: true,
+      nextFocusProgress: true, expectedAfterFocus: 'waiting-for-alert',
+    });
+    await mountedHydrationCase({
+      label: 'a later progress read failure cannot preserve stale Ready',
+      expected: 'waiting-for-alert', nativeStatus: status(),
+      captureOptOut: false, supported: true, automationConfirmed: true,
+      nextFocusProgress: 'error', expectedAfterFocus: 'needs-automation',
+    });
+    await mountedHydrationCase({
+      label: 'failed setup progress read does not fabricate automation confirmation',
+      expected: 'needs-automation', nativeStatus: status(),
+      captureOptOut: false, supported: true, progressReadFails: true,
+    });
+    for (const [label, nativeStatus, expected] of [
+      ['pending queue', status({ pending: 1 }), 'queue-warning'],
+      ['dropped warning', status({ dropped: 2 }), 'queue-warning'],
+      ['corrupt warning', status({ corrupt: true }), 'queue-warning'],
+      ['expired native entitlement', status({ entitled: false }), 'paused'],
+      ['actual first-alert receipt', status({ firstCapturedAt: 1 }), 'first-alert-captured'],
+    ]) {
+      await mountedHydrationCase({
+        label: `setup progress read failure preserves ${label}`,
+        expected, nativeStatus, captureOptOut: false, supported: true, progressReadFails: true,
+      });
+    }
     await mountedHydrationCase({
       label: 'hydration reads the native disabled default without draining',
       expected: 'off',

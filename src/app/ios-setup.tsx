@@ -1,5 +1,3 @@
-import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
-import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -88,7 +86,6 @@ const failureCopy = (failure: Exclude<IosSetupFailure, null>): string => {
 };
 
 export default function IosSetupScreen() {
-  const words = workflowCopy(useLanguage());
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -659,19 +656,10 @@ export default function IosSetupScreen() {
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
             actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
           />
-          <WorkflowHero title={words.setupTitle} body={words.setupBody} icon="mail" />
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
           ) : (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
-              <IosSetupJourney
-                language={language}
-                historyStatus={progress.historyStatus}
-                futureReadiness={setup.readiness}
-                automationConfirmed={progress.futureAutomationConfirmed}
-                detectedBanks={detectedBanks}
-                captureHealth={setup.captureHealth}
-              />
               <ChecklistRow
                 step={1}
                 title={t('iosMessagePastTitle')}
@@ -741,6 +729,16 @@ export default function IosSetupScreen() {
                   </ThemedText>
                 ) : null}
               </ChecklistRow>
+              <View style={styles.evidence}>
+                <IosSetupJourney
+                  language={language}
+                  historyStatus={progress.historyStatus}
+                  futureReadiness={setup.readiness}
+                  automationConfirmed={progress.futureAutomationConfirmed}
+                  detectedBanks={detectedBanks}
+                  captureHealth={setup.captureHealth}
+                />
+              </View>
             </View>
           )}
           {error && (
@@ -814,6 +812,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four, gap: Spacing.four,
   },
   checklist: { gap: Spacing.two },
+  evidence: { paddingTop: Spacing.three },
   hints: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',

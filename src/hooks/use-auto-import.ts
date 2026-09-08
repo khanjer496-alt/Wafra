@@ -53,6 +53,7 @@ import {
 } from '@/lib/ios-local-capture';
 import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
+import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
   WafraLiveCaptureNativeModule,
@@ -167,6 +168,7 @@ export function resolveIosCaptureSurfaceState({
   captureOptOut = false,
   enabled,
   setupProofVersion,
+  futureAutomationConfirmed = false,
   firstCapturedAt,
   pending,
   dropped,
@@ -180,6 +182,7 @@ export function resolveIosCaptureSurfaceState({
   captureOptOut?: boolean;
   enabled: boolean;
   setupProofVersion: number | null;
+  futureAutomationConfirmed?: boolean;
   firstCapturedAt: number | null;
   pending: number;
   dropped: number;
@@ -195,6 +198,9 @@ export function resolveIosCaptureSurfaceState({
   if (retirementPending) return 'migration-retry';
   if (setupProofVersion !== 1) return 'needs-automation';
   if (isCaptureTimestamp(firstCapturedAt)) return 'first-alert-captured';
+  // Native proof checks the local action, not the user's Message automation.
+  // Keep an actual captured milestone above this self-confirmation requirement.
+  if (futureAutomationConfirmed !== true) return 'needs-automation';
   return 'waiting-for-alert';
 }
 
@@ -621,6 +627,9 @@ export function useAutoImport(
         statusReadInProgress.current = false;
       }
       const cfg = await getRelayConfig();
+      // Failure to read self-confirmation must not retain a stale Ready state
+      // or suppress native queue warnings and actual received-alert evidence.
+      const setupProgress = await loadIosMessageSetupProgress().catch(() => null);
       if (!isCurrent()) return;
       const latest = getStateSnapshot();
       const warning = latest.iosCaptureWarning;
@@ -638,6 +647,7 @@ export function useAutoImport(
         captureOptOut: latest.captureOptOut,
         enabled: nativeStatus?.enabled ?? false,
         setupProofVersion: nativeStatus?.setupProofVersion ?? null,
+        futureAutomationConfirmed: setupProgress?.futureAutomationConfirmed === true,
         firstCapturedAt: nativeStatus?.firstCapturedAt ?? null,
         pending: nativeStatus?.pending ?? 0,
         dropped: Math.max(nativeStatus?.dropped ?? 0, warning?.dropped ?? 0),

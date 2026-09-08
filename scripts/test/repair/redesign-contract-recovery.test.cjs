@@ -58,14 +58,17 @@ for(const language of ['en','ar']) {
   }
   assert.equal(h.events.length,4);
  });
- test(`${language}: first-run example is opt-in and never writes the ledger`,()=>{
+ test(`${language}: inline first-run example stays optional and never writes the ledger`,()=>{
   const h=createWorkflowHarness({language,state:{onboarded:false},states:{2:true}}),tree=h.renderScreen('onboarding');
-  const label=h.deps['@/lib/i18n'].t('refTryExample');
+  const label=h.deps['@/lib/i18n'].t('onboardSampleAction');
+  assert.ok(walk(tree).some(n=>n.props.testID==='onboarding-example'));
+  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===h.deps['@/lib/i18n'].t('onboardChooseStart')));
+  assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('onboardSampleNote')));
   const button=walk(tree).find(n=>n.props.onPress&&n.props.accessibilityLabel===label);assert.ok(button);
   assert.deepEqual(h.events,[]);button.props.onPress();
-  assert.equal(h.events.length,1);assert.equal(h.events[0][0],'state');assert.equal(h.events[0][2],true);
+  assert.equal(h.events.length,1);assert.equal(h.events[0][0],'state');assert.equal(h.events[0][2](false),true);
   const demo=createWorkflowHarness({language,states:{0:false}}),preview=demo.deps['@/components/onboarding/money-preview'].MoneyPreview({reducedMotion:true});
-  const reveal=walk(preview).find(n=>n.props.onPress);assert.equal(reveal.props.accessibilityState.expanded,false);reveal.props.onPress();
+  const reveal=walk(preview).find(n=>n.props.onPress);assert.equal(reveal.props.accessibilityHint,demo.deps['@/lib/i18n'].t('onboardSampleNote'));reveal.props.onPress();
   assert.equal(demo.events.length,1);assert.deepEqual(demo.events[0].slice(0,2),['state',0]);
   assert.equal(demo.events[0][2](false),true);assert.equal(demo.events[0][2](true),false);
   const shown=createWorkflowHarness({language,states:{0:true}}),shownTree=shown.deps['@/components/onboarding/money-preview'].MoneyPreview({reducedMotion:true});

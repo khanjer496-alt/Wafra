@@ -189,3 +189,5 @@ node --test repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."
+
+node --test onboarding-actions.test.cjs
