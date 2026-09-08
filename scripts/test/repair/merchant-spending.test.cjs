@@ -27,6 +27,29 @@ test('same-name income and refunds never become spending or an inferred refund d
   assert.equal(result.totalFils, 9000); assert.equal(result.receivedFils, 2000);
   assert.equal(result.activity.length, 2); assert.equal(result.received.length, 1);
 });
+test('income average and conversion disclosure use only income that counts in the selected period', () => {
+  const result = project([
+    row('purchase', 9000, { originalCurrency: 'USD' }),
+    row('first-income', 100, { type: 'income' }), row('second-income', 101, { type: 'income' }),
+    row('other-source', 999999, { type: 'income', title: 'Talabat sales' }),
+    row('old-income', 999999, { type: 'income', date: '2026-08-31' }),
+    row('hidden-income', 999999, { type: 'income', accountId: 'hidden', originalCurrency: 'EUR' }),
+    row('transfer-income', 999999, { type: 'income', isTransfer: true }),
+  ]);
+  assert.equal(result.receivedFils, 201);
+  assert.equal(result.received.length, 2);
+  assert.equal(result.averageReceivedFils, 101);
+  assert.equal(result.averageReceivedApproximate, true);
+  assert.equal(result.hasConvertedIncome, false, 'foreign purchases and excluded credits cannot mark ordinary income converted');
+  assert.equal(result.totalFils, 9000, 'income summary must not change spending');
+  const converted = project([row('foreign-income', 3673, { type: 'income', originalCurrency: 'USD' })]);
+  assert.equal(converted.averageReceivedFils, 3673);
+  assert.equal(converted.averageReceivedApproximate, false);
+  assert.equal(converted.hasConvertedIncome, true);
+  const noIncome = project([row('purchase', 100)]);
+  assert.equal(noIncome.averageReceivedFils, null);
+  assert.equal(noIncome.averageReceivedApproximate, false);
+});
 test('substring and logo matches cannot combine different financial identities', () => {
   const rows = [row('a', 500), row('b', 600, { title: 'Talabat Business' }), row('c', 700, { title: 'Not Talabat' })];
   assert.equal(project(rows, 'Talabat').totalFils, 500);
@@ -84,6 +107,15 @@ test('Arabic, punctuation and reserved URL characters round-trip exactly', () =>
     assert.equal(project([row('x', 1, { title: name })], name).totalFils, 1);
   }
 });
+test('income source URLs preserve the exact identity and explicitly carry direction', () => {
+  const module = fixture()['@/lib/merchant-spending'];
+  for (const name of ['مطعم عربي', 'R&D / Cafe? #2 + 20%', 'Talabat sales']) {
+    const url = new URL(module.merchantSpendingHref(name, 'income'), 'https://example.test');
+    assert.equal(url.pathname, '/merchant'); assert.equal(url.searchParams.get('name'), name);
+    assert.equal(url.searchParams.get('type'), 'income');
+    assert.equal(module.merchantSpendingHref(name, 'expense'), module.merchantSpendingHref(name));
+  }
+});
 test('large histories have exact totals and bounded matching results', () => {
   const rows = Array.from({ length: 50000 }, (_, i) => row(String(i), i + 1, { title: i % 10 ? 'Other merchant' : 'Talabat' }));
   const result = project(rows); assert.equal(result.spending.length, 5000);
@@ -98,6 +130,16 @@ for (const language of ['en', 'ar']) test(`${language}: entry details expose a l
   assert.ok(link); assert.equal(link.props.accessibilityRole, 'button');
   assert.ok(text(link)); link.props.onPress();
   assert.deepEqual(h.events, [['close'], ['route', '/merchant?name=Talabat']]);
+});
+for (const language of ['en', 'ar']) test(`${language}: income entry details close before opening that income source`, () => {
+  const h = createHarness({ language });
+  const transaction = { ...h.state.transactions[1], title: 'Talabat sales', type: 'income', category: 'business' };
+  const link = walk(h.renderDetail(transaction)).find(n => n.props?.testID === 'view-merchant-spending');
+  assert.ok(link); assert.equal(link.props.accessibilityRole, 'button');
+  assert.match(link.props.accessibilityLabel, language === 'ar' ? /الدخل/ : /income/);
+  assert.equal(/merchant|التاجر/i.test(link.props.accessibilityLabel), false);
+  link.props.onPress();
+  assert.deepEqual(h.events, [['close'], ['route', '/merchant?name=Talabat%20sales&type=income']]);
 });
 test('Spending exposes the merchant directory without adding a fifth main tab', () => {
   const h = createHarness(); const link = walk(h.render('flow')).find(n => n.props?.testID === 'browse-merchant-spending');

@@ -27,12 +27,15 @@ export function projectMerchantSpending(
     activity, spending, received, totalFils, receivedFils, excludedCount,
     averageFils: spending.length ? Math.round(totalFils / spending.length) : null,
     averageApproximate: spending.length > 0 && totalFils % spending.length !== 0,
+    averageReceivedFils: received.length ? Math.round(receivedFils / received.length) : null,
+    averageReceivedApproximate: received.length > 0 && receivedFils % received.length !== 0,
     lastPurchase: spending[0]?.date ?? null,
     // The persisted ledger has no reliable refund-to-purchase relationship.
     // Do not infer refunds from income, title, or a logo, or net them off spend.
     hasConvertedAmounts: spending.some(tx => tx.originalCurrency !== undefined),
+    hasConvertedIncome: received.some(tx => tx.originalCurrency !== undefined),
   };
 }
 
-export const merchantSpendingHref = (title: string): `/merchant?${string}` =>
-  `/merchant?name=${encodeURIComponent(title.trim())}`;
+export const merchantSpendingHref = (title: string, type: Transaction['type'] = 'expense'): `/merchant?${string}` =>
+  `/merchant?name=${encodeURIComponent(title.trim())}${type === 'income' ? '&type=income' : ''}`;

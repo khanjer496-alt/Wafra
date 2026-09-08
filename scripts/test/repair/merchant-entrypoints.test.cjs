@@ -60,6 +60,21 @@ test('merchant URL preserves Arabic, punctuation and reserved query characters',
     assert.equal([...url.searchParams].length, 1);
   }
 });
+for (const language of ['en', 'ar']) test(`${language}: an income source opens income activity with its own accessible action`, () => {
+  const title = 'Talabat sales / فرع? #2 +20%';
+  const h = rowFixture({ language });
+  const tree = h.render({ type: 'income', title, category: 'business' });
+  const source = byId(tree, 'transaction-merchant-link');
+  assert.match(source.props.accessibilityLabel, language === 'ar' ? /عرض مصدر الدخل/ : /View income source/);
+  source.props.onPress();
+  const url = new URL(h.events[0][1], 'https://example.test');
+  assert.equal(url.pathname, '/merchant');
+  assert.equal(url.searchParams.get('name'), title);
+  assert.equal(url.searchParams.get('type'), 'income');
+  assert.deepEqual([...url.searchParams.keys()].sort(), ['name', 'type']);
+  byId(tree, 'transaction-details-link').props.onPress();
+  assert.deepEqual(h.events[1], ['transaction', 'fixture'], 'amount still opens the income transaction itself');
+});
 test('transfers never masquerade as merchant-spending links', () => {
   for (const [overrides, props] of [[{ isTransfer: true }, {}], [{ type: 'income' }, { internal: true }]]) {
     const h = rowFixture(); const tree = h.render(overrides, props);

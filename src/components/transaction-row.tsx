@@ -52,11 +52,11 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // transaction action. No ledger scan or store subscription belongs in a row.
   if (merchantLinks && onPress && transaction.title.trim() && !isTransfer) {
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
-    const merchantLabel = merchantWords.merchantDetails;
+    const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
       <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview].filter(Boolean).join('. ')}
         testID="transaction-merchant-link"
-        onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}`)}
+        onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}${isIncome ? '&type=income' : ''}`)}
         android_ripple={{ color: theme.backgroundSelected }}
         style={({ pressed }) => [styles.merchantTarget, largeText && styles.merchantTargetLarge,
           pressed && { backgroundColor: theme.backgroundSelected }]}>

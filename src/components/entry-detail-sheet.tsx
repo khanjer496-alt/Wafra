@@ -222,7 +222,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       </View>
 
       {!editing && showMerchantLink && !transaction.isTransfer && transaction.title.trim() &&
-        <MerchantSpendingLink merchant={transaction.title} onClose={onClose} />}
+        <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
 
