@@ -42,7 +42,7 @@ const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
   return assets.get(file);
 });
 const matches = {
-  Careem: 'careem', 'Careem Food': 'careem', 'كَرِيم دبي': 'careem',
+  Careem: 'careem', 'Careem Food': 'careem', 'Careem Dubai': 'careem',
   Talabat: 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
   Deliveroo: 'deliveroo', 'Carrefour': 'carrefour', 'CARREFOUR HYPER #004 DUBAI ARE': 'carrefour',
   'كارفور الشارقة': 'carrefour', 'Lulu Hypermarket': 'lulu', 'LuLu Hyper Market': 'lulu',
@@ -89,7 +89,7 @@ assert.deepEqual(fs.readdirSync(path.join(root, 'assets/merchants')).filter(file
 assert.ok(manifest.reduce((sum, row) => sum + row.bytes, 0) < 1024 * 1024, 'keep all 112 offline logos below 1 MiB');
 
 const samples = ['', null, undefined, 123, 'LuLu Exchange', 'Lulu International Exchange',
-  'لولو للصرافة', 'كريم للبشرة', 'Cafe near Carrefour', 'PayPal Talabat',
+  'لولو للصرافة', 'كريم', 'كَرِيم', 'كريم دبي', 'كَرِيم دبي', 'كريم للبشرة', 'Cafe near Carrefour', 'PayPal Talabat',
   'Talabat Starbucks', 'Apple Cafe', 'Pineapple Cafe', 'Amazon Cafe', 'Noon Saloon',
   'Emirates NBD', 'Emirates Islamic Dubai', 'Emirates Cooperative Society',
   'Uberoi Restaurant', 'Notionally Trading', 'Shop at IKEA', 'Google Unknown Shop',

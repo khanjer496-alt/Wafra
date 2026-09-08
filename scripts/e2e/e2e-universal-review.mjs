@@ -75,7 +75,7 @@ async function waitForLedger(page, transactionCount, pendingCount) {
 
 async function openReview(page) {
   await visible(page.getByText('Issuer not verified', { exact: false }));
-  await click(page, 'Review details');
+  await (await visible(page.getByTestId('review-alert-open'))).click();
   await page.waitForURL(/\/add-transaction\?reviewId=/);
 }
 
@@ -146,7 +146,7 @@ try {
     await page.reload({ waitUntil: 'networkidle' });
     await waitForLedger(page, 1, 0);
     await page.goto(new URL('/review-alerts', BASE).href, { waitUntil: 'networkidle' });
-    assert.equal(await button(page, 'Review details').count(), 0, 'resolved review has no second Add path');
+    assert.equal(await page.getByTestId('review-alert-open').count(), 0, 'resolved review has no second Add path');
     await page.goto(new URL(`/add-transaction?reviewId=${fixture.review.id}`, BASE).href, { waitUntil: 'networkidle' });
     assert.equal(await (await visible(button(page, 'Save transaction'))).isDisabled(), true, 'stale review URL cannot add another entry');
     await waitForLedger(page, 1, 0);
@@ -204,7 +204,7 @@ try {
   for (const name of ['statement', 'minimumOnly']) {
     await scenario(`${name} stays informational and never offers ordinary Add`, name, async (page) => {
       await openReview(page);
-      await visible(page.getByText('These are account details, not a new transaction.', { exact: true }));
+      await visible(page.getByText('For reference. This is not a transaction to add.', { exact: true }));
       await visible(page.getByText('AED 50.00', { exact: true }));
       if (name === 'statement') await visible(page.getByText('AED 500.00', { exact: true }));
       else await visible(page.getByText('The total balance is not stated. A minimum payment is not the full amount owed.', { exact: true }));
@@ -215,9 +215,20 @@ try {
     });
   }
 
+  await scenario('informational dismissal is confirmed and persists without a transaction', 'statement', async (page) => {
+    await openReview(page);
+    await click(page, 'Dismiss alert');
+    await visible(page.getByText('Dismiss this alert?', { exact: true }));
+    await remainsPending(page);
+    await click(page, 'Dismiss');
+    await waitForLedger(page, 0, 0);
+    await page.reload({ waitUntil: 'networkidle' });
+    await waitForLedger(page, 0, 0);
+  });
+
   await scenario('multiple independent purchases cannot be reduced to one posting', 'multiplePurchases', async (page) => {
     await openReview(page);
-    await visible(page.getByText('These are account details, not a new transaction.', { exact: true }));
+    await visible(page.getByText('For reference. This is not a transaction to add.', { exact: true }));
     await visible(page.getByText('AED 89.50 / AED 95.00', { exact: true }));
     assert.equal(await button(page, CONFIRM).count(), 0);
     assert.equal(await button(page, 'Save transaction').count(), 0);

@@ -8,6 +8,15 @@ const file = path.resolve(__dirname, '../../../src/components/ui/merchant-logo-a
 const deps = {};
 for (const [i, match] of [...fs.readFileSync(file, 'utf8').matchAll(/require\('([^']+\.png)'\)/g)].entries()) deps[match[1]] = i + 1;
 const { merchantLogoFor, merchantLogoDecision } = load(file, deps);
+test('an Arabic personal name cannot acquire Careem artwork through normalization or a location tail', () => {
+  for (const title of ['كريم', 'كَرِيم', 'كريم دبي', 'كَرِيم دبي', 'كريم 123']) {
+    assert.equal(merchantLogoFor(title), null, title);
+    assert.equal(merchantLogoDecision(title).reason, 'unknown');
+  }
+  for (const title of ['Careem', 'Careem Food', 'Careem Pay', 'Careem Plus', 'Careem Networks', 'Careem Dubai']) {
+    assert.equal(merchantLogoFor(title)?.id, 'careem', title);
+  }
+});
 test('punctuated host/path or control characters cannot impersonate a logo alias', () => {
   for (const title of ['amazon.ae.dubai', 'apple.com/bill/123', 'Netflix.com/999', 'Google.One.AE', 'Careem\nDubai', 'Talabat\u202e', 'PayPal *Talabat', 'Lulu Exchange', 'Noon One Cafe']) {
     assert.equal(merchantLogoFor(title), null, title);

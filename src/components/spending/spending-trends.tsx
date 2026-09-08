@@ -8,9 +8,11 @@ import { Money } from '@/components/ui/money';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED, monthLabel, weekdayShort } from '@/lib/format';
+import { formatMinorUnits } from '@/lib/ledger-money';
 import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
@@ -32,6 +34,9 @@ type Props = {
 /** The useful Stats content now belongs inside Spending, not another destination. */
 export function SpendingTrends(p: Props) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
+  const moneySpec = useLedgerMoney();
+  const moneyLabel = (fils: number) => moneySpec
+    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const { width, fontScale } = useWindowDimensions();
   // Six labels must fit at the actual width and text size. When they cannot,
   // every month remains available in a wrapping detail list, not hidden.
@@ -41,7 +46,7 @@ export function SpendingTrends(p: Props) {
   const selected = p.months.find((m) => m.key === p.selectedKey);
   const hasActivity = (month: MonthFlow) => month.incomeFils !== 0 || month.expenseFils !== 0;
   const monthDescription = (month: MonthFlow) => hasActivity(month)
-    ? `${monthLabel(month.key)}. ${w.income}: ${formatAED(month.incomeFils)}. ${w.spending}: ${formatAED(month.expenseFils)}`
+    ? `${monthLabel(month.key)}. ${w.income}: ${moneyLabel(month.incomeFils)}. ${w.spending}: ${moneyLabel(month.expenseFils)}`
     : `${monthLabel(month.key)}. ${w.noData}`;
   const monthFigures = (month: MonthFlow) => hasActivity(month) ? (
     <View style={styles.monthFigures}>
@@ -95,7 +100,7 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
       <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
         {p.merchants.map((m) => <Pressable key={m.title} accessibilityRole="button"
-          accessibilityLabel={`${m.title}, ${formatAED(m.totalFils)}, ${m.count} ${w.records}`}
+          accessibilityLabel={`${m.title}, ${moneyLabel(m.totalFils)}, ${m.count} ${w.records}`}
           onPress={() => p.onMerchant(m.title)} style={({ pressed }) => [styles.row, styles.rule,
             { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           <MerchantAvatar title={m.title} category={m.category} size={36} />
@@ -112,12 +117,12 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>
       <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
         {p.movers.map((m) => <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
-          accessibilityLabel={`${categoryLabel(m.category, lang)}. ${formatAED(m.previousFils)}. ${formatAED(m.currentFils)}`}
+          accessibilityLabel={`${categoryLabel(m.category, lang)}. ${moneyLabel(m.previousFils)}. ${moneyLabel(m.currentFils)}`}
           style={[styles.row, styles.rule, { borderColor: theme.cardBorder }]}>
           <CategoryAvatar category={m.category} size={36} />
           <View style={styles.grow}><ThemedText type="smallBold">{categoryLabel(m.category, lang)}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" tabular>{formatAED(m.previousFils)} → {formatAED(m.currentFils)}</ThemedText></View>
-          <View style={styles.change}><ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>{formatAED(Math.abs(m.deltaFils))}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary" tabular>{moneyLabel(m.previousFils)} → {moneyLabel(m.currentFils)}</ThemedText></View>
+          <View style={styles.change}><ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">{m.deltaFils > 0 ? w.more : w.fewer}</ThemedText></View>
         </Pressable>)}
         {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
@@ -128,7 +133,7 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="smallBold">{w.patterns}</ThemedText><Icon name={patterns ? 'chevron-down' : 'chevron-right'} size={18} color={theme.textSecondary} />
     </Pressable>
     {patterns && <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
-      {p.weekdays.map((fils, day) => <View key={day} style={styles.weekday} accessible accessibilityLabel={`${weekdayShort(day)}, ${formatAED(fils)}`}>
+      {p.weekdays.map((fils, day) => <View key={day} style={styles.weekday} accessible accessibilityLabel={`${weekdayShort(day)}, ${moneyLabel(fils)}`}>
         <ThemedText type="meta" style={styles.weekdayName}>{weekdayShort(day)}</ThemedText>
         <View style={[styles.weekdayTrack, { backgroundColor: theme.track }]}><View style={{ height: 6, borderRadius: 3, width: `${fils / weekdayMax * 100}%`, backgroundColor: theme.primary }} /></View>
         <Money fils={fils} type="meta" />

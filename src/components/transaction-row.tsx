@@ -41,7 +41,9 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // but never painted as income. Preserve the shipping accounting distinction.
   const arrived = transaction.type === 'income';
   const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
-  const label = [transaction.title, where, account?.name, clock,
+  const accountReview = isUnassignedIncome(transaction) ? t('incomeAccountReview', language) : null;
+  const accountLabel = accountReview ?? account?.name;
+  const label = [transaction.title, where, accountLabel, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
 
@@ -52,7 +54,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
     const merchantLabel = merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
-      <Pressable accessibilityRole="button" accessibilityLabel={`${merchantLabel}: ${transaction.title}`}
+      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview].filter(Boolean).join('. ')}
         testID="transaction-merchant-link"
         onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}`)}
         android_ripple={{ color: theme.backgroundSelected }}
@@ -65,8 +67,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
             <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
             {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
           </View>
-          {account ? <ThemedText type="meta" themeColor="textTertiary">{account.name}</ThemedText> :
-            isUnassignedIncome(transaction) ? <ThemedText type="meta" themeColor="textSecondary">{t('incomeAccountReview', language)}</ThemedText> : null}
+          {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"
@@ -97,7 +98,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
         <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
         {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
       </View>
-      {account ? <ThemedText type="meta" themeColor="textTertiary">{account.name}</ThemedText> : null}
+      {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
     </View>
   </Pressable>;
 }

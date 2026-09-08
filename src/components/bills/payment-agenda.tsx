@@ -7,8 +7,10 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
+import { formatMinorUnits } from '@/lib/ledger-money';
 import { groupPaymentKinds, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
 
 const groupIcons: Record<PaymentGroup, IconName> = {
@@ -20,6 +22,9 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
   items: readonly PaymentAgendaItem[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
+  const moneySpec = useLedgerMoney();
+  const moneyLabel = (fils: number) => moneySpec
+    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
   const groups = groupPaymentKinds(items, includePaid);
   return <View style={styles.root} testID="payment-agenda">
@@ -46,7 +51,7 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
             const date = item.paid ? `${item.kind === 'card' ? w.paidStatement : w.recorded} ${shortDate(item.dateISO)}`
               : item.daysLeft === 0 ? w.today : item.daysLeft === 1 ? w.tomorrow : shortDate(item.dateISO);
             return <Pressable key={item.id} accessibilityRole="button"
-              accessibilityLabel={`${item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${formatAED(item.amountFils)}`}
+              accessibilityLabel={`${item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
               onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
                 { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
               <MerchantAvatar title={item.title} category={item.category} size={40} />

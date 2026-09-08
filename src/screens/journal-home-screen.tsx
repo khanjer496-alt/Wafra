@@ -26,7 +26,8 @@ import { buildReferenceFxUpdates } from '@/lib/fx';
 import { formatAmount, shortDate } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
-import { ledgerCurrencyCode } from '@/lib/markets';
+import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -68,6 +69,9 @@ export default function JournalHomeScreen() {
   const toast = useToast();
   const { state, getStateSnapshot, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
   const { period } = usePeriod();
+  // Restores can change denomination while all three figures stay identical.
+  // Make it a prop so compiled children cannot retain ambient currency text.
+  const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId))!;
   // The tab shell still owns capture. This screen only observes or explicitly joins it.
   const { runAutoImport, needsPermission, captureState } = useAutoImport(false, true);
   const [now, setNow] = useState(() => new Date());
@@ -90,15 +94,15 @@ export default function JournalHomeScreen() {
     return () => listener.remove();
   }, []);
 
-  const dashboard = useMemo(() => projectDashboard({ state, period, now, includeInsights: false }),
+  const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
+  const hasPendingReview = reviewCount > 0;
+  const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
     // Status/progress changes must not recompute the financial projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
-      state.ledgerMoney, state.marketId, period, now]);
-  const payments = useMemo(() => dashboard.upcoming.items.filter((item) => item.kind !== 'subscription'),
-    [dashboard.upcoming.items]);
-  const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
+      state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
+  const payments = dashboard.upcoming.items;
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -174,6 +178,7 @@ export default function JournalHomeScreen() {
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
           incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
           netFils={dashboard.hero.netFils}
+          moneySpec={moneySpec}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
@@ -240,7 +245,7 @@ export default function JournalHomeScreen() {
             <ThemedText type="meta">{tf('uncategorisedMerchantCount', { count: dashboard.uncategorised.summary.merchants.length,
               s: dashboard.uncategorised.summary.merchants.length === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
-          : dashboard.unreadFormats.shouldPrompt ? <Pressable onPress={() => router.push('/accuracy')} accessibilityRole="button" style={styles.footerAction}>
+          : dashboard.unreadFormats?.shouldPrompt ? <Pressable onPress={() => router.push('/accuracy')} accessibilityRole="button" style={styles.footerAction}>
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,
               s: dashboard.unreadFormats.count === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable> : null}

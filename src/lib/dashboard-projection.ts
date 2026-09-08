@@ -17,6 +17,8 @@ export interface DashboardProjectionRequest {
   dismissedInsightId?: string | null;
   /** Screens that do not render insights need not run their historical analysis. */
   includeInsights?: boolean;
+  /** Home renders cashflow, cards/bills and one priority prompt. */
+  surface?: 'dashboard' | 'home';
 }
 
 export interface DashboardProjection {
@@ -37,21 +39,33 @@ export interface DashboardProjection {
   uncategorised: { summary: UncategorisedSummary; shouldPrompt: boolean };
 }
 
+export interface HomeDashboardProjection extends Pick<DashboardProjection,
+  'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
+  hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
+  /** Null when a higher-priority prompt hides this calculation. */
+  unreadFormats: DashboardProjection['unreadFormats'] | null;
+}
+
 const UPCOMING_WITHIN_DAYS = 9;
 
-export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection {
+export function projectDashboard(request: DashboardProjectionRequest & { surface: 'home' }): HomeDashboardProjection;
+export function projectDashboard(request: DashboardProjectionRequest & { surface?: 'dashboard' }): DashboardProjection;
+export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection;
+export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection {
   const { state, period, now, dismissedInsightId, includeInsights = true } = request;
+  const homeOnly = request.surface === 'home';
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, liveAccounts);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
-  const cashOut = summarizeCashOutflow(state, period, { live: liveAccounts, internal });
-  const unreadCount = unreadFormatCount(state);
   const uncategorisedSummary = uncategorisedMerchants(state);
-  const insight = includeInsights ? buildInsights(
-    state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal,
-  ).find((item) => item.id !== dismissedInsightId) ?? null : null;
+  const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
+  const hideUnreadPrompt = homeOnly && (uncategorised.shouldPrompt ||
+    state.reviewTray.pending.some((item) => item.expiresAt > now.getTime()));
+  const unreadCount = hideUnreadPrompt ? null : unreadFormatCount(state);
+  const unreadFormats = unreadCount === null ? null
+    : { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD };
 
   // The store already provides display order. Stop at the six visible rows
   // rather than allocating a filtered copy of the entire transaction history.
@@ -64,6 +78,26 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
     }
   }
 
+  const upcoming = { withinDays: UPCOMING_WITHIN_DAYS,
+    items: homeOnly
+      ? leavingSoon(state, now, { withinDays: UPCOMING_WITHIN_DAYS, kinds: ['card', 'bill'] })
+      : leavingSoon(state, now, { withinDays: UPCOMING_WITHIN_DAYS }) };
+  const accountById = new Map(state.accounts.map((account) => [account.id, account] as const));
+  if (homeOnly) {
+    return {
+      hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
+      upcoming, activityRows, accountById, internalTransactionIds: internal,
+      unreadFormats, uncategorised,
+    };
+  }
+
+  // The full dashboard keeps its existing figures and subscription timeline.
+  // Omitted Home sections are not represented by fabricated zero amounts.
+  const cashOut = summarizeCashOutflow(state, period, { live: liveAccounts, internal });
+  const insight = includeInsights ? buildInsights(
+    state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal,
+  ).find((item) => item.id !== dismissedInsightId) ?? null : null;
+
   return {
     live: isCurrentMonth(period, now),
     hero: { incomeFils, expenseFils, cashOutFils: cashOut.totalFils,
@@ -71,16 +105,15 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
       netFils: incomeFils - expenseFils },
     comparison: periodComparison(state.transactions, period, liveAccounts, internal, now),
     insight,
-    upcoming: { withinDays: UPCOMING_WITHIN_DAYS,
-      items: leavingSoon(state, now, { withinDays: UPCOMING_WITHIN_DAYS }) },
+    upcoming,
     activityRows,
-    accountById: new Map(state.accounts.map((account) => [account.id, account] as const)),
+    accountById,
     foreignActivity: summarizeForeignActivity(state.transactions,
       (transaction) => liveAccounts.has(transaction.accountId) &&
         !internal.has(transaction.id) && inPeriod(transaction.date, period)),
     internalTransactionIds: internal,
     lastAutomaticCaptureDate: state.transactions.find((transaction) => transaction.source === 'sms')?.date,
-    unreadFormats: { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD },
-    uncategorised: { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) },
+    unreadFormats: unreadFormats!, // Only the Home branch can omit this scan.
+    uncategorised,
   };
 }

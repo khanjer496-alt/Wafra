@@ -10,8 +10,10 @@ import { Button } from '@/components/ui/controls';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED } from '@/lib/format';
+import { formatMinorUnits } from '@/lib/ledger-money';
 import { limitedCategorySummary, spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import type { CategoryId } from '@/lib/types';
 
@@ -34,6 +36,9 @@ type Props = {
 /** Categories and their limits are ONE list. No repeated category chart below it. */
 export function SpendingOverview(p: Props) {
   const theme = useTheme(); const language = useLanguage(); const large = useLargeTextLayout();
+  const moneySpec = useLedgerMoney();
+  const moneyLabel = (fils: number) => moneySpec
+    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
   const limited = limitedCategorySummary(p.rows);
   const rows = p.rows.filter((row) => p.filter === 'all' ||
@@ -66,7 +71,7 @@ export function SpendingOverview(p: Props) {
         const share = spendingShare(row.spentFils, p.totalFils);
         const shareLabel = spendingShareLabel(share, language);
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
-        accessibilityLabel={`${categoryLabel(row.category, language)}. ${formatAED(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${formatAED(row.limitFils)}`}`}
+        accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${moneyLabel(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
         style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
         <CategoryAvatar category={row.category} size={44} />
@@ -86,7 +91,7 @@ export function SpendingOverview(p: Props) {
           {row.limitFils !== null && <>
             <View style={[styles.categoryBottom, large && styles.stack]}>
               <ThemedText type="meta" themeColor={row.remainingFils! < 0 ? 'expense' : 'textSecondary'} style={styles.caption}>
-                {formatAED(Math.abs(row.remainingFils!))} {row.remainingFils! < 0 ? w.over : w.left}</ThemedText>
+                {moneyLabel(Math.abs(row.remainingFils!))} {row.remainingFils! < 0 ? w.over : w.left}</ThemedText>
               <ThemedText type="meta" tabular themeColor="textTertiary" style={styles.caption}>
                 {Math.round(row.ratio! * 100)}% {w.budgetUsed}</ThemedText>
             </View>
@@ -102,7 +107,7 @@ export function SpendingOverview(p: Props) {
     {limited.count > 0 && <View style={[styles.budgetSummary, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]} testID="limited-category-summary">
       <ThemedText type="smallBold">{w.limited} · {limited.count}</ThemedText>
       <View style={[styles.summaryLine, large && styles.stack]}>
-        <ThemedText type="meta" tabular>{formatAED(limited.spentFils)} {w.of} {formatAED(limited.limitFils)}</ThemedText>
+        <ThemedText type="meta" tabular>{moneyLabel(limited.spentFils)} {w.of} {moneyLabel(limited.limitFils)}</ThemedText>
         <ThemedText type="meta" tabular themeColor={limited.ratio! > 1 ? 'expense' : 'textSecondary'}>
           {Math.round(limited.ratio! * 100)}% {w.used}</ThemedText>
       </View>

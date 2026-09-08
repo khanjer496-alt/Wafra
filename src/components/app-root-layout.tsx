@@ -11,6 +11,7 @@ import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
+import { LedgerMoneyProvider } from '@/hooks/use-ledger-money';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   observeEntitlement,
@@ -26,6 +27,8 @@ import {
 import { PeriodProvider } from '@/lib/period-context';
 import { localCaptureEntitlementLease } from '@/lib/purchases';
 import { StoreProvider, useStore } from '@/lib/store';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { marketCurrencyCode } from '@/lib/markets';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
@@ -155,8 +158,10 @@ function BillingSync() {
 function Direction({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
   const language = state.language === 'ar' ? 'ar' : 'en';
+  const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
     <LanguageProvider language={language}>
+      <LedgerMoneyProvider moneySpec={moneySpec}>
       <View
         // Static translation lookups are legal throughout the existing app, but
         // React Compiler cannot see the module-level language they read and
@@ -168,6 +173,7 @@ function Direction({ children }: { children: React.ReactNode }) {
         style={[StyleSheet.absoluteFill, { direction: language === 'ar' ? 'rtl' : 'ltr' }]}>
         {children}
       </View>
+      </LedgerMoneyProvider>
     </LanguageProvider>
   );
 }

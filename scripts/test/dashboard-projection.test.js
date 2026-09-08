@@ -104,6 +104,7 @@ function state(transactions = [], over = {}) {
     marketId: 'AE',
     language: 'en',
     themePreference: 'system',
+    reviewTray: { pending: [] },
     ...over,
   };
 }
@@ -244,6 +245,17 @@ setActiveMarket('AE');
     projected.unreadFormats.count === 3 && projected.unreadFormats.shouldPrompt &&
       projected.uncategorised.summary.merchants.length === 3 &&
       projected.uncategorised.shouldPrompt);
+  const home = projectDashboard(request(ledger, { surface: 'home' }));
+  eq('Home preserves the exact financial hero without calculating unused cash-out fields', home.hero, {
+    incomeFils: 10055, expenseFils: 6100, netFils: 3955,
+  });
+  eq('Home preserves due cards and bills from the full timeline', home.upcoming,
+    { ...projected.upcoming, items: projected.upcoming.items.filter(item => item.kind !== 'subscription') });
+  eq('Home preserves activity, account lookup and both transfer identities', [
+    home.activityRows, [...home.accountById], [...home.internalTransactionIds],
+  ], [projected.activityRows, [...projected.accountById], [...projected.internalTransactionIds]]);
+  eq('Home keeps the exact category prompt while withholding hidden unread work',
+    [home.uncategorised, home.unreadFormats], [projected.uncategorised, null]);
   ok('projection has no mutation side effect on the store snapshot', JSON.stringify(ledger) === before);
 
   if (projected.insight) {
@@ -255,6 +267,20 @@ setActiveMarket('AE');
   } else {
     ok('fixture produces an insight for dismissal projection', false);
   }
+}
+
+{
+  const ledger = state(['First format', 'Second format', 'Third format'].map((raw, i) =>
+    tx(`unread-${i}`, { category: 'groceries', source: 'sms', raw })));
+  const unread = projectDashboard(request(ledger)).unreadFormats;
+  const home = () => projectDashboard(request(ledger, { surface: 'home' }));
+  eq('eligible Home fallback exposes the exact unread-format count', home().unreadFormats, unread);
+  ledger.reviewTray = { pending: [{ expiresAt: now.getTime() + 1 }] };
+  eq('a live review takes priority without scanning unread formats', home().unreadFormats, null);
+  ledger.reviewTray = { pending: [{ expiresAt: now.getTime() - 1 }] };
+  eq('expired reviews restore the unread fallback on the same transaction array', home().unreadFormats, unread);
+  ledger.reviewTray = { pending: [] };
+  eq('dismissed reviews restore the unread fallback on the same transaction array', home().unreadFormats, unread);
 }
 
 {

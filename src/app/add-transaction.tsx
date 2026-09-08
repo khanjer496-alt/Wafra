@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   findNodeHandle,
@@ -13,6 +13,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
@@ -25,7 +26,8 @@ import { t as tUi } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
-import { isUniversalReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
+import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -69,7 +71,7 @@ export default function AddTransactionScreen() {
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
   const reviewId = Array.isArray(params.reviewId) ? params.reviewId[0] : params.reviewId;
-  const { state, addTransaction, promoteReviewAlert } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, addTransaction, promoteReviewAlert, dismissReviewAlert } = useStore();
   const reviewItem = reviewId
     ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
     : null;
@@ -131,6 +133,19 @@ export default function AddTransactionScreen() {
   const categoryRef = useRef<View>(null);
   const accountRef = useRef<View>(null);
   const reviewDateRef = useRef<TextInput>(null);
+  const [confirmingInformationDismiss, setConfirmingInformationDismiss] = useState(false);
+  const [informationItem] = useState<UniversalReviewAlert | null>(() => genericItem && !ordinaryPosting ? genericItem : null);
+  const [informationDismissFailed, setInformationDismissFailed] = useState(false);
+  const informationDismissInFlight = useRef(false);
+  const informationDismissActive = useRef(true);
+  const informationDismissAttempted = useRef(false);
+  const informationGeneration = useRef(getStateGeneration());
+  const informationRouteId = useRef(reviewId);
+  informationRouteId.current = reviewId;
+  useEffect(() => {
+    informationDismissActive.current = true;
+    return () => { informationDismissActive.current = false; };
+  }, []);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
   const amountFils = parseAmountToFils(amountText);
@@ -257,21 +272,72 @@ export default function AddTransactionScreen() {
     void save();
   };
 
-  if (genericItem && !ordinaryPosting) {
-    const family = genericItem.event.family;
+  // Dismissal removes the pending row before its encrypted write resolves.
+  // Keep this read-only detail visible on failure so Retry can persist the
+  // same explicit dismissal instead of exposing a blank transaction form.
+  if (informationItem) {
+    const words = reviewAlertCopy[state.language === 'ar' ? 'ar' : 'en'];
+    const family = informationItem.event.family;
     const titleKey = family === 'statement' ? 'genericStatement' : family === 'balance' ? 'genericBalanceUpdate'
-      : family === 'card-payment' ? 'genericCardPayment' : 'genericBill';
+      : family === 'card-payment' ? 'genericCardPayment' : family === 'bill' ? 'genericBill' : 'genericReviewTitle';
+    const canDismissInformation = () => {
+      if (informationRouteId.current !== informationItem.id || informationItem.expiresAt <= Date.now() ||
+        getStateGeneration() !== informationGeneration.current) return false;
+      const current = getStateSnapshot().reviewTray.pending.find(item => item.id === informationItem.id);
+      // A failed optimistic write can remove our own row in memory. Only that
+      // same confirmed attempt may retry persistence without a pending row.
+      if (!current) return informationDismissAttempted.current;
+      return isUniversalReviewAlert(current) && !isOrdinaryUniversalPosting(current.event) &&
+        current.sourceKey === informationItem.sourceKey && current.observedAt === informationItem.observedAt &&
+        current.expiresAt > Date.now();
+    };
+    const informationValid = canDismissInformation();
+    const dismissInformation = async () => {
+      if (informationDismissInFlight.current || !canDismissInformation()) return;
+      informationDismissInFlight.current = true;
+      informationDismissAttempted.current = true;
+      setInformationDismissFailed(false);
+      setSaving(true);
+      try {
+        await dismissReviewAlert(informationItem.id, 'dismissed');
+        if (informationDismissActive.current && canDismissInformation()) {
+          toast.show(tUi('reviewAlertDismissed'), { tone: 'info' });
+          router.back();
+        }
+      } catch {
+        if (informationDismissActive.current) setInformationDismissFailed(true);
+      } finally {
+        informationDismissInFlight.current = false;
+        if (informationDismissActive.current) setSaving(false);
+      }
+    };
     return (
-      <ScreenScaffold headerMode="inline" header={{ title: tUi(titleKey),
-        back: { label: tUi('close'), icon: 'close', onPress: () => router.back() } }} contentStyle={styles.content}>
-        <ThemedText type="small" themeColor="textSecondary">{tUi('genericInformational')}</ThemedText>
-        <UniversalReviewFacts event={genericItem.event} includeAmount />
-        <Pressable accessibilityRole="button" style={[styles.saveBtn, { backgroundColor: theme.primary }]}
-          onPress={() => router.push(family === 'balance' ? '/(tabs)/wallet' : family === 'bill' ? '/(tabs)/bills' : '/cards')}>
-          <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{tUi(family === 'balance'
-            ? 'genericOpenWallet' : family === 'bill' ? 'genericOpenBills' : 'genericOpenCards')}</ThemedText>
-        </Pressable>
-      </ScreenScaffold>
+      <>
+        <ScreenScaffold testID="informational-review" headerMode="inline" header={{ title: tUi(titleKey),
+          back: { label: tUi('close'), icon: 'close', onPress: () => router.back(), disabled: saving } }} contentStyle={styles.content}>
+          <ThemedText type="small" themeColor="textSecondary">{words.informationHint}</ThemedText>
+          {informationValid && <UniversalReviewFacts event={informationItem.event} includeAmount />}
+          {informationValid && ['statement', 'balance', 'card-payment', 'bill'].includes(family) && <Pressable accessibilityRole="button"
+            disabled={saving} accessibilityState={{ disabled: saving }}
+            style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+            onPress={() => router.push(family === 'balance' ? '/(tabs)/wallet' : family === 'bill' ? '/(tabs)/bills' : '/cards')}>
+            <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{tUi(family === 'balance'
+              ? 'genericOpenWallet' : family === 'bill' ? 'genericOpenBills' : 'genericOpenCards')}</ThemedText>
+          </Pressable>}
+          {!informationValid || informationDismissFailed ? <ThemedText accessibilityRole="alert" themeColor="expense">
+            {tUi(informationValid ? 'reviewAlertDismissFailed' : 'genericSourceChanged')}</ThemedText> : null}
+          {saving ? <ThemedText accessibilityLiveRegion="polite">{words.dismissing}</ThemedText> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={informationDismissFailed ? words.retryDismiss : words.dismissAlert}
+            disabled={saving || !informationValid} accessibilityState={{ disabled: saving || !informationValid, busy: saving }}
+            style={[styles.saveBtn, { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.cardBorder }]}
+            onPress={() => informationDismissFailed ? void dismissInformation() : setConfirmingInformationDismiss(true)}>
+            <ThemedText type="smallBold">{informationDismissFailed ? words.retryDismiss : words.dismissAlert}</ThemedText>
+          </Pressable>
+        </ScreenScaffold>
+        <ConfirmSheet visible={confirmingInformationDismiss && informationValid} onClose={() => setConfirmingInformationDismiss(false)}
+          question={tUi('reviewAlertDismissQuestion')} body={tUi('reviewAlertDismissBody')}
+          confirmLabel={tUi('dismiss')} destructive onConfirm={() => void dismissInformation()} />
+      </>
     );
   }
 

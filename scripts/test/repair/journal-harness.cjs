@@ -65,6 +65,7 @@ function harness(options = {}) {
     '@/components/ui/toast': { useToast: () => ({ show: (message) => events.push(['toast', message]) }) },
     '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/hooks/use-language': { useLanguage: () => language },
+    '@/hooks/use-ledger-money': { useLedgerMoney: () => null },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => options.largeText ?? false },
     '@/hooks/use-theme': { useTheme: () => theme },
     '@/hooks/use-auto-import': { useAutoImport: () => ({ captureState: options.captureState ?? 'waiting-for-alert',
@@ -89,6 +90,8 @@ function harness(options = {}) {
     ['card-payment-sheet', 'CardPaymentSheet'], ['bill-detail-sheet', 'BillDetailSheet']]) {
     dependencies[`@/components/${module}`] = { [name]: (props) => jsx('Sheet', { ...props, name }) };
   }
+  dependencies['@/lib/currency-metadata'] = load(path.join(root, 'src/lib/currency-metadata.ts'));
+  dependencies['@/lib/ledger-money'] = load(path.join(root, 'src/lib/ledger-money.ts'), dependencies);
   if (options.render) {
     const svg = { __esModule: true, default: 'svg', Circle: 'circle', Line: 'line', Path: 'path', Rect: 'rect' };
     dependencies['react-native-svg'] = svg;

@@ -3,13 +3,17 @@ import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'rea
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { formatAmount } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
+import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
 interface MoneyProps {
   fils: number;
+  /** Explicit ledger denomination for reactive surfaces such as restored Home. */
+  moneySpec?: LedgerMoneySpec;
   type?: TextType;
   /** Colour of the figure. Defaults to ink. */
   color?: string;
@@ -33,10 +37,11 @@ function signGlyph(fils: number, sign: Sign): string {
   }
 }
 
-function CurrencyPrefix() {
+function CurrencyPrefix({ label }: { label?: string }) {
+  const ledgerMoney = useLedgerMoney();
   return (
     <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-      {ledgerCurrencyDisplay()}
+      {label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay()}
     </ThemedText>
   );
 }
@@ -47,6 +52,7 @@ function CurrencyPrefix() {
  */
 export function Money({
   fils,
+  moneySpec,
   type = 'small',
   color,
   sign = 'none',
@@ -54,12 +60,18 @@ export function Money({
   prefix = true,
   style,
 }: MoneyProps) {
-  const amount = `${signGlyph(fils, sign)}${formatAmount(Math.abs(fils), { decimals })}`;
-  const label = `${prefix ? `${ledgerCurrencyDisplay()} ` : ''}${amount}`;
+  const contextMoney = useLedgerMoney();
+  const denomination = moneySpec ?? contextMoney;
+  const currency = denomination?.currency ?? ledgerCurrencyDisplay();
+  const value = denomination
+    ? formatMinorUnits(Math.round(Math.abs(fils)), denomination, decimals === true ? { decimals: true } : undefined)
+    : formatAmount(Math.abs(fils), { decimals });
+  const amount = `${signGlyph(fils, sign)}${value}`;
+  const label = `${prefix ? `${currency} ` : ''}${amount}`;
   return (
     <View accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.inline, style]}>
       {prefix && (
-        <CurrencyPrefix />
+        <CurrencyPrefix label={currency} />
       )}
       <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
         {amount}

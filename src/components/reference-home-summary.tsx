@@ -6,8 +6,7 @@ import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Money } from '@/components/ui/money';
 import type { Colors } from '@/constants/theme';
-import { formatAmount } from '@/lib/format';
-import { ledgerCurrencyCode } from '@/lib/markets';
+import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Props = {
   theme: typeof Colors.light;
@@ -19,6 +18,7 @@ type Props = {
   incomeFils: number;
   expenseFils: number;
   netFils: number;
+  moneySpec: LedgerMoneySpec;
   onPeriod: () => void;
   onAdd: () => void;
   onSettings: () => void;
@@ -31,6 +31,7 @@ export function ReferenceHomeSummary(p: Props) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
   const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
   const netColor = p.netFils < 0 ? p.theme.expense : p.netFils > 0 ? p.theme.income : p.theme.text;
+  const currency = p.moneySpec.currency;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.header}>
       <View style={styles.wordmark}><WafraMark size={28} /><ThemedText type="title">Wafra</ThemedText></View>
@@ -58,26 +59,26 @@ export function ReferenceHomeSummary(p: Props) {
         </Pressable>
       </View>
       <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
-        accessibilityLabel={`${w.moneyOut}, ${ledgerCurrencyCode()} ${formatAmount(p.expenseFils)}. ${w.viewSpending}`}
+        accessibilityLabel={`${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}`}
         style={styles.spending}>
-        <Money fils={p.expenseFils} type="display" />
+        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="display" />
         <View style={styles.link}><ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
           <Icon name="arrow-up-right" size={16} color={p.theme.primary} /></View>
       </Pressable>
       <Pressable accessibilityRole="button" onPress={p.onIncome} testID="home-income-summary"
-        accessibilityLabel={`${w.moneyIn}, ${ledgerCurrencyCode()} ${formatAmount(p.incomeFils)}`}
+        accessibilityLabel={`${w.moneyIn}, ${currency} ${formatMinorUnits(Math.round(p.incomeFils), p.moneySpec)}`}
         style={[styles.income, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
         <View style={styles.link}><Icon name="arrow-down-right" size={16} color={p.theme.income} />
           <ThemedText type="small" themeColor="textSecondary">{w.moneyIn}</ThemedText></View>
-        <Money fils={p.incomeFils} type="smallBold" />
+        <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" />
       </Pressable>
       {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
         {w.noIncome}</ThemedText>}
       <View testID="home-net-summary" accessible accessibilityRole="text"
-        accessibilityLabel={`${w.netLabel}, ${ledgerCurrencyCode()} ${netSign}${formatAmount(Math.abs(p.netFils))}. ${w.cashflowNote}`}
+        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`}
         style={[styles.net, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
         <ThemedText type="smallBold">{w.netLabel}</ThemedText>
-        <Money fils={p.netFils} type="heading" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+        <Money fils={p.netFils} moneySpec={p.moneySpec} type="heading" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
       </View>
       <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
     </View>

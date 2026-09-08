@@ -23,7 +23,8 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/format': { clockTime: () => '12:30', formatAmount: minor => (minor / 100).toFixed(2) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED' },
     '@/lib/ledger': load(path.resolve(__dirname, '../../../src/lib/ledger.ts')),
-    '@/lib/i18n': { t: key => key },
+    '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
+      ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
   });
   const transaction = { id: 'fixture', title: 'Talabat', amountFils: 12345, type: 'expense',
@@ -71,6 +72,24 @@ test('merchant previews can disable their own merchant link without losing trans
   assert.equal(byId(tree, 'transaction-merchant-link'), undefined);
   tree.props.onPress(); assert.deepEqual(h.events, [['transaction', 'fixture']]);
 });
+for (const language of ['en', 'ar']) for (const merchantLinks of [true, false]) {
+  test(`${language}/${merchantLinks}: unresolved income keeps its visible and accessible account warning`, () => {
+    const h = rowFixture({ language });
+    const warning = language === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review';
+    const tree = h.render({ type: 'income', category: 'business', accountId: '__unassigned-income__' },
+      { account: undefined, merchantLinks });
+    assert.ok(walk(tree).some(node => node.type === 'Text' && node.props.children === warning));
+    const details = merchantLinks ? byId(tree, 'transaction-details-link') : tree;
+    assert.ok(details.props.accessibilityLabel.includes(warning));
+    assert.match(details.props.accessibilityLabel, /123\.45 AED/);
+    if (merchantLinks) assert.ok(byId(tree, 'transaction-merchant-link').props.accessibilityLabel.includes(warning));
+    details.props.onPress();
+    assert.deepEqual(h.events, [['transaction', 'fixture']]);
+    const assigned = h.render({ type: 'income', category: 'business' }, { merchantLinks });
+    assert.equal(walk(assigned).some(node => node.type === 'Text' && node.props.children === warning), false);
+    assert.ok((merchantLinks ? byId(assigned, 'transaction-details-link') : assigned).props.accessibilityLabel.includes('Everyday card'));
+  });
+}
 test('non-interactive rows remain non-interactive', () => {
   const h = rowFixture(); const tree = h.render({}, { onPress: undefined });
   assert.equal(tree.props.onPress, undefined);

@@ -26,11 +26,11 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-const LedgerTabButton = ({ focused, icon, label, onPress }: {
-  focused: boolean; icon: IconName; label: string; onPress: () => void;
+const LedgerTabButton = ({ focused, icon, label, onPress, testID }: {
+  focused: boolean; icon: IconName; label: string; onPress: () => void; testID: string;
 }) => {
   const theme = useTheme();
-  return <Pressable role="tab" aria-selected={focused} accessibilityRole="tab"
+  return <Pressable testID={testID} role="tab" aria-selected={focused} accessibilityRole="tab"
     accessibilityLabel={label} accessibilityState={{ selected: focused }} onPress={onPress}
     android_ripple={{ color: theme.backgroundSelected, borderless: false }}
     style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
@@ -58,6 +58,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
     return (
       <LedgerTabButton
         key={route.key}
+        testID={`main-tab-${route.name}`}
         focused={focused}
         icon={TAB_ICONS[route.name]}
         label={t(TAB_LABELS[route.name], lang)}

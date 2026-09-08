@@ -18,7 +18,11 @@ test('workflow copy has matching nonempty English/Arabic keys',()=>{
 test('workflow consumers have real imports, not imports hidden in comments',()=>{
  const files=['settings','import-sms','ios-setup','feedback','review-alerts','categorise','pro','trusted-devices'].map(n=>`src/app/${n}.tsx`).concat('src/components/onboarding-gate.tsx');
  for(const file of files){const sf=source(file),names=new Set();for(const n of sf.statements)if(ts.isImportDeclaration(n)&&n.importClause?.namedBindings&&ts.isNamedImports(n.importClause.namedBindings))for(const element of n.importClause.namedBindings.elements)names.add(element.name.text);
- assert.ok(names.has('workflowCopy'),`${file}: copy import`);assert.ok(names.has(file.includes('onboarding')?'SetupIllustration':'WorkflowHero'),`${file}: surface import`);}
+ assert.ok(names.has('workflowCopy'),`${file}: copy import`);
+ if(file.endsWith('/review-alerts.tsx')){
+  assert.ok(!names.has('WorkflowHero'),'Review alerts has one compact intro instead of a repeated hero');
+  assert.match(fs.readFileSync(path.join(root,file),'utf8'),/testID="review-alerts-intro"/);
+ }else assert.ok(names.has(file.includes('onboarding')?'SetupIllustration':'WorkflowHero'),`${file}: surface import`);}
 });
 test('new workflow files transpile without syntax errors',()=>{
  for(const file of ['src/components/workflows/workflow-copy.ts','src/components/workflows/workflow-surfaces.tsx']){

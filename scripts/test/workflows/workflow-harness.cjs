@@ -58,10 +58,15 @@ function createWorkflowHarness(options={}) {
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
  d['@/lib/reimbursement-report']={buildExpenseReportHtml:()=>'',reportExpenses:()=>[]};
  d['../../modules/notification-reader']={};d['../../modules/sms-reader']={};
+ d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false};
  Object.assign(d['@/lib/launch-performance'],{isInternalLaunchDiagnosticsEnabled:()=>false,serializeLaunchMetrics:()=>''});
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
  function renderScreen(screen,props={}){
+  if(screen==='review-alerts'){
+   h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
+   h.local('@/components/universal-review-fields');
+  }
   if(screen==='feedback'){
    d['@/lib/sms-parser']={STRUCTURAL_TITLES:new Set()};
    d['@/lib/feedback-wire']=load(path.join(root,'src/lib/feedback-wire.ts'),d,{TextEncoder});

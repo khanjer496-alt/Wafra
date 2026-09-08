@@ -55,12 +55,13 @@ function createHarness(options = {}) {
   const state={hydrated:true,onboarded:true,language:lang,accounts,transactions,budgets,bills,cardDues,goals:[],captureOptOut:false,historyImport:null,
     privateMode:true,notSubscriptions:[],merchantOverrides:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
-  const store={state,getStateSnapshot:()=>state};
+  const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
   for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const deps={react,'react/jsx-runtime':runtime,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
     'expo-linear-gradient':{LinearGradient:p=>jsx('Gradient',p)},
     '@/hooks/use-theme':{useTheme:()=>theme},'@/hooks/use-language':{useLanguage:()=>lang},'@/hooks/use-large-text-layout':{useLargeTextLayout:()=>!!options.largeText},
+    '@/hooks/use-ledger-money':{useLedgerMoney:()=>null},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
     '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
     '@/lib/i18n':i18n,

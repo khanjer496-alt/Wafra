@@ -1,4 +1,3 @@
-import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -7,17 +6,19 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Block } from '@/components/ui/layout';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { useToast } from '@/components/ui/toast';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useLanguage } from '@/hooks/use-language';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
-import { universalMoneyLabel } from '@/components/universal-review-fields';
+import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/universal-review-fields';
+import { reviewAlertCopy } from '@/lib/review-alert-copy';
+import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
 import { useStore } from '@/lib/store';
 
 const FAMILY_COPY: Record<ReviewAlert['family'], { label: StringKey; icon: IconName }> = {
@@ -70,28 +71,41 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   item: UniversalReviewAlert; busy: boolean; onAdd: () => void; onDismiss: () => void;
 }) {
   const theme = useTheme();
+  const language = useLanguage();
+  const words = reviewAlertCopy[language === 'ar' ? 'ar' : 'en'];
   const event = item.event;
+  const informational = !isOrdinaryUniversalPosting(event);
   const key = event.family === 'statement' ? 'genericStatement'
     : event.family === 'balance' ? 'genericBalanceUpdate'
     : event.family === 'card-payment' ? 'genericCardPayment'
     : event.family === 'bill' ? 'genericBill' : 'genericReviewTitle';
-  const fact = [event.amount, event.statementTotal, event.balance, event.creditLimit]
-    .find((field) => field.evidence === 'explicit' && field.value !== null);
+  const facts: [StringKey, UniversalField<UniversalMoney>][] = [
+    ['genericAmount', event.amount], ['genericStatementTotal', event.statementTotal],
+    ['genericBalance', event.balance], ['genericCreditLimit', event.creditLimit],
+    ['genericMinimumDue', event.minimumDue],
+  ];
+  const fact = facts.find(([, field]) => field.evidence === 'explicit' && field.value !== null);
+  const amount = fact?.[1].value ? universalMoneyLabel(fact[1].value) : t('genericAmountNeedsReview');
+  const identity = [t(key), event.merchant.evidence === 'explicit' ? event.merchant.value : null,
+    fact ? `${t(fact[0])}: ${amount}` : amount].filter(Boolean).join('. ');
   return (
-    <View style={[styles.alertRow, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
       <View style={styles.alertCopy}>
         <ThemedText type="smallBold">{t(key)}</ThemedText>
         {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
-        <ThemedText type="title" tabular>{fact?.value ? universalMoneyLabel(fact.value) : event.family === 'statement' && event.minimumDue.value
-          ? t('genericMinimumDue') + ' · ' + universalMoneyLabel(event.minimumDue.value) : t('genericAmountNeedsReview')}</ThemedText>
+        {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact[0])}</ThemedText> : null}
+        <ThemedText type="title" tabular>{amount}</ThemedText>
+        {informational ? <ThemedText type="meta" themeColor="textSecondary">{words.informationHint}</ThemedText> : null}
         <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
-        <View style={{ flexDirection: 'row', gap: Spacing.three, marginTop: Spacing.two }}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('genericReviewDetails')}
-            disabled={busy} onPress={onAdd} style={{ minHeight: 48, justifyContent: 'center', flex: 1 }}>
-            <ThemedText type="smallBold" style={{ color: theme.primary }}>{t('genericReviewDetails')}</ThemedText>
+        <View style={styles.rowActions}>
+          <Pressable testID="review-alert-open" accessibilityRole="button" accessibilityLabel={`${t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}. ${identity}`}
+            accessibilityState={{ disabled: busy }} disabled={busy} onPress={onAdd} style={styles.addButton}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>{t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}</ThemedText>
+            <Icon name="chevron-right" size={15} color={theme.primary} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('dismiss')}
-            disabled={busy} onPress={onDismiss} style={{ minHeight: 48, justifyContent: 'center' }}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`${t('dismiss')}. ${identity}`}
+            accessibilityHint={t('reviewAlertDismissBody')} accessibilityState={{ disabled: busy }}
+            disabled={busy} onPress={onDismiss} style={styles.dismissButton}>
             <ThemedText type="small" themeColor="textSecondary">{t('dismiss')}</ThemedText>
           </Pressable>
         </View>
@@ -121,7 +135,7 @@ function AlertRow({
   const bank = institutionLabel(item.institution);
 
   return (
-    <View style={[styles.alertRow, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
       <View style={styles.alertMain}>
       <View style={[styles.alertIcon, { backgroundColor: theme.backgroundSelected }]}>
         <Icon name={family.icon} size={18} color={theme.warning} />
@@ -141,6 +155,7 @@ function AlertRow({
       </View>
       <View style={styles.rowActions}>
         <Pressable
+          testID="review-alert-open"
           accessibilityRole="button"
           accessibilityLabel={`${t('reviewAlertReview')}. ${t(family.label)}. ${amount}. ${bank}`}
           accessibilityHint={t('reviewAlertAddHint')}
@@ -152,12 +167,12 @@ function AlertRow({
           }}
           style={({ pressed }) => [
             styles.addButton,
-            { backgroundColor: theme.primary, opacity: busy ? 0.45 : pressed ? 0.78 : 1 },
+            { opacity: busy ? 0.45 : pressed ? 0.78 : 1 },
           ]}>
-          <Icon name="plus" size={14} color={theme.onPrimary} />
-          <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+          <ThemedText type="smallBold" style={{ color: theme.primary }}>
             {t('reviewAlertReview')}
           </ThemedText>
+          <Icon name="chevron-right" size={15} color={theme.primary} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -171,10 +186,9 @@ function AlertRow({
           }}
           style={({ pressed }) => [
             styles.dismissButton,
-            { borderColor: theme.cardBorderStrong, opacity: busy ? 0.45 : pressed ? 0.72 : 1 },
+            { opacity: busy ? 0.45 : pressed ? 0.72 : 1 },
           ]}>
-          <Icon name="close" size={14} color={theme.textSecondary} />
-          <ThemedText type="nano" themeColor="textSecondary">
+          <ThemedText type="small" themeColor="textSecondary">
             {t('dismiss')}
           </ThemedText>
         </Pressable>
@@ -232,24 +246,18 @@ export default function ReviewAlertsScreen() {
           contentInset={listInsets.contentInset}
           scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
           contentInsetAdjustmentBehavior="automatic"
-          ListHeaderComponent={
-            <View style={styles.intro}>
-              <WorkflowHero title={pending.length > 0 ? words.reviewTitle : words.complete}
-                body={words.reviewBody} icon="check"
-                facts={pending.length > 0 ? [{ label: words.pending, value: String(pending.length) }] : []} />
-              <Block style={styles.privacyBlock}>
-                <Icon name="lock" size={16} color={theme.textTertiary} />
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopy}>
-                  {t('reviewAlertsPrivacy')}
-                </ThemedText>
-              </Block>
+          ListHeaderComponent={pending.length > 0 ? (
+            <View style={styles.intro} testID="review-alerts-intro">
+              <ThemedText type="smallBold" accessibilityLiveRegion="polite">{tf('reviewAlertsSettingsCount', { count: pending.length })}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{words.reviewBody}</ThemedText>
             </View>
-          }
+          ) : null}
+          ListFooterComponent={<ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopy}>{t('reviewAlertsPrivacy')}</ThemedText>}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Icon name="check" size={28} color={theme.income} strokeWidth={2.1} />
               <ThemedText type="subtitle" accessibilityRole="header">
-                {t('reviewAlertsEmptyTitle')}
+                {words.complete}
               </ThemedText>
               <ThemedText type="default" themeColor="textSecondary">
                 {t('reviewAlertsEmptyBody')}
@@ -284,16 +292,13 @@ export default function ReviewAlertsScreen() {
 
 const styles = StyleSheet.create({
   emptyContent: { flexGrow: 1 },
-  intro: { gap: Spacing.three, paddingBottom: Spacing.four },
-  privacyBlock: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  privacyCopy: { flex: 1, lineHeight: 19 },
+  intro: { gap: Spacing.two, paddingBottom: Spacing.three },
+  privacyCopy: { paddingVertical: Spacing.three },
   alertRow: {
     minHeight: 112,
-    gap: Spacing.three,
-    borderWidth: 1,
-    borderRadius: 20,
-    marginBottom: Spacing.three,
-    padding: Spacing.three,
+    gap: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.three,
   },
   alertIcon: {
     width: 36,
@@ -310,21 +315,15 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 100,
     minHeight: 48,
-    borderRadius: Radius.control,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.half,
-    paddingHorizontal: Spacing.two,
+    gap: Spacing.two,
   },
   dismissButton: {
-    flexGrow: 1,
     minWidth: 100,
     minHeight: 48,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.control,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.half,
     paddingHorizontal: Spacing.two,
   },
   empty: {

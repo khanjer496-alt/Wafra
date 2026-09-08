@@ -8,7 +8,8 @@ export interface MerchantLogo {
 // Static requires are intentional: Metro includes these files in native builds
 // and OTA updates. No merchant name, bank message or device IP goes to a logo API.
 const ENTRIES: readonly [string, number, readonly string[]][] = [
-  ['careem', require('../../../assets/merchants/careem.png'), ['Careem', 'Careem Food', 'Careem Pay', 'Careem Plus', 'Careem Networks', 'كريم']],
+  // Bare Arabic كريم is also a person's name; a title alone cannot identify the company.
+  ['careem', require('../../../assets/merchants/careem.png'), ['Careem', 'Careem Food', 'Careem Pay', 'Careem Plus', 'Careem Networks']],
   ['talabat', require('../../../assets/merchants/talabat.png'), ['Talabat', 'Talabat Mart', 'Talabat Pro', 'Talabat.com', 'طلبات']],
   ['deliveroo', require('../../../assets/merchants/deliveroo.png'), ['Deliveroo', 'Deliveroo Plus', 'Deliveroo.ae', 'ديليفرو', 'دليفرو']],
   ['carrefour', require('../../../assets/merchants/carrefour.png'), ['Carrefour', 'Carrefour Hypermarket', 'Carrefour Hyper', 'Carrefour Market', 'Carrefour MOE', 'Carrefour Mall of the Emirates', 'كارفور']],
