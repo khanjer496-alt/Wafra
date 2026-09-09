@@ -30,6 +30,8 @@ jobs:
           filters: |
             ios:
               - 'app.json'
+              - 'app.config.js'
+              - 'scripts/test/ios-history-paging.*'
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
@@ -156,6 +158,7 @@ jobs:
         run: |
           bash scripts/test/native-history-store.sh
           bash scripts/test/native-live-capture-store.sh
+          bash scripts/test/ios-history-paging.sh
 
   # The browser suites catch what unit tests structurally cannot: a route that
   # resolves to nothing, a screen that renders blank, a total that disagrees

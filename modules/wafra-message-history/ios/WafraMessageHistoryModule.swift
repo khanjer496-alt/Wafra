@@ -3,9 +3,11 @@ import Foundation
 
 private enum WafraMessageHistoryBridgeError: Error {
   case unavailableChunk
+  case cleanupFailed
 }
 
 private struct WafraCompletedHistorySessionRecord: Record {
+  @Field var paged: Bool = false
   @Field var chunkIndices: [Int] = []
   @Field var found: Int = 0
   @Field var attempted: Int = 0
@@ -28,12 +30,15 @@ public class WafraMessageHistoryModule: Module {
 
     AsyncFunction("getCompletedSession") {
       (sessionId: String) -> WafraCompletedHistorySessionRecord? in
-      guard let descriptor = try WafraMessageHistoryStore.shared.completedSession(
-        sessionId: sessionId
-      ) else {
+      let paged = sessionId.hasPrefix("PAGED-")
+      let descriptor = try paged
+        ? WafraPagedHistoryStore.shared.completedSession(sessionId: sessionId)
+        : WafraMessageHistoryStore.shared.completedSession(sessionId: sessionId)
+      guard let descriptor else {
         return nil
       }
       var record = WafraCompletedHistorySessionRecord()
+      record.paged = paged
       record.chunkIndices = descriptor.chunkIndices
       record.found = descriptor.found
       record.attempted = descriptor.attempted
@@ -44,9 +49,11 @@ public class WafraMessageHistoryModule: Module {
 
     AsyncFunction("recoverCompletedSession") {
       (startedAfterMs: Double) -> WafraRecoveredHistorySessionRecord? in
-      guard let recovered = try WafraMessageHistoryStore.shared.recoverCompletedSession(
-        startedAfter: Date(timeIntervalSince1970: startedAfterMs / 1_000)
-      ) else {
+      let cutoff = Date(timeIntervalSince1970: startedAfterMs / 1_000)
+      let legacy = try WafraMessageHistoryStore.shared.recoverCompletedSession(startedAfter: cutoff)
+      let paged = try WafraPagedHistoryStore.shared.recoverCompletedSession(startedAfter: cutoff)
+      // Preserve legacy precedence if both sessions remain; never discard either.
+      guard let recovered = legacy ?? paged else {
         return nil
       }
       var record = WafraRecoveredHistorySessionRecord()
@@ -60,6 +67,11 @@ public class WafraMessageHistoryModule: Module {
     }
 
     AsyncFunction("readChunk") { (sessionId: String, chunkIndex: Int) -> [String] in
+      if sessionId.hasPrefix("PAGED-") {
+        // readChunk checks completion and the chunk-to-journal mapping under
+        // the store lock. Do not re-read every page before each single chunk.
+        return try WafraPagedHistoryStore.shared.readChunk(sessionId: sessionId, chunkIndex: chunkIndex)
+      }
       guard
         let descriptor = try WafraMessageHistoryStore.shared.completedSession(
           sessionId: sessionId
@@ -75,15 +87,35 @@ public class WafraMessageHistoryModule: Module {
     }
 
     AsyncFunction("discardSession") { (sessionId: String) in
+      if sessionId.hasPrefix("PAGED-") {
+        try WafraPagedHistoryStore.shared.discard(sessionId: sessionId)
+        return
+      }
       try WafraHistoryCleanupCoordinator.shared.discardSession(sessionId: sessionId)
     }
 
     AsyncFunction("purgeExpired") { () -> Int in
-      try WafraHistoryCleanupCoordinator.shared.purgeExpired(now: Date())
+      var failed = false
+      var count = 0
+      do { count += try WafraHistoryCleanupCoordinator.shared.purgeExpired(now: Date()) } catch { failed = true }
+      do { count += try WafraPagedHistoryStore.shared.purgeExpired() } catch { failed = true }
+      if failed { throw WafraMessageHistoryBridgeError.cleanupFailed }
+      return count
     }
 
     AsyncFunction("eraseAll") {
-      try WafraHistoryCleanupCoordinator.shared.eraseAll()
+      var failed = false
+      do { try WafraHistoryCleanupCoordinator.shared.eraseAll() } catch { failed = true }
+      do { try WafraPagedHistoryStore.shared.eraseAll() } catch { failed = true }
+      if failed { throw WafraMessageHistoryBridgeError.cleanupFailed }
+    }
+
+    AsyncFunction("getPagedStatus") { () -> String? in
+      try WafraPagedHistoryStore.shared.status()
+    }
+
+    AsyncFunction("discardPagedHistory") {
+      try WafraPagedHistoryStore.shared.eraseAll()
     }
   }
 }

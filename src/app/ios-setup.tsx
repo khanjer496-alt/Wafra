@@ -56,6 +56,7 @@ import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { IosSetupJourney } from '@/components/ios-message-setup/setup-journey';
 import { canFinishIosMessageSetup, detectedSetupBanks, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
+import { pagedHistoryEnabled, pagedHistoryCopy } from '@/lib/ios-paged-setup';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
   version: 1,
@@ -105,6 +106,8 @@ export default function IosSetupScreen() {
   const historyInstallUrl = historyShortcutInstallUrl();
   const historySupported = Platform.OS === 'ios' &&
     iosSupportsMessageHistory(Platform.Version);
+  const pagedEnabled = historySupported && pagedHistoryEnabled();
+  const pagingCopy = pagedHistoryCopy[language === 'ar' ? 'ar' : 'en'];
   const controllerRef = useRef<ReturnType<typeof createIosCaptureSetup> | null>(null);
   const screenActive = useRef(true);
   const operationInFlight = useRef<Promise<void> | null>(null);
@@ -597,6 +600,7 @@ export default function IosSetupScreen() {
     }
     if (progress.activeSection === 'history') {
       if (historyComplete) return { label: 'iosMessageNextFuture', onPress: () => selectSection('future') };
+      if (pagedEnabled) return { label: 'historyStartAction', onPress: () => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } }) };
       if (!historySupported || !historyReady || !historyInstallUrl) {
         return { label: 'iosMessageLearnMore', onPress: openHelp };
       }
@@ -631,6 +635,11 @@ export default function IosSetupScreen() {
     if (futureStep === 'ready') {
       helpActions.push({ label: t('iosMessageReviewAutomation'), onPress: () => setShowAutomationGuide(true) });
     }
+  } else if (pagedEnabled) {
+    helpActions.push({ label: pagingCopy.title, onPress: () => {
+      setDetailsVisible(false);
+      router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } });
+    } });
   } else if (historyRunning) {
     helpActions.push({ label: t('iosMessageResetHistory'), onPress: () => setResetHistoryVisible(true) });
   } else if (historyReady && historyInstallUrl) {
@@ -704,6 +713,12 @@ export default function IosSetupScreen() {
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{t('iosMessageHistoryDeferredHelp')}</ThemedText>
                     <Button label={t('iosMessageResumeHistory')} variant="ghost" onPress={resumeHistory} disabled={busy} wrapLabel />
+                  </>
+                ) : pagedEnabled ? (
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">{pagingCopy.intro}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">{pagingCopy.runningHelp}</ThemedText>
+                    <Button label={pagingCopy.start} variant="ghost" onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } })} disabled={busy} wrapLabel />
                   </>
                 ) : !historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">

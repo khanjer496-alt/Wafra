@@ -252,6 +252,8 @@ export default function ImportSmsScreen() {
   // A forged Android deep link must remain the ordinary inbox/paste screen.
   // The native history session exists only in the Apple module graph.
   const history = Platform.OS === 'ios' ? historyParam : undefined;
+  const usePagedHistory = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26 &&
+    process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1';
   const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
 
   const [text, setText] = useState('');
@@ -1231,7 +1233,9 @@ export default function ImportSmsScreen() {
                     </ThemedText>
                   </View>
                 )}
-                <Button
+                {!history && usePagedHistory ?
+                  <Button label={t('historyStartAction')} icon="calendar"
+                    disabled={historyActionBusy} wrapLabel onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: 'import' } })} /> : <Button
                   label={
                     historyCardState === 'unsupported'
                       ? t('historyPasteManually')
@@ -1253,8 +1257,8 @@ export default function ImportSmsScreen() {
                   }
                   onPress={historyCardPrimaryAction}
                   wrapLabel
-                />
-                {historyCardState === 'running' && (
+                />}
+                {!usePagedHistory && historyCardState === 'running' && (
                   <Button
                     label={t('cancel')}
                     variant="ghost"
@@ -1262,7 +1266,7 @@ export default function ImportSmsScreen() {
                     onPress={() => void cancelHistoryHandoff()}
                   />
                 )}
-                {historyCardState === 'ready' && historyHandoffExpired && (
+                {!usePagedHistory && historyCardState === 'ready' && historyHandoffExpired && (
                   <Button
                     label={t('historyReinstallAction')}
                     variant="outline"

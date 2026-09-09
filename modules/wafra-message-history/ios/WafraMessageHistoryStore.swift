@@ -1303,7 +1303,8 @@ public final class WafraMessageHistoryStore {
     }
   }
 
-  private static func hasUniqueJSONMemberNames(_ data: Data) -> Bool {
+  /// Pure source validation shared with the scalar paged-import adapter.
+  public static func hasUniqueJSONMemberNames(_ data: Data) -> Bool {
     var scanner = JSONMemberScanner(bytes: Array(data))
     return scanner.parseDocument()
   }
@@ -1319,7 +1320,8 @@ public final class WafraMessageHistoryStore {
     ) != nil
   }
 
-  private static func normalizeShortcutInstant(_ value: String, now: Date) -> String? {
+  /// Pure timestamp validation; this method does not read or mutate a session.
+  public static func normalizeShortcutInstant(_ value: String, now: Date) -> String? {
     let range = NSRange(value.startIndex..., in: value)
     guard let match = shortcutInstant.firstMatch(in: value, range: range) else { return nil }
     func part(_ index: Int) -> String? {

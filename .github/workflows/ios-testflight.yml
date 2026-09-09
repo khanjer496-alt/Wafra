@@ -955,6 +955,9 @@ jobs:
           security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"
           bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$APP/Metadata.appintents/extract.actionsdata"
           bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$APP/WafraMessageHistoryResources.bundle"
+          if node -e 'process.exit(require("./eas.json").build["history-beta"].env.WAFRA_PAGED_HISTORY_BETA === "1" ? 0 : 1)'; then
+            node scripts/check-ios-paging-metadata.mjs "$APP/Metadata.appintents/extract.actionsdata"
+          fi
           export APP
           python3 <<'PY'
           import hashlib,json,os,pathlib,plistlib,shutil

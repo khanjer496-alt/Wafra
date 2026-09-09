@@ -579,7 +579,9 @@ function discardPreparedV2Contract(source) {
   `.replace(/\s+/g, ' ').trim();
   eq(
     'TypeScript exposes only the completed-history bridge contract',
-    types.replace(/\s+/g, ' ').trim(),
+    types.replace(/\/\*[^]*?\*\//g, '').replace(/^\s*paged\?: boolean;\s*$/gm, '')
+      .replace(/^\s*getPagedStatus\?\(\): Promise<string \| null>;\s*$/gm, '')
+      .replace(/^\s*discardPagedHistory\?\(\): Promise<void>;\s*$/gm, '').replace(/\s+/g, ' ').trim(),
     exactTypes,
   );
 
@@ -617,6 +619,8 @@ function discardPreparedV2Contract(source) {
     'discardSession',
     'purgeExpired',
     'eraseAll',
+    'getPagedStatus',
+    'discardPagedHistory',
   ];
   eq(
     'Swift bridge exports the exact completed-only method set',
@@ -664,7 +668,10 @@ function discardPreparedV2Contract(source) {
     'bridge refuses a chunk until the completed descriptor lists its index',
     /completedSession\(\s*sessionId:\s*sessionId\s*\)/.test(readBridge) &&
       /chunkIndices\.contains\(chunkIndex\)/.test(readBridge) &&
-      readBridge.indexOf('completedSession(') < readBridge.indexOf('readChunk('),
+      readBridge.indexOf('completedSession(') < readBridge.indexOf('WafraMessageHistoryStore.shared.readChunk(') &&
+      /WafraPagedHistoryStore.shared.readChunk\(/.test(readBridge) &&
+      /guard head.sessionId == sessionId, head.checkpoint.complete else/.test(read('modules/wafra-message-history/ios/WafraPagedHistoryStore.swift')) &&
+      /if offset < head.pages\[index\].chunks/.test(read('modules/wafra-message-history/ios/WafraPagedHistoryStore.swift')),
     readBridge,
   );
   ok(

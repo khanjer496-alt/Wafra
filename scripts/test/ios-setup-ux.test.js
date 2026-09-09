@@ -279,7 +279,7 @@ ok('iOS local setup: controller has only local native and Linking dependencies',
 
 ok('iOS message setup: sentence-length actions wrap',
   (screen.match(/<Button\b[\s\S]*?\/>/g) || []).every((button) => /wrapLabel/.test(button)) &&
-    /wrapLabel = false[\s\S]{0,1600}numberOfLines=\{wrapLabel \? undefined : 1\}/.test(controls));
+    /wrapLabel = true[\s\S]{0,1600}numberOfLines=\{wrapLabel \? undefined : 1\}/.test(controls));
 ok('iOS local setup: shared actions retain the 48pt minimum target',
   /minHeight:\s*48/.test(controls));
 ok('iOS local setup: the whole screen scrolls and respects both safe edges',

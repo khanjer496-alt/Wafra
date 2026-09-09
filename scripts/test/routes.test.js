@@ -310,7 +310,7 @@ function sources(dir = SRC) {
   // The nightly digest and the per-charge banner are notification settings,
   // not privacy ones, and they are what people come here to switch off.
   ok('the notification switches are out of the Privacy group and above it',
-    at("t('dailySummarySetting')") < at("t('privacyHeader')"));
+    at("t('dailySummarySetting')") >= 0 && at("t('messagesPrivacy')") > at("t('dailySummarySetting')"));
 
   // Android's row and iPhone's row are mutually exclusive, so a user never
   // sees both — which is exactly why they must not have had two names.

@@ -84,6 +84,7 @@ function createWorkflowHarness(options={}) {
   }
   if(screen==='trusted-devices')h.local('@/lib/trusted-device-contract','src/lib/trusted-device-contract.ts');
   if(screen==='ios-setup'){
+   d['@/lib/ios-paged-setup']=load(path.join(root,'src/lib/ios-paged-setup.ts'),{}, {process:{env:{}}});
    // Actual state/step logic, with unavailable native resources and service I/O.
    d['@/lib/ios-local-capture-protocol']={IOS_LOCAL_CAPTURE_SHORTCUT_URL:null,iosLocalCaptureTestUrl:()=>null,normalizeIosLocalCaptureShortcutUrl:()=>null};
    // Execute the new, pure capture-health/journey modules too. Only native
