@@ -309,8 +309,12 @@ function sources(dir = SRC) {
 
   // The nightly digest and the per-charge banner are notification settings,
   // not privacy ones, and they are what people come here to switch off.
+  // The navigation also uses privacyHeader; locate the actual section rather
+  // than accidentally comparing notification content with its tab label.
+  const notificationsAt = at("t('dailySummarySetting')");
+  const privacySectionAt = at("<SectionHeader title={t('privacyHeader')}");
   ok('the notification switches are out of the Privacy group and above it',
-    at("t('dailySummarySetting')") < at("t('privacyHeader')"));
+    notificationsAt >= 0 && privacySectionAt > notificationsAt);
 
   // Android's row and iPhone's row are mutually exclusive, so a user never
   // sees both — which is exactly why they must not have had two names.
