@@ -168,7 +168,11 @@ test('named Wio recipients remain distinct and a name is not treated as proof of
 test('duplicate amounts, conflicting destinations, different currencies and edited rows cannot auto-link', () => {
   const parsed = parse([['FAB', ownDetail], ['FAB', credited(), 2000], ['FAB', credited(), 120000]]);
   const duplicate = apply(base(), parsed);
-  assert.equal(core.reconcileTransfers(duplicate.transactions, duplicate.accounts).internalIds.size, 0);
+  const duplicatedResult = core.reconcileTransfers(duplicate.transactions, duplicate.accounts);
+  assert.equal(duplicatedResult.internalIds.size, 1, 'explicit destination ownership is independent of ambiguous receipt pairing');
+  assert.equal(duplicatedResult.pendingIds.size, 2, 'neither competing incoming credit is silently linked');
+  assert.ok([...duplicatedResult.byId.values()].every(a => !a.counterpartId));
+  assert.ok(duplicate.transactions.every(t => !t.transferMatch));
   const valid = apply(base(), parsed.slice(0, 2));
   for (const mutate of [
     t => t.type === 'expense' ? { ...t, userEdited: true } : t,
@@ -176,7 +180,11 @@ test('duplicate amounts, conflicting destinations, different currencies and edit
     t => t.type === 'expense' ? { ...t, originalCurrency: 'USD', originalAmountMinor: 81300, transferEvidence: { ...t.transferEvidence, currency: 'USD' } } : t,
   ]) {
     const rows = valid.transactions.map(t => { const { transferMatch, ...row } = t; return mutate(row); });
-    assert.equal(core.reconcileTransfers(rows, valid.accounts).internalIds.size, 0);
+    const result = core.reconcileTransfers(rows, valid.accounts);
+    assert.ok([...result.byId.values()].every(a => !a.counterpartId), 'contradictory money or identities cannot be paired');
+    const outgoing = rows.find(t => t.type === 'expense');
+    assert.equal(result.internalIds.has(outgoing.id), outgoing.originalCurrency === 'USD',
+      'FX changes do not erase known account ownership; edited or contradictory endpoints remain unresolved');
   }
 });
 

@@ -22,7 +22,7 @@ const expandGroups = h => {
 const openEntry = h => { expandGroups(h); byId(h.render(), 'transfer-review-entry').props.onPress(); };
 
 function createUI({ language = 'en', transactions = [row('one'), row('two')], bulk = false,
-  params = {}, resolveTransfers, ensureDurable, groupDefinitions } = {}) {
+  params = {}, resolveTransfers, ensureDurable, groupDefinitions, assessments = {} } = {}) {
   const events = [], slots = [], refs = [];
   let cursor = 0, refCursor = 0, generation = 1;
   const state = { language, hydrated: true, transactions,
@@ -45,14 +45,14 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   const reconcile = txs => {
     const definitions = groupDefinitions ?? [{ id: 'group', transactionIds: txs.map(tx => tx.id), bulkEligible: bulk }];
     const groups = definitions.flatMap(definition => {
-      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision);
+      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision && !assessments[tx.id]);
       return rows.length ? [{ id: definition.id, transactionIds: rows.map(tx => tx.id), accountId: rows[0].accountId,
         direction: rows[0].type, status: 'ownership-unknown', bulkEligible: definition.bulkEligible,
         counterparty: definition.bulkEligible ? { last4: '9876', kind: 'account', bankIdentity: 'synthetic-bank' } : undefined }] : [];
     });
     return { groups, pendingIds: new Set(groups.flatMap(group => group.transactionIds)), internalIds: new Set(),
       byId: new Map(txs.map(tx => [tx.id, { status: tx.transferDecision
-        ? tx.transferDecision.ownership === 'own' ? 'counterpart-missing' : 'confirmed-external' : 'ownership-unknown' }])) };
+        ? tx.transferDecision.ownership === 'own' ? 'counterpart-missing' : 'confirmed-external' : 'ownership-unknown', ...assessments[tx.id] }])) };
   };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native,
@@ -83,6 +83,27 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   const render = () => { cursor = 0; refCursor = 0; return screen(); };
   return { render, notice, state, store, events, words: deps['@/lib/transfer-review-copy'].transferReviewCopy(language),
     setGeneration: value => { generation = value; } };
+}
+
+for (const language of ['en', 'ar']) {
+  for (const reason of ['known-account', 'known-card']) {
+    test(`${language}: ${reason} explains cross-SMS ownership without a fake receipt and allows correction`, async () => {
+      const h = createUI({ language, transactions: [row('known')], params: { transactionId: 'known' },
+        assessments: { known: { status: reason === 'known-card' ? 'card-repayment' : 'confirmed-own',
+          reason, counterpartyAccountId: 'other' } } });
+      openEntry(h);
+      const tree = h.render();
+      assert.ok(text(byId(tree, 'transfer-known-ownership-evidence')).includes(
+        reason === 'known-card' ? h.words.knownCardEvidence : h.words.knownAccountEvidence));
+      assert.equal(byId(tree, 'transfer-counterpart-evidence'), undefined, 'no invented receipt');
+      assert.ok(byId(tree, 'transfer-choice-external'), 'automatic classification can be corrected');
+      byId(tree, 'transfer-choice-external').props.onPress();
+      byLabel(h.render(), h.words.confirm).props.onPress();
+      await flush();
+      assert.equal(h.events[0][1].ownership, 'external');
+      assert.deepEqual(h.events[0][1].ids, ['known']);
+    });
+  }
 }
 
 for (const language of ['en', 'ar']) {

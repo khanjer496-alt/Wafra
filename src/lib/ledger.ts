@@ -60,6 +60,6 @@ export function internalTransferIds(
   transactions: Transaction[], accounts: Set<string> | Account[],
 ): Set<string> {
   const result = reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []);
-  if (!result.corroboratingIds.size && !result.cardRepaymentPairs.size) return result.internalIds;
-  return new Set([...result.internalIds, ...result.corroboratingIds, ...result.cardRepaymentPairs.keys()]);
+  if (!result.corroboratingIds.size && !result.cardRepaymentPairs.size && !result.knownCardRepayments.size) return result.internalIds;
+  return new Set([...result.internalIds, ...result.corroboratingIds, ...result.cardRepaymentPairs.keys(), ...result.knownCardRepayments.keys()]);
 }

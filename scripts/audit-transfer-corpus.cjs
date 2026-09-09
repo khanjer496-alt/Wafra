@@ -195,7 +195,9 @@ function summary(value) {
   const amounts = { incomeFils: sum(t => ledger.isIncome(t,live,excluded)), spendingFils: sum(t => ledger.isSpending(t,live,excluded)) };
   const cash = summarizeCashOutflow(value,{mode:'all'},{live,internal:excluded});
   return { transactions: value.transactions.length, accounts: value.accounts.length, statuses, pending: reconciliation.pendingIds.size,
-    linkedOwnPairs: [...reconciliation.byId.values()].filter(x => x.status==='confirmed-own').length / 2,
+    linkedOwnPairs: [...reconciliation.byId.values()].filter(x => x.status==='confirmed-own' && x.counterpartId).length / 2,
+    knownOwnAccountRows: [...reconciliation.byId.values()].filter(x => x.reason==='known-account').length,
+    knownCardRepaymentRows: reconciliation.knownCardRepayments.size,
     corroboratingAlerts: reconciliation.corroboratingIds.size, provedCardRepayments: reconciliation.cardRepaymentPairs.size,
     unassignedTransfers: value.transactions.filter(t => core.isUnassignedTransferAccount(t.accountId)).length,
     cardPaymentRows: cardPaymentRows(value).length, ...amounts, cashOutFils: cash.totalFils, cardCashOutFils: cash.cardPaymentsFils };

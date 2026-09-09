@@ -50,8 +50,10 @@ export interface TransferAssessment {
     'card-repayment' | 'corroborating-alert' | 'likely-own' | 'likely-card-repayment';
   reason: 'user' | 'explicit-ownership' | 'reference' | 'reciprocal-instruments' | 'missing-evidence' |
     'multiple-candidates' | 'missing-counterpart' | 'account-unresolved' | 'destination-and-receipt' |
-    'credit-card-receipt' | 'bank-confirmation' | 'amount-time' | 'explicit-external';
+    'credit-card-receipt' | 'bank-confirmation' | 'amount-time' | 'explicit-external' | 'known-account' | 'known-card';
   counterpartId?: string;
+  /** Independently observed owned endpoint; not a claim that a receipt exists. */
+  counterpartyAccountId?: string;
   candidateIds: string[];
 }
 
@@ -76,6 +78,8 @@ export interface TransferReconciliationResult {
   corroboratingOf: Map<string, string>;
   /** Bank debit -> independently observed credit-card receipt. */
   cardRepaymentPairs: Map<string, string>;
+  /** Bank debit -> owned credit-card account, including payments without a receipt. */
+  knownCardRepayments: Map<string, string>;
 }
 
 export interface TransferDecisionRequest {

@@ -201,6 +201,93 @@ interface Context {
   fingerprints: Map<string, string>;
   instrumentKey: (value: unknown) => string | undefined;
   corroboratingOf: Map<string, string>;
+  knownCounterparties: Map<string, Account>;
+}
+
+/** Ownership and pairing are different questions. A completed transfer naming
+ * an instrument independently observed in other bank SMS does not need a
+ * same-amount receipt to establish ownership. Never learn from beneficiary
+ * mentions, editable Wallet metadata alone, or our own inferred links. */
+function knownTransferCounterparties(
+  rows: Map<string, TransferRow>, duplicateIds: Set<string>, accounts: Account[],
+  entries: Map<string, Entry>,
+): Map<string, Account> {
+  const bankCache = new Map<string, string | undefined>();
+  const bankKey = (name: string | undefined): string | undefined => {
+    if (!name) return undefined;
+    if (!bankCache.has(name)) {
+      const bank = bankIdentityForName(name);
+      bankCache.set(name, bank && !/^(?:unknown|bank|unattributed|none|na|n a|unassigned)$/.test(bank) ? bank : undefined);
+    }
+    return bankCache.get(name);
+  };
+  const keyOf = (instrument: Instrument): string | undefined => {
+    const bank = bankKey(instrument.bankIdentity);
+    return bank && /^\d{4}$/.test(instrument.last4) ? JSON.stringify([bank, instrument.last4]) : undefined;
+  };
+  const kindOf = (account: Account): Instrument['kind'] => account.kind === 'bank' ? 'account' :
+    account.kind === 'card' ? account.cardType ?? 'unknown' : 'unknown';
+  // Count all account IDs and candidate identities before checking observations:
+  // a duplicate without activity is still a collision, not a reason to pick one.
+  const idCounts = new Map<string, number>();
+  const byId = new Map<string, Account>();
+  const byEndpoint = new Map<string, Account[]>();
+  for (const account of accounts) {
+    idCounts.set(account.id, (idCounts.get(account.id) ?? 0) + 1);
+    byId.set(account.id, account);
+    if (account.kind !== 'bank' && account.kind !== 'card') continue;
+    const key = keyOf({ last4: account.last4 ?? '', kind: kindOf(account), bankIdentity: account.bankName });
+    if (!key) continue;
+    const bucket = byEndpoint.get(key) ?? [];
+    bucket.push(account); byEndpoint.set(key, bucket);
+  }
+  // Two distinct source identities suffice to answer "an SMS other than this
+  // one" without retaining a second full index of the user's financial history.
+  const observations = new Map<string, Set<string>>();
+  const sourceOf = (tx: Transaction): string | undefined =>
+    typeof tx.smsKey === 'string' && tx.smsKey.length > 0 ? tx.smsKey :
+      sourceTime(tx) === undefined ? undefined : `clock:${sourceTime(tx)}`;
+  for (const tx of rows.values()) {
+    const account = byId.get(tx.accountId), capture = tx.captureInstrument;
+    const evidence = evidenceOf(tx), source = sourceOf(tx);
+    if (duplicateIds.has(tx.id) || tx.userEdited || manual(tx) || !source || !account ||
+        idCounts.get(account.id) !== 1 || !capture || !isInstrument(capture) ||
+        capture.kind === 'unknown' || capture.kind !== kindOf(account) ||
+        // A bank-side payment can name somebody else's beneficiary card. Only
+        // card activity or its own receipt independently establishes ownership.
+        (capture.kind === 'credit' && (tx.isTransfer || tx.cardPaymentSide !== undefined) &&
+          (tx.cardPaymentSide !== 'receipt' || tx.type !== 'income')) ||
+        capture.last4 !== account.last4 || !bankKey(capture.bankIdentity) ||
+        bankKey(capture.bankIdentity) !== bankKey(account.bankName) ||
+        (tx.transferEvidence !== undefined && !evidence) ||
+        (evidence && (evidence.attribution !== 'source' ||
+          (evidence.sourceBank && bankKey(evidence.sourceBank) !== bankKey(capture.bankIdentity)))) ||
+        !minor(tx.amountFils)) continue;
+    const sources = observations.get(account.id) ?? new Set<string>();
+    if (sources.size < 2) sources.add(source);
+    observations.set(account.id, sources);
+  }
+  const result = new Map<string, Account>();
+  for (const entry of entries.values()) {
+    const tx = entry.tx, evidence = evidenceOf(tx), cp = evidence?.counterparty;
+    if (tx.userEdited || decisionOf(tx) || !cp || evidence?.endpointProof !== 'explicit-transfer' ||
+        evidence.explicitExternal || !evidence.sourceBank || bankKey(evidence.sourceBank) !== entry.bank) continue;
+    // Missing issuer information cannot be supplied by a globally unique tail:
+    // a recipient at a different bank can have the same last four digits.
+    const key = keyOf(cp);
+    if (!key) continue;
+    const candidates = (byEndpoint.get(key) ?? []).filter(account =>
+      cp.kind === 'unknown' || kindOf(account) === 'unknown' || kindOf(account) === cp.kind);
+    if (candidates.length !== 1) continue;
+    const target = candidates[0];
+    if (idCounts.get(target.id) !== 1 || target.id === tx.accountId || kindOf(target) === 'unknown' ||
+        ![...(observations.get(target.id) ?? [])].some(source => source !== sourceOf(tx))) continue;
+    // A bank debit going TO a known credit card is a repayment. A bank credit
+    // coming FROM that card can be a cash advance; never call it repayment.
+    if (kindOf(target) === 'credit' && tx.type !== 'expense') continue;
+    result.set(tx.id, target);
+  }
+  return result;
 }
 
 function context(transactions: Transaction[], accounts: Account[]): Context {
@@ -303,7 +390,8 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   // External user choices may still have a companion bank confirmation, but
   // must never participate in automatic own-account matching.
   for (const [id, entry] of entries) if (transferOwnership(entry.tx) === 'external') entries.delete(id);
-  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf };
+  const knownCounterparties = knownTransferCounterparties(rows, duplicateIds, accounts, entries);
+  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf, knownCounterparties };
 }
 
 /** Two narrowly identified issuer formats, not two arbitrary equal payments.
@@ -511,6 +599,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const stale = new Set<string>();
   const corroboratingOf = ctx.corroboratingOf;
   const corroboratingIds = new Set(corroboratingOf.keys());
+  const knownCardRepayments = new Map<string, string>();
   for (const tx of ctx.rows.values()) {
     const ownership = transferOwnership(tx);
     if (ownership === null || !id(tx.id)) continue;
@@ -528,7 +617,16 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       byId.set(tx.id, { id: tx.id, status: 'confirmed-external', reason: decisionOf(tx) ? 'user' : 'explicit-external', candidateIds: [] });
       continue;
     }
-    if (ownership === 'own') {
+    const known = ctx.knownCounterparties.get(tx.id);
+    if (known?.kind === 'card' && known.cardType === 'credit') {
+      knownCardRepayments.set(tx.id, known.id);
+      byId.set(tx.id, { id: tx.id, status: 'card-repayment', reason: 'known-card',
+        counterpartyAccountId: known.id, candidateIds: [] });
+    } else if (known) {
+      internalIds.add(tx.id);
+      byId.set(tx.id, { id: tx.id, status: 'confirmed-own', reason: 'known-account',
+        counterpartyAccountId: known.id, candidateIds: [] });
+    } else if (ownership === 'own') {
       internalIds.add(tx.id);
       byId.set(tx.id, { id: tx.id, status: 'counterpart-missing', reason: 'missing-counterpart', candidateIds: [] });
     } else {
@@ -570,7 +668,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     return result;
   };
   for (const entry of ctx.entries.values()) {
-    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id)) continue;
+    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id) || knownCardRepayments.has(entry.tx.id)) continue;
     for (const key of keys(entry)) {
       const bucket = indexes.get(key);
       if (bucket) bucket.push(entry); else indexes.set(key, [entry]);
@@ -580,7 +678,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const candidates = new Map<string, Map<string, Exclude<Basis, 'user'>>>();
   const overflow = new Set<string>();
   for (const entry of ctx.entries.values()) {
-    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id)) continue;
+    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id) || knownCardRepayments.has(entry.tx.id)) continue;
     const possible = new Map<string, Exclude<Basis, 'user'>>();
     for (const key of keys(entry, true)) {
       const bucket = indexes.get(key);
@@ -609,7 +707,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       byId.set(txId, { id: txId, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: ids });
     }
   }
-  const cardRepaymentPairs = observedCardRepayments(ctx, pendingIds, corroboratingIds);
+  const cardRepaymentPairs = observedCardRepayments(ctx, new Set([...pendingIds, ...knownCardRepayments.keys()]), corroboratingIds);
   for (const [debitId, receiptId] of cardRepaymentPairs) {
     pendingIds.delete(debitId);
     byId.set(debitId, { id: debitId, status: 'card-repayment', reason: 'credit-card-receipt', counterpartId: receiptId, candidateIds: [] });
@@ -633,7 +731,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const orderedGroups = [...groups.values()];
   for (const group of orderedGroups) group.transactionIds.sort();
   orderedGroups.sort((a, b) => a.id.localeCompare(b.id));
-  return { byId, internalIds, pendingIds, groups: orderedGroups, corroboratingIds, corroboratingOf, cardRepaymentPairs };
+  return { byId, internalIds, pendingIds, groups: orderedGroups, corroboratingIds, corroboratingOf, cardRepaymentPairs, knownCardRepayments };
 }
 
 // Store arrays are immutable snapshots. Retain only their last paired result;

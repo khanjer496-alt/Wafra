@@ -297,8 +297,13 @@ export interface ParsedCard {
  * distinguish corroborating remittance alerts from additional postings, and
  * identify receiving-card receipts independently of the outgoing bank. Partly
  * masked transfer sources no longer inherit an unrelated first credit card.
+ *
+ * 39: recheck histories for ownership established by independent bank SMS.
+ * Known account endpoints classify own transfers without requiring a matching
+ * receipt; known credit-card destinations retain repayment semantics. No new
+ * user decisions, account routing, amounts or fictitious receipt rows are made.
  */
-export const PARSER_VERSION = 38;
+export const PARSER_VERSION = 39;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

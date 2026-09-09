@@ -413,7 +413,8 @@ export function cardPaymentRows(state: AppState): Transaction[] {
   // A generic bank debit naming the receiving card is still stored on the
   // BANK account. Its independent receipt alone settles the card; reuse that
   // canonical receipt for Cash out without inventing another card payment.
-  const proved = reconcileTransfers(state.transactions, state.accounts).cardRepaymentPairs;
+  const reconciliation = reconcileTransfers(state.transactions, state.accounts);
+  const proved = reconciliation.cardRepaymentPairs;
   if (proved.size) {
     const debitByReceipt = new Map([...proved].map(([debit, receipt]) => [receipt, debit]));
     const byId = new Map(state.transactions.map(row => [row.id, row]));
@@ -422,6 +423,16 @@ export function cardPaymentRows(state: AppState): Transaction[] {
       const debitId = debitByReceipt.get(entry.receipt?.id ?? entry.row.id);
       const debit = debitId ? byId.get(debitId) : undefined;
       if (debit) canonical[i] = { ...canonical[i], cashOutAccountId: debit.accountId, cashOutDate: debit.date };
+    }
+  }
+
+  // Ownership can be known before a receipt arrives. Show the bank debit as
+  // cash used to repay a card, without inventing a card-side posting or silently
+  // settling a statement. Once a receipt is linked, the canonical receipt above
+  // takes over and the debit must not appear a second time.
+  if (reconciliation.knownCardRepayments.size) {
+    for (const transaction of state.transactions) {
+      if (reconciliation.knownCardRepayments.has(transaction.id) && !proved.has(transaction.id)) canonical.push(transaction);
     }
   }
 

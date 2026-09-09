@@ -45,6 +45,7 @@ type Selection = {
   record?: { title: string; reference?: string; source: string };
   counterpart?: { id: string; title: string; account: string; date: string; amount: number; linkable: boolean };
   status?: Group['status'];
+  ownershipExplanation?: string;
   readOnly?: boolean;
 };
 
@@ -183,7 +184,10 @@ export default function ReviewTransfersScreen() {
       summary: row ? summarize(rows, group.summary.account, group.summary.counterparty) : group.summary,
       ownership: row?.transferDecision ? null : undefined, undo: !!row?.transferDecision,
       status: assessment?.status,
-      readOnly: assessment?.status === 'corroborating-alert' || assessment?.status === 'card-repayment',
+      readOnly: assessment?.status === 'corroborating-alert' ||
+        (assessment?.status === 'card-repayment' && assessment.reason !== 'known-card'),
+      ownershipExplanation: assessment?.reason === 'known-account' ? words.knownAccountEvidence :
+        assessment?.reason === 'known-card' ? words.knownCardEvidence : undefined,
       ...(counterpart ? { counterpart: { id: counterpart.id, title: counterpart.title,
         account: accountLabels.get(counterpart.accountId) ?? words.accountUnknown,
         date: fullDateTime(counterpart), amount: counterpart.amountFils, linkable } } : {}),
@@ -340,6 +344,7 @@ export default function ReviewTransfersScreen() {
       <ThemedText type="subtitle" accessibilityRole="header">{selection.undo ? words.undoTitle : selection.ids.length > 1 ? words.groupChoose : words.choose}</ThemedText>
       <SummaryFacts summary={selection.summary} words={words} />
       {selection.status && <ThemedText type="smallBold">{statusLabel(selection.status, words)}</ThemedText>}
+      {selection.ownershipExplanation && <ThemedText testID="transfer-known-ownership-evidence" type="small" themeColor="textSecondary">{selection.ownershipExplanation}</ThemedText>}
       {selection.status?.startsWith('likely-') && <ThemedText type="small" themeColor="textSecondary">{words.suggestedOnly}</ThemedText>}
       {selection.counterpart && <View style={styles.facts} testID="transfer-counterpart-evidence">
         <ThemedText type="smallBold">{words.linkedEntry}</ThemedText>
