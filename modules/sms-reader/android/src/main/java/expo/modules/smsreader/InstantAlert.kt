@@ -159,7 +159,8 @@ object InstantAlert {
     // Some banks append a separate promotional paragraph to a completed card
     // purchase. Trim only after a fully grounded purchase prefix; never trim a
     // decline, OTP, request, or reversal into an apparent successful payment.
-    val text = if (PURCHASE_PREFIX_RE.containsMatchIn(body)) body.split(PROMO_FOOTER_RE, limit = 2)[0] else body
+    // Remove only the recognized offer line, never the remaining message.
+    val text = if (PURCHASE_PREFIX_RE.containsMatchIn(body)) body.replace(PROMO_FOOTER_RE, "") else body
     if (REFUSE_RE.containsMatchIn(text)) return null
 
     // The message must say money MOVED, in the past tense. Note what is
@@ -270,7 +271,7 @@ object InstantAlert {
   // "deducted", شراء is "purchase", سحب is "withdrawn". Deliberately absent
   // here as in English: مستحق ("due") and رصيد ("balance").
   private val DEBIT_RE = Regex(
-    "\\bpayment of\\s+(?:$CUR)\\s*[0-9][0-9,.]*\\s+to\\s+[^\\r\\n]{1,120}\\s+with\\s+(?:credit|debit) card ending\\s+\\d{4}\\b|" +
+    "^\\s*payment of\\s+(?:$CUR)\\s*[0-9][0-9,.]*\\s+to\\s+[^\\r\\n]{1,120}\\s+with\\s+(?:credit|debit) card ending\\s+\\d{4}\\b|" +
     "purchase|was used|has been used|\\bdebited\\b|\\bspent\\b|withdraw(?:n|al)?|" +
       "\\bdeducted\\b|\\bcharged to\\b|\\bwas done\\b|using your card|" +
       "خصم|شراء|مشتريات|سحب|مخصوم",
@@ -283,9 +284,10 @@ object InstantAlert {
   )
 
   private val UNSAFE_TRANSACTION_RE = Regex(
-    "\\botp\\b|one[- ]time|verification code|declin|unsuccessful|insufficient|" +
-      "could not be (?:processed|completed)|has failed|\\breversed\\b|pre[- ]?auth|blocked|" +
-      "will be (?:charged|deducted)",
+    "\\botp\\b|one[- ]time (?:password|pin)|do not share|verification code|declin|unsuccessful|insufficient|" +
+      "could not be (?:processed|completed)|\\bfailed\\b|\\breversed\\b|pre[- ]?auth|blocked|" +
+      "\\bpending\\b|\\bcancell?ed\\b|not (?:completed|processed|successful|debited)|" +
+      "will be (?:charged|deducted)|تم رفض|مرفوض|غير ناجح|فشل|قيد الانتظار",
     RegexOption.IGNORE_CASE,
   )
 

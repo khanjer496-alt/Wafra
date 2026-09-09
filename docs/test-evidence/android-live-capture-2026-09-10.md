@@ -32,11 +32,15 @@
 ## Verification before native build
 
 - App/server TypeScript and full repository ESLint passed.
-- 639 repair, workflow and iOS-journey tests passed.
-- All 71 original JavaScript suites were executed. The four initial failures
-  were resolved and rerun: contracts (289), import planning (267), parser
-  (1,049) and iOS capture setup (390) assertions passed.
-- Native preview regex/corpus: 39 assertions passed, with 111 of 118 transaction
+- Merged the latest main's bounded parser-pattern caches, unchanged idle-scan
+  watermark and explicit Dubai browser-fixture timezone. Both the resumable
+  migration handoff and the no-op watermark correction are preserved.
+- 650 repair, workflow and iOS-journey tests passed after integration.
+- All 71 original JavaScript suites passed on the merged source. These include
+  contracts (289), import planning (267), parser (1,049) and iOS capture setup
+  (390) assertions.
+- Native preview regex/corpus: 43 assertions passed after the final offer-line
+  safety checks, with 111 of 118 transaction
   fixtures recognized. This is fixture coverage, not universal bank coverage.
 - Actual JVM pattern compilation and engine tests: 29 assertions passed.
 - Local synthetic browser transaction, 44-screen light/dark audit, English/

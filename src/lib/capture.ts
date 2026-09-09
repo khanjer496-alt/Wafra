@@ -367,12 +367,20 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       throw new SmsHistoryUnavailableError();
     }
     const migrationTime = Date.now();
+    // scanInbox starts newestTs at its inclusive query lower bound. On an
+    // empty incremental read that is lastScanTs + 1, not an observed message.
+    // Persisting it made every idle refresh rewrite the ledger and advanced
+    // the watermark without evidence. Real inbox refusals and queued captures
+    // still advance normally; a completed reread still carries its receipt.
+    const emptyScan = inboxScannedCount === 0 && scannedCount === 0 &&
+      parsed.length === 0 && declined.length === 0 && reviewCandidates.length === 0 &&
+      reviewSourceBindings.length === 0;
     return {
       parsed,
       reviewCandidates,
       reviewSourceBindings,
       declined,
-      newestTs,
+      newestTs: emptyScan ? state.lastScanTs : newestTs,
       inboxScannedCount,
       scannedCount,
       historicalReread: reread && inboxHistoryComplete,

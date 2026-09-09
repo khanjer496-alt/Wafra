@@ -88,7 +88,7 @@ function merchantOf(body) {
 /** What the banner would say, or null for "post nothing". */
 function read(body) {
   if (UNSAFE_TRANSACTION_RE.test(body)) return null;
-  if (PURCHASE_PREFIX_RE.test(body)) body = body.split(PROMO_FOOTER_RE, 1)[0];
+  if (PURCHASE_PREFIX_RE.test(body)) body = body.replace(new RegExp(PROMO_FOOTER_RE.source, 'gi'), '');
   if (REFUSE_RE.test(body)) return null;
   const credit = CREDIT_RE.test(body);
   if (!credit && !DEBIT_RE.test(body)) return null;
@@ -198,9 +198,13 @@ const cases = [
   ['Payment of AED 34.47 to Example Market with Credit Card ending 1234. Avl Cr. Limit is AED 18,764.51.', true, 'a completed ENBD payment-of alert is not silently missed'],
   ['Payment of AED 34.47 to Example Market with Credit Card ending 1234 was declined.', false, 'payment wording never overrides a decline'],
   ['Your payment of AED 34.47 will be charged tomorrow.', false, 'a scheduled payment is not an immediate charge'],
+  ['Pending payment of AED 34.47 to Example Market with Credit Card ending 1234.', false, 'a pending payment is not a completed card alert'],
+  ['Payment of AED 34.47 to Example Market with Credit Card ending 1234 is pending.', false, 'a pending suffix cannot be ignored'],
   ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\n07/09/26 12:02\nAvl Bal AED 14980.91\nSeptember statement due on 26/09/2026\nPay school fees in 12 instalments at 0% interest with no fees. Conditions apply.', true, 'a separate school-fee offer cannot silence a completed card purchase'],
   ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nDECLINED\nPay school fees in 12 instalments.', false, 'trimming an offer cannot remove the transaction refusal'],
   ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\nPay school fees in 12 instalments.\nTransaction declined.', false, 'a refusal after the promotional paragraph still blocks the banner'],
+  ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\nPay school fees in 12 instalments.\nتم رفض العملية', false, 'an Arabic refusal after the offer line still blocks the banner'],
+  ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\nPay school fees in 12 instalments.\nWill be deducted tomorrow.', false, 'future-charge text outside the offer is retained and refused'],
   ['Pay school fees in 12 instalments. Purchase of AED 174.00 with card ending 1234 qualifies.', false, 'promotional purchase wording alone never qualifies for trimming'],
   // A genuine purchase carrying a statement footer. Refusing on the word
   // "statement" would have silenced every ADCB credit-card charge.

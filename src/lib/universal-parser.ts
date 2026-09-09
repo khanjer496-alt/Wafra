@@ -26,8 +26,18 @@ const conservativeStatus = (statuses: PostingStatus[]): PostingStatus => {
   return 'unknown';
 };
 
-const phrase = (pattern: string): RegExp => new RegExp(
-  `(?:^|[^\\p{L}\\p{M}\\p{N}])(?:${pattern})(?=$|[^\\p{L}\\p{M}\\p{N}])`, 'iu');
+// Callers supply only the fixed grammar strings below. Never cache message
+// text, extracted values or parser results across people, messages or scans.
+const phrasePatterns = new Map<string, RegExp>();
+const phrase = (pattern: string): RegExp => {
+  const cached = phrasePatterns.get(pattern);
+  if (cached) return cached;
+  const compiled = new RegExp(
+    `(?:^|[^\\p{L}\\p{M}\\p{N}])(?:${pattern})(?=$|[^\\p{L}\\p{M}\\p{N}])`, 'iu');
+  if (phrasePatterns.size >= 64) phrasePatterns.clear();
+  phrasePatterns.set(pattern, compiled);
+  return compiled;
+};
 
 /** Completed movement predicates, independent of issuer/country selection. */
 const completedMovement = (source: string): { status: PostingStatus; direction: 'debit' | 'credit'; family: UniversalBankEvent['family'] } | null => {

@@ -62,11 +62,23 @@ const NEAR_DUE = /(?:minimum (?:amount )?due|amount due|payment due|statement to
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Only grammar vocabulary enters this bounded cache, never an alert or sender.
+// Rebuilding the same Unicode expression for every term of every message is
+// unnecessary on mobile runtimes. Non-global tests have no matching cursor.
+const termPatterns = new Map<string, RegExp>();
+const termPattern = (term: string): RegExp => {
+  const cached = termPatterns.get(term);
+  if (cached) return cached;
+  const flexibleTerm = term.trim().split(/\s+/u).map(escapeRegExp).join('\\s+');
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${flexibleTerm}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+  if (termPatterns.size >= 1024) termPatterns.clear();
+  termPatterns.set(term, pattern);
+  return pattern;
+};
+
 const findTerm = (text: string, terms: readonly string[]): string | null => {
   for (const term of terms) {
-    const flexibleTerm = term.trim().split(/\s+/u).map(escapeRegExp).join('\\s+');
-    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${flexibleTerm}(?=$|[^\\p{L}\\p{N}])`, 'iu');
-    if (pattern.test(text)) return term;
+    if (termPattern(term).test(text)) return term;
   }
   return null;
 };

@@ -180,6 +180,22 @@ interface RawCandidate {
   evidence: DraftEvidence;
 }
 
+// Cache syntax only. A later call with the same alias spellings may assign
+// different currencies, so currenciesByToken must still be rebuilt per call.
+// The ordered, escaped grammar key also preserves equal-length token priority.
+const aliasPatterns = new Map<string, readonly [RegExp, RegExp]>();
+const aliasPatternPair = (pattern: string): readonly [RegExp, RegExp] => {
+  const cached = aliasPatterns.get(pattern);
+  if (cached) return cached;
+  const pair = [
+    new RegExp(`(^|[^\\p{L}\\p{N}])(${pattern})${TOKEN_GAP}(${NUMBER})`, 'giu'),
+    new RegExp(`(${NUMBER})${TOKEN_GAP}(${pattern})(?=$|[^\\p{L}\\p{N}])`, 'giu'),
+  ] as const;
+  if (aliasPatterns.size >= 32) aliasPatterns.clear();
+  aliasPatterns.set(pattern, pair);
+  return pair;
+};
+
 const collectAliasRaw = (normalized: string, aliases: CurrencyAliasMap): RawCandidate[] => {
   const tokens = Object.keys(aliases).sort((a, b) => b.length - a.length);
   if (!tokens.length) return [];
@@ -187,8 +203,7 @@ const collectAliasRaw = (normalized: string, aliases: CurrencyAliasMap): RawCand
     tokens.map((token) => [token.toLowerCase(), aliases[token]] as const),
   );
   const pattern = tokens.map(escapeRe).join('|');
-  const prefix = new RegExp(`(^|[^\\p{L}\\p{N}])(${pattern})${TOKEN_GAP}(${NUMBER})`, 'giu');
-  const suffix = new RegExp(`(${NUMBER})${TOKEN_GAP}(${pattern})(?=$|[^\\p{L}\\p{N}])`, 'giu');
+  const [prefix, suffix] = aliasPatternPair(pattern);
   const found: RawCandidate[] = [];
   for (const [re, tokenAt, amountAt] of [[prefix, 2, 3], [suffix, 2, 1]] as const) {
     re.lastIndex = 0;

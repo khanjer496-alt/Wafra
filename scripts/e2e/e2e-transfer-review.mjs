@@ -151,6 +151,10 @@ try {
     const name = `${language}-${mode}-${width}`;
     const words = labels[language];
     const context = await browser.newContext({ viewport: { width, height },
+      // The fixture date above is Dubai-local; a UTC browser treats these rows
+      // as tomorrow between 20:00 and midnight UTC and correctly hides them
+      // from a recent-through-today view. Test in the same explicit timezone.
+      timezoneId: 'Asia/Dubai',
       locale: language === 'ar' ? 'ar-AE' : 'en-AE', colorScheme: mode, reducedMotion: 'reduce', acceptDownloads: true });
     await context.route('**/*', route => {
       const url = route.request().url();
