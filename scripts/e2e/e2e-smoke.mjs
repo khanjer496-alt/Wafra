@@ -333,8 +333,28 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
     const want=money(row.label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]||'');
     await tapLabel(page,row.label);await tapText(page,'View activity',1500);
     ok('Category detail opens a scoped expense ledger', /category=/.test(page.url())&&/type=expense/.test(page.url()));
-    const total=await page.evaluate(()=>[...document.querySelectorAll('div,span')].filter(n=>n.childElementCount===0&&n.getBoundingClientRect().width>0)
-      .map(n=>(n.textContent||'').trim()).find(x=>/^[+−-]\s?AED/.test(x))||'');
+    const aggregate = page.getByTestId('transactions-net-total');
+    let total;
+    if (await aggregate.count()) {
+      total = await aggregate.innerText();
+    } else {
+      // The single-result screen intentionally omits two identical totals.
+      // Validate its one actual transaction instead of requiring a duplicate
+      // summary to exist. Split/excluded contributions retain an aggregate.
+      const summary = await page.getByTestId('transactions-summary').innerText();
+      // Expo keeps the previous Home's recent-transaction buttons mounted.
+      // Count only the row that is actually on top in the active ledger.
+      const rows = await page.getByTestId('transaction-details-link').evaluateAll(nodes => nodes.filter(node => {
+        const r = node.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return false;
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return top && (node === top || node.contains(top));
+      }).map(node => node.getAttribute('aria-label')));
+      ok('a category without an aggregate contains exactly one transaction',
+        /^1 transaction(?:\s|·|$)/.test(summary) && rows.length === 1);
+      const label = rows[0];
+      total = label?.match(/(?:plus|minus)\s+([\d,]+(?:\.\d+)?)\s+AED$/)?.[1] ?? '';
+    }
     ok('Category ledger total equals the category amount',Math.round(Math.abs(money(total))*100)===Math.round(want*100));
     await tapLabel(page,'Back',1200);await tapTab(page,'Spending');
   }
