@@ -5,6 +5,9 @@
 Integrated the reviewed UI change set onto main at
 `ca14f20f3e9de58e1041b0c36f5c850f86ef7d96`, including the newly shipped
 inference of transfer ownership from independently observed accounts.
+During publication, main advanced to
+`f8527a22422cf0b136a7a8b36c955d4b65656c61` with iOS date-binding scripts.
+That commit was merged unchanged, and the combined regression sweep was rerun.
 The parser, accounting helpers, native modules, dependency versions and build
 configuration are unchanged by this integration. Main's newer compact transfer
 review notice was retained rather than replaced by the older local draft.
@@ -31,7 +34,7 @@ remain unchanged.
 - App and server TypeScript: passed.
 - Full repository ESLint: passed.
 - Compiled the current shipping modules using scripts/test/build.sh.
-- Repair / workflow / iOS-journey regressions: 588 passed, 0 failed.
+- Repair / workflow / iOS-journey regressions: 595 passed, 0 failed after the final merge.
 - Eleven targeted original contract suites: all passed (accessibility, money,
   accounting, dashboard, preservation, layout and performance configuration).
 - Fresh Expo web export from the integrated checkout: passed.
