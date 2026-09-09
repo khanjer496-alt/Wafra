@@ -26,6 +26,7 @@ import type {
 } from '@/lib/types';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
+import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 
 export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 'background';
 
@@ -226,7 +227,11 @@ export const createCaptureExecutor = ({
     const state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
 
+    const tracing = captureTraceEnabled();
+    const traceStarted = tracing ? Date.now() : 0;
+    captureTrace('routine:start');
     const collected = await dependencies.collectRoutine(state);
+    captureTrace('collect:done', collected.parsed.length, tracing ? Date.now() - traceStarted : 0);
     if (collected.needsSetup) return { kind: 'needs-setup' };
     // Inbox/relay I/O can overlap a hand edit or another import. Do not use
     // the state that was read only to choose the scan watermark and parser
@@ -249,9 +254,12 @@ export const createCaptureExecutor = ({
       // Review first, before an SMS cursor can advance. The authoritative
       // ledger is read again after this durability await: Restore may replace
       // the entire ledger while encrypted review staging is in flight.
+      const reviewStarted = tracing ? Date.now() : 0;
+      captureTrace('reviews:start', reviewCandidates.length);
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
+      captureTrace('reviews:done', reviewAlerts, tracing ? Date.now() - reviewStarted : 0);
       if (captureStopped(activeLedger, collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
@@ -263,6 +271,8 @@ export const createCaptureExecutor = ({
     // restored ledger as having completed a historical parser migration.
     const stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
+    const planStarted = tracing ? Date.now() : 0;
+    captureTrace('plan:start', collected.parsed.length);
     const plan = dependencies.planRows(
       collected.parsed,
       stateAtPlan,
@@ -270,6 +280,7 @@ export const createCaptureExecutor = ({
       new Date(),
       collected.declined,
     );
+    captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
     // it into the atomic ledger write. A routine scan can finish after an old
@@ -287,8 +298,11 @@ export const createCaptureExecutor = ({
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
           importBatch.parserRereadComplete === true)) {
+        const saveStarted = tracing ? Date.now() : 0;
+        captureTrace('save:start');
         const cursorReceipt = activeLedger.importBatch(importBatch);
         await cursorReceipt.durable;
+        captureTrace('save:done', cursorReceipt.ids.length, tracing ? Date.now() - saveStarted : 0);
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
@@ -314,6 +328,7 @@ export const createCaptureExecutor = ({
         }
       }
       await collected.commit();
+      captureTrace('routine:done', 0, tracing ? Date.now() - traceStarted : 0);
       return {
         kind: 'up-to-date',
         source: collected.source,
@@ -322,8 +337,11 @@ export const createCaptureExecutor = ({
       };
     }
 
+    const saveStarted = tracing ? Date.now() : 0;
+    captureTrace('save:start', plan.txCount + plan.healedCount);
     const receipt = activeLedger.importBatch(importBatch);
     await receipt.durable;
+    captureTrace('save:done', receipt.ids.length, tracing ? Date.now() - saveStarted : 0);
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
@@ -334,6 +352,7 @@ export const createCaptureExecutor = ({
       }
     }
     await collected.commit();
+    captureTrace('routine:done', receipt.ids.length, tracing ? Date.now() - traceStarted : 0);
     return {
       kind: 'imported',
       source: collected.source,

@@ -28,6 +28,10 @@ on:
           - arm64
           - universal
         default: arm64
+      capture_trace:
+        description: 'Internal test APK: local capture stage counts and timings only, no message content'
+        type: boolean
+        default: false
 # A push during a build was already cancelling it, but only after the runner
 # had burned 15 minutes on Gradle. Making it explicit kills the superseded run
 # immediately instead.
@@ -68,8 +72,15 @@ jobs:
       EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
       WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Refuse diagnostic tracing in a Play bundle
+        if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'
+        run: |
+          echo '::error::Capture tracing is for a local device test APK, not a Play bundle.'
+          exit 1
 
       - name: Refuse experimental bank notification capture in a Play bundle
         if: github.event.inputs.notification_capture_beta == 'true' && github.event.inputs.bundle == 'true'

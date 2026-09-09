@@ -40,6 +40,7 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
+import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 
 const PAGE_SIZE = 1000;
 const MAX_REVIEW_CANDIDATES = 50;
@@ -427,6 +428,9 @@ export async function scanInbox(
     };
   }
 
+  const tracing = captureTraceEnabled();
+  const traceStarted = tracing ? Date.now() : 0;
+  captureTrace('inbox:start');
   const parsed: (ParsedSms & {
     smsTs: number;
     sender: string;
@@ -556,12 +560,14 @@ export async function scanInbox(
     : Math.max(1, Math.floor(options.maxInboxPages));
 
   for (;;) {
+    const readStarted = tracing ? Date.now() : 0;
     const batch: InboxSms[] = await SmsReader.getInboxSms(
       sinceMs,
       beforeDateMs,
       beforeId,
       PAGE_SIZE,
     );
+    captureTrace('page:read', batch.length, tracing ? Date.now() - readStarted : 0, pagesRead + 1);
     if (batch.length === 0) {
       inboxHistoryComplete = true;
       nextCursor = null;
@@ -571,7 +577,13 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
+    const pageStarted = tracing ? Date.now() : 0;
+    let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
+      if (tracing && (i === 0 || Date.now() - traceCheckpoint >= 1000)) {
+        traceCheckpoint = Date.now();
+        captureTrace('page:progress', i, traceCheckpoint - pageStarted, pagesRead);
+      }
       const sms = batch[i];
       const sourceEventId = `a${sms.id}`;
       if (sms.date > newestTs) newestTs = sms.date;
@@ -653,6 +665,7 @@ export async function scanInbox(
         resetParseYieldState(pageYield);
       }
     }
+    captureTrace('page:done', batch.length, tracing ? Date.now() - pageStarted : 0, pagesRead);
     onProgress?.(scannedCount, parsed.length);
     const nextBeforeDateMs = batch[batch.length - 1].date;
     const nextBeforeId = batch[batch.length - 1].id;
@@ -798,6 +811,7 @@ export async function scanInbox(
   // Oldest-first so account auto-creation sees the earliest occurrence first.
   parsed.sort((a, b) => a.smsTs - b.smsTs);
   reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+  captureTrace('inbox:done', scannedCount, tracing ? Date.now() - traceStarted : 0, pagesRead);
   return {
     parsed,
     reviewCandidates,

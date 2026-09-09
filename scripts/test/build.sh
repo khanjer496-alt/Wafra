@@ -65,7 +65,7 @@ for f in types routes format categories ledger capture-source-identity dedupe ar
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics period purchases markets i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
-         history-import diagnostic-export diagnostic-messages transaction-filter \
+         history-import diagnostic-export diagnostic-messages transaction-filter capture-trace \
          launch-performance launch-benchmark \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
