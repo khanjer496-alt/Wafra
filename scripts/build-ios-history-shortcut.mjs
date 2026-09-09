@@ -369,10 +369,25 @@ const outputPropertyTextAction = (
   },
 });
 
+// The action editor's human labels are not the serialized unit identifiers.
+// Installed WFDurationQuantityFieldParameter accepts sec/min/hr, not the
+// longer labels. A discarded quantity must never silently change a boundary.
 const quantity = (magnitude, unit) => ({
-  Value: { Magnitude: magnitude, Unit: unit },
+  Value: { Magnitude: magnitude, Unit: ({ seconds: "sec", minutes: "min", hours: "hr" })[unit] ?? unit },
   WFSerializationType: "WFQuantityFieldValue",
 });
+
+// WFDateFieldParameter silently discards a bare variable attachment. The
+// iPhone Date Filter Check v2 returned a valid 2028 boundary and Future=0
+// after this representation was corrected. Keep the original Date variable
+// intact; this changes its serialized wrapper, not its value or time zone.
+const dateField = (input) => {
+  if (input?.WFSerializationType === "WFTextTokenString") return input;
+  if (input?.WFSerializationType !== "WFTextTokenAttachment" || !input.Value) {
+    throw new Error("invalid_history_date_field");
+  }
+  return textToken("\ufffc", { "{0, 1}": input.Value });
+};
 
 const currentDate = (uuid) => ({
   WFWorkflowActionIdentifier: "is.workflow.actions.date",
@@ -390,7 +405,7 @@ const adjustDate = (
   WFWorkflowActionParameters: {
     UUID: uuid,
     CustomOutputName: customOutputName,
-    WFDate: date,
+    WFDate: dateField(date),
     WFAdjustOperation: operation,
     ...(duration ? { WFDuration: duration } : {}),
   },
@@ -518,7 +533,7 @@ const timeBetweenDatesAction = (
   WFWorkflowActionParameters: {
     UUID: uuid,
     CustomOutputName: customOutputName,
-    WFTimeUntilFromDate: fromDate,
+    WFTimeUntilFromDate: dateField(fromDate),
     WFInput: toDate,
     WFTimeUntilUnit: unit,
   },
@@ -760,13 +775,13 @@ const findMessagesAction = ({
             Property: "date",
             Operator: 2,
             Removable: true,
-            Values: { Unit: 4, Date: startDate },
+            Values: { Unit: 4, Date: dateField(startDate) },
           },
           {
             Property: "date",
             Operator: 0,
             Removable: true,
-            Values: { Unit: 4, Date: endDate },
+            Values: { Unit: 4, Date: dateField(endDate) },
           },
           ...(hardEndDate
             ? [
@@ -774,7 +789,7 @@ const findMessagesAction = ({
                   Property: "date",
                   Operator: 0,
                   Removable: true,
-                  Values: { Unit: 4, Date: hardEndDate },
+                  Values: { Unit: 4, Date: dateField(hardEndDate) },
                 },
               ]
             : []),
@@ -784,7 +799,7 @@ const findMessagesAction = ({
                   Property: "date",
                   Operator: 2,
                   Removable: true,
-                  Values: { Unit: 4, Date: hardStartDate },
+                  Values: { Unit: 4, Date: dateField(hardStartDate) },
                 },
               ]
             : []),
@@ -792,7 +807,7 @@ const findMessagesAction = ({
             Property: "date",
             Operator: 2,
             Removable: true,
-            Values: { Unit: 4, Date: date },
+            Values: { Unit: 4, Date: dateField(date) },
           })),
         ],
       },
@@ -938,8 +953,11 @@ const buildSmokePreamble = ({ messageLimit }) => [
 ];
 
 /**
- * Retained only to reproduce Apple's iOS 26.6 date-filter defect. The
- * production graph below must not call this date-window diagnostic.
+ * Legacy adaptive-window experiment. Its earlier date-filter results were
+ * confounded by invalid Date parameter wrappers and duration-unit labels.
+ * A corrected bounded filter now works on the owner's iPhone; this does not
+ * prove fractional windows, tied-date completeness, throughput or resumption.
+ * The production graph below must not call this unqualified diagnostic.
  */
 export const buildAdaptiveHistoryDiagnostic = () => [
   alertAction(
@@ -2267,7 +2285,7 @@ export function verifyHistoryShortcutGraph(shortcut) {
       ids.minusThirtyDays,
       "First Included Day",
       "Subtract",
-      [1, "seconds"],
+      [1, "sec"],
     ],
     [5, ids.tomorrowBase, ids.now, "Date", "Get Start of Day", undefined],
     [
@@ -2292,7 +2310,7 @@ export function verifyHistoryShortcutGraph(shortcut) {
       "date boundary action is missing",
     );
     expect(parameters(index).UUID === uuid, "date boundary output changed");
-    assertActionOutput(
+    assertScalarTextOutput(
       parameters(index).WFDate,
       sourceUUID,
       sourceName,
@@ -2331,13 +2349,13 @@ export function verifyHistoryShortcutGraph(shortcut) {
       templates[1]?.Operator === 0,
     "date filters are reversed or unsafe",
   );
-  assertActionOutput(
+  assertScalarTextOutput(
     templates[0]?.Values?.Date,
     ids.startBoundary,
     "Start Boundary",
     "start date filter is wrong",
   );
-  assertActionOutput(
+  assertScalarTextOutput(
     templates[1]?.Values?.Date,
     ids.exclusiveEnd,
     "Exclusive End",
