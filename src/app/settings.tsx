@@ -121,7 +121,6 @@ import NotificationReader from '../../modules/notification-reader';
 import { isBankNotificationCaptureAvailable } from '@/lib/trusted-bank-notification-packages';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
-import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import {
   isInternalLaunchDiagnosticsEnabled,
   serializeLaunchMetrics,
@@ -1432,8 +1431,6 @@ export default function SettingsScreen() {
 
         {panel === 'data' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={words.needsReview} />
-          {linkRow(transferReviewCopy().title, transferReviewCopy().reviewedIntro,
-            () => router.push('/review-transfers'))}
           {reviewAlertCount > 0 && linkRow(
             t('reviewAlertsTitle'),
             tf('reviewAlertsSettingsCount', { count: reviewAlertCount }),

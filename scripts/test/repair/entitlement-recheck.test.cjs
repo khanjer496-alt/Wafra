@@ -71,12 +71,13 @@ function harness(overrides = {}, options = {}) {
   };
   const calls = { scans: 0, permission: 0, routes: [], toasts: [], setup: 0 };
   const appListeners = new Set();
+  const inboxListeners = new Set();
   const runtime = hookRuntime();
   const router = { push: route => calls.routes.push(route) };
   const toast = { show: text => calls.toasts.push(text) };
   const native = {
     Platform: { OS: 'android', Version: 36 },
-    AppState: { addEventListener: (_event, listener) => {
+    AppState: { currentState: 'active', addEventListener: (_event, listener) => {
       appListeners.add(listener);
       return { remove: () => appListeners.delete(listener) };
     } },
@@ -92,6 +93,7 @@ function harness(overrides = {}, options = {}) {
     clearIosCaptureWarning: () => ({ cleared: false, durable: Promise.resolve() }),
   };
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
+    '@/lib/inbox-refresh-scheduler': load(path.join(root, 'src/lib/inbox-refresh-scheduler.ts')),
     react: runtime.react,
     'react-native': native,
     'expo-router': {
@@ -100,6 +102,7 @@ function harness(overrides = {}, options = {}) {
     },
     '@/components/ui/toast': { useToast: () => toast },
     '@/lib/auto-import': {
+      subscribeInboxChanges: listener => { inboxListeners.add(listener); return () => inboxListeners.delete(listener); },
       isSmsScanningAvailable: () => true,
       hasSmsPermission: async () => { calls.permission += 1; return options.permission !== false; },
       requestSmsPermission: async () => options.permission !== false,
@@ -151,7 +154,9 @@ function harness(overrides = {}, options = {}) {
     get model() { return model; },
     update: async patch => { state = { ...state, ...patch }; render(); await settle(); },
     advance: ms => { now += ms; },
-    resume: async () => { for (const listener of appListeners) listener('active'); await settle(); },
+    resume: async () => { for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    inboxChanged: async () => { for (const listener of inboxListeners) listener(); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    observerCount: () => inboxListeners.size,
     active: () => purchases.isProActive(state),
   };
 }
@@ -182,7 +187,7 @@ test('reactivation bypasses recent scan freshness, while revocation never reads 
   await h.update({ pro: true });
   assert.equal(h.calls.scans, 2, 'the earlier successful scan must not suppress renewed eligibility');
   await h.resume();
-  assert.equal(h.calls.scans, 2, 'ordinary foreground resumes keep the 30-second throttle');
+  assert.equal(h.calls.scans, 3, 'Android resume checks new messages even within 30 seconds of the previous read');
 });
 
 test('history ownership defers an activation retry without consuming its freshness bypass', async t => {
@@ -248,6 +253,15 @@ test('status-only consumers do not become additional foreground scan owners', as
   await h.update({ pro: true });
   assert.equal(h.calls.scans, 0);
   assert.equal(h.calls.permission, 0);
+});
+
+test('the mounted Android owner imports a new provider event without a pull gesture', async t => {
+  const h = harness({ pro: true }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle(); assert.equal(h.calls.scans, 1);
+  assert.equal(h.observerCount(), 1);
+  await h.inboxChanged(); assert.equal(h.calls.scans, 2);
+  await h.update({ captureOptOut: true }); assert.equal(h.observerCount(), 0);
+  await h.inboxChanged(); assert.equal(h.calls.scans, 2, 'capture opt-out removes the listener');
 });
 
 test('two mounted foreground owners and effect replay join one activation scan', async t => {

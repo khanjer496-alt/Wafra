@@ -3,6 +3,7 @@ package expo.modules.smsreader
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.provider.Telephony
 import android.os.Handler
 import android.os.Looper
@@ -28,8 +29,41 @@ private class SmsInboxAccessException(
  * several messages. A date-only cursor can skip a row at a page boundary.
  */
 class SmsReaderModule : Module() {
+  private var inboxObserver: ContentObserver? = null
+  private var observedContext: Context? = null
+
+  private fun stopInboxObservation() {
+    inboxObserver?.let { observer ->
+      try { observedContext?.contentResolver?.unregisterContentObserver(observer) } catch (_: Exception) { }
+    }
+    inboxObserver = null
+    observedContext = null
+  }
+
   override fun definition() = ModuleDefinition {
     Name("SmsReader")
+    Events("onInboxChanged")
+
+    // Only a wake-up hint crosses this event. The ordinary permission-gated
+    // inbox reader remains the single source of parsed/committed transactions.
+    OnStartObserving {
+      stopInboxObservation()
+      val context = appContext.reactContext
+      if (context != null && context.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+          override fun onChange(selfChange: Boolean) {
+            sendEvent("onInboxChanged", emptyMap<String, Any>())
+          }
+        }
+        try {
+          context.contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, observer)
+          observedContext = context
+          inboxObserver = observer
+        } catch (_: SecurityException) { stopInboxObservation() }
+      }
+    }
+    OnStopObserving { stopInboxObservation() }
+    OnDestroy { stopInboxObservation() }
 
     AsyncFunction("startHistoryImport") { id: String, promise: Promise ->
       Handler(Looper.getMainLooper()).post {

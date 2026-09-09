@@ -30,6 +30,7 @@ import {
   isSmsScanningAvailable,
   openSmsPermissionSettings,
   requestSmsPermission,
+  subscribeInboxChanges,
 } from '@/lib/auto-import';
 import { enableRelayBackgroundSync, setChargeAlertsEnabled } from '@/lib/background-relay';
 import {
@@ -53,6 +54,7 @@ import {
 } from '@/lib/ios-local-capture';
 import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
+import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
@@ -213,12 +215,11 @@ export const iosRelayIntentFor = ({
 }): 'supplemental' | null => hasRelayConfig && !privateMode ? 'supplemental' : null;
 
 export const shouldReplayJoinedAutoImport = ({
-  platform,
   outcome,
 }: {
   platform: string;
   outcome: AutoImportOutcome;
-}): boolean => outcome !== 'imported' && !(platform === 'ios' && outcome === 'up-to-date');
+}): boolean => outcome !== 'imported' && outcome !== 'up-to-date';
 
 type IosLocalCoordinator = ReturnType<typeof getSharedIosLocalCaptureCoordinator>;
 
@@ -588,6 +589,7 @@ export function useAutoImport(
   );
   const previousCaptureOptOut = useRef(state.captureOptOut);
   const previousEntitlementActive = useRef(entitlementActive);
+  const previousHistoryStatus = useRef(state.historyImport?.status);
   const iosRecoveryInFlight = useRef<Promise<boolean> | null>(null);
 
   const readAndCommitCaptureStatus = useCallback(async (
@@ -792,6 +794,7 @@ export function useAutoImport(
       // against a competing ledger snapshot and could advance lastScanTs past
       // history the page coordinator has not committed yet.
       if (state.historyImport && state.historyImport.status !== 'complete') {
+        if (interactive) toast.show(t('historyImportRunningTitle'));
         return 'history-import-running';
       }
       // Hard paywall: tracking pauses when the trial ends without Pro.
@@ -981,7 +984,7 @@ export function useAutoImport(
         if (shouldReplayJoinedAutoImport({ platform: Platform.OS, outcome })) {
           return startAutoImport(true).then(() => undefined);
         }
-        if (Platform.OS === 'ios' && outcome === 'up-to-date') {
+        if (outcome === 'up-to-date') {
           toast.show(t('upToDateNoNew'));
         }
         return undefined;
@@ -1017,6 +1020,36 @@ export function useAutoImport(
     latestScan.current = runAutoImport;
   }, [runAutoImport]);
 
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
+      !state.onboarded || state.captureOptOut || !entitlementActive || needsPermission ||
+      (state.historyImport && state.historyImport.status !== 'complete')) return;
+    let disposed = false;
+    let unsubscribe = () => {};
+    const eligible = () => {
+      const current = getStateSnapshot();
+      return !disposed && RNAppState.currentState === 'active' && current.hydrated && current.onboarded &&
+        !current.captureOptOut && isProActive(current);
+    };
+    const scheduler = createInboxRefreshScheduler(async () => {
+      // A provider change can land after another caller took its inbox page.
+      // Joining that stale read alone would lose this hint. Wait, then read the
+      // newly committed watermark once through the same single-flight owner.
+      const existing = importInFlight;
+      if (existing) await existing.promise.catch(() => {});
+      if (eligible()) await latestScan.current(false);
+    }, eligible);
+    // Native observation is permission-gated too. Avoid a redundant permission
+    // query beside the ordinary capture attempt; re-subscribe after a denial
+    // clears or a full-history owner releases the inbox.
+    try { unsubscribe = subscribeInboxChanges?.(() => scheduler.request()) ?? (() => {}); } catch { /* Resume still scans. */ }
+    const lifecycle = RNAppState.addEventListener('change', next => {
+      if (next === 'active') scheduler.request();
+    });
+    return () => { disposed = true; unsubscribe(); lifecycle.remove(); scheduler.dispose(); };
+  }, [entitlementActive, getStateSnapshot, needsPermission, state.captureOptOut,
+    state.historyImport, state.hydrated, state.onboarded, watchForeground]);
+
   // Silent auto-import on open, and again every time the app comes back to
   // the foreground.
   //
@@ -1037,6 +1070,9 @@ export function useAutoImport(
     if (Platform.OS !== 'ios' && !state.onboarded) return;
     const captureJustEnabled = previousCaptureOptOut.current && !state.captureOptOut;
     previousCaptureOptOut.current = state.captureOptOut;
+    const historyJustCompleted = previousHistoryStatus.current !== undefined &&
+      previousHistoryStatus.current !== 'complete' && state.historyImport?.status === 'complete';
+    previousHistoryStatus.current = state.historyImport?.status;
     const entitlementJustActivated = !previousEntitlementActive.current && entitlementActive;
     // A restored entitlement owes one scan, even within the 30s throttle.
     // Keep that transition pending while the history owner prevents scanning.
@@ -1083,7 +1119,7 @@ export function useAutoImport(
     // will refuse. When capture is explicitly enabled again, force the first
     // real scan even if another scan happened less than 30 seconds earlier.
     if (!state.captureOptOut && entitlementActive) {
-      scan(state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated);
+      scan(state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated || historyJustCompleted);
     }
 
     if (state.onboarded && !sessionSetupRan) {
@@ -1102,7 +1138,9 @@ export function useAutoImport(
     }
 
     const sub = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') scan();
+      // Android's provider scheduler above owns resume and intentionally does
+      // not suppress a fresh purchase behind a previous 30-second scan.
+      if (next === 'active' && Platform.OS !== 'android') scan();
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps

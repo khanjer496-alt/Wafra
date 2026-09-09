@@ -41,6 +41,7 @@ import { PARSER_VERSION } from '@/lib/sms-parser';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
+import type { HistoryImportProgress } from '@/lib/history-import';
 
 export type CaptureSource = 'sms' | 'relay' | 'none';
 
@@ -69,6 +70,8 @@ export interface CaptureResult {
   inboxScannedCount?: number;
   /** Android reached the end of the inbox after starting at the beginning. */
   historicalReread?: boolean;
+  /** Hand an incomplete parser migration to the existing resumable owner. */
+  historyImport?: HistoryImportProgress;
   /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
@@ -338,11 +341,15 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       inboxHistoryComplete = false,
       scannedCount = 0,
       detectedLaunchMarket = null,
+      nextCursor = null,
       commit,
     } = await scanInbox(
       sinceMs,
       state.merchantOverrides,
-      undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state) },
+      undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
+        // The first page brings newest activity forward. Older pages belong
+        // to the durable, resumable history coordinator, not one giant refresh.
+        maxInboxPages: reread ? 1 : undefined },
     );
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep
@@ -356,9 +363,10 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     if (reread && inboxScannedCount === 0 && hasStoredInboxHistory) {
       throw new SmsHistoryUnavailableError();
     }
-    if (reread && !inboxHistoryComplete) {
+    if (reread && !inboxHistoryComplete && !nextCursor) {
       throw new SmsHistoryUnavailableError();
     }
+    const migrationTime = Date.now();
     return {
       parsed,
       reviewCandidates,
@@ -368,6 +376,11 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       inboxScannedCount,
       scannedCount,
       historicalReread: reread && inboxHistoryComplete,
+      ...(reread && !inboxHistoryComplete && nextCursor ? { historyImport: {
+        status: 'paused' as const, cursor: nextCursor, scanned: scannedCount,
+        found: parsed.length + reviewCandidates.length, startedAt: migrationTime,
+        updatedAt: migrationTime, error: null,
+      } } : {}),
       detectedLaunchMarket,
       source: 'sms',
       commit,

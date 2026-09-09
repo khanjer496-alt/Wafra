@@ -219,6 +219,14 @@ export function buildImportPlan(
   // every caller has to pass through it.
   if (!state.hydrated) return emptyPlan();
 
+  // An empty incremental read must not rebuild every full-history identity
+  // index just to persist its watermark. There are no monetary decisions here.
+  if (parsed.length === 0 && declined.length === 0) {
+    const plan = emptyPlan();
+    plan.batch.lastScanTs = newestTs;
+    return plan;
+  }
+
   // An Android provider ID without its original timestamp is not portable
   // identity. Refuse the whole input before money, snapshots or cursor effects.
   if ([...parsed, ...declined].some((row) => row.sourceEventId &&
@@ -582,7 +590,15 @@ export function buildImportPlan(
       // On an empty first scan the old empty-string fallback silently dropped
       // parsed fees, receipts and salaries. Keep a stable unresolved reference
       // until real source evidence or the user identifies an account.
-      return { accountId: ambiguousFallbackAccountId ?? (fallbackAccountId || UNASSIGNED_TRANSACTION_ACCOUNT_ID), confident: false };
+      const priorAccount = ambiguousFallbackAccountId ? accountAtRef(ambiguousFallbackAccountId) : undefined;
+      const issuer = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+      // A sender identifies an issuer, not one of the user's cards. Preserve
+      // user choices and compatible old assignments; repair only a provable
+      // cross-bank fallback. New unidentified events get no invented account.
+      const wrongIssuer = issuer && priorAccount?.bankName &&
+        bankIdentityForName(issuer.name) !== bankIdentityForName(priorAccount.bankName);
+      return { accountId: ambiguousFallbackAccountId && (!createMissing || !wrongIssuer)
+        ? ambiguousFallbackAccountId : UNASSIGNED_TRANSACTION_ACCOUNT_ID, confident: false };
     }
     const { last4 } = p.card;
     // The parser owns card-kind evidence, including Arabic forms such as
@@ -1040,9 +1056,11 @@ export function buildImportPlan(
     if (!accountId) continue;
     if (resolution.confident) noteSnapshot(accountId, p);
     const healedAccountId = resolution.confident || unassignedIncome ||
+      (!prior?.userEdited && !prior?.captureInstrument && accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) ||
       (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
     const accountForMatchedPrior = (matched: Transaction | undefined) =>
-      unassignedIncome && (matched?.captureInstrument || matched?.userEdited)
+      (unassignedIncome || accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) &&
+        (matched?.captureInstrument || matched?.userEdited)
         ? undefined : healedAccountId;
     if (sourceCorrectionPrior && smsKey) {
       promoteMatchedHistory(sourceCorrectionPrior.id, smsKey, p, healedAccountId);

@@ -155,7 +155,12 @@ object InstantAlert {
 
   /** Null when the message is not plainly a completed transaction. */
   private fun read(body: String): Read? {
-    if (REFUSE_RE.containsMatchIn(body)) return null
+    if (UNSAFE_TRANSACTION_RE.containsMatchIn(body)) return null
+    // Some banks append a separate promotional paragraph to a completed card
+    // purchase. Trim only after a fully grounded purchase prefix; never trim a
+    // decline, OTP, request, or reversal into an apparent successful payment.
+    val text = if (PURCHASE_PREFIX_RE.containsMatchIn(body)) body.split(PROMO_FOOTER_RE, limit = 2)[0] else body
+    if (REFUSE_RE.containsMatchIn(text)) return null
 
     // The message must say money MOVED, in the past tense. Note what is
     // absent from these: "payment", "due", "outstanding", "balance". Those
@@ -163,10 +168,10 @@ object InstantAlert {
     // nothing — and they also appear as footers on genuine purchases, so
     // refusing on them would drop the real alerts too. Requiring a completed
     // verb handles both cases without a second list to keep in step.
-    val credit = CREDIT_RE.containsMatchIn(body)
-    if (!credit && !DEBIT_RE.containsMatchIn(body)) return null
+    val credit = CREDIT_RE.containsMatchIn(text)
+    if (!credit && !DEBIT_RE.containsMatchIn(text)) return null
 
-    val amount = AMOUNT_RE.find(body) ?: return null
+    val amount = AMOUNT_RE.find(text) ?: return null
     // Groups 1/2 are "AED 150.00", groups 3/4 are "150.00 درهم". Exactly one
     // pair is populated.
     val code = amount.groupValues[1].ifEmpty { amount.groupValues[4] }
@@ -179,8 +184,8 @@ object InstantAlert {
     return Read(
       amount = "${code.uppercase()} $figure",
       credit = credit,
-      merchant = merchant(body),
-      last4 = LAST4_RE.find(body)?.groupValues?.get(1),
+      merchant = merchant(text),
+      last4 = LAST4_RE.find(text)?.groupValues?.get(1),
     )
   }
 
@@ -191,7 +196,8 @@ object InstantAlert {
    * banner falls back to the amount alone, which is still useful.
    */
   private fun merchant(body: String): String? {
-    val name = MERCHANT_RE.find(body)?.groupValues?.get(1)
+    val name = (PAYMENT_MERCHANT_RE.find(body)?.groupValues?.get(1)
+      ?: MERCHANT_RE.find(body)?.groupValues?.get(1))
       ?.trim()?.trimEnd(',', '.', '-', ' ') ?: return null
     if (name.length < 3 || name.length > 28) return null
     if (!name.any { it.isLetter() }) return null
@@ -254,14 +260,37 @@ object InstantAlert {
     RegexOption.IGNORE_CASE,
   )
 
+  private val PAYMENT_MERCHANT_RE = Regex(
+    "^\\s*Payment of\\s+(?:$CUR)\\s*[0-9][0-9,.]*\\s+to\\s+([^\\r\\n]{1,120}?)\\s+with\\s+(?:Credit|Debit) Card ending\\s+\\d{4}\\b",
+    RegexOption.IGNORE_CASE,
+  )
+
   // The Arabic verbs carry no \b for the reason given on AMOUNT_RE. They are
   // the same completed-verb list as the English one, not a wider one: خصم is
   // "deducted", شراء is "purchase", سحب is "withdrawn". Deliberately absent
   // here as in English: مستحق ("due") and رصيد ("balance").
   private val DEBIT_RE = Regex(
+    "\\bpayment of\\s+(?:$CUR)\\s*[0-9][0-9,.]*\\s+to\\s+[^\\r\\n]{1,120}\\s+with\\s+(?:credit|debit) card ending\\s+\\d{4}\\b|" +
     "purchase|was used|has been used|\\bdebited\\b|\\bspent\\b|withdraw(?:n|al)?|" +
       "\\bdeducted\\b|\\bcharged to\\b|\\bwas done\\b|using your card|" +
       "خصم|شراء|مشتريات|سحب|مخصوم",
+    RegexOption.IGNORE_CASE,
+  )
+
+  private val PURCHASE_PREFIX_RE = Regex(
+    "^\\s*(?:Credit|Debit) Card Purchase\\s*[\\r\\n]+Card No\\s+[Xx*]*[0-9]{4}\\s*[\\r\\n]+(?:$CUR)\\s+[0-9][0-9,.]*\\s*[\\r\\n]+",
+    RegexOption.IGNORE_CASE,
+  )
+
+  private val UNSAFE_TRANSACTION_RE = Regex(
+    "\\botp\\b|one[- ]time|verification code|declin|unsuccessful|insufficient|" +
+      "could not be (?:processed|completed)|has failed|\\breversed\\b|pre[- ]?auth|blocked|" +
+      "will be (?:charged|deducted)",
+    RegexOption.IGNORE_CASE,
+  )
+
+  private val PROMO_FOOTER_RE = Regex(
+    "[\\r\\n]+(?:(?:Pay school fees|Convert (?:this|your)|Enjoy |Shop now|Get (?:up to|cashback|a discount)))[^\\r\\n]*",
     RegexOption.IGNORE_CASE,
   )
 

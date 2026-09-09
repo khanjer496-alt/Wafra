@@ -15,6 +15,8 @@ const S = {
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
   transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
+  transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
+  accountTransferHistory: { en: 'Transfers between accounts and to others', ar: 'التحويلات بين حساباتك وإلى الآخرين' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
   filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
   incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },

@@ -206,6 +206,12 @@ export default function TransactionsScreen() {
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded } = projection;
+  // A single ordinary row already displays its amount. Keep a separate total
+  // only when it conveys different information (for example a transfer excluded
+  // from totals or a category filter showing part of a split purchase).
+  const singleRow = filtered.length === 1 ? filtered[0] : null;
+  const showResultTotal = filtered.length > 1 ||
+    (singleRow !== null && Math.abs(totalShown) !== singleRow.amountFils);
   const resultsPending = appliedFilters !== filters || appliedQuery !== query;
   const sections = useMemo<DaySection[]>(() => appliedFilters.sort === 'largest'
     ? [{ title: tr('largestFirst'), totalFils: totalShown, data: filtered }]
@@ -286,8 +292,8 @@ export default function TransactionsScreen() {
                 : ''}
 
             </ThemedText>
-            <View style={styles.summaryRight}>
-              <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
+            {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
+              {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
                 <ThemedText type="small" themeColor="textSecondary">{tr('transactionNetTotal')}</ThemedText>
               <ThemedText
                 type="smallBold"
@@ -296,7 +302,7 @@ export default function TransactionsScreen() {
                 {totalShown >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(totalShown), { decimals: false })}
               </ThemedText>
-              </View>
+              </View>}
               {activeFilterCount > 0 && (
                 <Pressable
                   accessibilityRole="button"
@@ -308,7 +314,7 @@ export default function TransactionsScreen() {
                   </ThemedText>
                 </Pressable>
               )}
-            </View>
+            </View>}
               {(excluded.transfers > 0 || excluded.hidden > 0) && (
                 <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
               {excluded.transfers > 0
@@ -337,6 +343,9 @@ export default function TransactionsScreen() {
               <ThemedText type="micro" themeColor="textSecondary">
                 {section.title}
               </ThemedText>
+              {sections.length > 1 && section.data.length > 1 && <View testID="transaction-day-total"
+                style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
+                <ThemedText type="meta" themeColor="textSecondary">{tr('transactionDayTotal')}</ThemedText>
               <ThemedText
                 type="small"
                 tabular
@@ -344,6 +353,7 @@ export default function TransactionsScreen() {
                 {section.totalFils >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(section.totalFils), { decimals: false })}
               </ThemedText>
+              </View>}
             </View>
           )}
           renderItem={renderRow}
@@ -359,7 +369,7 @@ export default function TransactionsScreen() {
           }
         />
   ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
-    filters.datePreset, period, activeFilterCount, totalShown, excluded, clearFilters, renderRow]);
+    filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow]);
 
   return (
     <>

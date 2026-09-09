@@ -159,3 +159,77 @@ test('narrow screens give search full width without reducing the font size', () 
   const filter = labelled(toolbar, h.deps['@/lib/i18n'].t('filtersButton'));
   assert.equal(style(filter).alignSelf, 'flex-end');
 });
+
+const fixtureRow = (id, overrides = {}) => ({
+  id, title: 'Fixture shop', date: '2026-09-02', amountFils: 12500,
+  type: 'expense', category: 'dining', accountId: 'enbd', source: 'sms', ...overrides,
+});
+const netSummary = h => walk(h.tree).find(n => n.props?.testID === 'transactions-net-total');
+const sectionHeader = (h, section) => h.list.props.renderSectionHeader({ section });
+const dayTotal = header => walk(header).find(n => n.props?.testID === 'transaction-day-total');
+
+for (const language of ['en', 'ar']) {
+  for (const largeText of [false, true]) {
+    test(`${language}/${largeText}: one ordinary result has one amount, not two extra totals`, () => {
+      const row = fixtureRow('only');
+      const h = transactions({ language, largeText, params: { merchant: 'Fixture shop' }, state: { transactions: [row] } });
+      assert.equal(netSummary(h), undefined);
+      assert.equal(h.list.props.sections.length, 1);
+      const header = sectionHeader(h, h.list.props.sections[0]);
+      assert.equal(dayTotal(header), undefined);
+      assert.ok(text(header).includes(h.list.props.sections[0].title), 'date heading remains visible');
+      assert.ok(labelled(h.tree, h.deps['@/lib/i18n'].t('clearAllFilters')), 'filter removal remains available');
+      const renderedRow = h.list.props.renderItem({ item: row, index: 0 });
+      const details = walk(renderedRow).find(n => n.props?.testID === 'transaction-details-link');
+      assert.ok(details, 'actual transaction remains available');
+      assert.match(text(details), /125|١٢٥/);
+      assert.deepEqual(h.events, [], 'rendering never merges, deletes or writes transactions');
+      assert.deepEqual(h.state.transactions, [row]);
+    });
+  }
+  test(`${language}: a single excluded transfer still explains that its total is zero`, () => {
+    const row = fixtureRow('transfer', { isTransfer: true });
+    const h = transactions({ language, state: { transactions: [row] } });
+    assert.ok(netSummary(h));
+    assert.ok(walk(h.tree).some(n => n.props?.testID === 'transactions-exclusions'));
+    assert.equal(h.list.props.sections[0].totalFils, 0);
+    assert.equal(dayTotal(sectionHeader(h, h.list.props.sections[0])), undefined);
+    assert.deepEqual(h.events, []);
+  });
+  test(`${language}: a single split result retains its selected-category subtotal`, () => {
+    const row = fixtureRow('split', { amountFils: 12500, splits: [
+      { category: 'dining', amountFils: 2500 }, { category: 'groceries', amountFils: 10000 },
+    ] });
+    const h = transactions({ language, params: { category: 'dining' }, state: { transactions: [row] } });
+    assert.ok(netSummary(h));
+    assert.equal(h.list.props.sections[0].totalFils, -2500, 'keep the exact partial amount, not the full purchase');
+    assert.equal(dayTotal(sectionHeader(h, h.list.props.sections[0])), undefined);
+    assert.deepEqual(h.events, []);
+  });
+  test(`${language}: one day with multiple transactions shows one combined total`, () => {
+    const rows = [fixtureRow('one'), fixtureRow('two', { amountFils: 7500 })];
+    const h = transactions({ language, state: { transactions: rows } });
+    assert.ok(netSummary(h));
+    assert.equal(h.list.props.sections[0].totalFils, -20000);
+    assert.equal(dayTotal(sectionHeader(h, h.list.props.sections[0])), undefined);
+    assert.equal(h.list.props.sections[0].data.length, 2);
+  });
+  test(`${language}: only a multi-entry day within multi-day results has a labelled subtotal`, () => {
+    const rows = [fixtureRow('one'), fixtureRow('two'), fixtureRow('three', { date: '2026-09-01' })];
+    const h = transactions({ language, state: { transactions: rows } });
+    assert.ok(netSummary(h));
+    for (const section of h.list.props.sections) {
+      const total = dayTotal(sectionHeader(h, section));
+      assert.equal(Boolean(total), section.data.length > 1);
+      if (total) assert.ok(text(total).includes(h.deps['@/lib/i18n'].t('transactionDayTotal')));
+    }
+    assert.equal(h.list.props.sections.flatMap(s => s.data).length, 3);
+    assert.deepEqual(h.events, []);
+  });
+  test(`${language}: empty results do not invent a zero transaction total`, () => {
+    const h = transactions({ language, state: { transactions: [] } });
+    assert.equal(netSummary(h), undefined);
+    assert.equal(h.list.props.sections.length, 0);
+    assert.ok(text(h.list.props.ListEmptyComponent).includes(h.deps['@/lib/i18n'].t('nothingMatches')));
+  });
+}

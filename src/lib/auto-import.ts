@@ -92,6 +92,13 @@ export function isSmsScanningAvailable(): boolean {
   return Platform.OS === 'android' && SmsReader != null;
 }
 
+/** Older binaries remain usable; only new modules emit this source-free hint. */
+export function subscribeInboxChanges(listener: () => void): () => void {
+  if (!isSmsScanningAvailable()) return () => {};
+  const subscription = SmsReader?.addListener?.('onInboxChanged', listener);
+  return () => subscription?.remove();
+}
+
 export async function hasSmsPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);

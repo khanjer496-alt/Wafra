@@ -15,6 +15,8 @@ export interface InboxSms extends RawSms {
 export type CorpusSms = InboxSms;
 
 interface SmsReaderModule {
+  /** Source-free provider-change hint; no message bodies or sender metadata. */
+  addListener?(event: 'onInboxChanged', listener: () => void): { remove(): void };
   /** Optional on older binaries. Starts only while the activity is foregrounded. */
   startHistoryImport?(sessionId: string): Promise<boolean>;
   isHistoryImportRunning?(sessionId: string): boolean;

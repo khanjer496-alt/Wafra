@@ -302,8 +302,11 @@ export interface ParsedCard {
  * Known account endpoints classify own transfers without requiring a matching
  * receipt; known credit-card destinations retain repayment semantics. No new
  * user decisions, account routing, amounts or fictitious receipt rows are made.
+ *
+ * 40: reread exact sources to repair cross-issuer fallback assignments for
+ * unidentified payments. Amounts, dates and user edits remain unchanged.
  */
-export const PARSER_VERSION = 39;
+export const PARSER_VERSION = 40;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

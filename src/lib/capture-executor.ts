@@ -286,9 +286,11 @@ export const createCaptureExecutor = ({
     // it into the atomic ledger write. A routine scan can finish after an old
     // backup is restored; stamping that partial scan would prevent the next
     // launch from repairing the restored history.
-    const importBatch: ImportBatchInput = collected.historicalReread
-      ? { ...plan.batch, parserRereadComplete: true }
-      : plan.batch;
+    const importBatch: ImportBatchInput = {
+      ...plan.batch,
+      ...(collected.historicalReread ? { parserRereadComplete: true } : {}),
+      ...(collected.historyImport ? { historyImport: collected.historyImport } : {}),
+    };
 
     if (!hasChanges(plan)) {
       // A review-only Android scan still consumed the inbox up to newestTs.
@@ -297,7 +299,7 @@ export const createCaptureExecutor = ({
       // privacy cap are intentionally not retained. Relay rows use ACKs.
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
-          importBatch.parserRereadComplete === true)) {
+          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
         const saveStarted = tracing ? Date.now() : 0;
         captureTrace('save:start');
         const cursorReceipt = activeLedger.importBatch(importBatch);

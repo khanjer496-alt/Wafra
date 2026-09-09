@@ -376,6 +376,8 @@ export default function WalletScreen() {
           />
 
           {/* Group by account purpose without implying a live bank connection. */}
+          <Button label={t('accountTransferHistory')} variant="ghost" icon="chevron-right"
+            onPress={() => router.push('/review-transfers')} />
           <View style={styles.section}>
 
 

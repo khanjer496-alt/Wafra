@@ -147,6 +147,9 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     const kt = ktSources(`modules/${dir}/android/src/main/java`);
     const declaredName = kt.match(/Name\("([^"]+)"\)/)?.[1];
     const exposed = new Set([...kt.matchAll(/(?:Async)?Function\("([a-zA-Z]+)"/g)].map((m) => m[1]));
+    // Expo NativeModule supplies addListener for explicitly declared events;
+    // it is not a hand-written Function in the module's Kotlin definition.
+    if (dir === 'sms-reader' && /Events\("onInboxChanged"\)/.test(kt)) exposed.add('addListener');
     const ts = read(`modules/${dir}/index.ts`);
     const jsName = ts.match(/requireOptionalNativeModule<[^>]+>\('([^']+)'\)/)?.[1];
     const expects = [...ts.matchAll(/^ {2}([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
@@ -989,11 +992,11 @@ function ktSources(dir) {
   // joins one instead of starting its own used to inherit that silent
   // outcome and go unanswered. It must run its own follow-up once the shared
   // scan settles, without re-entering as a second concurrent scan.
-  ok('an interactive join preserves feedback without duplicating an iOS drain',
+  ok('an interactive join preserves feedback without duplicating a successful scan',
     /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
       /shouldReplayJoinedAutoImport/.test(home) &&
       /return startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home) &&
-      /Platform\.OS === 'ios' && outcome === 'up-to-date'[\s\S]*upToDateNoNew/.test(home));
+      /if \(outcome === 'up-to-date'\)[\s\S]*upToDateNoNew/.test(home));
 }
 
 /* ── every tab that shows captured money can go and refresh it ──────── */
@@ -1091,7 +1094,7 @@ function ktSources(dir) {
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
       /Platform\.OS !== 'ios'[\s\S]*Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS/.test(hook) &&
-      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated\);/.test(hook));
+      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated \|\| historyJustCompleted\);/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
   // who has just erased everything and is being shown the Shortcut cleanup

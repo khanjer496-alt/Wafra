@@ -58,10 +58,14 @@ function pattern(name) {
 const AMOUNT_RE = pattern('AMOUNT_RE');
 const LAST4_RE = pattern('LAST4_RE');
 const MERCHANT_RE = pattern('MERCHANT_RE');
+const PAYMENT_MERCHANT_RE = pattern('PAYMENT_MERCHANT_RE');
 const DEBIT_RE = pattern('DEBIT_RE');
 const CREDIT_RE = pattern('CREDIT_RE');
 const REFUSE_RE = pattern('REFUSE_RE');
 const BANK_WORD_RE = pattern('BANK_WORD_RE');
+const PURCHASE_PREFIX_RE = pattern('PURCHASE_PREFIX_RE');
+const PROMO_FOOTER_RE = pattern('PROMO_FOOTER_RE');
+const UNSAFE_TRANSACTION_RE = pattern('UNSAFE_TRANSACTION_RE');
 
 ok('the Kotlin patterns can be read out of the source', CUR.includes('AED') && REFUSE_RE.source.includes('otp'));
 
@@ -69,7 +73,7 @@ ok('the Kotlin patterns can be read out of the source', CUR.includes('AED') && R
 // Keep in step with InstantAlert.read() and InstantAlert.merchant().
 
 function merchantOf(body) {
-  const m = MERCHANT_RE.exec(body);
+  const m = PAYMENT_MERCHANT_RE.exec(body) || MERCHANT_RE.exec(body);
   if (!m) return null;
   const name = m[1].trim().replace(/[,.\- ]+$/, '');
   if (name.length < 3 || name.length > 28) return null;
@@ -83,6 +87,8 @@ function merchantOf(body) {
 
 /** What the banner would say, or null for "post nothing". */
 function read(body) {
+  if (UNSAFE_TRANSACTION_RE.test(body)) return null;
+  if (PURCHASE_PREFIX_RE.test(body)) body = body.split(PROMO_FOOTER_RE, 1)[0];
   if (REFUSE_RE.test(body)) return null;
   const credit = CREDIT_RE.test(body);
   if (!credit && !DEBIT_RE.test(body)) return null;
@@ -189,6 +195,13 @@ ok('the redacted corpus is broad, not a handful', corpus.length > 80, `${corpus.
 /* ── The traps that are specific to reading a message twice ──────────── */
 
 const cases = [
+  ['Payment of AED 34.47 to Example Market with Credit Card ending 1234. Avl Cr. Limit is AED 18,764.51.', true, 'a completed ENBD payment-of alert is not silently missed'],
+  ['Payment of AED 34.47 to Example Market with Credit Card ending 1234 was declined.', false, 'payment wording never overrides a decline'],
+  ['Your payment of AED 34.47 will be charged tomorrow.', false, 'a scheduled payment is not an immediate charge'],
+  ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\n07/09/26 12:02\nAvl Bal AED 14980.91\nSeptember statement due on 26/09/2026\nPay school fees in 12 instalments at 0% interest with no fees. Conditions apply.', true, 'a separate school-fee offer cannot silence a completed card purchase'],
+  ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nDECLINED\nPay school fees in 12 instalments.', false, 'trimming an offer cannot remove the transaction refusal'],
+  ['Credit Card Purchase\nCard No XXXX1234\nAED 174.00\nEXAMPLE SHOP\nPay school fees in 12 instalments.\nTransaction declined.', false, 'a refusal after the promotional paragraph still blocks the banner'],
+  ['Pay school fees in 12 instalments. Purchase of AED 174.00 with card ending 1234 qualifies.', false, 'promotional purchase wording alone never qualifies for trimming'],
   // A genuine purchase carrying a statement footer. Refusing on the word
   // "statement" would have silenced every ADCB credit-card charge.
   ['Credit Card Purchase\nCard No XXXX3749\nAED 267.00\nOFF PRICE GENERAL TRAD SHARJAH ARE\n11/07/26 19:38\nAvl Bal AED 9235.93\nJuly statement due on 27/07/2026', true, 'a purchase with a statement footer still gets a banner'],
@@ -207,6 +220,8 @@ const cases = [
 for (const [message, expected, name] of cases) {
   ok(name, !!read(message) === expected);
 }
+ok('the ENBD banner merchant does not include card wording',
+  read('Payment of AED 34.47 to Example Market with Credit Card ending 1234. Avl Cr. Limit is AED 1,000.00.')?.merchant === 'Example Market');
 
 // Arabic. A customer whose bank writes to them in Arabic got no banner at all
 // — the app claimed instant alerts and was silent for every charge they made.

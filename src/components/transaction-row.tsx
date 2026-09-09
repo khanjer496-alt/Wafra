@@ -12,7 +12,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
-import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransfer as isLedgerTransfer, isUnassignedIncome, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
@@ -45,7 +45,8 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const arrived = transaction.type === 'income';
   const where = pending ? transferReviewCopy(language).ownershipUnknown
     : isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
-  const accountReview = isUnassignedIncome(transaction) ? t('incomeAccountReview', language) : null;
+  const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
+    ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
   const bankCaption = account?.bankName || account?.name;
   const accountCaption = accountReview ?? (bankCaption

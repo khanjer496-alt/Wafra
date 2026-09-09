@@ -67,6 +67,16 @@ try {
       await page.screenshot({path:`${OUT}/${name}-edit.png`});
       await footer.getByRole('button',{name:'Cancel',exact:true}).click();
       await exposed(footer.getByRole('button',{name:'Delete',exact:true}),page);
+      // One real result must not look like three transactions. The monetary
+      // projection is unchanged; only identical summary/subtotal labels go.
+      await page.goto(`${BASE}/transactions?merchant=Apple%20Store%20US`, { waitUntil:'networkidle' });
+      await summary.waitFor({state:'visible'});
+      assert.match(await summary.innerText(), /^1 transaction\b/);
+      assert.equal(await page.getByTestId('transaction-details-link').count(), 1);
+      assert.equal(await page.getByTestId('transactions-net-total').count(), 0);
+      assert.equal(await page.getByTestId('transaction-day-total').count(), 0);
+      await page.getByRole('button', { name:'Clear all filters', exact:true }).waitFor({state:'visible'});
+      await page.screenshot({path:`${OUT}/${name}-single-result.png`});
       assert.deepEqual(errors,[]);
       results.push({name,passed:true,scope:height===420?'Constrained browser viewport, not a native keyboard':'Real Expo web rendering'});
     } catch (error) {

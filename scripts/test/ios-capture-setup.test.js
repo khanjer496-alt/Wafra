@@ -3372,11 +3372,11 @@ struct WafraBankSenderRegistryTests {
         ? shouldReplayJoined({ platform: 'ios', outcome: 'up-to-date' })
         : 'missing',
       false);
-    eq('local lifecycle: Android keeps the existing interactive feedback replay',
+    eq('local lifecycle: Android reports a successful joined scan without doing it twice',
       typeof shouldReplayJoined === 'function'
         ? shouldReplayJoined({ platform: 'android', outcome: 'up-to-date' })
         : 'missing',
-      true);
+      false);
     eq('local lifecycle: an imported join never runs a duplicate scan on either platform',
       typeof shouldReplayJoined === 'function'
         ? shouldReplayJoined({ platform: 'ios', outcome: 'imported' })
