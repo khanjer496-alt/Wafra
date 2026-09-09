@@ -52,7 +52,11 @@ function harness(options = {}) {
   const dependencies = {
     react, 'react/jsx-runtime': runtime, 'react-native': native,
     'expo-linear-gradient': { LinearGradient: (props) => jsx('Gradient', props) },
-    '@/lib/balances': load(path.join(root, 'src/lib/balances.ts')),
+    // Balances now excludes corroborating transfer observations. Load the real
+    // reconciler as well; a fake empty result would bypass that accounting rule.
+    '@/lib/balances': load(path.join(root, 'src/lib/balances.ts'), {
+      '@/lib/transfer-reconciliation': require('./load-transfer-ledger.cjs').core,
+    }),
     '@/constants/theme': themeModule,
     'expo-router': { useRouter: () => ({ push: (route) => events.push(['route', route]) }) },
     '@react-navigation/native': { useIsFocused: () => true },

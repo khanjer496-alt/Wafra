@@ -1,5 +1,5 @@
 import type { Account, Transaction } from '@/lib/types';
-import { isTransferCandidate, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
 
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
@@ -27,7 +27,7 @@ export function countsInTotals(
   if (isTransfer(transaction)) return false;
   // Uncertain ownership is displayed separately from confirmed totals.
   if (isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown') return false;
-  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
+  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction) && !isUnassignedTransferAccount(transaction.accountId)) return false;
   if (internal?.has(transaction.id)) return false;
   return true;
 }
@@ -56,5 +56,7 @@ export function isInboundTransfer(transaction: Transaction): boolean {
 export function internalTransferIds(
   transactions: Transaction[], accounts: Set<string> | Account[],
 ): Set<string> {
-  return reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []).internalIds;
+  const result = reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []);
+  if (!result.corroboratingIds.size && !result.cardRepaymentPairs.size) return result.internalIds;
+  return new Set([...result.internalIds, ...result.corroboratingIds, ...result.cardRepaymentPairs.keys()]);
 }

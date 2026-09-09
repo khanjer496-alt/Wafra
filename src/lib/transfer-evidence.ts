@@ -1,6 +1,8 @@
 import { MARKETS, bankFromName, bankFromSender, bankIdentityForName } from '@/lib/markets';
 import { normalizeArabic, type ParsedSms } from '@/lib/sms-parser';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 type TransferAlert = Omit<ParsedSms, 'raw'> & {
   raw?: string;
@@ -60,7 +62,7 @@ interface Endpoint {
 /** Read only immediate, labelled endpoints. Never join digits across masks. */
 function endpoints(raw: string): Endpoint[] {
   const found: Endpoint[] = [];
-  const re = /\b(from|to)\s+(your\s+)?(?:([\p{L}][\p{L} .&'-]{0,60}?)\s+)?((?:account\s*\/\s*card)|account|(?:(?:credit|debit|covered|charge|prepaid)\s+)?card)\b\s*(?:(?:no\.?|number)\s*)?(?:ending(?:\s+(?:in|with))?\s*)?[:#]?\s*([Xx*·•\d][Xx*·•\d.-]*(?:[ -]+\d{4}\b)?)(?![\w*·•-])/giu;
+  const re = /\b(from|to)\s+(your\s+)?(?:([\p{L}][\p{L} .&'-]{0,60}?)\s+)?((?:(?:IBAN\s*\/\s*)?account\s*\/\s*card)|account|(?:(?:credit|debit|covered|charge|prepaid)\s+)?card)\b\s*(?:(?:no\.?|number)\s*)?(?:ending(?:\s+(?:in|with))?\s*)?[:#]?\s*([Xx*·•\d][Xx*·•\d.-]*(?:[ -]+\d{4}\b)?)(?![\w*·•-])/giu;
   for (const match of raw.matchAll(re)) {
     if (found.length >= 8) return []; // Unusual multi-party text is not auto-evidence.
     const terminal = match[5].match(/(\d{4})\.?$/)?.[1];
@@ -73,6 +75,29 @@ function endpoints(raw: string): Endpoint[] {
       party: terminal ? { last4: terminal, kind, ...(bankIdentity ? { bankIdentity } : {}) } : undefined });
   }
   return found;
+}
+
+/** Recipient names remain display/suggestion evidence, never an automatic self rule. */
+function safeName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  const name = value.trim().replace(/\s+/g, ' ');
+  if (name.length < 2 || name.length > 80 || !/^[\p{L}\p{M} .'&-]+$/u.test(name) ||
+      /\b(?:account|card|iban|unknown|beneficiary)\b/i.test(name)) return;
+  return name;
+}
+
+function maskedSourceKey(raw: string, bank: string): string | undefined {
+  // A mask with only one to three final digits cannot become a four-digit
+  // account. Preserve a scoped opaque hint, not a guessed bank account number.
+  const tokens = [...raw.matchAll(/\b(?:from\s+your|to\s+(?:your\s+)?|your\s+)?account\s*(?:no\.?|number)?\s*[:#]?\s*([\dXx*.-]{4,40})(?![\w*.-])/gi)]
+    .map(match => match[1]);
+  if (bank === 'hsbc' && tokens.length === 0) {
+    const token = raw.match(/^From HSBC:\s*\d{2}[A-Z]{3}\d{2}\s+TT Payment to\s+([\dXx*.-]{4,40})(?![\w*.-])/i)?.[1];
+    if (token) tokens.push(token);
+  }
+  if (tokens.length !== 1 || !/[x*]/i.test(tokens[0]) || /\d{4}$/.test(tokens[0])) return;
+  const mask = tokens[0].replace(/[.-]/g, '').replace(/x/gi, '*');
+  return bytesToHex(sha256(utf8ToBytes(`wafra-transfer-mask-v1\0${bank}\0${mask}`)));
 }
 
 /**
@@ -97,12 +122,22 @@ export function buildTransferEvidence(
   let counterparty: TransferEvidence['counterparty'];
   let explicitOwn = OWN_TITLE.test(alert.merchant.trim()) && alert.transferHint;
   const reference = normalizedReference(alert.reference);
+  let sourceAccountKey: string | undefined;
+  let counterpartyName: string | undefined;
+  let endpointProof: TransferEvidence['endpointProof'];
+  let postingForm: TransferEvidence['postingForm'];
+  let explicitExternal = false;
 
   if (typeof alert.raw === 'string') {
     const raw = normalizeArabic(alert.raw);
     const parties = endpoints(raw);
     const ownDirection = alert.type === 'expense' ? 'from' : 'to';
-    const sources = parties.filter(party => party.direction === ownDirection && party.own);
+    // FAB's completed account-to-account grammar omits "your" on both
+    // endpoints. A narrow completed-transfer clause supplies the source role;
+    // an arbitrary "from account" mention in a footer does not.
+    const completedRequest = sourceBankIdentity !== undefined &&
+      /^\s*(?:Dear Customer,?\s*)?(?:your\s+)?funds?\s+transfer\s+request\b[\s\S]*\bhas been processed(?: successfully)?\b/i.test(raw);
+    const sources = parties.filter(party => party.direction === ownDirection && (party.own || completedRequest));
     if (sources.length === 1) {
       const source = sources[0];
       const sourceMatches = source.party && sourceCard && source.party.last4 === sourceCard.last4 &&
@@ -113,22 +148,53 @@ export function buildTransferEvidence(
         !/[.!?]\s/.test(raw.slice(Math.min(source.end, party.end), Math.max(source.index, party.index))));
       if (sourceMatches && others.length === 1) {
         counterparty = others[0].party;
+        // This FAB intra-bank receipt has two explicit bank-account labels.
+        // Its other template (IBAN/Account/Card) makes no such issuer claim.
+        if (sourceBankIdentity === 'fab' && completedRequest && counterparty?.kind === 'account' &&
+            /\bfrom account\s+[Xx*\d]+\s+to account\s+[Xx*\d]+\s+has been processed\b/i.test(raw)) {
+          counterparty = { ...counterparty, bankIdentity: sourceBankIdentity };
+        }
         explicitOwn ||= !!counterparty && others[0].own;
+        if (counterparty && sourceBankIdentity) endpointProof = 'explicit-transfer';
       }
     } else if (sources.length > 1) {
       attributed = false;
+    }
+    if (sourceBankIdentity) {
+      if (!sourceCard) sourceAccountKey = maskedSourceKey(raw, sourceBankIdentity);
+      if (completedRequest && alert.type === 'expense') postingForm = 'transfer-detail';
+      if (sourceBankIdentity === 'fab' && /^\s*Outward Remittance\s+Debit\s+Account\b/i.test(raw)) postingForm = 'remittance-debit';
+      if (alert.type === 'income' && /\bcredited\b|^\s*Inward Remittance\s+Credit\b/i.test(raw)) postingForm = 'credit-receipt';
+      // The bank's word "external" means outside that bank, NOT outside the
+      // user's ownership. Only explicit third-party ownership is retained.
+      explicitExternal = /\b(?:to|from)\s+(?:a\s+)?third[- ]party(?:'s)?\s+account\b/i.test(raw);
+      if (sourceBankIdentity === 'wio' && alert.type === 'expense') {
+        counterpartyName = safeName(raw.match(/\bYour local transfer of\s+[A-Z]{3}\s+[\d,.]+\s+to\s+(.{2,80}?)\s+from your account number\b/i)?.[1]);
+      }
     }
   } else {
     const carried = alert.transferEvidence;
     if (carried?.version === 1 && carried.currency === currency) {
       counterparty = safeCounterparty(carried.counterparty);
       explicitOwn ||= carried.explicitOwn === true;
+      sourceAccountKey = typeof carried.sourceAccountKey === 'string' && /^[a-f0-9]{64}$/.test(carried.sourceAccountKey)
+        ? carried.sourceAccountKey : undefined;
+      counterpartyName = safeName(carried.counterpartyName);
+      endpointProof = carried.endpointProof === 'explicit-transfer' ? carried.endpointProof : undefined;
+      postingForm = ['transfer-detail', 'remittance-debit', 'credit-receipt'].includes(carried.postingForm ?? '')
+        ? carried.postingForm : undefined;
+      explicitExternal = carried.explicitExternal === true;
       // A contradiction found while the body existed cannot be upgraded by
       // later account routing after the original text has been discarded.
       attributed &&= carried.attribution === 'source';
     }
   }
   return { version: 1, currency, attribution: attributed ? 'source' : 'fallback',
+    ...(sourceBankIdentity ? { sourceBank: sourceBankIdentity } : {}),
+    ...(sourceAccountKey ? { sourceAccountKey } : {}),
     ...(reference ? { reference } : {}), ...(counterparty ? { counterparty } : {}),
-    ...(explicitOwn ? { explicitOwn: true } : {}) };
+    ...(counterpartyName ? { counterpartyName } : {}), ...(endpointProof ? { endpointProof } : {}),
+    ...(postingForm ? { postingForm } : {}),
+    ...(explicitOwn && !explicitExternal ? { explicitOwn: true } : {}),
+    ...(explicitExternal && !explicitOwn ? { explicitExternal: true } : {}) };
 }

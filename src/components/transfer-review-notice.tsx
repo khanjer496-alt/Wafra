@@ -6,7 +6,6 @@ import { Icon } from '@/components/ui/icon';
 import { Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { formatAED } from '@/lib/format';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
 export interface TransferReviewNoticeProps {
@@ -16,24 +15,19 @@ export interface TransferReviewNoticeProps {
   onPress: () => void;
 }
 
-export function TransferReviewNotice({ pendingCount, incomingFils, outgoingFils, onPress }: TransferReviewNoticeProps) {
+export function TransferReviewNotice({ pendingCount, onPress }: TransferReviewNoticeProps) {
   const theme = useTheme();
   const words = transferReviewCopy(useLanguage());
   if (pendingCount <= 0) return null;
-  const amounts = [
-    incomingFils > 0 ? `${words.moneyIn}: ${formatAED(incomingFils, { decimals: true })}` : null,
-    outgoingFils > 0 ? `${words.moneyOut}: ${formatAED(outgoingFils, { decimals: true })}` : null,
-  ].filter(Boolean).join(' · ');
   return (
     <Pressable testID="transfer-review-notice" accessibilityRole="button"
-      accessibilityLabel={[words.noticeTitle(pendingCount), amounts, words.noticeBody].filter(Boolean).join('. ')}
+      accessibilityLabel={[words.noticeTitle(pendingCount), words.noticeCount(pendingCount), words.noticeBody].join('. ')}
       onPress={onPress} style={[styles.notice, { borderColor: theme.cardBorder }]}>
       <View style={styles.heading}>
         <ThemedText type="smallBold" style={styles.text}>{words.noticeTitle(pendingCount)}</ThemedText>
         <Icon name="chevron-right" size={16} color={theme.textSecondary} />
       </View>
-      {amounts ? <ThemedText type="small" tabular>{amounts}</ThemedText> : null}
-      <ThemedText type="meta" themeColor="textSecondary">{words.noticeBody}</ThemedText>
+      <ThemedText type="meta" themeColor="textSecondary">{words.noticeCount(pendingCount)}</ThemedText>
     </Pressable>
   );
 }

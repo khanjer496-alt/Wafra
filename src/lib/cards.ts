@@ -2,7 +2,7 @@ import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
 import { tf, type Lang } from '@/lib/i18n';
 import { isSpending } from '@/lib/ledger';
-import { isTransferCandidate } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
 export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
@@ -408,6 +408,21 @@ export function cardPaymentRows(state: AppState): Transaction[] {
   }
   for (const debit of externalDebits) {
     if (!matchedExternalDebitIds.has(debit.id)) canonical.push(debit);
+  }
+
+  // A generic bank debit naming the receiving card is still stored on the
+  // BANK account. Its independent receipt alone settles the card; reuse that
+  // canonical receipt for Cash out without inventing another card payment.
+  const proved = reconcileTransfers(state.transactions, state.accounts).cardRepaymentPairs;
+  if (proved.size) {
+    const debitByReceipt = new Map([...proved].map(([debit, receipt]) => [receipt, debit]));
+    const byId = new Map(state.transactions.map(row => [row.id, row]));
+    for (let i = 0; i < canonicalEntries.length; i++) {
+      const entry = canonicalEntries[i];
+      const debitId = debitByReceipt.get(entry.receipt?.id ?? entry.row.id);
+      const debit = debitId ? byId.get(debitId) : undefined;
+      if (debit) canonical[i] = { ...canonical[i], cashOutAccountId: debit.accountId, cashOutDate: debit.date };
+    }
   }
 
   return canonical;

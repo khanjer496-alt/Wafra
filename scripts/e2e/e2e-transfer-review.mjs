@@ -34,6 +34,11 @@ const rows = [
       counterparty: { last4: '4999', kind: 'account', bankIdentity: 'adcb' } },
   })),
   tx('legacy-own', 'expense', 4000, { title: 'Own account transfer', isTransfer: true, transferEvidence: undefined }),
+  // Reproduce the reported backlog size using synthetic old records, not a private inbox.
+  ...Array.from({ length: 3106 }, (_, i) => tx(`historical-${String(i).padStart(4, '0')}`, 'expense', 10000 + i, {
+    accountId: accounts[1].id, date: '2022-11-05', ts: Date.parse('2022-11-05T10:00:00Z') + i,
+    smsKey: `hqa-history-${i}`, captureInstrument: { last4: '4222', kind: 'account', bankIdentity: 'adcb' },
+  })),
 ];
 function seed(language, mode) {
   return {
@@ -51,8 +56,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { save: 'Save classification', undo: 'Undo decision', group: 'Review 2 entries together', backup: 'Back up everything (JSON)' },
-  ar: { save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'مراجعة 2 عمليات معاً', backup: 'نسخ احتياطي كامل (JSON)' },
+  en: { save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave unclassified' },
+  ar: { save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه غير مصنف' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -118,8 +123,11 @@ async function home(page, expected, pendingCount) {
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
   const notice = page.getByTestId('transfer-review-notice');
   if (pendingCount) {
-    assert.match(await (await exposed(notice)).getAttribute('aria-label'),
-      new RegExp(`^(?:${pendingCount} transfers? to review|تحويلات للمراجعة: ${pendingCount}\\.)`));
+    const label = await (await exposed(notice)).getAttribute('aria-label');
+    const digits = label.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[,٬]/g, '');
+    assert.match(digits, new RegExp(`\\b${pendingCount}\\b`));
+    assert.ok(label.includes('Not included in totals') || label.includes('غير محتسبة في الإجماليات'));
+    assert.ok(!(await notice.textContent()).includes('AED'), 'Home has no giant transfer totals');
     await fits(notice);
   } else assert.equal(await notice.count(), 0);
 }
@@ -162,6 +170,10 @@ try {
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
       await click(page.getByTestId('transfer-review-notice'));
       await page.waitForURL(/review-transfers/);
+      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
+      await fits(page.getByTestId('transfer-search'));
+      await page.screenshot({ path: path.join(OUT, `${name}-recent-groups.png`) });
+      await click(page.getByTestId('transfer-review-group').filter({ hasText: '4999' }).getByTestId('transfer-group-toggle'));
       await click(page.getByRole('button', { name: words.group, exact: true }));
       await fits(page.getByTestId('transfer-review-confirmation'));
       await page.screenshot({ path: path.join(OUT, `${name}-group-confirmation.png`) });
@@ -184,8 +196,9 @@ try {
       await page.reload({ waitUntil: 'networkidle' });
       saved = await stored(page);
       assert.equal(saved.transactions.length, rows.length, 'classification never deletes or duplicates ledger rows');
+      const savedById = new Map(saved.transactions.map(t => [t.id, t]));
       for (const original of rows) {
-        const current = saved.transactions.find(t => t.id === original.id);
+        const current = savedById.get(original.id);
         assert.deepEqual([current.amountFils, current.type, current.accountId], [original.amountFils, original.type, original.accountId]);
       }
       await page.goto(BASE + '/settings?section=privacy', { waitUntil: 'networkidle' });
@@ -204,6 +217,23 @@ try {
       await page.goto(`${BASE}/review-transfers?transactionId=deleted-entry`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'stale route cannot classify another row');
       await page.screenshot({ path: path.join(OUT, `${name}-missing-entry.png`) });
+      // All 3,106 old transfers remain reachable without creating 3,106 mounted actions.
+      await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
+      assert.equal(await page.getByTestId('transfer-review-group').filter({ hasText: '4222' }).count(), 0, 'old records do not occupy the recent view');
+      await click(page.getByTestId('transfer-scope-all'));
+      await page.getByTestId('transfer-search').fill('4222');
+      await page.waitForFunction(() => document.querySelector('[data-testid="transfer-browse-summary"]')?.textContent
+        .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[,٬]/g, '').includes('3106'));
+      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0);
+      await page.screenshot({ path: path.join(OUT, `${name}-3106-history-collapsed.png`) });
+      const historic = page.getByTestId('transfer-review-group').filter({ hasText: '4222' });
+      await click(historic.getByTestId('transfer-group-toggle'));
+      assert.ok(await page.getByTestId('transfer-review-entry').count() <= 20, 'expanded records are bounded and virtualized');
+      const beforeLeave = (await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]);
+      await click(page.getByTestId('transfer-review-entry').first());
+      await click(page.getByRole('button', { name: words.leave, exact: true }));
+      assert.deepEqual((await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]), beforeLeave,
+        'leaving unclassified does not apply or dismiss any decision');
       assert.deepEqual(errors, []);
       await rm(path.join(OUT, `${name}-failure.png`), { force: true });
       results.push({ name, passed: true });

@@ -59,7 +59,7 @@ test('unreadable source digits do not turn failed or pending requests into money
 });
 
 test('structured evidence keeps original currency and actual source confidence', () => {
-  assert.deepEqual(json(evidence(row())), { version: 1, currency: 'AED', attribution: 'source' });
+  assert.deepEqual(json(evidence(row())), { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'fab' });
   assert.equal(evidence(row(), false).attribution, 'fallback');
   assert.equal(evidence(row({ card: null })).attribution, 'fallback');
   assert.equal(evidence(row({ card: { last4: '123', kind: 'account' } })).attribution, 'fallback');

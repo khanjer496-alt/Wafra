@@ -1,4 +1,5 @@
 import type { Account, AppState } from './types';
+import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 
 /**
  * The two slices of state a balance is a function of.
@@ -28,8 +29,9 @@ export interface NetWorthBreakdown {
 export function accountBalanceFils(state: BalanceState, accountId: string): number {
   const account = state.accounts.find((a) => a.id === accountId);
   let balance = account?.openingFils ?? 0;
+  const secondary = reconcileTransfers(state.transactions, state.accounts).corroboratingIds;
   for (const t of state.transactions) {
-    if (t.accountId !== accountId) continue;
+    if (t.accountId !== accountId || secondary.has(t.id)) continue;
     balance += t.type === 'income' ? t.amountFils : -t.amountFils;
   }
   return balance;
@@ -76,12 +78,13 @@ export function netWorthFils(state: BalanceState): number {
 export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
   const runningByAccount = new Map<string, number>();
   const smsAccountIds = new Set<string>();
+  const secondary = reconcileTransfers(state.transactions, state.accounts).corroboratingIds;
 
   for (const account of state.accounts) {
     if (!account.archived) runningByAccount.set(account.id, account.openingFils ?? 0);
   }
   for (const transaction of state.transactions) {
-    if (!runningByAccount.has(transaction.accountId)) continue;
+    if (!runningByAccount.has(transaction.accountId) || secondary.has(transaction.id)) continue;
     if (transaction.source === 'sms') smsAccountIds.add(transaction.accountId);
     runningByAccount.set(
       transaction.accountId,

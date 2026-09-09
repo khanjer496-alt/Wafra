@@ -10,6 +10,7 @@ import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureIns
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import { isUnassignedTransferAccount, unassignedTransferAccountId } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import {
@@ -559,7 +560,27 @@ export function buildImportPlan(
     refuseAmbiguous = false,
     createMissing = true,
   ): AccountResolution => {
-    if (!p.card) return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
+    if (!p.card) {
+      const evidence = buildTransferEvidence(p, false);
+      // A Liv/HSBC/YAP source without four readable terminal digits must not
+      // inherit the first saved card. The bank/mask-scoped holding remains
+      // explicitly unassigned and never enters the user's Accounts list.
+      if (evidence) {
+        const priorAccount = ambiguousFallbackAccountId ? accountAtRef(ambiguousFallbackAccountId) : undefined;
+        const sameBank = evidence.sourceBank && priorAccount?.bankName &&
+          bankIdentityForName(evidence.sourceBank) === bankIdentityForName(priorAccount.bankName);
+        // A less specific reread cannot undo an existing compatible bank-side
+        // assignment. Repair the demonstrated unrelated-card/issuer fallback,
+        // not every older account that this masked alert cannot identify.
+        const bankSide = priorAccount?.kind === 'bank' ||
+          (priorAccount?.kind === 'card' && priorAccount.cardType === 'debit');
+        if (sameBank && bankSide && ambiguousFallbackAccountId) {
+          return { accountId: ambiguousFallbackAccountId, confident: false };
+        }
+        return { accountId: unassignedTransferAccountId(evidence), confident: false };
+      }
+      return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
+    }
     const { last4 } = p.card;
     // The parser owns card-kind evidence, including Arabic forms such as
     // Mada. Reinterpreting its structured result from English-only raw-text
@@ -1014,7 +1035,8 @@ export function buildImportPlan(
     const { accountId } = resolution;
     if (!accountId) continue;
     if (resolution.confident) noteSnapshot(accountId, p);
-    const healedAccountId = resolution.confident || unassignedIncome ? accountId : undefined;
+    const healedAccountId = resolution.confident || unassignedIncome ||
+      (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
     const accountForMatchedPrior = (matched: Transaction | undefined) =>
       unassignedIncome && (matched?.captureInstrument || matched?.userEdited)
         ? undefined : healedAccountId;

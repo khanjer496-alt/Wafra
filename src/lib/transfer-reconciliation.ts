@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
-import { bankIdentityForName } from '@/lib/markets';
+import { bankIdentityForName, ledgerCurrencyCode } from '@/lib/markets';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import type { Account, Transaction } from '@/lib/types';
 import type {
@@ -53,7 +53,14 @@ export function isTransferEvidence(value: unknown): value is TransferEvidence {
   return record(value) && value.version === 1 && currency(value.currency) &&
     (value.attribution === 'source' || value.attribution === 'fallback') &&
     optional(value, 'reference', ref => typeof ref === 'string' && ref.length <= 96) &&
-    optional(value, 'counterparty', isInstrument) && optional(value, 'explicitOwn', own => own === true);
+    optional(value, 'counterparty', isInstrument) && optional(value, 'explicitOwn', own => own === true) &&
+    optional(value, 'explicitExternal', external => external === true) && !(value.explicitOwn && value.explicitExternal) &&
+    optional(value, 'sourceBank', bank => typeof bank === 'string' && bank.length > 0 && bank.length <= 160) &&
+    optional(value, 'sourceAccountKey', key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key)) &&
+    optional(value, 'counterpartyName', name => typeof name === 'string' && name.trim() === name &&
+      name.length >= 2 && name.length <= 80 && /^[\p{L}\p{M} .'&-]+$/u.test(name)) &&
+    optional(value, 'endpointProof', proof => proof === 'explicit-transfer') &&
+    optional(value, 'postingForm', form => typeof form === 'string' && ['transfer-detail', 'remittance-debit', 'credit-receipt'].includes(form));
 }
 
 export function isTransferDecision(value: unknown): value is TransferDecision {
@@ -65,7 +72,7 @@ export function isTransferDecision(value: unknown): value is TransferDecision {
 export function isTransferMatch(value: unknown): value is TransferMatch {
   const signature = (s: unknown) => typeof s === 'string' && /^tr1:[a-f0-9]{64}$/.test(s);
   return record(value) && value.version === 1 && id(value.counterpartId) &&
-    typeof value.basis === 'string' && ['reference', 'reciprocal-instruments', 'user'].includes(value.basis) &&
+    typeof value.basis === 'string' && ['reference', 'reciprocal-instruments', 'destination-and-receipt', 'user'].includes(value.basis) &&
     signature(value.signature) && signature(value.counterpartSignature);
 }
 
@@ -74,6 +81,15 @@ const evidenceOf = (tx: TransferRow): TransferEvidence | undefined =>
 const decisionOf = (tx: TransferRow): TransferDecision | undefined =>
   isTransferDecision(tx.transferDecision) ? tx.transferDecision : undefined;
 const manual = (tx: Transaction): boolean => tx.source !== 'sms' && !tx.smsKey;
+
+/** A holding reference is deliberately NOT an account and proves no ownership. */
+export function unassignedTransferAccountId(evidence: TransferEvidence): string {
+  const bank = (evidence.sourceBank ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'unknown';
+  const key = evidence.sourceAccountKey && /^[a-f0-9]{64}$/.test(evidence.sourceAccountKey) ? evidence.sourceAccountKey : 'unknown';
+  return `__unassigned-transfer__:${bank}:${key}`;
+}
+export const isUnassignedTransferAccount = (accountId: string): boolean =>
+  /^__unassigned-transfer__:[a-z0-9-]{1,80}:(?:[a-f0-9]{64}|unknown)$/.test(accountId);
 
 export function isTransferCandidate(tx: Transaction): boolean {
   const row = tx as TransferRow;
@@ -94,6 +110,7 @@ export function transferOwnership(tx: Transaction): Ownership {
   if (!isTransferCandidate(tx)) return null;
   const decision = decisionOf(tx);
   if (decision) return decision.ownership;
+  if (evidenceOf(tx)?.explicitExternal === true) return 'external';
   if ((manual(tx) && tx.isTransfer === true) || evidenceOf(tx)?.explicitOwn === true ||
     (tx.isTransfer === true && OWN_TITLE.test(tx.title.trim()))) return 'own';
   return 'unknown';
@@ -117,7 +134,8 @@ export function transferFingerprint(tx: Transaction): string {
       'isTransfer', 'userEdited', 'titleEdited', 'cardPaymentSide', 'paymentFlowSide', 'cashOutAccountId',
       'cashOutDate', 'paymentInstrumentSource', 'billIdentity']),
     fields(tx.captureInstrument, ['last4', 'kind', 'bankIdentity']),
-    fields(ev, ['version', 'currency', 'attribution', 'reference', 'explicitOwn']),
+    fields(ev, ['version', 'currency', 'attribution', 'reference', 'explicitOwn', 'explicitExternal',
+      'sourceBank', 'sourceAccountKey', 'counterpartyName', 'endpointProof', 'postingForm']),
     fields(ev?.counterparty, ['last4', 'kind', 'bankIdentity']),
     fields(row.transferDecision, ['version', 'ownership', 'decidedAt', 'counterpartId']),
   ]))}`;
@@ -180,6 +198,7 @@ interface Context {
   entries: Map<string, Entry>;
   fingerprints: Map<string, string>;
   instrumentKey: (value: unknown) => string | undefined;
+  corroboratingOf: Map<string, string>;
 }
 
 function context(transactions: Transaction[], accounts: Account[]): Context {
@@ -221,6 +240,18 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   const entries = new Map<string, Entry>();
   const fingerprints = new Map<string, string>();
   const referenceCounts = new Map<string, number>();
+  // Resolve an ambiguous "account/card" source kind only when a different
+  // independently captured bank-account posting establishes that identity.
+  const observedBankAccounts = new Set<string>();
+  for (const tx of rows.values()) {
+    if (duplicateIds.has(tx.id) || tx.userEdited || (tx.source !== 'sms' && !tx.smsKey)) continue;
+    const account = accountById.get(tx.accountId);
+    const capture = tx.captureInstrument;
+    const key = instrumentKey(capture);
+    if (account?.kind === 'bank' && capture?.kind === 'account' && key === accountKeys.get(account.id)) {
+      observedBankAccounts.add(key!);
+    }
+  }
   for (const tx of rows.values()) {
     const evidence = evidenceOf(tx);
     // An observed reused reference stays reused when another row is reviewed
@@ -237,18 +268,21 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
     }
     if (!isTransferCandidate(tx) || !id(tx.id)) continue;
     fingerprints.set(tx.id, transferFingerprint(tx));
-    const own = transferOwnership(tx);
     const account = accountById.get(tx.accountId);
-    if (duplicateIds.has(tx.id) || !evidence || evidence.attribution !== 'source' || own === 'external' ||
+    if (duplicateIds.has(tx.id) || !evidence || evidence.attribution !== 'source' ||
       (tx.userEdited && !decisionOf(tx)) || !eligibleAccount(account)) continue;
-    const key = instrumentKey(tx.captureInstrument);
+    const capture = tx.captureInstrument?.kind === 'unknown' && account?.kind === 'bank' &&
+      evidence.sourceBank && bankIdentityForName(evidence.sourceBank) === bankIdentityForName(account.bankName) &&
+      observedBankAccounts.has(accountKeys.get(account.id) ?? '')
+      ? { ...tx.captureInstrument, kind: 'account' as const } : tx.captureInstrument;
+    const key = instrumentKey(capture);
     if (!key || key !== accountKeys.get(tx.accountId) || identityCounts.get(key) !== 1) continue;
     const at = sourceTime(tx);
     const money = sourceMoney(tx, evidence);
     if (at === undefined || !money) continue;
     entries.set(tx.id, { tx, at, money, instrument: key,
       counterparty: instrumentKey(evidence.counterparty),
-      capture: tx.captureInstrument!, counterpartyHint: evidence.counterparty,
+      capture: capture!, counterpartyHint: evidence.counterparty,
       counterpartyBank: evidence.counterparty?.bankIdentity ? normalizeBank(evidence.counterparty.bankIdentity) : undefined,
       bank: normalizeBank(tx.captureInstrument!.bankIdentity!)!, reference: normalizedReference(evidence.reference),
       referenceUnique: false, referenceReused: false });
@@ -263,7 +297,49 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
     entry.referenceUnique = count === 2;
     entry.referenceReused = count > 2;
   }
-  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey };
+  const corroboratingOf = complementaryPostingPairs(entries);
+  // External user choices may still have a companion bank confirmation, but
+  // must never participate in automatic own-account matching.
+  for (const [id, entry] of entries) if (transferOwnership(entry.tx) === 'external') entries.delete(id);
+  return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf };
+}
+
+/** Two narrowly identified issuer formats, not two arbitrary equal payments.
+ * Keep both records and derive the secondary role again after every edit. */
+function complementaryPostingPairs(entries: Map<string, Entry>): Map<string, string> {
+  const buckets = new Map<string, Entry[]>();
+  for (const entry of entries.values()) {
+    if (entry.bank !== 'fab' || entry.tx.type !== 'expense' || entry.tx.userEdited) continue;
+    const form = evidenceOf(entry.tx)?.postingForm;
+    if (form !== 'transfer-detail' && form !== 'remittance-debit') continue;
+    if (form === 'remittance-debit' && entry.tx.transferDecision) continue;
+    const key = JSON.stringify([entry.instrument, entry.tx.accountId, entry.money]);
+    const bucket = buckets.get(key) ?? []; bucket.push(entry); buckets.set(key, bucket);
+  }
+  const result = new Map<string, string>();
+  for (const bucket of buckets.values()) {
+    bucket.sort((a, b) => a.at - b.at);
+    const matches = new Map<string, string[]>();
+    for (const entry of bucket) {
+      const candidates: string[] = [];
+      let scanned = 0;
+      for (let i = lowerBound(bucket, entry.at - 90_000); i < bucket.length && bucket[i].at <= entry.at + 90_000; i++) {
+        if (++scanned > MAX_EVIDENCE_SCAN) { candidates.length = 0; break; }
+        const other = bucket[i];
+        if (entry.tx.id === other.tx.id || entry.tx.smsKey === other.tx.smsKey ||
+            evidenceOf(entry.tx)?.postingForm === evidenceOf(other.tx)?.postingForm ||
+            (entry.reference && other.reference && entry.reference !== other.reference)) continue;
+        candidates.push(other.tx.id);
+      }
+      matches.set(entry.tx.id, candidates);
+    }
+    for (const entry of bucket) {
+      if (evidenceOf(entry.tx)?.postingForm !== 'remittance-debit') continue;
+      const candidates = matches.get(entry.tx.id)!;
+      if (candidates.length === 1 && matches.get(candidates[0])?.length === 1) result.set(entry.tx.id, candidates[0]);
+    }
+  }
+  return result;
 }
 
 function automaticBasis(a: Entry, b: Entry): Exclude<Basis, 'user'> | undefined {
@@ -279,13 +355,20 @@ function automaticBasis(a: Entry, b: Entry): Exclude<Basis, 'user'> | undefined 
   if (contradicts(a, b) || contradicts(b, a)) return undefined;
   if (a.referenceUnique && b.referenceUnique && a.bank === b.bank && a.reference && a.reference === b.reference) return 'reference';
   if (a.counterparty === b.instrument && b.counterparty === a.instrument) return 'reciprocal-instruments';
+  const outgoing = a.tx.type === 'expense' ? a : b;
+  const incoming = a.tx.type === 'income' ? a : b;
+  if (evidenceOf(outgoing.tx)?.endpointProof === 'explicit-transfer' &&
+      outgoing.counterparty === incoming.instrument && incoming.capture.kind === 'account' &&
+      evidenceOf(incoming.tx)?.postingForm === 'credit-receipt') return 'destination-and-receipt';
   return undefined;
 }
 
 function manualPair(a: TransferRow, b: TransferRow, ctx: Context): boolean {
+  const identifiable = (tx: TransferRow) => eligibleAccount(ctx.accounts.get(tx.accountId)) ||
+    (isUnassignedTransferAccount(tx.accountId) && !!evidenceOf(tx)?.sourceBank);
   return a.id !== b.id && !ctx.duplicateIds.has(a.id) && !ctx.duplicateIds.has(b.id) &&
     isTransferCandidate(a) && isTransferCandidate(b) && a.type !== b.type && a.accountId !== b.accountId &&
-    eligibleAccount(ctx.accounts.get(a.accountId)) && eligibleAccount(ctx.accounts.get(b.accountId)) &&
+    identifiable(a) && identifiable(b) &&
     minor(a.amountFils) && minor(b.amountFils);
 }
 
@@ -315,22 +398,132 @@ const lowerBound = (entries: Entry[], at: number): number => {
   return low;
 };
 
+interface ObservedRow { tx: Transaction; at: number; money: string; bank: string; credit: boolean }
+
+function observedReceipt(tx: Transaction, ctx: Context): ObservedRow | undefined {
+  const account = ctx.accounts.get(tx.accountId);
+  const capture = tx.captureInstrument;
+  if (ctx.duplicateIds.has(tx.id) || tx.userEdited || tx.transferDecision ||
+      (tx.source !== 'sms' && !tx.smsKey) || tx.type !== 'income' || tx.cardPaymentSide !== 'receipt' ||
+      account?.kind !== 'card' || account.cardType !== 'credit' || capture?.kind !== 'credit' ||
+      capture.last4 !== account.last4 || !capture.bankIdentity || !account.bankName ||
+      bankIdentityForName(capture.bankIdentity) !== bankIdentityForName(account.bankName)) return;
+  const at = sourceTime(tx);
+  const money = sourceMoney(tx, { version: 1, currency: ledgerCurrencyCode(), attribution: 'source' });
+  if (at === undefined || !money) return;
+  return { tx, at, money, bank: bankIdentityForName(capture.bankIdentity)!, credit: true };
+}
+
+/** Enumerate all candidates in a bounded time/money bucket, never pick the
+ * nearest greedily. Overflow is ambiguous on BOTH sides of a proposed pair. */
+function uniqueObservedPairs(
+  rows: ObservedRow[], windowMs: number, accepts: (a: ObservedRow, b: ObservedRow) => boolean,
+): Map<string, string> {
+  const buckets = new Map<string, ObservedRow[]>();
+  for (const row of rows) { const bucket = buckets.get(row.money) ?? []; bucket.push(row); buckets.set(row.money, bucket); }
+  const partners = new Map<string, string[]>();
+  for (const bucket of buckets.values()) {
+    bucket.sort((a, b) => a.at - b.at);
+    let left = 0;
+    for (const row of bucket) {
+      while (left < bucket.length && bucket[left].at < row.at - windowMs) left++;
+      const ids: string[] = [];
+      let scanned = 0;
+      for (let i = left; i < bucket.length && bucket[i].at <= row.at + windowMs; i++) {
+        if (++scanned > MAX_EVIDENCE_SCAN) { ids.length = 0; break; }
+        const other = bucket[i];
+        if (row.tx.id !== other.tx.id && accepts(row, other)) ids.push(other.tx.id);
+      }
+      partners.set(row.tx.id, ids);
+    }
+  }
+  const pairs = new Map<string, string>();
+  for (const [id, candidates] of partners) {
+    if (candidates.length === 1 && partners.get(candidates[0])?.length === 1 && partners.get(candidates[0])![0] === id)
+      pairs.set(id, candidates[0]);
+  }
+  return pairs;
+}
+
+function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: Set<string>): Map<string, string> {
+  const rows: ObservedRow[] = [];
+  for (const entry of ctx.entries.values()) {
+    if (!pending.has(entry.tx.id) || secondary.has(entry.tx.id) || entry.tx.type !== 'expense' ||
+        entry.tx.transferDecision || entry.tx.userEdited || evidenceOf(entry.tx)?.endpointProof !== 'explicit-transfer') continue;
+    rows.push({ tx: entry.tx, at: entry.at, money: entry.money, bank: entry.bank, credit: false });
+  }
+  for (const tx of ctx.rows.values()) { const receipt = observedReceipt(tx, ctx); if (receipt) rows.push(receipt); }
+  const pairs = uniqueObservedPairs(rows, 86_400_000, (a, b) => {
+    const debit = a.credit ? b : a, receipt = a.credit ? a : b;
+    if (a.credit === b.credit || debit.tx.type !== 'expense' || debit.tx.accountId === receipt.tx.accountId) return false;
+    const cp = evidenceOf(debit.tx)?.counterparty;
+    return !!cp && (cp.kind === 'unknown' || cp.kind === 'credit') && cp.last4 === receipt.tx.captureInstrument?.last4 &&
+      (!cp.bankIdentity || bankIdentityForName(cp.bankIdentity) === receipt.bank);
+  });
+  return new Map([...pairs].filter(([id]) => ctx.rows.get(id)?.type === 'expense'));
+}
+
+function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<string>, secondary: Set<string>,
+  cardPairs: Map<string, string>, byId: Map<string, TransferAssessment>): void {
+  const pairedReceipts = new Set(cardPairs.values());
+  const rows: ObservedRow[] = [];
+  for (const tx of ctx.rows.values()) {
+    if (ctx.duplicateIds.has(tx.id) || tx.userEdited || tx.transferDecision || secondary.has(tx.id) ||
+        internal.has(tx.id) || pairedReceipts.has(tx.id) || cardPairs.has(tx.id)) continue;
+    const receipt = observedReceipt(tx, ctx);
+    if (receipt) { rows.push(receipt); continue; }
+    const ev = evidenceOf(tx);
+    if (!pending.has(tx.id) || !ev?.sourceBank || ev.explicitExternal || (tx.source !== 'sms' && !tx.smsKey)) continue;
+    const at = sourceTime(tx), money = sourceMoney(tx, ev), bank = bankIdentityForName(ev.sourceBank);
+    if (at === undefined || !money || !bank) continue;
+    // Known bank provenance is not account ownership. This branch produces a
+    // suggestion only, including masked/unassigned source accounts.
+    rows.push({ tx, at, money, bank, credit: false });
+  }
+  const pairs = uniqueObservedPairs(rows, 86_400_000, (a, b) => {
+    if (a.tx.type === b.tx.type || a.tx.accountId === b.tx.accountId || a.bank === b.bank || (a.credit && b.credit)) return false;
+    const contradicts = (source: ObservedRow, target: ObservedRow): boolean => {
+      const cp = evidenceOf(source.tx)?.counterparty;
+      return !!cp && ((cp.bankIdentity !== undefined && bankIdentityForName(cp.bankIdentity) !== target.bank) ||
+        (target.tx.captureInstrument !== undefined && cp.last4 !== target.tx.captureInstrument.last4) ||
+        (cp.kind === 'credit' && !target.credit) || (cp.kind === 'account' && target.credit));
+    };
+    return !contradicts(a, b) && !contradicts(b, a);
+  });
+  const observed = new Map(rows.map(row => [row.tx.id, row]));
+  for (const [id, otherId] of pairs) {
+    if (!pending.has(id) || byId.get(id)?.status === 'ambiguous') continue;
+    const row = observed.get(id)!, other = observed.get(otherId)!;
+    const maxDelay = evidenceOf(row.tx)?.counterpartyName || evidenceOf(other.tx)?.counterpartyName ? 90 * 60_000 : 30 * 60_000;
+    if (Math.abs(row.at - other.at) > maxDelay) continue;
+    byId.set(id, { id, status: other.credit ? 'likely-card-repayment' : 'likely-own',
+      reason: 'amount-time', counterpartId: otherId, candidateIds: [otherId] });
+  }
+}
+
 function reconcile(ctx: Context): TransferReconciliationResult {
   const byId = new Map<string, TransferAssessment>();
   const internalIds = new Set<string>();
   const pendingIds = new Set<string>();
   const userLinked = new Set<string>();
   const stale = new Set<string>();
+  const corroboratingOf = ctx.corroboratingOf;
+  const corroboratingIds = new Set(corroboratingOf.keys());
   for (const tx of ctx.rows.values()) {
     const ownership = transferOwnership(tx);
     if (ownership === null || !id(tx.id)) continue;
+    if (corroboratingIds.has(tx.id)) {
+      byId.set(tx.id, { id: tx.id, status: 'corroborating-alert', reason: 'bank-confirmation',
+        counterpartId: corroboratingOf.get(tx.id), candidateIds: [] });
+      continue;
+    }
     if (ctx.duplicateIds.has(tx.id)) {
       byId.set(tx.id, { id: tx.id, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: [] });
       pendingIds.add(tx.id);
       continue;
     }
     if (ownership === 'external') {
-      byId.set(tx.id, { id: tx.id, status: 'confirmed-external', reason: 'user', candidateIds: [] });
+      byId.set(tx.id, { id: tx.id, status: 'confirmed-external', reason: decisionOf(tx) ? 'user' : 'explicit-external', candidateIds: [] });
       continue;
     }
     if (ownership === 'own') {
@@ -361,10 +554,21 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     if (entry.referenceUnique && entry.reference) result.push(JSON.stringify(['ref', entry.bank, entry.money, entry.reference, direction]));
     if (entry.counterparty) result.push(JSON.stringify(['instruments', entry.money,
       ...[entry.instrument, entry.counterparty].sort(), direction]));
+    // Index both directions of a stated destination. The credit need not
+    // repeat the outgoing bank's account number to corroborate receipt.
+    if (!opposite) {
+      result.push(JSON.stringify(['arrived', entry.money, entry.instrument, direction]));
+      if (entry.counterparty && evidenceOf(entry.tx)?.endpointProof === 'explicit-transfer')
+        result.push(JSON.stringify(['addressed', entry.money, entry.counterparty, direction]));
+    } else {
+      result.push(JSON.stringify(['addressed', entry.money, entry.instrument, direction]));
+      if (entry.counterparty && evidenceOf(entry.tx)?.endpointProof === 'explicit-transfer')
+        result.push(JSON.stringify(['arrived', entry.money, entry.counterparty, direction]));
+    }
     return result;
   };
   for (const entry of ctx.entries.values()) {
-    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id)) continue;
+    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id)) continue;
     for (const key of keys(entry)) {
       const bucket = indexes.get(key);
       if (bucket) bucket.push(entry); else indexes.set(key, [entry]);
@@ -374,7 +578,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const candidates = new Map<string, Map<string, Exclude<Basis, 'user'>>>();
   const overflow = new Set<string>();
   for (const entry of ctx.entries.values()) {
-    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id)) continue;
+    if (stale.has(entry.tx.id) || userLinked.has(entry.tx.id) || corroboratingIds.has(entry.tx.id)) continue;
     const possible = new Map<string, Exclude<Basis, 'user'>>();
     for (const key of keys(entry, true)) {
       const bucket = indexes.get(key);
@@ -403,6 +607,12 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       byId.set(txId, { id: txId, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: ids });
     }
   }
+  const cardRepaymentPairs = observedCardRepayments(ctx, pendingIds, corroboratingIds);
+  for (const [debitId, receiptId] of cardRepaymentPairs) {
+    pendingIds.delete(debitId);
+    byId.set(debitId, { id: debitId, status: 'card-repayment', reason: 'credit-card-receipt', counterpartId: receiptId, candidateIds: [] });
+  }
+  suggestObservedPairs(ctx, pendingIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
   const groups = new Map<string, TransferReviewGroup>();
   for (const txId of pendingIds) {
     const tx = ctx.rows.get(txId)!;
@@ -410,17 +620,18 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     const ev = evidenceOf(tx);
     const cp = ev?.counterparty;
     const strong = ev?.attribution === 'source' ? ctx.instrumentKey(cp) : undefined;
-    const key = JSON.stringify([tx.accountId, tx.type, assessment.status, assessment.reason, strong ?? null]);
+    const key = JSON.stringify([tx.accountId, tx.type, assessment.status, assessment.reason, strong ?? null, ev?.counterpartyName ?? null]);
     const existing = groups.get(key);
     if (existing) existing.transactionIds.push(txId);
     else groups.set(key, { id: `transfer-group:${hash(key)}`, transactionIds: [txId], accountId: tx.accountId,
       direction: tx.type, status: assessment.status, ...(strong && cp ? { counterparty: { ...cp } } : {}),
-      bulkEligible: strong !== undefined && assessment.status !== 'ambiguous' });
+      ...(ev?.counterpartyName ? { counterpartyName: ev.counterpartyName } : {}),
+      bulkEligible: strong !== undefined && assessment.status !== 'ambiguous' && !assessment.status.startsWith('likely-') });
   }
   const orderedGroups = [...groups.values()];
   for (const group of orderedGroups) group.transactionIds.sort();
   orderedGroups.sort((a, b) => a.id.localeCompare(b.id));
-  return { byId, internalIds, pendingIds, groups: orderedGroups };
+  return { byId, internalIds, pendingIds, groups: orderedGroups, corroboratingIds, corroboratingOf, cardRepaymentPairs };
 }
 
 // Store arrays are immutable snapshots. Retain only their last paired result;
@@ -454,7 +665,7 @@ export function normalizeTransferLinks(transactions: Transaction[], accounts: Ac
     }
     let match: TransferMatch | undefined;
     if (counterpart && assessment?.status === 'confirmed-own' &&
-      (assessment.reason === 'user' || assessment.reason === 'reference' || assessment.reason === 'reciprocal-instruments')) {
+      (assessment.reason === 'user' || assessment.reason === 'reference' || assessment.reason === 'reciprocal-instruments' || assessment.reason === 'destination-and-receipt')) {
       match = { version: 1, counterpartId: counterpart.id, basis: assessment.reason,
         signature: ctx.fingerprints.get(tx.id)!, counterpartSignature: ctx.fingerprints.get(counterpart.id)! };
     }
