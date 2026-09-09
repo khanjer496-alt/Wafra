@@ -1,5 +1,5 @@
 /** Spending owns categories, their limits, transactions and the former Stats insights. */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
@@ -36,7 +36,8 @@ import type { CategoryId, Transaction } from '@/lib/types';
 
 type ViewMode = 'categories' | 'activity' | 'trends';
 const validView = (value: unknown): value is ViewMode => ['categories', 'activity', 'trends'].includes(String(value));
-const ACTIVITY_PREVIEW_LIMIT = 30;
+// This ScrollView is a preview. The full ledger is virtualized in Transactions.
+const ACTIVITY_PREVIEW_LIMIT = 8;
 
 export default function FlowScreen() {
   const theme = useTheme(); const language = useLanguage(); const router = useRouter();
@@ -47,6 +48,7 @@ export default function FlowScreen() {
   const [view, setView] = useState<ViewMode>(validView(params.view) ? params.view : 'categories');
   const [filter, setFilter] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
+  const appliedQuery = useDeferredValue(query);
   const [periodOpen, setPeriodOpen] = useState(false);
   const [limitFor, setLimitFor] = useState<CategoryId | 'new' | null>(null);
   const [category, setCategory] = useState<CategoryId | null>(null);
@@ -71,10 +73,10 @@ export default function FlowScreen() {
     .filter((tx) => isSpending(tx, live, internal) && inPeriod(tx.date, period))
     .sort((a, b) => b.date.localeCompare(a.date)), [view, state.transactions, live, internal, period]);
   const activity = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = appliedQuery.trim().toLocaleLowerCase();
     return !needle ? sortedActivity : sortedActivity.filter((tx) =>
       `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase().includes(needle));
-  }, [sortedActivity, query, accountById]);
+  }, [sortedActivity, appliedQuery, accountById]);
   const analysis = useMemo(() => {
     if (view !== 'trends') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(key, i - 5));
@@ -101,16 +103,16 @@ export default function FlowScreen() {
       <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
-      <MerchantSpendingLink />
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
         onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
+      {view === 'categories' && <MerchantSpendingLink />}
       {view === 'activity' && <View style={styles.activity} testID="spending-activity">
         <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
         <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
           {activity.slice(0, ACTIVITY_PREVIEW_LIMIT).map((tx) => <TransactionRow key={tx.id} transaction={tx}
-            account={accountById.get(tx.accountId)} onPress={() => setEntry(tx)} />)}
+            account={accountById.get(tx.accountId)} onPress={setEntry} internal={internal.has(tx.id)} />)}
           {activity.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noResults}</ThemedText>}
         </View>
         <Button label={w.allActivity} variant="outline" onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
@@ -153,7 +155,7 @@ export default function FlowScreen() {
   </>;
 }
 const styles = StyleSheet.create({
-  activity: { gap: 16 }, group: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, overflow: 'hidden' },
+  activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
   empty: { paddingVertical: 24 }, categoryDetail: { gap: 16 },
   categoryHistory: { gap: 10 }, categoryBars: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   categoryBarColumn: { height: '100%', flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'flex-end' },

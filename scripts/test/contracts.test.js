@@ -1821,7 +1821,7 @@ ok('the spoken label agrees with the sign on screen',
     'sortTxs orders by date alone, so reversing gave reverse IMPORT order within a day');
 
   ok('the custom range is usable where there is no native picker',
-    /Platform\.OS === 'web' \?/.test(tx) && /picking !== null && Platform\.OS !== 'web'/.test(tx),
+    /Platform\.OS === 'web' \?/.test(fs.readFileSync(path.join(ROOT, 'src/components/transaction-filter-sheet.tsx'), 'utf8')) && /picking !== null && Platform\.OS !== 'web'/.test(fs.readFileSync(path.join(ROOT, 'src/components/transaction-filter-sheet.tsx'), 'utf8')),
     'datetimepicker has no web build; it warns and renders null');
 }
 

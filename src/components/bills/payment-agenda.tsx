@@ -76,11 +76,11 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 30 }, section: { gap: 10 },
+  root: { gap: 24 }, section: { gap: 8 },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   sectionIcon: { width: 32, height: 42, alignItems: 'center', justifyContent: 'center' },
   statusHeading: { paddingTop: 8, paddingBottom: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 80, paddingVertical: 16, borderBottomWidth: 1 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   content: { flex: 1, minWidth: 0, gap: 5 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   grow: { flex: 1, minWidth: 0, gap: 3 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   stack: { flexDirection: 'column', alignItems: 'flex-start' }, empty: { paddingVertical: 12 },

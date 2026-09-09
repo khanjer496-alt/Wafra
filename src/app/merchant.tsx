@@ -68,14 +68,14 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
       header={{ title: activityTitle, back: { label: w.back, onPress: () => router.canGoBack() ? router.back() : router.replace(fallback) } }}>
       {!state.hydrated ? <View style={styles.empty}><SkeletonRows count={3} height={80} /></View> :
       <FlatList data={data} renderItem={renderRow} keyExtractor={transactionKey}
-        contentContainerStyle={insets.contentContainerStyle} contentInset={insets.contentInset}
+        contentContainerStyle={[insets.contentContainerStyle, styles.listContent]} contentInset={insets.contentInset}
         scrollIndicatorInsets={insets.scrollIndicatorInsets} contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled" initialNumToRender={12} maxToRenderPerBatch={10} windowSize={7}
         removeClippedSubviews={Platform.OS === 'android'}
         ListHeaderComponent={<View style={styles.header}>
           <View style={styles.identity}><MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} />
             <ThemedText type="heading" style={styles.name}>{merchant || pickLabel}</ThemedText></View>
-          <View testID="merchant-period"><Button label={periodLabel(period)} icon="calendar" variant="ghost" wrapLabel onPress={() => setPeriodOpen(true)} /></View>
+          <View testID="merchant-period" style={styles.period}><Button label={periodLabel(period)} icon="calendar" variant="ghost" wrapLabel onPress={() => setPeriodOpen(true)} /></View>
           {periodRange(period) ? <ThemedText type="meta" themeColor="textSecondary">{periodRange(period)}</ThemedText> : null}
           <View style={styles.hero} testID={income ? 'merchant-total-received' : 'merchant-total-spent'}>
             <ThemedText type="small" themeColor="textSecondary">{income ? w.totalReceived : w.total}</ThemedText>
@@ -96,8 +96,10 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
           <SegmentedControl value={view} onChange={setView} label={activityTitle} segments={[
             income ? { value: 'received', label: w.income } : { value: 'spending', label: w.spending }, { value: 'all', label: w.allActivity },
           ]} />
+          <View style={styles.recentHeading}>
           <ThemedText type="smallBold">{w.recent}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">{data.length} / {matches.length}</ThemedText>
+          </View>
         </View>}
         ListEmptyComponent={<View style={styles.empty}><ThemedText type="smallBold">{view === 'received' ? w.incomeEmpty : view === 'spending' ? w.empty : w.emptyActivity}</ThemedText>
           <Button label={merchant ? w.allTime : pickLabel} variant="outline" onPress={() => merchant ? setPeriod({ mode: 'all' }) : router.replace(fallback)} />
@@ -118,10 +120,13 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 }
 
 const styles = StyleSheet.create({
-  header: { gap: 16, paddingBottom: 18 }, identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  name: { flex: 1, minWidth: 0 }, hero: { gap: 8, paddingVertical: 12 },
-  facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 20, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  listContent: { gap: 0 },
+  header: { gap: 12, paddingBottom: 12 }, identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  period: { alignSelf: 'flex-start', maxWidth: '100%' },
+  recentHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  name: { flex: 1, minWidth: 0 }, hero: { gap: 6, paddingVertical: 8 },
+  facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
   fact: { flex: 1, minWidth: 110, gap: 6 }, stack: { flexDirection: 'column' },
-  received: { gap: 8 }, transaction: { paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  received: { gap: 8 }, transaction: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   empty: { gap: 16, paddingVertical: 24 }, footer: { gap: 8, paddingVertical: 24 },
 });

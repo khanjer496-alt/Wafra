@@ -138,6 +138,7 @@ test('shared sheet keeps a fixed footer below the shrinking scroll region', () =
   const Sheet = h.local('@/components/ui/bottom-sheet').BottomSheet;
   const footer = h.jsx('FooterFixture', {}), content = h.jsx('ContentFixture', {});
   const tree = Sheet({ visible: true, title: 'Fixture', onClose() {}, footer, children: content, testID: 'fixture-sheet' });
+  assert.equal(tree.props.hardwareAccelerated, true, 'Android modal transitions use hardware acceleration');
   const scroll = walk(tree).find(n => n.type === 'ScrollView');
   const footerBox = walk(tree).find(n => n.props?.testID === 'fixture-sheet-footer');
   assert.ok(scroll && footerBox);
@@ -145,6 +146,8 @@ test('shared sheet keeps a fixed footer below the shrinking scroll region', () =
   assert.equal(style(footerBox).flexShrink, 0);
   assert.ok(style(footerBox).paddingBottom >= 10);
   assert.equal(walk(scroll).includes(footer), false);
+  assert.equal(Sheet({ visible: false, title: 'Hidden', onClose() {}, children: content }), null,
+    'an initially closed sheet creates no native subtree');
 });
 
 test('narrow screens give search full width without reducing the font size', () => {

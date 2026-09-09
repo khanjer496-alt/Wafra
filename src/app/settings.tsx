@@ -16,7 +16,7 @@
  *    Restore bounced a free user to /pro while Export CSV and Expense report,
  *    one hairline below them, simply worked.
  */
-import { WorkflowHero, WorkflowNavigation } from '@/components/workflows/workflow-surfaces';
+import { WorkflowNavigation } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
@@ -136,8 +136,8 @@ import {
  */
 const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 
-type SettingsPanel = 'preferences' | 'imports' | 'privacy' | 'help';
-const SETTINGS_PANELS: readonly SettingsPanel[] = ['preferences', 'imports', 'privacy', 'help'];
+type SettingsPanel = 'preferences' | 'imports' | 'privacy' | 'data' | 'help';
+const SETTINGS_PANELS: readonly SettingsPanel[] = ['preferences', 'imports', 'privacy', 'data', 'help'];
 export default function SettingsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
@@ -190,12 +190,19 @@ export default function SettingsScreen() {
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
-  const formats = useMemo(() => unreadFormatCount(state), [state]);
+  const formats = useMemo(() => panel === 'data' ? unreadFormatCount(state) : 0,
+    // The count reads transactions only, not capture progress or appearance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [panel, state.transactions]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
   // their way down to two merchants loses the only route to the screen with
   // the job half done. This row is the permanent way in, and it stays visible
   // at zero to say so.
-  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
+  const unsorted = useMemo(() => panel === 'data' ? uncategorisedMerchants(state)
+    : { merchants: [], rowCount: 0, totalFils: 0 },
+    // Merchant review reads these financial inputs; no work on other panels.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [panel, state.transactions, state.accounts, state.merchantOverrides]);
   // A count of 0 is not a verdict on every device — see noFormatsReason().
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
@@ -1183,12 +1190,11 @@ export default function SettingsScreen() {
         header={settingsHeader}
         contentStyle={styles.content}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <WorkflowHero title={panel === 'privacy' ? words.privacyTitle : words.settingsTitle}
-          body={panel === 'privacy' ? words.privacyBody : words.settingsBody} icon="sliders" />
         <WorkflowNavigation<SettingsPanel> value={panel} onChange={setPanel} label={words.settingsNavigation}
           items={[{ value: 'preferences', label: words.preferences, icon: 'sliders' },
             { value: 'imports', label: words.capture, icon: 'mail' },
-            { value: 'privacy', label: words.privacy, icon: 'lock' },
+            { value: 'privacy', label: t('privacyHeader'), icon: 'lock' },
+            { value: 'data', label: t('dataHeader'), icon: 'download' },
             { value: 'help', label: words.help, icon: 'tools' }]} />
         {panel === 'help' && (<Section index={0} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <Block onPress={() => router.push('/pro')}>
@@ -1413,6 +1419,7 @@ export default function SettingsScreen() {
           )}
           {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
           {linkRow(t('messagesPrivacy'), null, () => setPrivacyDetailsVisible(true), { last: true })}
+          {linkRow(t('dataHeader'), words.privacyBody, () => setPanel('data'), { last: true })}
           {(legacyChargeAlertsAvailable || relay === undefined) && (
             <Block style={styles.privacyCopy}>
               <Icon name="alert" size={16} color={theme.warning} />
@@ -1423,8 +1430,8 @@ export default function SettingsScreen() {
           )}
         </Section>)}
 
-        {panel === 'privacy' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
-          <SectionHeader title={t('dataHeader')} />
+        {panel === 'data' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+          <SectionHeader title={words.needsReview} />
           {linkRow(transferReviewCopy().title, transferReviewCopy().reviewedIntro,
             () => router.push('/review-transfers'))}
           {reviewAlertCount > 0 && linkRow(
@@ -1454,6 +1461,7 @@ export default function SettingsScreen() {
                 : t('formatsNotKeptRow'),
             () => router.push('/accuracy'),
           )}
+          <SectionHeader title={t('dataHeader')} />
           {linkRow(t('backupJson'), null, backupJson)}
           {isSmsCorpusExportAvailable() && (
             <Block>
@@ -1590,7 +1598,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   settingsPanel: { borderTopWidth: 1, paddingVertical: Spacing.three, gap: Spacing.two },
   content: {
-    gap: Spacing.four + 2,
+    gap: Spacing.three,
   },
   proRow: {
     flexDirection: 'row',

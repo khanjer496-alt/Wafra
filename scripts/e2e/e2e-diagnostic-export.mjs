@@ -18,7 +18,7 @@ try {
     page.on('download', download => downloads.push(download));
     const name = `${lang}-${theme}-${width}`;
     try {
-      await page.goto(`${BASE}/settings?section=privacy`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE}/settings?section=data`, { waitUntil: 'networkidle' });
       const label = lang === 'ar' ? 'تصدير البيانات للتشخيص' : 'Export data for diagnosis';
       await page.getByRole('button', { name: label, exact: true }).click();
       const sheet = page.getByTestId('diagnostic-export-sheet');

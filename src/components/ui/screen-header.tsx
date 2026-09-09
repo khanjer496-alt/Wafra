@@ -93,9 +93,9 @@ const InlineHeader = (props: ScreenHeaderProps) => (
       <HeaderLeading back={props.back} />
       <View style={styles.titleGroup}>
         <ThemedText
-          type="title"
+          type={props.back ? 'heading' : 'title'}
           accessibilityRole="header"
-          style={[styles.title, hasArabicScript(props.title) && styles.arabicTitle]}>
+          style={[styles.title, hasArabicScript(props.title) && (props.back ? styles.arabicDetailTitle : styles.arabicTitle)]}>
           {props.title}
         </ThemedText>
         {props.subtitle ? (
@@ -173,6 +173,7 @@ const styles = StyleSheet.create({
   title: { flexShrink: 1 },
   // Plex Arabic needs 1.5em for its full vertical metrics.
   arabicTitle: { lineHeight: 44 },
+  arabicDetailTitle: { lineHeight: 34 },
   subtitle: { flexShrink: 1 },
   nativeTitle: { alignItems: 'flex-start' },
   textAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },

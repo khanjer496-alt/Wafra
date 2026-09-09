@@ -38,7 +38,12 @@ for (const language of ['en', 'ar']) {
         incoming.props.onPress(); outgoing.props.onPress();
         assert.deepEqual(h.events, [['route', '/transactions?type=income'], ['route', '/flow']]);
         const style = Object.assign({}, ...net.props.style.flat().filter(Boolean));
-        assert.equal(style.flexDirection, 'column', 'large text stacks rather than shrinking money');
+        const metrics = walk(tree).find(node => Array.isArray(node.props?.children)
+          && node.props.children.includes(incoming) && node.props.children.includes(net));
+        assert.ok(metrics, 'income and net share the responsive metrics group');
+        const groupStyle = Object.assign({}, ...metrics.props.style.flat().filter(Boolean));
+        assert.equal(groupStyle.flexDirection, 'column', 'large text stacks the complete metrics group');
+        assert.equal(style.flexBasis, 'auto', 'stacked money does not inherit a percentage height');
       });
     }
   }

@@ -204,10 +204,15 @@ export function BottomSheet({
   const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
 
+  // Keep the dismissal lifecycle, but do not build hidden native sheet trees.
+  // All hooks stay above this guard so every open/close follows the same order.
+  if (!mounted) return null;
+
   return (
     <Modal
       visible={mounted}
       transparent
+      hardwareAccelerated
       animationType="none"
       onRequestClose={requestImplicitDismiss}
       statusBarTranslucent>
@@ -263,7 +268,7 @@ export function BottomSheet({
                     />
                   ) : null}
                   <View style={styles.header}>
-                    <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header" style={styles.title}>
+                    <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
                       {title}
                     </ThemedText>
                     {dismissible ? (
@@ -277,7 +282,7 @@ export function BottomSheet({
                           Platform.OS === 'android' && styles.androidClose,
                           { borderColor: theme.controlBorder },
                         ]}>
-                        <Icon name="close" size={15} color={theme.textSecondary} />
+                        <Icon name="close" size={20} color={theme.textSecondary} />
                       </Pressable>
                     ) : null}
                   </View>

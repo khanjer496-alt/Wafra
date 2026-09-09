@@ -120,7 +120,7 @@ function createHarness(options = {}) {
   local('@/components/ui/segmented-control');local('@/components/ui/controls');local('@/components/ui/progress-bar');local('@/components/ui/text-field');
   deps['@/components/ui/period-pill']={SectionHeader:p=>jsx('SectionHeader',p)};
   for(const [module,name] of [['period-sheet','PeriodSheet'],['entry-detail-sheet','EntryDetailSheet'],['card-payment-sheet','CardPaymentSheet'],['bill-detail-sheet','BillDetailSheet'],
-    ['card-detail-sheet','CardDetailSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
+    ['card-detail-sheet','CardDetailSheet'],['transaction-filter-sheet','TransactionFilterSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
     deps['@/components/'+module]={[name]:p=>jsx('Boundary',{...p,name})};
   }
   local('@/components/ui/category-chips');

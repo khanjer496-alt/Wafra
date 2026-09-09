@@ -47,6 +47,10 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     : isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
   const accountReview = isUnassignedIncome(transaction) ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
+  const bankCaption = account?.bankName || account?.name;
+  const accountCaption = accountReview ?? (bankCaption
+    ? `${bankCaption}${account?.last4 && !bankCaption.includes(account.last4) ? ` ·${account.last4}` : ''}`
+    : undefined);
   const label = [transaction.title, where, accountLabel, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
@@ -64,14 +68,11 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
         android_ripple={{ color: theme.backgroundSelected }}
         style={({ pressed }) => [styles.merchantTarget, largeText && styles.merchantTargetLarge,
           pressed && { backgroundColor: theme.backgroundSelected }]}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={40} />
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
         <View style={styles.content}>
           <ThemedText type="smallBold">{transaction.title}</ThemedText>
-          <View style={styles.details}>
-            <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
-            {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
-          </View>
-          {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
+          <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+          {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"
@@ -81,7 +82,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
         <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
           {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
         </ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary">{merchantWords.entryDetails}</ThemedText>
+        <ThemedText type="meta" style={styles.metadata} themeColor="textTertiary">{merchantWords.entryDetails}</ThemedText>
       </Pressable>
     </View>;
   }
@@ -90,7 +91,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     onPress={onPress ? () => onPress(transaction) : undefined}
     android_ripple={{ color: theme.backgroundSelected }}
     style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.backgroundSelected }]}>
-    <MerchantAvatar title={transaction.title} category={transaction.category} size={40} />
+    <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
     <View style={styles.content}>
       <View style={[styles.headline, largeText && styles.headlineLarge]}>
         <ThemedText type="smallBold" style={[styles.merchant, largeText && styles.merchantLarge]}>{transaction.title}</ThemedText>
@@ -98,11 +99,8 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
           {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
         </ThemedText>
       </View>
-      <View style={styles.details}>
-        <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
-        {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
-      </View>
-      {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+      {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
     </View>
   </Pressable>;
 }
@@ -111,15 +109,14 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
 // unchanged visible rows from rebuilding when import progress updates.
 export const TransactionRow = React.memo(TransactionRowInner);
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: 76, paddingVertical: 14 },
-  content: { flex: 1, minWidth: 0, gap: 4 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 72, paddingVertical: 10 },
+  content: { flex: 1, minWidth: 0, gap: 3 },
   headline: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   headlineLarge: { flexDirection: 'column', gap: 6 },
   merchant: { flexGrow: 1, flexShrink: 1, flexBasis: 120 },
   merchantLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   amount: { flexShrink: 1 },
-  details: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  category: { flexShrink: 1 },
+  metadata: { fontSize: 12, lineHeight: 19, flexShrink: 1 },
   splitRow: { flexWrap: 'wrap', alignItems: 'flex-start' },
   splitRowLarge: { flexDirection: 'column' },
   merchantTarget: { flexDirection: 'row', alignItems: 'flex-start', gap: 12,

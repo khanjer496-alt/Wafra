@@ -417,13 +417,13 @@ await tapLabel(page, 'Back', 1200);
 // ── Settings ──────────────────────────────────────────────────────────
 await tapLabel(page, 'Settings', 1400);
 {
- const panels=await Promise.all(['Preferences','Imports','Privacy & data','Help'].map(x=>visibleText(page,x)));
- ok('Settings exposes all four task panels',panels.every(Boolean));
+ const panels=await Promise.all(['Preferences','Imports','Privacy','Data','Help'].map(x=>visibleText(page,x)));
+ ok('Settings exposes all five task panels',panels.every(Boolean));
 }
 await tapText(page,'Help',500);
 ok('Help keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
 ok('Help keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
-await tapText(page,'Privacy & data',500);
+await tapText(page,'Privacy',500);
 ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
 await tapText(page,'Preferences',500);
 
@@ -461,7 +461,7 @@ await tapText(page,'Preferences',500);
 }
 
 // ── Import ────────────────────────────────────────────────────────────
-await tapText(page,'Privacy & data',500);
+await tapText(page,'Data',500);
 await tapText(page, 'Improve accuracy', 1200);
 ok('accuracy screen opens', !!(await visibleText(page, /reads clean|could not be fully read/)));
 await tapLabel(page, 'Back', 1200);

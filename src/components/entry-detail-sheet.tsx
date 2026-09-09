@@ -119,12 +119,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     ).length;
   }, [transaction, title, category, state.transactions]);
 
-  if (!transaction) return null;
+  const hasTransaction = transaction !== null;
+  const transferState = useMemo(
+    () => hasTransaction ? reconcileTransfers(state.transactions, state.accounts) : null,
+    [hasTransaction, state.transactions, state.accounts],
+  );
+
+  if (!transaction || !transferState) return null;
 
   const meta = getCategory(transaction.category);
   const transferReview = isTransferCandidate(transaction);
   const transferWords = transferReviewCopy();
-  const transferState = reconcileTransfers(state.transactions, state.accounts);
   const confirmedTransfer = isLedgerTransfer(transaction) || transferState.internalIds.has(transaction.id);
   const pendingTransfer = transferState.pendingIds.has(transaction.id);
   const account = state.accounts.find((a) => a.id === transaction.accountId);

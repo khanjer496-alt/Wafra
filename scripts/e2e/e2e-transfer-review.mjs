@@ -201,7 +201,7 @@ try {
         const current = savedById.get(original.id);
         assert.deepEqual([current.amountFils, current.type, current.accountId], [original.amountFils, original.type, original.accountId]);
       }
-      await page.goto(BASE + '/settings?section=privacy', { waitUntil: 'networkidle' });
+      await page.goto(BASE + '/settings?section=data', { waitUntil: 'networkidle' });
       const backupButton = await exposed(page.getByRole('button', { name: words.backup, exact: true }));
       const [download] = await Promise.all([page.waitForEvent('download'), backupButton.click()]);
       const backup = JSON.parse(await readFile(await download.path(), 'utf8'));

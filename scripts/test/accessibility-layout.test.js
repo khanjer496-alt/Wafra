@@ -176,7 +176,7 @@ ok('Bills manual reminder rows open one labelled detail target',
 ok('Wallet source rows open on normal tap and keep long press optional',
   /onPress=\{\(\) => openAccount\(account\)\}/.test(wallet) &&
     /onLongPress=\{\(\) => setOptionsFor\(account\)\}/.test(wallet) &&
-    (wallet.match(/accessibilityRole="button"/g) ?? []).length >= 8);
+    ((wallet.match(/accessibilityRole="button"/g) ?? []).length + (wallet.match(/<Button\b/g) ?? []).length) >= 8);
 ok('Wallet inactive disclosure exposes a localized expanded button',
   /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
 

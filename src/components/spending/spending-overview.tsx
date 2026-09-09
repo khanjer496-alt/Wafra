@@ -117,7 +117,7 @@ export function SpendingOverview(p: Props) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 16 }, overview: { paddingVertical: 18, gap: 12 },
+  root: { gap: 12 }, overview: { paddingVertical: 12, gap: 8 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },

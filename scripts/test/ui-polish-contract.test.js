@@ -145,7 +145,8 @@ assert.match(task3Transactions, /useScreenContentInsets\(\{ hasFooter: false \}\
 assert.match(task3Transactions, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/);
 assert.match(task3Transactions, /header=\{\{[\s\S]*?back:[\s\S]*?actions:/);
 assert.match(task3Transactions, /<SectionList[\s\S]*?ListHeaderComponent=/);
-assert.match(task3Transactions, /contentContainerStyle=\{listInsets\.contentContainerStyle\}/);
+assert.match(task3Transactions, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task3Transactions, /listContent: \{ gap: 0 \}/);
 assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
 assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
 assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);

@@ -398,7 +398,7 @@ await pressEverything('bills all obligations', async () => {
 });
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/); });
-for (const panel of ['Preferences', 'Imports', 'Privacy & data', 'Help']) {
+for (const panel of ['Preferences', 'Imports', 'Privacy', 'Data', 'Help']) {
   await pressEverything(`settings ${panel}`, () => settingsPanel(panel),
     { skip: ['Erase everything on this phone'] });
 }
@@ -431,7 +431,7 @@ await pressEverything('pro', async () => {
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
 });
 await pressEverything('accuracy', async () => {
-  await settingsPanel('Privacy & data');
+  await settingsPanel('Data');
   await tapKey(page, 'Improve accuracy'); await page.waitForTimeout(1300);
 });
 await pressEverything('import', async () => {
@@ -483,7 +483,7 @@ await goesTo('Home settings action', home, 'Settings', /^\/settings/);
 await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
 await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
 await goesTo('Settings Pro', () => settingsPanel('Help'), 'Wafra Pro', /^\/pro/);
-await goesTo('Settings accuracy', () => settingsPanel('Privacy & data'), 'Improve accuracy', /^\/accuracy/);
+await goesTo('Settings accuracy', () => settingsPanel('Data'), 'Improve accuracy', /^\/accuracy/);
 await goesTo('Settings feedback', () => settingsPanel('Help'), 'Send feedback', /^\/feedback/);
 
 /* ── 3. Search, manual entry, cancellation and filter clearing ────────── */

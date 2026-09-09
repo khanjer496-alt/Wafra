@@ -49,7 +49,7 @@ export function Button({
   disabled,
   inline,
   labelColor: labelColorOverride,
-  wrapLabel = false,
+  wrapLabel = true,
   style,
 }: ButtonProps) {
   const theme = useTheme();
