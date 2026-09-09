@@ -38,6 +38,41 @@ const summary = (amount = '713.00') => `Outward Remittance\nDebit\nAccount XXXX1
 const credited = (amount = '813.00', target = '2222') => `An amount of AED ${amount} has been credited to your FAB account XXXX${target} on 08/09/2026. Your balance is AED 9813.00`;
 const ownDetail = 'Dear Customer, your funds transfer request of AED 813.00 from account XXXX1111 to account XXXX2222 has been processed on 08/09/2026 16:00. For more information please call 600525500.';
 
+test('the transfer evidence upgrade invalidates already scanned version-37 histories', () => {
+  assert.ok(require('../build/sms-parser').PARSER_VERSION > 37);
+});
+
+test('a first scan preserves a cardless money event before it has discovered any accounts', () => {
+  const state = { ...base(), accounts: [] };
+  const fee = { kind: 'transaction', type: 'expense', merchant: 'Bank fee', amountFils: 1375,
+    currency: 'AED', categoryGuess: 'other', categoryDeliberate: true, transferHint: false, card: null,
+    date: '2026-09-08', smsTs: NOW, sender: 'FAB', channel: 'inbox', sourceEventId: 'a900555',
+    snapshotFils: 8900, snapshotKind: 'balance', raw: 'Your account was debited AED 13.75 as service charge. Balance AED 89.00.' };
+  const plan = buildImportPlan([fee], state, NOW);
+  assert.equal(plan.txCount, 1, 'never advance the watermark after dropping parsed money');
+  assert.equal(plan.newAccountCount, 0, 'unidentified is not a fictional bank account');
+  assert.deepEqual(plan.batch.snapshots, {}, 'unidentified alerts never assert a bank balance');
+  const first = apply(state, [fee]);
+  assert.equal(first.transactions[0].accountId, ledger.UNASSIGNED_TRANSACTION_ACCOUNT_ID);
+  assert.equal(ledger.isSpending(first.transactions[0], ledger.liveAccountIds(first.accounts)), true);
+  assert.equal(summarizeCashOutflow(first, { mode: 'all' }).totalFils, 0, 'funding source is still unknown');
+  const withAccount = { ...first, accounts: structuredClone(accounts) };
+  assert.deepEqual(apply(withAccount, [fee]).transactions, first.transactions,
+    'finding a later unrelated card cannot make the same event duplicate or change its attribution');
+});
+
+test('discovering two banks with the same account tail never emits a competing global hint', () => {
+  const parsed = parse([['FAB', credited()], ['Liv',
+    'AED 927.00 has been credited to account XXXX2222. Current balance is AED 1559.70.', 300000]]);
+  const empty = { ...base(), accounts: [] };
+  const first = apply(empty, parsed);
+  assert.equal(first.accounts.length, 2);
+  assert.equal(first.accountHints['2222'], undefined);
+  assert.ok(Object.keys(first.accountHints).some(key => key.includes('FAB')));
+  assert.ok(Object.keys(first.accountHints).some(key => key.includes('Liv')));
+  assert.deepEqual(apply(first, parsed), first, 'the complete persisted state is repeatable');
+});
+
 test('one explicit FAB destination and independently observed receiving account link automatically', () => {
   const state = apply(base(), parse([['FAB', ownDetail], ['FAB', credited(), 240000]]));
   const result = core.reconcileTransfers(state.transactions, state.accounts);
@@ -68,6 +103,27 @@ test('a bank debit, its remittance confirmation and the other bank card receipt 
   assert.equal(state.transactions.filter(t => ledger.countsInTotals(t, undefined, exclusions)).length, 0);
   const again = apply(state, parsed);
   assert.deepEqual(again.transactions, state.transactions, 'reread is idempotent');
+});
+
+test('iOS source-free capture preserves account/card source routing and repayment evidence', () => {
+  const { buildTransferEvidence } = require('../build/transfer-evidence');
+  const parsed = parse([['FAB', detail()], ['FAB', summary(), 20000],
+    ['ADCBAlert', 'Your payment of AED 713 against Credit Card no. XXX3333 was received at 04:00 PM on 08/09/2026. Thank you.', 7000]]);
+  const compact = parsed.map(p => {
+    const { raw, sender, ...kept } = p;
+    return { ...kept, bankHint: markets.bankFromSender(sender).name,
+      transferEvidence: buildTransferEvidence(p, true) };
+  });
+  assert.equal(compact[0].transferEvidence.sourceKindAmbiguous, true);
+  assert.equal(Object.hasOwn(compact[0], 'raw'), false);
+  const state = apply(base(), compact);
+  const result = core.reconcileTransfers(state.transactions, state.accounts);
+  assert.equal(state.accounts.length, base().accounts.length, 'no phantom source credit card');
+  assert.equal(result.cardRepaymentPairs.size, 1);
+  assert.equal(result.corroboratingIds.size, 1);
+  assert.equal(result.pendingIds.size, 0);
+  assert.equal(summarizeCashOutflow(state, { mode: 'all' }).totalFils, 71300);
+  assert.deepEqual(apply(state, compact), state);
 });
 
 test('Liv partly masked accounts never borrow the unrelated first credit card or fabricate four digits', () => {

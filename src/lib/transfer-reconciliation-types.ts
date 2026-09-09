@@ -8,6 +8,8 @@ export interface TransferEvidence {
   sourceBank?: string;
   /** Hash of a bank-scoped, partly masked source identifier. Not a last-four claim. */
   sourceAccountKey?: string;
+  /** The source clause said account/card, not an untyped card alone. */
+  sourceKindAmbiguous?: true;
   reference?: string;
   counterparty?: {
     last4: string;

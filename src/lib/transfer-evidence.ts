@@ -57,6 +57,7 @@ interface Endpoint {
   index: number;
   end: number;
   party: TransferEvidence['counterparty'];
+  sourceKindAmbiguous: boolean;
 }
 
 /** Read only immediate, labelled endpoints. Never join digits across masks. */
@@ -72,7 +73,8 @@ function endpoints(raw: string): Endpoint[] {
     const bankIdentity = recognizedBankIdentity(match[3]);
     found.push({ direction: match[1].toLowerCase() as Endpoint['direction'], own: !!match[2],
       index: match.index!, end: match.index! + match[0].length,
-      party: terminal ? { last4: terminal, kind, ...(bankIdentity ? { bankIdentity } : {}) } : undefined });
+      party: terminal ? { last4: terminal, kind, ...(bankIdentity ? { bankIdentity } : {}) } : undefined,
+      sourceKindAmbiguous: /account\s*\/\s*card/.test(label) });
   }
   return found;
 }
@@ -123,6 +125,7 @@ export function buildTransferEvidence(
   let explicitOwn = OWN_TITLE.test(alert.merchant.trim()) && alert.transferHint;
   const reference = normalizedReference(alert.reference);
   let sourceAccountKey: string | undefined;
+  let sourceKindAmbiguous = false;
   let counterpartyName: string | undefined;
   let endpointProof: TransferEvidence['endpointProof'];
   let postingForm: TransferEvidence['postingForm'];
@@ -144,6 +147,7 @@ export function buildTransferEvidence(
         (source.party.kind === sourceCard.kind || source.party.kind === 'unknown' || sourceCard.kind === 'unknown') &&
         (!source.party.bankIdentity || !sourceBankIdentity || source.party.bankIdentity === sourceBankIdentity);
       if (!sourceMatches) attributed = false;
+      if (sourceMatches && source.sourceKindAmbiguous && sourceCard?.kind === 'unknown') sourceKindAmbiguous = true;
       const others = parties.filter(party => party.direction !== ownDirection &&
         !/[.!?]\s/.test(raw.slice(Math.min(source.end, party.end), Math.max(source.index, party.index))));
       if (sourceMatches && others.length === 1) {
@@ -179,6 +183,7 @@ export function buildTransferEvidence(
       explicitOwn ||= carried.explicitOwn === true;
       sourceAccountKey = typeof carried.sourceAccountKey === 'string' && /^[a-f0-9]{64}$/.test(carried.sourceAccountKey)
         ? carried.sourceAccountKey : undefined;
+      sourceKindAmbiguous = carried.sourceKindAmbiguous === true && sourceCard?.kind === 'unknown';
       counterpartyName = safeName(carried.counterpartyName);
       endpointProof = carried.endpointProof === 'explicit-transfer' ? carried.endpointProof : undefined;
       postingForm = ['transfer-detail', 'remittance-debit', 'credit-receipt'].includes(carried.postingForm ?? '')
@@ -192,6 +197,7 @@ export function buildTransferEvidence(
   return { version: 1, currency, attribution: attributed ? 'source' : 'fallback',
     ...(sourceBankIdentity ? { sourceBank: sourceBankIdentity } : {}),
     ...(sourceAccountKey ? { sourceAccountKey } : {}),
+    ...(sourceKindAmbiguous ? { sourceKindAmbiguous: true } : {}),
     ...(reference ? { reference } : {}), ...(counterparty ? { counterparty } : {}),
     ...(counterpartyName ? { counterpartyName } : {}), ...(endpointProof ? { endpointProof } : {}),
     ...(postingForm ? { postingForm } : {}),

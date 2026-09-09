@@ -4,12 +4,15 @@ import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, t
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
 export const UNASSIGNED_INCOME_ACCOUNT_ID = '__unassigned-income__';
+/** A parsed money event can exist before any account has been discovered. This
+ * is an unresolved attribution, not a bank/card and not balance evidence. */
+export const UNASSIGNED_TRANSACTION_ACCOUNT_ID = '__unassigned-transaction__';
 export const isUnassignedIncome = (transaction: Transaction): boolean =>
   transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type === 'income';
 
 /** Account visibility is applied to totals, never to transfer identity. */
 export function liveAccountIds(accounts: Account[]): Set<string> {
-  return new Set([UNASSIGNED_INCOME_ACCOUNT_ID,
+  return new Set([UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID,
     ...accounts.filter((account) => !account.archived).map((account) => account.id)]);
 }
 

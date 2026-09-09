@@ -57,6 +57,7 @@ export function isTransferEvidence(value: unknown): value is TransferEvidence {
     optional(value, 'explicitExternal', external => external === true) && !(value.explicitOwn && value.explicitExternal) &&
     optional(value, 'sourceBank', bank => typeof bank === 'string' && bank.length > 0 && bank.length <= 160) &&
     optional(value, 'sourceAccountKey', key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key)) &&
+    optional(value, 'sourceKindAmbiguous', flag => flag === true) &&
     optional(value, 'counterpartyName', name => typeof name === 'string' && name.trim() === name &&
       name.length >= 2 && name.length <= 80 && /^[\p{L}\p{M} .'&-]+$/u.test(name)) &&
     optional(value, 'endpointProof', proof => proof === 'explicit-transfer') &&
@@ -138,6 +139,7 @@ export function transferFingerprint(tx: Transaction): string {
       'sourceBank', 'sourceAccountKey', 'counterpartyName', 'endpointProof', 'postingForm']),
     fields(ev?.counterparty, ['last4', 'kind', 'bankIdentity']),
     fields(row.transferDecision, ['version', 'ownership', 'decidedAt', 'counterpartId']),
+    ...(ev?.sourceKindAmbiguous !== undefined ? [fields(ev, ['sourceKindAmbiguous'])] : []),
   ]))}`;
 }
 

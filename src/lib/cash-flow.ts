@@ -1,5 +1,5 @@
 import { cardPaymentRows } from '@/lib/cards';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, liveAccountIds, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import { inPeriod, type PeriodLike } from '@/lib/period';
 import type { Account, AppState } from '@/lib/types';
 import { isUnassignedTransferAccount, transferOwnership } from '@/lib/transfer-reconciliation';
@@ -59,6 +59,9 @@ export function summarizeCashOutflow(
   for (const transaction of state.transactions) {
     const settlement = settlements.get(transaction.id);
     const fundingAccountId = settlement?.cashOutAccountId ?? transaction.accountId;
+    // No identified source means we cannot assert that a confirmed purchase
+    // was paid immediately from cash rather than charged to a credit card.
+    if (!settlement && fundingAccountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) continue;
     if (!live.has(fundingAccountId) && !isUnassignedTransferAccount(fundingAccountId)) continue;
     // Manual repayments carry the legacy transfer flag. The card ledger's
     // confirmed settlement role takes precedence over that generic flag.

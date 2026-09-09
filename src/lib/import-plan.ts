@@ -12,7 +12,7 @@ import { healPatch } from '@/lib/heal';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { isUnassignedTransferAccount, unassignedTransferAccountId } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
-import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
+import { UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import {
   ledgerMoneyMatchesCurrentMetadata,
   ledgerMoneySpec,
@@ -579,7 +579,10 @@ export function buildImportPlan(
         }
         return { accountId: unassignedTransferAccountId(evidence), confident: false };
       }
-      return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
+      // On an empty first scan the old empty-string fallback silently dropped
+      // parsed fees, receipts and salaries. Keep a stable unresolved reference
+      // until real source evidence or the user identifies an account.
+      return { accountId: ambiguousFallbackAccountId ?? (fallbackAccountId || UNASSIGNED_TRANSACTION_ACCOUNT_ID), confident: false };
     }
     const { last4 } = p.card;
     // The parser owns card-kind evidence, including Arabic forms such as
@@ -587,8 +590,9 @@ export function buildImportPlan(
     // heuristics silently downgraded explicit Arabic debit cards to unknown.
     const kind = p.card.kind as ResolvedCardKind;
     const transferParties = kind === 'unknown' && p.raw ? extractOutgoingTransferParties(p.raw) : null;
-    const sourceKindAmbiguous = transferParties?.sourceKindAmbiguous === true &&
-      transferParties.source?.last4 === last4;
+    const sourceKindAmbiguous = (transferParties?.sourceKindAmbiguous === true &&
+      transferParties.source?.last4 === last4) || (p.raw === undefined && kind === 'unknown' &&
+      buildTransferEvidence(p, false)?.sourceKindAmbiguous === true);
     // A message that spells out its issuer ("Emirates NBD Credit Card Mini
     // Stmt for Card ending 8575") is STATING the bank; a sender ID only
     // suggests one. That distinction is the only thing that can separate two
@@ -1350,6 +1354,18 @@ export function buildImportPlan(
       autoDetected: true,
       ...(importIdentity ? { importIdentity } : {}),
     });
+  }
+
+  // A tail shared by different accounts cannot be a new global routing hint.
+  // Keep issuer/kind-scoped hints, and leave an older stored hint untouched:
+  // its resolver still has to prove a unique compatible account. Without this
+  // check the first scan and its replay alternated the same tail between banks.
+  const tailCounts = new Map<string, number>();
+  for (const { account } of accountCandidates()) {
+    if (account.last4) tailCounts.set(account.last4, (tailCounts.get(account.last4) ?? 0) + 1);
+  }
+  for (const key of Object.keys(newHints)) {
+    if (/^\d{4}$/.test(key) && (tailCounts.get(key) ?? 0) > 1) delete newHints[key];
   }
 
   return {

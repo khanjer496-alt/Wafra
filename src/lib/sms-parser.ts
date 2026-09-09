@@ -292,8 +292,13 @@ export interface ParsedCard {
  * Transfer rechecks retain bounded ownership evidence; masked source prefixes
  * never become account suffixes. Ownership decisions remain separate from
  * category guesses and survive rereads.
+ *
+ * 38: rerun existing version-37 histories to retain explicit transfer endpoints,
+ * distinguish corroborating remittance alerts from additional postings, and
+ * identify receiving-card receipts independently of the outgoing bank. Partly
+ * masked transfer sources no longer inherit an unrelated first credit card.
  */
-export const PARSER_VERSION = 37;
+export const PARSER_VERSION = 38;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

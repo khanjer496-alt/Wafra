@@ -36,6 +36,10 @@ module.exports = function loadLedgerHydration(root) {
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
       Platform: { OS: 'web' },
     },
+    // Native locale subscriptions and export-file cleanup are lifecycle
+    // adapters, not ledger transforms. No provider is mounted in this audit.
+    'expo-localization': { useLocales: () => [] },
+    '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
