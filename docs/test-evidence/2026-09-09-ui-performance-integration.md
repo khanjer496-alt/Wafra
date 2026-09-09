@@ -68,3 +68,28 @@ incompatible EAS signer or uninstall the existing ledger to bypass signing.
 The original dirty checkout and its unreadable Git index were left intact.
 Only this reviewed change set was integrated through a clean main checkout;
 unrelated local iOS drafts and diagnostic/source exports were not published.
+
+## Build and final validation follow-up
+
+GitHub Android build 145 (run 34352941460) completed successfully from
+`8f91a0bc791160597123ecf9366633fde50aa3b5`. The APK is non-debuggable,
+ARM64, package app.wafra.android, version 1.0.0 (145), minSdk 24 / targetSdk 36.
+APK SHA-256: `7060892f3ad3aff20403c4d3364040919421991d331d278a6a82f4ba3bdc45f2`.
+Its v2 signature verifies with the expected installed-app certificate
+`782b21c38c20f60425b171255718df54629c2909f3273c53e81d31fdbe3b446b`.
+The embedded bundle contains the new transaction-filter-sheet and search
+-toolbar markers. No device installation was performed.
+
+The complete GitHub browser job for this source passed. The first GitHub check
+job found an outdated routes assertion: it matched the new Privacy navigation
+label rather than the actual Privacy section header. The final JavaScript
+sweep also identified an old expectation that shared buttons do not wrap by
+default. Both test-only assertions now follow the current implementation, and
+two English/Arabic behavioral tests verify that notification controls remain
+in Imports rather than Privacy or Data without mutating settings.
+
+After these test-only corrections, all 71 original JavaScript suites passed
+sequentially with generated iOS contract fixtures, and all 597 repair/workflow/
+iOS-journey cases passed. This is not a native iOS build. The app source,
+assets, native modules, build configuration and lockfile are identical to
+build 145; this verification-only follow-up does not require a replacement APK.

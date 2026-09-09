@@ -52,6 +52,7 @@ test('the real scanner never reads or acknowledges notifications with a closed b
   const notification = { isAvailable: () => available, isEnabled: () => enabled,
     getCaptured: async () => { reads++; return []; }, ackCaptured: async () => { acknowledgements++; return true; } };
   const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
     'expo-crypto': {}, 'expo-secure-store': {},
     '../../modules/notification-reader': { __esModule: true, default: notification },

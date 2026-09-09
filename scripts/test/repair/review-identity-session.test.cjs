@@ -25,6 +25,7 @@ const normalize = (text) => text.replace(/\d+/g, '#').toLowerCase();
 function harness(fail = () => false) {
   const calls = [];
   const api = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     'react-native': { Platform: { OS: 'android' } },
     'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'sha256' }, digestStringAsync: async (_, data) => {
       calls.push(data); if (fail(data)) throw new Error('native digest failed'); return sha256(data);

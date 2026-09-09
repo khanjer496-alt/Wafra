@@ -15,6 +15,7 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
   const batch = Array.from({ length: 950 }, (_, i) => ({ id: 950 - i, date: 1000000 - i,
     address: 'SYNTHETIC', body: `Synthetic record ${i}` }));
   const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     'react-native': { Platform: { OS: 'android' }, AppState: appState },
     'expo-crypto': {}, 'expo-secure-store': {},
     '../../modules/notification-reader': { __esModule: true, default: null },

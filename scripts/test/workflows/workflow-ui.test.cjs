@@ -120,3 +120,13 @@ for(const language of ['en','ar'])test(`iOS setup renders actual checklist witho
  const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},2:true,3:true}}),tree=h.renderScreen('ios-setup');
  assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'));assert.deepEqual(h.events,[]);
 });
+
+for (const language of ['en', 'ar']) test(language + ': notification controls remain in Imports, not Privacy or Data', () => {
+  for (const section of ['imports', 'privacy', 'data']) {
+    const h = createWorkflowHarness({ language, params: { section } });
+    const tree = h.renderScreen('settings');
+    const label = h.deps['@/lib/i18n'].t('dailySummarySetting');
+    assert.equal(text(tree).includes(label), section === 'imports');
+    assert.deepEqual(h.events, [], 'reading a settings section must not alter notifications');
+  }
+});
