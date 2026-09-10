@@ -146,6 +146,7 @@ export default function JournalHomeScreen() {
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
+  const unresolvedTransfers = dashboard.unresolvedTransfers ?? { count: 0, incomeFils: 0, outgoingFils: 0 };
   const payments = dashboard.upcoming.items;
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
@@ -265,6 +266,9 @@ export default function JournalHomeScreen() {
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
           incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
           netFils={dashboard.hero.netFils}
+          unresolvedTransferCount={unresolvedTransfers.count}
+          unresolvedIncomingFils={unresolvedTransfers.incomeFils}
+          unresolvedOutgoingFils={unresolvedTransfers.outgoingFils}
           moneySpec={moneySpec}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}

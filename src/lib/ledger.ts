@@ -39,10 +39,10 @@ export function countsInTotals(
  * Cash-flow totals answer a different question from spending analytics.
  *
  * An unresolved bank transfer on a real visible account still moved money, so
- * dropping it from In/Out can make a multi-year Net wildly wrong. Keep those
- * movements in cash-flow until reconciliation proves they are between the
- * user's own accounts. Category, merchant, subscription and budget analytics
- * continue to use countsInTotals(), where unresolved ownership stays excluded.
+ * it remains eligible for cash-movement views. Exact Income / Spending / Net
+ * figures additionally exclude it through isUnresolvedTransferMovement() and
+ * surface the uncertainty separately. Category, merchant, subscription and
+ * budget analytics continue to use countsInTotals().
  */
 export function countsInCashflowTotals(
   transaction: Transaction,
@@ -62,6 +62,24 @@ export function countsInCashflowTotals(
   if (isUnassignedTransferAccount(transaction.accountId)) return false;
   if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
   return true;
+}
+
+/**
+ * A real bank movement that Wafra can see, but cannot yet prove was either an
+ * external payment or a move between the user's own accounts.
+ *
+ * These rows stay visible in activity, but must not silently swing an exact
+ * Income / Spending / Net figure in either direction. They are reported as one
+ * aggregate uncertainty bucket instead of becoming thousands of review tasks.
+ */
+export function isUnresolvedTransferMovement(
+  transaction: Transaction,
+  live?: Set<string>,
+  internal?: Set<string>,
+): boolean {
+  if (internal?.has(transaction.id) || isUnassignedIncome(transaction)) return false;
+  return isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown' &&
+    countsInCashflowTotals(transaction, live, internal);
 }
 
 export function isSpending(

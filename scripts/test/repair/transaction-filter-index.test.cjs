@@ -75,3 +75,21 @@ test('records a repeat-filter benchmark without asserting phone performance or f
   const indexedMs = measure(() => projectTransactionFilter(index, filters, o));
   console.log(JSON.stringify({ rows: rows.length, indexMs, originalMs, indexedMs, scope: 'local Node benchmark, not Android frame time' }));
 });
+
+test('transaction summary keeps an unresolved bank transfer visible but outside confirmed net', () => {
+  setMonthStartDay(1);
+  const unresolved = {
+    id: 'unclear-credit', title: 'Incoming transfer', amountFils: 25000000,
+    category: 'other', type: 'income', date: '2026-01-12', accountId: 'active', source: 'sms',
+  };
+  const purchase = {
+    id: 'purchase', title: 'Carrefour', amountFils: 10000,
+    category: 'groceries', type: 'expense', date: '2026-01-12', accountId: 'active', source: 'sms',
+  };
+  const options = { ...o, period: { mode: 'all' }, live: new Set(['active']), internal: new Set() };
+  const result = projectTransactionFilter(createTransactionFilterIndex([unresolved, purchase], 'en'), defaults, options);
+  assert.equal(result.filtered.length, 2, 'the bank movement remains inspectable in activity');
+  assert.equal(result.totalShown, -10000, 'confirmed net contains the purchase, not the unproven credit');
+  assert.deepEqual(result.unresolvedTransfers, { count: 1, incomeFils: 25000000, outgoingFils: 0 });
+  assert.equal(result.excluded.transfers, 1);
+});

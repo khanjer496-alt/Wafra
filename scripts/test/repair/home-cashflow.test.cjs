@@ -64,6 +64,28 @@ test('changing the shared reporting period changes all three Home figures togeth
     find(previous.render('home'), 'home-net-summary').props.accessibilityLabel);
 });
 
+test('Home separates unclear transfers from confirmed net instead of guessing their ownership', () => {
+  const h = createHarness({ language: 'en', period: { mode: 'all' } });
+  const previous = h.deps['@/lib/dashboard-projection'].projectDashboard();
+  h.deps['@/lib/dashboard-projection'].projectDashboard = () => ({ ...previous,
+    hero: { incomeFils: 270000000, expenseFils: 345000000, netFils: -75000000 },
+    unresolvedTransfers: { count: 3108, incomeFils: 552029437, outgoingFils: 342305358 },
+  });
+  const tree = h.render('home');
+  const net = find(tree, 'home-net-summary');
+  const unclear = find(tree, 'home-unresolved-transfer-summary');
+  const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
+  assert.ok(net && unclear);
+  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + ','));
+  assert.match(text(unclear), /3108/);
+  assert.ok(text(unclear).includes(words.unclearTransfers));
+  assert.ok(text(unclear).includes(words.unclearTransferNote));
+  assert.match(text(unclear), /5,520,294\.37/);
+  assert.match(text(unclear), /3,423,053\.58/);
+  assert.doesNotMatch(net.props.accessibilityLabel, /1,347,|1,349,/,
+    'unclear transfer cashflow cannot leak into the confirmed headline');
+});
+
 test('Home refreshes its conditional prompt after the final review is dismissed without a ledger change', () => {
   const h = createHarness({ state: { reviewTray: { pending: [{ expiresAt: Date.now() + 864000000 }] } } });
   const project = h.deps['@/lib/dashboard-projection'].projectDashboard;

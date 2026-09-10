@@ -4188,9 +4188,12 @@ ok('stale: a stale statement that gets paid leaves openDues',
     { title: 'Inward remittance', category: 'other', isTransfer: false },
   );
   const externalInternal = ledger.internalTransferIds([externalRemittance], accounts);
-  ok('internal: an unpaired inward remittance remains pending rather than definite income',
+  const unresolvedRemittance = reconcileTransfers([externalRemittance], accounts);
+  ok('internal: an unpaired inward remittance stays unresolved without becoming income or a review backlog item',
     externalInternal.size === 0 && !ledger.isIncome(externalRemittance, live, externalInternal) &&
-      reconcileTransfers([externalRemittance], accounts).pendingIds.has(externalRemittance.id));
+      ledger.isUnresolvedTransferMovement(externalRemittance, live, externalInternal) &&
+      !unresolvedRemittance.pendingIds.has(externalRemittance.id) &&
+      unresolvedRemittance.byId.get(externalRemittance.id)?.status === 'ownership-unknown');
   const confirmedExternal = { ...externalRemittance,
     transferDecision: { version: 1, ownership: 'external', decidedAt: Date.parse('2026-06-27T13:00:00Z') } };
   ok('internal: a confirmed external remittance counts as income',

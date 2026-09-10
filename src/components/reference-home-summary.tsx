@@ -18,6 +18,9 @@ type Props = {
   incomeFils: number;
   expenseFils: number;
   netFils: number;
+  unresolvedTransferCount: number;
+  unresolvedIncomingFils: number;
+  unresolvedOutgoingFils: number;
   moneySpec: LedgerMoneySpec;
   onPeriod: () => void;
   onAdd: () => void;
@@ -83,6 +86,18 @@ export function ReferenceHomeSummary(p: Props) {
       {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
         {w.noIncome}</ThemedText>}
       <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
+      {p.unresolvedTransferCount > 0 && <View testID="home-unresolved-transfer-summary"
+        style={[styles.unclearTransfers, { borderColor: p.theme.cardBorder }]}>
+        <View style={styles.unclearHeading}>
+          <ThemedText type="smallBold">{w.unclearTransfers}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{p.unresolvedTransferCount}</ThemedText>
+        </View>
+        <ThemedText type="meta" themeColor="textSecondary">{w.unclearTransferNote}</ThemedText>
+        <ThemedText type="meta" tabular themeColor="textSecondary">
+          {currency} {formatMinorUnits(Math.round(p.unresolvedIncomingFils), p.moneySpec)} {w.unclearIn}
+          {' · '}{currency} {formatMinorUnits(Math.round(p.unresolvedOutgoingFils), p.moneySpec)} {w.unclearOut}
+        </ThemedText>
+      </View>}
     </View>
   </View>;
 }
@@ -99,6 +114,8 @@ const styles = StyleSheet.create({
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 12 },
   metric: { flexGrow: 1, flexShrink: 1, flexBasis: '42%', minWidth: 120, minHeight: 48, gap: 6 },
+  unclearTransfers: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, gap: 4 },
+  unclearHeading: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   metricStacked: { flexBasis: 'auto', alignSelf: 'stretch' },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
 });

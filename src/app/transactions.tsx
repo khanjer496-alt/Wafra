@@ -205,7 +205,7 @@ export default function TransactionsScreen() {
     live: liveAccounts, internal }), [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
-  const { filtered, totalShown, excluded } = projection;
+  const { filtered, totalShown, excluded, unresolvedTransfers } = projection;
   // A single ordinary row already displays its amount. Keep a separate total
   // only when it conveys different information (for example a transfer excluded
   // from totals or a category filter showing part of a split purchase).
@@ -326,6 +326,16 @@ export default function TransactionsScreen() {
               {excluded.hidden > 0
                 ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
                 : ''}
+                </ThemedText>
+              )}
+              {unresolvedTransfers.count > 0 && (
+                <ThemedText testID="transactions-unresolved-transfers" type="meta" themeColor="textSecondary">
+                  {trf('unresolvedTransfersSummary', {
+                    count: unresolvedTransfers.count,
+                    s: unresolvedTransfers.count === 1 ? '' : 's',
+                    incoming: formatAED(unresolvedTransfers.incomeFils, { decimals: false }),
+                    outgoing: formatAED(unresolvedTransfers.outgoingFils, { decimals: false }),
+                  })}
                 </ThemedText>
               )}
               </View>

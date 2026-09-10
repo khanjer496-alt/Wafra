@@ -300,7 +300,10 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     // and its "transfers not counted" line all added up an own-account move
     // as income while a test said every total was safe.
     const shapes = [
-      /[+-]?=\s*\w+\.type === 'income' \?/g,
+      // A bare `=` is also how code chooses an opposite direction, e.g.
+      // `const opposite = row.type === 'income' ? ...`, which is not a money
+      // accumulator. This guard is specifically about running totals.
+      /[+-]=\s*\w+\.type === 'income' \?/g,
       /\w+\.type === 'expense' \? -\w+\.amountFils : \w+\.amountFils/g,
     ];
     for (const m of shapes.flatMap((re) => [...text.matchAll(re)])) {

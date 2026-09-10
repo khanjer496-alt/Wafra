@@ -14,7 +14,11 @@ const S = {
   // Transaction list and details: concise visible labels, complete semantics.
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
-  transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
+  transactionNetTotal: { en: 'Confirmed net', ar: 'الصافي المؤكد' },
+  unresolvedTransfersSummary: {
+    en: '{count} unclear transfer{s} excluded from this Net · {incoming} in · {outgoing} out. No action required.',
+    ar: '{count} تحويلات غير واضحة مستبعدة من هذا الصافي · {incoming} داخل · {outgoing} خارج. لا يلزم اتخاذ إجراء.',
+  },
   transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
   rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
   billAliasAlso: {
