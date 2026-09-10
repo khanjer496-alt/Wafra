@@ -1414,6 +1414,22 @@ const E2E_DEMO_LEDGER =
   Platform.OS === 'web' && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1';
 
 /**
+ * Screenmap needs real post-onboarding screens, not twelve screenshots of the
+ * first-run overlay. Its CI job runs an iOS development simulator with a
+ * synthetic ledger. Keep this opt-in behind BOTH the dedicated flag and the
+ * development-only founder flag so a production build cannot accidentally
+ * seed sample money even if one environment variable is misconfigured.
+ *
+ * The data itself is the same deterministic demoState() used by browser QA;
+ * no phone backup, SMS body, account number or customer data is involved.
+ */
+const SCREENMAP_DEMO_LEDGER =
+  Platform.OS === 'ios' &&
+  process.env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO === '1' &&
+  process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+const SYNTHETIC_DEMO_LEDGER = E2E_DEMO_LEDGER || SCREENMAP_DEMO_LEDGER;
+
+/**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
  *
  * Exported for the perf suite, which asserts the property the whole scheme
@@ -1543,7 +1559,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     try {
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
-      let next: Partial<Omit<AppState, 'hydrated'>> = E2E_DEMO_LEDGER
+      let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
         ? demoState()
         : { onboarded: false };
       if (loaded) {

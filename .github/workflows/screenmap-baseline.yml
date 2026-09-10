@@ -1,0 +1,35 @@
+name: screenmap · launch baseline
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: screenmap-baseline-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  baseline:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - uses: aleqsio/screenmap@v1
+        with:
+          mode: baseline
+          expo_token: ${{ secrets.EXPO_TOKEN }}
+          eas_profile: screenmap-simulator
+          simulator: iPhone 17 Pro
+          agent_provider: codex
+          # Wafra is reviewed privately: keep screenshots in the workflow
+          # artifact and open the .scrmap locally in app.screenmap.dev.
+          publish: 'false'
+          flows_pr: 'false'

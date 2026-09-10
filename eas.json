@@ -34,6 +34,16 @@
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     },
+    "screenmap-simulator": {
+      "extends": "development-simulator",
+      "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
+        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO": "1",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
     "preview": {
       "extends": "base",
       "channel": "preview",
