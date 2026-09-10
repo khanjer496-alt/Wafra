@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
@@ -59,6 +59,16 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
+  let cashflowIncomeFils = 0;
+  let cashflowOutFils = 0;
+  if (homeOnly) {
+    for (const transaction of state.transactions) {
+      if (!inPeriod(transaction.date, period) ||
+          !countsInCashflowTotals(transaction, liveAccounts, internal)) continue;
+      if (transaction.type === 'income') cashflowIncomeFils += transaction.amountFils;
+      else cashflowOutFils += transaction.amountFils;
+    }
+  }
   const uncategorisedSummary = uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
   const hideUnreadPrompt = homeOnly && (uncategorised.shouldPrompt ||
@@ -71,7 +81,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   // rather than allocating a filtered copy of the entire transaction history.
   const activityRows: Transaction[] = [];
   for (const transaction of state.transactions) {
-    if (countsInTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
+    if (countsInCashflowTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
       activityRows.push(transaction);
       if (activityRows.length === 6) break;
     }
@@ -84,7 +94,11 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const accountById = new Map(state.accounts.map((account) => [account.id, account] as const));
   if (homeOnly) {
     return {
-      hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
+      // Home is the cash-flow surface: In / Out / Net. Spending analytics keep
+      // using the stricter summary above so unknown transfers never become a
+      // merchant/category purchase merely because they moved cash.
+      hero: { incomeFils: cashflowIncomeFils, expenseFils: cashflowOutFils,
+        netFils: cashflowIncomeFils - cashflowOutFils },
       upcoming, activityRows, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };

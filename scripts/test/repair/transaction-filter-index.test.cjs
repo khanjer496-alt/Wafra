@@ -6,7 +6,7 @@ const { createTransactionFilterIndex, projectTransactionFilter } = require('../b
 const { monthKey, shiftMonthKey, setMonthStartDay } = require('../build/format.js');
 const { inPeriod } = require('../build/period.js');
 const { categoryLabel, getCategory } = require('../build/categories.js');
-const { countsInTotals } = require('../build/ledger.js');
+const { countsInCashflowTotals } = require('../build/ledger.js');
 const { touchesCategories, amountInCategories } = require('../build/splits.js');
 const defaults = { type: null, accountId: null, categories: new Set(), datePreset: 'selected',
   dateFrom: null, dateTo: null, minFils: null, sort: 'newest' };
@@ -31,10 +31,10 @@ function original(rows, filters, o, language) {
   if (filters.sort === 'largest') list.sort((a, b) => b.amountFils - a.amountFils);
   else if (filters.sort === 'oldest') list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
     (a.ts ?? Date.parse(a.date + 'T12:00:00Z')) - (b.ts ?? Date.parse(b.date + 'T12:00:00Z')));
-  const contribution = t => countsInTotals(t, o.live, o.internal)
+  const contribution = t => countsInCashflowTotals(t, o.live, o.internal)
     ? (t.type === 'income' ? 1 : -1) * (filters.categories.size ? amountInCategories(t, filters.categories) : t.amountFils) : 0;
   const excluded = { transfers: 0, hidden: 0 };
-  for (const t of list) if (!countsInTotals(t, o.live, o.internal)) excluded[o.live.has(t.accountId) ? 'transfers' : 'hidden']++;
+  for (const t of list) if (!countsInCashflowTotals(t, o.live, o.internal)) excluded[o.live.has(t.accountId) ? 'transfers' : 'hidden']++;
   return { filtered: list, totalShown: list.reduce((sum, t) => sum + contribution(t), 0), excluded };
 }
 const rows = Array.from({ length: 12000 }, (_, i) => ({ id: 'row-' + i,

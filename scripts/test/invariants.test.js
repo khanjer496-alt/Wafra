@@ -429,9 +429,10 @@ const hits = parsed.filter((x) => x.p);
     ledger.internalTransferIds(transactions, ledger.liveAccountIds(accountsWith(true))).size === 0);
   const unproven = transactions.slice(0, 2).map(({ transferEvidence, ...transaction }) => transaction);
   const pending = reconcileTransfers(unproven, accountsWith(true));
-  ok('transfer: equal amounts and clocks without evidence stay pending, never auto-owned',
-    pending.internalIds.size === 0 && pending.pendingIds.size === 2 &&
-      pending.pendingIds.has('out') && pending.pendingIds.has('in'));
+  ok('transfer: equal amounts and clocks without evidence are never auto-owned or forced into review',
+    pending.internalIds.size === 0 && pending.pendingIds.size === 0 &&
+      pending.byId.get('out')?.status === 'ownership-unknown' &&
+      pending.byId.get('in')?.status === 'ownership-unknown');
 
   // Widening must not widen the MATCH. Two accounts are still required, and a
   // real arrival of the same value on the same day is still real.

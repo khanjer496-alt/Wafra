@@ -269,7 +269,7 @@ export default function JournalHomeScreen() {
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
-          onSpending={() => router.push('/flow')} />
+          onSpending={() => router.push('/transactions?type=expense')} />
         <TransferReviewNotice {...pendingTransfers} onPress={() => router.push('/review-transfers')} />
 
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}

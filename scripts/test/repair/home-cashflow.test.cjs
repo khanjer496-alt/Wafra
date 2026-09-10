@@ -36,7 +36,7 @@ for (const language of ['en', 'ar']) {
         assert.equal(!!find(tree, 'home-no-income-note'), incomeFils === 0);
         assert.ok(!text(tree).includes(words.balance), 'account snapshots do not replace cashflow');
         incoming.props.onPress(); outgoing.props.onPress();
-        assert.deepEqual(h.events, [['route', '/transactions?type=income'], ['route', '/flow']]);
+        assert.deepEqual(h.events, [['route', '/transactions?type=income'], ['route', '/transactions?type=expense']]);
         const style = Object.assign({}, ...net.props.style.flat().filter(Boolean));
         const metrics = walk(tree).find(node => Array.isArray(node.props?.children)
           && node.props.children.includes(incoming) && node.props.children.includes(net));

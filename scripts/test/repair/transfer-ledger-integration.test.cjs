@@ -32,7 +32,7 @@ const decide = (rows, ids, ownership) => core.applyTransferDecision(rows, accoun
 // Unknown recipients are reviewed one entry at a time, never as a catchall batch.
 const decideEach = (rows, ids, ownership) => ids.reduce((current, id) => decide(current, [id], ownership), rows);
 
-test('unknown bank transfers stay recorded outside confirmed totals; external choices restore exact amounts', () => {
+test('unknown bank transfers stay out of spending analytics but remain in cash-flow without creating a review backlog', () => {
   const rows = [row('out', 'expense', { isTransfer: true }), row('in', 'income', { accountId: 'other-bank' }),
     row('salary', 'income', { title: 'Salary', category: 'salary', amountFils: 50000 }),
     row('shop', 'expense', { title: 'Coffee', category: 'dining', amountFils: 2500 })];
@@ -42,7 +42,12 @@ test('unknown bank transfers stay recorded outside confirmed totals; external ch
       transactions.filter(t => ledger.isSpending(t, undefined, internal)).reduce((s,t) => s+t.amountFils,0)];
   };
   assert.deepEqual(sums(rows), [50000, 2500]);
-  assert.equal(core.reconcileTransfers(rows, accounts).pendingIds.size, 2);
+  assert.equal(core.reconcileTransfers(rows, accounts).pendingIds.size, 0);
+  const internal = ledger.internalTransferIds(rows, accounts);
+  assert.deepEqual([
+    rows.filter(t => t.type === 'income' && ledger.countsInCashflowTotals(t, undefined, internal)).reduce((s,t) => s+t.amountFils,0),
+    rows.filter(t => t.type === 'expense' && ledger.countsInCashflowTotals(t, undefined, internal)).reduce((s,t) => s+t.amountFils,0),
+  ], [60000, 12500]);
   assert.throws(() => decide(rows, ['out', 'in'], 'external'), /known-counterparty group/);
   const external = decideEach(rows, ['out', 'in'], 'external');
   assert.deepEqual(sums(external), [60000, 12500]);
@@ -53,14 +58,16 @@ test('unknown bank transfers stay recorded outside confirmed totals; external ch
   assert.deepEqual(sums(own), [50000, 2500]);
   assert.equal(core.reconcileTransfers(own, accounts).pendingIds.size, 0);
   const undo = decide(own, ['out'], null);
-  assert.equal(core.reconcileTransfers(undo, accounts).pendingIds.has('out'), true);
+  assert.equal(core.reconcileTransfers(undo, accounts).pendingIds.has('out'), false,
+    'an ordinary unpaired transfer does not become a mandatory review task');
 });
 
 test('a company-suffix category guess cannot turn an unclear transfer into confirmed business income', () => {
   const unknown = row('company-transfer', 'income', { category: 'business', title: 'Incoming transfer' });
   const named = row('business-payout', 'income', { category: 'business', title: 'Business payout' });
-  assert.equal(core.reconcileTransfers([unknown, named], accounts).pendingIds.has(unknown.id), true);
+  assert.equal(core.reconcileTransfers([unknown, named], accounts).pendingIds.has(unknown.id), false);
   assert.equal(ledger.isIncome(unknown), false);
+  assert.equal(ledger.countsInCashflowTotals(unknown), true);
   assert.equal(ledger.isIncome(named), true);
   const confirmed = decide([unknown], [unknown.id], 'external')[0];
   assert.equal(ledger.isIncome(confirmed), true);

@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { countsInTotals } from '@/lib/ledger';
+import { countsInCashflowTotals } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -76,7 +76,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (filters.datePreset === 'custom' && ((filters.dateFrom && row.date < filters.dateFrom) || (filters.dateTo && row.date > filters.dateTo))) continue;
     if (query && !search.includes(query)) continue;
     filtered.push(row);
-    const counts = countsInTotals(row, options.live, options.internal);
+    const counts = countsInCashflowTotals(row, options.live, options.internal);
     if (!counts) { if (options.live.has(row.accountId)) transfers++; else hidden++; }
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;

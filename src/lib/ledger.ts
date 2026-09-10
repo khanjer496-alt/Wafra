@@ -35,6 +35,35 @@ export function countsInTotals(
   return true;
 }
 
+/**
+ * Cash-flow totals answer a different question from spending analytics.
+ *
+ * An unresolved bank transfer on a real visible account still moved money, so
+ * dropping it from In/Out can make a multi-year Net wildly wrong. Keep those
+ * movements in cash-flow until reconciliation proves they are between the
+ * user's own accounts. Category, merchant, subscription and budget analytics
+ * continue to use countsInTotals(), where unresolved ownership stays excluded.
+ */
+export function countsInCashflowTotals(
+  transaction: Transaction,
+  live?: Set<string>,
+  internal?: Set<string>,
+): boolean {
+  if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type !== 'income') return false;
+  if (internal?.has(transaction.id)) return false;
+  const ownership = transferOwnership(transaction);
+  if (ownership === 'own') return false;
+  // Settlement/funding rows are deliberately not transfer candidates. Preserve
+  // their existing exclusion instead of re-labelling card payments as income.
+  if (ownership === null && transaction.isTransfer === true) return false;
+  // A holding transfer source is not a user's known account, so it cannot yet
+  // establish cash flow for the ledger. Ordinary unassigned parsed activity is
+  // still governed by the live-account set below.
+  if (isUnassignedTransferAccount(transaction.accountId)) return false;
+  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
+  return true;
+}
+
 export function isSpending(
   transaction: Transaction, live?: Set<string>, internal?: Set<string>,
 ): boolean {
