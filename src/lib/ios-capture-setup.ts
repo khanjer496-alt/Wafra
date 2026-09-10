@@ -328,12 +328,10 @@ export function createIosCaptureSetup({
       publish({ failure: 'shortcut-install' });
       return;
     }
-    if (!(await canUseShortcuts(generation))) {
-      if (!disposed && generation === operationGeneration) {
-        publish({ failure: 'shortcuts-missing' });
-      }
-      return;
-    }
+    // Installing from an iCloud share URL does not require the Shortcuts URL
+    // scheme to pass canOpenURL first. On some real devices that probe can
+    // return false even though the iCloud share page opens and hands off to
+    // Shortcuts correctly. Blocking on it made the onboarding CTA look inert.
     try {
       await dependencies.openUrl(url);
       if (!disposed && generation === operationGeneration) {

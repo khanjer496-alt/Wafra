@@ -300,8 +300,8 @@ module.exports = async ({ execute, ok, eq, translated }) => {
 
   const missing = await makeScreen({ available: false });
   await missing.press('iosLocalInstallShortcut');
-  ok('iOS recovery: missing Shortcuts offers an actionable App Store recovery',
-    await missing.press('iosInstallShortcuts') && missing.urls[0] === 'https://apps.apple.com/app/shortcuts/id1462947752');
+  ok('iOS recovery: future install still opens the public iCloud link when the scheme probe is false',
+    missing.urls.length === 1 && /https:\/\/www\.icloud\.com\/shortcuts\//.test(missing.urls[0]));
 
   const noHistoryBridge = await makeScreen({ historyAvailable: false, progress: { historyShortcutConfirmed: true } });
   await noHistoryBridge.selectHistory();
@@ -314,8 +314,8 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   const missingHistoryShortcuts = await makeScreen({ available: false });
   await missingHistoryShortcuts.selectHistory();
   await missingHistoryShortcuts.press('historyAddAction');
-  ok('iOS recovery: missing Shortcuts on the history path also opens App Store recovery',
-    await missingHistoryShortcuts.press('iosInstallShortcuts') && missingHistoryShortcuts.urls[0] === 'https://apps.apple.com/app/shortcuts/id1462947752');
+  ok('iOS recovery: history install still opens the public iCloud link when the scheme probe is false',
+    missingHistoryShortcuts.urls.length === 1 && /https:\/\/www\.icloud\.com\/shortcuts\//.test(missingHistoryShortcuts.urls[0]));
 
   const runningHistory = await makeScreen({ historyInFlight: true });
   await runningHistory.selectHistory();

@@ -371,10 +371,9 @@ export default function IosSetupScreen() {
   const openHistoryInstall = useCallback(() => {
     if (!historyInstallUrl) return;
     void runOperation(async () => {
-      if (!await Linking.canOpenURL('shortcuts://')) {
-        setShortcutsMissing(true);
-        return;
-      }
+      // Open the public iCloud Shortcut share directly. Do not gate this on
+      // canOpenURL('shortcuts://'): the scheme probe is not required for an
+      // HTTPS install URL and can fail spuriously on real devices.
       setShortcutsMissing(false);
       await updateProgress({ type: 'history-status-changed', status: 'in-progress' });
       try {
