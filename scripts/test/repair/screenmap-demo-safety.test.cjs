@@ -33,6 +33,7 @@ test('Screenmap uses only the synthetic iOS development ledger', () => {
 
 test('production cannot satisfy the Screenmap demo guard', () => {
   const eas = JSON.parse(read('eas.json'));
+  const appConfig = read('app.config.js');
   assert.equal(eas.cli.version, '>=22.4.0');
   assert.equal(eas.build.production.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK, '0');
   assert.equal(eas.build['screenmap-simulator'].extends, 'development-simulator');
@@ -41,6 +42,12 @@ test('production cannot satisfy the Screenmap demo guard', () => {
   assert.equal(eas.build['development-simulator'].env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO, undefined);
   assert.equal(eas.build.development.developmentClient, true);
   assert.equal(eas.build.development.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK, '1');
+  assert.match(appConfig,
+    /EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO === '1'[\s\S]*?EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1'/,
+    'Screenmap config override must require both synthetic-review flags');
+  assert.match(appConfig,
+    /runtimeVersion:\s*undefined[\s\S]*?updates:[\s\S]*?enabled:\s*false/,
+    'Screenmap must disable OTA runtime matching for the action-owned local Metro session');
 });
 
 test('Screenmap output and publishing stay private by default', () => {
