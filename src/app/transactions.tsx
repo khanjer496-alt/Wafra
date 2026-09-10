@@ -294,14 +294,16 @@ export default function TransactionsScreen() {
             </ThemedText>
             {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
               {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
-                <ThemedText type="small" themeColor="textSecondary">{tr('transactionNetTotal')}</ThemedText>
-              <ThemedText
+                <ThemedText type="small" themeColor="textSecondary">
+                  {tr(unresolvedTransfers.count > 0 ? 'transactionNetPending' : 'transactionNetTotal')}
+                </ThemedText>
+              {unresolvedTransfers.count === 0 ? <ThemedText
                 type="smallBold"
                 tabular
                 style={{ color: totalShown >= 0 ? theme.income : theme.text }}>
                 {totalShown >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(totalShown), { decimals: false })}
-              </ThemedText>
+              </ThemedText> : <ThemedText type="smallBold">—</ThemedText>}
               </View>}
               {activeFilterCount > 0 && (
                 <Pressable
@@ -329,7 +331,13 @@ export default function TransactionsScreen() {
                 </ThemedText>
               )}
               {unresolvedTransfers.count > 0 && (
-                <ThemedText testID="transactions-unresolved-transfers" type="meta" themeColor="textSecondary">
+                <View testID="transactions-unresolved-transfers">
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {trf('transactionConfirmedSubtotal', {
+                    amount: `${totalShown >= 0 ? '+' : '−'}${formatAED(Math.abs(totalShown), { decimals: false })}`,
+                  })}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
                   {trf('unresolvedTransfersSummary', {
                     count: unresolvedTransfers.count,
                     s: unresolvedTransfers.count === 1 ? '' : 's',
@@ -337,6 +345,7 @@ export default function TransactionsScreen() {
                     outgoing: formatAED(unresolvedTransfers.outgoingFils, { decimals: false }),
                   })}
                 </ThemedText>
+                </View>
               )}
               </View>
             </View>

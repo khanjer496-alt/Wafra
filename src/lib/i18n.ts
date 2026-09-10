@@ -15,6 +15,11 @@ const S = {
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
   transactionNetTotal: { en: 'Confirmed net', ar: 'الصافي المؤكد' },
+  transactionNetPending: { en: 'Net not final', ar: 'الصافي غير نهائي' },
+  transactionConfirmedSubtotal: {
+    en: 'Confirmed entries: {amount}',
+    ar: 'العمليات المؤكدة: {amount}',
+  },
   unresolvedTransfersSummary: {
     en: '{count} unclear transfer{s} excluded from this Net · {incoming} in · {outgoing} out. No action required.',
     ar: '{count} تحويلات غير واضحة مستبعدة من هذا الصافي · {incoming} داخل · {outgoing} خارج. لا يلزم اتخاذ إجراء.',

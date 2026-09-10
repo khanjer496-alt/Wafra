@@ -266,6 +266,7 @@ export default function JournalHomeScreen() {
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
           incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
           netFils={dashboard.hero.netFils}
+          netFinal={unresolvedTransfers.count === 0}
           unresolvedTransferCount={unresolvedTransfers.count}
           unresolvedIncomingFils={unresolvedTransfers.incomeFils}
           unresolvedOutgoingFils={unresolvedTransfers.outgoingFils}

@@ -18,6 +18,7 @@ type Props = {
   incomeFils: number;
   expenseFils: number;
   netFils: number;
+  netFinal: boolean;
   unresolvedTransferCount: number;
   unresolvedIncomingFils: number;
   unresolvedOutgoingFils: number;
@@ -77,10 +78,14 @@ export function ReferenceHomeSummary(p: Props) {
         <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" color={p.theme.income} />
       </Pressable>
       <View testID="home-net-summary" accessible accessibilityRole="text"
-        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`}
+        accessibilityLabel={p.netFinal
+          ? `${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`
+          : `${w.netPending}. ${w.notFinal}. ${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}.`}
         style={[styles.metric, p.largeText && styles.metricStacked]}>
-        <ThemedText type="small" themeColor="textSecondary">{w.netLabel}</ThemedText>
-        <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+        <ThemedText type="small" themeColor="textSecondary">{p.netFinal ? w.netLabel : w.netPending}</ThemedText>
+        {p.netFinal
+          ? <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+          : <ThemedText type="smallBold">{w.notFinal}</ThemedText>}
       </View>
       </View>
       {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
@@ -93,6 +98,9 @@ export function ReferenceHomeSummary(p: Props) {
           <ThemedText type="meta" themeColor="textSecondary">{p.unresolvedTransferCount}</ThemedText>
         </View>
         <ThemedText type="meta" themeColor="textSecondary">{w.unclearTransferNote}</ThemedText>
+        <ThemedText type="meta" tabular themeColor="textSecondary">
+          {w.netLabel}: {currency} {netSign}{formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}
+        </ThemedText>
         <ThemedText type="meta" tabular themeColor="textSecondary">
           {currency} {formatMinorUnits(Math.round(p.unresolvedIncomingFils), p.moneySpec)} {w.unclearIn}
           {' · '}{currency} {formatMinorUnits(Math.round(p.unresolvedOutgoingFils), p.moneySpec)} {w.unclearOut}

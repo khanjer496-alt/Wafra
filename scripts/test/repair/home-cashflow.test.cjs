@@ -76,10 +76,15 @@ test('Home separates unclear transfers from confirmed net instead of guessing th
   const unclear = find(tree, 'home-unresolved-transfer-summary');
   const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
   assert.ok(net && unclear);
-  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + ','));
+  assert.ok(net.props.accessibilityLabel.startsWith(words.netPending + '.'));
+  assert.ok(text(net).includes(words.notFinal));
+  assert.doesNotMatch(text(net), /750,000|750000/,
+    'a provisional all-time subtotal is not rendered as the headline Net');
   assert.match(text(unclear), /3108/);
   assert.ok(text(unclear).includes(words.unclearTransfers));
   assert.ok(text(unclear).includes(words.unclearTransferNote));
+  assert.match(text(unclear), /750,000/,
+    'the confirmed-only subtotal remains available as supporting context');
   assert.match(text(unclear), /5,520,294\.37/);
   assert.match(text(unclear), /3,423,053\.58/);
   assert.doesNotMatch(net.props.accessibilityLabel, /1,347,|1,349,/,

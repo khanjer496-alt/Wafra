@@ -66,7 +66,7 @@ export const spendingTrendsCopy = {
 
 export const homeSummaryCopy = {
   en: { balance: 'Recorded balances', net: 'Net after spending', notBalance: 'Income minus spending · not your bank balance',
-    moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Confirmed net',
+    moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Confirmed net', netPending: 'Net not final', notFinal: 'Unclear transfers remain',
     cashflowNote: 'Income minus spending · unclear transfers are not guessed',
     noIncome: 'No confirmed income recorded for this period.',
     unclearTransfers: 'Unclear transfers excluded', unclearTransferNote: 'Not counted as income or spending until Wafra can prove what they are.',
@@ -75,7 +75,7 @@ export const homeSummaryCopy = {
     spending: 'Spending', viewSpending: 'View money out', income: 'Income this period', period: 'This period', balanceDetail: 'View accounts',
     balanceNote: 'Latest known figures · not a live bank connection' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
-    moneyIn: 'الدخل', moneyOut: 'الإنفاق', netLabel: 'الصافي المؤكد',
+    moneyIn: 'الدخل', moneyOut: 'الإنفاق', netLabel: 'الصافي المؤكد', netPending: 'الصافي غير نهائي', notFinal: 'ما زالت هناك تحويلات غير واضحة',
     cashflowNote: 'الدخل ناقص الإنفاق · لا يتم تخمين التحويلات غير الواضحة',
     noIncome: 'لا يوجد دخل مؤكد مسجل لهذه الفترة.',
     unclearTransfers: 'تحويلات غير واضحة مستبعدة', unclearTransferNote: 'لا تُحتسب كدخل أو إنفاق حتى تتمكن وفرة من إثبات ماهيتها.',

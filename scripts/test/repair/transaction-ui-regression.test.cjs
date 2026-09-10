@@ -160,6 +160,23 @@ test('narrow screens give search full width without reducing the font size', () 
   assert.equal(style(filter).alignSelf, 'flex-end');
 });
 
+test('an unresolved transfer makes the transaction Net explicitly unfinished instead of printing a misleading signed total', () => {
+  const rows = [
+    fixtureRow('purchase', { amountFils: 12500 }),
+    fixtureRow('unclear-transfer', {
+      title: 'Incoming transfer', type: 'income', category: 'other', amountFils: 25000000,
+    }),
+  ];
+  const h = transactions({ language: 'en', state: { transactions: rows }, period: { mode: 'all' } });
+  const net = netSummary(h);
+  const unclear = walk(h.tree).find(n => n.props?.testID === 'transactions-unresolved-transfers');
+  assert.ok(net && unclear);
+  assert.ok(text(net).includes(h.deps['@/lib/i18n'].t('transactionNetPending')));
+  assert.ok(text(net).includes('—'));
+  assert.ok(text(unclear).includes(h.deps['@/lib/i18n'].tf('transactionConfirmedSubtotal', { amount: '−AED 125' })));
+  assert.ok(text(unclear).includes('AED 250,000'));
+});
+
 const fixtureRow = (id, overrides = {}) => ({
   id, title: 'Fixture shop', date: '2026-09-02', amountFils: 12500,
   type: 'expense', category: 'dining', accountId: 'enbd', source: 'sms', ...overrides,
