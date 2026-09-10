@@ -161,13 +161,13 @@ async function main() {
   setActiveMarket('AE');
 
   setLedgerCurrency('AED');
-  ok('a pack denominated in another currency is refused, not applied',
-    setActiveMarket('SA') === false && getActiveMarket().id === 'AE');
-  ok('so stored fils keep the currency they were recorded in',
+  ok('parser market can change independently from the ledger currency',
+    setActiveMarket('SA') === true && getActiveMarket().id === 'SA');
+  ok('changing parser market never relabels stored money',
     formatAED(46520, { decimals: false }) === 'AED 465.20');
-  ok('and the refusal is visible before it is attempted',
-    canSelectMarket('SA') === false && canSelectMarket('AE') === true);
-  ok('a pack in the SAME currency is never refused',
+  ok('both verified parser packs remain selectable with a global ledger',
+    canSelectMarket('SA') === true && canSelectMarket('AE') === true);
+  ok('switching back changes parser vocabulary only',
     setActiveMarket('AE') === true && getActiveMarket().id === 'AE');
 
   // The screen calls "foreign" whatever is not the LEDGER's currency, so an
@@ -177,14 +177,15 @@ async function main() {
     ledgerCurrencyCode() === 'AED' &&
       summarizeForeignActivity(mixed).groups.map((g) => g.currency).join(',') === 'USD,SAR');
 
-  // Erasing or restoring releases the pin on the same tick — there is no
-  // stored field to migrate, so an emptied ledger is free to move country.
+  // Erasing or restoring releases the explicit ledger denomination. Until a
+  // new currency is chosen, presentation follows the selected parser pack for
+  // legacy compatibility only.
   setLedgerCurrency(null);
   ok('releasing the pin lets the country change through again',
     setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465.20');
   setLedgerCurrency('SAR');
-  ok('an SAR ledger pins SAR, not whichever pack shipped first',
-    setActiveMarket('AE') === false && formatAED(46520, { decimals: false }) === 'SAR 465.20');
+  ok('an SAR ledger stays SAR even while the AE parser pack is active',
+    setActiveMarket('AE') === true && formatAED(46520, { decimals: false }) === 'SAR 465.20');
   setLedgerCurrency(null);
   setActiveMarket('AE');
 

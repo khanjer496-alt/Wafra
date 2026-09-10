@@ -22,7 +22,6 @@
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": [
           "shortcuts"
         ],

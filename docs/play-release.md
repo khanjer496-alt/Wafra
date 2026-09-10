@@ -1,5 +1,9 @@
 # Wafra — Google Play release playbook
 
+> **Current declaration source:** `docs/store-compliance/google-play.md` and
+> `docs/store-metadata.json`. This older playbook contains historical rollout
+> assumptions; use it for background only when it agrees with those files.
+
 Modeled on FinArt ("Expense Tracker Budget Planner", com.finart — live on Play
 with READ_SMS since 2016, 1M+ downloads), which ships under Google's
 **"SMS-based money management"** permission exception for "apps that track and

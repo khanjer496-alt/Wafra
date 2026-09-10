@@ -264,16 +264,48 @@ const checkStoreDocuments = async (root, findings) => {
     readText(root, 'docs/privacy-policy.md', findings),
     readText(root, 'docs/terms-of-use.md', findings),
     readText(root, 'docs/store-listing.md', findings),
+    readText(root, 'docs/store-compliance/google-play.md', findings),
+    readText(root, 'docs/store-compliance/apple-app-store.md', findings),
+    readText(root, 'docs/store-compliance/global-launch-board.md', findings),
+    readText(root, 'docs/store-compliance/monitoring-and-rollback.md', findings),
   ]);
   const databaseId = wrangler?.match(/^\s*database_id\s*=\s*"([^"]+)"\s*$/m)?.[1] ?? '';
   if (!UUID.test(databaseId)) findings.push(finding('d1-database-id', 'The production D1 database UUID is missing', 'The relay cannot be released against an unresolved database.', 'Set database_id in server/wrangler.toml.'));
-  if (privacy?.includes('support@example.com') || terms?.includes('support@example.com')) {
-    findings.push(finding('legal-contact', 'Legal documents still use the placeholder support address', 'Customers and reviewers need a real contact route.', 'Replace support@example.com in both legal documents.'));
+  if (privacy?.includes('[[PUBLIC SUPPORT CONTACT') || terms?.includes('[[PUBLIC SUPPORT CONTACT')) {
+    findings.push(finding('legal-contact', 'Legal documents still use a placeholder support contact', 'Customers and reviewers need a monitored real contact route.', 'Replace the PUBLIC SUPPORT CONTACT placeholder in both legal documents.'));
   }
-  if (privacy?.includes('[pending before release]')) findings.push(finding('privacy-relay-entity', 'The privacy policy relay entity is unfinished', 'The policy does not identify the relay entity and jurisdiction.', 'Complete the pending privacy-policy section.'));
-  if (terms && /\[\[(LEGAL ENTITY|JURISDICTION)\]\]/.test(terms)) findings.push(finding('terms-placeholders', 'The terms contain legal placeholders', 'The contracting entity or jurisdiction is unresolved.', 'Complete the legal entity and jurisdiction in the terms.'));
+  if (privacy && !privacy.includes('Nasida Apps LLC')) findings.push(finding('privacy-publisher', 'The privacy policy does not identify the publisher', 'The public policy must identify the entity responsible for Wafra.', 'Name the approved publisher in the privacy policy.'));
+  if (terms && !terms.includes('Nasida Apps LLC')) findings.push(finding('terms-publisher', 'The terms do not identify the publisher', 'The contracting entity must be named before publication.', 'Name the approved publisher in the terms.'));
+  if (terms?.includes('[[GOVERNING LAW')) findings.push(finding('terms-governing-law', 'The governing-law clause is unresolved', 'Choosing governing law is a publisher/counsel decision and cannot be inferred from the repository.', 'Have the publisher/counsel choose the governing law and replace the placeholder.'));
   if (listing && /\[(business email|host the landing page privacy section)[^\]]*pending\]/i.test(listing)) {
     findings.push(finding('store-listing-placeholders', 'The store listing contains launch placeholders', 'Contact or hosted privacy details are unfinished.', 'Complete the pending store-listing fields.'));
+  }
+};
+
+const checkAppleExportCompliance = async (root, expo, findings) => {
+  const decision = await readJson(
+    root,
+    'docs/store-compliance/apple-export-compliance.json',
+    findings,
+  );
+  if (!decision) return;
+  if (decision.status !== 'approved' || typeof decision.itsAppUsesNonExemptEncryption !== 'boolean') {
+    findings.push(finding(
+      'apple-export-compliance',
+      'Apple export-compliance determination is still pending',
+      'Wafra ships application-level cryptography; the repository must not guess the App Store Connect encryption answer.',
+      'Complete the publisher/export-compliance review for the exact iOS binary, set status=approved and record the resulting boolean.',
+    ));
+    return;
+  }
+  const configured = expo?.ios?.infoPlist?.ITSAppUsesNonExemptEncryption;
+  if (configured !== decision.itsAppUsesNonExemptEncryption) {
+    findings.push(finding(
+      'apple-export-compliance-config',
+      'The iOS encryption declaration does not match the approved decision',
+      'App Store Connect/build metadata and the retained publisher decision must agree exactly.',
+      'Set expo.ios.infoPlist.ITSAppUsesNonExemptEncryption to the approved boolean before building the public candidate.',
+    ));
   }
 };
 
@@ -306,7 +338,12 @@ export const assessReleaseReadiness = async ({ root, intent, publicEnv = {} }) =
       checkProductionRuntime(expo, eas, platform, publicEnv, findings);
     }
   }
-  if (intent.kind === 'store-release') await checkStoreDocuments(absoluteRoot, findings);
+  if (intent.kind === 'store-release') {
+    await checkStoreDocuments(absoluteRoot, findings);
+    if (platform === 'ios' || platform === 'all') {
+      await checkAppleExportCompliance(absoluteRoot, expo, findings);
+    }
+  }
 
   return {
     ready: findings.length === 0,

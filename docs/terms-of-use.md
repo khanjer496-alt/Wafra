@@ -1,15 +1,14 @@
 # Wafra Terms of Use
 
-_Last updated: 2 August 2026_
+_Last updated: 10 September 2026_
 
-> **Draft — needs a lawyer and two decisions before publishing.**
-> Placeholders marked `[[…]]` must be filled: the legal entity that publishes
-> the app, and the governing jurisdiction. Both change the meaning of this
-> document, and neither should be guessed. Everything else describes how the
-> app actually behaves today; if the app changes, this changes with it.
+> **Launch draft — needs counsel review and one legal decision before publishing.**
+> The publisher is known. The governing-law clause and monitored public support
+> contact remain deliberate placeholders because neither should be guessed from
+> where the company was formed or where a user happens to live.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android and iOS published by `[[LEGAL ENTITY]]` ("we", "us").
+for Android and iOS published by **Nasida Apps LLC** ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -18,9 +17,10 @@ them, do not use the app.
 
 Wafra records your personal money movements — expenses, income, transfers,
 card statements, bills and subscriptions — and presents them as balances,
-budgets and reports. Android can parse bank alerts on the device. On iPhone,
-a personal Shortcut can send alerts from bank senders you select to Wafra's
-privacy-minimising relay for parsing and sealed delivery back to your devices.
+budgets and reports. Android can parse supported bank alerts on the device. On
+iPhone, a personal Apple Message automation can pass selected bank alerts to
+Wafra's local App Intent on that iPhone. Optional email, statement and trusted-
+device features use Wafra's privacy-minimising relay only when you choose them.
 
 It is an organiser for information your bank already sent you. It is not a
 bank, not a payment service, and it does not connect to your bank accounts or
@@ -41,7 +41,7 @@ information the app showed or failed to show.
 
 ## Using the app
 
-You must be 18 or older, or have consent from a parent or guardian.
+You must be 18 or older to use Wafra.
 
 There is no account, no sign-up and no password — the app works anonymously.
 That means we cannot identify you, cannot recover your data for you, and
@@ -120,9 +120,8 @@ transactions.
 
 ## Governing law
 
-These terms are governed by the laws of `[[JURISDICTION]]`.
+These terms are governed by the laws of `[[GOVERNING LAW — PUBLISHER/COUNSEL TO CONFIRM]]`.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-support@example.com
+[[PUBLIC SUPPORT CONTACT — required before publishing]]

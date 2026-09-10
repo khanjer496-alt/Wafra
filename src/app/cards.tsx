@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet, type Choice } from '@/components/ui/choice-sheet';
@@ -18,7 +19,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIds, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
-import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
+import { formatAmount, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -57,13 +58,14 @@ export default function CardsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const router = useRouter();
-  const { state, editAccount, deleteAccount } = useStore();
+  const { state, editAccount, deleteAccount, setLedgerMoney } = useStore();
   const now = useMemo(() => new Date(), []);
 
   const [showInactive, setShowInactive] = useState(false);
   const [detail, setDetail] = useState<Account | null>(null);
   const [limitFor, setLimitFor] = useState<Account | null>(null);
   const [limitText, setLimitText] = useState('');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   // The card a long press is asking about, and the confirmation that the
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
@@ -129,10 +131,15 @@ export default function CardsScreen() {
   };
 
   const saveCreditLimit = () => {
-    const fils = parseAmountToFils(limitText);
+    const fils = state.ledgerMoney
+      ? parseAmountWithMoneySpec(limitText, state.ledgerMoney)
+      : null;
     if (limitFor && fils) editAccount(limitFor.id, { creditLimitFils: fils });
     setLimitFor(null);
   };
+  const creditLimitFils = state.ledgerMoney
+    ? parseAmountWithMoneySpec(limitText, state.ledgerMoney)
+    : null;
 
   const cardActions = (card: Account): Choice<CardAction>[] => [
     { value: 'visibility', label: card.archived ? t('unhide') : t('hideCard') },
@@ -298,13 +305,27 @@ export default function CardsScreen() {
         onClose={() => setLimitFor(null)}
         title={t('creditLimitTitle')}
         footer={(
-          <Button wrapLabel label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
+          <Button wrapLabel label={t('saveLimit')} onPress={saveCreditLimit} disabled={!creditLimitFils} />
         )}>
         <ThemedText type="default" themeColor="textSecondary">
           {tf('creditLimitBody', { name: limitFor?.name ?? t('card') })}
         </ThemedText>
+        {!state.ledgerMoney && (
+          <Button
+            label={t('chooseLedgerCurrency')}
+            variant="outline"
+            onPress={() => setCurrencySheetVisible(true)}
+          />
+        )}
         <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
       </BottomSheet>
+
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
+      />
 
       {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
           inherits its clipping and its scroll offset on web. */}

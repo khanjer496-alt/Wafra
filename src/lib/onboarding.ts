@@ -4,7 +4,10 @@ import type {
   Budget,
   CategoryId,
   Goal,
+  OnboardingFocus,
+  OnboardingJourneyStage,
   OnboardingPlanPreferences,
+  OnboardingTracking,
   Transaction,
 } from '@/lib/types';
 
@@ -12,20 +15,107 @@ export type OnboardingMarketId = 'AE' | 'SA';
 export type OnboardingGoalId = OnboardingPlanPreferences['goalIds'][number];
 export type OnboardingBudgetId = OnboardingPlanPreferences['budgetId'];
 
+export interface OnboardingFocusPreset {
+  id: OnboardingFocus;
+  titleKey: StringKey;
+  detailKey: StringKey;
+  icon: 'chart' | 'receipt' | 'trend' | 'wallet';
+}
+
+export interface OnboardingTrackingPreset {
+  id: OnboardingTracking;
+  titleKey: StringKey;
+  detailKey: StringKey;
+  icon: 'spark' | 'bank' | 'chart' | 'phone';
+}
+
+export const FOCUS_PRESETS: readonly OnboardingFocusPreset[] = [
+  {
+    id: 'spending',
+    titleKey: 'onboardFocusSpending',
+    detailKey: 'onboardFocusSpendingDetail',
+    icon: 'chart',
+  },
+  {
+    id: 'bills',
+    titleKey: 'onboardFocusBills',
+    detailKey: 'onboardFocusBillsDetail',
+    icon: 'receipt',
+  },
+  {
+    id: 'cashflow',
+    titleKey: 'onboardFocusCashflow',
+    detailKey: 'onboardFocusCashflowDetail',
+    icon: 'trend',
+  },
+  {
+    id: 'overview',
+    titleKey: 'onboardFocusOverview',
+    detailKey: 'onboardFocusOverviewDetail',
+    icon: 'wallet',
+  },
+] as const;
+
+export const TRACKING_PRESETS: readonly OnboardingTrackingPreset[] = [
+  {
+    id: 'none',
+    titleKey: 'onboardTrackingNone',
+    detailKey: 'onboardTrackingNoneDetail',
+    icon: 'spark',
+  },
+  {
+    id: 'bank-apps',
+    titleKey: 'onboardTrackingBankApps',
+    detailKey: 'onboardTrackingBankAppsDetail',
+    icon: 'bank',
+  },
+  {
+    id: 'spreadsheet',
+    titleKey: 'onboardTrackingSpreadsheet',
+    detailKey: 'onboardTrackingSpreadsheetDetail',
+    icon: 'chart',
+  },
+  {
+    id: 'finance-app',
+    titleKey: 'onboardTrackingFinanceApp',
+    detailKey: 'onboardTrackingFinanceAppDetail',
+    icon: 'phone',
+  },
+] as const;
+
+export function onboardingLandingPath(focus: OnboardingFocus | null | undefined): '/' | '/flow' | '/bills' {
+  if (focus === 'spending') return '/flow';
+  if (focus === 'bills') return '/bills';
+  return '/';
+}
+
+export function onboardingInsightKeys(focus: OnboardingFocus | null | undefined): {
+  title: StringKey;
+  body: StringKey;
+} {
+  if (focus === 'spending') return { title: 'onboardInsightSpendingTitle', body: 'onboardInsightSpendingBody' };
+  if (focus === 'bills') return { title: 'onboardInsightBillsTitle', body: 'onboardInsightBillsBody' };
+  if (focus === 'cashflow') return { title: 'onboardInsightCashflowTitle', body: 'onboardInsightCashflowBody' };
+  return { title: 'onboardInsightOverviewTitle', body: 'onboardInsightOverviewBody' };
+}
+
 /** Resolve first-run navigation only after durable preferences/setup have loaded. */
 export function onboardingResumeDestination({
   platform,
   pendingIosSetup,
   hasSavedPlan,
   completedCallback,
+  savedStage,
 }: {
   platform: string;
   pendingIosSetup: boolean;
   hasSavedPlan: boolean;
   completedCallback: boolean;
-}): 'welcome' | 'capture' | 'ios-setup' | 'complete' {
+  savedStage?: OnboardingJourneyStage | null;
+}): OnboardingJourneyStage | 'ios-setup' {
   if (completedCallback) return 'complete';
   if (platform === 'ios' && pendingIosSetup) return 'ios-setup';
+  if (savedStage && savedStage !== 'complete') return savedStage;
   return hasSavedPlan ? 'capture' : 'welcome';
 }
 

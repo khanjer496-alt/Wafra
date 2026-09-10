@@ -19,13 +19,23 @@ function createHarness(options = {}) {
   const amount=(fils, opts={})=>(fils/100).toLocaleString(lang==='ar'?'ar-AE':'en-AE', {minimumFractionDigits:opts.decimals===false?0:2,maximumFractionDigits:opts.decimals===false?0:2});
   const formatAED=(fils,opts)=>`${lang==='ar'?'د.إ':'AED'} ${amount(fils,opts)}`;
   const i18n=load(path.join(root,'src/lib/i18n.ts'));i18n.setLanguage(lang);
+  const parseAmountWithMoneySpec=(value,spec)=>{
+    const text=String(value??'').trim().replace(/,/g,'');
+    if(!/^\d+(?:\.\d+)?$/.test(text))return null;
+    const [whole,fraction='']=text.split('.');
+    const exponent=spec?.exponent??2;
+    if(fraction.length>exponent)return null;
+    const scale=10**exponent;
+    const parsed=Number(whole)*scale+Number((fraction+'0'.repeat(exponent)).slice(0,exponent)||0);
+    return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
+  };
   const format={ formatAED, formatAmount:amount, formatCompactAED:f=>amount(f,{decimals:false}),
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},
     shortDate:d=>new Date(d+'T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:'short',day:'numeric'}),
     weekdayShort:d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d], weekdayName:d=>['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d],
-    toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,
+    toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,parseAmountWithMoneySpec,
     totalAsShown:a=>a.reduce((s,v)=>s+v,0),fullDateTime:tx=>tx.date,friendlyDate:d=>format.shortDate(d),
   };
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
@@ -56,7 +66,7 @@ function createHarness(options = {}) {
     privateMode:true,notSubscriptions:[],merchantOverrides:{},billAliases:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
-  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const deps={react,'react/jsx-runtime':runtime,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
     'expo-linear-gradient':{LinearGradient:p=>jsx('Gradient',p)},
@@ -69,6 +79,7 @@ function createHarness(options = {}) {
     '@/lib/period':periodModule,'@/lib/period-context':{usePeriod:()=>({period,setPeriod:p=>events.push(['period',p])})},
     '@/lib/store':{useStore:()=>store},
     '@/components/ui/screen-scaffold':{ScreenScaffold:p=>jsx('Scaffold',p),useScreenContentInsets:()=>({contentInset:{top:0},contentContainerStyle:{}})},
+    '@/components/ledger-currency-sheet':{LedgerCurrencySheet:p=>jsx('Boundary',{...p,name:'LedgerCurrencySheet'}),suggestedLedgerCurrency:()=> 'AED'},
     '@/components/ui/bottom-sheet':{BottomSheet:p=>p.visible?jsx('Sheet',p):null},
     '@/components/ui/spring-pressable':{SpringPressable:p=>jsx('Pressable',p)},
     '@/components/ui/platform-symbol':{PlatformSymbol:p=>p.fallback},

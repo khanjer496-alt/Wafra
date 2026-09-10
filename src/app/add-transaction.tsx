@@ -14,16 +14,16 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { parseAmountToFils, toISODate } from '@/lib/format';
+import { parseAmountToFils, parseAmountWithMoneySpec, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
-import { t as tUi } from '@/lib/i18n';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
+import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
@@ -71,7 +71,7 @@ export default function AddTransactionScreen() {
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
   const reviewId = Array.isArray(params.reviewId) ? params.reviewId[0] : params.reviewId;
-  const { state, getStateSnapshot, getStateGeneration, addTransaction, promoteReviewAlert, dismissReviewAlert } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, addTransaction, setLedgerMoney, promoteReviewAlert, dismissReviewAlert } = useStore();
   const reviewItem = reviewId
     ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
     : null;
@@ -111,6 +111,8 @@ export default function AddTransactionScreen() {
   const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(event?.amount.evidence === 'explicit' ? event.amount.value : null);
   const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
     rememberedReview ? rememberedReview.category as CategoryId : reviewItem
       ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : null : 'groceries',
@@ -148,7 +150,10 @@ export default function AddTransactionScreen() {
   }, []);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
-  const amountFils = parseAmountToFils(amountText);
+  const manualMoneySpec = state.ledgerMoney;
+  const amountFils = reviewItem
+    ? parseAmountToFils(amountText)
+    : manualMoneySpec ? parseAmountWithMoneySpec(amountText, manualMoneySpec) : null;
   const reviewRouteInvalid = !!reviewId && (!reviewItem || reviewItem.expiresAt <= Date.now());
   const sourceChanged = !!genericItem && (reviewBinding.current?.sourceKey !== genericItem.sourceKey ||
     reviewBinding.current?.observedAt !== genericItem.observedAt);
@@ -159,6 +164,7 @@ export default function AddTransactionScreen() {
     title.trim().length > 0 && title.trim().length <= 80 &&
     (event.instrument.evidence !== 'ambiguous' || selectedInstrument !== null));
   const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid && genericReady &&
+    (!!reviewItem || !!manualMoneySpec) &&
     (reviewItem ? validReviewDate(reviewDate) : !!amountFils);
   const amountInvalid = showValidation && !reviewItem && !amountFils;
   const categoryInvalid = showValidation && !category;
@@ -234,7 +240,7 @@ export default function AddTransactionScreen() {
       title: title.trim() || categoryLabel(getCategory(category)),
       date,
       source: 'manual',
-    });
+    }, state.ledgerMoney ? undefined : manualMoneySpec ?? undefined);
     router.back();
   };
 
@@ -342,6 +348,7 @@ export default function AddTransactionScreen() {
   }
 
   return (
+    <>
     <ScreenScaffold
       keyboardAware
       headerMode="inline"
@@ -406,6 +413,34 @@ export default function AddTransactionScreen() {
       {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
       {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
       {!moneyMatchesLedger ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericCurrencyMismatch')}</ThemedText> : null}
+      {/* A manual-only first run has no bank alert to establish accounting
+          currency. Require one explicit choice instead of inheriting the
+          parser pack's fallback currency. The phone region is only a hint. */}
+      {!reviewItem && !state.ledgerMoney && (
+        <View style={styles.fieldBlock}>
+          <ThemedText type="small" themeColor="textSecondary">{tUi('ledgerCurrencyTitle')}</ThemedText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={tUi('chooseLedgerCurrency')}
+            onPress={() => setCurrencySheetVisible(true)}
+            style={({ pressed }) => [
+              styles.currencyPicker,
+              { borderColor: state.ledgerMoney ? theme.primary : theme.controlBorder,
+                backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement },
+            ]}>
+            <View style={styles.currencyPickerCopy}>
+              <ThemedText type="smallBold">{tUi('chooseLedgerCurrency')}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {suggestedCurrency
+                  ? tfUi('currencyPhoneSuggestion', { currency: suggestedCurrency })
+                  : tUi('ledgerCurrencyRequiredHint')}
+              </ThemedText>
+            </View>
+            <Icon name="chevron-right" size={17} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+      )}
+
       {/* Amount */}
       {event && genericItem ? (
         <UniversalReviewFields event={event} money={selectedMoney} onMoneyChange={setSelectedMoney}
@@ -435,7 +470,7 @@ export default function AddTransactionScreen() {
           errorText={amountInvalid ? tUi('amountInLedgerCurrency') : undefined}
           leading={(
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-              {ledgerCurrencyDisplay()}
+              {state.ledgerMoney?.currency ?? '—'}
             </ThemedText>
           )}
           style={[styles.amountInput, { color: theme.text, fontFamily: state.language === 'ar' ? Fonts.arabicBold : Fonts.sansSemi }]}
@@ -617,6 +652,13 @@ export default function AddTransactionScreen() {
                 placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
               />
     </ScreenScaffold>
+    <LedgerCurrencySheet
+      visible={currencySheetVisible}
+      value={state.ledgerMoney?.currency ?? null}
+      onClose={() => setCurrencySheetVisible(false)}
+      onSelect={setLedgerMoney}
+    />
+    </>
   );
 }
 
@@ -648,6 +690,17 @@ const styles = StyleSheet.create({
   currency: {
     fontSize: 18,
   },
+  currencyPicker: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  currencyPickerCopy: { flex: 1, minWidth: 0, gap: 2 },
   amountInput: {
     fontSize: 40,
     fontFamily: Fonts.sansSemi,

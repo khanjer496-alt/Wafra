@@ -94,9 +94,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     });
     const router = { replace: (route) => routes.push(route), push: (route) => routes.push(route), back() {}, canGoBack: () => true, setParams() {} };
     const store = {
-      state: { accounts: [], transactions: [], language: 'en' },
+      state: { accounts: [], transactions: [], language: 'en', onboardingProfile: null },
       ensureDurable: async () => {},
       setOnboarded() { onboarded = true; },
+      setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
       async setCaptureOptOut(value) {
         preferenceEvents.push(`opt-out:${value}`);
         optedOut = value; // The real store dispatches before persistence.
@@ -143,6 +144,11 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       }) },
       '@/lib/ios-history-setup': { ...history, historyShortcutInstallUrl: () => 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789' },
       '@/lib/ios-message-onboarding': progress,
+      '@/lib/growth-funnel': {
+        GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' },
+        trackGrowthEvent() {},
+      },
+      '@/lib/onboarding': { onboardingLandingPath: () => '/' },
       '@/lib/store': { useStore: () => store },
       '../../modules/wafra-message-history': historyAvailable ? native : {},
     }).default;

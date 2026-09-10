@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
 import { SectionHeader } from '@/components/ui/period-pill';
@@ -10,13 +11,12 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, formatAmount, parseAmountToFils, shiftMonthKey } from '@/lib/format';
+import { formatAED, formatAmount, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -40,10 +40,11 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
-  const { state, upsertBudget, deleteBudget } = useStore();
+  const { state, upsertBudget, deleteBudget, setLedgerMoney } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
   const [text, setText] = useState('');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
 
   const existing = picked ? state.budgets.find((b) => b.category === picked) : undefined;
 
@@ -149,7 +150,9 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     };
   }, [state.transactions, key, picked, liveAccounts, internal]);
 
-  const limitFils = parseAmountToFils(text);
+  const limitFils = state.ledgerMoney
+    ? parseAmountWithMoneySpec(text, state.ledgerMoney)
+    : null;
   const ratio = limitFils ? spent / limitFils : 0;
   const over = ratio >= 1;
   // Only a live month has days left. `key` is whatever month Flow was
@@ -207,6 +210,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   };
 
   return (
+    <>
     <BottomSheet
       visible={open}
       onClose={onClose}
@@ -294,6 +298,19 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             )}
 
             <View style={styles.amountBlock}>
+              {!state.ledgerMoney && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chooseLedgerCurrency')}
+                  onPress={() => setCurrencySheetVisible(true)}
+                  style={[styles.currencyChoice, { borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}>
+                  <View style={styles.currencyChoiceCopy}>
+                    <ThemedText type="smallBold">{t('chooseLedgerCurrency')}</ThemedText>
+                    <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyRequiredHint')}</ThemedText>
+                  </View>
+                  <ThemedText type="smallBold" themeColor="textSecondary">›</ThemedText>
+                </Pressable>
+              )}
               <TextField
                 numeric
                 label={t('monthlyLimit')}
@@ -304,7 +321,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 selectionColor={theme.primary}
                 leading={(
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-                  {ledgerCurrencyDisplay()}
+                  {state.ledgerMoney?.currency ?? '—'}
                 </ThemedText>
                 )}
                 style={styles.amountInput}
@@ -378,6 +395,13 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
               </View>
             )}
     </BottomSheet>
+    <LedgerCurrencySheet
+      visible={currencySheetVisible}
+      value={state.ledgerMoney?.currency ?? null}
+      onClose={() => setCurrencySheetVisible(false)}
+      onSelect={setLedgerMoney}
+    />
+    </>
   );
 }
 
@@ -401,7 +425,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },
-  amountBlock: { marginTop: Spacing.four },
+  amountBlock: { marginTop: Spacing.four, gap: Spacing.two },
+  currencyChoice: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  currencyChoiceCopy: { flex: 1, minWidth: 0, gap: 2 },
   aed: { fontSize: 15 },
   amountInput: {
     fontSize: 34,

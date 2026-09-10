@@ -339,6 +339,30 @@ export interface OnboardingPlanPreferences {
   budgetId: 'essentials' | 'balanced' | 'flexible';
 }
 
+/** What the person wants Wafra to make clearer first. No financial data. */
+export type OnboardingFocus = 'spending' | 'bills' | 'cashflow' | 'overview';
+
+/** How the person tracked money before Wafra. No provider/account identity. */
+export type OnboardingTracking = 'none' | 'bank-apps' | 'spreadsheet' | 'finance-app';
+
+/** Durable first-run position so an interrupted setup resumes instead of restarting. */
+export type OnboardingJourneyStage =
+  | 'welcome'
+  | 'focus'
+  | 'tracking'
+  | 'preview'
+  | 'privacy'
+  | 'capture'
+  | 'complete';
+
+export interface OnboardingProfile {
+  v: 1;
+  stage: OnboardingJourneyStage;
+  focus: OnboardingFocus | null;
+  tracking: OnboardingTracking | null;
+  startedAt: number;
+}
+
 export const LOCAL_CAPTURE_QUALIFICATION_VERSION = 1 as const;
 export const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
@@ -546,7 +570,7 @@ export function mergeLocalCaptureQualifications(
 
 export interface AppState {
   hydrated: boolean;
-  /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
+  /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
   ledgerMoney: LedgerMoneySpec | null;
   /** Encrypted, structured global alerts awaiting an explicit user decision. */
   reviewTray: AlertReviewTrayState;
@@ -562,6 +586,8 @@ export interface AppState {
   goals: Goal[];
   /** First-run plan waiting for a real ledger currency before activation. */
   onboardingPlan: OnboardingPlanPreferences | null;
+  /** Source-free first-run choices and resume position. */
+  onboardingProfile: OnboardingProfile | null;
   /** Local currency explicitly observed in an imported bank alert. */
   onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */

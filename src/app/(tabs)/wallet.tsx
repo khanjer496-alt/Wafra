@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BalanceOverview } from '@/components/wallet/balance-overview';
 import { AccountGroups, type AccountDisplayRow } from '@/components/wallet/account-groups';
 import { AmountSheet } from '@/components/ui/amount-sheet';
@@ -34,12 +35,11 @@ import { cardFigure, isInactiveAccount, openDues, reissueSuggestions } from '@/l
 import { tapped } from '@/lib/haptics';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import {
   formatAmount,
   monthKey,
-  parseAmountToFils,
+  parseAmountWithMoneySpec,
   totalAsShown,
   shortDate,
   toISODate,
@@ -108,6 +108,7 @@ export default function WalletScreen() {
     addGoal,
     editGoal,
     deleteGoal,
+    setLedgerMoney,
     mergeRenewedCard,
     markCardsDistinct,
   } = useStore();
@@ -126,6 +127,7 @@ export default function WalletScreen() {
   const [goalTitle, setGoalTitle] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalIcon, setGoalIcon] = useState(GOAL_ICONS[0]);
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
 
   // The account a long press is asking about, and the confirmation that a
   // destructive answer to it opens second.
@@ -273,12 +275,22 @@ export default function WalletScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dues, language]);
 
+  const openingFils = openingText.trim() === ''
+    ? 0
+    : state.ledgerMoney
+      ? parseAmountWithMoneySpec(openingText, state.ledgerMoney)
+      : null;
+  const accountDraftValid = Boolean(name.trim()) && openingFils !== null;
+  const goalTargetFils = state.ledgerMoney
+    ? parseAmountWithMoneySpec(goalTarget, state.ledgerMoney)
+    : null;
+
   const saveAccount = () => {
-    if (!name.trim()) return;
+    if (!accountDraftValid || openingFils === null) return;
     addAccount({
       name: name.trim(),
       kind,
-      openingFils: parseAmountToFils(openingText) ?? 0,
+      openingFils,
       color: ACCOUNT_COLORS[colorIdx],
     });
     setName('');
@@ -287,9 +299,8 @@ export default function WalletScreen() {
   };
 
   const saveGoal = () => {
-    const target = parseAmountToFils(goalTarget);
-    if (!goalTitle.trim() || !target) return;
-    addGoal({ title: goalTitle.trim(), emoji: goalIcon, targetFils: target, savedFils: 0 });
+    if (!goalTitle.trim() || !goalTargetFils) return;
+    addGoal({ title: goalTitle.trim(), emoji: goalIcon, targetFils: goalTargetFils, savedFils: 0 });
     setGoalTitle('');
     setGoalTarget('');
     setGoalVisible(false);
@@ -611,7 +622,7 @@ export default function WalletScreen() {
 
       {/* Add account sheet */}
       <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newAccount')}
-        footer={<Button label={t('addAccount')} onPress={saveAccount} disabled={!name.trim()} />}>
+        footer={<Button label={t('addAccount')} onPress={saveAccount} disabled={!accountDraftValid} />}>
             <ThemedText type="small" accessibilityRole="header">
               {t('accountNamePlaceholder')}
             </ThemedText>
@@ -650,8 +661,21 @@ export default function WalletScreen() {
             <ThemedText type="micro" themeColor="textSecondary">
               {t('openingBalanceOptional')}
             </ThemedText>
+            {!state.ledgerMoney && openingText.trim() !== '' && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('chooseLedgerCurrency')}
+                onPress={() => setCurrencySheetVisible(true)}
+                style={[styles.currencyChoice, { borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}>
+                <View style={styles.accountInfo}>
+                  <ThemedText type="smallBold">{t('chooseLedgerCurrency')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyRequiredHint')}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+              </Pressable>
+            )}
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
-              <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
+              <ThemedText type="smallBold" themeColor="textSecondary">{state.ledgerMoney?.currency ?? '—'}</ThemedText>
               <TextInput
                 accessibilityLabel={t('openingBalanceOptional')}
                 value={openingText}
@@ -684,7 +708,7 @@ export default function WalletScreen() {
       {/* New goal sheet */}
       <BottomSheet visible={goalVisible} onClose={() => setGoalVisible(false)} title={t('newGoalTitle')}
         footer={<Button label={t('createGoal')} onPress={saveGoal}
-          disabled={!goalTitle.trim() || !parseAmountToFils(goalTarget)} />}>
+          disabled={!goalTitle.trim() || !goalTargetFils} />}>
             <ThemedText type="small" accessibilityRole="header">{t('goalPlaceholder')}</ThemedText>
             <TextInput
               accessibilityLabel={t('goalPlaceholder')}
@@ -696,8 +720,21 @@ export default function WalletScreen() {
             />
 
             <ThemedText type="micro" themeColor="textSecondary">{t('targetAmount')}</ThemedText>
+            {!state.ledgerMoney && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('chooseLedgerCurrency')}
+                onPress={() => setCurrencySheetVisible(true)}
+                style={[styles.currencyChoice, { borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}>
+                <View style={styles.accountInfo}>
+                  <ThemedText type="smallBold">{t('chooseLedgerCurrency')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyRequiredHint')}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+              </Pressable>
+            )}
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
-              <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
+              <ThemedText type="smallBold" themeColor="textSecondary">{state.ledgerMoney?.currency ?? '—'}</ThemedText>
               <TextInput
                 accessibilityLabel={t('targetAmount')}
                 value={goalTarget}
@@ -768,10 +805,16 @@ export default function WalletScreen() {
           onClose={() => setGoalTopUp(null)}
           title={t('goalsHeader')}
           question={tf('addToGoal', { goal: goalTopUp.title })}
-          placeholder={t('amountInAed')}
+          placeholder={t('amountInLedgerCurrency')}
           onSubmit={addToGoal}
         />
       )}
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
+      />
     </>
   );
 }
@@ -1004,6 +1047,16 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
+  },
+  currencyChoice: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
   },
   amountInput: {
     flex: 1,

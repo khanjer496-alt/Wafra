@@ -183,7 +183,7 @@ function sources(dir = SRC) {
   const settingsInventory = [
     ['Pro summary', /<Block onPress=\{\(\) => router\.push\('\/pro'\)\}>/],
     ['daily notifications', /toggleDailySummary\(next\)/],
-    ['per-charge notifications', /toggleInstantAlerts\(next\)[\s\S]*toggleChargeAlerts\(next\)/],
+    ['per-charge notifications', /requestInstantAlertsChange\(next\)[\s\S]*toggleChargeAlerts\(next\)/],
     ['SMS capture', /toggleSms/],
     ['iPhone local capture', /setIosAutomaticCapture/],
     ['history recovery', /beginHistoryImport\(\)[\s\S]*confirmIosCaptureRecovery/],

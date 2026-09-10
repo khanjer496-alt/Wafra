@@ -1,116 +1,181 @@
-# Wafra store launch package
+# Wafra — global store launch package
 
-This package is ready for account setup and device capture, not yet for public
-submission. The canonical, length-checked copy and screenshot order live in
-[`store-metadata.json`](./store-metadata.json). Run `npm run check:store` after
-every change.
+_Updated 10 September 2026. `docs/store-metadata.json` is the machine-checked
+source for listing copy; this document explains how to use it._
 
-## Positioning by storefront
+## Product position
 
-- **Initial distribution:** UAE and Saudi Arabia only. The shipping onboarding
-  and ledger are AED/SAR; localized subscription billing does not make a
-  USD/EUR/GBP/INR ledger appear. Broader storefront distribution waits for
-  selectable ledger currencies and product QA in those markets.
-- **Google Play default listing during restricted-permission review:** explain
-  optional SMS-based money management prominently, including why `READ_SMS`
-  imports retained supported alerts and `RECEIVE_SMS` keeps automatic tracking
-  current. Do not rely on a country-specific listing that may not yet be live
-  to justify the requested core permission.
-- **Future global draft:** lead with private manual money tracking only after
-  arbitrary ledger currencies ship. Do not imply universal bank parsing.
-- **iPhone:** never say the app reads the Messages inbox. The live path is a
-  user-owned Message automation. Past-message import is a separate, user-run
-  iOS 26+ Shortcut whose physically tested beta path covers fewer than 3,000
-  retained Messages and fails closed when complete coverage cannot be proved.
+Wafra is a **global personal money tracker**, not a Gulf-only product.
 
-RevenueCat and both stores may be configured for additional territories in
-advance, but public app distribution remains AE/SA until the product currency
-matches those users. The paywall must always show the storefront's localized
-price string. Ledger currency and purchase currency are separate concepts.
+- The default store listing is English and can be distributed worldwide where
+  the publisher's store agreements, tax, sanctions/export, privacy and local
+  legal requirements allow it.
+- A manual-only user chooses a supported ISO 4217 ledger currency before the
+  first transaction. The phone's region may suggest a currency but never fixes
+  it silently.
+- The ledger currently represents currencies whose ISO minor-unit exponent is
+  0, 2 or 3. It must not claim every ISO currency until exponent-4 currencies
+  are supported too.
+- Storefront billing currency is independent of ledger currency. Apple/Google
+  supply the localized subscription price string; Wafra never converts a price
+  from AED, USD or another ledger/reference currency.
+- Automatic bank-alert posting is **not worldwide coverage**. UAE and Saudi
+  market packs remain the launch-tested automatic packs. The worldwide parser
+  may surface other strongly grounded alerts for user review, but it does not
+  silently auto-post an unverified bank format.
+- Localizations are added per market based on product/support readiness. Arabic
+  remains supported in-app and may be published as an optional localization;
+  it is not a prerequisite or the definition of the global launch.
 
-## Screenshot production
+## Default store story
 
-Capture real native builds, not the Playwright web export. The existing App
-Store set has duplicated Stats/Bills/Wallet frames and the old promotional
-composites contain obsolete navigation and overly broad claims.
+The first product-page frames should explain the universal value before any
+bank-specific capability:
 
-Run `npm run check:store-assets` before uploading anything. It rejects missing
-frames, wrong dimensions, alpha channels and byte-identical screenshots. The
-current repository intentionally fails this gate until new Release-native sets
-replace the invalid assets.
+1. Know your spending and money left.
+2. Start manually without a bank login.
+3. Bills and recurring charges in one place.
+4. Card statement due dates without double-counting repayments as spending.
+5. Category budgets and spending composition.
+6. Accounts, cash out and transfers.
+7. Private encrypted ledger and backup/export.
+8. Optional supported imports, with coverage limitations visible.
 
-Required launch sets:
+Do not put a UAE flag, Saudi flag, “dirham”, a named local utility, or a local
+bank in the default headline/feature graphic. A screenshot may contain a
+synthetic example currency, but the surrounding store copy must make clear that
+the ledger currency is user-selected.
 
-| Store | Listing | Size | Locales | Frames |
-| --- | --- | --- | --- | --- |
-| App Store | Default | 1320×2868 (6.9-inch) | en-US, ar-SA | 8 each |
-| Google Play | Gulf custom | 1080×1920 | English, Arabic | 8 each |
-| Google Play | Gulf feature graphic | 1024×500 | English, Arabic | 2 total |
+## Google Play restricted SMS permissions
 
-The Global Play screenshots and graphics in the metadata are future drafts,
-not launch requirements. Produce them only after arbitrary ledger currencies
-and their market QA ship.
+Google Play's current SMS/Call Log policy lists **SMS-based money management**
+(for example budget tracking) as an exception eligible for `READ_SMS` and
+`RECEIVE_SMS`, subject to review and approval:
 
-The first three images must communicate the product without reading the long
-description. Use one short benefit headline, one genuine app screen, large
-legible figures, and no paragraph text. Include at least one dark-mode image
-only if the submitted build's dark mode has passed contrast review.
+https://support.google.com/googleplay/android-developer/answer/10208820
 
-Do not put real bank messages, names, card digits, setup tokens, relay URLs,
-notification identifiers or live financial data in any asset. Seed synthetic
-but internally consistent data and visibly mark App Review demo instructions as
-synthetic outside the customer-facing screenshots.
+Wafra uses the permissions separately:
 
-## RevenueCat and stores
+- `READ_SMS` — after the user chooses automatic Android tracking and sees the
+  in-app disclosure, Wafra reads the Android inbox locally to find supported
+  financial alerts. Non-financial messages are ignored; SMS text is not
+  uploaded to Wafra's relay.
+- `RECEIVE_SMS` — requested later, separately, only if the user enables the
+  optional delivery-time transaction alert. A dedicated disclosure is shown
+  immediately before this runtime request. The receiver checks the delivered
+  SMS locally for financial activity and does not maintain a second raw-message
+  archive.
 
-External configuration required before the paywall can sell:
+Both uses must be described in the Play listing and Permissions Declaration.
+Declining either permission must remain a real choice. Manual entry and explicit
+imports must continue to work.
 
-1. Create `wafra_pro_monthly` and `wafra_pro_yearly` in both stores.
-2. Put the Apple products in one subscription group. Configure Android base
-   plans and territory pricing.
-3. Create RevenueCat entitlement `pro`, attach both platform products to the
-   matching monthly/yearly packages, and set a current Offering.
-4. Add only the public `appl_…` and `goog_…` SDK keys to the evaluated app
-   configuration. Never commit App Store Connect keys or Google service-account
-   JSON.
-5. Do not add a store introductory trial while Wafra grants its own local
-   three-day trial.
-6. Test new purchase, restore, renewal, cancellation, expiry, refund, Apple
-   billing retry/grace, and Google grace/account hold from store-installed
-   builds in at least 0-decimal, 2-decimal and 3-decimal price locales.
+Google's prominent-disclosure policy requires the disclosure inside the app,
+in normal usage, immediately before consent/permission, and to say what data is
+accessed and how it is used/shared:
 
-Before submission, add clickable Privacy Policy and Terms links beside the
-paywall renewal copy. Complete and host the legal documents, then make the App
-Store privacy and Play Data Safety answers match the exact shipped RevenueCat
-SDK and optional import paths.
+https://support.google.com/googleplay/android-developer/answer/10144311
 
-The included three days are granted by Wafra itself; they are not an Apple or
-Google introductory trial, do not start a subscription, and do not charge the
-user automatically. State that distinction in App Review notes and Play copy.
+The declaration package lives in `docs/store-compliance/google-play.md`.
 
-## Store-console package
+## App Store privacy and iPhone capture
 
-- Apple: copyright, version notes, App Review contact and notes, demo path,
-  Privacy Policy URL, Terms URL, support URL, App Privacy answers, encryption
-  declaration, subscription localizations, and IAP review screenshots.
-- Google Play: Financial Features declaration, SMS Permissions Declaration,
-  Data Safety, app access, ads, content rating, target audience, 512×512 icon,
-  feature graphic, localized screenshot alt text, tags, subscription/base-plan
-  localizations, and cancellation link.
-- Re-check Android target-SDK policy immediately before submission; the dated
-  Play requirement changes independently of Expo SDK compatibility.
+Never say that Wafra reads the iPhone Messages inbox. Apple provides no direct
+third-party SMS inbox API.
 
-Run `npm run check:launch` to see metadata, screenshot and configuration gates
-in one pass. It deliberately reports all groups even when more than one fails.
+The current primary iPhone automatic-capture path is a user-configured Message
+automation that invokes Wafra's local App Intent on the same iPhone. Optional
+email/PDF/trusted-device features use the relay separately when chosen.
 
-## Gates that still need external proof
+App Store privacy answers must describe the union of Wafra and embedded SDK
+behavior, including RevenueCat when production billing is enabled. Apple
+requires a public privacy-policy URL and disclosure of third-party SDK data
+practices:
 
-- Xcode 26.2+ signed build for the current commit.
-- A distinct, credential-free published history Shortcut link.
-- Real iPhone validation of Find Messages, App Intent authentication, carrier
-  SMS fields, large histories, lock/reboot, cleanup and offline behavior.
-- TestFlight and Play closed-test purchase/restore evidence.
-- Google approval for `READ_SMS` and `RECEIVE_SMS` under SMS-based money
-  management.
-- Export-compliance classification for the app's cryptography.
-- Legal entity, jurisdiction, support address and hosted HTTPS policy URLs.
+https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy
+
+The draft answers live in `docs/store-compliance/apple-app-store.md`.
+
+## Subscriptions
+
+Products remain:
+
+- `wafra_pro_monthly`
+- `wafra_pro_yearly`
+- RevenueCat entitlement: `pro`
+
+The commercial price is **not approved yet**. Reference values in repository
+docs are planning values, not a promise to users.
+
+Wafra currently grants three local app days. Do not also configure a storefront
+free trial unless the local period is removed in the same release; otherwise
+the two clocks stack.
+
+Before production, test a store-installed build for purchase, restore, renewal,
+cancellation, billing retry/grace, account hold where applicable, refund,
+expiry and offline cached entitlement. Verify the exact store-formatted price
+in representative 0-, 2- and 3-decimal storefront currencies (the current
+read-back sample is JPY / USD / KWD).
+
+## Asset rules
+
+### Apple
+
+Use a final release-like iPhone build. The preferred repository target is the
+accepted 6.9-inch portrait size **1320×2868**, with no alpha channel. Apple
+accepts one to ten screenshots and currently accepts several 6.9-inch sizes:
+
+https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications
+
+English is the required launch set. Additional localized sets are optional and
+must be genuinely localized rather than byte-identical copies.
+
+### Google Play
+
+- Listing icon: 512×512 32-bit PNG with alpha, maximum 1 MiB.
+- Feature graphic: 1024×500 JPEG or 24-bit PNG without alpha.
+- At least two phone screenshots; the launch plan uses eight 1080×1920 frames
+  for a strong 9:16 presentation.
+
+Current specification:
+
+https://support.google.com/googleplay/android-developer/answer/9866151
+
+Do not ship the legacy Gulf feature graphic whose headline says “dirham” or
+promotes a local SMS story as the whole product.
+
+## Legal/support requirements
+
+Publisher: **Nasida Apps LLC**.
+
+Still requires publisher/counsel input before public submission:
+
+- governing law in Terms;
+- monitored public support contact;
+- counsel review of Privacy Policy and Terms;
+- any country-specific privacy/data-transfer, consumer, financial-app, tax or
+  sanctions/export restrictions that affect worldwide availability.
+
+The final support URL must lead to real contact information. Apple explicitly
+requires the Support URL to let users reach the publisher:
+
+https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/
+
+## Release order
+
+1. Freeze a candidate commit.
+2. Run typecheck, lint, tests, browser E2E, store metadata/pricing/assets checks,
+   release configuration check and dependency/security review.
+3. Build signed App Store and Play candidates from that exact commit.
+4. Verify bundle/package IDs, version/build numbers, Android target API, SQLCipher,
+   production flags, SDK keys, signing identities and artifact hashes.
+5. Install from TestFlight / Play internal testing, not only side-loaded builds.
+6. Complete the physical-device matrix in `docs/store-compliance/global-launch-board.md`.
+7. Complete store privacy/policy forms from the exact submitted artifact.
+8. Run closed/external beta as required.
+9. Obtain explicit publisher sign-off before public production submission.
+10. Use staged/phased release where available and follow the rollback/monitoring
+    plan in `docs/store-compliance/monitoring-and-rollback.md`.
+
+Public production submission is never an automatic side effect of a commit,
+build or metadata preparation task.

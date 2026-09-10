@@ -69,6 +69,12 @@ function actions(options = {}) {
   };
   const context = {
     Platform: { OS: options.platform ?? 'android' },
+    focus: options.focus ?? null,
+    tracking: options.tracking ?? null,
+    GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
+    trackGrowthEvent() {},
+    saveJourney() {},
+    onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
     requestedFirstEntry: { current: false },
     setFinishing(value) { ui.finishing = value; record('finishing', value); },
@@ -100,7 +106,10 @@ function actions(options = {}) {
     isSmsScanningAvailable: () => options.scanAvailable ?? true,
     setOnboarded() { ledger.onboarded = true; record('setOnboarded'); },
     committed() { record('committed'); },
-    router: { push(route) { record('route', route); } },
+    router: {
+      push(route) { record('route', route); },
+      replace(route) { record('replace', route); },
+    },
   };
   const handlers = vm.runInNewContext(program, context, { filename: sourcePath });
   Object.assign(context, handlers, {
@@ -379,6 +388,7 @@ test('manual empty Home completion stays on Home after persistence without addin
   assert.equal(h.ledger.onboarded, true);
   assert.equal(calls(h, 'ensureDurable').length, 1);
   assert.equal(calls(h, 'route').length, 0);
+  assert.deepEqual(calls(h, 'replace'), [['replace', '/']]);
   assert.equal(calls(h, 'committed').length, 1);
   remainsEmpty(h);
 });
@@ -473,6 +483,7 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   assert.equal(h.ui.finishSaveFailed, false);
   assert.equal(h.ledger.captureOptOut, false);
   assert.equal(calls(h, 'route').length, 0, 'Automatic setup retry does not open the manual entry form');
+  assert.deepEqual(calls(h, 'replace'), [['replace', '/']], 'Automatic setup returns to the personalized default view');
   assert.equal(calls(h, 'committed').length, 1);
 });
 

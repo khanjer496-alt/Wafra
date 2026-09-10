@@ -11,11 +11,20 @@ const EXPECTED_PRODUCTS = {
     referenceAmount: '74.99',
   },
 };
-const STOREFRONT_CURRENCIES = { AE: 'AED', SA: 'SAR' };
+
+const SAMPLE_CURRENCIES = ['JPY', 'USD', 'KWD'];
+
+const validReadBack = (value) => value && typeof value === 'object' &&
+  value.appleVerified === true && value.googleVerified === true &&
+  typeof value.appleFormattedPrice === 'string' && value.appleFormattedPrice.trim() !== '' &&
+  typeof value.googleFormattedPrice === 'string' && value.googleFormattedPrice.trim() !== '';
 
 export function validateStorePricing(pricing, metadata) {
   const errors = [];
-  if (pricing.schemaVersion !== 1) errors.push('pricing schemaVersion must be 1');
+  if (pricing.schemaVersion !== 2) errors.push('pricing schemaVersion must be 2');
+  if (pricing.distribution !== 'worldwide' || metadata.launchScope?.distribution !== 'worldwide') {
+    errors.push('pricing and store metadata must both use worldwide distribution');
+  }
   if (pricing.strategy !== 'storefront-native-price-points') {
     errors.push('pricing strategy must use storefront-native price points');
   }
@@ -26,10 +35,11 @@ export function validateStorePricing(pricing, metadata) {
     'Always use the Apple or Google storefront-formatted price returned by RevenueCat.') {
     errors.push('pricing display rule must require the storefront-formatted RevenueCat price');
   }
-
-  const launchStorefronts = metadata.launchScope?.storefronts ?? [];
-  if (JSON.stringify(pricing.launchStorefronts) !== JSON.stringify(launchStorefronts)) {
-    errors.push('pricing launchStorefronts must match store metadata launch scope');
+  if (pricing.rules?.manualFxPricing !== false) {
+    errors.push('global pricing must not hand-convert a ledger or reference currency');
+  }
+  if (JSON.stringify(pricing.readBackSampleCurrencies) !== JSON.stringify(SAMPLE_CURRENCIES)) {
+    errors.push('pricing read-back samples must cover representative 0/2/3-decimal storefront currencies');
   }
   const actualPlans = Object.keys(pricing.products ?? {}).sort();
   if (JSON.stringify(actualPlans) !== JSON.stringify(Object.keys(EXPECTED_PRODUCTS))) {
@@ -52,25 +62,19 @@ export function validateStorePricing(pricing, metadata) {
         product.referencePrice?.amount !== expected.referenceAmount) {
       errors.push(`pricing product ${plan} reference price must be USD ${expected.referenceAmount}`);
     }
-    for (const storefront of launchStorefronts) {
-      if (!(storefront in (product.approvedStorefrontPrices ?? {}))) {
-        errors.push(`pricing product ${plan} is missing storefront ${storefront}`);
-      }
-    }
   }
 
   if (pricing.approvalStatus === 'approved') {
     for (const [plan, product] of Object.entries(pricing.products ?? {})) {
-      for (const storefront of launchStorefronts) {
-        const approved = product.approvedStorefrontPrices?.[storefront];
-        if (!approved || typeof approved.applePricePointId !== 'string' ||
-            approved.applePricePointId.trim() === '' ||
-            approved.googleCurrency !== STOREFRONT_CURRENCIES[storefront] ||
-            !MONEY.test(approved.googleAmount ?? '')) {
-          errors.push(`approved ${plan} pricing needs Apple price point and Google ${STOREFRONT_CURRENCIES[storefront]} amount for ${storefront}`);
-        }
-        if (approved?.readBack?.apple !== true || approved?.readBack?.google !== true) {
-          errors.push(`approved ${plan} pricing needs Apple and Google read-back evidence for ${storefront}`);
+      const approved = product.approvedBasePrice;
+      if (!approved || typeof approved.currency !== 'string' || !/^[A-Z]{3}$/.test(approved.currency) ||
+          approved.currency !== product.referencePrice?.currency ||
+          !MONEY.test(approved.amount ?? '') || approved.publisherApproved !== true) {
+        errors.push(`approved ${plan} pricing needs one publisher-approved base price`);
+      }
+      for (const currency of SAMPLE_CURRENCIES) {
+        if (!validReadBack(product.readBackEvidence?.[currency])) {
+          errors.push(`approved ${plan} pricing needs Apple and Google formatted-price read-back evidence for ${currency}`);
         }
       }
     }

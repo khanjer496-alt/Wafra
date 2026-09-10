@@ -1,18 +1,25 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "launchScope": {
-    "storefronts": ["AE", "SA"],
-    "ledgerCurrencies": ["AED", "SAR"],
-    "reason": "The shipping ledger and automatic market packs are UAE/Saudi. Broader storefront distribution waits for selectable USD/EUR/GBP/INR ledgers and matching product QA."
+    "distribution": "worldwide",
+    "defaultLocale": "en-US",
+    "ledgerCurrencySupport": {
+      "standard": "ISO 4217",
+      "minorUnitExponents": [0, 2, 3]
+    },
+    "automaticImportMarketPacks": ["AE", "SA"],
+    "reason": "Wafra's ledger and manual entry are global. A first manual entry requires an explicit supported ISO ledger currency. Automatic bank-alert posting remains limited to explicitly tested market/bank formats; unfamiliar global alerts are review-only or manual rather than guessed."
   },
   "positioning": {
-    "futureGlobalDraft": "Private money planning with manual entry and optional imports. Do not publish this draft until arbitrary ledger currencies ship.",
-    "launch": "Optional imports for supported UAE and Saudi bank-alert formats, with Android SMS-based money management processed on-device.",
+    "launch": "Private money tracking for people anywhere, with manual entry and optional supported imports. No bank login is required.",
+    "automaticImports": "Automatic bank-alert support varies by country, bank and message format. Supported Android SMS is processed on-device; unsupported formats are never advertised as automatic coverage.",
     "subscription": "Prices and currency always come from the user's Apple or Google storefront, never from the ledger currency."
   },
   "apple": {
     "primaryCategory": "FINANCE",
     "secondaryCategory": "PRODUCTIVITY",
+    "launchLocales": ["en-US"],
+    "optionalLocales": ["ar-SA"],
     "locales": {
       "en-US": {
         "name": "Wafra: Budget & Money Tracker",
@@ -57,33 +64,36 @@
     "listings": {
       "global-en": {
         "languageCode": "en-US",
-        "status": "future-draft-after-arbitrary-ledger-currencies",
+        "status": "launch",
         "title": "Wafra: Budget & Money Tracker",
         "shortDescription": "Track expenses, budgets, bills, subscriptions and savings—privately.",
-        "fullDescription": "See what is left, where your money went, and what is due next—without connecting a bank account.\n\nWafra is a private expense tracker and budget planner for spending, income, card dues, bills, recurring charges and savings goals. Start with manual entry, paste an alert you choose, or import a supported statement.\n\nKEY FEATURES\n• Clear monthly spending and income\n• Category budgets with useful limits\n• Bills, card dues and recurring charges in one place\n• Savings goals and account organization\n• Salary-day or calendar money months\n• Backup and restore with a file you control\n• Optional app lock\n\nPRIVACY\nNo account registration. No ads. No bank login. Your ledger is encrypted on your device. Optional bank-alert support varies by country, bank and message format; unsupported activity can always be added manually.\n\nAutomatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency. Manage or cancel your subscription through Google Play."
+        "fullDescription": "See what is left, where your money went, and what is due next—without connecting a bank account.\n\nWafra is a private expense tracker and budget planner for spending, income, card dues, bills, recurring charges and savings goals. Choose your ledger currency, start manually, paste an alert you choose, or use an optional supported import.\n\nKEY FEATURES\n• Clear monthly spending and income\n• Category budgets with useful limits\n• Bills, card dues and recurring charges in one place\n• Savings goals and account organization\n• Salary-day or calendar money months\n• Backup and restore with a file you control\n• Optional app lock\n\nOPTIONAL ANDROID BANK-SMS TRACKING\nWhere a bank and message format are supported, Wafra can use READ_SMS after an in-app explanation and your permission to scan retained financial alerts on your phone and turn supported activity into ledger entries. SMS processing happens on your device; Wafra does not upload your SMS, and non-financial messages are ignored.\n\nRECEIVE_SMS is requested separately only if you choose instant transaction alerts. It lets Wafra inspect a newly delivered SMS on-device for financial activity so it can show the optional alert. You can decline either permission and continue using Wafra manually. Automatic bank-alert coverage varies by country, bank and exact message format.\n\nPRIVACY\nNo account registration. No ads. No bank login. Your main ledger is encrypted on your device. Optional relay-backed statement, email and trusted-device features are explained before use. Unsupported automatic bank formats are never presented as guaranteed coverage.\n\nAutomatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency. Manage or cancel your subscription through Google Play."
       },
       "global-ar": {
         "languageCode": "ar",
-        "status": "future-draft-after-arbitrary-ledger-currencies",
+        "status": "optional-localization",
         "title": "وفرة: ميزانية ومصاريف",
         "shortDescription": "تابع المصاريف والميزانيات والفواتير والاشتراكات والادخار بخصوصية.",
         "fullDescription": "اعرف ما تبقّى، وأين ذهب مالك، وما الذي يستحق قريباً — دون ربط حسابك البنكي.\n\nوفرة متعقب مصاريف ومخطط ميزانية خاص يجمع الدخل ومستحقات البطاقات والفواتير والرسوم المتكررة وأهداف الادخار. ابدأ يدوياً، أو الصق تنبيهاً تختاره، أو استورد كشفاً مدعوماً.\n\nالميزات\n• عرض شهري واضح للمصاريف والدخل\n• حدود مفيدة لفئات الإنفاق\n• الفواتير ومستحقات البطاقات والرسوم المتكررة في مكان واحد\n• أهداف الادخار وتنظيم الحسابات\n• شهر مالي يبدأ يوم الراتب أو بداية الشهر\n• نسخة احتياطية تملكها وتتحكم بها\n• قفل اختياري للتطبيق\n\nالخصوصية\nلا تسجيل ولا إعلانات ولا ربط بالحساب البنكي. سجلّك مشفّر على جهازك. يختلف دعم تنبيهات البنوك الاختياري حسب الدولة والبنك وصيغة الرسالة، ويمكن دائماً إضافة النشاط غير المدعوم يدوياً.\n\nيتطلب الالتقاط التلقائي اشتراك وفرة برو بعد ثلاثة أيام مضمنة في التطبيق؛ يبقى الإدخال اليدوي ولصق التنبيهات والنسخ الاحتياطي والاستعادة مجاناً. لا يبدأ أي اشتراك أو خصم تلقائياً. تُحصّل Google Play القيمة بعملة متجرك المحلية، ويمكن إدارة الاشتراك أو إلغاؤه من Google Play."
       },
       "gulf-en": {
         "languageCode": "en-US",
+        "status": "market-specific-custom-listing",
         "title": "Wafra: Budget & Money Tracker",
         "shortDescription": "Track supported bank alerts, budgets, bills and subscriptions—privately.",
         "fullDescription": "Turn supported UAE and Saudi bank alerts into a clearer money picture—without sharing bank credentials.\n\nOn Android, SMS access is optional. Leave permission off and use manual entry whenever you prefer. If you choose automatic tracking, Android processes supported bank alerts locally on your phone; other content is discarded before Wafra storage and is never uploaded. READ_SMS imports retained alerts after you choose automatic tracking. The separate RECEIVE_SMS permission is requested only if you enable optional instant bank-alert banners.\n\nTrack expenses, income, budgets, card dues, utility bills, recurring charges, subscriptions and savings goals. Support depends on the bank and exact message format; review the supported list in the app.\n\nNo registration. No ads. No bank login. Wafra cannot reply to messages, approve payments or move money. Your ledger is encrypted on your device. Automatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency."
       },
       "gulf-ar": {
         "languageCode": "ar",
+        "status": "market-specific-custom-listing",
         "title": "وفرة: ميزانية ومصاريف",
         "shortDescription": "تابع تنبيهات البنوك المدعومة والميزانية والفواتير والاشتراكات بخصوصية.",
         "fullDescription": "حوّل تنبيهات البنوك الإماراتية والسعودية المدعومة إلى صورة مالية أوضح، دون مشاركة بيانات الدخول البنكية.\n\nإذن الرسائل اختياري على أندرويد. يمكنك تركه مغلقاً واستخدام الإدخال اليدوي. عند اختيار المتابعة التلقائية، يعالج أندرويد تنبيهات البنوك المدعومة محلياً على هاتفك، ويتخلص من المحتوى الآخر قبل تخزينه في وفرة ولا يرفعه. يستورد إذن READ_SMS التنبيهات المحفوظة بعد اختيار المتابعة التلقائية. ولا يُطلب إذن RECEIVE_SMS المنفصل إلا إذا فعّلت تنبيهات البنك الفورية الاختيارية.\n\nتابع المصاريف والدخل والميزانيات ومستحقات البطاقات وفواتير الخدمات والرسوم المتكررة والاشتراكات وأهداف الادخار. يختلف الدعم حسب البنك وصيغة الرسالة الدقيقة؛ راجع القائمة المدعومة داخل التطبيق.\n\nلا تسجيل ولا إعلانات ولا ربط بالحساب البنكي. لا يستطيع وفرة الرد على الرسائل أو الموافقة على الدفعات أو نقل المال. سجلّك مشفّر على جهازك. يتطلب الالتقاط التلقائي اشتراك وفرة برو بعد ثلاثة أيام مضمنة في التطبيق؛ يبقى الإدخال اليدوي ولصق التنبيهات والنسخ الاحتياطي والاستعادة مجاناً. لا يبدأ أي اشتراك أو خصم تلقائياً. تُحصّل Google Play قيمة وفرة برو بعملة متجرك المحلية."
       }
     },
-    "launchDefaultListing": "gulf-en",
-    "launchListings": ["gulf-en", "gulf-ar"],
+    "launchDefaultListing": "global-en",
+    "launchListings": ["global-en"],
+    "optionalListings": ["global-ar", "gulf-en", "gulf-ar"],
     "tags": ["Budgeting", "Expense tracker", "Personal finance"],
     "subscriptionLocalizations": {
       "wafra_pro_monthly": {
@@ -116,12 +126,13 @@
     "apple": {
       "device": "6.9-inch iPhone",
       "pixels": "1320x2868",
+      "launchLocales": ["en-US"],
       "locales": ["en-US", "ar-SA"],
       "story": [
         {
           "route": "/",
           "headline": { "en-US": "See where your money goes", "ar-SA": "شاهد أين تذهب أموالك" },
-          "altText": { "en-US": "Wafra Home showing AED spending, income and money left this month.", "ar-SA": "شاشة وفرة الرئيسية تعرض المصاريف والدخل والمتبقي هذا الشهر بالدرهم الإماراتي." }
+          "altText": { "en-US": "Wafra Home showing spending, income and money left this month in the selected ledger currency.", "ar-SA": "شاشة وفرة الرئيسية تعرض المصاريف والدخل والمتبقي هذا الشهر بعملة السجل المختارة." }
         },
         {
           "route": "/import-sms",
@@ -163,7 +174,7 @@
       ]
     },
     "googleGlobal": {
-      "status": "future-draft-after-arbitrary-ledger-currencies",
+      "status": "launch-required",
       "pixels": "1080x1920",
       "locales": ["en", "ar"],
       "story": {
@@ -190,6 +201,7 @@
       }
     },
     "googleGulf": {
+      "status": "optional-market-specific",
       "pixels": "1080x1920",
       "locales": ["en", "ar"],
       "story": {

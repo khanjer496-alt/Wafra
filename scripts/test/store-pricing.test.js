@@ -23,18 +23,17 @@ const ok = (name, condition, detail = '') => {
     const value = clone(pricing);
     value.approvalStatus = 'approved';
     for (const product of Object.values(value.products)) {
-      product.approvedStorefrontPrices.AE = {
-        applePricePointId: 'apple-ae-price-point',
-        googleCurrency: 'AED',
-        googleAmount: '29.99',
-        readBack: { apple: true, google: true },
+      product.approvedBasePrice = {
+        currency: product.referencePrice.currency,
+        amount: product.referencePrice.amount,
+        publisherApproved: true,
       };
-      product.approvedStorefrontPrices.SA = {
-        applePricePointId: 'apple-sa-price-point',
-        googleCurrency: 'SAR',
-        googleAmount: '29.99',
-        readBack: { apple: true, google: true },
-      };
+      product.readBackEvidence = Object.fromEntries(['JPY', 'USD', 'KWD'].map((currency) => [currency, {
+        appleVerified: true,
+        googleVerified: true,
+        appleFormattedPrice: `${currency} Apple price`,
+        googleFormattedPrice: `${currency} Google price`,
+      }]));
     }
     return value;
   };
@@ -46,17 +45,17 @@ const ok = (name, condition, detail = '') => {
 
   ok('canonical pending pricing is valid', validateStorePricing(pricing, metadata).length === 0);
   ok('complete approved pricing is valid', validateStorePricing(approvedPricing(), metadata).length === 0);
-  ok('approved pricing rejects a blank Apple price point', rejects(
-    (value) => { value.products.monthly.approvedStorefrontPrices.AE.applePricePointId = ' '; },
-    /Apple price point/,
+  ok('approved pricing rejects an unapproved base price', rejects(
+    (value) => { value.products.monthly.approvedBasePrice.publisherApproved = false; },
+    /publisher-approved base price/,
   ));
-  ok('approved pricing rejects the wrong storefront currency', rejects(
-    (value) => { value.products.monthly.approvedStorefrontPrices.AE.googleCurrency = 'SAR'; },
-    /Google AED amount/,
+  ok('approved pricing rejects a base currency that differs from the reference', rejects(
+    (value) => { value.products.monthly.approvedBasePrice.currency = 'EUR'; },
+    /publisher-approved base price/,
   ));
-  ok('approved pricing rejects malformed Google amounts', rejects(
-    (value) => { value.products.monthly.approvedStorefrontPrices.AE.googleAmount = '29.999'; },
-    /Google AED amount/,
+  ok('approved pricing rejects malformed base amounts', rejects(
+    (value) => { value.products.monthly.approvedBasePrice.amount = '29.999'; },
+    /publisher-approved base price/,
   ));
   ok('pricing rejects store introductory offers', rejects(
     (value) => { value.rules.introductoryOffer = true; },
@@ -67,8 +66,8 @@ const ok = (name, condition, detail = '') => {
     /base plan/,
   ));
   ok('approved pricing requires store read-back evidence', rejects(
-    (value) => { value.products.monthly.approvedStorefrontPrices.AE.readBack.google = false; },
-    /read-back evidence/,
+    (value) => { value.products.monthly.readBackEvidence.JPY.googleVerified = false; },
+    /read-back evidence for JPY/,
   ));
   ok('pricing rejects product identifier drift', rejects(
     (value) => { value.products.yearly.productId = 'wafra_pro_annual'; },

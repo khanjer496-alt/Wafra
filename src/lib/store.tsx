@@ -37,7 +37,7 @@ import {
   ledgerCurrencyExponent,
   marketCurrencyCode,
   setActiveMarket,
-  setLedgerCurrency,
+  setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
 import {
   generateSeedAccounts,
@@ -62,7 +62,7 @@ import {
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
 import { markLaunchPhase } from '@/lib/launch-performance';
-import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney } from '@/lib/ledger-money';
+import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
   type PromoteReviewAlertInput,
@@ -124,6 +124,7 @@ import {
   type LocalCaptureQualificationReceipt,
   type LocalCaptureReviewQualificationCandidate,
   type OnboardingPlanPreferences,
+  type OnboardingProfile,
   type Transaction,
   type TransactionType,
 } from '@/lib/types';
@@ -177,6 +178,7 @@ const EMPTY_STATE: AppState = {
   cardDues: [],
   goals: [],
   onboardingPlan: null,
+  onboardingProfile: null,
   onboardingCurrencyEvidence: null,
   merchantOverrides: {},
   billAliases: {},
@@ -547,7 +549,7 @@ export function migratePersistedState(
     // Released first for the same reason the hydrate branch releases it: this
     // runs over a backup being restored, whose pack is a property of the state
     // arriving, not of the one it replaces.
-    setLedgerCurrency(null);
+    setGlobalLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
     parsed.transactions = parsed.transactions.flatMap((t) => {
       if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
@@ -604,9 +606,9 @@ function captureMarketContext(): () => void {
   const currency = pinnedLedgerCurrencyCode();
   const exponent = ledgerCurrencyExponent();
   return () => {
-    setLedgerCurrency(null);
+    setGlobalLedgerCurrency(null);
     setActiveMarket(market);
-    setLedgerCurrency(currency, exponent);
+    setGlobalLedgerCurrency(currency, exponent);
   };
 }
 
@@ -638,7 +640,7 @@ export function parseBackupForRestore(
 type Action =
   | { type: 'resolveTransfers'; request: TransferDecisionRequest }
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
-  | { type: 'addTransaction'; transaction: Transaction }
+  | { type: 'addTransaction'; transaction: Transaction; ledgerMoney?: LedgerMoneySpec }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
   | ({
@@ -666,6 +668,7 @@ type Action =
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
   | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
+  | { type: 'setOnboardingProfile'; profile: OnboardingProfile }
   | {
       type: 'activateOnboardingPlan';
       budgets: Budget[];
@@ -683,6 +686,7 @@ type Action =
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
   | { type: 'unlockFounderPro' }
+  | { type: 'setLedgerMoney'; ledgerMoney: LedgerMoneySpec }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
@@ -714,23 +718,33 @@ type Action =
  * still corruption, even before the first bank transaction arrives.
  */
 /**
- * Pin (or release) the ledger's accounting currency from the state that now
- * exists — see `ledgerCurrency` in markets.ts for why the pin exists at all.
+ * Mirror the persisted ledger-money choice into the formatting/parser module.
  *
- * Derived rather than persisted: the currency of record IS `marketId`, and the
- * pin is what stops `marketId` drifting once there is money it would relabel.
- * Recomputing it after every action is what makes `clearAll` and `restore`
- * release or re-pin it on the same tick, with no field to migrate.
+ * `ledgerMoney` is now the accounting fact even while the ledger is empty. That
+ * lets a user choose USD, JPY or KWD once and then create a budget/account/goal
+ * before their first transaction without any screen silently falling back to
+ * the parser market's AED/SAR. Erase releases it; restore/hydrate reinstates it.
  */
 function syncLedgerCurrency(next: AppState): AppState {
-  if (!ledgerStateHasMoney(next)) {
-    setLedgerCurrency(null);
-    return next.ledgerMoney === null ? next : { ...next, ledgerMoney: null };
+  const hasMoney = ledgerStateHasMoney(next);
+  if (!hasMoney && next.ledgerMoney) {
+    setGlobalLedgerCurrency(next.ledgerMoney.currency, next.ledgerMoney.exponent);
+    return next;
+  }
+  if (!hasMoney) {
+    setGlobalLedgerCurrency(null);
+    return next;
   }
   const spec = next.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(next.marketId));
   if (!spec) throw new Error('Ledger currency is not supported');
-  setLedgerCurrency(spec.currency, spec.exponent);
+  setGlobalLedgerCurrency(spec.currency, spec.exponent);
   return next.ledgerMoney === spec ? next : { ...next, ledgerMoney: spec };
+}
+
+/** First money-bearing action on a fresh ledger must follow an explicit choice. */
+function requireSelectedLedgerMoney(state: AppState): void {
+  if (state.ledgerMoney || ledgerStateHasMoney(state)) return;
+  throw new Error('Choose a ledger currency before recording money');
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -780,7 +794,7 @@ function reduceState(state: AppState, action: Action): AppState {
       // The incoming state brings its own accounting currency with it, so any
       // pin held by the state being replaced must not veto its pack. A restore
       // of an SAR backup over an AED ledger is exactly that case.
-      setLedgerCurrency(null);
+      setGlobalLedgerCurrency(null);
       setActiveMarket(next.marketId);
       if (!next.language) next.language = detectLanguage();
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
@@ -812,12 +826,16 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, pro: action.pro };
     case 'unlockFounderPro':
       return state.founderPro ? state : { ...state, founderPro: true };
+    case 'setLedgerMoney': {
+      const current = migrateLegacyLedgerMoney(state);
+      if (ledgerStateHasMoney(state) && current &&
+        (current.currency !== action.ledgerMoney.currency ||
+          current.exponent !== action.ledgerMoney.exponent)) {
+        throw new Error('Ledger currency cannot change after money is recorded');
+      }
+      return { ...state, ledgerMoney: action.ledgerMoney };
+    }
     case 'setMarket':
-      // Refused outright once the ledger holds money: the pack change would
-      // relabel every stored figure in a currency it was never recorded in,
-      // and nothing here converts. markets.ts owns that judgement so it holds
-      // for onboarding and Settings alike; `marketId` must not move when the
-      // pack did not.
       if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
     case 'setUiLanguage':
@@ -891,8 +909,26 @@ function reduceState(state: AppState, action: Action): AppState {
       // O(n) once, on a setting the user changes approximately never.
       return { ...state, monthStartDay: day, transactions: [...state.transactions] };
     }
-    case 'addTransaction':
-      return { ...state, transactions: sortTxs([action.transaction, ...state.transactions]) };
+    case 'addTransaction': {
+      const requestedMoney = action.ledgerMoney;
+      if (requestedMoney) {
+        const currentMetadata = ledgerMoneySpec(requestedMoney.currency);
+        if (!currentMetadata || currentMetadata.exponent !== requestedMoney.exponent ||
+          currentMetadata.schemaVersion !== requestedMoney.schemaVersion) {
+          throw new Error('Unsupported ledger currency');
+        }
+        if (ledgerStateHasMoney(state) && state.ledgerMoney &&
+          (state.ledgerMoney.currency !== requestedMoney.currency ||
+            state.ledgerMoney.exponent !== requestedMoney.exponent)) {
+          throw new Error('Ledger currency cannot change after money is recorded');
+        }
+      }
+      return {
+        ...state,
+        ...(requestedMoney && !ledgerStateHasMoney(state) ? { ledgerMoney: requestedMoney } : {}),
+        transactions: sortTxs([action.transaction, ...state.transactions]),
+      };
+    }
     case 'editTransaction': {
       const transactions = sortTxs(
         state.transactions.map((t) => {
@@ -927,14 +963,19 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, transactions: state.transactions.filter((t) => !ids.has(t.id)) };
     }
     case 'upsertBudget': {
+      if (action.budget.limitFils !== 0) requireSelectedLedgerMoney(state);
       const others = state.budgets.filter((b) => b.category !== action.budget.category);
       return { ...state, budgets: [...others, action.budget] };
     }
     case 'deleteBudget':
       return { ...state, budgets: state.budgets.filter((b) => b.category !== action.category) };
     case 'addAccount':
+      if (action.account.openingFils !== 0 || (action.account.snapshotFils ?? 0) !== 0 ||
+        (action.account.creditLimitFils ?? 0) !== 0) requireSelectedLedgerMoney(state);
       return { ...state, accounts: [...state.accounts, action.account] };
     case 'editAccount':
+      if ((action.patch.openingFils ?? 0) !== 0 || (action.patch.snapshotFils ?? 0) !== 0 ||
+        (action.patch.creditLimitFils ?? 0) !== 0) requireSelectedLedgerMoney(state);
       return {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
@@ -955,10 +996,12 @@ function reduceState(state: AppState, action: Action): AppState {
         ),
       };
     case 'addBill':
+      if (action.bill.amountFils !== 0) requireSelectedLedgerMoney(state);
       return { ...state, bills: [...state.bills, action.bill] };
     case 'deleteBill':
       return { ...state, bills: state.bills.filter((b) => b.id !== action.id) };
     case 'markBillPaid': {
+      requireSelectedLedgerMoney(state);
       const bills = state.bills.map((b) =>
         b.id === action.id && !b.paidMonths.includes(action.month)
           ? { ...b, paidMonths: [...b.paidMonths, action.month] }
@@ -967,12 +1010,16 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, bills, transactions: sortTxs([action.transaction, ...state.transactions]) };
     }
     case 'upsertCardDue': {
+      if (action.due.totalDueFils !== 0 || action.due.minDueFils !== 0 || action.due.paidFils !== 0) {
+        requireSelectedLedgerMoney(state);
+      }
       return {
         ...state,
         cardDues: mergeImportedCardDues(state.cardDues, [action.due], state.accounts),
       };
     }
     case 'payCardDue': {
+      if (action.amountFils !== 0 || action.transaction) requireSelectedLedgerMoney(state);
       const cardDues = state.cardDues.map((d) =>
         d.id === action.id
           ? {
@@ -1027,8 +1074,12 @@ function reduceState(state: AppState, action: Action): AppState {
         accountHints: { ...state.accountHints, [action.last4]: action.accountId },
       };
     case 'addGoal':
+      if (action.goal.targetFils !== 0 || action.goal.savedFils !== 0) requireSelectedLedgerMoney(state);
       return { ...state, goals: [...state.goals, action.goal] };
     case 'editGoal':
+      if ((action.patch.targetFils ?? 0) !== 0 || (action.patch.savedFils ?? 0) !== 0) {
+        requireSelectedLedgerMoney(state);
+      }
       return {
         ...state,
         goals: state.goals.map((g) => (g.id === action.id ? { ...g, ...action.patch } : g)),
@@ -1037,10 +1088,16 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setOnboardingPlan':
       return { ...state, onboardingPlan: action.plan };
+    case 'setOnboardingProfile':
+      return { ...state, onboardingProfile: action.profile };
     case 'activateOnboardingPlan': {
       // React Strict Mode may replay an effect. Clearing the pending plan in
       // the same reducer action makes activation idempotent even then.
       if (!state.onboardingPlan) return state;
+      if (action.budgets.some((budget) => budget.limitFils !== 0) ||
+        action.goals.some((goal) => goal.targetFils !== 0 || goal.savedFils !== 0)) {
+        requireSelectedLedgerMoney(state);
+      }
       const merged = mergeDeferredOnboardingPlan(
         state.budgets,
         state.goals,
@@ -1161,7 +1218,7 @@ interface StoreValue {
    * still mounted.
    */
   retryHydration: () => Promise<boolean>;
-  addTransaction: (t: Omit<Transaction, 'id'>) => void;
+  addTransaction: (t: Omit<Transaction, 'id'>, ledgerMoney?: LedgerMoneySpec) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
   deleteTransaction: (id: string) => void;
@@ -1208,6 +1265,7 @@ interface StoreValue {
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
+  setOnboardingProfile: (profile: OnboardingProfile) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -1223,6 +1281,7 @@ interface StoreValue {
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
   unlockFounderPro: () => Promise<void>;
+  setLedgerMoney: (currency: string) => boolean;
   setMarket: (id: string) => boolean;
   setUiLanguage: (language: string) => void;
   setOnboarded: () => void;
@@ -1557,6 +1616,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const run = ++hydrationRun.current;
     markLaunchPhase('ledger-load-start');
     try {
+      // Screenmap is a simulator-only visual review harness. Its synthetic
+      // ledger must not depend on SQLCipher/keychain availability: a clean CI
+      // simulator can legitimately have no usable encrypted store yet, and a
+      // storage failure would place the recovery gate over every deep link.
+      // The guard itself is iOS-only and requires the dedicated Screenmap flag
+      // plus the development founder flag, so production and ordinary dev
+      // builds still exercise the real encrypted hydration path below.
+      if (SCREENMAP_DEMO_LEDGER) {
+        if (hydrationRun.current !== run) return false;
+        setHydrationFailed(false);
+        setStorageFailure(null);
+        setStorageRecoveryState(null);
+        dispatch({ type: 'hydrate', state: demoState() });
+        markLaunchPhase('ledger-load-complete');
+        return true;
+      }
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
       let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
@@ -1663,6 +1738,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Screenmap state exists only for screenshots and is intentionally
+    // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
+    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
     return persistence.save(snapshot).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
@@ -1724,8 +1802,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [persist]);
 
-  const addTransaction = useCallback((t: Omit<Transaction, 'id'>) => {
-    dispatch({ type: 'addTransaction', transaction: { ...t, id: makeId('tx') } });
+  const addTransaction = useCallback((t: Omit<Transaction, 'id'>, ledgerMoney?: LedgerMoneySpec) => {
+    const current = authoritativeState.current;
+    if (!ledgerStateHasMoney(current) && !current.ledgerMoney && !ledgerMoney) {
+      throw new Error('Choose a ledger currency before recording the first manual transaction');
+    }
+    dispatch({ type: 'addTransaction', transaction: { ...t, id: makeId('tx') }, ledgerMoney });
   }, [dispatch]);
 
   const editTransaction = useCallback((id: string, patch: Partial<Omit<Transaction, 'id'>>) => {
@@ -2037,6 +2119,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboardingPlan', plan });
   }, [dispatch]);
 
+  const setOnboardingProfile = useCallback((profile: OnboardingProfile) => {
+    dispatch({ type: 'setOnboardingProfile', profile });
+  }, [dispatch]);
+
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
   }, [dispatch]);
@@ -2146,6 +2232,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'unlockFounderPro' });
     if (!await persist(next)) throw new Error('Founder Pro grant could not be saved');
   }, [dispatch, persist]);
+
+  const setLedgerMoney = useCallback((currency: string) => {
+    const spec = ledgerMoneySpec(currency);
+    if (!spec) return false;
+    const current = authoritativeState.current;
+    const existing = migrateLegacyLedgerMoney(current);
+    if (ledgerStateHasMoney(current) && existing &&
+      (existing.currency !== spec.currency || existing.exponent !== spec.exponent)) {
+      return false;
+    }
+    dispatch({ type: 'setLedgerMoney', ledgerMoney: spec });
+    return true;
+  }, [dispatch]);
 
   const setMarket = useCallback((id: string) => {
     if (!canSelectMarket(id)) return false;
@@ -2349,6 +2448,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -2362,6 +2462,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setThemePreference,
       setPro,
       unlockFounderPro,
+      setLedgerMoney,
       setMarket,
       setUiLanguage,
       setOnboarded,
@@ -2409,6 +2510,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -2422,6 +2524,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setThemePreference,
       setPro,
       unlockFounderPro,
+      setLedgerMoney,
       setMarket,
       setUiLanguage,
       setOnboarded,

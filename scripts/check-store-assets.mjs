@@ -13,24 +13,8 @@ const sets = [
     height: 2868,
   },
   {
-    label: 'App Store Arabic 6.9-inch',
-    directory: 'docs/store-assets/appstore',
-    prefix: 'appstore-6.9-dark-ar-',
-    count: 8,
-    width: 1320,
-    height: 2868,
-  },
-  {
-    label: 'Google Play Gulf English',
-    directory: 'docs/store-assets/play/gulf-en',
-    prefix: '',
-    count: 8,
-    width: 1080,
-    height: 1920,
-  },
-  {
-    label: 'Google Play Gulf Arabic',
-    directory: 'docs/store-assets/play/gulf-ar',
+    label: 'Google Play global English',
+    directory: 'docs/store-assets/play/global-en',
     prefix: '',
     count: 8,
     width: 1080,
@@ -98,30 +82,10 @@ for (const set of sets) {
   orderedSetHashes.set(set.label, orderedHashes);
 }
 
-for (const [englishLabel, arabicLabel] of [
-  ['App Store English 6.9-inch', 'App Store Arabic 6.9-inch'],
-  ['Google Play Gulf English', 'Google Play Gulf Arabic'],
-]) {
-  const english = orderedSetHashes.get(englishLabel) ?? [];
-  const arabic = orderedSetHashes.get(arabicLabel) ?? [];
-  if (english.length !== 8 || arabic.length !== 8) continue;
-  english.forEach((frame, index) => {
-    if (frame.hash === arabic[index]?.hash) {
-      errors.push(
-        `${englishLabel}/${frame.name} is byte-identical to ${arabicLabel}/${arabic[index].name}; localized frames must be captured after the language switch`,
-      );
-    }
-  });
-}
-
 const graphics = [
   {
-    label: 'Google Play Gulf English feature graphic',
-    path: 'docs/store-assets/play/gulf-en-feature-graphic.png',
-  },
-  {
-    label: 'Google Play Gulf Arabic feature graphic',
-    path: 'docs/store-assets/play/gulf-ar-feature-graphic.png',
+    label: 'Google Play global English feature graphic',
+    path: 'docs/store-assets/play/global-en-feature-graphic.png',
   },
 ];
 const graphicHashes = new Map();
@@ -159,4 +123,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log('Store screenshots and Gulf feature graphics have the required count, dimensions, RGB format, and localized unique assets.');
+console.log('Required global-launch store screenshots and feature graphic have the required count, dimensions, RGB format, and unique frames.');

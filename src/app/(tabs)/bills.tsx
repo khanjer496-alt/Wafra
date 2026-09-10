@@ -9,6 +9,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { PaymentAgenda } from '@/components/bills/payment-agenda';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { PaymentAgendaItem } from '@/lib/reference-presentation';
@@ -17,6 +18,7 @@ import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
@@ -33,7 +35,7 @@ import {
   formatAED,
   fullDateTime,
   monthKey,
-  parseAmountToFils,
+  parseAmountWithMoneySpec,
   shortDate,
   toISODate,
   totalAsShown,
@@ -54,7 +56,6 @@ import {
 import { useStore } from '@/lib/store';
 import type { Account, Bill, CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 
 /**
@@ -87,7 +88,7 @@ export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
-  const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue } = useStore();
+  const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStore();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
    *
@@ -117,6 +118,7 @@ export default function BillsScreen() {
   const [amountText, setAmountText] = useState('');
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -343,18 +345,20 @@ export default function BillsScreen() {
    * nothing, with the sheet still open and no reason given.
    */
   const draftDueDay = Number(dueDayText);
+  const draftAmountFils = state.ledgerMoney
+    ? parseAmountWithMoneySpec(amountText, state.ledgerMoney)
+    : null;
   const draftValid =
     Boolean(title.trim()) &&
-    Boolean(parseAmountToFils(amountText)) &&
+    Boolean(draftAmountFils) &&
     dueDayText.trim() !== '' &&
     Number.isInteger(draftDueDay) &&
     draftDueDay >= 1 &&
     draftDueDay <= 31;
 
   const saveBill = () => {
-    const fils = parseAmountToFils(amountText);
-    if (!draftValid || !fils) return;
-    addBill({ title: title.trim(), category, amountFils: fils, dueDay: draftDueDay });
+    if (!draftValid || !draftAmountFils) return;
+    addBill({ title: title.trim(), category, amountFils: draftAmountFils, dueDay: draftDueDay });
     setTitle('');
     setAmountText('');
     setDueDayText('');
@@ -796,6 +800,20 @@ export default function BillsScreen() {
           placeholder={t('reminderNamePlaceholder')}
         />
 
+        {!state.ledgerMoney && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('chooseLedgerCurrency')}
+            onPress={() => setCurrencySheetVisible(true)}
+            style={[styles.currencyChoice, { borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}>
+            <View style={styles.currencyChoiceCopy}>
+              <ThemedText type="smallBold">{t('chooseLedgerCurrency')}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyRequiredHint')}</ThemedText>
+            </View>
+            <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+          </Pressable>
+        )}
+
         <View style={[styles.inputRow, largeText && styles.inputRowLarge]}>
           <View style={styles.fieldColumn}>
             <TextField
@@ -806,7 +824,7 @@ export default function BillsScreen() {
               placeholder={t('amount')}
               leading={(
                 <ThemedText type="smallBold" themeColor="textSecondary">
-                  {ledgerCurrencyDisplay()}
+                  {state.ledgerMoney?.currency ?? '—'}
                 </ThemedText>
               )}
             />
@@ -847,6 +865,12 @@ export default function BillsScreen() {
             }}
           />
         ) : undefined}
+      />
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
       />
       {/* Mounted only while there is something to confirm, so the entry
           animation runs on every open rather than once per screen. */}
@@ -1028,6 +1052,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two,
   },
+  currencyChoice: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  currencyChoiceCopy: { flex: 1, minWidth: 0, gap: 2 },
   inputRowLarge: { flexDirection: 'column' },
   fieldColumn: { flex: 1 },
   dayField: { flex: 0.6 },

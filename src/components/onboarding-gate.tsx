@@ -29,13 +29,21 @@ import {
   requestSmsPermission,
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
+import {
+  GROWTH_PLACEMENTS,
+  trackGrowthEvent,
+} from '@/lib/growth-funnel';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   BUDGET_PRESETS,
   DEFAULT_ONBOARDING_PLAN,
+  FOCUS_PRESETS,
   GOAL_PRESETS,
+  TRACKING_PRESETS,
+  onboardingInsightKeys,
+  onboardingLandingPath,
   onboardingResumeDestination,
   type OnboardingBudgetId,
   type OnboardingGoalId,
@@ -43,15 +51,21 @@ import {
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
+import type { OnboardingFocus, OnboardingTracking } from '@/lib/types';
 
 type Step =
   | 'welcome'
+  | 'focus'
+  | 'tracking'
+  | 'preview'
+  | 'privacy'
   | 'goals'
   | 'budget'
   | 'capture'
   | 'scanning'
   | 'complete';
-const QUESTION_STEPS: readonly Step[] = ['goals', 'budget'];
+const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview', 'privacy'];
+const PLAN_STEPS: readonly Step[] = ['goals', 'budget'];
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
@@ -178,11 +192,13 @@ function SelectionRow({
   );
 }
 
-function BackHeader({ step, onBack, showProgress, disabled }: {
-  step: Step; onBack: () => void; showProgress: boolean; disabled: boolean;
+function BackHeader({ step, onBack, progressSteps, disabled }: {
+  step: Step; onBack: () => void; progressSteps: readonly Step[] | null; disabled: boolean;
 }) {
-  const index = QUESTION_STEPS.indexOf(step);
-  const visibleIndex = index < 0 ? QUESTION_STEPS.length - 1 : index;
+  const steps = progressSteps ?? [];
+  const index = steps.indexOf(step);
+  const showProgress = index >= 0 && steps.length > 0;
+  const visibleIndex = showProgress ? index : 0;
   return (
     <View style={styles.progressHeader}>
       <View style={styles.progressTopline}>
@@ -201,14 +217,14 @@ function BackHeader({ step, onBack, showProgress, disabled }: {
           <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
         </Pressable>
         {showProgress && <ThemedText style={styles.stepLabel}>
-          {tf('onboardStepOf', { step: visibleIndex + 1, total: QUESTION_STEPS.length })}
+          {tf('onboardStepOf', { step: visibleIndex + 1, total: steps.length })}
         </ThemedText>}
       </View>
       {showProgress && <View
         style={styles.progressTrack}
         accessibilityRole="progressbar"
-        accessibilityValue={{ min: 1, max: QUESTION_STEPS.length, now: visibleIndex + 1 }}>
-        {QUESTION_STEPS.map((item, itemIndex) => (
+        accessibilityValue={{ min: 1, max: steps.length, now: visibleIndex + 1 }}>
+        {steps.map((item, itemIndex) => (
           <View
             key={item}
             style={[
@@ -248,9 +264,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ensureDurable,
     setOnboarded,
     setOnboardingPlan,
+    setOnboardingProfile,
     setCaptureOptOut,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
+  const [focus, setFocus] = useState<OnboardingFocus | null>(null);
+  const [tracking, setTracking] = useState<OnboardingTracking | null>(null);
   const [personalizing, setPersonalizing] = useState(false);
   const [resumeReady, setResumeReady] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
@@ -263,7 +282,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   }));
   const [goalLimitAnnounced, setGoalLimitAnnounced] = useState(false);
   const [progress] = useState({ scanned: 0, found: 0 });
-  const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
+  const [result, setResult] = useState<{ tx: number; accounts: number; bills: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
@@ -273,12 +292,39 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [finishing, setFinishing] = useState(false);
   const [finishSaveFailed, setFinishSaveFailed] = useState(false);
   const requestedFirstEntry = useRef(false);
+  const startedEventSent = useRef(false);
+
+  const saveJourney = (
+    stage: 'welcome' | 'focus' | 'tracking' | 'preview' | 'privacy' | 'capture' | 'complete',
+    nextFocus: OnboardingFocus | null = focus,
+    nextTracking: OnboardingTracking | null = tracking,
+  ) => {
+    setOnboardingProfile({
+      v: 1,
+      stage,
+      focus: nextFocus,
+      tracking: nextTracking,
+      startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
+    });
+  };
+
+  useEffect(() => {
+    if (!state.hydrated || state.onboarded || hydrationFailed || startedEventSent.current) return;
+    startedEventSent.current = true;
+    trackGrowthEvent('onboarding_started', {
+      focus: state.onboardingProfile?.focus ?? null,
+      tracking: state.onboardingProfile?.tracking ?? null,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  }, [hydrationFailed, state.hydrated, state.onboarded, state.onboardingProfile]);
 
   useEffect(() => {
     if (!state.hydrated || hydrationFailed) return;
     if (previouslyOnboarded.current && !state.onboarded) {
       resumeHandled.current = false;
       setStep('welcome');
+      setFocus(null);
+      setTracking(null);
       setPlan({ ...DEFAULT_ONBOARDING_PLAN, goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds] });
       setPersonalizing(false);
       setResumeFailed(false);
@@ -293,6 +339,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       return;
     }
     if (resumeHandled.current) return;
+    if (state.onboardingProfile) {
+      setFocus(state.onboardingProfile.focus);
+      setTracking(state.onboardingProfile.tracking);
+    }
     if (state.onboardingPlan) {
       setPlan({ ...state.onboardingPlan, goalIds: [...state.onboardingPlan.goalIds] });
       setPersonalizing(true);
@@ -313,6 +363,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           pendingIosSetup: saved?.returnToOnboarding === true,
           hasSavedPlan: state.onboardingPlan !== null,
           completedCallback: params.onboarding === 'complete',
+          savedStage: state.onboardingProfile?.stage ?? null,
         });
         resumeHandled.current = true;
         if (destination === 'ios-setup') router.replace('/ios-setup?fromOnboarding=1');
@@ -325,7 +376,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     };
     void restore();
     return () => { cancelled = true; };
-  }, [state.hydrated, state.onboarded, state.onboardingPlan, hydrationFailed, pathname,
+  }, [state.hydrated, state.onboarded, state.onboardingPlan, state.onboardingProfile, hydrationFailed, pathname,
     params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = params.onboarding === 'complete' ? 'complete' : step;
@@ -371,6 +422,52 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const chooseFocus = (id: OnboardingFocus) => {
+    setFocus(id);
+    saveJourney('focus', id, tracking);
+    trackGrowthEvent('onboarding_focus_selected', {
+      focus: id,
+      tracking,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
+  const chooseTracking = (id: OnboardingTracking) => {
+    setTracking(id);
+    saveJourney('tracking', focus, id);
+    trackGrowthEvent('onboarding_tracking_selected', {
+      focus,
+      tracking: id,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
+  const showValuePreview = () => {
+    if (!focus || !tracking) return;
+    saveJourney('preview');
+    setStep('preview');
+    trackGrowthEvent('onboarding_value_previewed', {
+      focus,
+      tracking,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
+  const showPrivacy = () => {
+    saveJourney('privacy');
+    setStep('privacy');
+    trackGrowthEvent('onboarding_privacy_seen', {
+      focus,
+      tracking,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
+  const showCapture = () => {
+    saveJourney('capture');
+    setStep('capture');
+  };
+
   const chooseGoal = (id: OnboardingGoalId) => {
     setGoalLimitAnnounced(false);
     setPlan((current) => {
@@ -388,25 +485,32 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const finishPreferences = () => {
     setOnboardingPlan(plan);
     setPersonalizing(false);
+    saveJourney('capture');
     setStep('capture');
   };
 
   const startScan = async () => {
     setSmsDenied(false);
+    trackGrowthEvent('capture_setup_started', { focus, tracking });
     let granted = false;
     try {
       granted = await requestSmsPermission();
     } catch {
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
       setCompletionOutcome('failed');
+      saveJourney('complete');
       setStep('complete');
       return;
     }
     if (!granted) {
+      trackGrowthEvent('capture_permission_denied', { focus, tracking, outcome: 'denied' });
       setSmsDenied(true);
       setCompletionOutcome('denied');
+      saveJourney('complete');
       setStep('complete');
       return;
     }
+    trackGrowthEvent('capture_permission_granted', { focus, tracking, outcome: 'automatic' });
     try {
       // A user may return from the manual completion screen and choose
       // automatic capture instead. Clear the durable opt-out before the first
@@ -414,20 +518,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       await setCaptureOptOut(false);
       await beginHistoryImport();
       setCompletionOutcome('automatic');
-      await openWafra();
+      await openWafra(false, undefined, 'automatic');
     } catch {
-      setResult({ tx: 0, accounts: 0 });
+      setResult({ tx: 0, accounts: 0, bills: 0 });
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
       setCompletionOutcome('failed');
+      saveJourney('complete');
       setStep('complete');
     }
   };
 
   const beginCapture = async () => {
     if (Platform.OS === 'ios') {
+      trackGrowthEvent('capture_setup_started', { focus, tracking });
       try {
         await setCaptureOptOut(false);
       } catch {
+        trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
         setCompletionOutcome('failed');
+        saveJourney('complete');
         setStep('complete');
         return;
       }
@@ -440,7 +549,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       await startScan();
       return;
     }
+    trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
     setCompletionOutcome('failed');
+    saveJourney('complete');
     setStep('complete');
   };
 
@@ -485,38 +596,68 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         }
         await dispatchIosMessageSetup({ type: 'onboarding-return-cleared' });
       }
+      trackGrowthEvent('manual_tracking_selected', { focus, tracking, outcome: 'manual' });
       setCompletionOutcome('manual');
+      saveJourney('complete');
       setStep('complete');
     } catch {
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
       setCompletionOutcome('failed');
+      saveJourney('complete');
       setStep('complete');
     }
   };
 
   const goBack = () => {
-    const index = QUESTION_STEPS.indexOf(activeStep);
     if (activeStep === 'complete') {
       setStep('capture');
+      saveJourney('capture');
       if (params.onboarding) router.setParams({ onboarding: undefined });
     } else if (activeStep === 'capture') {
-      setStep('welcome');
+      setStep('privacy');
+      saveJourney('privacy');
     } else if (activeStep === 'goals' || activeStep === 'scanning') {
       setStep('capture');
-    } else if (index > 0) {
-      setStep(QUESTION_STEPS[index - 1]);
+    } else if (activeStep === 'budget') {
+      setStep('goals');
+    } else if (activeStep === 'privacy') {
+      setStep('preview');
+      saveJourney('preview');
+    } else if (activeStep === 'preview') {
+      setStep('tracking');
+      saveJourney('tracking');
+    } else if (activeStep === 'tracking') {
+      setStep('focus');
+      saveJourney('focus');
+    } else if (activeStep === 'focus') {
+      setStep('welcome');
+      saveJourney('welcome');
     } else {
       setStep('welcome');
+      saveJourney('welcome');
     }
   };
 
-  const openWafra = async (addFirstEntry = false) => {
+  const openWafra = async (
+    addFirstEntry = false,
+    destination?: '/pro',
+    outcomeOverride?: CompletionOutcome,
+  ) => {
     setFinishing(true);
     requestedFirstEntry.current = addFirstEntry;
     try {
+      saveJourney('complete');
       setOnboarded();
       await ensureDurable();
+      trackGrowthEvent('onboarding_completed', {
+        focus,
+        tracking,
+        outcome: outcomeOverride ?? completionOutcome,
+        placement: GROWTH_PLACEMENTS.onboarding,
+      });
       committed();
       if (addFirstEntry) router.push('/add-transaction');
+      else router.replace(destination ?? onboardingLandingPath(focus));
       setFinishSaveFailed(false);
       setFinishing(false);
     } catch {
@@ -571,6 +712,37 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     params.onboarding === 'complete' || completionOutcome === 'automatic';
   const failedCompletion =
     activeStep === 'complete' && !automaticCompletion && completionOutcome === 'failed';
+  const insight = onboardingInsightKeys(focus);
+  const outcomeKey: StringKey = focus === 'spending'
+    ? 'onboardOutcomeSpending'
+    : focus === 'bills'
+      ? 'onboardOutcomeBills'
+      : focus === 'cashflow'
+        ? 'onboardOutcomeCashflow'
+        : 'onboardOutcomeOverview';
+  const trackingOutcomeKey: StringKey = tracking === 'none'
+    ? 'onboardOutcomeTrackingNone'
+    : tracking === 'bank-apps'
+      ? 'onboardOutcomeTrackingBankApps'
+      : tracking === 'spreadsheet'
+        ? 'onboardOutcomeTrackingSpreadsheet'
+        : tracking === 'finance-app'
+          ? 'onboardOutcomeTrackingFinanceApp'
+          : 'onboardOutcomeBody';
+  const landingLabel = focus === 'spending'
+    ? t('onboardOpenSpending')
+    : focus === 'bills'
+      ? t('onboardOpenBills')
+      : t('onboardOpenHome');
+  const discoveredResult = result ?? (
+    state.transactions.length > 0 || state.accounts.length > 0 || state.bills.length > 0 || state.cardDues.length > 0
+      ? {
+          tx: state.transactions.length,
+          accounts: state.accounts.filter((account) => !account.archived).length,
+          bills: state.bills.length + state.cardDues.length,
+        }
+      : null
+  );
 
   return (
     <View style={styles.container}>
@@ -610,7 +782,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <View style={styles.welcomeActions}>
                 <Button wrapLabel
                   label={t('onboardChooseStart')}
-                  onPress={() => { setPersonalizing(false); setStep('capture'); }}
+                  onPress={() => {
+                    setPersonalizing(false);
+                    saveJourney('focus');
+                    setStep('focus');
+                  }}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
@@ -623,12 +799,165 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           ) : (
             <>
               {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack}
-                disabled={setupBusy || finishing} showProgress={personalizing && QUESTION_STEPS.includes(activeStep)} />}
+                disabled={setupBusy || finishing}
+                progressSteps={personalizing
+                  ? (PLAN_STEPS.includes(activeStep) ? PLAN_STEPS : null)
+                  : (JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null)} />}
               <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
+                  {activeStep === 'focus' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardFocusTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
+                      </View>
+                      <View style={styles.choiceList} testID="onboarding-focus-options">
+                        {FOCUS_PRESETS.map((preset) => (
+                          <SelectionRow
+                            key={preset.id}
+                            title={t(preset.titleKey)}
+                            detail={t(preset.detailKey)}
+                            icon={preset.icon}
+                            selected={focus === preset.id}
+                            onPress={() => chooseFocus(preset.id)}
+                          />
+                        ))}
+                      </View>
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          disabled={!focus}
+                          onPress={() => {
+                            if (!focus) return;
+                            saveJourney('tracking');
+                            setStep('tracking');
+                          }}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'tracking' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardTrackingTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardTrackingBody')}</ThemedText>
+                      </View>
+                      <View style={styles.choiceList} testID="onboarding-tracking-options">
+                        {TRACKING_PRESETS.map((preset) => (
+                          <SelectionRow
+                            key={preset.id}
+                            title={t(preset.titleKey)}
+                            detail={t(preset.detailKey)}
+                            icon={preset.icon}
+                            selected={tracking === preset.id}
+                            onPress={() => chooseTracking(preset.id)}
+                          />
+                        ))}
+                      </View>
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          disabled={!tracking}
+                          onPress={showValuePreview}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'preview' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardOutcomeTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t(trackingOutcomeKey)}</ThemedText>
+                      </View>
+                      <View style={styles.valuePreview} testID="onboarding-value-preview">
+                        <View style={styles.valueStep}>
+                          <View style={styles.valueStepIcon}><Icon name="mail" size={20} color={night.primary} /></View>
+                          <View style={styles.valueStepCopy}>
+                            <ThemedText style={styles.valueStepTitle}>{t('onboardSampleBefore')}</ThemedText>
+                            <ThemedText style={styles.choiceDetail}>{t('onboardSampleMessage')}</ThemedText>
+                          </View>
+                        </View>
+                        <View style={styles.valueConnector} />
+                        <View style={styles.valueStep}>
+                          <View style={styles.valueStepIcon}><Icon name="check" size={20} color={night.primary} /></View>
+                          <View style={styles.valueStepCopy}>
+                            <ThemedText style={styles.valueStepTitle}>{t('onboardSampleAfter')}</ThemedText>
+                            <ThemedText style={styles.choiceDetail}>{t('onboardPreviewFooter')}</ThemedText>
+                          </View>
+                        </View>
+                        <View style={styles.valueConnector} />
+                        <View style={[styles.valueStep, styles.valueStepFinal]}>
+                          <View style={[styles.valueStepIcon, styles.valueStepIconFinal]}>
+                            <Icon name={focus === 'bills' ? 'receipt' : focus === 'cashflow' ? 'trend' : focus === 'overview' ? 'wallet' : 'chart'} size={20} color={night.onPrimary} />
+                          </View>
+                          <View style={styles.valueStepCopy}>
+                            <ThemedText style={styles.valueStepTitle}>{t(insight.title)}</ThemedText>
+                            <ThemedText style={styles.choiceDetail}>{t(outcomeKey)}</ThemedText>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          onPress={showPrivacy}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'privacy' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardPrivacyTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardDataControlBody')}</ThemedText>
+                      </View>
+                      <View style={styles.privacyList} testID="onboarding-privacy-points">
+                        {([
+                          ['lock', 'onboardPrivacyLocalTitle', 'onboardPrivacyLocalBody'],
+                          ['bank', 'onboardPrivacyNoLoginTitle', 'onboardPrivacyNoLoginBody'],
+                          ['repeat', 'onboardPrivacyChoiceTitle', 'onboardPrivacyChoiceBody'],
+                        ] as const).map(([icon, titleKey, bodyKey]) => (
+                          <View key={titleKey} style={styles.privacyPoint}>
+                            <View style={styles.privacyPointIcon}>
+                              <Icon name={icon} size={19} color={night.primary} />
+                            </View>
+                            <View style={styles.valueStepCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t(titleKey)}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t(bodyKey)}</ThemedText>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('onboardPrivacyContinue')}
+                          onPress={showCapture}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
                   {activeStep === 'goals' && (
                     <>
                       <View style={styles.questionTop}>
@@ -669,7 +998,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           style={styles.primaryButton}
                         />
                         <Button wrapLabel variant="outline" label={t('onboardSkipPersonalization')}
-                          onPress={() => { setPersonalizing(false); setStep('capture'); }}
+                          onPress={() => { setPersonalizing(false); saveJourney('capture'); setStep('capture'); }}
                           labelColor={night.text} style={styles.ghost} />
                       </View>
                     </>
@@ -882,20 +1211,40 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             />
                           </View>
                         )}
-                        {result && result.tx > 0 && (
+                        {discoveredResult && discoveredResult.tx > 0 && (
                           <View style={styles.resultCard}>
                             <View style={styles.resultCell}>
-                              <ThemedText style={styles.resultNumber}>{result.tx}</ThemedText>
+                              <ThemedText style={styles.resultNumber}>{discoveredResult.tx}</ThemedText>
                               <ThemedText style={styles.resultLabel}>
-                                {t(result.tx === 1 ? 'onboardEntryFound' : 'onboardEntriesFound')}
+                                {t(discoveredResult.tx === 1 ? 'onboardEntryFound' : 'onboardEntriesFound')}
                               </ThemedText>
                             </View>
                             <View style={styles.resultDivider} />
                             <View style={styles.resultCell}>
-                              <ThemedText style={styles.resultNumber}>{result.accounts}</ThemedText>
+                              <ThemedText style={styles.resultNumber}>{discoveredResult.accounts}</ThemedText>
                               <ThemedText style={styles.resultLabel}>
-                                {t(result.accounts === 1 ? 'onboardAccountFound' : 'onboardAccountsFound')}
+                                {t(discoveredResult.accounts === 1 ? 'onboardAccountFound' : 'onboardAccountsFound')}
                               </ThemedText>
+                            </View>
+                            <View style={styles.resultDivider} />
+                            <View style={styles.resultCell}>
+                              <ThemedText style={styles.resultNumber}>{discoveredResult.bills}</ThemedText>
+                              <ThemedText style={styles.resultLabel}>{t('onboardBillsFound')}</ThemedText>
+                            </View>
+                          </View>
+                        )}
+                        {!failedCompletion && !smsDenied && (
+                          <View style={styles.firstInsight} testID="onboarding-first-insight">
+                            <View style={styles.firstInsightIcon}>
+                              <Icon
+                                name={focus === 'bills' ? 'receipt' : focus === 'cashflow' ? 'trend' : focus === 'overview' ? 'wallet' : 'chart'}
+                                size={20}
+                                color={night.primary}
+                              />
+                            </View>
+                            <View style={styles.valueStepCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t(insight.title)}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t(insight.body)}</ThemedText>
                             </View>
                           </View>
                         )}
@@ -905,6 +1254,29 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             <ThemedText style={styles.deferredPlanText}>
                               {t('onboardPlanPending')}
                             </ThemedText>
+                          </View>
+                        )}
+                        {discoveredResult && discoveredResult.tx > 0 && !failedCompletion && !smsDenied && (
+                          <View style={styles.proPreview}>
+                            <View style={styles.proPreviewCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t('onboardProPreviewTitle')}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t('onboardProPreviewBody')}</ThemedText>
+                            </View>
+                            <Button
+                              wrapLabel
+                              variant="outline"
+                              label={t('onboardProPreviewAction')}
+                              labelColor={night.text}
+                              style={styles.ghost}
+                              onPress={() => void runSetupAction(async () => {
+                                trackGrowthEvent('post_import_pro_opened', {
+                                  focus,
+                                  tracking,
+                                  placement: GROWTH_PLACEMENTS.postImportPro,
+                                });
+                                await openWafra(false, '/pro');
+                              })}
+                            />
                           </View>
                         )}
                       </View>
@@ -917,7 +1289,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           <Button wrapLabel label={t('onboardAddFirstEntry')}
                             onPress={() => void runSetupAction(() => openWafra(true))}
                             disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
-                          <Button wrapLabel variant="ghost" label={t('onboardExploreLedger')}
+                          <Button wrapLabel variant="ghost" label={landingLabel}
                             onPress={() => void runSetupAction(() => openWafra())}
                             disabled={setupBusy} labelColor={night.text} />
                         </> : failedCompletion || smsDenied ? <>
@@ -927,7 +1299,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           <Button wrapLabel variant="outline" label={t('onboardManualChoice')}
                             onPress={() => void runSetupAction(continueManually)} disabled={setupBusy}
                             labelColor={night.text} style={styles.ghost} />
-                        </> : <Button wrapLabel label={t('openWafra')}
+                        </> : <Button wrapLabel label={landingLabel}
                           onPress={() => void runSetupAction(() => openWafra())} disabled={setupBusy}
                           labelColor={night.onPrimary} style={styles.primaryButton} />}
 
@@ -1166,6 +1538,88 @@ const styles = StyleSheet.create({
   resultNumber: { color: night.primary, fontFamily: Fonts.monoSemi, fontSize: 28, fontVariant: ['tabular-nums'] },
   resultLabel: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 11, textAlign: 'center' },
   resultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
+  valuePreview: {
+    borderRadius: Radius.sheet,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: night.cardBorder,
+    backgroundColor: night.backgroundElement,
+    padding: Spacing.three,
+  },
+  valueStep: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  valueStepFinal: {
+    borderRadius: Radius.md,
+    backgroundColor: night.primarySoft,
+    paddingHorizontal: Spacing.two,
+  },
+  valueStepIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: night.backgroundSelected,
+  },
+  valueStepIconFinal: { backgroundColor: night.primary },
+  valueStepCopy: { flex: 1, minWidth: 0, gap: 3 },
+  valueStepTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 20 },
+  valueConnector: {
+    width: 1,
+    height: 12,
+    marginLeft: 19,
+    backgroundColor: night.cardBorderStrong,
+  },
+  privacyList: { gap: Spacing.two },
+  privacyPoint: {
+    minHeight: 74,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.control,
+    borderWidth: 1,
+    borderColor: night.cardBorder,
+    backgroundColor: night.backgroundElement,
+  },
+  privacyPointIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: night.primarySoft,
+  },
+  firstInsight: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.control,
+    borderWidth: 1,
+    borderColor: night.primaryBorder,
+    backgroundColor: night.backgroundElement,
+  },
+  firstInsightIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: night.primarySoft,
+  },
+  proPreview: {
+    width: '100%',
+    gap: Spacing.two,
+    paddingTop: Spacing.one,
+  },
+  proPreviewCopy: { gap: 3 },
   capturePrivacy: {
     flexDirection: 'row',
     alignItems: 'center',

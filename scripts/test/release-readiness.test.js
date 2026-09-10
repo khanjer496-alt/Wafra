@@ -31,7 +31,10 @@ const validFixture = () => {
       checkAutomatically: 'ON_LOAD',
       fallbackToCacheTimeout: 1500,
     },
-    ios: { bundleIdentifier: 'app.wafra.ios' },
+    ios: {
+      bundleIdentifier: 'app.wafra.ios',
+      infoPlist: { ITSAppUsesNonExemptEncryption: true },
+    },
     android: { package: 'app.wafra.android' },
     plugins: [['expo-localization', {
       supportedLocales: { ios: ['en', 'ar'], android: ['en', 'ar'] },
@@ -63,9 +66,18 @@ const validFixture = () => {
     submit: { production: { android: { track: 'internal' } } },
   });
   write(root, 'server/wrangler.toml', 'database_id = "fa920e7b-c661-4517-917d-26e8b4878721"\n');
-  write(root, 'docs/privacy-policy.md', 'Contact support@wafra.example. Relay by Wafra LLC, UAE.');
-  write(root, 'docs/terms-of-use.md', 'Wafra LLC; laws of the UAE. support@wafra.example');
+  write(root, 'docs/privacy-policy.md', 'Nasida Apps LLC. Contact support@wafra.example.');
+  write(root, 'docs/terms-of-use.md', 'Nasida Apps LLC; laws chosen by publisher. support@wafra.example');
   write(root, 'docs/store-listing.md', 'Support: support@wafra.example. Privacy: https://wafra.example/privacy');
+  write(root, 'docs/store-compliance/google-play.md', 'Google Play declaration package.');
+  write(root, 'docs/store-compliance/apple-app-store.md', 'Apple App Store declaration package.');
+  write(root, 'docs/store-compliance/global-launch-board.md', 'Launch board.');
+  write(root, 'docs/store-compliance/monitoring-and-rollback.md', 'Monitoring and rollback.');
+  write(root, 'docs/store-compliance/apple-export-compliance.json', {
+    schemaVersion: 1,
+    status: 'approved',
+    itsAppUsesNonExemptEncryption: true,
+  });
   return root;
 };
 
@@ -108,6 +120,36 @@ const validFixture = () => {
       intent: { kind: 'build', platform: 'ios', profile: 'preview', submit: false },
     });
     ok('preview build checks only what that build needs', report.ready, JSON.stringify(report.findings));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    write(root, 'docs/store-compliance/apple-export-compliance.json', {
+      schemaVersion: 1,
+      status: 'pending-publisher-review',
+      itsAppUsesNonExemptEncryption: null,
+    });
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'store-release', platform: 'all' },
+    });
+    ok('store release blocks until Apple export compliance is publisher-approved',
+      report.findings.some(({ code }) => code === 'apple-export-compliance'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
+    app.expo.ios.infoPlist.ITSAppUsesNonExemptEncryption = false;
+    write(root, 'app.json', app);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'store-release', platform: 'ios' },
+    });
+    ok('store release rejects an iOS encryption flag that disagrees with the retained decision',
+      report.findings.some(({ code }) => code === 'apple-export-compliance-config'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 

@@ -5,6 +5,8 @@ export interface ExpenseReportOptions {
   transactions: Transaction[];
   accounts: Account[];
   currency: string;
+  /** Persisted ISO minor-unit exponent for the ledger's integer amounts. */
+  currencyExponent?: 0 | 2 | 3;
   language: 'en' | 'ar';
   from: string;
   to: string;
@@ -107,6 +109,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
   const {
     accounts,
     currency,
+    currencyExponent = 2,
     language,
     from,
     to,
@@ -152,8 +155,8 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
   const money = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: currencyExponent,
+    maximumFractionDigits: currencyExponent,
   });
   const date = new Intl.DateTimeFormat(locale, {
     day: '2-digit',
@@ -161,7 +164,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
     year: 'numeric',
   });
   const formatIso = (iso: string) => date.format(new Date(`${iso}T12:00:00Z`));
-  const formatMoney = (fils: number) => money.format(fils / 100);
+  const formatMoney = (minorUnits: number) => money.format(minorUnits / (10 ** currencyExponent));
 
   const body = rows.length
     ? rows

@@ -1,12 +1,13 @@
 # Wafra Privacy Policy
 
-_Last updated: 2 September 2026_
+_Last updated: 10 September 2026_
 
-Wafra ("the app") is a personal money manager for Android and iOS.
+Wafra ("the app") is a personal money manager for Android and iOS published by
+**Nasida Apps LLC** ("Wafra", "we", "us").
 
-**Not legal advice.** Have a lawyer review this before publishing. The relay
-hosting entity, processing region and support address must also be filled in
-before release.
+**Launch draft.** Have counsel review this before publishing. A monitored public
+support contact and any jurisdiction-specific transfer language required for the
+final distribution territories must still be confirmed before release.
 
 ## The short version
 
@@ -228,11 +229,12 @@ archive exists.
 
 ## Processing location
 
-The iPhone relay is hosted using Cloudflare Workers and D1. Its production
-jurisdiction and the legal entity responsible for that processing are
-**[pending before release]**. Depending on that configuration, processing may
-occur outside the user's country. This section must be completed before the
-iOS build is published.
+Nasida Apps LLC uses Cloudflare Workers and D1 for Wafra's optional relay-backed
+features. Internet routing and infrastructure may process data outside the
+user's country. The main Android and iPhone local-capture paths described above
+do not upload bank-message text to this relay. Where local law requires more
+specific international-transfer or data-location disclosure, that disclosure
+must be added for the affected storefront before distribution there.
 
 ## Your choices and deletion
 
@@ -258,7 +260,7 @@ deleted there separately.
 
 ## Children
 
-Wafra is not directed at children and is not intended for anyone under 13.
+Wafra is not directed at children and is intended for users aged 18 or older.
 
 ## Changes
 
@@ -267,6 +269,4 @@ will be surfaced in the app.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-
-support@example.com
+[[PUBLIC SUPPORT CONTACT — required before publishing]]

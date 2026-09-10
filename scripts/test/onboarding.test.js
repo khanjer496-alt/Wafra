@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const onboarding = require('./build/onboarding');
 const i18n = require('./build/i18n');
+const growth = require('./build/growth-funnel');
+const backupValidation = require('./build/backup-validation');
 
 let pass = 0;
 let fail = 0;
@@ -40,6 +42,49 @@ eq('saved personalization resumes at capture instead of resetting answers',
   resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: true, completedCallback: false }), 'capture');
 eq('a new user starts at the interactive welcome',
   resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: false, completedCallback: false }), 'welcome');
+eq('a saved value-first stage resumes before optional planning',
+  resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: false, completedCallback: false, savedStage: 'tracking' }), 'tracking');
+eq('spending focus opens Spending after setup', onboarding.onboardingLandingPath('spending'), '/flow');
+eq('bills focus opens Bills after setup', onboarding.onboardingLandingPath('bills'), '/bills');
+eq('cash-flow focus opens Home after setup', onboarding.onboardingLandingPath('cashflow'), '/');
+eq('overview focus opens Home after setup', onboarding.onboardingLandingPath('overview'), '/');
+
+eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.GROWTH_PLACEMENTS, {
+  onboarding: 'onboarding_main',
+  postImportPro: 'post_import_pro',
+  settingsPro: 'settings_pro',
+});
+{
+  const events = [];
+  growth.trackGrowthEvent('onboarding_started');
+  eq('growth events are a no-op until a provider sink is connected', events, []);
+  growth.setGrowthEventSink((event, payload) => events.push([event, payload.focus ?? null]));
+  growth.trackGrowthEvent('onboarding_focus_selected', { focus: 'bills' });
+  eq('provider-neutral funnel can be connected later without changing screens', events,
+    [['onboarding_focus_selected', 'bills']]);
+  growth.setGrowthEventSink(() => { throw new Error('analytics unavailable'); });
+  let blocked = false;
+  try { growth.trackGrowthEvent('onboarding_completed', { focus: 'bills' }); } catch { blocked = true; }
+  eq('analytics failure cannot block onboarding', blocked, false);
+  growth.setGrowthEventSink(null);
+}
+{
+  const profileState = {
+    transactions: [],
+    onboardingProfile: { v: 1, stage: 'privacy', focus: 'bills', tracking: 'bank-apps', startedAt: 10 },
+  };
+  eq('backup validation accepts the bounded source-free onboarding profile',
+    backupValidation.isValidBackupState(profileState), true);
+  eq('backup validation rejects unknown onboarding focus values',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, focus: 'crypto' } }), false);
+  eq('backup validation rejects unknown onboarding stages',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, stage: 'paywall' } }), false);
+  eq('backup validation rejects negative onboarding clocks',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, startedAt: -1 } }), false);
+}
 
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {
   marketId: 'AE',
@@ -235,8 +280,11 @@ const moneyPreviewSource = fs.readFileSync(
 );
 
 ok(
-  'optional personalization collects two steps without forcing a country',
-  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['goals', 'budget']") &&
+  'value-first onboarding precedes optional planning without forcing a country',
+  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview', 'privacy']") &&
+    gateSource.includes("const PLAN_STEPS: readonly Step[] = ['goals', 'budget']") &&
+    gateSource.includes('FOCUS_PRESETS.map') &&
+    gateSource.includes('TRACKING_PRESETS.map') &&
     gateSource.includes('setOnboardingPlan(plan)') &&
     !gateSource.includes('setMarket(plan.answers.marketId)') &&
     !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
@@ -360,18 +408,48 @@ ok(
   'onboarding uses real scan and import results rather than fake personalization delays',
   /progress\.scanned/.test(gateSource) &&
     /progress\.found/.test(gateSource) &&
-    /result\.tx/.test(gateSource) &&
-    /result\.accounts/.test(gateSource) &&
+    /discoveredResult\.tx/.test(gateSource) &&
+    /discoveredResult\.accounts/.test(gateSource) &&
+    /discoveredResult\.bills/.test(gateSource) &&
+    /state\.transactions\.length/.test(gateSource) &&
+    /state\.bills\.length \+ state\.cardDues\.length/.test(gateSource) &&
     !/setTimeout/i.test(gateSource),
 );
 ok(
-  'first run waits for encrypted hydration and shows progress only for optional goals and budget',
+  'first run waits for encrypted hydration and separates value-funnel progress from optional planning',
   /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
     /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
-    /QUESTION_STEPS\.length/.test(gateSource) &&
-    /showProgress=\{personalizing && QUESTION_STEPS\.includes\(activeStep\)\}/.test(gateSource),
+    /JOURNEY_STEPS\.includes\(activeStep\)/.test(gateSource) &&
+    /PLAN_STEPS\.includes\(activeStep\)/.test(gateSource) &&
+    /progressSteps=\{personalizing/.test(gateSource),
+);
+ok(
+  'value is shown before privacy and capture, and Pro appears only after real activity exists',
+  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'privacy'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
+    /discoveredResult && discoveredResult\.tx > 0[\s\S]*?onboardProPreviewAction/.test(gateSource) &&
+    /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
+);
+ok(
+  'tracking choice changes the value explanation instead of collecting a dead survey answer',
+  /const trackingOutcomeKey: StringKey = tracking === 'none'/.test(gateSource) &&
+    /tracking === 'bank-apps'/.test(gateSource) &&
+    /tracking === 'spreadsheet'/.test(gateSource) &&
+    /tracking === 'finance-app'/.test(gateSource) &&
+    /\{t\(trackingOutcomeKey\)\}/.test(gateSource),
+);
+ok(
+  'Android automatic completion records the automatic outcome synchronously',
+  /await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
+    /outcome: outcomeOverride \?\? completionOutcome/.test(gateSource),
+);
+ok(
+  'funnel instrumentation is provider-neutral and covers the important first-run decisions',
+  ['onboarding_started', 'onboarding_focus_selected', 'onboarding_tracking_selected',
+    'onboarding_value_previewed', 'onboarding_privacy_seen', 'capture_setup_started',
+    'capture_permission_granted', 'capture_permission_denied', 'manual_tracking_selected',
+    'onboarding_completed'].every((event) => gateSource.includes(`'${event}'`)),
 );
 ok(
   'manual completion keeps the gate visible through a failed durable save',
@@ -399,7 +477,7 @@ ok(
 );
 ok(
   'Android opens Home after durable setup instead of blocking on inbox parsing',
-  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?await openWafra\(\)/.test(gateSource) &&
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
     !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource),
 );
 ok(
@@ -417,9 +495,10 @@ ok(
   ),
 );
 ok(
-  'iOS checklist completion durably finishes onboarding before returning home',
+  'iOS checklist completion durably finishes onboarding before opening the selected first view',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
-    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?router\.replace\('\/'\)/.test(iosSource),
+    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?onboardingLandingPath\(onboardingFocus\)/.test(iosSource) &&
+    /setOnboardingProfile\(\{[\s\S]*?stage: 'complete'/.test(iosSource),
 );
 ok(
   'manual exit remains gate-owned while automated setup requires both outcomes',

@@ -47,20 +47,28 @@ const onboardingAction=(name,inputs)=>{
  const js=ts.transpileModule(`const action = ${action}; action();`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
  require('node:vm').runInNewContext(js,inputs);
 };
-test('optional goals and budget Back actions return to their actual entry points',()=>{
- for(const[activeStep,expected]of [['capture','welcome'],['goals','capture'],['budget','goals'],['scanning','capture'],['complete','capture']]){
+test('value-first and optional-plan Back actions return to their actual entry points',()=>{
+ const cases=[
+  ['capture','privacy','privacy'],['privacy','preview','preview'],['preview','tracking','tracking'],
+  ['tracking','focus','focus'],['focus','welcome','welcome'],['goals','capture',null],
+  ['budget','goals',null],['scanning','capture',null],['complete','capture','capture'],
+ ];
+ for(const[activeStep,expected,journey]of cases){
   const events=[];
-  onboardingAction('goBack',{activeStep,personalizing:true,QUESTION_STEPS:['goals','budget'],params:{},setStep:step=>events.push(step),router:{setParams:()=>assert.fail('no callback should be cleared')}});
-  assert.deepEqual(events,[expected],activeStep);
+  onboardingAction('goBack',{activeStep,params:{},setStep:step=>events.push(['step',step]),
+   saveJourney:stage=>events.push(['journey',stage]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
+  assert.deepEqual(events,[['step',expected],...(journey?[['journey',journey]]:[])],activeStep);
  }
  const events=[];
- onboardingAction('goBack',{activeStep:'complete',QUESTION_STEPS:['goals','budget'],params:{onboarding:'complete'},setStep:step=>events.push(['step',step]),router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
- assert.deepEqual(events,[['step','capture'],['params',['onboarding'],undefined]]);
+ onboardingAction('goBack',{activeStep:'complete',params:{onboarding:'complete'},setStep:step=>events.push(['step',step]),
+  saveJourney:stage=>events.push(['journey',stage]),router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
+ assert.deepEqual(events,[['step','capture'],['journey','capture'],['params',['onboarding'],undefined]]);
 });
-test('saving optional preferences records only the chosen plan and returns to capture',()=>{
+test('saving optional preferences records the chosen plan, resumes capture, and persists that journey stage',()=>{
  const plan={goalIds:['travel'],budgetId:'flexible'},events=[];
- onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),setPersonalizing:value=>events.push(['personalizing',value]),setStep:value=>events.push(['step',value])});
- assert.deepEqual(events,[['plan',plan],['personalizing',false],['step','capture']]);
+ onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),setPersonalizing:value=>events.push(['personalizing',value]),
+  saveJourney:stage=>events.push(['journey',stage]),setStep:value=>events.push(['step',value])});
+ assert.deepEqual(events,[['plan',plan],['personalizing',false],['journey','capture'],['step','capture']]);
 });
 test('new workflow files transpile without syntax errors',()=>{
  for(const file of ['src/components/workflows/workflow-copy.ts','src/components/workflows/workflow-surfaces.tsx']){
