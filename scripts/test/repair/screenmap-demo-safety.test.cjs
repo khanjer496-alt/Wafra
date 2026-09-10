@@ -25,6 +25,7 @@ test('Screenmap uses only the synthetic iOS development ledger', () => {
 
 test('production cannot satisfy the Screenmap demo guard', () => {
   const eas = JSON.parse(read('eas.json'));
+  assert.equal(eas.cli.version, '>=22.4.0');
   assert.equal(eas.build.production.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK, '0');
   assert.equal(eas.build['screenmap-simulator'].extends, 'development-simulator');
   assert.equal(eas.build['screenmap-simulator'].env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO, '1');
