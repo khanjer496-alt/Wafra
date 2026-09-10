@@ -120,9 +120,7 @@ export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null =>
 };
 
 export const historyShortcutInstallUrl = (): string | null =>
-  normalizeIosHistoryShortcutUrl(
-    process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
-  );
+  'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158';
 
 export const validIosHistorySessionId = (value: unknown): value is string =>
   typeof value === 'string' && SESSION_ID_RE.test(value);

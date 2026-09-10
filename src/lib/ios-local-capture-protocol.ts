@@ -36,9 +36,8 @@ export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | nu
 }
 
 /** Expo inlines this public value into each build profile. */
-export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUrl(
-  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
-);
+export const IOS_LOCAL_CAPTURE_SHORTCUT_URL =
+  'https://www.icloud.com/shortcuts/e4bc02cdb9d1475daac800fb78f1574f';
 
 /** Run the installed Shortcut without input so its local setup-proof branch executes. */
 export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
