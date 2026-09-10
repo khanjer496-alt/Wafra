@@ -257,8 +257,13 @@ export function BottomSheet({
               Elevation,
               sheetStyle,
             ]}>
-            {/* Swallows taps so a press inside the sheet never dismisses it. */}
-            <Pressable accessible={false} onPress={() => {}} style={styles.sheetBody}>
+            {/*
+              Do not make the whole sheet body a Pressable. A parent press
+              responder competes with the vertical ScrollView on Android and
+              makes short drags feel delayed or sticky. The sheet already sits
+              above the backdrop sibling, so a plain View is enough here.
+            */}
+            <View accessible={false} style={styles.sheetBody}>
               <GestureDetector gesture={drag}>
                 <Animated.View style={styles.dragRegion}>
                   {dismissible ? (
@@ -292,6 +297,7 @@ export function BottomSheet({
                 style={styles.scroll}
                 showsVerticalScrollIndicator={false}
                 bounces={false}
+                nestedScrollEnabled
                 // Or a tap on a chip while the keyboard is up only dismisses it.
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.content}>
@@ -300,7 +306,7 @@ export function BottomSheet({
               {hasFooter ? (
                 <View testID={testID ? `${testID}-footer` : undefined} style={[styles.footer, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>{footer}</View>
               ) : null}
-            </Pressable>
+            </View>
           </Animated.View>
         </View>
       </GestureHandlerRootView>

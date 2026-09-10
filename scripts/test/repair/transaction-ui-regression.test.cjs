@@ -142,12 +142,26 @@ test('shared sheet keeps a fixed footer below the shrinking scroll region', () =
   const scroll = walk(tree).find(n => n.type === 'ScrollView');
   const footerBox = walk(tree).find(n => n.props?.testID === 'fixture-sheet-footer');
   assert.ok(scroll && footerBox);
+  assert.equal(scroll.props.nestedScrollEnabled, true, 'nested sheet content must hand scroll gestures to Android correctly');
   assert.equal(style(scroll).flexShrink, 1);
   assert.equal(style(footerBox).flexShrink, 0);
   assert.ok(style(footerBox).paddingBottom >= 10);
   assert.equal(walk(scroll).includes(footer), false);
   assert.equal(Sheet({ visible: false, title: 'Hidden', onClose() {}, children: content }), null,
     'an initially closed sheet creates no native subtree');
+});
+
+test('entry edit does not rescan merchant history for every typed character', () => {
+  const source = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
+  const sheetSource = fs.readFileSync(path.join(root, 'src/components/ui/bottom-sheet.tsx'), 'utf8');
+  assert.doesNotMatch(sheetSource, /<Pressable accessible=\{false\} onPress=\{\(\) => \{\}\} style=\{styles\.sheetBody\}>/,
+    'the sheet body must not compete with its ScrollView as a press responder');
+  assert.doesNotMatch(source, /\[transaction,\s*title,\s*category,\s*state\.transactions\]/,
+    'editable title/category must not drive a full-ledger merchant scan');
+  assert.match(source, /countMerchantMatches\(merchant, category\)/,
+    'the current edited merchant is counted once when Save actually needs the rule prompt');
+  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 2,
+    'category and account rails must cooperate with the vertical sheet scroll');
 });
 
 test('narrow screens give search full width without reducing the font size', () => {

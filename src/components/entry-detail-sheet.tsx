@@ -117,16 +117,25 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
    * The row being edited is excluded by id because the prompt says "also
    * update N entries"; its own category is already applied by the edit.
    */
-  const sameMerchantCount = useMemo(() => {
+  const countMerchantMatches = (merchant: string, nextCategory: CategoryId) => {
     if (!transaction) return 0;
-    const key = title.trim().toLowerCase();
+    const key = merchant.trim().toLowerCase();
     if (key.length < 3) return 0;
     // Count the same direction and exclusions the rule will actually update.
-    if (!overrideFitsDirection(category, transaction.type)) return 0;
+    if (!overrideFitsDirection(nextCategory, transaction.type)) return 0;
     return state.transactions.filter(
       (t) => t.id !== transaction.id && overrideAppliesTo(t, key, transaction.type),
     ).length;
-  }, [transaction, title, category, state.transactions]);
+  };
+
+  // Read-only hint can scan once per selected transaction/store snapshot. Do
+  // not tie this to the editable title: that caused a full-ledger scan on
+  // every keystroke while the user was typing in the description field.
+  const sameMerchantCount = useMemo(
+    () => transaction ? countMerchantMatches(transaction.title, transaction.category) : 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [transaction, state.transactions],
+  );
 
   const sameBillCount = useMemo(() => {
     if (!transaction?.billIdentity || transaction.paymentFlowSide !== 'receipt') return 0;
@@ -189,7 +198,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       // cannot close first the way it did when the question was an OS dialog
       // that outlived it. It closes when the question is answered — or
       // dismissed, which is the "No" the alert used to spell out.
-      setRuleAsk({ merchant, category, type: transaction.type, count: sameMerchantCount });
+      setRuleAsk({ merchant, category, type: transaction.type, count: countMerchantMatches(merchant, category) });
       return;
     }
     onClose();
@@ -358,7 +367,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                 {categories.map((c) => (
                   <Chip
                     key={c.id}
@@ -375,7 +384,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             <ThemedText type="meta" themeColor="textTertiary">
               {t('account')}
             </ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
               {state.accounts.map((a) => (
                 <Chip
                   key={a.id}
