@@ -1557,6 +1557,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const run = ++hydrationRun.current;
     markLaunchPhase('ledger-load-start');
     try {
+      // Screenmap is a simulator-only visual review harness. Its synthetic
+      // ledger must not depend on SQLCipher/keychain availability: a clean CI
+      // simulator can legitimately have no usable encrypted store yet, and a
+      // storage failure would place the recovery gate over every deep link.
+      // The guard itself is iOS-only and requires the dedicated Screenmap flag
+      // plus the development founder flag, so production and ordinary dev
+      // builds still exercise the real encrypted hydration path below.
+      if (SCREENMAP_DEMO_LEDGER) {
+        if (hydrationRun.current !== run) return false;
+        setHydrationFailed(false);
+        setStorageFailure(null);
+        setStorageRecoveryState(null);
+        dispatch({ type: 'hydrate', state: demoState() });
+        markLaunchPhase('ledger-load-complete');
+        return true;
+      }
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
       let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
@@ -1663,6 +1679,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Screenmap state exists only for screenshots and is intentionally
+    // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
+    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
     return persistence.save(snapshot).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
