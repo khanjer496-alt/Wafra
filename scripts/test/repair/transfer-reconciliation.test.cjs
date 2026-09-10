@@ -104,6 +104,52 @@ test('an explicit own-account side automatically absorbs one unique matching opp
   assert.equal(result.byId.get('out').counterpartId, 'in');
 });
 
+test('a masked owned source and one unique opposite owned-account posting reconcile automatically', () => {
+  const mask = 'a'.repeat(64);
+  const fab = bank('fab', '0002', 'FAB');
+  const hidden = `__unassigned-transfer__:liv:${mask}`;
+  const outgoing = row('masked-out', 'expense', {
+    accountId: hidden,
+    captureInstrument: undefined,
+    ts: NOW,
+    transferEvidence: {
+      version: 1, currency: 'AED', attribution: 'fallback', sourceBank: 'liv', sourceAccountKey: mask,
+    },
+  });
+  const incoming = row('fab-in', 'income', {
+    accountId: fab.id,
+    captureInstrument: { last4: '0002', kind: 'account', bankIdentity: 'fab' },
+    ts: NOW + 70_000,
+    transferEvidence: {
+      version: 1, currency: 'AED', attribution: 'source', sourceBank: 'fab', postingForm: 'credit-receipt',
+    },
+  });
+  const result = reconcileTransfers([outgoing, incoming], [fab]);
+  assert.deepEqual(sorted(result.internalIds), ['fab-in', 'masked-out']);
+  assert.equal(result.byId.get('masked-out').reason, 'amount-time');
+  assert.equal(result.byId.get('fab-in').counterpartId, 'masked-out');
+  assert.deepEqual(sorted(result.pendingIds), []);
+});
+
+test('amount-time ownership stays fail-closed for named recipients, distant rows and collisions', () => {
+  const mask = 'b'.repeat(64);
+  const fab = bank('fab', '0002', 'FAB');
+  const hidden = `__unassigned-transfer__:liv:${mask}`;
+  const outgoing = row('masked-out', 'expense', {
+    accountId: hidden, captureInstrument: undefined, ts: NOW,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback', sourceBank: 'liv', sourceAccountKey: mask },
+  });
+  const incoming = row('fab-in', 'income', {
+    accountId: fab.id, captureInstrument: { last4: '0002', kind: 'account', bankIdentity: 'fab' }, ts: NOW + 70_000,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'fab', postingForm: 'credit-receipt' },
+  });
+  const named = { ...outgoing, id: 'named', transferEvidence: { ...outgoing.transferEvidence, counterpartyName: 'Ahmad' } };
+  assert.deepEqual(sorted(reconcileTransfers([named, incoming], [fab]).internalIds), []);
+  assert.deepEqual(sorted(reconcileTransfers([outgoing, { ...incoming, ts: NOW + 5 * 60_000 + 1 }], [fab]).internalIds), []);
+  const collision = { ...incoming, id: 'fab-in-2', ts: NOW + 80_000 };
+  assert.deepEqual(sorted(reconcileTransfers([outgoing, incoming, collision], [fab]).internalIds), []);
+});
+
 test('generic Business-labelled transfers still match evidence while named business receipts remain income', () => {
   const evidenced = pair({ category: 'business' }, { category: 'business' });
   assert.deepEqual(sorted(reconcileTransfers(evidenced, accounts).internalIds), ['in', 'out']);

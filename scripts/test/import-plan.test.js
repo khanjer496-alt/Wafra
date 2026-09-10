@@ -2105,7 +2105,7 @@ const DECLINE_SMS = [{
   ok('the durable import carries both sides of the linked bill-payment flow',
     utilityFlowPlan.batch.transactions.length === 2 &&
       utilityFlowPlan.batch.transactions.some((row) =>
-        row.paymentFlowSide === 'funding' && row.isTransfer === true) &&
+        row.paymentFlowSide === undefined && row.isTransfer === true && row.title === 'Outgoing transfer') &&
       utilityFlowPlan.batch.transactions.some((row) =>
         row.paymentFlowSide === 'receipt' && row.title === 'Fishbasket' &&
         row.billIdentity === 'consumer:4036'),
@@ -2262,7 +2262,8 @@ const DECLINE_SMS = [{
   );
   ok('a parser-version reread repairs and collapses both legacy notification rows',
     legacyPushPlan.txCount === 0 &&
-      legacyPushPlan.batch.updates.some((row) => row.paymentFlowSide === 'funding') &&
+      legacyPushPlan.batch.updates.some((row) => row.id === 'old-funding' &&
+        row.paymentFlowSide === undefined && row.accountId !== undefined) &&
       legacyPushPlan.batch.updates.some((row) =>
         row.paymentFlowSide === 'receipt' && row.billIdentity === 'consumer:4036') &&
       healedLegacyPush.length === 1 && healedLegacyPush[0].title === 'Fishbasket' &&

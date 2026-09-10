@@ -489,6 +489,7 @@ const lowerBound = (entries: Entry[], at: number): number => {
 };
 
 interface ObservedRow { tx: Transaction; at: number; money: string; bank: string; credit: boolean }
+interface OwnedTransferObservation extends ObservedRow { identity: string }
 
 function observedReceipt(tx: Transaction, ctx: Context): ObservedRow | undefined {
   const account = ctx.accounts.get(tx.accountId);
@@ -551,6 +552,76 @@ function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: S
       (!cp.bankIdentity || bankIdentityForName(cp.bankIdentity) === receipt.bank);
   });
   return new Map([...pairs].filter(([id]) => ctx.rows.get(id)?.type === 'expense'));
+}
+
+/**
+ * A source-account observation that is strong enough to say "this is one of
+ * the user's accounts", even when the bank never exposes four trailing
+ * digits. The masked-account id is bank-scoped and SHA-256 derived by
+ * transfer-evidence.ts; it is not a beneficiary or a guessed Wallet account.
+ */
+function ownedTransferObservation(tx: TransferRow, ctx: Context): OwnedTransferObservation | undefined {
+  if (ctx.duplicateIds.has(tx.id) || tx.userEdited || tx.transferDecision ||
+      (tx.source !== 'sms' && !tx.smsKey)) return;
+  const ev = evidenceOf(tx);
+  if (!ev?.sourceBank || ev.explicitExternal || ev.counterpartyName) return;
+  const at = sourceTime(tx), money = sourceMoney(tx, ev), bank = bankIdentityForName(ev.sourceBank);
+  if (at === undefined || !money || !bank) return;
+
+  if (isUnassignedTransferAccount(tx.accountId)) {
+    if (!ev.sourceAccountKey || !/^[a-f0-9]{64}$/.test(ev.sourceAccountKey)) return;
+    return { tx, at, money, bank, credit: false, identity: `mask:${bank}:${ev.sourceAccountKey}` };
+  }
+
+  const account = ctx.accounts.get(tx.accountId);
+  const capture = tx.captureInstrument;
+  if (!eligibleAccount(account) || !isInstrument(capture) || capture.kind === 'credit' ||
+      !capture.bankIdentity || capture.last4 !== account.last4 || !account.bankName) return;
+  const accountBank = bankIdentityForName(account.bankName);
+  const captureBank = bankIdentityForName(capture.bankIdentity);
+  if (!accountBank || accountBank !== bank || captureBank !== bank) return;
+  return { tx, at, money, bank, credit: false, identity: `account:${account.id}` };
+}
+
+/**
+ * Two independently observed owned source accounts, opposite directions,
+ * exact money, and mutually unique clocks within five minutes are sufficient
+ * to derive an internal move. This is deliberately narrower than the review
+ * suggestion path: named recipients are excluded, same-account observations
+ * are excluded, and any explicit endpoint contradiction wins.
+ *
+ * This closes the common masked-account pattern where Liv says only
+ * "your account 095XXX11XXX01" and FAB separately reports the matching inward
+ * remittance. Neither alert alone proves the destination's ownership; together
+ * they do without forcing the user through hundreds of review rows.
+ */
+function observedOwnedTransferPairs(
+  ctx: Context,
+  pending: Set<string>,
+  secondary: Set<string>,
+  cardPairs: Map<string, string>,
+): Map<string, string> {
+  const pairedReceipts = new Set(cardPairs.values());
+  const rows: OwnedTransferObservation[] = [];
+  for (const tx of ctx.rows.values()) {
+    if (!pending.has(tx.id) || secondary.has(tx.id) || cardPairs.has(tx.id) || pairedReceipts.has(tx.id)) continue;
+    const observed = ownedTransferObservation(tx, ctx);
+    if (observed) rows.push(observed);
+  }
+  return uniqueObservedPairs(rows, 5 * 60_000, (a, b) => {
+    const left = a as OwnedTransferObservation, right = b as OwnedTransferObservation;
+    if (left.tx.type === right.tx.type || left.identity === right.identity) return false;
+    const contradicts = (source: OwnedTransferObservation, target: OwnedTransferObservation): boolean => {
+      const cp = evidenceOf(source.tx)?.counterparty;
+      const targetCapture = target.tx.captureInstrument;
+      if (!cp) return false;
+      if (cp.bankIdentity !== undefined && bankIdentityForName(cp.bankIdentity) !== target.bank) return true;
+      if (targetCapture !== undefined && cp.last4 !== targetCapture.last4) return true;
+      if (cp.kind === 'credit') return true;
+      return false;
+    };
+    return !contradicts(left, right) && !contradicts(right, left);
+  });
 }
 
 function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<string>, secondary: Set<string>,
@@ -795,6 +866,15 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     unresolvedIds.delete(debitId);
     pendingIds.delete(debitId);
     byId.set(debitId, { id: debitId, status: 'card-repayment', reason: 'credit-card-receipt', counterpartId: receiptId, candidateIds: [] });
+  }
+  const observedOwnPairs = observedOwnedTransferPairs(ctx, unresolvedIds, corroboratingIds, cardRepaymentPairs);
+  for (const [txId, counterpartId] of observedOwnPairs) {
+    if (!unresolvedIds.has(txId) || !unresolvedIds.has(counterpartId)) continue;
+    internalIds.add(txId); internalIds.add(counterpartId);
+    unresolvedIds.delete(txId); unresolvedIds.delete(counterpartId);
+    pendingIds.delete(txId); pendingIds.delete(counterpartId);
+    byId.set(txId, { id: txId, status: 'confirmed-own', reason: 'amount-time', counterpartId, candidateIds: [] });
+    byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'amount-time', counterpartId: txId, candidateIds: [] });
   }
   suggestObservedPairs(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
   // Suggestions are deliberately non-destructive: they are the small subset

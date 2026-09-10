@@ -588,7 +588,19 @@ t('YAP cash withdrawal is an ATM withdrawal',
 
 t('instant transfer is titled Outgoing transfer',
   'Dear Customer, AED 1,176.00 has been debited from your account 095XXX11XXX01 towards instant transfer. The available balance is AED 17,795.55.',
-  { merchant: 'Outgoing transfer', amountFils: 117600, paymentFlowSide: 'funding' });
+  { merchant: 'Outgoing transfer', amountFils: 117600, transfer: true });
+ok('an ordinary instant transfer is not pre-labelled as a bill-payment funding leg',
+  parseSms('Dear Customer, AED 1,176.00 has been debited from your account 095XXX11XXX01 towards instant transfer. The available balance is AED 17,795.55.')?.paymentFlowSide === undefined);
+
+t('a posted credit explicitly sent by a company is named as business income',
+  'AED 11,507.73 sent by NETWORK INTERNATIONAL LLC PO Box No and has been credited into your account number 90XXXX2615. Available balance is AED 14,770.79.',
+  { merchant: 'Network International', amountFils: 1150773, type: 'income', category: 'business', deliberate: true },
+  { sender: 'WIO' });
+
+t('a posted cashback credit is an offset, not an unresolved transfer',
+  'Dear Customer, your cashback amount of AED 50.00 has been credited to your credit card account with the card number ending 5182XXXXXXXX3644',
+  { merchant: 'Cashback', amountFils: 5000, type: 'income', category: 'other', deliberate: true },
+  { sender: 'FAB' });
 
 t('FAB multi-line Keeta purchase ignores the instalment promo footer',
   'Credit Card Purchase \nCard No XXXX4711 \nAED 76.50 \nTAP*Keeta Dubai ARE \n15/12/25 22:34 \nAvailable Balance AED 7875.65\nYour December statement payment due date is 26/12/2025\n0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.',

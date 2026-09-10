@@ -80,12 +80,18 @@ const preferredPairs = (
 export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[] => {
   const buckets = new Map<number, { funding: Transaction[]; receipts: Transaction[] }>();
   for (const row of transactions) {
-    if (row.source !== 'sms' || row.type !== 'expense' || !row.paymentFlowSide) continue;
+    if (row.source !== 'sms' || row.type !== 'expense') continue;
     const bucket = buckets.get(row.amountFils) ?? { funding: [], receipts: [] };
-    if (row.paymentFlowSide === 'funding') {
+    const inferredFunding =
+      row.paymentFlowSide === undefined &&
+      row.isTransfer === true &&
+      /^(?:Outgoing|Bank) transfer$/i.test(row.title);
+    if (row.paymentFlowSide === 'funding' || inferredFunding) {
       if (!row.userEdited && !row.transferDecision && row.isTransfer === true) bucket.funding.push(row);
-    } else {
+    } else if (row.paymentFlowSide === 'receipt') {
       if (row.isTransfer !== true) bucket.receipts.push(row);
+    } else {
+      continue;
     }
     buckets.set(row.amountFils, bucket);
   }

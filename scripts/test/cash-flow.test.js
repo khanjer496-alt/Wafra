@@ -534,7 +534,7 @@ setMonthStartDay(1);
 
 const linkedUtilityFlowRows = reconcilePaymentFlows([
   tx('liv-funding', 1216800, {
-    accountId: 'bank', isTransfer: true, paymentFlowSide: 'funding',
+    accountId: 'bank', isTransfer: true,
     title: 'Outgoing transfer', date: '2026-08-01',
     ts: Date.parse('2026-08-01T14:25:32Z'),
   }),

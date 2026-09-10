@@ -357,7 +357,7 @@ const semanticState = applyMaterializedImportBatch(BASE, semanticBatch);
 const semanticSummary = summarizeMonth(semanticState.transactions, month);
 const semanticCashOut = summarizeCashOutflow(semanticState, month);
 ok('semantic meanings produce one reconciled set of income, spending and cash movement',
-  semanticSummary.incomeFils === 887500 && semanticSummary.expenseFils === 196000 &&
+  semanticSummary.incomeFils === 887500 && semanticSummary.expenseFils === 136000 &&
     semanticCashOut.totalFils === 286000 && semanticCashOut.cardPaymentsFils === 90000 &&
     semanticCashOut.accountOutflowFils === 196000,
   JSON.stringify({ semanticSummary, semanticCashOut, rows: semanticState.transactions }));
@@ -443,7 +443,7 @@ const compactState = applyMaterializedImportBatch(BASE, compactBatch);
 const compactSummary = summarizeMonth(compactState.transactions, month);
 const compactCashOut = summarizeCashOutflow(compactState, month);
 ok('compact bank shorthand produces exact income, spending and cash-out totals',
-  compactSummary.incomeFils === 887500 && compactSummary.expenseFils === 130799 &&
+  compactSummary.incomeFils === 887500 && compactSummary.expenseFils === 70799 &&
     compactCashOut.totalFils === 261000 && compactCashOut.cardPaymentsFils === 90000 &&
     compactCashOut.accountOutflowFils === 171000,
   JSON.stringify({ compactSummary, compactCashOut }));
@@ -454,7 +454,7 @@ ok('compact bank shorthand produces exact income, spending and cash-out totals',
   ok('ordinary named-beneficiary transfer does not create a manual ownership review task',
     pending.length === 0);
   ok('ordinary beneficiary transfer remains money out without becoming merchant spending',
-    compactSummary.expenseFils === 130799 && compactCashOut.accountOutflowFils === 171000);
+    compactSummary.expenseFils === 70799 && compactCashOut.accountOutflowFils === 171000);
 }
 const compactReplayPlan = buildImportPlan(
   compactParsed,

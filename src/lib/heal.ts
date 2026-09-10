@@ -126,6 +126,20 @@ export function healPatch(
   if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
     patch.paymentFlowSide = p.paymentFlowSide;
   }
+  // Older parser versions marked every "towards instant transfer" debit as a
+  // bill-payment funding leg before seeing any receipt. That role is now
+  // inferred only when a matching receipt exists. Clear the stale parser role
+  // on a reread so ordinary transfers return to normal transfer accounting.
+  if (
+    prior.paymentFlowSide === 'funding' &&
+    p.paymentFlowSide === undefined &&
+    p.kind === 'transaction' &&
+    p.type === 'expense' &&
+    p.transferHint &&
+    /^(?:Outgoing|Bank) transfer$/i.test(p.merchant)
+  ) {
+    patch.clearCardPaymentRole = true;
+  }
   if (p.billIdentity && prior.billIdentity !== p.billIdentity) {
     patch.billIdentity = p.billIdentity;
   }

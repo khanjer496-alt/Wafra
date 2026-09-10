@@ -138,8 +138,9 @@ test('Liv partly masked accounts never borrow the unrelated first credit card or
   assert.equal(JSON.stringify(liv).includes('095-XXX'), false);
   assert.equal(state.accounts.length, 4, 'a holding reference creates no fictional account');
   const result = core.reconcileTransfers(state.transactions, state.accounts);
-  assert.equal(result.internalIds.size, 0, 'amount/time alone never classifies ownership');
-  assert.equal(result.byId.get(liv.id).status, 'likely-own');
+  assert.equal(result.internalIds.size, 2, 'two independently owned account observations may reconcile without fabricating an account');
+  assert.equal(result.byId.get(liv.id).status, 'confirmed-own');
+  assert.equal(result.byId.get(liv.id).reason, 'amount-time');
 });
 
 test('an existing fallback transfer is repaired through exact source identity without changing money or user edits', () => {

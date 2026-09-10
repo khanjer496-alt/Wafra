@@ -2860,9 +2860,20 @@ const BUSINESS_INCOME_EVIDENCE_RE =
  * but displayed as the unhelpful `Incoming transfer`.
  */
 function businessIncomeTitle(raw: string): string | null {
-  return /\bdelivery\s+hero\s+talabat\s+db\s+l\.?l\.?c/i.test(raw)
-    ? 'Talabat sales'
-    : null;
+  if (/\bdelivery\s+hero\s+talabat\s+db\s+l\.?l\.?c/i.test(raw)) return 'Talabat sales';
+  // Some banks put a corporate originator before the credit clause rather
+  // than after `from`/`B/O`: "AED 11,507.73 sent by NETWORK INTERNATIONAL LLC
+  // ... has been credited into your account". A legal suffix is strong
+  // business-origin evidence; a person's name without one deliberately stays
+  // an unclassified incoming transfer.
+  const sentByCompany = raw.match(
+    /\bsent\s+by\s+([A-Z][A-Z0-9 .&'\/-]{1,72}?\s+(?:L\.?L\.?C|LTD|LIMITED|PJSC|PSC|FZE|FZCO|DMCC|INC|PLC))\b/i,
+  )?.[1];
+  if (!sentByCompany) return null;
+  const name = sentByCompany
+    .replace(/\s+(?:L\.?L\.?C|LTD|LIMITED|PJSC|PSC|FZE|FZCO|DMCC|INC|PLC)\.?$/i, '')
+    .trim();
+  return titleCase(cleanDescriptor(name));
 }
 
 /**
@@ -5442,7 +5453,10 @@ function parseSmsInner(
     merchant = service ?? businessTitle ?? (isBillDue
       ? 'Bill payment'
       : type === 'income'
-        ? /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw)
+        ? /\bcash\s*back\b|\bcashback\b/i.test(raw) &&
+          /\b(?:credited|posted|received|applied)\b/i.test(raw)
+          ? 'Cashback'
+          : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw)
           ? 'Refund'
           : DEPOSIT_RE.test(raw)
           ? 'Cash deposit'
@@ -5577,10 +5591,6 @@ function parseSmsInner(
     minDueFils: null,
     card,
     transferHint,
-    ...(type === 'expense' && transferHint &&
-    /\btowards\s+(?:an?\s+)?instant\s+transfer\b/i.test(raw)
-      ? { paymentFlowSide: 'funding' as const }
-      : {}),
     snapshotFils,
     snapshotKind,
     // When the title is pinned, the TITLE is all guessCategory gets to read —
