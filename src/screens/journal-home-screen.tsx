@@ -1,7 +1,4 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
-import { TransferReviewNotice } from '@/components/transfer-review-notice';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
-import { liveAccountIds } from '@/lib/ledger';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -32,7 +29,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { syncPaymentReminders } from '@/lib/notifications';
-import { inPeriod, periodLabel } from '@/lib/period';
+import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
@@ -127,18 +124,6 @@ export default function JournalHomeScreen() {
   }, []);
 
   const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
-  const pendingTransfers = useMemo(() => {
-    const pending = reconcileTransfers(state.transactions, state.accounts).pendingIds;
-    const live = liveAccountIds(state.accounts);
-    let pendingCount = 0, incomingFils = 0, outgoingFils = 0;
-    for (const row of state.transactions) {
-      if (!pending.has(row.id) || !live.has(row.accountId) || !inPeriod(row.date, period)) continue;
-      pendingCount += 1;
-      if (row.type === 'income') incomingFils += row.amountFils;
-      else outgoingFils += row.amountFils;
-    }
-    return { pendingCount, incomingFils, outgoingFils };
-  }, [state.transactions, state.accounts, period]);
   const hasPendingReview = reviewCount > 0;
   const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
     // Status/progress changes must not recompute the financial projection.
@@ -270,8 +255,6 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')} />
-        <TransferReviewNotice {...pendingTransfers} onPress={() => router.push('/review-transfers')} />
-
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
         {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
 

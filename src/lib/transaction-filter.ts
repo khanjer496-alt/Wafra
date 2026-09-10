@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { countsInTotals } from '@/lib/ledger';
+import { countsInTotals, isMoneyMovementOnly } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -56,7 +56,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   const query = options.query.trim().toLowerCase(); const merchant = options.merchant?.trim().toLowerCase();
   const last = shiftMonthKey(options.currentKey, -1); const three = shiftMonthKey(options.currentKey, -2);
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
-  let totalShown = 0; let transfers = 0; let hidden = 0;
+  let totalShown = 0; let transfers = 0; let movements = 0; let hidden = 0;
   for (const { row, merchantKey, search, month } of index.ordered(filters.sort)) {
     if (options.smsOnly && row.source !== 'sms') continue;
     if (merchant && merchant !== merchantKey) continue;
@@ -77,7 +77,11 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (query && !search.includes(query)) continue;
     filtered.push(row);
     const counts = countsInTotals(row, options.live, options.internal);
-    if (!counts) { if (options.live.has(row.accountId)) transfers++; else hidden++; }
+    if (!counts) {
+      if (!options.live.has(row.accountId)) hidden++;
+      else if (isMoneyMovementOnly(row)) movements++;
+      else transfers++;
+    }
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;
     totalShown += contribution;
@@ -87,5 +91,5 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
       day.data.push(row); day.totalFils += contribution;
     }
   }
-  return { filtered, totalShown, excluded: { transfers, hidden }, days: [...byDay.values()] };
+  return { filtered, totalShown, excluded: { transfers, movements, hidden }, days: [...byDay.values()] };
 }

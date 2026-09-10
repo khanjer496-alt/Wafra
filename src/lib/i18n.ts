@@ -30,7 +30,7 @@ const S = {
     en: 'Wafra found {count} payments with this same bill reference. If the bank’s name is unclear, edit it once and Wafra can remember the name and category for matching payments.',
     ar: 'وجد وفرة {count} دفعات تحمل مرجع الفاتورة نفسه. إذا كان اسم البنك غير واضح، عدّله مرة واحدة ويمكن لوفرة تذكّر الاسم والفئة للدفعات المطابقة.',
   },
-  accountTransferHistory: { en: 'Transfers between accounts and to others', ar: 'التحويلات بين حساباتك وإلى الآخرين' },
+  accountTransferHistory: { en: 'Transfers', ar: 'التحويلات' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
   ledgerCurrencyTitle: { en: 'Ledger currency', ar: 'عملة السجل' },
   ledgerCurrencyBody: {
@@ -2102,6 +2102,10 @@ const S = {
   transfersExcluded: {
     en: '{count} transfer{s} not counted',
     ar: '{count} تحويل مستبعد من الإجمالي',
+  },
+  movementsExcluded: {
+    en: '{count} money movement{s} not counted',
+    ar: '{count} حركة أموال مستبعدة من الإجمالي',
   },
   // Rows on a hidden account. They are still listed — they are real records
   // and searching for one should find it — but every other total in the app

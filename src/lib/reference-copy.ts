@@ -66,15 +66,15 @@ export const spendingTrendsCopy = {
 
 export const homeSummaryCopy = {
   en: { balance: 'Recorded balances', net: 'Net after spending', notBalance: 'Income minus spending · not your bank balance',
-    moneyIn: 'Money in', moneyOut: 'Money out', netLabel: 'Net',
-    cashflowNote: 'Money in minus spending · not your bank balance',
+    moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Net',
+    cashflowNote: 'Income minus spending',
     noIncome: 'No income recorded for this period.',
     add: 'Add', import: 'Import', accounts: 'Accounts', settings: 'Settings',
     spending: 'Spending', viewSpending: 'View spending breakdown', income: 'Income this period', period: 'This period', balanceDetail: 'View accounts',
     balanceNote: 'Latest known figures · not a live bank connection' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي',
-    cashflowNote: 'الدخل ناقص المصروفات · ليس رصيد البنك',
+    cashflowNote: 'الدخل ناقص المصروفات',
     noIncome: 'لا يوجد دخل مسجل لهذه الفترة.',
     add: 'إضافة', import: 'استيراد', accounts: 'الحسابات', settings: 'الإعدادات',
     spending: 'الإنفاق', viewSpending: 'عرض تفاصيل الإنفاق', income: 'الدخل في هذه الفترة', period: 'هذه الفترة', balanceDetail: 'عرض الحسابات',

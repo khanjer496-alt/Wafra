@@ -315,7 +315,7 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>}
-              {(excluded.transfers > 0 || excluded.hidden > 0) && (
+              {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
                 <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
               {excluded.transfers > 0
                 ? `${trf('transfersExcluded', {
@@ -323,8 +323,14 @@ export default function TransactionsScreen() {
                     s: excluded.transfers === 1 ? '' : 's',
                   })}`
                 : ''}
+              {excluded.movements > 0
+                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
+                    count: excluded.movements,
+                    s: excluded.movements === 1 ? '' : 's',
+                  })}`
+                : ''}
               {excluded.hidden > 0
-                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
+                ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
                 : ''}
                 </ThemedText>
               )}

@@ -21,6 +21,16 @@ export function isTransfer(transaction: Transaction): boolean {
   return ownership === 'own' || (ownership === null && transaction.isTransfer === true);
 }
 
+/**
+ * Money that changed location or form without representing consumption or
+ * earned income. Keep these rows in Activity/account cash-flow views, but do
+ * not let them inflate Spending, Income, merchant analytics, or Net.
+ */
+export function isMoneyMovementOnly(transaction: Transaction): boolean {
+  if (transaction.category === 'cash-withdrawal' || transaction.category === 'investing') return true;
+  return transaction.type === 'income' && transaction.title.trim().toLowerCase() === 'cash deposit';
+}
+
 export function countsInTotals(
   transaction: Transaction,
   live?: Set<string>,
@@ -30,6 +40,7 @@ export function countsInTotals(
   if (isTransfer(transaction)) return false;
   // Uncertain ownership is displayed separately from confirmed totals.
   if (isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown') return false;
+  if (isMoneyMovementOnly(transaction)) return false;
   if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction) && !isUnassignedTransferAccount(transaction.accountId)) return false;
   if (internal?.has(transaction.id)) return false;
   return true;
