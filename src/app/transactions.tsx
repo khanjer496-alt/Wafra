@@ -381,7 +381,7 @@ export default function TransactionsScreen() {
             </View>
           }
         />
-  ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
+  ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length, unresolvedTransfers.count,
     filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow]);
 
   return (

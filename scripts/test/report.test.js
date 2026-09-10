@@ -126,9 +126,9 @@ ok('reportExpenses drops a legacy structural transfer and an archived account',
 ok('reportExpenses never prints uncertain generic transfers even without supplied pairing context',
   !reportExpenses(sweepRows, '2026-07-01', '2026-07-31').some((tx) => tx.id === 'sweep-out'));
 const pendingSweep = sweepRows.slice(0, 2).map(({ transferEvidence, ...transaction }) => transaction);
-ok('removing transfer evidence leaves both generic legs pending instead of claiming an own-account pair',
+ok('removing transfer evidence leaves generic legs unpaired without creating a manual review backlog',
   internalTransferIds(pendingSweep, multiAccounts).size === 0 &&
-    require('./build/transfer-reconciliation').reconcileTransfers(pendingSweep, multiAccounts).pendingIds.size === 2);
+    require('./build/transfer-reconciliation').reconcileTransfers(pendingSweep, multiAccounts).pendingIds.size === 0);
 
 const withSweep = buildExpenseReportHtml({
   transactions: sweepRows,
