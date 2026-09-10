@@ -20,6 +20,9 @@
   "exclude": [
     "server",
     "builds",
+    "artifacts",
+    "node_modules",
+    ".postdelegate-launch-work",
     "scripts/test/build"
   ]
 }

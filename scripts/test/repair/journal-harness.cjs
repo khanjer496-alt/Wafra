@@ -112,7 +112,14 @@ function harness(options = {}) {
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
-  dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'));
+  const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));
+  Object.assign(dependencies['@/lib/markets'], { bankIdentityForName: bankIdentity.bankIdentityForName, bankBrandForName: bankIdentity.bankBrandForName });
+  dependencies['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
+  dependencies['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
+  dependencies['@/lib/transfer-reconciliation'] = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), dependencies);
+  dependencies['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), dependencies);
+  dependencies['@/components/transfer-review-notice'] = load(path.join(root, 'src/components/transfer-review-notice.tsx'), dependencies);
+  dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
   const { default: Home } = load(path.join(root, 'src/screens/journal-home-screen.tsx'), dependencies);

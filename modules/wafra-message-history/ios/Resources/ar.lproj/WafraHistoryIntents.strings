@@ -44,3 +44,7 @@
 "history.body.parameter" = "نص الرسالة";
 "history.sender.parameter" = "مرسل الرسالة";
 "history.date.parameter" = "تاريخ الرسالة";
+
+"history.stage_shortcut.title" = "تجهيز دفعة رسائل اختصار وفرة";
+"history.stage_shortcut.description" = "يجهّز حتى 50 رسالة محددة بتواريخ تتضمن فرق التوقيت في تخزين محلي محمي. لا يُكمل استيراد السجل ولا يفتح وفرة.";
+"history.stage_shortcut.error" = "تعذّر تجهيز دفعة رسائل الاختصار المحددة.";

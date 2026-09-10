@@ -1,0 +1,495 @@
+{
+  "WFWorkflowName": "Wafra Local Capture",
+  "WFWorkflowMinimumClientVersionString": "1106",
+  "WFWorkflowMinimumClientVersion": 1106,
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": -314141441,
+    "WFWorkflowIconGlyphNumber": 61440
+  },
+  "WFWorkflowClientVersion": "4042.0.2.2",
+  "WFWorkflowHasOutputFallback": false,
+  "WFWorkflowOutputContentItemClasses": [],
+  "WFWorkflowInputContentItemClasses": [
+    "WFMessageContentItem"
+  ],
+  "WFWorkflowImportQuestions": [],
+  "WFWorkflowTypes": [
+    "WFWorkflowTypeShowInSearch"
+  ],
+  "WFQuickActionSurfaces": [],
+  "WFWorkflowHasShortcutInputVariables": true,
+  "WFWorkflowActions": [
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "C335E95B-5E0C-4455-A135-C598E297ECAE",
+        "WFControlFlowMode": 0,
+        "WFCondition": 101,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "Type": "ExtensionInput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "app.wafra.ios.RecordWafraCaptureSetupProofIntent",
+      "WFWorkflowActionParameters": {
+        "UUID": "6D39ED50-25D8-497F-B651-290645878561",
+        "AppIntentDescriptor": {
+          "TeamIdentifier": "UV7YN4GQ66",
+          "BundleIdentifier": "app.wafra.ios",
+          "Name": "Wafra",
+          "AppIntentIdentifier": "RecordWafraCaptureSetupProofIntent"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "com.apple.MobileSMS.MessageEntity",
+      "WFWorkflowActionParameters": {
+        "UUID": "A8C4A13F-48E0-4B90-A8EE-65016E9C6E89",
+        "AppIntentDescriptor": {
+          "TeamIdentifier": "0000000000",
+          "BundleIdentifier": "com.apple.MobileSMS",
+          "Name": "Messages",
+          "AppIntentIdentifier": "MessageEntity",
+          "ActionRequiresAppInstallation": true
+        },
+        "WFContentItemFilter": {
+          "WFSerializationType": "WFContentPredicateTableTemplate",
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFContentPredicateBoundedDate": false,
+            "WFActionParameterFilterTemplates": []
+          }
+        },
+        "WFContentItemSortProperty": "date",
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemLimitEnabled": true,
+        "WFContentItemLimitNumber": 300
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.repeat.each",
+      "WFWorkflowActionParameters": {
+        "UUID": "056DB282-A0ED-4DA6-A2A1-E4CB49A7305D",
+        "GroupingIdentifier": "056DB282-A0ED-4DA6-A2A1-E4CB49A7305D",
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Value": {
+            "Type": "ActionOutput",
+            "OutputUUID": "A8C4A13F-48E0-4B90-A8EE-65016E9C6E89",
+            "OutputName": "Message"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "5528A51D-6031-45C7-B148-14953531EED9",
+        "CustomOutputName": "Sender Text",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "Variable",
+                "VariableName": "Repeat Item",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Sender"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "6FE51E1C-F71A-4531-B294-8775349DE462",
+        "CustomOutputName": "Message Body",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "Variable",
+                "VariableName": "Repeat Item",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Content"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "12CD25AD-05B1-4DBB-8560-10BC61BDE514",
+        "CustomOutputName": "Message GUID",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "Variable",
+                "VariableName": "Repeat Item",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "GUID"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.hash",
+      "WFWorkflowActionParameters": {
+        "UUID": "868CF71D-A8A4-49A9-872A-A5F7A9B7FCFB",
+        "WFInput": {
+          "Value": {
+            "Type": "ActionOutput",
+            "OutputUUID": "12CD25AD-05B1-4DBB-8560-10BC61BDE514",
+            "OutputName": "Message GUID"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFHashType": "SHA256"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.changecase",
+      "WFWorkflowActionParameters": {
+        "UUID": "04992CD4-87A9-470D-A340-D180E4528F77",
+        "CustomOutputName": "Lowercase Message ID",
+        "WFCaseType": "lowercase",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "868CF71D-A8A4-49A9-872A-A5F7A9B7FCFB",
+                "OutputName": "Hash"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "app.wafra.ios.StageWafraLiveMessageIntent",
+      "WFWorkflowActionParameters": {
+        "UUID": "6808B616-C034-46D6-A2CE-927BD68D764E",
+        "AppIntentDescriptor": {
+          "TeamIdentifier": "UV7YN4GQ66",
+          "BundleIdentifier": "app.wafra.ios",
+          "Name": "Wafra",
+          "AppIntentIdentifier": "StageWafraLiveMessageIntent"
+        },
+        "sender": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "5528A51D-6031-45C7-B148-14953531EED9",
+                "OutputName": "Sender Text"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "body": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "6FE51E1C-F71A-4531-B294-8775349DE462",
+                "OutputName": "Message Body"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "eventId": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "04992CD4-87A9-470D-A340-D180E4528F77",
+                "OutputName": "Lowercase Message ID"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "observedAt": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "Variable",
+                "VariableName": "Repeat Item",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "date"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.repeat.each",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "056DB282-A0ED-4DA6-A2A1-E4CB49A7305D",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.exit",
+      "WFWorkflowActionParameters": {}
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "C335E95B-5E0C-4455-A135-C598E297ECAE",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "1233D840-DCE7-4FFD-9415-20736825C74F",
+        "CustomOutputName": "Sender Text",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Sender"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "DE001532-690F-465F-982A-DB5C8A6B560A",
+        "CustomOutputName": "Message Body",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Content"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "633B29C7-23F7-4124-982E-C88E40A9D53E",
+        "CustomOutputName": "Message GUID",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "GUID"
+                  },
+                  {
+                    "Type": "WFCoercionVariableAggrandizement",
+                    "CoercionItemClass": "WFStringContentItem"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.hash",
+      "WFWorkflowActionParameters": {
+        "UUID": "C3BF02F3-896A-446C-91F7-3E005311B28F",
+        "WFInput": {
+          "Value": {
+            "Type": "ActionOutput",
+            "OutputUUID": "633B29C7-23F7-4124-982E-C88E40A9D53E",
+            "OutputName": "Message GUID"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFHashType": "SHA256"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.changecase",
+      "WFWorkflowActionParameters": {
+        "UUID": "300400CB-8AE3-4F65-8CD2-7F9BB6D12465",
+        "CustomOutputName": "Lowercase Message ID",
+        "WFCaseType": "lowercase",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "C3BF02F3-896A-446C-91F7-3E005311B28F",
+                "OutputName": "Hash"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "app.wafra.ios.StageWafraLiveMessageIntent",
+      "WFWorkflowActionParameters": {
+        "UUID": "7B9A112F-0C18-4D95-BFC5-C373523C16B6",
+        "AppIntentDescriptor": {
+          "TeamIdentifier": "UV7YN4GQ66",
+          "BundleIdentifier": "app.wafra.ios",
+          "Name": "Wafra",
+          "AppIntentIdentifier": "StageWafraLiveMessageIntent"
+        },
+        "sender": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "1233D840-DCE7-4FFD-9415-20736825C74F",
+                "OutputName": "Sender Text"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "body": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "DE001532-690F-465F-982A-DB5C8A6B560A",
+                "OutputName": "Message Body"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "eventId": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "300400CB-8AE3-4F65-8CD2-7F9BB6D12465",
+                "OutputName": "Lowercase Message ID"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "observedAt": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "date"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.exit",
+      "WFWorkflowActionParameters": {}
+    }
+  ]
+}

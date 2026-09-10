@@ -354,24 +354,30 @@ const hits = parsed.filter((x) => x.p);
  * That leg is worded by the bank exactly like being paid and carries no
  * transfer flag, so nothing downstream could tell it from a salary.
  *
- * The titles below are what the parser actually emits for the two halves of a
- * FAB/ADCB own-account transfer, which is why the structural-title match in
- * ledger.ts recognises them.
+ * Titles identify candidates only. These synthetic ADCB fixtures independently
+ * identify both instruments and carry one shared bank reference; matching the
+ * amount and date alone must never decide ownership.
  */
 {
   const ledger = require('./build/ledger');
   const ins = require('./build/insights');
   const analytics = require('./build/analytics');
+  const { reconcileTransfers } = require('./build/transfer-reconciliation');
 
   const accountsWith = (archived) => [
-    { id: 'old', name: 'ADCB 0002', kind: 'bank', openingFils: 0, color: '#000', archived },
-    { id: 'nw', name: 'ADCB 0004', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'old', name: 'ADCB 0002', kind: 'bank', bankName: 'ADCB', last4: '0002', openingFils: 0, color: '#000', archived },
+    { id: 'nw', name: 'ADCB 0004', kind: 'bank', bankName: 'ADCB', last4: '0004', openingFils: 0, color: '#000' },
   ];
+  const transferFacts = (last4, reference = 'SYNTHETIC984512') => ({
+    ts: Date.parse('2026-06-10T12:00:00Z'),
+    captureInstrument: { last4, kind: 'account', bankIdentity: 'ADCB' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference },
+  });
   const transactions = [
     { id: 'out', type: 'expense', amountFils: 1900000, category: 'other', accountId: 'old',
-      title: 'Outgoing transfer', date: '2026-06-10', source: 'sms', isTransfer: true },
-    { id: 'in', type: 'income', amountFils: 1900000, category: 'business', accountId: 'nw',
-      title: 'Incoming transfer', date: '2026-06-10', source: 'sms' },
+      title: 'Outgoing transfer', date: '2026-06-10', source: 'sms', isTransfer: true, ...transferFacts('0002') },
+    { id: 'in', type: 'income', amountFils: 1900000, category: 'other', accountId: 'nw',
+      title: 'Incoming transfer', date: '2026-06-10', source: 'sms', ...transferFacts('0004') },
     { id: 'pay', type: 'income', amountFils: 2500000, category: 'salary', accountId: 'nw',
       title: 'Salary', date: '2026-06-25', source: 'sms' },
     { id: 'b1', type: 'expense', amountFils: 20000, category: 'groceries', accountId: 'nw',
@@ -381,7 +387,7 @@ const hits = parsed.filter((x) => x.p);
   const read = (archived) => {
     const accounts = accountsWith(archived);
     const live = ledger.liveAccountIds(accounts);
-    const internal = ledger.internalTransferIds(transactions, live);
+    const internal = ledger.internalTransferIds(transactions, accounts);
     return {
       internal,
       summary: ins.summarizeMonth(transactions, { mode: 'month', key: '2026-06' }, live, internal),
@@ -413,29 +419,36 @@ const hits = parsed.filter((x) => x.p);
     hidden.series[0].fils === shown.series[0].fils && shown.series[0].fils === 2480000,
     `${shown.series[0].fils} -> ${hidden.series[0].fils}`);
 
-  // Passing the accounts themselves is the shape that cannot be narrowed by
-  // mistake, and must agree with the widened legacy Set.
+  // Identity requires the full account records. A legacy visibility Set has
+  // no issuer/instrument evidence and must not create an automatic pair.
   const byAccounts = ledger.internalTransferIds(transactions, accountsWith(true));
-  ok('transfer: Account[] and the legacy Set of ids agree',
+  ok('transfer: complete archived account records preserve the evidenced pair',
     byAccounts.size === hidden.internal.size && [...byAccounts].every((id) => hidden.internal.has(id)),
     [...byAccounts].join(','));
+  ok('transfer: a legacy visibility Set cannot manufacture source-account identity',
+    ledger.internalTransferIds(transactions, ledger.liveAccountIds(accountsWith(true))).size === 0);
+  const unproven = transactions.slice(0, 2).map(({ transferEvidence, ...transaction }) => transaction);
+  const pending = reconcileTransfers(unproven, accountsWith(true));
+  ok('transfer: equal amounts and clocks without evidence stay pending, never auto-owned',
+    pending.internalIds.size === 0 && pending.pendingIds.size === 2 &&
+      pending.pendingIds.has('out') && pending.pendingIds.has('in'));
 
   // Widening must not widen the MATCH. Two accounts are still required, and a
   // real arrival of the same value on the same day is still real.
   const decoy = [
     { id: 'd-out', type: 'expense', amountFils: 500000, category: 'other', accountId: 'old',
-      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true },
+      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true, ...transferFacts('0002') },
     { id: 'd-pay', type: 'income', amountFils: 500000, category: 'salary', accountId: 'nw',
-      title: 'Salary', date: '2026-06-15', source: 'sms' },
+      title: 'Salary', date: '2026-06-15', source: 'sms', ...transferFacts('0004') },
   ];
   ok('transfer: widening the account set does not let a salary be eaten as an arriving leg',
     ledger.internalTransferIds(decoy, accountsWith(true)).size === 0);
 
   const selfPair = [
     { id: 's-out', type: 'expense', amountFils: 500000, category: 'other', accountId: 'old',
-      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true },
-    { id: 's-in', type: 'income', amountFils: 500000, category: 'business', accountId: 'old',
-      title: 'Incoming transfer', date: '2026-06-15', source: 'sms' },
+      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true, ...transferFacts('0002') },
+    { id: 's-in', type: 'income', amountFils: 500000, category: 'other', accountId: 'old',
+      title: 'Incoming transfer', date: '2026-06-15', source: 'sms', ...transferFacts('0002') },
   ];
   ok('transfer: one account still cannot transfer to itself',
     ledger.internalTransferIds(selfPair, accountsWith(true)).size === 0);

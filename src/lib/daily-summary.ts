@@ -43,7 +43,7 @@ export interface DailySummary {
  */
 export function buildDailySummary(state: AppState, dayISO: string): DailySummary | null {
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, live);
+  const internal = internalTransferIds(state.transactions, state.accounts);
 
   const rows: Transaction[] = [];
   let totalFils = 0;

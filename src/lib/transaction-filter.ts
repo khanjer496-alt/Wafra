@@ -1,6 +1,7 @@
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { countsInTotals } from '@/lib/ledger';
+import { countsInCashflowTotals } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -57,6 +58,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   const last = shiftMonthKey(options.currentKey, -1); const three = shiftMonthKey(options.currentKey, -2);
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
   let totalShown = 0; let transfers = 0; let hidden = 0;
+  let pendingCount = 0; let pendingIncomeFils = 0; let pendingOutgoingFils = 0;
   for (const { row, merchantKey, search, month } of index.ordered(filters.sort)) {
     if (options.smsOnly && row.source !== 'sms') continue;
     if (merchant && merchant !== merchantKey) continue;
@@ -76,16 +78,27 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (filters.datePreset === 'custom' && ((filters.dateFrom && row.date < filters.dateFrom) || (filters.dateTo && row.date > filters.dateTo))) continue;
     if (query && !search.includes(query)) continue;
     filtered.push(row);
-    const counts = countsInTotals(row, options.live, options.internal);
+    const counts = countsInCashflowTotals(row, options.live, options.internal);
     if (!counts) { if (options.live.has(row.accountId)) transfers++; else hidden++; }
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;
     totalShown += contribution;
+    if (counts && isTransferCandidate(row) && transferOwnership(row) === 'unknown') {
+      pendingCount += 1;
+      if (row.type === 'income') pendingIncomeFils += part;
+      else pendingOutgoingFils += part;
+    }
     if (filters.sort !== 'largest') {
       let day = byDay.get(row.date);
       if (!day) { day = { date: row.date, totalFils: 0, data: [] }; byDay.set(row.date, day); }
       day.data.push(row); day.totalFils += contribution;
     }
   }
-  return { filtered, totalShown, excluded: { transfers, hidden }, days: [...byDay.values()] };
+  return {
+    filtered,
+    totalShown,
+    excluded: { transfers, hidden },
+    pendingTransfers: { count: pendingCount, incomeFils: pendingIncomeFils, outgoingFils: pendingOutgoingFils },
+    days: [...byDay.values()],
+  };
 }

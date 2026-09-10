@@ -3749,10 +3749,10 @@ for (const [label, kind] of [['Debit Card', 'debit'], ['account/card', 'unknown'
 }
 t('an unreadable transfer source cannot become the readable beneficiary',
   'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your account/card XXXX on 16/04/2026 01:18',
-  null);
+  { kind: 'transaction', type: 'expense', amountFils: 407080, card: null });
 t('an unreadable transfer source cannot steal a card from a later footer',
   'Dear Customer, your funds transfer request of AED 4,070.80 to IBAN/Account/Card XXXX5678 has been processed successfully from your account/card XXXX on 16/04/2026 01:18. Credit Card XXXX9012 available limit AED 50,000.00.',
-  null);
+  { kind: 'transaction', type: 'expense', amountFils: 407080, card: null });
 t('an incoming transfer keeps the credited instrument and income direction',
   'AED 4,070.80 has been credited to your account XXXX1234 on 16/04/2026.',
   { type: 'income', amountFils: 407080, transfer: false,

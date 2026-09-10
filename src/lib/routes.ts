@@ -41,6 +41,7 @@ export const APP_ROUTES = [
   '/settings',
   '/accuracy',
   '/categorise',
+  '/review-transfers',
   '/import-sms',
   '/ios-setup',
   '/add-transaction',

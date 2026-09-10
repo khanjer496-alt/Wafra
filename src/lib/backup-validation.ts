@@ -1,4 +1,5 @@
 import type { AppState } from '@/lib/types';
+import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -55,6 +56,7 @@ const transaction: Check = (value) => {
     fxRate: finitePositive, fxRateDate: isoDate, fxSource: oneOf('bank', 'reference', 'fallback'),
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
     viaPush: boolean, captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
+    transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
     cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,

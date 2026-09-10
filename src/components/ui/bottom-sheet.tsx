@@ -204,10 +204,15 @@ export function BottomSheet({
   const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
 
+  // Keep the dismissal lifecycle, but do not build hidden native sheet trees.
+  // All hooks stay above this guard so every open/close follows the same order.
+  if (!mounted) return null;
+
   return (
     <Modal
       visible={mounted}
       transparent
+      hardwareAccelerated
       animationType="none"
       onRequestClose={requestImplicitDismiss}
       statusBarTranslucent>
@@ -252,8 +257,15 @@ export function BottomSheet({
               Elevation,
               sheetStyle,
             ]}>
-            {/* Swallows taps so a press inside the sheet never dismisses it. */}
-            <Pressable accessible={false} onPress={() => {}} style={styles.sheetBody}>
+            {/*
+              The sheet body must not be a Pressable. Wrapping a ScrollView in
+              one makes the parent press responder compete with scrolling,
+              which is especially visible on Android as delayed/stuttering
+              drags. The sheet is already above the backdrop sibling in the
+              responder tree, so ordinary Views still keep inside touches from
+              reaching the dismiss layer.
+            */}
+            <View accessible={false} style={styles.sheetBody}>
               <GestureDetector gesture={drag}>
                 <Animated.View style={styles.dragRegion}>
                   {dismissible ? (
@@ -263,7 +275,7 @@ export function BottomSheet({
                     />
                   ) : null}
                   <View style={styles.header}>
-                    <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header" style={styles.title}>
+                    <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
                       {title}
                     </ThemedText>
                     {dismissible ? (
@@ -277,7 +289,7 @@ export function BottomSheet({
                           Platform.OS === 'android' && styles.androidClose,
                           { borderColor: theme.controlBorder },
                         ]}>
-                        <Icon name="close" size={15} color={theme.textSecondary} />
+                        <Icon name="close" size={20} color={theme.textSecondary} />
                       </Pressable>
                     ) : null}
                   </View>
@@ -287,6 +299,7 @@ export function BottomSheet({
                 style={styles.scroll}
                 showsVerticalScrollIndicator={false}
                 bounces={false}
+                nestedScrollEnabled
                 // Or a tap on a chip while the keyboard is up only dismisses it.
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.content}>
@@ -295,7 +308,7 @@ export function BottomSheet({
               {hasFooter ? (
                 <View testID={testID ? `${testID}-footer` : undefined} style={[styles.footer, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>{footer}</View>
               ) : null}
-            </Pressable>
+            </View>
           </Animated.View>
         </View>
       </GestureHandlerRootView>

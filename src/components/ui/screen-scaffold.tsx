@@ -57,17 +57,18 @@ export function useScreenContentInsets({
   const footerClearance = hasFooter ? 48 + Spacing.four : 0;
   const bottom = tabbed
     ? tabBarClearance + footerClearance
-    : insets.bottom + footerClearance + Spacing.four;
-  const top = tabbed ? insets.top + Spacing.three : Spacing.three;
+    : (Platform.OS === 'android' ? 0 : insets.bottom) + footerClearance + Spacing.four;
+  const top = tabbed && Platform.OS !== 'android' ? insets.top + Spacing.three : Spacing.three;
 
-  return {
+  // Stable inset objects let memoized lists skip unrelated search/menu renders.
+  return useMemo(() => ({
     contentContainerStyle: [
       styles.content,
       Platform.OS !== 'ios' && { paddingTop: top, paddingBottom: bottom },
     ],
     contentInset: { top, bottom },
     scrollIndicatorInsets: { top, bottom },
-  };
+  }), [top, bottom]);
 }
 
 export function ScreenScaffold({
@@ -100,7 +101,7 @@ export function ScreenScaffold({
 
   const top = usesNativeHeader
     ? contentInsets.contentInset.top
-    : safeAreaInsets.top + (header === undefined ? Spacing.four : Spacing.three);
+    : (Platform.OS === 'android' ? 0 : safeAreaInsets.top) + (header === undefined ? Spacing.four : Spacing.three);
   const keyboardBottom = keyboardAware && Platform.OS !== 'ios' ? keyboardHeight : 0;
   const effectiveInsets = {
     contentInset: { top, bottom: contentInsets.contentInset.bottom + keyboardBottom },
@@ -187,7 +188,12 @@ export function ScreenScaffold({
   );
 
   return (
-    <ThemedView style={styles.root} testID={testID}>
+    <ThemedView style={[styles.root, Platform.OS === 'android' && {
+      // A scroll-content inset protects only the FIRST row. Reserve the actual
+      // viewport instead, so scrolled text cannot run beneath the system bars.
+      paddingTop: safeAreaInsets.top,
+      paddingBottom: tabbed ? 0 : safeAreaInsets.bottom,
+    }]} testID={testID}>
       {keyboardAware ? (
         <KeyboardAvoidingView
           style={styles.flex}

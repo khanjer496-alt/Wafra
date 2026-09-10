@@ -268,6 +268,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
   const [learnMoreVisible, setLearnMoreVisible] = useState(false);
+  const [exampleVisible, setExampleVisible] = useState(false);
   const [setupBusy, setSetupBusy] = useState(false);
   const setupBusyRef = useRef(false);
   const [finishing, setFinishing] = useState(false);
@@ -606,7 +607,29 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {t('onboardWelcomeBody')}
                 </ThemedText>
               </View>
-              <MoneyPreview reducedMotion={reducedMotion} />
+              <View style={styles.valueFlow}>
+                <View style={styles.valueStep}>
+                  <View style={styles.valueIcon}><Icon name="mail" size={18} color={night.primary} /></View>
+                  <View style={styles.valueCopy}>
+                    <ThemedText style={styles.valueTitle}>{t('onboardValueAlerts')}</ThemedText>
+                    <ThemedText style={styles.valueDetail}>{t('onboardValueAlertsBody')}</ThemedText>
+                  </View>
+                </View>
+                <View style={styles.valueStep}>
+                  <View style={styles.valueIcon}><Icon name="spark" size={18} color={night.primary} /></View>
+                  <View style={styles.valueCopy}>
+                    <ThemedText style={styles.valueTitle}>{t('onboardValueOrganized')}</ThemedText>
+                    <ThemedText style={styles.valueDetail}>{t('onboardValueOrganizedBody')}</ThemedText>
+                  </View>
+                </View>
+                <View style={styles.valueStep}>
+                  <View style={styles.valueIcon}><Icon name="chart" size={18} color={night.primary} /></View>
+                  <View style={styles.valueCopy}>
+                    <ThemedText style={styles.valueTitle}>{t('onboardValuePicture')}</ThemedText>
+                    <ThemedText style={styles.valueDetail}>{t('onboardValuePictureBody')}</ThemedText>
+                  </View>
+                </View>
+              </View>
               <View style={styles.welcomeActions}>
                 <Button wrapLabel
                   label={t('onboardChooseStart')}
@@ -614,6 +637,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
+                <Button wrapLabel variant="ghost" label={t('refTryExample')}
+                  onPress={() => setExampleVisible(true)} labelColor={night.textSecondary} />
                 <View style={styles.setupTime}>
                   <Icon name="lock" size={14} color={night.textTertiary} />
                   <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
@@ -951,6 +976,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           </BottomSheet>
         </SafeAreaView>
       </View>
+      <BottomSheet visible={exampleVisible} onClose={() => setExampleVisible(false)} title={t('refTryExample')}>
+        <View style={styles.exampleSheet}><MoneyPreview reducedMotion={reducedMotion} /></View>
+      </BottomSheet>
       <ConfirmSheet
         visible={shortcutCleanup !== null}
         onClose={() => setShortcutCleanup(null)}
@@ -1127,6 +1155,16 @@ const styles = StyleSheet.create({
   startOptionTitleLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 21 },
+  valueFlow: { marginTop: Spacing.four, borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong },
+  valueStep: { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: Spacing.three,
+    paddingVertical: Spacing.two + 2 },
+  valueIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: night.primarySoft,
+    alignItems: 'center', justifyContent: 'center' },
+  valueCopy: { flex: 1, minWidth: 0, gap: 2 },
+  valueTitle: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 20 },
+  valueDetail: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 12, lineHeight: 18 },
+  exampleSheet: { backgroundColor: night.background, borderRadius: Radius.sheet, padding: Spacing.three },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   scanStats: {
     width: '100%',

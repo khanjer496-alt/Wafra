@@ -308,9 +308,17 @@ function sources(dir = SRC) {
   }
 
   // The nightly digest and the per-charge banner are notification settings,
-  // not privacy ones, and they are what people come here to switch off.
-  ok('the notification switches are out of the Privacy group and above it',
-    at("t('dailySummarySetting')") < at("t('privacyHeader')"));
+  // not privacy ones. Settings now uses explicit panels, so assert membership
+  // rather than comparing the first textual occurrence of two translated keys.
+  {
+    const notificationPanel = settings.match(/panel === 'imports'[\s\S]*?<SectionHeader title=\{t\('settingsNotificationsHeader'\)\}[\s\S]*?<\/Section>/)?.[0] ?? '';
+    const privacyPanel = settings.match(/panel === 'privacy'[\s\S]*?<SectionHeader title=\{t\('privacyHeader'\)\}[\s\S]*?<\/Section>/)?.[0] ?? '';
+    ok('the notification switches are out of the Privacy group',
+      notificationPanel.includes("t('dailySummarySetting')") &&
+      notificationPanel.includes("t('alertEveryCharge')") &&
+      !privacyPanel.includes("t('dailySummarySetting')") &&
+      !privacyPanel.includes("t('alertEveryCharge')"));
+  }
 
   // Android's row and iPhone's row are mutually exclusive, so a user never
   // sees both — which is exactly why they must not have had two names.

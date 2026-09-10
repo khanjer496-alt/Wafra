@@ -67,3 +67,9 @@ artifacts/
 builds/
 /--output
 /modules/*/android/build/
+
+# Never include unrelated local launch work or local Cloudflare state in a
+# no-VCS internal-device archive. Neither is an app build input.
+/.postdelegate-launch-work/
+/.wrangler/
+/.git/

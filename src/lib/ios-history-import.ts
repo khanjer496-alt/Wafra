@@ -7,6 +7,9 @@ import type { CompletedHistorySession, WafraHistoryNativeModule } from '../../mo
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_CHUNK_RECORDS = 50;
 const MAX_SESSION_CHUNKS = Math.ceil(MAX_HISTORICAL_RECORDS / MAX_CHUNK_RECORDS);
+// Paged staging is byte-bounded natively. Keep the legacy descriptor contract
+// unchanged; every paged chunk still contains at most 50 validated records.
+const MAX_PAGED_RECORDS = 1_000_000;
 export type IosHistoryImportErrorCode =
   | 'invalid-session'
   | 'session-unavailable'
@@ -95,6 +98,13 @@ const validateSessionId = (sessionId: string): void => {
 const validateDescriptor = (
   descriptor: CompletedHistorySession,
 ): CompletedHistorySession => {
+  if (descriptor.paged !== undefined && typeof descriptor.paged !== 'boolean') {
+    throw new IosHistoryImportError('invalid-descriptor');
+  }
+  const maxRecords = descriptor.paged === true ? MAX_PAGED_RECORDS : MAX_HISTORICAL_RECORDS;
+  // A page can finish with a short chunk, so ceil(total / 50) is not a bound
+  // on the number of chunks produced by a paged source.
+  const maxChunks = descriptor.paged === true ? MAX_PAGED_RECORDS : MAX_SESSION_CHUNKS;
   const counts = [
     descriptor.found,
     descriptor.attempted,
@@ -106,9 +116,9 @@ const validateDescriptor = (
   }
   if (
     descriptor.found !== descriptor.attempted ||
-    descriptor.found > MAX_HISTORICAL_RECORDS ||
-    descriptor.attempted > MAX_HISTORICAL_RECORDS ||
-    descriptor.accepted > MAX_HISTORICAL_RECORDS ||
+    descriptor.found > maxRecords ||
+    descriptor.attempted > maxRecords ||
+    descriptor.accepted > maxRecords ||
     !Number.isSafeInteger(descriptor.accepted + descriptor.skipped) ||
     descriptor.accepted + descriptor.skipped !== descriptor.attempted
   ) {
@@ -116,7 +126,7 @@ const validateDescriptor = (
   }
   if (
     !Array.isArray(descriptor.chunkIndices) ||
-    descriptor.chunkIndices.length > MAX_SESSION_CHUNKS ||
+    descriptor.chunkIndices.length > maxChunks ||
     (descriptor.found === 0 && descriptor.chunkIndices.length !== 0) ||
     !descriptor.chunkIndices.every((value, index) => value === index)
   ) {

@@ -170,6 +170,12 @@ function extractedHistoryIntentFixture() {
         parameter('chunkIndex', 'history.chunk.parameter', primitive(2)),
         parameter('records', 'history.records.parameter', array(0)),
       ], primitive(0)),
+      StageWafraShortcutHistoryIntent: intent(0, [
+        parameter('sessionId', 'history.session_id.parameter', primitive(0)),
+        parameter('authorizationSecret', 'history.authorization.parameter', primitive(0)),
+        parameter('chunkIndex', 'history.chunk.parameter', primitive(2)),
+        parameter('records', 'history.records.parameter', array(0)),
+      ], primitive(0)),
     },
   };
 }
@@ -274,6 +280,7 @@ const historyIntentNames = [
   'PrepareWafraHistoryMessageV3Intent',
   'ImportWafraPreparedHistoryV2Intent',
   'DiscardWafraPreparedHistoryV2Intent',
+  'StageWafraShortcutHistoryIntent',
 ];
 
 function historyIntentPolicyContract(source) {
@@ -288,6 +295,7 @@ function historyIntentPolicyContract(source) {
     prepareV3,
     preparedImportV2,
     discardV2,
+    shortcutStage,
   ] = historyIntentNames
     .map((name) => swiftIntent(source, name));
   const hasExactPolicy = (intent, required, forbidden) =>
@@ -299,7 +307,7 @@ function historyIntentPolicyContract(source) {
       .test(intent);
   return Boolean(
     begin && stage && finish && bulk && prepare && preparedImport &&
-      prepareV2 && prepareV3 && preparedImportV2 && discardV2
+      prepareV2 && prepareV3 && preparedImportV2 && discardV2 && shortcutStage
   ) &&
     hasExactPolicy(begin, 'requiresLocalDeviceAuthentication', 'alwaysAllowed') &&
     hasExactPolicy(stage, 'alwaysAllowed', 'requiresLocalDeviceAuthentication') &&
@@ -310,7 +318,8 @@ function historyIntentPolicyContract(source) {
     hasExactPolicy(prepareV2, 'alwaysAllowed', 'requiresLocalDeviceAuthentication') &&
     hasExactPolicy(prepareV3, 'alwaysAllowed', 'requiresLocalDeviceAuthentication') &&
     hasExactPolicy(preparedImportV2, 'requiresLocalDeviceAuthentication', 'alwaysAllowed') &&
-    hasExactPolicy(discardV2, 'alwaysAllowed', 'requiresLocalDeviceAuthentication');
+    hasExactPolicy(discardV2, 'alwaysAllowed', 'requiresLocalDeviceAuthentication') &&
+    hasExactPolicy(shortcutStage, 'alwaysAllowed', 'requiresLocalDeviceAuthentication');
 }
 
 function historyIntentAvailabilityContract(source) {
@@ -325,11 +334,13 @@ function historyIntentAvailabilityContract(source) {
   });
 }
 
-function stageOutputContract(source) {
-  const stage = swiftIntent(source, 'StageWafraMessageHistoryIntent');
+function stageOutputContract(source, shortcut = false) {
+  const stage = swiftIntent(source, shortcut ? 'StageWafraShortcutHistoryIntent' : 'StageWafraMessageHistoryIntent');
   const perform = swiftFunction(stage, 'perform');
   return Boolean(perform) &&
-    /let counts = try WafraMessageHistoryStore\.shared\.stageChunk\(/.test(perform) &&
+    (shortcut
+      ? /let counts = try WafraMessageHistoryStore\.shared\.stageShortcutChunk\(/.test(perform)
+      : /let counts = try WafraMessageHistoryStore\.shared\.stageChunk\(/.test(perform)) &&
     /let value = "\{\\"attempted\\":\\\(counts\.attempted\),\\"accepted\\":\\\(counts\.accepted\),\\"skipped\\":\\\(counts\.skipped\)\}"/
       .test(perform) &&
     (perform.match(/return\s+\.result\(/g) || []).length === 1 &&
@@ -536,6 +547,10 @@ function discardPreparedV2Contract(source) {
   const plugin = read('modules/wafra-message-history/plugin/index.js');
   const firstPluginInvocations = captureHistoryIntentPlugin();
   const generated = firstPluginInvocations[0]?.contents || '';
+  const shortcutStage = swiftIntent(generated, 'StageWafraShortcutHistoryIntent');
+  ok('Shortcut Stage exposes a separate native offset adapter',
+    Boolean(shortcutStage) && /shared\.stageShortcutChunk\(/.test(shortcutStage), 'new adapter intent missing');
+
   const appConsumer = read('src/app/import-sms.tsx');
   const english = read(
     'modules/wafra-message-history/ios/Resources/en.lproj/WafraHistoryIntents.strings',
@@ -546,6 +561,7 @@ function discardPreparedV2Contract(source) {
 
   const exactTypes = `
     export interface CompletedHistorySession {
+      paged?: boolean;
       chunkIndices: number[];
       found: number;
       attempted: number;
@@ -560,11 +576,13 @@ function discardPreparedV2Contract(source) {
       discardSession(sessionId: string): Promise<void>;
       purgeExpired(): Promise<number>;
       eraseAll(): Promise<void>;
+      getPagedStatus?(): Promise<string | null>;
+      discardPagedHistory?(): Promise<void>;
     }
   `.replace(/\s+/g, ' ').trim();
   eq(
-    'TypeScript exposes only the completed-history bridge contract',
-    types.replace(/\s+/g, ' ').trim(),
+    'TypeScript exposes completed records plus optional source-free paging controls',
+    types.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim(),
     exactTypes,
   );
 
@@ -602,9 +620,11 @@ function discardPreparedV2Contract(source) {
     'discardSession',
     'purgeExpired',
     'eraseAll',
+    'getPagedStatus',
+    'discardPagedHistory',
   ];
   eq(
-    'Swift bridge exports the exact completed-only method set',
+    'Swift bridge exports the exact read/cleanup and source-free status method set',
     [...swiftModule.matchAll(/AsyncFunction\("([^"]+)"/g)].map((match) => match[1]),
     bridgeMethods,
   );
@@ -649,9 +669,19 @@ function discardPreparedV2Contract(source) {
     'bridge refuses a chunk until the completed descriptor lists its index',
     /completedSession\(\s*sessionId:\s*sessionId\s*\)/.test(readBridge) &&
       /chunkIndices\.contains\(chunkIndex\)/.test(readBridge) &&
-      readBridge.indexOf('completedSession(') < readBridge.indexOf('readChunk('),
+      readBridge.indexOf('completedSession(') < readBridge.indexOf('WafraMessageHistoryStore.shared.readChunk('),
     readBridge,
   );
+  const pagedStore = read('modules/wafra-message-history/ios/WafraPagedHistoryStore.swift');
+  const pagedRead = swiftFunction(pagedStore, 'readChunk');
+  ok('paged chunk dispatch also requires the native completed checkpoint',
+    /sessionId\.hasPrefix\("PAGED-"\)/.test(readBridge) &&
+    /WafraPagedHistoryStore\.shared\.readChunk/.test(readBridge) &&
+    /head\.sessionId == sessionId, head\.checkpoint\.complete/.test(pagedRead) &&
+    pagedRead.indexOf('head.checkpoint.complete') < pagedRead.indexOf('readEntry('), pagedRead);
+  ok('paged status exposes no staging source or authorization token',
+    /return try response\(load\(directory\)\)/.test(swiftFunction(pagedStore, 'status')) &&
+    !/readChunk|recordIDs|sender|body|authorizationSecret/.test(swiftFunction(pagedStore, 'status')));
   ok(
     'bridge maps every cleanup operation through the two-store coordinator',
     /WafraHistoryCleanupCoordinator\.shared\.discardSession\(sessionId:\s*sessionId\)/
@@ -681,7 +711,7 @@ function discardPreparedV2Contract(source) {
     appConsumer,
   );
 
-  eq('generated source declares exactly one of all ten history intents', [
+  eq('generated source declares exactly one of all eleven history intents', [
     generated.match(/struct BeginWafraHistoryImportIntent:\s*AppIntent/g)?.length || 0,
     generated.match(/struct StageWafraMessageHistoryIntent:\s*AppIntent/g)?.length || 0,
     generated.match(/struct FinishWafraHistoryImportIntent:\s*AppIntent/g)?.length || 0,
@@ -692,13 +722,23 @@ function discardPreparedV2Contract(source) {
     generated.match(/struct PrepareWafraHistoryMessageV3Intent:\s*AppIntent/g)?.length || 0,
     generated.match(/struct ImportWafraPreparedHistoryV2Intent:\s*AppIntent/g)?.length || 0,
     generated.match(/struct DiscardWafraPreparedHistoryV2Intent:\s*AppIntent/g)?.length || 0,
-  ], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    generated.match(/struct StageWafraShortcutHistoryIntent:\s*AppIntent/g)?.length || 0,
+  ], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   ok('each history intent is iOS 26 and background-only in its own struct',
     historyIntentAvailabilityContract(generated), generated);
   ok('each history intent has its required authentication policy in its own struct',
     historyIntentPolicyContract(generated), generated);
   const beginIntent = swiftIntent(generated, 'BeginWafraHistoryImportIntent');
   const stageIntent = swiftIntent(generated, 'StageWafraMessageHistoryIntent');
+  eq('Shortcut Stage binds exact legacy scalar authorization and record-list parameters',
+    swiftParameters(shortcutStage), swiftParameters(stageIntent));
+  ok('Shortcut Stage returns only authoritative counts without opening or finishing history',
+    stageOutputContract(generated, true) &&
+      !/OpenURL|openAppWhenRun|finishSession|openURL|ImportWafra|readChunk/.test(shortcutStage), shortcutStage);
+  ok('Shortcut Stage contract rejects accidental strict-store dispatch',
+    !stageOutputContract(generated.replace(shortcutStage,
+      shortcutStage.replace('shared.stageShortcutChunk(', 'shared.stageChunk(')), true));
+
   const bulkIntent = swiftIntent(generated, 'ImportWafraMessageHistoryIntent');
   const prepareIntent = swiftIntent(generated, 'PrepareWafraHistoryMessageIntent');
   const preparedImportIntent = swiftIntent(generated, 'ImportWafraPreparedHistoryIntent');
@@ -1038,6 +1078,9 @@ function discardPreparedV2Contract(source) {
     'history.stage.description',
     'history.stage.error',
     'history.stage.title',
+    'history.stage_shortcut.title',
+    'history.stage_shortcut.description',
+    'history.stage_shortcut.error',
     'history.total_chunks.parameter',
   ].sort();
   eq('English localization table contains the closed history key set',
@@ -1060,7 +1103,7 @@ function discardPreparedV2Contract(source) {
     generated.match(/return WafraMessageHistoryResources\.localized\("history\.[^"]+\.error"\)/g)?.length || 0,
     metadataResources.length,
     metadataResources.every((key) => expectedKeys.includes(key)),
-  ], [10, 10, 42, 10, 62, true]);
+  ], [11, 11, 46, 11, 68, true]);
   ok(
     'generated metadata retains no literal English fallback',
     !/static let (?:title|description)[^\n]*=\s*"|@Parameter\(title:\s*"|IntentDescription\(\s*"/.test(generated),
@@ -1069,7 +1112,7 @@ function discardPreparedV2Contract(source) {
   ok(
     'source-free localized intent errors replace underlying store errors',
       /CustomLocalizedStringResourceConvertible/.test(generated) &&
-      (generated.match(/catch\s*\{/g)?.length || 0) === 10 &&
+      (generated.match(/catch\s*\{/g)?.length || 0) === 11 &&
       !/throw error\b/.test(generated),
     generated,
   );
@@ -1102,7 +1145,7 @@ function discardPreparedV2Contract(source) {
 
   const validMetadataResult = verifyExtractedMetadata(extractedHistoryIntentFixture());
   ok(
-    'compiled metadata gate accepts the exact ten-intent history contract',
+    'compiled metadata gate accepts the exact eleven-intent history contract',
     validMetadataResult.status === 0 &&
       /exact .*history contract/.test(validMetadataResult.stdout),
     `status=${validMetadataResult.status}\n${validMetadataResult.stdout}${validMetadataResult.stderr}`,
@@ -1192,6 +1235,16 @@ function discardPreparedV2Contract(source) {
     `status=${wrongStagePolicyResult.status}\n` +
       `${wrongStagePolicyResult.stdout}${wrongStagePolicyResult.stderr}`,
   );
+  for (const mutation of ['policy', 'parameters', 'foreground']) {
+    const fixture = extractedHistoryIntentFixture();
+    const action = fixture.actions.StageWafraShortcutHistoryIntent;
+    if (mutation === 'policy') action.authenticationPolicy = 2;
+    if (mutation === 'parameters') action.parameters[3].valueType = { primitive: { wrapper: { typeIdentifier: 0 } } };
+    if (mutation === 'foreground') action.openAppWhenRun = true;
+    const result = verifyExtractedMetadata(fixture);
+    ok(`compiled metadata gate refuses Shortcut Stage ${mutation} drift`,
+      result.status !== 0 && /StageWafraShortcutHistoryIntent/.test(`${result.stdout}${result.stderr}`));
+  }
   const leakingFinishMetadata = extractedHistoryIntentFixture();
   leakingFinishMetadata.actions.FinishWafraHistoryImportIntent.outputType = {
     primitive: { wrapper: { typeIdentifier: 0 } },

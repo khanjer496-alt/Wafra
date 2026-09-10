@@ -14,6 +14,7 @@ import { BalanceOverview } from '@/components/wallet/balance-overview';
 import { AccountGroups, type AccountDisplayRow } from '@/components/wallet/account-groups';
 import { AmountSheet } from '@/components/ui/amount-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { Button } from '@/components/ui/controls';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { AccountTile } from '@/components/ui/tile';
@@ -225,8 +226,8 @@ export default function WalletScreen() {
 
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
   const cashOut = useMemo(
     () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),
@@ -607,7 +608,8 @@ export default function WalletScreen() {
       </ScreenScaffold>
 
       {/* Add account sheet */}
-      <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newAccount')}>
+      <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newAccount')}
+        footer={<Button label={t('addAccount')} onPress={saveAccount} disabled={!name.trim()} />}>
             <ThemedText type="small" accessibilityRole="header">
               {t('accountNamePlaceholder')}
             </ThemedText>
@@ -675,17 +677,12 @@ export default function WalletScreen() {
               ))}
             </View>
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={saveAccount}
-              disabled={!name.trim()}
-              style={[styles.saveBtn, { backgroundColor: theme.primary, opacity: name.trim() ? 1 : 0.45 }]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('addAccount')}</ThemedText>
-            </Pressable>
       </BottomSheet>
 
       {/* New goal sheet */}
-      <BottomSheet visible={goalVisible} onClose={() => setGoalVisible(false)} title={t('newGoalTitle')}>
+      <BottomSheet visible={goalVisible} onClose={() => setGoalVisible(false)} title={t('newGoalTitle')}
+        footer={<Button label={t('createGoal')} onPress={saveGoal}
+          disabled={!goalTitle.trim() || !parseAmountToFils(goalTarget)} />}>
             <ThemedText type="small" accessibilityRole="header">{t('goalPlaceholder')}</ThemedText>
             <TextInput
               accessibilityLabel={t('goalPlaceholder')}
@@ -730,19 +727,6 @@ export default function WalletScreen() {
               ))}
             </View>
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={saveGoal}
-              disabled={!goalTitle.trim() || !parseAmountToFils(goalTarget)}
-              style={[
-                styles.saveBtn,
-                {
-                  backgroundColor: theme.primary,
-                  opacity: !goalTitle.trim() || !parseAmountToFils(goalTarget) ? 0.45 : 1,
-                },
-              ]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('createGoal')}</ThemedText>
-            </Pressable>
       </BottomSheet>
 
       {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
@@ -809,7 +793,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
   },
   content: {
-    gap: Spacing.five,
+    gap: Spacing.four,
   },
   scan: {
     flexDirection: 'row',
@@ -1004,6 +988,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   kindChip: {
+    minHeight: 48,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.two + 4,
     paddingVertical: Spacing.two,
     borderRadius: Radius.full,
@@ -1035,8 +1021,8 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   emojiPick: {
-    width: 40,
-    height: 40,
+    width: 48,
+    height: 48,
     borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',

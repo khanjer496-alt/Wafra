@@ -1,14 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   Keyboard,
   Platform,
   Pressable,
-  ScrollView,
   SectionList,
   StyleSheet,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -17,24 +14,22 @@ import { ThemedText } from '@/components/themed-text';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { TransactionRow } from '@/components/transaction-row';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
-import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
 import { Icon } from '@/components/ui/icon';
-import { CategoryChips } from '@/components/ui/category-chips';
-import { Button, Chip } from '@/components/ui/controls';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { CATEGORIES, EXPENSE_CATEGORIES } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, shortDate, toISODate } from '@/lib/format';
+import { CATEGORIES } from '@/lib/categories';
+import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { internalTransferIds, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
-import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters, type DatePreset, type SortMode } from '@/lib/transaction-filter';
+import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { useStore } from '@/lib/store';
-import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
+import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
 const DEFAULT_FILTERS: Filters = {
@@ -101,7 +96,7 @@ export default function TransactionsScreen() {
    * letter. 140ms is under the threshold where a search feels like it is
    * thinking, and it collapses a nine-letter word into one pass.
    */
-  const [appliedQuery, setAppliedQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState(query);
   useEffect(() => {
     const id = setTimeout(() => setAppliedQuery(query), 140);
     return () => clearTimeout(id);
@@ -151,19 +146,6 @@ export default function TransactionsScreen() {
    */
   const [smsOnly, setSmsOnly] = useState(source === 'sms');
   const [sheetVisible, setSheetVisible] = useState(false);
-  /** Which end of the custom range is currently open in the native picker. */
-  const [picking, setPicking] = useState<'dateFrom' | 'dateTo' | null>(null);
-  /**
-   * What is typed into the range boxes on web, where there is no picker.
-   *
-   * `@react-native-community/datetimepicker` has no web implementation — it
-   * warns and renders null — so tapping From or To set `picking` and produced
-   * nothing at all, and "Date range" was the one preset that could not be
-   * used. Kept separate from `filters` so a half-typed date does not
-   * repeatedly re-filter the ledger; the bound moves only once the text is a
-   * whole ISO date.
-   */
-  const [rangeDraft, setRangeDraft] = useState({ dateFrom: '', dateTo: '' });
   const [editing, setEditing] = useState<Transaction | null>(null);
   const listInsets = useScreenContentInsets({ hasFooter: false });
 
@@ -189,8 +171,8 @@ export default function TransactionsScreen() {
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
 
   const accountById = useMemo(
@@ -219,114 +201,35 @@ export default function TransactionsScreen() {
     [accountById, openEntry, theme.cardBorder, internal],
   );
 
-  const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, {
-    query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal,
-  }), [filterIndex, appliedFilters, appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
-  const { filtered, totalShown, excluded } = projection;
+  const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
+    live: liveAccounts, internal }), [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
+  const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
+    [filterIndex, appliedFilters, filterOptions]);
+  const { filtered, totalShown, excluded, pendingTransfers } = projection;
   const resultsPending = appliedFilters !== filters || appliedQuery !== query;
   const sections = useMemo<DaySection[]>(() => appliedFilters.sort === 'largest'
     ? [{ title: tr('largestFirst'), totalFils: totalShown, data: filtered }]
     : projection.days.map(day => ({ title: friendlyDate(day.date, todayISO), totalFils: day.totalFils, data: day.data })),
   [projection, appliedFilters.sort, filtered, todayISO, totalShown, tr]);
 
-  const toggleCategory = (id: CategoryId) => {
-    setFilters((current) => {
-      const next = new Set(current.categories);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return { ...current, categories: next };
-    });
-  };
-
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     setMerchantFilter(null);
-    // Including the one that arrived as a route param. "Clear all" that leaves
-    // a restriction in place is worse than no button.
     setSmsOnly(false);
-    setRangeDraft({ dateFrom: '', dateTo: '' });
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
-  };
+  }, []);
 
-  const presetLabel: Record<DatePreset, string> = {
-    selected: period.mode === 'all' ? tr('selectedPeriod') : periodLabel(period),
-    all: tr('allTime'),
-    month: tr('thisMonth'),
-    lastMonth: tr('lastMonth'),
-    '3months': tr('lastThreeMonths'),
-    custom: tr('dateRange'),
-  };
-
-  return (
-    <>
-      <ScreenScaffold
-        scroll={false}
-        virtualized
-        headerMode="native"
-        header={{
-          title: tr('transactionsTitle'),
-          back: { label: tr('back'), onPress: () => router.back() },
-          actions: [{
-            label: tr('addTransactionTitle'),
-            icon: 'plus',
-            onPress: () => router.push('/add-transaction'),
-          }],
-        }}>
+  const transactionResults = useMemo(() => (
         <SectionList
           sections={sections}
           keyExtractor={transactionKey}
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={listInsets.contentContainerStyle}
+          contentContainerStyle={[listInsets.contentContainerStyle, styles.listContent]}
           contentInset={listInsets.contentInset}
           scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
           contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={(
             <View style={styles.controls}>
-              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
-                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
-                  <TextField
-                    label={tr('transactionSearchLabel')}
-                    accessibilityLabel={tr('searchMerchants')}
-                    value={query}
-                    onChangeText={setQuery}
-                    inputMode="search"
-                    returnKeyType="search"
-                    placeholder={tr('transactionSearchPlaceholder')}
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-                    trailing={query.length > 0 ? (
-                      <ActionIconButton
-                        icon="close"
-                        label={tr('clearSearch')}
-                        variant="plain"
-                        onPress={() => setQuery('')}
-                      />
-                    ) : undefined}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('filtersButton')}
-                  accessibilityState={{ selected: activeFilterCount > 0 }}
-                  hitSlop={6}
-                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
-                  style={({ pressed }) => [
-                    styles.filterBtn,
-                    (largeText || narrowSearch) && styles.filterBtnStacked,
-                    {
-                      backgroundColor: activeFilterCount > 0
-                        ? theme.primary
-                        : theme.backgroundSelected,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}>
-                  <Icon
-                    name="filter"
-                    size={17}
-                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-                  />
-                </Pressable>
-              </View>
+
 
               {/* The restrictions that came from the link that opened this screen.
               Both are removable here, which is the only thing that explains an
@@ -360,9 +263,8 @@ export default function TransactionsScreen() {
                 </View>
               )}
 
-              <View testID="transactions-summary" style={styles.summaryRow} accessibilityState={{ busy: resultsPending }}>
+              <View testID="transactions-summary" style={styles.summaryRow}>
             {/* Full-width metadata; money and exclusions have their own lines. */}
-            {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
             <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
               {trf('transactionsCount', {
                 count: filtered.length,
@@ -420,6 +322,28 @@ export default function TransactionsScreen() {
                 : ''}
                 </ThemedText>
               )}
+              {pendingTransfers.count > 0 && (
+                <Pressable
+                  testID="transactions-pending-transfers"
+                  accessibilityRole="button"
+                  accessibilityLabel={`${trf('pendingTransfersIncluded', {
+                    count: pendingTransfers.count,
+                    s: pendingTransfers.count === 1 ? '' : 's',
+                  })}. ${tr('review')}`}
+                  onPress={() => router.push('/review-transfers')}
+                  style={styles.pendingTransferNote}>
+                  <Icon name="alert" size={15} color={theme.warning} />
+                  <ThemedText type="meta" themeColor="textSecondary" style={styles.pendingTransferText}>
+                    {trf('pendingTransfersIncluded', {
+                      count: pendingTransfers.count,
+                      s: pendingTransfers.count === 1 ? '' : 's',
+                    })}
+                  </ThemedText>
+                  <ThemedText type="meta" style={{ color: theme.primary, fontWeight: '700' }}>
+                    {tr('review')}
+                  </ThemedText>
+                </Pressable>
+              )}
               </View>
             </View>
           )}
@@ -456,253 +380,82 @@ export default function TransactionsScreen() {
             </View>
           }
         />
-      </ScreenScaffold>
+  ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
+    filters.datePreset, period, activeFilterCount, totalShown, excluded, pendingTransfers, clearFilters, renderRow]);
 
-      {/* Filter sheet */}
-      <BottomSheet
-        visible={sheetVisible}
-        title={tr('filtersTitle')}
-        onClose={() => setSheetVisible(false)}>
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('typeFilter')}
-          </ThemedText>
-          <View style={styles.chipRow}>
-            {([null, 'expense', 'income'] as (TransactionType | null)[]).map((type) => {
-              const label =
-                type === null
-                  ? tr('allWord')
-                  : type === 'expense'
-                    ? `− ${tr('expenseLabel')}`
-                    : `+ ${tr('incomeLabel')}`;
-              return (
-                <Chip
-                  key={String(type)}
-                  label={label}
-                  active={filters.type === type}
-                  onPress={() => setFilters((current) => ({ ...current, type }))}
-                />
-              );
-            })}
-          </View>
-        </View>
-
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('periodFilter')}
-          </ThemedText>
-          <View style={styles.chipRow}>
-            {(Object.keys(presetLabel) as DatePreset[]).map((preset) => (
-              <Chip
-                key={preset}
-                label={presetLabel[preset]}
-                active={filters.datePreset === preset}
-                onPress={() =>
-                  setFilters((current) => ({ ...current, datePreset: preset }))
-                }
-              />
-            ))}
-          </View>
-
-          {filters.datePreset === 'custom' && (
-            <View style={styles.rangeRow}>
-              {(['dateFrom', 'dateTo'] as const).map((field) => {
-                const label = field === 'dateFrom' ? tr('fromLabel') : tr('toLabel');
-                return (
-                  <View key={field} style={styles.rangeColumn}>
-                    <ThemedText type="micro" themeColor="textSecondary">
-                      {label}
-                    </ThemedText>
-                    {Platform.OS === 'web' ? (
-                      // Typed, because there is no picker to open here. The
-                      // bound only moves on a complete ISO date, so the list
-                      // is not re-filtered against "2026-0".
-                      <TextInput
-                        accessibilityLabel={`${label}: ${
-                          filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
-                        }`}
-                        value={rangeDraft[field]}
-                        onChangeText={(text) => {
-                          setRangeDraft((current) => ({ ...current, [field]: text }));
-                          const iso = text.trim();
-                          const whole = /^\d{4}-\d{2}-\d{2}$/.test(iso);
-                          if (whole || iso === '') {
-                            setFilters((current) => ({ ...current, [field]: whole ? iso : null }));
-                          }
-                        }}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={theme.textSecondary}
-                        inputMode="numeric"
-                        style={[
-                          styles.rangeInput,
-                          styles.rangeTextInput,
-                          { backgroundColor: theme.backgroundSelected, color: theme.text },
-                        ]}
+  return (
+    <>
+      <ScreenScaffold
+        scroll={false}
+        virtualized
+        headerMode="native"
+        header={{
+          title: tr('transactionsTitle'),
+          back: { label: tr('back'), onPress: () => router.back() },
+          actions: [{
+            label: tr('addTransactionTitle'),
+            icon: 'plus',
+            onPress: () => router.push('/add-transaction'),
+          }],
+        }}>
+        <View style={styles.searchContainer} accessibilityState={{ busy: resultsPending }}>
+              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
+                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
+                  <TextField
+                    label={tr('transactionSearchLabel')}
+                    accessibilityLabel={tr('searchMerchants')}
+                    value={query}
+                    onChangeText={setQuery}
+                    inputMode="search"
+                    returnKeyType="search"
+                    placeholder={tr('transactionSearchPlaceholder')}
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+                    trailing={query.length > 0 ? (
+                      <ActionIconButton
+                        icon="close"
+                        label={tr('clearSearch')}
+                        variant="plain"
+                        onPress={() => setQuery('')}
                       />
-                    ) : (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`${label}: ${
-                          filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
-                        }`}
-                        onPress={() => setPicking(field)}
-                        style={[styles.rangeInput, { backgroundColor: theme.backgroundSelected }]}>
-                        <ThemedText
-                          type="small"
-                          themeColor={filters[field] ? 'text' : 'textSecondary'}>
-                          {filters[field] ? shortDate(filters[field]!) : tr('anyLabel')}
-                        </ThemedText>
-                      </Pressable>
-                    )}
-                  </View>
-                );
-              })}
-              {filters.dateFrom || filters.dateTo ? (
+                    ) : undefined}
+                  />
+                </View>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={tr('clearFilter')}
-                  onPress={() => {
-                    setRangeDraft({ dateFrom: '', dateTo: '' });
-                    setFilters((current) => ({
-                      ...current,
-                      dateFrom: null,
-                      dateTo: null,
-                    }));
-                  }}
-                  style={styles.rangeClear}
-                  hitSlop={8}>
-                  <ThemedText type="small" style={{ color: theme.primary }}>
-                    {tr('clearFilter')}
-                  </ThemedText>
+                  accessibilityLabel={tr('filtersButton')}
+                  accessibilityState={{ selected: activeFilterCount > 0 }}
+                  hitSlop={6}
+                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
+                  style={({ pressed }) => [
+                    styles.filterBtn,
+                    (largeText || narrowSearch) && styles.filterBtnStacked,
+                    {
+                      backgroundColor: activeFilterCount > 0
+                        ? theme.primary
+                        : theme.backgroundSelected,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}>
+                  <Icon
+                    name="filter"
+                    size={17}
+                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
+                  />
                 </Pressable>
-              ) : null}
-            </View>
-          )}
-          {/* Never mounted on web: the package has no web build, so this
-              renders null after a console warning. The typed fields above are
-              the web path. */}
-          {picking !== null && Platform.OS !== 'web' && (
-            <DateTimePicker
-              mode="date"
-              display="calendar"
-              value={filters[picking] ? new Date(`${filters[picking]}T12:00:00`) : new Date()}
-              minimumDate={
-                picking === 'dateTo' && filters.dateFrom
-                  ? new Date(`${filters.dateFrom}T12:00:00`)
-                  : undefined
-              }
-              maximumDate={
-                picking === 'dateFrom' && filters.dateTo
-                  ? new Date(`${filters.dateTo}T12:00:00`)
-                  : new Date()
-              }
-              onChange={(event, picked) => {
-                const field = picking;
-                setPicking(null);
-                if (event.type !== 'set' || !picked || !field) return;
-                setFilters((current) => ({ ...current, [field]: toISODate(picked) }));
-              }}
-            />
-          )}
+              </View>
+          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
         </View>
+        {transactionResults}
+      </ScreenScaffold>
 
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('accountFilter')}
-          </ThemedText>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRowScroll}>
-            <Chip
-              label={tr('allWord')}
-              active={!filters.accountId}
-              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
-            />
-            {hasUnassignedIncome && <Chip
-              label={tr('incomeAccountReview')} active={filters.accountId === UNASSIGNED_INCOME_ACCOUNT_ID}
-              onPress={() => setFilters(current => ({ ...current, accountId: UNASSIGNED_INCOME_ACCOUNT_ID }))} />}
-            {state.accounts.map((account) => (
-              <Chip
-                key={account.id}
-                label={account.name}
-                active={filters.accountId === account.id}
-                onPress={() =>
-                  setFilters((current) => ({
-                    ...current,
-                    accountId: current.accountId === account.id ? null : account.id,
-                  }))
-                }
-              />
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('categoriesFilter')}
-          </ThemedText>
-          <CategoryChips
-            categories={EXPENSE_CATEGORIES}
-            selected={filters.categories}
-            onToggle={toggleCategory}
-            layout="wrap"
-          />
-        </View>
-
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('minimumAmountFilter')}
-          </ThemedText>
-          <View style={styles.chipRow}>
-            {[null, 10000, 50000, 100000].map((value) => (
-              <Chip
-                key={String(value)}
-                label={value === null ? tr('anyLabel') : `${value / 100}+`}
-                active={filters.minFils === value}
-                onPress={() =>
-                  setFilters((current) => ({ ...current, minFils: value }))
-                }
-              />
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
-            {tr('sortFilter')}
-          </ThemedText>
-          <View style={styles.chipRow}>
-            {(['newest', 'oldest', 'largest'] as SortMode[]).map((sort) => (
-              <Chip
-                key={sort}
-                label={
-                  sort === 'newest'
-                    ? tr('newest')
-                    : sort === 'oldest'
-                      ? tr('oldest')
-                      : tr('largest')
-                }
-                active={filters.sort === sort}
-                onPress={() => setFilters((current) => ({ ...current, sort }))}
-              />
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.sheetActions}>
-          <Button inline variant="outline" label={tr('reset')} onPress={clearFilters} />
-          <Button
-            inline
-            disabled={resultsPending}
-            label={trf('showResults', {
-              count: filtered.length,
-              s: filtered.length === 1 ? '' : 's',
-            })}
-            onPress={() => setSheetVisible(false)}
-          />
-        </View>
-      </BottomSheet>
+      {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
+        accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
+        onClose={() => setSheetVisible(false)} onApply={(nextFilters, resetScope) => {
+          if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
+          setFilters(nextFilters);
+          setSheetVisible(false);
+        }} />}
 
       <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
     </>
@@ -710,6 +463,9 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Screen sections have a gap; virtualized header/row/footer cells must not.
+  listContent: { gap: 0 },
+  searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },
   filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
@@ -753,6 +509,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minWidth: 0,
   },
+  pendingTransferNote: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  pendingTransferText: { flex: 1, minWidth: 0 },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   sectionHeader: {
     flexWrap: 'wrap',
@@ -778,46 +541,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterGroup: {
-    gap: Spacing.two,
-  },
-  rangeRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: Spacing.two,
-  },
-  rangeColumn: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  rangeInput: {
-    minHeight: 44,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two + 2,
-    justifyContent: 'center',
-  },
-  rangeTextInput: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  rangeClear: {
-    minHeight: 44,
-    justifyContent: 'flex-end',
-    paddingBottom: Spacing.two,
-  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
-  },
-  chipRowScroll: {
-    gap: Spacing.two,
-    paddingBottom: Spacing.one,
-  },
-  sheetActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginTop: Spacing.one,
-  },
+  }
 });

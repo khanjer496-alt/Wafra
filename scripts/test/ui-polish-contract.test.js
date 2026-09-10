@@ -25,7 +25,7 @@ assert.match(add, /promoteReviewAlert/);
 assert.match(add, /addTransaction/);
 
 const bills = code(read('src/app/(tabs)/bills.tsx'));
-assert.match(bills, /useState<'upcoming' \| 'all'>/);
+assert.match(bills, /useState<'upcoming' \| 'recurring'>/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -145,7 +145,7 @@ assert.match(task3Transactions, /useScreenContentInsets\(\{ hasFooter: false \}\
 assert.match(task3Transactions, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/);
 assert.match(task3Transactions, /header=\{\{[\s\S]*?back:[\s\S]*?actions:/);
 assert.match(task3Transactions, /<SectionList[\s\S]*?ListHeaderComponent=/);
-assert.match(task3Transactions, /contentContainerStyle=\{listInsets\.contentContainerStyle\}/);
+assert.match(task3Transactions, /contentContainerStyle=\{\[listInsets\.contentContainerStyle,\s*styles\.listContent\]\}/);
 assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
 assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
 assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);
@@ -212,7 +212,7 @@ assert.match(task5Segments,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
 assert.ok(Number(task5Segments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','refAll']) assert.ok(task5Bills.includes(`t('${label}')`));
+for (const label of ['refUpcoming','subscriptionsSeg']) assert.ok(task5Bills.includes(`t('${label}')`));
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);

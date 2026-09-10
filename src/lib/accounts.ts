@@ -466,7 +466,7 @@ export function repairCardPaymentAccounts(state: AppState): AppState {
 export function removeDeclinedTransactions(state: AppState): AppState {
   const doomed = new Set<string>();
   for (const tx of state.transactions) {
-    if (tx.source !== 'sms' || tx.userEdited || tx.isTransfer || tx.splits) continue;
+    if (tx.source !== 'sms' || tx.userEdited || tx.transferDecision || tx.isTransfer || tx.splits) continue;
     const raw = tx.raw;
     if (!raw) continue;
     // The parser's own refusal test, on the SMS text — never on the title.

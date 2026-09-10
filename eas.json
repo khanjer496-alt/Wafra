@@ -128,6 +128,14 @@
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     },
+    "history-paging-device": {
+      "extends": "ios-parity-device",
+      "channel": "history-paging-device",
+      "env": {
+        "WAFRA_PAGED_HISTORY_BETA": "1",
+        "EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA": "1"
+      }
+    },
     "production": {
       "extends": "base",
       "channel": "production",

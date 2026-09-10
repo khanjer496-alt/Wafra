@@ -56,12 +56,12 @@ test('substring and logo matches cannot combine different financial identities',
   assert.equal(project(rows, 'Tal').totalFils, 0);
   assert.equal(project(rows, '  ').activity.length, 0);
 });
-test('transfers, paired incoming legs, card payments, hidden and unknown accounts remain excluded', () => {
+test('transfers, pending bank credits, card payments, hidden and unknown accounts remain excluded', () => {
   const rows = [row('spend', 2500), row('transfer', 50000, { isTransfer: true }),
     row('card-payment', 30000, { accountId: 'card', type: 'income', isTransfer: true }),
     row('hidden', 9999, { accountId: 'hidden' }), row('unknown', 9999, { accountId: 'missing' }),
-    row('out', 75000, { title: 'Outgoing transfer', accountId: 'hidden' }),
-    row('in', 75000, { title: 'Incoming transfer', accountId: 'bank', type: 'income' })];
+    row('out', 75000, { title: 'Outgoing transfer', accountId: 'hidden', source: 'sms' }),
+    row('in', 75000, { title: 'Incoming transfer', accountId: 'bank', type: 'income', source: 'sms' })];
   const result = project(rows);
   assert.equal(result.totalFils, 2500); assert.equal(result.receivedFils, 0); assert.equal(result.excludedCount, 4);
   const incoming = project(rows, 'Incoming transfer');

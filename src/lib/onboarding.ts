@@ -1,4 +1,6 @@
 import { t, type Lang, type StringKey } from '@/lib/i18n';
+import { isIncome } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import type {
   Budget,
   CategoryId,
@@ -194,15 +196,16 @@ export const DEFAULT_ONBOARDING_PLAN: OnboardingPlanPreferences = {
  * a recurring budget by accident.
  */
 export function onboardingIncomeBasis(
-  transactions: readonly Pick<
-    Transaction,
-    'type' | 'amountFils' | 'isTransfer' | 'category' | 'date'
-  >[],
+  transactions: readonly Transaction[],
 ): number {
   const salaries: number[] = [];
   const businessByMonth = new Map<string, number>();
   for (const transaction of transactions) {
-    if (transaction.type !== 'income' || transaction.isTransfer) continue;
+    if (!isIncome(transaction)) continue;
+    // Cash-flow totals include unresolved transfers on known accounts so money is
+    // never silently dropped. Starter budgets are stricter: an unresolved transfer
+    // is not evidence of recurring earned income.
+    if (isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown') continue;
     if (!Number.isSafeInteger(transaction.amountFils) || transaction.amountFils <= 0) continue;
     if (transaction.category === 'salary') {
       salaries.push(transaction.amountFils);

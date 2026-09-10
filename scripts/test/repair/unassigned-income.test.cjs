@@ -72,12 +72,31 @@ test('ordinary fully identified business credits retain their real account and s
 });
 test('unassigned income is not a proven own-account transfer; corrupt expenses cannot use its visibility exception', () => {
   const income = { id: 'credit', accountId: UNASSIGNED_INCOME_ACCOUNT_ID, type: 'income', title: 'Incoming transfer',
-    category: 'business', amountFils: 10000, date: '2026-09-01' };
+    category: 'business', amountFils: 10000, date: '2026-09-01', source: 'sms' };
   const expense = { ...income, id: 'debit', accountId: 'bank', type: 'expense', title: 'Outgoing transfer', isTransfer: true };
   assert.equal(internalTransferIds([income, expense], new Set(['bank'])).size, 0);
-  assert.equal(countsInTotals(income, new Set(['bank'])), true);
+  assert.equal(countsInTotals(income, new Set(['bank'])), false, 'generic Business is still ownership-pending');
+  assert.equal(countsInTotals({ ...income, title: 'Talabat Business' }, new Set(['bank'])), true,
+    'named business receipts remain income even while their bank attribution needs review');
+  assert.equal(countsInTotals({ ...income, transferDecision: { version: 1, ownership: 'external', decidedAt: now.getTime() } }, new Set(['bank'])), true);
   assert.equal(countsInTotals({ ...income, type: 'expense' }, liveAccountIds([])), false);
 });
+
+test('resolved-account pending transfers remain in totals until proven to be between own accounts', () => {
+  const live = new Set(['bank']);
+  const incoming = { id: 'pending-in', accountId: 'bank', type: 'income', title: 'Incoming transfer',
+    category: 'other', amountFils: 250000, date: '2022-10-25', source: 'sms' };
+  const outgoing = { ...incoming, id: 'pending-out', type: 'expense', title: 'Outgoing transfer', amountFils: 70000 };
+  assert.equal(countsInTotals(incoming, live), true, 'unknown incoming transfer stays in income');
+  assert.equal(countsInTotals(outgoing, live), true, 'unknown outgoing transfer stays in spending');
+  assert.equal(countsInTotals({ ...incoming, transferDecision: { version: 1, ownership: 'own', decidedAt: now.getTime() } }, live), false,
+    'confirming it as own removes it from totals');
+  assert.equal(countsInTotals({ ...incoming, transferDecision: { version: 1, ownership: 'external', decidedAt: now.getTime() } }, live), true,
+    'confirming it as external preserves it in totals');
+  assert.equal(countsInTotals({ ...incoming, title: 'Card payment', isTransfer: true, cardPaymentSide: 'receipt' }, live), false,
+    'card-settlement semantics remain excluded from income/spending');
+});
+
 test('reserved unassigned attribution survives JSON and the existing backup validator', () => {
   const result = apply(base([])).state;
   const restored = JSON.parse(JSON.stringify(result));

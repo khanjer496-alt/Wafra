@@ -6,6 +6,7 @@ import { getMonthStartDay, monthKey } from '@/lib/format';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { countsInTotals, internalTransferIds, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_VERSION } from '@/lib/sms-parser';
+import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
 
 export interface DiagnosticBuild { version: string; build: string; platform: string }
@@ -48,6 +49,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   assertDiagnosticContinues(active);
   const live = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, state.accounts);
+  const transfers = reconcileTransfers(state.transactions, state.accounts);
   const accounts = new Map(state.accounts.map(account => [account.id, account]));
   const sourceCounts = new Map<string, number>();
   for (const tx of state.transactions) if (tx.smsKey) {
@@ -67,6 +69,13 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     const tx = state.transactions[index];
     const row = fields(tx, TX_FIELDS);
     if (tx.captureInstrument) row.captureInstrument = fields(tx.captureInstrument, 'last4 kind bankIdentity');
+    if (isTransferEvidence(tx.transferEvidence)) {
+      row.transferEvidence = fields(tx.transferEvidence, 'version currency attribution reference explicitOwn');
+      if (tx.transferEvidence.counterparty) (row.transferEvidence as JsonRow).counterparty =
+        fields(tx.transferEvidence.counterparty, 'last4 kind bankIdentity');
+    }
+    if (isTransferDecision(tx.transferDecision)) row.transferDecision = fields(tx.transferDecision, 'version ownership decidedAt counterpartId');
+    if (isTransferMatch(tx.transferMatch)) row.transferMatch = fields(tx.transferMatch, 'version counterpartId basis');
     if (tx.splits) row.splits = tx.splits.map(part => fields(part, 'category amountFils note'));
     const flags: string[] = [];
     const unassigned = isUnassignedIncome(tx);
@@ -75,7 +84,8 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     if (unassigned) flags.push('account-needs-review');
     else if (!account) flags.push('missing-account');
     else if (account.archived) flags.push('hidden-account');
-    if (tx.isTransfer || internal.has(tx.id)) flags.push('transfer-excluded');
+    if (transfers.pendingIds.has(tx.id)) flags.push('transfer-ownership-pending');
+    else if (!counted && (tx.isTransfer || internal.has(tx.id))) flags.push('transfer-excluded');
     if (!Number.isSafeInteger(tx.amountFils) || tx.amountFils <= 0) flags.push('invalid-amount');
     if (!categorySupportsType(tx.category, tx.type)) flags.push('category-direction-conflict');
     if (tx.smsKey && (sourceCounts.get(canonicalCaptureSourceKey(tx.smsKey, tx.ts)) ?? 0) > 1) flags.push('repeated-source-identity');

@@ -103,8 +103,8 @@ export default function BillsScreen() {
   const key = monthKey(now);
   const todayISO = toISODate(now);
 
-  const [agendaView, setAgendaView] = useState<'upcoming' | 'all'>('upcoming');
-  const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
+  const [agendaView, setAgendaView] = useState<'upcoming' | 'recurring'>('upcoming');
+  const words = { upcoming: t('refUpcoming'), recurring: t('subscriptionsSeg'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
@@ -158,8 +158,8 @@ export default function BillsScreen() {
     [state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
   );
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
@@ -231,6 +231,10 @@ export default function BillsScreen() {
     }
     return items;
   }, [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
+  const visibleAgendaItems = useMemo(() => agendaView === 'upcoming'
+    ? agendaItems.filter((item) => !item.paid)
+    : agendaItems.filter((item) => item.kind === 'recurring' || item.group === 'subscriptions' || item.group === 'utilities'),
+  [agendaItems, agendaView]);
 
   // Everything the detail sheet needs about the tapped subscription: its raw
   // charges (newest first), which cards paid it, first charge, lifetime total.
@@ -393,8 +397,6 @@ export default function BillsScreen() {
   };
 
   const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
-    // Keep the paid statement's result visible after the last open due settles.
-    setAgendaView('all');
     setConfirmation({
       question: tf('payAccountTitle', { name: accName }),
       body: tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
@@ -549,8 +551,8 @@ export default function BillsScreen() {
         contentStyle={largeText && styles.headerLarge}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
         <SegmentedControl label={t('billsTitle')} value={agendaView} onChange={setAgendaView}
-          segments={[{ value: 'upcoming', label: words.upcoming }, { value: 'all', label: words.all }]} />
-        <PaymentAgenda items={agendaItems} includePaid={agendaView === 'all'} onOpen={(item) => {
+          segments={[{ value: 'upcoming', label: words.upcoming }, { value: 'recurring', label: words.recurring }]} />
+        <PaymentAgenda items={visibleAgendaItems} includePaid={false} onOpen={(item) => {
           if (item.kind === 'card') {
             const id = item.id.slice(5);
             const due = state.cardDues.find((due) => due.id === id);
@@ -561,11 +563,11 @@ export default function BillsScreen() {
             if (sub) setDetail(sub);
           }
         }} />
-        {agendaView === 'all' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+        {agendaView === 'recurring' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
           <ThemedText type="heading">{words.unscheduled}</ThemedText>
           {otherRepeats.map(renderRecurringRow)}
         </View>}
-        {agendaView === 'all' && stopped.length > 0 && <>
+        {agendaView === 'recurring' && stopped.length > 0 && <>
           <Button label={showStopped ? words.fewer : words.more} variant="ghost" onPress={() => setShowStopped(!showStopped)} />
           {showStopped && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
             <ThemedText type="heading">{words.stopped}</ThemedText>

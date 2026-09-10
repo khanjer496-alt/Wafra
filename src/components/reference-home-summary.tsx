@@ -58,28 +58,34 @@ export function ReferenceHomeSummary(p: Props) {
           <Icon name="chevron-down" size={14} color={p.theme.textSecondary} />
         </Pressable>
       </View>
-      <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
-        accessibilityLabel={`${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}`}
-        style={styles.spending}>
-        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="display" />
-        <View style={styles.link}><ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
-          <Icon name="arrow-up-right" size={16} color={p.theme.primary} /></View>
-      </Pressable>
+      <View style={[styles.metrics, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
       <Pressable accessibilityRole="button" onPress={p.onIncome} testID="home-income-summary"
         accessibilityLabel={`${w.moneyIn}, ${currency} ${formatMinorUnits(Math.round(p.incomeFils), p.moneySpec)}`}
-        style={[styles.income, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
+        style={[styles.metric, p.largeText && styles.metricStacked]}>
         <View style={styles.link}><Icon name="arrow-down-right" size={16} color={p.theme.income} />
           <ThemedText type="small" themeColor="textSecondary">{w.moneyIn}</ThemedText></View>
-        <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" />
+        <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" color={p.theme.income} />
+      </Pressable>
+      <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
+        accessibilityLabel={`${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}`}
+        style={[styles.metric, p.largeText && styles.metricStacked]}>
+        <View style={styles.link}><Icon name="arrow-up-right" size={16} color={p.theme.textSecondary} />
+          <ThemedText type="small" themeColor="textSecondary">{w.moneyOut}</ThemedText></View>
+        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="smallBold" />
+      </Pressable>
+      <View testID="home-net-summary" accessible accessibilityRole="text"
+        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`}
+        style={[styles.metric, p.largeText && styles.metricStacked]}>
+        <ThemedText type="small" themeColor="textSecondary">{w.netLabel}</ThemedText>
+        <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+      </View>
+      </View>
+      <Pressable accessibilityRole="button" onPress={p.onSpending} style={styles.spendingLink}>
+        <ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
+        <Icon name="arrow-up-right" size={16} color={p.theme.primary} />
       </Pressable>
       {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
         {w.noIncome}</ThemedText>}
-      <View testID="home-net-summary" accessible accessibilityRole="text"
-        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`}
-        style={[styles.net, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
-        <ThemedText type="smallBold">{w.netLabel}</ThemedText>
-        <Money fils={p.netFils} moneySpec={p.moneySpec} type="heading" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
-      </View>
       <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
     </View>
   </View>;
@@ -93,11 +99,11 @@ const styles = StyleSheet.create({
   summary: { gap: 8, paddingBottom: 8 },
   summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   period: { minHeight: 44, paddingHorizontal: 12, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  spending: { minHeight: 100, justifyContent: 'center', alignItems: 'flex-start', gap: 10, paddingBottom: 12 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  income: { minHeight: 56, paddingVertical: 12, borderTopWidth: 1,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  net: { minHeight: 60, paddingVertical: 12, borderTopWidth: 1,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  spendingLink: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 14 },
+  metric: { flexGrow: 1, flexShrink: 1, flexBasis: '28%', minWidth: 96, minHeight: 52, gap: 7 },
+  metricStacked: { flexBasis: 'auto', alignSelf: 'stretch' },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
 });

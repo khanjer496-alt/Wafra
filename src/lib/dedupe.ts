@@ -689,12 +689,18 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     const duplicateAt = [...candidates].find((index) => {
       const prior = kept[index];
       if (prior.source !== 'sms') return false;
-      const bothEdited = Boolean(row.userEdited && prior.userEdited);
+      const rowPinned = Boolean(row.userEdited || row.transferDecision);
+      const priorPinned = Boolean(prior.userEdited || prior.transferDecision);
+      const bothEdited = rowPinned && priorPinned;
       const rowSource = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
       const priorSource = prior.smsKey ? canonicalCaptureSourceKey(prior.smsKey, prior.ts) : undefined;
       if (row.smsKey && rowSource && !isUnboundAndroidSourceKey(rowSource) && rowSource === priorSource &&
         (row.smsKey.startsWith('h') || (row.type === prior.type &&
           compatibleCaptureInstrument(row.captureInstrument, prior.captureInstrument)))) return !bothEdited;
+      // A reviewed event may fold with its exact same provider identity, but
+      // amount/time heuristics cannot delete a decision or attach it to a
+      // different event. Two independently reviewed rows require user review.
+      if (row.transferDecision || prior.transferDecision) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
@@ -748,7 +754,9 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     changed = true;
     const prior = kept[duplicateAt];
     const cardPaymentPair = isOppositeCardPaymentPair(row, prior, rowTime);
-    const preferred = row.userEdited !== prior.userEdited
+    const preferred = Boolean(row.userEdited || row.transferDecision) !== Boolean(prior.userEdited || prior.transferDecision)
+      ? row.userEdited || row.transferDecision ? row : prior
+      : row.userEdited !== prior.userEdited
       ? row.userEdited ? row : prior
       : cardPaymentPair
         ? row.cardPaymentSide === 'receipt' ? row : prior

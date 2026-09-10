@@ -253,13 +253,14 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'welcome embeds an explicitly labeled interactive example without ledger or setup writes',
+  'welcome gets to setup directly and keeps the interactive example optional and write-free',
   /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
     /onboardSampleMessage/.test(moneyPreviewSource) &&
     /onboardSampleNote/.test(moneyPreviewSource) &&
     /setRevealed/.test(moneyPreviewSource) &&
-    /activeStep === 'welcome'[\s\S]*?<MoneyPreview reducedMotion=\{reducedMotion\}[\s\S]*?onboardChooseStart/.test(gateSource) &&
-    !/exampleVisible|SetupIllustration/.test(gateSource) &&
+    /activeStep === 'welcome'[\s\S]*?onboardChooseStart/.test(gateSource) &&
+    /exampleVisible/.test(gateSource) &&
+    /setStep\('capture'\)/.test(gateSource) &&
     !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(moneyPreviewSource) &&
     !/function points\(/.test(gateSource),
 );

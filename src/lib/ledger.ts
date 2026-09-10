@@ -1,4 +1,5 @@
 import type { Account, Transaction } from '@/lib/types';
+import { isTransferCandidate, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
 
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
@@ -13,7 +14,8 @@ export function liveAccountIds(accounts: Account[]): Set<string> {
 }
 
 export function isTransfer(transaction: Transaction): boolean {
-  return transaction.isTransfer === true;
+  const ownership = transferOwnership(transaction);
+  return ownership === 'own' || (ownership === null && transaction.isTransfer === true);
 }
 
 export function countsInTotals(
@@ -23,8 +25,42 @@ export function countsInTotals(
 ): boolean {
   if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type !== 'income') return false;
   if (isTransfer(transaction)) return false;
+  // Commerce/income analytics remain conservative: an unresolved transfer is
+  // not yet a purchase or earned income. Cash-flow list totals use the separate
+  // countsInCashflowTotals predicate below so they do not silently drop money.
+  if (isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown') return false;
   if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
   if (internal?.has(transaction.id)) return false;
+  return true;
+}
+
+/**
+ * Whether a recorded row changes the selected period's cash-flow position.
+ *
+ * `countsInTotals` deliberately excludes unresolved transfers because category,
+ * merchant and subscription analytics must not call an unknown transfer a
+ * purchase or earned income. A transaction list's signed Net answers a simpler
+ * question: how much recorded money came in versus went out. For that view an
+ * unresolved transfer on a real, visible account must remain visible until it
+ * is proven to be between the user's own accounts; otherwise years of legitimate
+ * credits can disappear from Net merely because an old SMS did not identify the
+ * counterparty.
+ */
+export function countsInCashflowTotals(
+  transaction: Transaction,
+  live?: Set<string>,
+  internal?: Set<string>,
+): boolean {
+  if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type !== 'income') return false;
+  const ownership = transferOwnership(transaction);
+  if (ownership === 'own' || internal?.has(transaction.id)) return false;
+  // Card repayments, bill-funding observations and explicit manual own-transfer
+  // rows are non-candidate transfer roles. Preserve their existing exclusion.
+  if (ownership === null && transaction.isTransfer === true) return false;
+  // A credit whose own destination account is unknown is not enough evidence to
+  // put money into the user's cash-flow total. It remains in the review queue.
+  if (isUnassignedIncome(transaction) && ownership === 'unknown') return false;
+  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
   return true;
 }
 
@@ -45,96 +81,12 @@ export function isInboundTransfer(transaction: Transaction): boolean {
   return isTransfer(transaction) && transaction.type === 'income';
 }
 
-interface TimedTransfer {
-  transaction: Transaction;
-  at: number;
-  /** Original position preserves the old stable-sort tie-break. */
-  order: number;
-}
-
-const TRANSFER_WINDOW_MS = 3 * 86_400_000;
-const OUTGOING_TRANSFER = /^(?:outgoing|bank|own account|self|savings) transfer$/i;
-const INCOMING_TRANSFER = /^(?:(?:incoming|bank|own account|self) transfer|inward remittance)$/i;
-
-function lowerBound(candidates: readonly TimedTransfer[], at: number): number {
-  let low = 0;
-  let high = candidates.length;
-  while (low < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    if (candidates[middle].at < at) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
-/**
- * Pair only evidenced, equal-amount transfers between different owned accounts.
- *
- * Preserve the shipping rules: income order, closest timestamp within three
- * days (inclusive), original outgoing order for equal distances, and at most
- * one match per outgoing ID. Salaries and ordinary purchases cannot pair.
- * Archived accounts remain eligible: hiding an account cannot create income.
- *
- * Previously each incoming transfer filtered and sorted its entire amount
- * bucket, repeatedly parsing the same dates. Index each bucket by time once,
- * then inspect only its three-day window. No transaction is mutated, no match
- * is persisted, and no cross-ledger cache can become stale after edits/erase.
+/** Ownership needs evidence from complete accounts, never just visible IDs.
+ * Legacy Set callers can still exclude explicit/user-owned rows, but cannot
+ * establish a bank identity. New callers should supply the full account list.
  */
 export function internalTransferIds(
-  transactions: Transaction[],
-  accounts: Set<string> | Account[],
+  transactions: Transaction[], accounts: Set<string> | Account[],
 ): Set<string> {
-  const accountIds = Array.isArray(accounts)
-    ? new Set(accounts.map((account) => account.id))
-    : new Set(transactions.map((transaction) => transaction.accountId));
-  const outgoing = new Map<number, TimedTransfer[]>();
-  const paired = new Set<string>();
-
-  for (let order = 0; order < transactions.length; order += 1) {
-    const transaction = transactions[order];
-    if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID || transaction.type !== 'expense' || !accountIds.has(transaction.accountId) ||
-      !(transaction.isTransfer === true || OUTGOING_TRANSFER.test(transaction.title.trim()))) {
-      continue;
-    }
-    const at = transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
-    // Non-finite timestamps could never pass the old absolute-distance guard.
-    if (!Number.isFinite(at)) continue;
-    const entry = { transaction, at, order };
-    const bucket = outgoing.get(transaction.amountFils);
-    if (bucket) bucket.push(entry);
-    else outgoing.set(transaction.amountFils, [entry]);
-  }
-  for (const bucket of outgoing.values()) {
-    bucket.sort((a, b) => a.at - b.at || a.order - b.order);
-  }
-
-  for (const transaction of transactions) {
-    if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID || transaction.type !== 'income' || transaction.isTransfer ||
-      !accountIds.has(transaction.accountId) || transaction.category === 'salary' ||
-      !INCOMING_TRANSFER.test(transaction.title.trim())) continue;
-    const candidates = outgoing.get(transaction.amountFils);
-    if (!candidates) continue;
-    const arrived = transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
-    if (!Number.isFinite(arrived)) continue;
-
-    let closest: TimedTransfer | undefined;
-    let distance = Number.POSITIVE_INFINITY;
-    for (let i = lowerBound(candidates, arrived - TRANSFER_WINDOW_MS);
-      i < candidates.length && candidates[i].at <= arrived + TRANSFER_WINDOW_MS; i += 1) {
-      const candidate = candidates[i];
-      if (paired.has(candidate.transaction.id) ||
-        candidate.transaction.accountId === transaction.accountId) continue;
-      const delta = Math.abs(candidate.at - arrived);
-      if (delta < distance || (delta === distance && candidate.order < (closest?.order ?? Infinity))) {
-        closest = candidate;
-        distance = delta;
-      }
-      // Equal timestamps are already ordered by original position.
-      if (distance === 0) break;
-    }
-    if (!closest) continue;
-    paired.add(closest.transaction.id);
-    paired.add(transaction.id);
-  }
-  return paired;
+  return reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []).internalIds;
 }

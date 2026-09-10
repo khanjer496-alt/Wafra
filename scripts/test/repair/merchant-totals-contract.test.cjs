@@ -61,9 +61,9 @@ test('merchant spending excludes credits, flagged transfers, hidden and missing 
   assert.equal(result.activity.length, 7, 'All activity keeps excluded records available for inspection');
 });
 
-test('both legs of inferred transfers remain excluded even when the sending account is hidden', () => {
+test('both legs of user-confirmed transfers remain excluded even when the sending account is hidden', () => {
   const rows = [tx('outgoing', 20000, { title: 'Outgoing transfer', accountId: 'hidden', isTransfer: true }),
-    tx('incoming', 20000, { title: 'Incoming transfer', type: 'income', category: 'other' })];
+    tx('incoming', 20000, { title: 'Incoming transfer', type: 'income', category: 'other', isTransfer: true })];
   const result = project(rows, 'Incoming transfer');
   assert.equal(result.receivedFils, 0);
   assert.equal(result.excludedCount, 1);

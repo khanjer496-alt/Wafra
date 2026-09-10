@@ -22,7 +22,9 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/categories': { getCategory: id => id, categoryLabel: id => id },
     '@/lib/format': { clockTime: () => '12:30', formatAmount: minor => (minor / 100).toFixed(2) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED' },
-    '@/lib/ledger': load(path.resolve(__dirname, '../../../src/lib/ledger.ts')),
+    '@/lib/ledger': require('./load-transfer-ledger.cjs').ledger,
+    '@/lib/transfer-reconciliation': require('./load-transfer-ledger.cjs').core,
+    '@/lib/transfer-review-copy': load(path.resolve(__dirname, '../../../src/lib/transfer-review-copy.ts'), { '@/lib/i18n': { getLanguage: () => language } }),
     '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
       ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
@@ -39,41 +41,32 @@ function walk(node) {
 }
 const byId = (tree, id) => walk(tree).find(node => node.props?.testID === id);
 
-test('merchant identity and transaction amount have independent, non-nested actions', () => {
+test('merchant rows expose one predictable, non-nested transaction action', () => {
   const h = rowFixture(); const tree = h.render();
   assert.deepEqual(h.events, [], 'rendering must not navigate or edit');
-  const merchant = byId(tree, 'transaction-merchant-link');
   const details = byId(tree, 'transaction-details-link');
-  assert.ok(merchant); assert.ok(details);
-  assert.equal(walk(merchant.props.children).filter(n => n.type === 'Pressable').length, 0);
+  assert.ok(details);
   assert.equal(walk(details.props.children).filter(n => n.type === 'Pressable').length, 0);
-  assert.match(merchant.props.accessibilityLabel, /Talabat/);
   assert.match(details.props.accessibilityLabel, /Talabat.*Everyday card.*123\.45 AED/);
-  merchant.props.onPress(); details.props.onPress();
-  assert.deepEqual(h.events, [['merchant', '/merchant?name=Talabat'], ['transaction', 'fixture']]);
+  details.props.onPress();
+  assert.deepEqual(h.events, [['transaction', 'fixture']]);
 });
-test('merchant URL preserves Arabic, punctuation and reserved query characters', () => {
+test('merchant names with Arabic and reserved characters remain exact in row accessibility', () => {
   for (const name of ['مطعم عربي', 'R&D / Cafe? #2 + 20%', ' Talabat Business ']) {
-    const h = rowFixture(); byId(h.render({ title: name }), 'transaction-merchant-link').props.onPress();
-    const url = new URL(h.events[0][1], 'https://example.test');
-    assert.equal(url.pathname, '/merchant'); assert.equal(url.searchParams.get('name'), name.trim());
-    assert.equal([...url.searchParams].length, 1);
+    const h = rowFixture(); const action = byId(h.render({ title: name }), 'transaction-details-link');
+    assert.ok(action.props.accessibilityLabel.includes(name));
+    action.props.onPress();
+    assert.deepEqual(h.events, [['transaction', 'fixture']]);
   }
 });
-for (const language of ['en', 'ar']) test(`${language}: an income source opens income activity with its own accessible action`, () => {
+for (const language of ['en', 'ar']) test(`${language}: an income row keeps one accessible transaction action`, () => {
   const title = 'Talabat sales / فرع? #2 +20%';
   const h = rowFixture({ language });
   const tree = h.render({ type: 'income', title, category: 'business' });
-  const source = byId(tree, 'transaction-merchant-link');
-  assert.match(source.props.accessibilityLabel, language === 'ar' ? /عرض مصدر الدخل/ : /View income source/);
-  source.props.onPress();
-  const url = new URL(h.events[0][1], 'https://example.test');
-  assert.equal(url.pathname, '/merchant');
-  assert.equal(url.searchParams.get('name'), title);
-  assert.equal(url.searchParams.get('type'), 'income');
-  assert.deepEqual([...url.searchParams.keys()].sort(), ['name', 'type']);
-  byId(tree, 'transaction-details-link').props.onPress();
-  assert.deepEqual(h.events[1], ['transaction', 'fixture'], 'amount still opens the income transaction itself');
+  const action = byId(tree, 'transaction-details-link');
+  assert.ok(action.props.accessibilityLabel.includes(title));
+  action.props.onPress();
+  assert.deepEqual(h.events, [['transaction', 'fixture']]);
 });
 test('transfers never masquerade as merchant-spending links', () => {
   for (const [overrides, props] of [[{ isTransfer: true }, {}], [{ type: 'income' }, { internal: true }]]) {
@@ -97,7 +90,6 @@ for (const language of ['en', 'ar']) for (const merchantLinks of [true, false]) 
     const details = merchantLinks ? byId(tree, 'transaction-details-link') : tree;
     assert.ok(details.props.accessibilityLabel.includes(warning));
     assert.match(details.props.accessibilityLabel, /123\.45 AED/);
-    if (merchantLinks) assert.ok(byId(tree, 'transaction-merchant-link').props.accessibilityLabel.includes(warning));
     details.props.onPress();
     assert.deepEqual(h.events, [['transaction', 'fixture']]);
     const assigned = h.render({ type: 'income', category: 'business' }, { merchantLinks });
@@ -110,14 +102,11 @@ test('non-interactive rows remain non-interactive', () => {
   assert.equal(tree.props.onPress, undefined);
   assert.equal(byId(tree, 'transaction-merchant-link'), undefined);
 });
-test('Arabic and large text preserve both minimum-size touch targets and exact money', () => {
+test('Arabic and large text preserve the single minimum-size touch target and exact money', () => {
   const h = rowFixture({ language: 'ar', large: true }); const tree = h.render();
-  const merchant = byId(tree, 'transaction-merchant-link'); const details = byId(tree, 'transaction-details-link');
-  assert.match(merchant.props.accessibilityLabel, /عرض تفاصيل التاجر/);
-  for (const target of [merchant, details]) {
-    assert.equal(target.props.accessibilityRole, 'button');
-    assert.equal(target.props.style({ pressed: false })[0].minHeight, 48);
-  }
+  const details = byId(tree, 'transaction-details-link');
+  assert.equal(details.props.accessibilityRole, 'button');
+  assert.equal(details.props.style({ pressed: false })[0].minHeight, 72);
   assert.ok(walk(tree).filter(n => n.type === 'Text').every(n => n.props.numberOfLines === undefined));
-  assert.equal(tree.props.style[2].flexDirection, 'column');
+  assert.match(details.props.accessibilityLabel, /123\.45 AED/);
 });

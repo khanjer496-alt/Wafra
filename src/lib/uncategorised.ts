@@ -162,7 +162,7 @@ export const CATEGORISE_PROMPT_THRESHOLD = 3;
  */
 export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, live);
+  const internal = internalTransferIds(state.transactions, state.accounts);
 
   // Pass 1 — WHICH MERCHANTS ARE WORTH ASKING ABOUT. Candidacy only; nothing
   // here is counted or totalled, because a candidate row is evidence that the

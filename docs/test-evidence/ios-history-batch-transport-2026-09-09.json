@@ -1,0 +1,16 @@
+{
+  "batch_native_seconds" : 0.26153466667165048,
+  "batch_size" : 50,
+  "batch_stage_calls" : 7,
+  "exact_record_parity" : true,
+  "file_protection" : "host metadata adapter; iPhone encryption not certified",
+  "idempotent_retry" : true,
+  "offset_normalization" : true,
+  "oversize_rejected" : true,
+  "production_data_accessed" : false,
+  "records" : 301,
+  "scalar_native_seconds" : 1.834759708319325,
+  "scalar_prepare_calls" : 301,
+  "scope" : "synthetic macOS native transport only; not iPhone or Shortcuts throughput",
+  "sms_acquisition_or_pagination_tested" : false
+}

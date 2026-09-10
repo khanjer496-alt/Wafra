@@ -203,6 +203,10 @@ export function planConfirmedUniversalImport(
         userEdited: true, titleEdited: true,
         ...(captureInstrument ? { captureInstrument } : {}),
         ...(confirmation.betweenOwnAccounts ? { isTransfer: true } : {}),
+        ...(event.family === 'transfer' ? { transferDecision: {
+          version: 1 as const, ownership: confirmation.betweenOwnAccounts ? 'own' as const : 'external' as const,
+          decidedAt: Date.now(),
+        } } : {}),
       }],
       newAccounts: [], newDues: [], newBills: [], newHints: {}, snapshots: {}, bankNames: {}, cardTypes: {}, updates: [],
       // An explicit review decision must not skip other unread capture events.

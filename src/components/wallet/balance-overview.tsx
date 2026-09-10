@@ -54,7 +54,7 @@ export function BalanceOverview(p: BalanceOverviewProps) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 8 }, hero: { paddingVertical: 20, gap: 12, borderBottomWidth: 1 }, heroTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  root: { gap: 8 }, hero: { paddingVertical: 12, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth }, heroTitle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
  money: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },
    stack: { flexDirection: 'column', alignItems: 'flex-start' },
   disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 44 },

@@ -44,3 +44,7 @@
 "history.body.parameter" = "Message body";
 "history.sender.parameter" = "Message sender";
 "history.date.parameter" = "Message date";
+
+"history.stage_shortcut.title" = "Stage Wafra Shortcut message batch";
+"history.stage_shortcut.description" = "Stages up to 50 selected message records with explicit time-zone offsets in protected local storage. Does not complete a history import or open Wafra.";
+"history.stage_shortcut.error" = "The selected Shortcut message batch could not be staged.";

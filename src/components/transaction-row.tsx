@@ -1,5 +1,4 @@
 import React from 'react';
-import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
@@ -11,8 +10,9 @@ import { clockTime, formatAmount } from '@/lib/format';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
-import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
-import { isUnassignedIncome } from '@/lib/ledger';
+import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
 interface TransactionRowProps {
   transaction: Transaction;
@@ -29,55 +29,49 @@ interface TransactionRowProps {
  * Larger text stacks the amount; financial values are never ellipsized.
  */
 function TransactionRowInner({ transaction, account, onPress, internal, merchantLinks = true }: TransactionRowProps) {
-  const router = useRouter();
   const theme = useTheme();
   const language = useLanguage();
   const largeText = useLargeTextLayout();
   const meta = getCategory(transaction.category);
   const clock = clockTime(transaction);
-  const isTransfer = transaction.isTransfer || internal === true;
-  const isIncome = transaction.type === 'income' && !isTransfer;
+  const isTransfer = isLedgerTransfer(transaction) || internal === true;
+  const pending = !internal && isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown';
+  const isIncome = transaction.type === 'income' && !isTransfer && !pending;
   // Direction and classification differ: an inbound transfer is positive,
   // but never painted as income. Preserve the shipping accounting distinction.
   const arrived = transaction.type === 'income';
-  const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
+  const where = pending ? transferReviewCopy(language).ownershipUnknown
+    : isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
   const accountReview = isUnassignedIncome(transaction) ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
+  const bankCaption = account?.bankName || account?.name;
+  const accountCaption = accountReview ?? (bankCaption
+    ? `${bankCaption}${account?.last4 && !bankCaption.includes(account.last4) ? ` ·${account.last4}` : ''}`
+    : undefined);
   const label = [transaction.title, where, accountLabel, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
 
-  // Two sibling targets, not a link nested inside a button: the merchant
-  // identity opens its summary; the exact amount and Details keep the original
-  // transaction action. No ledger scan or store subscription belongs in a row.
-  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer) {
-    const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
-    const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
-    return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
-      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview].filter(Boolean).join('. ')}
-        testID="transaction-merchant-link"
-        onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}${isIncome ? '&type=income' : ''}`)}
-        android_ripple={{ color: theme.backgroundSelected }}
-        style={({ pressed }) => [styles.merchantTarget, largeText && styles.merchantTargetLarge,
-          pressed && { backgroundColor: theme.backgroundSelected }]}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={40} />
-        <View style={styles.content}>
-          <ThemedText type="smallBold">{transaction.title}</ThemedText>
-          <View style={styles.details}>
-            <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
-            {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
-          </View>
-          {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
-        </View>
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"
+  // The entire row is one predictable target. Merchant drill-down lives in the
+  // transaction sheet, so scanning a ledger never turns merchant names and
+  // amounts into competing tap zones.
+  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer && !pending) {
+    return <View testID="merchant-transaction-row">
+      <Pressable accessibilityRole="button" accessibilityLabel={label}
+        testID="transaction-details-link"
         onPress={() => onPress(transaction)} android_ripple={{ color: theme.backgroundSelected }}
-        style={({ pressed }) => [styles.entryTarget, largeText && styles.entryTargetLarge,
-          pressed && { backgroundColor: theme.backgroundSelected }]}>
-        <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
-          {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
-        </ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary">{merchantWords.entryDetails}</ThemedText>
+        style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.backgroundSelected }]}>
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
+        <View style={styles.content}>
+          <View style={[styles.headline, largeText && styles.headlineLarge]}>
+            <ThemedText type="smallBold" style={[styles.merchant, largeText && styles.merchantLarge]}>{transaction.title}</ThemedText>
+            <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
+              {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
+            </ThemedText>
+          </View>
+          <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+          {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
+        </View>
       </Pressable>
     </View>;
   }
@@ -86,7 +80,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     onPress={onPress ? () => onPress(transaction) : undefined}
     android_ripple={{ color: theme.backgroundSelected }}
     style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.backgroundSelected }]}>
-    <MerchantAvatar title={transaction.title} category={transaction.category} size={40} />
+    <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
     <View style={styles.content}>
       <View style={[styles.headline, largeText && styles.headlineLarge]}>
         <ThemedText type="smallBold" style={[styles.merchant, largeText && styles.merchantLarge]}>{transaction.title}</ThemedText>
@@ -94,11 +88,8 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
           {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
         </ThemedText>
       </View>
-      <View style={styles.details}>
-        <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
-        {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
-      </View>
-      {accountLabel ? <ThemedText type="meta" themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountLabel}</ThemedText> : null}
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+      {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
     </View>
   </Pressable>;
 }
@@ -107,21 +98,12 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
 // unchanged visible rows from rebuilding when import progress updates.
 export const TransactionRow = React.memo(TransactionRowInner);
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: 76, paddingVertical: 14 },
-  content: { flex: 1, minWidth: 0, gap: 4 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 72, paddingVertical: 10 },
+  content: { flex: 1, minWidth: 0, gap: 3 },
   headline: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   headlineLarge: { flexDirection: 'column', gap: 6 },
   merchant: { flexGrow: 1, flexShrink: 1, flexBasis: 120 },
   merchantLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   amount: { flexShrink: 1 },
-  details: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  category: { flexShrink: 1 },
-  splitRow: { flexWrap: 'wrap', alignItems: 'flex-start' },
-  splitRowLarge: { flexDirection: 'column' },
-  merchantTarget: { flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    flexGrow: 1, flexShrink: 1, flexBasis: 160, minWidth: 0, minHeight: 48 },
-  merchantTargetLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
-  entryTarget: { minHeight: 48, minWidth: 72, maxWidth: '100%', flexShrink: 1,
-    alignItems: 'flex-end', justifyContent: 'center', paddingStart: 8, gap: 4 },
-  entryTargetLarge: { alignSelf: 'flex-end' },
+  metadata: { fontSize: 12, lineHeight: 19, flexShrink: 1 },
 });

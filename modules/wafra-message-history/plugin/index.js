@@ -16,6 +16,7 @@ internal import WafraMessageHistory
 private enum WafraHistoryIntentError: Error, CustomLocalizedStringResourceConvertible {
   case beginFailed
   case stageFailed
+  case shortcutStageFailed
   case finishFailed
   case importFailed
   case prepareFailed
@@ -31,6 +32,8 @@ private enum WafraHistoryIntentError: Error, CustomLocalizedStringResourceConver
       return WafraMessageHistoryResources.localized("history.begin.error")
     case .stageFailed:
       return WafraMessageHistoryResources.localized("history.stage.error")
+    case .shortcutStageFailed:
+      return WafraMessageHistoryResources.localized("history.stage_shortcut.error")
     case .finishFailed:
       return WafraMessageHistoryResources.localized("history.finish.error")
     case .importFailed:
@@ -107,6 +110,43 @@ struct StageWafraMessageHistoryIntent: AppIntent {
       return .result(value: value)
     } catch {
       throw WafraHistoryIntentError.stageFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+struct StageWafraShortcutHistoryIntent: AppIntent {
+  static let title = ${localizedMetadata('history.stage_shortcut.title')}
+  static let description = IntentDescription(
+    ${localizedMetadata('history.stage_shortcut.description')}
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let supportedModes: IntentModes = .background
+
+  @Parameter(title: ${localizedMetadata('history.session_id.parameter')})
+  var sessionId: String
+
+  @Parameter(title: ${localizedMetadata('history.authorization.parameter')})
+  var authorizationSecret: String
+
+  @Parameter(title: ${localizedMetadata('history.chunk.parameter')})
+  var chunkIndex: Int
+
+  @Parameter(title: ${localizedMetadata('history.records.parameter')})
+  var records: [String]
+
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    do {
+      let counts = try WafraMessageHistoryStore.shared.stageShortcutChunk(
+        sessionId: sessionId,
+        authorizationSecret: authorizationSecret,
+        chunkIndex: chunkIndex,
+        records: records
+      )
+      let value = "{\\"attempted\\":\\(counts.attempted),\\"accepted\\":\\(counts.accepted),\\"skipped\\":\\(counts.skipped)}"
+      return .result(value: value)
+    } catch {
+      throw WafraHistoryIntentError.shortcutStageFailed
     }
   }
 }

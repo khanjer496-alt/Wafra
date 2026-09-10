@@ -6,11 +6,13 @@ const boundary=(tree,name)=>walk(tree).find(n=>n.type==='Boundary'&&n.props.name
 const pending=(id='pending',overrides={})=>({id,sourceKey:'test-fixture:'+id,observedAt:Date.now()-60000,expiresAt:Date.now()+86400000,channel:'inbox',parserVersion:1,market:'AE',institution:'emirates-nbd',grammar:'test-purchase',amount:{currency:'AED',minorUnits:'12345',exponent:2},direction:'debit',family:'purchase',rail:null,instrument:{kind:'card',last4:'1234'},...overrides});
 for(const language of ['en','ar'])for(const theme of ['light','dark']){
  test(`settings panels render with actual copy and no writes: ${language}/${theme}`,()=>{
-  for(const section of ['preferences','imports','privacy','help']){
+  for(const section of ['preferences','imports','privacy','data','help']){
    const h=createWorkflowHarness({language,theme,params:{section}}),tree=h.renderScreen('settings'),words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
-   assert.ok(text(tree).includes(words.settingsTitle)||text(tree).includes(words.privacyTitle));
+   const scaffold=walk(tree).find(n=>n.type==='Scaffold');
+   assert.equal(scaffold.props.header.title,h.deps['@/lib/i18n'].t('settingsTitle'));
+   assert.ok(!text(tree).includes(words.settingsTitle),'no duplicate settings hero');
    const selected=walk(tree).filter(n=>n.props?.accessibilityState?.selected&&n.props?.accessibilityLabel);
-   assert.ok(selected.some(n=>n.props.accessibilityLabel===({preferences:words.preferences,imports:words.capture,privacy:words.privacy,help:words.help})[section]));
+   assert.ok(selected.some(n=>n.props.accessibilityLabel===({preferences:words.preferences,imports:words.capture,privacy:h.deps['@/lib/i18n'].t('privacyHeader'),data:h.deps['@/lib/i18n'].t('dataHeader'),help:words.help})[section]));
    assert.deepEqual(h.events,[]);
   }
  });
@@ -23,7 +25,7 @@ for(const language of ['en','ar'])for(const theme of ['light','dark']){
 }
 test('settings navigation is explicit and does not change preferences',()=>{
  const h=createWorkflowHarness(),tree=h.renderScreen('settings');
- byLabel(tree,h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').privacy).props.onPress();
+ byLabel(tree,h.deps['@/lib/i18n'].t('privacyHeader')).props.onPress();
  assert.deepEqual(h.events,[['state',0,'privacy']]);
 });
 test('unknown settings deep-link falls back to preferences',()=>{

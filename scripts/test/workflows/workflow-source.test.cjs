@@ -26,7 +26,10 @@ test('workflow consumers have real imports for their current localized presentat
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
   }else{
    assert.ok(names.has('workflowCopy'),`${file}: copy import`);
-   if(file.endsWith('/review-alerts.tsx')){
+   if(file.endsWith('/settings.tsx')){
+    assert.ok(names.has('WorkflowNavigation'),'Settings exposes the section controls directly');
+    assert.ok(!names.has('WorkflowHero'),'Settings must not duplicate its page heading');
+   }else if(file.endsWith('/review-alerts.tsx')){
     assert.ok(!names.has('WorkflowHero'),'Review alerts has one compact intro instead of a repeated hero');
     assert.match(fs.readFileSync(path.join(root,file),'utf8'),/testID="review-alerts-intro"/);
    }else assert.ok(names.has('WorkflowHero'),`${file}: surface import`);
