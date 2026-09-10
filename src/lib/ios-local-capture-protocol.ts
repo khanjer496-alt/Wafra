@@ -46,3 +46,18 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
     `&x-cancel=${callback('cancel')}` +
     `&x-error=${callback('error')}`;
 }
+
+/**
+ * User-initiated recovery run. The Shortcut's no-input branch rereads a
+ * bounded recent overlap and stages it through the same GUID-keyed live queue.
+ * The callback only returns to Wafra; the foreground listener owns the drain.
+ */
+export function iosLocalCaptureCatchupUrl(): string {
+  const callback = encodeURIComponent('wafra://');
+  return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
+    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+  )}` +
+    `&x-success=${callback}` +
+    `&x-cancel=${callback}` +
+    `&x-error=${callback}`;
+}
