@@ -59,7 +59,9 @@ for(const language of ['en','ar']) {
   assert.equal(h.events.length,4);
  });
  test(`${language}: inline first-run example stays optional and never writes the ledger`,()=>{
-  const h=createWorkflowHarness({language,state:{onboarded:false},states:{2:true}}),tree=h.renderScreen('onboarding');
+  // focus + tracking added two useState slots ahead of resumeReady; slot 4 now
+  // represents the hydrated/resume-ready gate in this source-executed harness.
+  const h=createWorkflowHarness({language,state:{onboarded:false},states:{4:true}}),tree=h.renderScreen('onboarding');
   const label=h.deps['@/lib/i18n'].t('onboardSampleAction');
   assert.ok(walk(tree).some(n=>n.props.testID==='onboarding-example'));
   assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===h.deps['@/lib/i18n'].t('onboardChooseStart')));
