@@ -29,7 +29,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { syncPaymentReminders } from '@/lib/notifications';
-import { inPeriod, periodLabel } from '@/lib/period';
+import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
