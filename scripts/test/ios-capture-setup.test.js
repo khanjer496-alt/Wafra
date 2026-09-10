@@ -4195,9 +4195,9 @@ struct WafraBankSenderRegistryTests {
     const harness = controllerHarness();
     await harness.controller.send({ type: 'load' });
     await harness.controller.send({ type: 'install-shortcut' });
-    eq('setup controller: install checks Shortcuts then opens only the validated URL',
+    eq('setup controller: install opens the validated iCloud URL directly',
       [...harness.capabilityChecks, ...harness.opened],
-      ['shortcuts://', publishedShortcut]);
+      [publishedShortcut]);
     ok('setup controller: install handoff advances without enabling capture',
       harness.controller.getModel().stage === 'automation' &&
         harness.enableCalls.length === 0 &&
@@ -4211,9 +4211,9 @@ struct WafraBankSenderRegistryTests {
     });
     await harness.controller.send({ type: 'load' });
     await harness.controller.send({ type: 'install-shortcut' });
-    ok('setup controller: missing Shortcuts blocks install with specific recovery',
-      harness.controller.getModel().failure === 'shortcuts-missing' &&
-        harness.opened.length === 0 && harness.enableCalls.length === 0);
+    ok('setup controller: install does not trust a flaky Shortcuts capability probe',
+      harness.controller.getModel().failure === null &&
+        harness.opened[0] === publishedShortcut && harness.enableCalls.length === 0);
     harness.controller.dispose();
   }
 
@@ -4521,44 +4521,19 @@ struct WafraBankSenderRegistryTests {
   }
 
   {
-    const capability = deferred();
     let opened = 0;
     const harness = controllerHarness({
       dependencyOverrides: {
-        canOpenUrl: async () => capability.promise,
+        canOpenUrl: async () => false,
         openUrl: async () => { opened += 1; },
       },
     });
     await harness.controller.send({ type: 'load' });
-    const installing = harness.controller.send({ type: 'install-shortcut' });
-    await Promise.resolve();
-    await harness.controller.send({ type: 'go-to-stage', stage: 'automation' });
-    capability.resolve(true);
-    await installing;
-    ok('setup controller: stale install capability cannot open after stage navigation',
-      opened === 0 && harness.controller.getModel().stage === 'automation' &&
-        !harness.controller.getModel().opening,
-      JSON.stringify({ opened, model: harness.controller.getModel() }));
+    await harness.controller.send({ type: 'install-shortcut' });
+    ok('setup controller: direct HTTPS install is independent of Shortcuts scheme probing',
+      opened === 1 && harness.controller.getModel().stage === 'automation' &&
+        !harness.controller.getModel().opening);
     harness.controller.dispose();
-  }
-
-  {
-    const capability = deferred();
-    let opened = 0;
-    const harness = controllerHarness({
-      dependencyOverrides: {
-        canOpenUrl: async () => capability.promise,
-        openUrl: async () => { opened += 1; },
-      },
-    });
-    await harness.controller.send({ type: 'load' });
-    const installing = harness.controller.send({ type: 'install-shortcut' });
-    await Promise.resolve();
-    harness.controller.dispose();
-    capability.resolve(true);
-    await installing;
-    ok('setup controller: disposal during capability check suppresses the open',
-      opened === 0);
   }
 
   {
@@ -4570,7 +4545,7 @@ struct WafraBankSenderRegistryTests {
     await controller.send({ type: 'load' });
     await controller.send({ type: 'install-shortcut' });
     ok('setup controller: production Linking wrappers preserve their receiver',
-      linkingCanOpenUrls.at(-1) === 'shortcuts://' &&
+      linkingCanOpenUrls.length === 0 &&
         linkingUrls.at(-1) === publishedShortcut &&
         controller.getModel().failure === null,
       JSON.stringify({ linkingCanOpenUrls, linkingUrls, model: controller.getModel() }));
