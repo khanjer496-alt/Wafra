@@ -21,9 +21,10 @@ const actualEffect = ts.transpileModule(`({ effect: ${callback}, dependencies: (
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 class EffectHarness {
   constructor() {
-    this.input = { state: { hydrated: true, onboarded: false, onboardingPlan: null }, pathname: '/',
+    this.input = { state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null }, pathname: '/',
       params: {}, hydrationFailed: false, resumeAttempt: 0 };
-    this.ui = { ready: false, failed: false, step: 'welcome', plan: null, personalizing: false };
+    this.ui = { ready: false, failed: false, step: 'welcome', plan: null, personalizing: false,
+      focus: null, tracking: null };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
     this.routes = []; this.reads = 0; this.loader = async () => ({ returnToOnboarding: false });
     this.router = { replace: path => this.routes.push(path) };
@@ -35,6 +36,8 @@ class EffectHarness {
       DEFAULT_ONBOARDING_PLAN, onboardingResumeDestination,
       setPlan: value => { this.ui.plan = value; },
       setPersonalizing: value => { this.ui.personalizing = value; },
+      setFocus: value => { this.ui.focus = value; },
+      setTracking: value => { this.ui.tracking = value; },
       setStep: value => { this.ui.step = value; },
       setResumeReady: value => { this.ui.ready = value; },
       setResumeFailed: value => { this.ui.failed = value; },
@@ -63,10 +66,17 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   retry.loader = async () => ({ returnToOnboarding: true }); retry.render({ resumeAttempt: 1 }); await flush();
   assert.equal(retry.ui.failed, false); assert.deepEqual(retry.routes, ['/ios-setup?fromOnboarding=1']); ok('read failure holds gate and retry resumes');
   const erase = new EffectHarness(); erase.ui.step = 'complete'; erase.ui.personalizing = true;
-  erase.render({ state: { hydrated: true, onboarded: true, onboardingPlan: null } });
-  erase.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null } }); await flush();
+  erase.render({ state: { hydrated: true, onboarded: true, onboardingPlan: null, onboardingProfile: null } });
+  erase.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null } }); await flush();
   assert.equal(erase.ui.step, 'welcome'); assert.equal(erase.ui.personalizing, false);
+  assert.equal(erase.ui.focus, null); assert.equal(erase.ui.tracking, null);
   assert.deepEqual(JSON.parse(JSON.stringify(erase.ui.plan)), DEFAULT_ONBOARDING_PLAN); ok('erase in same mounted gate clears completion and preferences');
+  const staged = new EffectHarness();
+  staged.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null,
+    onboardingProfile: { v: 1, stage: 'tracking', focus: 'bills', tracking: null, startedAt: 123 } } });
+  await flush();
+  assert.equal(staged.ui.step, 'tracking'); assert.equal(staged.ui.focus, 'bills');
+  assert.equal(staged.ui.tracking, null); ok('saved value-first stage and focus resume without restarting');
   const canceled = new EffectHarness(); let release;
   canceled.loader = () => new Promise(resolve => { release = resolve; });
   canceled.render(); canceled.render({ pathname: '/import-sms' });

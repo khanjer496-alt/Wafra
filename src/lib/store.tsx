@@ -124,6 +124,7 @@ import {
   type LocalCaptureQualificationReceipt,
   type LocalCaptureReviewQualificationCandidate,
   type OnboardingPlanPreferences,
+  type OnboardingProfile,
   type Transaction,
   type TransactionType,
 } from '@/lib/types';
@@ -177,6 +178,7 @@ const EMPTY_STATE: AppState = {
   cardDues: [],
   goals: [],
   onboardingPlan: null,
+  onboardingProfile: null,
   onboardingCurrencyEvidence: null,
   merchantOverrides: {},
   billAliases: {},
@@ -666,6 +668,7 @@ type Action =
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
   | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
+  | { type: 'setOnboardingProfile'; profile: OnboardingProfile }
   | {
       type: 'activateOnboardingPlan';
       budgets: Budget[];
@@ -1085,6 +1088,8 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setOnboardingPlan':
       return { ...state, onboardingPlan: action.plan };
+    case 'setOnboardingProfile':
+      return { ...state, onboardingProfile: action.profile };
     case 'activateOnboardingPlan': {
       // React Strict Mode may replay an effect. Clearing the pending plan in
       // the same reducer action makes activation idempotent even then.
@@ -1260,6 +1265,7 @@ interface StoreValue {
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
+  setOnboardingProfile: (profile: OnboardingProfile) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -1467,6 +1473,22 @@ const E2E_DEMO_LEDGER =
   Platform.OS === 'web' && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1';
 
 /**
+ * Screenmap needs real post-onboarding screens, not twelve screenshots of the
+ * first-run overlay. Its CI job runs an iOS development simulator with a
+ * synthetic ledger. Keep this opt-in behind BOTH the dedicated flag and the
+ * development-only founder flag so a production build cannot accidentally
+ * seed sample money even if one environment variable is misconfigured.
+ *
+ * The data itself is the same deterministic demoState() used by browser QA;
+ * no phone backup, SMS body, account number or customer data is involved.
+ */
+const SCREENMAP_DEMO_LEDGER =
+  Platform.OS === 'ios' &&
+  process.env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO === '1' &&
+  process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+const SYNTHETIC_DEMO_LEDGER = E2E_DEMO_LEDGER || SCREENMAP_DEMO_LEDGER;
+
+/**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
  *
  * Exported for the perf suite, which asserts the property the whole scheme
@@ -1594,9 +1616,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const run = ++hydrationRun.current;
     markLaunchPhase('ledger-load-start');
     try {
+      // Screenmap is a simulator-only visual review harness. Its synthetic
+      // ledger must not depend on SQLCipher/keychain availability: a clean CI
+      // simulator can legitimately have no usable encrypted store yet, and a
+      // storage failure would place the recovery gate over every deep link.
+      // The guard itself is iOS-only and requires the dedicated Screenmap flag
+      // plus the development founder flag, so production and ordinary dev
+      // builds still exercise the real encrypted hydration path below.
+      if (SCREENMAP_DEMO_LEDGER) {
+        if (hydrationRun.current !== run) return false;
+        setHydrationFailed(false);
+        setStorageFailure(null);
+        setStorageRecoveryState(null);
+        dispatch({ type: 'hydrate', state: demoState() });
+        markLaunchPhase('ledger-load-complete');
+        return true;
+      }
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
-      let next: Partial<Omit<AppState, 'hydrated'>> = E2E_DEMO_LEDGER
+      let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
         ? demoState()
         : { onboarded: false };
       if (loaded) {
@@ -1700,6 +1738,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Screenmap state exists only for screenshots and is intentionally
+    // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
+    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
     return persistence.save(snapshot).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
@@ -2078,6 +2119,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboardingPlan', plan });
   }, [dispatch]);
 
+  const setOnboardingProfile = useCallback((profile: OnboardingProfile) => {
+    dispatch({ type: 'setOnboardingProfile', profile });
+  }, [dispatch]);
+
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
   }, [dispatch]);
@@ -2403,6 +2448,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -2464,6 +2510,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,

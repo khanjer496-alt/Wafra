@@ -52,6 +52,8 @@ import {
   type IosMessageSetupEvent,
   type IosMessageSetupProgress,
 } from '@/lib/ios-message-onboarding';
+import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
+import { onboardingLandingPath } from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { IosSetupJourney } from '@/components/ios-message-setup/setup-journey';
@@ -94,7 +96,7 @@ export default function IosSetupScreen() {
     shortcutResult?: string;
     section?: string;
   }>();
-  const { state, ensureDurable, setOnboarded, setCaptureOptOut } = useStore();
+  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
   const detectedBanks = useMemo(() => detectedSetupBanks(state.accounts, state.transactions),
@@ -524,6 +526,15 @@ export default function IosSetupScreen() {
       if (!canFinishIosMessageSetup(current,
         controllerRef.current?.getModel().readiness ?? 'not-added')) return;
       if (fromOnboarding) {
+        const onboardingFocus = state.onboardingProfile?.focus ?? null;
+        const onboardingTracking = state.onboardingProfile?.tracking ?? null;
+        setOnboardingProfile({
+          v: 1,
+          stage: 'complete',
+          focus: onboardingFocus,
+          tracking: onboardingTracking,
+          startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
+        });
         const outcome = await completeIosMessageOnboardingAttempt({
           retryRequired: finishRetryRequired,
           ensureDurable,
@@ -540,7 +551,13 @@ export default function IosSetupScreen() {
           throw new Error('ios_message_onboarding_finish_failed');
         }
         if (screenActive.current) setFinishRetryRequired(false);
-        router.replace('/');
+        trackGrowthEvent('onboarding_completed', {
+          focus: onboardingFocus,
+          tracking: onboardingTracking,
+          outcome: 'automatic',
+          placement: GROWTH_PLACEMENTS.onboarding,
+        });
+        router.replace(onboardingLandingPath(onboardingFocus));
         return;
       }
       if (router.canGoBack()) {
@@ -558,6 +575,8 @@ export default function IosSetupScreen() {
     runOperation,
     send,
     setOnboarded,
+    setOnboardingProfile,
+    state.onboardingProfile,
     updateProgress,
   ]);
 

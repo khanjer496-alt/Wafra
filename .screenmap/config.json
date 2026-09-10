@@ -1,0 +1,20 @@
+{
+  "effort": "balanced",
+  "scheme": "wafra",
+  "device": "iPhone 17 Pro",
+  "suspects": {
+    "depth": 2,
+    "broadCap": 8
+  },
+  "waits": {
+    "transition": 2500,
+    "network": 6000,
+    "boot": 15000
+  },
+  "agent": {
+    "enabled": false,
+    "provider": "codex",
+    "scan": "params",
+    "maxScreens": 8
+  }
+}

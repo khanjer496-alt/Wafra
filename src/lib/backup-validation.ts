@@ -91,6 +91,13 @@ const due: Check = (value) => record(value) && required(value, {
 const goal: Check = (value) => record(value) && required(value, {
   id, title: text, emoji: text, targetFils: positive, savedFils: nonnegative,
 });
+const onboardingProfile: Check = (value) => record(value) && required(value, {
+  v: oneOf(1),
+  stage: oneOf('welcome', 'focus', 'tracking', 'preview', 'privacy', 'capture', 'complete'),
+  focus: oneOf(null, 'spending', 'bills', 'cashflow', 'overview'),
+  tracking: oneOf(null, 'none', 'bank-apps', 'spreadsheet', 'finance-app'),
+  startedAt: nonnegative,
+});
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>
     !['__proto__', 'prototype', 'constructor'].includes(key) && check(item));
@@ -118,6 +125,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
     themePreference: oneOf('system', 'light', 'dark'),
     onboardingCurrencyEvidence: oneOf(null, 'AED', 'SAR'),
+    onboardingProfile: (v) => v === null || onboardingProfile(v),
     onboardingPlan: (v) => v === null || (record(v) && required(v, {
       goalIds: arrayOf(oneOf('emergency', 'travel', 'home')),
       budgetId: oneOf('essentials', 'balanced', 'flexible'),

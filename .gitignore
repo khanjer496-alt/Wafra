@@ -53,6 +53,7 @@ scripts/test/build/
 # Local build products and simulator/test captures
 /artifacts/
 /builds/
+/.screenmap/out/
 /modules/*/android/build/
 
 # The Worker has its own toolchain (Workers runtime types, not React Native).

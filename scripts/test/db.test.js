@@ -397,6 +397,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/review-source-bindings': require('./build/review-source-bindings'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/bills': require('./build/bills'),
+    '@/lib/bill-alias': require('./build/bill-alias'),
     '@/lib/dedupe': dedupe,
     '@/lib/payment-flow': require('./build/payment-flow'),
     '@/lib/ledger-import': execute('src/lib/ledger-import.ts', (id) => require(id.replace('@/lib/', './build/'))),
@@ -580,8 +581,8 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /let next: [^=]*= E2E_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
-    (hydrateBody.match(/setHydrationFailed\(false\)/g) ?? []).length === 1,
+    /const loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
+    /const loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
     'branch that leaves a genuinely new install latched off forever');

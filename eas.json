@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": "22.4.0",
+    "version": ">=22.4.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -30,6 +30,16 @@
       "env": {
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
+    "screenmap-simulator": {
+      "extends": "development-simulator",
+      "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
+        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
