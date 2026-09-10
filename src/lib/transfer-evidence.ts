@@ -88,7 +88,7 @@ function safeName(value: unknown): string | undefined {
   return name;
 }
 
-function maskedSourceKey(raw: string, bank: string): string | undefined {
+export function maskedSourceAccountKey(raw: string, bank: string): string | undefined {
   // A mask with only one to three final digits cannot become a four-digit
   // account. Preserve a scoped opaque hint, not a guessed bank account number.
   const tokens = [...raw.matchAll(/\b(?:from\s+your|to\s+(?:your\s+)?|your\s+)?account\s*(?:no\.?|number)?\s*[:#]?\s*([\dXx*.-]{4,40})(?![\w*.-])/gi)]
@@ -165,7 +165,7 @@ export function buildTransferEvidence(
       attributed = false;
     }
     if (sourceBankIdentity) {
-      if (!sourceCard) sourceAccountKey = maskedSourceKey(raw, sourceBankIdentity);
+      if (!sourceCard) sourceAccountKey = maskedSourceAccountKey(raw, sourceBankIdentity);
       if (completedRequest && alert.type === 'expense') postingForm = 'transfer-detail';
       if (sourceBankIdentity === 'fab' && /^\s*Outward Remittance\s+Debit\s+Account\b/i.test(raw)) postingForm = 'remittance-debit';
       if (alert.type === 'income' && /\bcredited\b|^\s*Inward Remittance\s+Credit\b/i.test(raw)) postingForm = 'credit-receipt';
