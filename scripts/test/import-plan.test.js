@@ -2475,8 +2475,9 @@ const DECLINE_SMS = [{
 
 }
 
-// A masked account number that does not expose four trailing digits cannot
-// justify using whichever account happens to appear first in Wallet.
+// A stable bank-authenticated mask is a real source account even when the bank
+// never exposes four displayable trailing digits. It gets one opaque account
+// identity; it must never borrow whichever visible card/account comes first.
 {
   setActiveMarket('AE');
   const ts = Date.parse('2026-09-05T10:00:00Z');
@@ -2490,8 +2491,15 @@ const DECLINE_SMS = [{
     ],
   };
   const plan = buildImportPlan([row], state, ts);
-  ok('an unresolved masked account retains the event without asserting a balance',
-    plan.txCount === 1 && Object.keys(plan.batch.snapshots).length === 0, plan.batch);
+  ok('a stable masked source creates one issuer-scoped bank account and keeps its quoted balance',
+    plan.txCount === 1 && plan.batch.newAccounts.length === 1 &&
+      plan.batch.newAccounts[0].kind === 'bank' && plan.batch.newAccounts[0].bankName === 'Emirates NBD' &&
+      !plan.batch.newAccounts[0].last4 && plan.batch.transactions[0].accountId === '0' &&
+      plan.batch.snapshots['0']?.fils === 793920,
+    plan.batch);
+  const maskedHint = Object.keys(plan.batch.newHints).find((key) => key.startsWith('source-account|emirates nbd|'));
+  ok('the opaque source identity is persisted as a non-display hint',
+    !!maskedHint && plan.batch.newHints[maskedHint] === '0', plan.batch.newHints);
   const old = {
     ...state,
     transactions: [{
@@ -2501,8 +2509,9 @@ const DECLINE_SMS = [{
     }],
   };
   const reread = buildImportPlan([row], old, ts);
-  ok('a no-instrument reread cannot move an existing row to the fallback account',
-    reread.txCount === 0 && reread.batch.updates.every((u) => u.accountId === undefined),
+  ok('a masked-source reread repairs a parser-owned fallback without borrowing the visible ENBD account',
+    reread.txCount === 0 && reread.batch.newAccounts.length === 1 &&
+      reread.batch.updates.some((u) => u.id === 'old-masked' && u.accountId === '0'),
     reread.batch.updates);
   const identified = {
     ...parseSms('AED 7,000.00 has been debited from your account ending 2501. The available balance is AED 7,939.20.'),

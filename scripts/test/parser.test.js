@@ -592,6 +592,16 @@ t('instant transfer is titled Outgoing transfer',
 ok('an ordinary instant transfer is not pre-labelled as a bill-payment funding leg',
   parseSms('Dear Customer, AED 1,176.00 has been debited from your account 095XXX11XXX01 towards instant transfer. The available balance is AED 17,795.55.')?.paymentFlowSide === undefined);
 
+t('Liv interest payout is income, not a support-footer merchant or unresolved transfer',
+  'Hi There! Your interest payout for your account 095XXX11XXX01 is AED 13.26 and has been credited to your account. Current balance is AED 25,815.90. For further queries, please reach out to our support team via call or WhatsApp on 600521212.',
+  { merchant: 'Interest', amountFils: 1326, type: 'income', category: 'other', transfer: false, deliberate: true },
+  { sender: 'Liv' });
+
+t('Liv REV credit is a refund rather than an unidentified incoming transfer',
+  'AED 1,000.00 has been credited to your account no. 095-XXX11XXX-01 REV-9O00123964812AE280260000959001182501RQST-27/12/2022 01:26:11 PM',
+  { merchant: 'Refund', amountFils: 100000, type: 'income', category: 'other', transfer: false, deliberate: true },
+  { sender: 'Liv' });
+
 t('a posted credit explicitly sent by a company is named as business income',
   'AED 11,507.73 sent by NETWORK INTERNATIONAL LLC PO Box No and has been credited into your account number 90XXXX2615. Available balance is AED 14,770.79.',
   { merchant: 'Network International', amountFils: 1150773, type: 'income', category: 'business', deliberate: true },
