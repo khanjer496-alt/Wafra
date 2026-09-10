@@ -9,7 +9,7 @@ const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
 ]);
 
 /**
- * Accept only Apple's exact public Shortcut URL shape.
+ * Accept only Wafra's approved Shortcut distribution URL shapes.
  *
  * This deliberately does not share the relay-era normalizer. A URL with a
  * credential, query, fragment, extra path, non-hex ID, or retired graph must
@@ -18,11 +18,21 @@ const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
  */
 export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
-  if (!match) return null;
-  const id = match[1].toLowerCase();
-  if (RETIRED_CAPTURE_SHORTCUT_IDS.has(id)) return null;
-  return `https://www.icloud.com/shortcuts/${id}`;
+
+  const iCloudMatch = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
+  if (iCloudMatch) {
+    const id = iCloudMatch[1].toLowerCase();
+    if (RETIRED_CAPTURE_SHORTCUT_IDS.has(id)) return null;
+    return `https://www.icloud.com/shortcuts/${id}`;
+  }
+
+  // TestFlight can pin an Apple-signed Shortcut file to Wafra's own GitHub
+  // release until the equivalent iCloud share URL is published. Keep this
+  // allowlist exact so an arbitrary download can never become setup input.
+  const releaseMatch = /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/([A-Za-z0-9._-]+)\/Wafra-Local-Capture-signed\.shortcut$/.exec(value);
+  if (releaseMatch) return value;
+
+  return null;
 }
 
 /** Expo inlines this public value into each build profile. */
