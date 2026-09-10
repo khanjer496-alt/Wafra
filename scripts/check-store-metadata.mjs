@@ -20,7 +20,11 @@ const limit = (value, max, label) => {
   }
 };
 
-exactValues(Object.keys(metadata.apple.locales), ['ar-SA', 'en-US'], 'Apple launch locales');
+if (metadata.schemaVersion !== 2) errors.push('store metadata schemaVersion must be 2');
+exactValues(metadata.apple.launchLocales ?? [], ['en-US'], 'Apple required launch locales');
+for (const locale of metadata.apple.launchLocales ?? []) {
+  if (!metadata.apple.locales?.[locale]) errors.push(`Apple launch locale ${locale} is missing`);
+}
 for (const [locale, entry] of Object.entries(metadata.apple.locales)) {
   limit(entry.name, 30, `Apple ${locale} name`);
   limit(entry.subtitle, 30, `Apple ${locale} subtitle`);
@@ -65,22 +69,25 @@ for (const listing of launchListings) {
 }
 exactValues(
   launchListings.map((listing) => metadata.googlePlay.listings[listing]?.languageCode),
-  ['ar', 'en-US'],
-  'Google Play launch language codes',
+  ['en-US'],
+  'Google Play required launch language codes',
 );
+if (metadata.googlePlay.launchDefaultListing !== 'global-en') {
+  errors.push('Google Play default launch listing must be global-en');
+}
 
 const productIds = ['wafra_pro_monthly', 'wafra_pro_yearly'];
 for (const productId of productIds) {
   const apple = metadata.apple.subscriptionLocalizations?.[productId] ?? {};
-  for (const locale of ['en-US', 'ar-SA']) {
-    const entry = apple[locale] ?? {};
+  if (!apple['en-US']) errors.push(`Apple ${productId} must include en-US launch copy`);
+  for (const [locale, entry] of Object.entries(apple)) {
     limit(entry.displayName, 30, `Apple ${productId} ${locale} display name`);
     limit(entry.description, 45, `Apple ${productId} ${locale} description`);
   }
 
   const google = metadata.googlePlay.subscriptionLocalizations?.[productId] ?? {};
-  for (const locale of ['en-US', 'ar']) {
-    const entry = google[locale] ?? {};
+  if (!google['en-US']) errors.push(`Google Play ${productId} must include en-US launch copy`);
+  for (const [locale, entry] of Object.entries(google)) {
     limit(entry.title, 55, `Google Play ${productId} ${locale} title`);
     limit(entry.description, 200, `Google Play ${productId} ${locale} description`);
     if (!Array.isArray(entry.benefits) || entry.benefits.length < 1 || entry.benefits.length > 4) {
@@ -138,11 +145,20 @@ for (const key of ['googleGlobal', 'googleGulf']) {
   }
 }
 
-if (JSON.stringify(metadata.launchScope?.storefronts) !== JSON.stringify(['AE', 'SA'])) {
-  errors.push('launch storefronts must remain AE/SA until broader ledger currencies ship');
+if (metadata.launchScope?.distribution !== 'worldwide') {
+  errors.push('launch distribution must be global-first/worldwide');
 }
-if (JSON.stringify(metadata.launchScope?.ledgerCurrencies) !== JSON.stringify(['AED', 'SAR'])) {
-  errors.push('launch ledger currencies must match the shipping UAE/Saudi markets');
+if (metadata.launchScope?.defaultLocale !== 'en-US') {
+  errors.push('global launch default locale must be en-US');
+}
+if (JSON.stringify(metadata.launchScope?.ledgerCurrencySupport?.minorUnitExponents) !== JSON.stringify([0, 2, 3])) {
+  errors.push('global ledger support must match the shipping 0/2/3-minor-unit money engine');
+}
+if (JSON.stringify(metadata.launchScope?.automaticImportMarketPacks) !== JSON.stringify(['AE', 'SA'])) {
+  errors.push('automatic import claims must remain limited to the currently launch-tested AE/SA packs');
+}
+if (metadata.screenshots?.googleGlobal?.status !== 'launch-required') {
+  errors.push('the global Google Play screenshot plan must be the launch-required set');
 }
 
 if (errors.length) {

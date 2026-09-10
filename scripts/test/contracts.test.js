@@ -2238,7 +2238,12 @@ ok('the spoken label agrees with the sign on screen',
       parserResearch,
     ) && /rawMessages: false/.test(parserResearchContract) &&
       /timestamps: false/.test(parserResearchContract));
-  const extraMetadataConsumers = new Set(['launch-alert-parser.ts', 'universal-money.ts', 'transfer-reconciliation.ts']);
+  const extraMetadataConsumers = new Set([
+    'ledger-currency-sheet.tsx',
+    'launch-alert-parser.ts',
+    'universal-money.ts',
+    'transfer-reconciliation.ts',
+  ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));

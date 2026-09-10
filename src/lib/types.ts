@@ -546,7 +546,7 @@ export function mergeLocalCaptureQualifications(
 
 export interface AppState {
   hydrated: boolean;
-  /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
+  /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
   ledgerMoney: LedgerMoneySpec | null;
   /** Encrypted, structured global alerts awaiting an explicit user decision. */
   reviewTray: AlertReviewTrayState;

@@ -12,11 +12,14 @@ const writeJson = async (file, value) => {
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 };
 
-export const writeAppStoreConnectMetadata = async ({ output, metadata, version }) => {
+export const writeAppStoreConnectMetadata = async ({ output, metadata, version, locales }) => {
   assertSafeSegment(version, 'App Store version');
   const root = path.join(output, 'apple', 'asc-metadata');
 
-  for (const [locale, entry] of Object.entries(metadata.apple.locales)) {
+  const selected = locales ?? Object.keys(metadata.apple.locales);
+  for (const locale of selected) {
+    const entry = metadata.apple.locales[locale];
+    if (!entry) throw new Error(`Missing Apple metadata for ${locale}`);
     assertSafeSegment(locale, 'Apple locale');
     await Promise.all([
       writeJson(path.join(root, 'app-info', `${locale}.json`), {

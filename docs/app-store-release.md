@@ -1,5 +1,10 @@
 # Wafra — App Store release playbook
 
+> **Current declaration source:** `docs/store-compliance/apple-app-store.md`,
+> `docs/store-compliance/apple-export-compliance.json` and
+> `docs/store-metadata.json`. Historical relay instructions below are retained
+> for migration context only.
+
 > **CURRENT STATUS — LEGACY RELAY SHORTCUT RETIRED / DO NOT USE FOR NEW SETUP**
 >
 > The relay-uploading **Wafra Capture** instructions and App Review wording

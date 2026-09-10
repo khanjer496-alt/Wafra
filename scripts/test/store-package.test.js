@@ -39,8 +39,8 @@ const ok = (name, condition, detail = '') => {
       path.join(output, 'apple/metadata/en-US/name.txt'),
       'utf8',
     ).trim();
-    const googleArabic = fs.readFileSync(
-      path.join(output, 'google/metadata/android/ar/short_description.txt'),
+    const googleEnglish = fs.readFileSync(
+      path.join(output, 'google/metadata/android/en-US/short_description.txt'),
       'utf8',
     ).trim();
     const ascAppInfo = JSON.parse(fs.readFileSync(
@@ -48,21 +48,24 @@ const ok = (name, condition, detail = '') => {
       'utf8',
     ));
     const ascVersion = JSON.parse(fs.readFileSync(
-      path.join(output, 'apple/asc-metadata/version/1.0.0/ar-SA.json'),
+      path.join(output, 'apple/asc-metadata/version/1.0.0/en-US.json'),
       'utf8',
     ));
-    ok('canonical metadata generates both Apple launch locales',
-      manifest.appleLocales.join(',') === 'en-US,ar-SA', manifest.appleLocales.join(','));
+    ok('canonical metadata generates only the required Apple launch locale',
+      manifest.appleLocales.join(',') === 'en-US', manifest.appleLocales.join(','));
     ok('canonical metadata generates only active Google Play launch locales',
-      manifest.googleLocales.join(',') === 'en-US,ar', manifest.googleLocales.join(','));
+      manifest.googleLocales.join(',') === 'en-US', manifest.googleLocales.join(','));
     ok('generated Apple metadata preserves the reviewed listing name',
       appleName === 'Wafra: Budget & Money Tracker', appleName);
-    ok('generated Google metadata preserves localized Arabic copy',
-      googleArabic.includes('بخصوصية'), googleArabic);
+    ok('generated Google metadata preserves the global English listing copy',
+      googleEnglish.includes('privately'), googleEnglish);
     ok('generated asc app-info metadata preserves the reviewed listing identity',
       ascAppInfo.name === 'Wafra: Budget & Money Tracker' && Boolean(ascAppInfo.subtitle));
-    ok('generated asc version metadata preserves localized Arabic copy',
-      ascVersion.description.includes('وفرة') && Boolean(ascVersion.keywords));
+    ok('generated asc version metadata preserves the global English copy',
+      ascVersion.description.includes('without connecting a bank account') && Boolean(ascVersion.keywords));
+    ok('optional Arabic metadata is not made a launch prerequisite',
+      !fs.existsSync(path.join(output, 'apple/metadata/ar-SA')) &&
+      !fs.existsSync(path.join(output, 'google/metadata/android/ar')));
     ok('generated manifest pins metadata to the configured App Store version',
       manifest.appStoreVersion === '1.0.0', manifest.appStoreVersion);
     ok('metadata-only preparation never implies screenshots were reviewed',

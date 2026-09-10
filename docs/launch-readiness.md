@@ -1,5 +1,10 @@
 # Wafra launch readiness
 
+> **Historical detailed audit.** The current global-launch status board is
+> `docs/store-compliance/global-launch-board.md`; current store copy comes from
+> `docs/store-metadata.json`. This older audit remains useful as background but
+> must not override those newer sources.
+
 _Repository audit: 2 August 2026. This is a launch checklist, not evidence that
 Apple or Google will approve the app. Store rules and console state must be
 rechecked immediately before submission._

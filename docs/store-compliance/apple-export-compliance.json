@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "status": "pending-publisher-review",
+  "itsAppUsesNonExemptEncryption": null,
+  "facts": {
+    "applicationCryptography": [
+      "X25519",
+      "HKDF-SHA-256",
+      "AES-256-GCM",
+      "SQLCipher"
+    ],
+    "transportSecurity": "HTTPS/TLS is also used for optional network features"
+  },
+  "instruction": "The publisher must answer App Store Connect export-compliance questions for the submitted binary and set this file to status=approved with the resulting boolean. Do not infer the answer from company location or from generic TLS exemptions."
+}

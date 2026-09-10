@@ -292,15 +292,11 @@ let active: MarketPack = AE;
  * left describing the old currency. A wrong number is worse than an honest
  * label.
  *
- * So the accounting currency is pinned BY THE LEDGER: once money is recorded,
- * only a pack denominated in the same currency may become active. Nothing new
- * is persisted for this — `marketId` is still the record, it simply can no
- * longer drift once there is money that would be relabelled by the drift. The
- * store re-derives this from state on every reduction, so erasing the ledger
- * (or restoring a different one) releases the pin on the same tick.
- *
- * The pin lives here rather than in the country picker so it holds for every
- * caller — Settings, onboarding, a restored backup, the Worker.
+ * So the accounting currency is pinned BY THE LEDGER and is no longer the same
+ * setting as the parser market. A USD ledger may still use the UAE parser pack
+ * to recognise a UAE bank sender; that must not relabel the stored USD figures.
+ * The parser/import boundary separately refuses an AED/SAR posting when it does
+ * not match the explicit ledger currency.
  */
 let ledgerCurrency: string | null = null;
 let ledgerExponent: 0 | 2 | 3 | null = null;
@@ -347,21 +343,19 @@ export function ledgerCurrencyDisplay(): string {
   );
 }
 
-/** Whether pack `id` can be selected without relabelling money already stored. */
+/** Parser-market selection is independent from the ledger accounting currency. */
 export function canSelectMarket(id: string): boolean {
-  if (!ledgerCurrency) return true;
-  return (MARKETS.find((m) => m.id === id) ?? AE).currency.code === ledgerCurrency;
+  return MARKETS.some((market) => market.id === id);
 }
 
 /**
- * Select a market pack. Returns false — and changes NOTHING, not even the
- * bank registry — when the pack is denominated differently from money the
- * ledger already holds. See `ledgerCurrency` above for why the answer is a
- * refusal rather than a conversion.
+ * Select the parser market pack. This changes bank/sender vocabulary only; it
+ * never changes `ledgerCurrency`, which is the accounting fact used to render
+ * stored money. Invalid ids change nothing and return false.
  */
 export function setActiveMarket(id: string): boolean {
   if (!canSelectMarket(id)) return false;
-  active = MARKETS.find((m) => m.id === id) ?? AE;
+  active = MARKETS.find((m) => m.id === id)!;
   return true;
 }
 

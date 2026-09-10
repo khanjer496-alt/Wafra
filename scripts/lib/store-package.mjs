@@ -3,8 +3,8 @@ import path from 'node:path';
 
 import { writeAppStoreConnectMetadata } from './app-store-connect-package.mjs';
 
-const APPLE_LAUNCH_LOCALES = ['ar-SA', 'en-US'];
-const GOOGLE_LAUNCH_LOCALES = ['ar', 'en-US'];
+const APPLE_LAUNCH_LOCALES = ['en-US'];
+const GOOGLE_LAUNCH_LOCALES = ['en-US'];
 
 const assertExactValues = (actual, expected, label) => {
   const normalized = [...actual].sort();
@@ -45,7 +45,8 @@ const writeAppleMetadata = async (output, metadata) => {
     promotionalText: 'promotional_text.txt',
     description: 'description.txt',
   };
-  for (const [locale, entry] of Object.entries(metadata.apple.locales)) {
+  for (const locale of metadata.apple.launchLocales) {
+    const entry = metadata.apple.locales[locale];
     for (const [field, filename] of Object.entries(fields)) {
       await writeText(path.join(output, 'apple', 'metadata', locale, filename), entry[field]);
     }
@@ -78,7 +79,7 @@ const copyMatching = async ({ source, destination, predicate }) => {
 
 const copyAppleAssets = async (root, output) => {
   const source = path.join(root, 'docs', 'store-assets', 'appstore');
-  const locales = { 'en-US': 'appstore-6.9-dark-en-', 'ar-SA': 'appstore-6.9-dark-ar-' };
+  const locales = { 'en-US': 'appstore-6.9-dark-en-' };
   for (const [locale, prefix] of Object.entries(locales)) {
     const count = await copyMatching({
       source,
@@ -90,7 +91,7 @@ const copyAppleAssets = async (root, output) => {
 };
 
 const copyGoogleAssets = async (root, output) => {
-  const locales = { 'en-US': 'gulf-en', ar: 'gulf-ar' };
+  const locales = { 'en-US': 'global-en' };
   for (const [locale, sourceLocale] of Object.entries(locales)) {
     const localeRoot = path.join(output, 'google', 'metadata', 'android', locale, 'images');
     const count = await copyMatching({
@@ -118,7 +119,7 @@ export const prepareStorePackage = async ({
     readFile(path.join(root, 'docs', 'store-pricing.json'), 'utf8').then(JSON.parse),
     readFile(path.join(root, 'app.json'), 'utf8').then(JSON.parse),
   ]);
-  assertExactValues(Object.keys(metadata.apple.locales), APPLE_LAUNCH_LOCALES, 'Apple locales');
+  assertExactValues(metadata.apple.launchLocales, APPLE_LAUNCH_LOCALES, 'Apple launch locales');
   assertExactValues(
     metadata.googlePlay.launchListings.map(
       (listing) => metadata.googlePlay.listings[listing]?.languageCode,
@@ -133,6 +134,7 @@ export const prepareStorePackage = async ({
       output,
       metadata,
       version: appConfig.expo.version,
+      locales: metadata.apple.launchLocales,
     }),
     writeGoogleMetadata(output, metadata),
   ]);
@@ -142,8 +144,8 @@ export const prepareStorePackage = async ({
   }
   const manifest = {
     generatedAt: new Date().toISOString(),
-    launchStorefronts: metadata.launchScope.storefronts,
-    appleLocales: Object.keys(metadata.apple.locales),
+    distribution: metadata.launchScope.distribution,
+    appleLocales: metadata.apple.launchLocales,
     appStoreVersion: appConfig.expo.version,
     googleLocales: metadata.googlePlay.launchListings.map(
       (listing) => metadata.googlePlay.listings[listing].languageCode,

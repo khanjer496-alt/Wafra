@@ -422,6 +422,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // drift from the count the categorise screen prints beside the tap — the
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
+    '@/lib/bill-alias': require('./build/bill-alias'),
     './balances': {},
     ...realModules,
   };

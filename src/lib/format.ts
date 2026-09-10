@@ -2,6 +2,7 @@ import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import {
   checkedMinorSum,
   formatMinorUnits,
+  type LedgerMoneySpec,
   parseMajorToMinor,
   roundToWholeMajorMinor,
   storedLedgerMoneySpec,
@@ -100,10 +101,14 @@ export function formatCompactAED(fils: number): string {
   return `${approximate ? '≈' : ''}${roundedSteps / stepsPerUnit}${millions ? 'M' : 'k'}`;
 }
 
-export function parseAmountToFils(text: string): number | null {
+export function parseAmountWithMoneySpec(text: string, spec: LedgerMoneySpec): number | null {
   // Normalize separators before filtering: stripping ٫ would turn 12٫50 into 1250.
   const cleaned = normalizeArabicNumerals(text).replace(/[^0-9.,]/g, '');
-  return parseMajorToMinor(cleaned, activeMoneySpec());
+  return parseMajorToMinor(cleaned, spec);
+}
+
+export function parseAmountToFils(text: string): number | null {
+  return parseAmountWithMoneySpec(text, activeMoneySpec());
 }
 
 export function toISODate(d: Date): string {

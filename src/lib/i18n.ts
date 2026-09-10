@@ -32,6 +32,40 @@ const S = {
   },
   accountTransferHistory: { en: 'Transfers between accounts and to others', ar: 'التحويلات بين حساباتك وإلى الآخرين' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
+  ledgerCurrencyTitle: { en: 'Ledger currency', ar: 'عملة السجل' },
+  ledgerCurrencyBody: {
+    en: 'Choose the currency your main ledger is recorded in. You can still track purchases made in other currencies.',
+    ar: 'اختر العملة التي يُسجّل بها سجلك الرئيسي. يمكنك مع ذلك تتبع المشتريات بعملات أخرى.',
+  },
+  chooseLedgerCurrency: { en: 'Choose currency', ar: 'اختر العملة' },
+  ledgerCurrencyRequiredHint: {
+    en: 'Required before your first manual entry.',
+    ar: 'مطلوبة قبل أول عملية يدوية.',
+  },
+  ledgerCurrencyPermanentHint: {
+    en: 'Locked after money is recorded to protect historical amounts.',
+    ar: 'تُثبّت بعد تسجيل المال لحماية المبالغ التاريخية.',
+  },
+  currencyPhoneSuggestion: {
+    en: 'Your phone suggests {currency}. Confirm the currency you actually use.',
+    ar: 'يقترح هاتفك {currency}. أكّد العملة التي تستخدمها فعلياً.',
+  },
+  currencySuggestedByPhone: { en: 'Suggested by your phone region', ar: 'مقترحة حسب منطقة الهاتف' },
+  currencyDecimalPlaces: { en: '{count} decimal places', ar: '{count} منازل عشرية' },
+  searchCurrency: { en: 'Search currency code', ar: 'ابحث عن رمز العملة' },
+  currencyCodeExample: { en: 'USD, EUR, JPY…', ar: 'USD، EUR، JPY…' },
+  currencyNotSupported: {
+    en: 'That currency is not supported for a Wafra ledger yet.',
+    ar: 'هذه العملة غير مدعومة لسجل وفرة حالياً.',
+  },
+  instantSmsDisclosureTitle: {
+    en: 'Allow live bank-SMS delivery?',
+    ar: 'السماح باستقبال رسائل البنك فور وصولها؟',
+  },
+  instantSmsDisclosureBody: {
+    en: 'To show an instant transaction alert, Wafra receives SMS as they arrive and checks them on this device for financial activity. Raw message text is not uploaded or kept by Wafra after the delivery check, and non-financial messages are ignored. This is separate from inbox-history access.',
+    ar: 'لعرض تنبيه فوري للعملية، يستقبل وفرة رسائل SMS عند وصولها ويفحصها على هذا الجهاز بحثاً عن نشاط مالي. لا يرفع وفرة نص الرسالة الخام ولا يحتفظ به بعد فحص الوصول، ويتجاهل الرسائل غير المالية. هذا الإذن منفصل عن الوصول إلى سجل الرسائل.',
+  },
   filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
   incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },
   incomeAccountReviewBody: { en: 'This payment counts as income, but the message did not identify its bank account. Edit this entry to select the correct account. No bank balance has been inferred.', ar: 'تُحتسب هذه الدفعة ضمن الدخل، لكن الرسالة لم تحدد حسابها المصرفي. عدّل العملية لاختيار الحساب الصحيح. لم يتم افتراض أي رصيد مصرفي.' },

@@ -42,6 +42,7 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -116,6 +117,7 @@ import {
   reportExpenses,
 } from '@/lib/reimbursement-report';
 import { ClearAllError, useStore } from '@/lib/store';
+import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import { isBankNotificationCaptureAvailable } from '@/lib/trusted-bank-notification-packages';
@@ -152,6 +154,7 @@ export default function SettingsScreen() {
     setPrivateMode,
     setCaptureOptOut,
     beginHistoryImport,
+    setLedgerMoney,
     setMarket,
     setUiLanguage,
     exportBackup,
@@ -217,6 +220,7 @@ export default function SettingsScreen() {
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
   const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(false);
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const [personalReviewBusy, setPersonalReviewBusy] = useState(false);
   const [personalReviewCount, setPersonalReviewCount] = useState(0);
   const personalReviewRunning = useRef(false);
@@ -500,6 +504,23 @@ export default function SettingsScreen() {
     }
   };
 
+  const requestInstantAlertsChange = (enabled: boolean) => {
+    if (!enabled) {
+      void toggleInstantAlerts(false);
+      return;
+    }
+    // RECEIVE_SMS is a separate restricted permission from READ_SMS. Put the
+    // disclosure immediately before the runtime request, not in a policy page
+    // or a distant settings description, so consent is specific to live
+    // delivery-time financial alerts.
+    setConfirmation({
+      question: t('instantSmsDisclosureTitle'),
+      body: t('instantSmsDisclosureBody'),
+      confirmLabel: t('enableAction'),
+      onConfirm: () => void toggleInstantAlerts(true),
+    });
+  };
+
   /**
    * Turning it on needs notification permission — and asking for it here, at
    * the moment the user says yes to a notification, is the only place the ask
@@ -671,6 +692,7 @@ export default function SettingsScreen() {
   });
 
   const languagePreference = state.languagePreference ?? 'system';
+  const ledgerCurrencyLocked = ledgerStateHasMoney(state);
   const applyLanguage = (next: 'system' | 'en' | 'ar') => {
     if (next === languagePreference) return;
     // No alert, and nothing to restart. The strings re-render from this and
@@ -799,7 +821,8 @@ export default function SettingsScreen() {
       const html = buildExpenseReportHtml({
         transactions: state.transactions,
         accounts: state.accounts,
-        currency: market.currency.code,
+        currency: state.ledgerMoney?.currency ?? market.currency.code,
+        currencyExponent: state.ledgerMoney?.exponent ?? 2,
         language: state.language === 'ar' ? 'ar' : 'en',
         from,
         to,
@@ -1366,7 +1389,7 @@ export default function SettingsScreen() {
                   Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
                   return;
                 }
-                void toggleInstantAlerts(next);
+                requestInstantAlertsChange(next);
               },
               true,
             )}
@@ -1403,9 +1426,25 @@ export default function SettingsScreen() {
           </Block>
           {linkRow(t('language'), languagePreference === 'system'
             ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
-            : LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
-            last: true,
-          })}
+            : LANGUAGE_NAMES[language], () => setRegionSheet('language'))}
+          {ledgerCurrencyLocked ? (
+            <Row
+              last
+              accessibilityLabel={`${t('ledgerCurrencyTitle')}: ${state.ledgerMoney?.currency ?? ledgerCurrencyDisplay()}`}>
+              <View style={styles.rowText}>
+                <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {(state.ledgerMoney?.currency ?? ledgerCurrencyDisplay()) + ' · ' + t('ledgerCurrencyPermanentHint')}
+                </ThemedText>
+              </View>
+              <Icon name="lock" size={13} color={theme.textTertiary} />
+            </Row>
+          ) : linkRow(
+            t('ledgerCurrencyTitle'),
+            state.ledgerMoney?.currency ?? t('chooseLedgerCurrency'),
+            () => setCurrencySheetVisible(true),
+            { last: true },
+          )}
         </Section>)}
 
         {panel === 'privacy' && (<Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
@@ -1567,6 +1606,12 @@ export default function SettingsScreen() {
         options={languageChoices}
         value={languagePreference}
         onSelect={applyLanguage}
+      />
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
       />
       <ChoiceSheet
         visible={reportScopeSheet}
