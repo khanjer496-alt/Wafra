@@ -124,6 +124,7 @@ import {
   type LocalCaptureQualificationReceipt,
   type LocalCaptureReviewQualificationCandidate,
   type OnboardingPlanPreferences,
+  type OnboardingProfile,
   type Transaction,
   type TransactionType,
 } from '@/lib/types';
@@ -177,6 +178,7 @@ const EMPTY_STATE: AppState = {
   cardDues: [],
   goals: [],
   onboardingPlan: null,
+  onboardingProfile: null,
   onboardingCurrencyEvidence: null,
   merchantOverrides: {},
   billAliases: {},
@@ -666,6 +668,7 @@ type Action =
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
   | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
+  | { type: 'setOnboardingProfile'; profile: OnboardingProfile }
   | {
       type: 'activateOnboardingPlan';
       budgets: Budget[];
@@ -1037,6 +1040,8 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setOnboardingPlan':
       return { ...state, onboardingPlan: action.plan };
+    case 'setOnboardingProfile':
+      return { ...state, onboardingProfile: action.profile };
     case 'activateOnboardingPlan': {
       // React Strict Mode may replay an effect. Clearing the pending plan in
       // the same reducer action makes activation idempotent even then.
@@ -1208,6 +1213,7 @@ interface StoreValue {
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
+  setOnboardingProfile: (profile: OnboardingProfile) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -2056,6 +2062,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboardingPlan', plan });
   }, [dispatch]);
 
+  const setOnboardingProfile = useCallback((profile: OnboardingProfile) => {
+    dispatch({ type: 'setOnboardingProfile', profile });
+  }, [dispatch]);
+
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
   }, [dispatch]);
@@ -2368,6 +2378,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -2428,6 +2439,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editGoal,
       deleteGoal,
       setOnboardingPlan,
+      setOnboardingProfile,
       setAppLock,
       setDailySummary,
       setPrivateMode,

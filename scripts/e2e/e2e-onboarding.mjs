@@ -23,25 +23,33 @@ const copy = {
     headline: 'Your money. A clearer picture.', sample: 'INTERACTIVE EXAMPLE',
     organize: 'Organize this alert', reset: 'See the alert again',
     category: 'Dining · Card purchase', note: 'Example only. Nothing is saved.',
-    choose: 'Choose how to start', capture: 'Start your way', back: 'Back',
+    choose: 'Choose how to start', focus: 'What do you want to understand first?',
+    focusChoice: /^Bills & subscriptions\./, tracking: 'How do you track money today?',
+    trackingChoice: /^I check my bank apps\./, outcome: 'Wafra does the organizing.',
+    privacy: 'Your data stays under your control.', privacyContinue: 'Choose how to connect',
+    capture: 'Start your way', back: 'Back',
     personalize: 'Make it yours', edit: 'Edit your preferences', goals: 'Your goals',
     travel: 'A proper holiday. Flights, stays, and spending money',
     budget: 'Your spending plan', flexible: 'More flexible. More room for dining and shopping',
     next: 'Continue', save: 'Save plan', skipPlan: 'Set this up later',
     manual: /^Start manually\./, complete: 'Begin with something real.',
-    add: 'Add my first entry', explore: 'Explore my ledger', saveTransaction: 'Save transaction',
+    add: 'Add my first entry', landing: 'Open Bills', landingPath: '/bills', saveTransaction: 'Save transaction',
   },
   ar: {
     headline: 'أموالك. بصورة أوضح.', sample: 'مثال تفاعلي',
     organize: 'نظّم هذا التنبيه', reset: 'شاهد التنبيه مجدداً',
     category: 'مطاعم · شراء بالبطاقة', note: 'مثال فقط. لا يُحفظ شيء.',
-    choose: 'اختر كيف تبدأ', capture: 'ابدأ بطريقتك', back: 'رجوع',
+    choose: 'اختر كيف تبدأ', focus: 'ما الذي تريد فهمه أولاً؟',
+    focusChoice: /^الفواتير والاشتراكات\./, tracking: 'كيف تتابع أموالك اليوم؟',
+    trackingChoice: /^أراجع تطبيقات البنك\./, outcome: 'وفرة يتولى التنظيم.',
+    privacy: 'بياناتك تبقى تحت سيطرتك.', privacyContinue: 'اختر طريقة الربط',
+    capture: 'ابدأ بطريقتك', back: 'رجوع',
     personalize: 'خصّص تجربتك', edit: 'عدّل تفضيلاتك', goals: 'أهدافك',
     travel: 'إجازة تستحقها. رحلات وإقامة ومصروف',
     budget: 'خطة إنفاقك', flexible: 'أكثر مرونة. مساحة أكبر للمطاعم والتسوق',
     next: 'متابعة', save: 'حفظ الخطة', skipPlan: 'إعداد هذا لاحقاً',
     manual: /^ابدأ يدوياً\./, complete: 'ابدأ بعملية حقيقية.',
-    add: 'أضف أول عملية لي', explore: 'استكشف سجلي', saveTransaction: 'حفظ العملية',
+    add: 'أضف أول عملية لي', landing: 'افتح الفواتير', landingPath: '/bills', saveTransaction: 'حفظ العملية',
   },
 };
 
@@ -216,20 +224,35 @@ async function capture(page, c, artifact) {
   await assertEmpty(page);
 }
 
+async function reachCapture(page, c, artifact) {
+  await click(page, c.choose);
+  await stage(page, c.focus, `${artifact}-focus`, c.next);
+  await click(page, c.focusChoice, 'radio');
+  await click(page, c.next);
+  await stage(page, c.tracking, `${artifact}-tracking`, c.next);
+  await click(page, c.trackingChoice, 'radio');
+  await click(page, c.next);
+  await stage(page, c.outcome, `${artifact}-outcome`, c.next);
+  await click(page, c.next);
+  await stage(page, c.privacy, `${artifact}-privacy`, c.privacyContinue);
+  await click(page, c.privacyContinue);
+  await capture(page, c, `${artifact}-capture`);
+}
+
 async function completion(page, c, artifact, addFirstEntry = false) {
   await click(page, c.manual);
   await stage(page, c.complete, artifact, c.add);
-  await exposed(control(page, c.explore));
+  await exposed(control(page, c.landing));
   await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).captureOptOut === true, STATE_KEY);
   await assertEmpty(page, { optOut: true });
-  await click(page, addFirstEntry ? c.add : c.explore);
+  await click(page, addFirstEntry ? c.add : c.landing);
   await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).onboarded === true, STATE_KEY);
   await assertEmpty(page, { onboarded: true, optOut: true });
   if (addFirstEntry) {
     await page.waitForURL(/\/add-transaction(?:\?|$)/);
     await exposed(control(page, c.saveTransaction));
   } else {
-    assert.equal(new URL(page.url()).pathname, '/');
+    assert.equal(new URL(page.url()).pathname, c.landingPath);
   }
   assert.equal(await page.getByTestId('onboarding-welcome').count(), 0);
   await page.reload({ waitUntil: 'networkidle' });
@@ -300,8 +323,7 @@ try {
     await click(page, c.reset);
     await exposed(control(page, c.organize));
     await assertExampleDidNotPersist(page);
-    await click(page, c.choose);
-    await capture(page, c, `${name}-capture`);
+    await reachCapture(page, c, name);
     await click(page, c.personalize);
     await stage(page, c.goals, `${name}-goals`, c.next);
     await click(page, c.back);
@@ -328,8 +350,7 @@ try {
   });
 
   await scenario('skip-example-first-entry', {}, async (page, c, name) => {
-    await click(page, c.choose);
-    await capture(page, c, `${name}-capture`);
+    await reachCapture(page, c, name);
     assert.equal((await ledger(page)).onboardingPlan, null, 'personalization is optional');
     await completion(page, c, `${name}-manual`, true);
   });
@@ -347,8 +368,7 @@ try {
       await assertExampleDidNotPersist(page);
       assert.deepEqual(await page.evaluate(() => window.__wafraOnboardingExampleAnimations), [],
         'Reduce Motion must prevent sample CSS animation starts, including completed animations');
-      await click(page, c.choose);
-      await capture(page, c, `${name}-capture`);
+      await reachCapture(page, c, name);
       await click(page, c.personalize);
       await stage(page, c.goals, `${name}-goals`, c.skipPlan);
       await click(page, c.skipPlan);
