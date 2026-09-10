@@ -67,7 +67,7 @@ test('categorisation displays affected count and applies merchant rule only afte
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
 });
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null},states:{4:true}}),tree=h.renderScreen('onboarding');
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{4:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
  assert.ok(text(tree).includes(t('onboardHeadline')));assert.ok(!text(tree).includes('42,500'));
  const example=walk(tree).find(n=>n.props?.testID==='onboarding-example');

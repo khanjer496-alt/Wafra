@@ -56,7 +56,9 @@ test('Screenmap output and publishing stay private by default', () => {
     assert.match(workflow, /EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'/);
     assert.match(workflow, /EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'/);
     assert.match(workflow, /Build local iOS simulator app/);
-    assert.match(workflow, /app_path: \$\{\{ runner\.temp \}\}\/wafra-screenmap-derived\/Build\/Products\/Debug-iphonesimulator\/Wafra\.app/);
+    assert.match(workflow, /-configuration Release/,
+      'Screenmap must use an embedded Release JS bundle so EXPO_PUBLIC demo flags are compiled in');
+    assert.match(workflow, /app_path: \$\{\{ runner\.temp \}\}\/wafra-screenmap-derived\/Build\/Products\/Release-iphonesimulator\/Wafra\.app/);
     assert.doesNotMatch(workflow, /expo_token:/);
     assert.doesNotMatch(workflow, /eas_profile:/);
     assert.match(workflow, /publish: 'false'/);

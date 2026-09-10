@@ -165,7 +165,7 @@
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
       "sha256": "38859b1a6518a2b1f23bb7f9d68e1fd34c57615a24ccfcce674c6b5724aaa706",
-      "reviewedChange": "2026-09-10: preserve onboarding focus/tracking and emit the provider-neutral completion event after durable iOS setup."
+      "reviewedChange": "2026-09-10: Durable iOS onboarding completion now preserves the source-free onboarding focus, records the provider-neutral completion event, and opens the selected first view."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -251,7 +251,7 @@
       "file": "src/app/add-transaction.tsx",
       "name": "save",
       "sha256": "419342ccc429d3606d2b44f67a25becbdf075f3105acf67f9dd8462c709b57d9",
-      "reviewedChange": "2026-09-10: first manual money is committed only after an explicit durable ledger-currency choice."
+      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write."
     },
     {
       "file": "src/app/add-transaction.tsx",
@@ -272,37 +272,37 @@
       "file": "src/components/onboarding-gate.tsx",
       "name": "finishPreferences",
       "sha256": "10ed151b74939aad71f855b19b0eaad7c49250885b37c853c71c4ec27ce7d566",
-      "reviewedChange": "2026-09-10: save the optional plan, persist the capture journey stage, hide optional progress, and return to capture; executed by workflow-source.test.cjs."
+      "reviewedChange": "2026-09-10: Save the optional plan, persist capture as the resume stage, hide optional progress, and return to capture; executed by workflow-source.test.cjs."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
       "sha256": "f76f7be10d1acc32992ddec5c1aa72a7de733ece164e9222373020022eb23936",
-      "reviewedChange": "2026-09-10: permission/scan outcomes update the durable onboarding journey and provider-neutral growth hook; final save remains guarded and save-only retry never re-scans."
+      "reviewedChange": "2026-09-10: Android automatic setup retains the guarded permission/import path, adds source-free funnel events, and persists completion as the resumable stage; save-only retry never re-scans."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "beginCapture",
       "sha256": "abcc4f5115607c4f80a32967f60fb49a1104b2c78c7ddf81b9cd1a4aac231cf9",
-      "reviewedChange": "2026-09-10: capture start records the selected onboarding route before awaiting the serialized scan; unavailable bridge still requires explicit manual choice."
+      "reviewedChange": "2026-09-10: Capture setup keeps serialized native handoff behavior, records source-free funnel state, and still requires explicit manual choice when capture is unavailable."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
       "sha256": "44fa1118fbe81ed3c0358bd7956f22a4a219906a3230f7b00fac23cd67367e90",
-      "reviewedChange": "2026-09-10: manual onboarding records the explicit manual outcome without enabling automatic capture."
+      "reviewedChange": "2026-09-10: Manual setup still durably opts out and revokes iOS relay state, while recording only source-free funnel outcome/resume state."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
       "sha256": "a63774d96540c8c03c1419873b2a100b6f7ef0cc63a89b463b58528e47fc5dde",
-      "reviewedChange": "2026-09-10: Back follows the expanded welcome/focus/tracking/preview/privacy/capture journey and persists only the matching non-financial stage; executed by workflow-source.test.cjs."
+      "reviewedChange": "2026-09-10: Back navigation now follows the value-first funnel and persists resumable journey stages while optional plan steps still return to capture; executed by workflow-source.test.cjs."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
       "sha256": "a33ca9ec1d7e035fb559ad9d32c0d9183e6f597b6e00ff8551a52ada5cdc1579",
-      "reviewedChange": "2026-09-10: completion persists the expanded onboarding profile/growth outcome while retaining save retry and requested Add route; executed by onboarding-actions.test.cjs."
+      "reviewedChange": "2026-09-10: Hold completion through persistence, retain save retry/Add route, record source-free completion, and route to the selected first view or explicit Pro destination."
     },
     {
       "file": "src/app/review-alerts.tsx",
