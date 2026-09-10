@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
 import { Radius } from '@/constants/theme';
+import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
 
 interface MerchantAvatarProps {
@@ -13,17 +14,33 @@ interface MerchantAvatarProps {
   size?: number;
 }
 
-/** Bundled merchant artwork. Unknown merchants keep their category glyph. */
+/** Bundled artwork first; unknown merchants can be enriched from a safe remote brand lookup. */
 export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
-  const logo = merchantLogoFor(title);
-  if (!logo) return <CategoryAvatar category={category} size={size} />;
-  // Remount on identity change so an earlier failed image cannot hide another
-  // merchant's logo when a list reuses this row.
-  return <LogoTile key={logo.id} logo={logo} category={category} size={size} />;
+  const bundled = merchantLogoFor(title);
+  const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setRemote(null);
+    if (bundled) return () => { alive = false; };
+    void resolveRemoteMerchantLogo(title).then(value => {
+      if (alive) setRemote(value);
+    });
+    return () => { alive = false; };
+  }, [title, bundled]);
+
+  if (bundled) {
+    return <LogoTile key={bundled.id} id={bundled.id} source={bundled.source} category={category} size={size} />;
+  }
+  if (remote) {
+    return <LogoTile key={remote.id} id={remote.id} source={{ uri: remote.logoUrl }} category={category} size={size} />;
+  }
+  return <CategoryAvatar category={category} size={size} />;
 }
 
-function LogoTile({ logo, category, size }: {
-  logo: NonNullable<ReturnType<typeof merchantLogoFor>>;
+function LogoTile({ id, source, category, size }: {
+  id: string;
+  source: number | { uri: string };
   category: CategoryId;
   size: number;
 }) {
@@ -32,7 +49,7 @@ function LogoTile({ logo, category, size }: {
 
   return (
     <View
-      testID={`merchant-logo-${logo.id}`}
+      testID={`merchant-logo-${id.replace(/[^a-z0-9:-]/gi, '-')}`}
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
@@ -41,10 +58,10 @@ function LogoTile({ logo, category, size }: {
         { width: size, height: size, borderRadius: size >= 40 ? Radius.control : Radius.tile },
       ]}>
       <Image
-        source={logo.source}
+        source={source}
         contentFit="contain"
         cachePolicy="memory-disk"
-        recyclingKey={logo.id}
+        recyclingKey={id}
         transition={0}
         accessible={false}
         onError={() => setFailed(true)}
@@ -58,8 +75,6 @@ const styles = StyleSheet.create({
   tile: {
     alignItems: 'center',
     justifyContent: 'center',
-    // Original brand colours on a neutral plate in either theme. Never tint,
-    // invert, or remotely request artwork using a user's transaction title.
     backgroundColor: '#FFFFFF',
   },
 });

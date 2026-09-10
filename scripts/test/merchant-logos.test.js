@@ -111,11 +111,12 @@ function loadAvatar(identities) {
   return compile('src/components/ui/merchant-avatar.tsx', (id) => {
     switch (id) {
       case 'react/jsx-runtime': return { jsx, jsxs: jsx };
-      case 'react': return { useState: () => [failed, (value) => { failed = value; }] };
+      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined };
       case 'react-native': return { StyleSheet: { create: (value) => value }, View: 'view' };
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
+      case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
       case '@/constants/theme': return { Radius: { control: 12, tile: 8 } };
       default: throw new Error(`Unexpected runtime dependency: ${id}`);
     }
