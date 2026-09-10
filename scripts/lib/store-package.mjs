@@ -13,6 +13,31 @@ const assertExactValues = (actual, expected, label) => {
   }
 };
 
+const assertSafePathSegment = (value, label) => {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    path.isAbsolute(value)
+  ) {
+    throw new Error(`${label} contains an unsafe path segment: ${String(value)}`);
+  }
+};
+
+const validateMetadataPathSegments = (metadata) => {
+  for (const locale of Object.keys(metadata.apple?.locales ?? {})) {
+    assertSafePathSegment(locale, 'Apple locale');
+  }
+  for (const listingName of Object.keys(metadata.googlePlay?.listings ?? {})) {
+    assertSafePathSegment(listingName, 'Google Play listing key');
+    const languageCode = metadata.googlePlay.listings[listingName]?.languageCode;
+    assertSafePathSegment(languageCode, `Google Play language code for ${listingName}`);
+  }
+};
+
 const writeText = async (file, value) => {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${value.trim()}\n`, 'utf8');
@@ -127,6 +152,7 @@ export const prepareStorePackage = async ({
     GOOGLE_LAUNCH_LOCALES,
     'Google Play launch locales',
   );
+  validateMetadataPathSegments(metadata);
   await resetOutput(root, output, allowOutsideRoot);
   await Promise.all([
     writeAppleMetadata(output, metadata),

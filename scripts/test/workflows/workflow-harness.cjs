@@ -32,6 +32,7 @@ function createWorkflowHarness(options={}) {
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
  d['@/components/themed-view']={ThemedView:p=>jsx('View',{...p,style:[{backgroundColor:h.theme.background},p.style]})};
  d['@/components/storage-recovery']={StorageRecovery:p=>jsx('Boundary',{name:'StorageRecovery',...p})};
+ d['@/components/ledger-currency-sheet']={LedgerCurrencySheet:p=>jsx('LedgerCurrencySheet',p),suggestedLedgerCurrency:()=> 'AED'};
  d['expo-constants']={__esModule:true,default:{expoConfig:{version:'test',extra:{}},platform:{},executionEnvironment:'standalone'}};
  for(const name of ['expo-document-picker','expo-local-authentication','expo-print','expo-sharing','expo-crypto','expo-device'])d[name]={};
  const store=d['@/lib/store'].useStore();
@@ -62,6 +63,7 @@ function createWorkflowHarness(options={}) {
  d['../../modules/notification-reader']={};d['../../modules/sms-reader']={};
  d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false};
  Object.assign(d['@/lib/launch-performance'],{isInternalLaunchDiagnosticsEnabled:()=>false,serializeLaunchMetrics:()=>''});
+ d['@/lib/growth-funnel']={GROWTH_PLACEMENTS:{onboarding:'onboarding_main',postImportPro:'post_import_pro',settingsPro:'settings_pro'},trackGrowthEvent:(...args)=>h.events.push(['growth',...args])};
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
  function renderScreen(screen,props={}){
