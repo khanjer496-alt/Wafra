@@ -11,16 +11,18 @@ only, so Android still uses the physical-phone and browser acceptance checks.
 
 ## Privacy boundary
 
-The dedicated `screenmap-simulator` EAS profile sets
+The Screenmap workflow builds a local iOS simulator `.app` with
 `EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO=1`. The app admits that flag only on iOS while
 the development-only founder flag is also enabled, then loads the same generated
-demo ledger used by QA. The ordinary development simulator profile does not set
-the Screenmap flag. No phone backup, SMS corpus, diagnostic export, real account,
-credential or customer data belongs in a Screenmap run.
+demo ledger used by QA. No phone backup, SMS corpus, diagnostic export, real
+account, credential or customer data belongs in a Screenmap run.
 
 Bundles are configured with `publish: false`. They remain workflow artifacts and
-are opened manually in the Screenmap viewer. The initial baseline does not need
-an agent/API key: route parsing, deep links and committed flows are deterministic.
+are opened manually in the Screenmap viewer. The simulator app is built directly
+on the GitHub macOS runner and passed through Screenmap's `app_path`, so this
+workflow does not consume the project's monthly EAS iOS-build allowance. The
+initial baseline does not need an agent/API key: route parsing, deep links and
+committed flows are deterministic.
 
 ## Cost boundary
 

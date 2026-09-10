@@ -24,11 +24,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
+      - name: Build local iOS simulator app
+        env:
+          EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'
+          EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'
+        run: |
+          npm ci
+          npx expo prebuild --platform ios --no-install
+          npx pod-install
+          xcodebuild \
+            -workspace ios/Wafra.xcworkspace \
+            -scheme Wafra \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/wafra-screenmap-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64 \
+            build
       - uses: aleqsio/screenmap@v1
         with:
           mode: pr
-          expo_token: ${{ secrets.EXPO_TOKEN }}
-          eas_profile: screenmap-simulator
+          app_path: ${{ runner.temp }}/wafra-screenmap-derived/Build/Products/Debug-iphonesimulator/Wafra.app
           simulator: iPhone 17 Pro
           agent_provider: codex
           # Private review: artifact link rather than anonymous raw-GitHub URLs.

@@ -45,8 +45,12 @@ test('Screenmap output and publishing stay private by default', () => {
   assert.equal(config.scheme, 'wafra');
   assert.equal(config.agent.enabled, false);
   for (const workflow of [baseline, pr]) {
-    assert.match(workflow, /expo_token: \$\{\{ secrets\.EXPO_TOKEN \}\}/);
-    assert.match(workflow, /eas_profile: screenmap-simulator/);
+    assert.match(workflow, /EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'/);
+    assert.match(workflow, /EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'/);
+    assert.match(workflow, /Build local iOS simulator app/);
+    assert.match(workflow, /app_path: \$\{\{ runner\.temp \}\}\/wafra-screenmap-derived\/Build\/Products\/Debug-iphonesimulator\/Wafra\.app/);
+    assert.doesNotMatch(workflow, /expo_token:/);
+    assert.doesNotMatch(workflow, /eas_profile:/);
     assert.match(workflow, /publish: 'false'/);
   }
 });
