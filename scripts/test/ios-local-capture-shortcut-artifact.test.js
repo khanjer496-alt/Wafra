@@ -58,7 +58,11 @@ const tokenAttachment = (value, range = "{0, 1}") => {
 };
 
 const main = async () => {
-  const { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } =
+  const {
+    buildLocalCaptureShortcut,
+    verifyLocalCaptureShortcutGraph,
+    IOS_LOCAL_CAPTURE_CATCHUP_LIMIT,
+  } =
     await import(pathToFileURL(builderPath));
   const shortcut = buildLocalCaptureShortcut();
   const actions = shortcut.WFWorkflowActions;
@@ -72,13 +76,22 @@ const main = async () => {
   assert.equal(shortcut.WFWorkflowHasOutputFallback, false);
   assert.deepEqual(shortcut.WFWorkflowOutputContentItemClasses, []);
   assert.deepEqual(shortcut.WFWorkflowImportQuestions, []);
-  assert.equal(actions.length, 11);
+  assert.equal(actions.length, 20);
   assert.equal(verifyLocalCaptureShortcutGraph(shortcut), true);
   assert.deepEqual(buildLocalCaptureShortcut(), shortcut);
 
   assert.deepEqual(ids, [
     "is.workflow.actions.conditional",
     SETUP,
+    "com.apple.MobileSMS.MessageEntity",
+    "is.workflow.actions.repeat.each",
+    "is.workflow.actions.gettext",
+    "is.workflow.actions.gettext",
+    "is.workflow.actions.gettext",
+    "is.workflow.actions.hash",
+    "is.workflow.actions.text.changecase",
+    STAGE,
+    "is.workflow.actions.repeat.each",
     "is.workflow.actions.exit",
     "is.workflow.actions.conditional",
     "is.workflow.actions.gettext",
@@ -103,17 +116,62 @@ const main = async () => {
       "RecordWafraCaptureSetupProofIntent",
     ),
   });
-  assert.deepEqual(parameters(actions[2]), {});
-  assert.equal(parameters(actions[3]).WFControlFlowMode, 2);
-  assert.equal(
-    parameters(actions[3]).GroupingIdentifier,
-    noInput.GroupingIdentifier,
-  );
+  const catchupFind = parameters(actions[2]);
+  assert.equal(catchupFind.WFContentItemSortProperty, "date");
+  assert.equal(catchupFind.WFContentItemSortOrder, "Latest First");
+  assert.equal(catchupFind.WFContentItemLimitEnabled, true);
+  assert.equal(catchupFind.WFContentItemLimitNumber, IOS_LOCAL_CAPTURE_CATCHUP_LIMIT);
+  assert.equal(IOS_LOCAL_CAPTURE_CATCHUP_LIMIT, 300);
+  assert.deepEqual(catchupFind.WFContentItemFilter.Value.WFActionParameterFilterTemplates, []);
+  assert.equal(parameters(actions[3]).WFControlFlowMode, 0);
+  assert.deepEqual(parameters(actions[3]).WFInput.Value, {
+    Type: "ActionOutput",
+    OutputUUID: catchupFind.UUID,
+    OutputName: "Message",
+  });
 
   for (const [index, outputName, propertyName] of [
     [4, "Sender Text", "Sender"],
     [5, "Message Body", "Content"],
     [6, "Message GUID", "GUID"],
+  ]) {
+    const extraction = parameters(actions[index]);
+    assert.equal(extraction.CustomOutputName, outputName);
+    const bound = tokenAttachment(extraction.WFTextActionText);
+    assert.equal(bound.Type, "Variable");
+    assert.equal(bound.VariableName, "Repeat Item");
+    assert.deepEqual(bound.Aggrandizements, [
+      { Type: "WFPropertyVariableAggrandizement", PropertyName: propertyName },
+      { Type: "WFCoercionVariableAggrandizement", CoercionItemClass: "WFStringContentItem" },
+    ]);
+  }
+  assert.equal(parameters(actions[7]).WFHashType, "SHA256");
+  assert.deepEqual(parameters(actions[7]).WFInput.Value, {
+    Type: "ActionOutput",
+    OutputUUID: parameters(actions[6]).UUID,
+    OutputName: "Message GUID",
+  });
+  assert.equal(parameters(actions[8]).WFCaseType, "lowercase");
+  const catchupStage = parameters(actions[9]);
+  assert.deepEqual(catchupStage.AppIntentDescriptor, EXPECTED_DESCRIPTOR("StageWafraLiveMessageIntent"));
+  assert.deepEqual(tokenAttachment(catchupStage.observedAt), {
+    Type: "Variable",
+    VariableName: "Repeat Item",
+    Aggrandizements: [{ Type: "WFPropertyVariableAggrandizement", PropertyName: "date" }],
+  });
+  assert.equal(parameters(actions[10]).WFControlFlowMode, 2);
+  assert.equal(parameters(actions[10]).GroupingIdentifier, parameters(actions[3]).GroupingIdentifier);
+  assert.deepEqual(parameters(actions[11]), {});
+  assert.equal(parameters(actions[12]).WFControlFlowMode, 2);
+  assert.equal(
+    parameters(actions[12]).GroupingIdentifier,
+    noInput.GroupingIdentifier,
+  );
+
+  for (const [index, outputName, propertyName] of [
+    [13, "Sender Text", "Sender"],
+    [14, "Message Body", "Content"],
+    [15, "Message GUID", "GUID"],
   ]) {
     const extraction = parameters(actions[index]);
     assert.equal(extraction.CustomOutputName, outputName);
@@ -134,16 +192,16 @@ const main = async () => {
   assert.equal(ids.includes("is.workflow.actions.number.random"), false);
   assert.equal(/CurrentDate/.test(JSON.stringify(shortcut)), false);
 
-  const guidHash = parameters(actions[7]);
+  const guidHash = parameters(actions[16]);
   assert.equal(guidHash.WFHashType, "SHA256");
   assert.deepEqual(guidHash.WFInput.Value, {
     Type: "ActionOutput",
-    OutputUUID: parameters(actions[6]).UUID,
+    OutputUUID: parameters(actions[15]).UUID,
     OutputName: "Message GUID",
   });
   assert.equal(guidHash.WFInput.WFSerializationType, "WFTextTokenAttachment");
 
-  const lowercaseHash = parameters(actions[8]);
+  const lowercaseHash = parameters(actions[17]);
   assert.equal(lowercaseHash.CustomOutputName, "Lowercase Message ID");
   assert.equal(lowercaseHash.WFCaseType, "lowercase");
   assert.deepEqual(tokenAttachment(lowercaseHash.text), {
@@ -152,7 +210,7 @@ const main = async () => {
     OutputName: "Hash",
   });
 
-  const stage = parameters(actions[9]);
+  const stage = parameters(actions[18]);
   assert.deepEqual(Object.keys(stage).sort(), [
     "AppIntentDescriptor",
     "UUID",
@@ -166,9 +224,9 @@ const main = async () => {
     EXPECTED_DESCRIPTOR("StageWafraLiveMessageIntent"),
   );
   for (const [key, sourceIndex, outputName] of [
-    ["sender", 4, "Sender Text"],
-    ["body", 5, "Message Body"],
-    ["eventId", 8, "Lowercase Message ID"],
+    ["sender", 13, "Sender Text"],
+    ["body", 14, "Message Body"],
+    ["eventId", 17, "Lowercase Message ID"],
   ]) {
     const bound = tokenAttachment(stage[key]);
     assert.deepEqual(bound, {
@@ -186,7 +244,7 @@ const main = async () => {
       },
     ],
   });
-  assert.deepEqual(parameters(actions[10]), {});
+  assert.deepEqual(parameters(actions[19]), {});
 
   const forbiddenIdentifiers = [
     /downloadurl|openurl|url\.getcontents/i,
@@ -230,41 +288,41 @@ const main = async () => {
     parameters(candidateActions[0]).WFCondition = 100;
   });
   rejects("sender reads body", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[4]).WFTextActionText)
+    tokenAttachment(parameters(candidateActions[13]).WFTextActionText)
       .Aggrandizements[0].PropertyName = "Content";
   });
   rejects("body loses String coercion", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[5]).WFTextActionText)
+    tokenAttachment(parameters(candidateActions[14]).WFTextActionText)
       .Aggrandizements.pop();
   });
   rejects("GUID reads Content", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[6]).WFTextActionText)
+    tokenAttachment(parameters(candidateActions[15]).WFTextActionText)
       .Aggrandizements[0].PropertyName = "Content";
   });
   rejects("GUID loses String coercion", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[6]).WFTextActionText)
+    tokenAttachment(parameters(candidateActions[15]).WFTextActionText)
       .Aggrandizements.pop();
   });
   rejects("GUID hash reads the body", (_candidate, candidateActions) => {
-    parameters(candidateActions[7]).WFInput = {
+    parameters(candidateActions[16]).WFInput = {
       Value: {
         Type: "ActionOutput",
-        OutputUUID: parameters(candidateActions[5]).UUID,
+        OutputUUID: parameters(candidateActions[14]).UUID,
         OutputName: "Message Body",
       },
       WFSerializationType: "WFTextTokenAttachment",
     };
   });
   rejects("Message hash is not normalized to lowercase", (_candidate, candidateActions) => {
-    parameters(candidateActions[8]).WFCaseType = "UPPERCASE";
+    parameters(candidateActions[17]).WFCaseType = "UPPERCASE";
   });
   rejects("event ID bypasses lowercase normalization", (_candidate, candidateActions) => {
-    const stageEvent = tokenAttachment(parameters(candidateActions[9]).eventId);
-    stageEvent.OutputUUID = parameters(candidateActions[7]).UUID;
+    const stageEvent = tokenAttachment(parameters(candidateActions[18]).eventId);
+    stageEvent.OutputUUID = parameters(candidateActions[16]).UUID;
     stageEvent.OutputName = "Hash";
   });
   rejects("date uses receipt time", (_candidate, candidateActions) => {
-    parameters(candidateActions[9]).observedAt = {
+    parameters(candidateActions[18]).observedAt = {
       Value: {
         string: "\ufffc",
         attachmentsByRange: { "{0, 1}": { Type: "CurrentDate" } },
@@ -273,34 +331,34 @@ const main = async () => {
     };
   });
   rejects("date uses an untyped attachment", (_candidate, candidateActions) => {
-    parameters(candidateActions[9]).observedAt = {
+    parameters(candidateActions[18]).observedAt = {
       Value: { Type: "CurrentDate" },
       WFSerializationType: "WFTextTokenAttachment",
     };
   });
   rejects("date uses the wrong property spelling", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[9]).observedAt)
+    tokenAttachment(parameters(candidateActions[18]).observedAt)
       .Aggrandizements[0].PropertyName = "Date";
   });
   rejects("date is coerced to a display String", (_candidate, candidateActions) => {
-    tokenAttachment(parameters(candidateActions[9]).observedAt)
+    tokenAttachment(parameters(candidateActions[18]).observedAt)
       .Aggrandizements.push({
         Type: "WFCoercionVariableAggrandizement",
         CoercionItemClass: "WFStringContentItem",
       });
   });
   rejects("wrong App Intent", (_candidate, candidateActions) => {
-    candidateActions[9].WFWorkflowActionIdentifier =
+    candidateActions[18].WFWorkflowActionIdentifier =
       `${APP_BUNDLE_ID}.ImportWafraMessageHistoryIntent`;
   });
   rejects("network action inserted", (_candidate, candidateActions) => {
-    candidateActions.splice(9, 0, {
+    candidateActions.splice(18, 0, {
       WFWorkflowActionIdentifier: "is.workflow.actions.downloadurl",
       WFWorkflowActionParameters: {},
     });
   });
   rejects("Message output shown", (_candidate, candidateActions) => {
-    candidateActions[10].WFWorkflowActionIdentifier =
+    candidateActions[19].WFWorkflowActionIdentifier =
       "is.workflow.actions.showresult";
   });
 
@@ -323,8 +381,8 @@ const main = async () => {
 
     const badPath = join(temporaryDirectory, "bad-local-capture.json");
     const bad = mutate((_candidate, candidateActions) => {
-      tokenAttachment(parameters(candidateActions[9]).body).OutputUUID =
-        parameters(candidateActions[4]).UUID;
+      tokenAttachment(parameters(candidateActions[18]).body).OutputUUID =
+        parameters(candidateActions[13]).UUID;
     });
     writeFileSync(badPath, `${JSON.stringify(bad)}\n`, "utf8");
     assert.throws(
@@ -346,7 +404,7 @@ const main = async () => {
       "receipt-time-local-capture.json",
     );
     const receiptTime = mutate((_candidate, candidateActions) => {
-      parameters(candidateActions[9]).observedAt = {
+      parameters(candidateActions[18]).observedAt = {
         Value: {
           string: "\ufffc",
           attachmentsByRange: { "{0, 1}": { Type: "CurrentDate" } },

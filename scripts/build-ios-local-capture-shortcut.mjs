@@ -9,10 +9,20 @@ const APP_TEAM_ID = "UV7YN4GQ66";
 const APP_BUNDLE_ID = "app.wafra.ios";
 const SETUP_INTENT = "RecordWafraCaptureSetupProofIntent";
 const STAGE_INTENT = "StageWafraLiveMessageIntent";
+const FIND_MESSAGES = "com.apple.MobileSMS.MessageEntity";
+export const IOS_LOCAL_CAPTURE_CATCHUP_LIMIT = 300;
 
 const ids = {
   noInputGroup: "C335E95B-5E0C-4455-A135-C598E297ECAE",
   setupProof: "6D39ED50-25D8-497F-B651-290645878561",
+  catchupFind: "A8C4A13F-48E0-4B90-A8EE-65016E9C6E89",
+  catchupRepeatGroup: "056DB282-A0ED-4DA6-A2A1-E4CB49A7305D",
+  catchupSenderText: "5528A51D-6031-45C7-B148-14953531EED9",
+  catchupMessageBody: "6FE51E1C-F71A-4531-B294-8775349DE462",
+  catchupMessageGuid: "12CD25AD-05B1-4DBB-8560-10BC61BDE514",
+  catchupGuidHash: "868CF71D-A8A4-49A9-872A-A5F7A9B7FCFB",
+  catchupLowercaseHash: "04992CD4-87A9-470D-A340-D180E4528F77",
+  catchupStage: "6808B616-C034-46D6-A2CE-927BD68D764E",
   senderText: "1233D840-DCE7-4FFD-9415-20736825C74F",
   messageBody: "DE001532-690F-465F-982A-DB5C8A6B560A",
   messageGuid: "633B29C7-23F7-4124-982E-C88E40A9D53E",
@@ -60,6 +70,22 @@ const extensionInputTextToken = (aggrandizements) =>
     "{0, 1}": extensionInputValue(aggrandizements),
   });
 
+const variableValue = (variableName, aggrandizements = []) => ({
+  Type: "Variable",
+  VariableName: variableName,
+  ...(aggrandizements.length > 0 ? { Aggrandizements: aggrandizements } : {}),
+});
+
+const variable = (variableName, aggrandizements = []) => ({
+  Value: variableValue(variableName, aggrandizements),
+  WFSerializationType: "WFTextTokenAttachment",
+});
+
+const variableTextToken = (variableName, aggrandizements = []) =>
+  textToken("\ufffc", {
+    "{0, 1}": variableValue(variableName, aggrandizements),
+  });
+
 const property = (propertyName) => ({
   Type: "WFPropertyVariableAggrandizement",
   PropertyName: propertyName,
@@ -89,6 +115,49 @@ const textAction = (uuid, customOutputName, propertyName) => ({
   },
 });
 
+const variableTextAction = (uuid, customOutputName, variableName, propertyName) => ({
+  WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    CustomOutputName: customOutputName,
+    WFTextActionText: variableTextToken(variableName, [
+      property(propertyName),
+      stringCoercion(),
+    ]),
+  },
+});
+
+const hashAction = (uuid, inputUUID, inputName) => ({
+  WFWorkflowActionIdentifier: "is.workflow.actions.hash",
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    WFInput: actionOutput(inputUUID, inputName),
+    WFHashType: "SHA256",
+  },
+});
+
+const lowercaseAction = (uuid, hashUUID) => ({
+  WFWorkflowActionIdentifier: "is.workflow.actions.text.changecase",
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    CustomOutputName: "Lowercase Message ID",
+    WFCaseType: "lowercase",
+    text: outputTextToken(hashUUID, "Hash"),
+  },
+});
+
+const stageAction = ({ uuid, senderUUID, bodyUUID, eventIdUUID, observedAt }) => ({
+  WFWorkflowActionIdentifier: `${APP_BUNDLE_ID}.${STAGE_INTENT}`,
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    AppIntentDescriptor: appIntentDescriptor(STAGE_INTENT),
+    sender: outputTextToken(senderUUID, "Sender Text"),
+    body: outputTextToken(bodyUUID, "Message Body"),
+    eventId: outputTextToken(eventIdUUID, "Lowercase Message ID"),
+    observedAt,
+  },
+});
+
 const stopAction = () => ({
   WFWorkflowActionIdentifier: "is.workflow.actions.exit",
   WFWorkflowActionParameters: {},
@@ -115,6 +184,64 @@ const createLocalCaptureShortcut = () => {
         AppIntentDescriptor: appIntentDescriptor(SETUP_INTENT),
       },
     },
+    // A no-input run is also Wafra's recovery lane. It intentionally rereads a
+    // bounded overlap of the newest retained Messages rather than trusting that
+    // every personal Message automation fired. StageWafraLiveMessageIntent uses
+    // SHA-256(Message.GUID), so rows already captured live are idempotent and
+    // anything genuinely missed is queued through the exact same parser path.
+    {
+      WFWorkflowActionIdentifier: FIND_MESSAGES,
+      WFWorkflowActionParameters: {
+        UUID: ids.catchupFind,
+        AppIntentDescriptor: {
+          TeamIdentifier: "0000000000",
+          BundleIdentifier: "com.apple.MobileSMS",
+          Name: "Messages",
+          AppIntentIdentifier: "MessageEntity",
+          ActionRequiresAppInstallation: true,
+        },
+        WFContentItemFilter: {
+          WFSerializationType: "WFContentPredicateTableTemplate",
+          Value: {
+            WFActionParameterFilterPrefix: 1,
+            WFContentPredicateBoundedDate: false,
+            WFActionParameterFilterTemplates: [],
+          },
+        },
+        WFContentItemSortProperty: "date",
+        WFContentItemSortOrder: "Latest First",
+        WFContentItemLimitEnabled: true,
+        WFContentItemLimitNumber: IOS_LOCAL_CAPTURE_CATCHUP_LIMIT,
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.repeat.each",
+      WFWorkflowActionParameters: {
+        UUID: ids.catchupRepeatGroup,
+        GroupingIdentifier: ids.catchupRepeatGroup,
+        WFControlFlowMode: 0,
+        WFInput: actionOutput(ids.catchupFind, "Message"),
+      },
+    },
+    variableTextAction(ids.catchupSenderText, "Sender Text", "Repeat Item", "Sender"),
+    variableTextAction(ids.catchupMessageBody, "Message Body", "Repeat Item", "Content"),
+    variableTextAction(ids.catchupMessageGuid, "Message GUID", "Repeat Item", "GUID"),
+    hashAction(ids.catchupGuidHash, ids.catchupMessageGuid, "Message GUID"),
+    lowercaseAction(ids.catchupLowercaseHash, ids.catchupGuidHash),
+    stageAction({
+      uuid: ids.catchupStage,
+      senderUUID: ids.catchupSenderText,
+      bodyUUID: ids.catchupMessageBody,
+      eventIdUUID: ids.catchupLowercaseHash,
+      observedAt: variableTextToken("Repeat Item", [property("date")]),
+    }),
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.repeat.each",
+      WFWorkflowActionParameters: {
+        GroupingIdentifier: ids.catchupRepeatGroup,
+        WFControlFlowMode: 2,
+      },
+    },
     stopAction(),
     {
       WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
@@ -126,34 +253,15 @@ const createLocalCaptureShortcut = () => {
     textAction(ids.senderText, "Sender Text", "Sender"),
     textAction(ids.messageBody, "Message Body", "Content"),
     textAction(ids.messageGuid, "Message GUID", "GUID"),
-    {
-      WFWorkflowActionIdentifier: "is.workflow.actions.hash",
-      WFWorkflowActionParameters: {
-        UUID: ids.guidHash,
-        WFInput: actionOutput(ids.messageGuid, "Message GUID"),
-        WFHashType: "SHA256",
-      },
-    },
-    {
-      WFWorkflowActionIdentifier: "is.workflow.actions.text.changecase",
-      WFWorkflowActionParameters: {
-        UUID: ids.lowercaseHash,
-        CustomOutputName: "Lowercase Message ID",
-        WFCaseType: "lowercase",
-        text: outputTextToken(ids.guidHash, "Hash"),
-      },
-    },
-    {
-      WFWorkflowActionIdentifier: `${APP_BUNDLE_ID}.${STAGE_INTENT}`,
-      WFWorkflowActionParameters: {
-        UUID: ids.stage,
-        AppIntentDescriptor: appIntentDescriptor(STAGE_INTENT),
-        sender: outputTextToken(ids.senderText, "Sender Text"),
-        body: outputTextToken(ids.messageBody, "Message Body"),
-        eventId: outputTextToken(ids.lowercaseHash, "Lowercase Message ID"),
-        observedAt: extensionInputTextToken([property("date")]),
-      },
-    },
+    hashAction(ids.guidHash, ids.messageGuid, "Message GUID"),
+    lowercaseAction(ids.lowercaseHash, ids.guidHash),
+    stageAction({
+      uuid: ids.stage,
+      senderUUID: ids.senderText,
+      bodyUUID: ids.messageBody,
+      eventIdUUID: ids.lowercaseHash,
+      observedAt: extensionInputTextToken([property("date")]),
+    }),
     stopAction(),
   ];
 
