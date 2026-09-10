@@ -100,9 +100,11 @@ export function merchantBrandConfidence(candidate: string, resultName: string, d
   return Math.min(0.89, containment * 0.75 + jaccard * 0.14);
 }
 
+const DEFAULT_BRANDFETCH_CLIENT_ID = '1idPBg9EKr252UlBUPZ';
+
 function clientId(): string | null {
   const value = process.env.EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID?.trim();
-  return value ? value : null;
+  return value || DEFAULT_BRANDFETCH_CLIENT_ID;
 }
 
 export function remoteMerchantLogosEnabled(): boolean {
