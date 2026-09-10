@@ -945,19 +945,19 @@ function ktSources(dir) {
       encoding: 'utf8',
     },
   ).status;
-  const captureUrl = 'https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168';
+  const captureUrl = 'https://www.icloud.com/shortcuts/e4bc02cdb9d1475daac800fb78f1574f';
   const historyUrl = 'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158';
   ok('OTA accepts distinct canonical current Shortcut artifacts',
     otaStatus(captureUrl, historyUrl) === 0);
   ok('OTA rejects a Shortcut URL with an explicit port that runtime refuses',
     otaStatus(
-      'https://www.icloud.com:8443/shortcuts/96f93402213144e8885db33f48fc6168',
+      'https://www.icloud.com:8443/shortcuts/e4bc02cdb9d1475daac800fb78f1574f',
       historyUrl,
     ) !== 0);
   ok('OTA compares canonical Shortcut IDs rather than raw URL casing',
     otaStatus(
       captureUrl,
-      'https://www.icloud.com/shortcuts/96F93402213144E8885DB33F48FC6168',
+      'https://www.icloud.com/shortcuts/E4BC02CDB9D1475DAAC800FB78F1574F',
     ) !== 0);
   ok('the replacement Shortcut contract prohibits file-backed configuration',
     /no URL, bearer token, device ID, file action, clipboard action/.test(shortcutSpec) &&

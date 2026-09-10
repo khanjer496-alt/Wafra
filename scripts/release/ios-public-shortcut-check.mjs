@@ -10,7 +10,7 @@ const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
   { kind: 'history', id: '2869584d40ed454691cf3f916cbee158', build: buildHistoryShortcut, verify: verifyHistoryShortcutGraph },
-  { kind: 'future', id: '96f93402213144e8885db33f48fc6168', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
+  { kind: 'future', id: 'e4bc02cdb9d1475daac800fb78f1574f', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
