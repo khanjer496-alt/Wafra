@@ -1,6 +1,4 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
-import { liveAccountIds } from '@/lib/ledger';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -126,18 +124,6 @@ export default function JournalHomeScreen() {
   }, []);
 
   const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
-  const pendingTransfers = useMemo(() => {
-    const pending = reconcileTransfers(state.transactions, state.accounts).pendingIds;
-    const live = liveAccountIds(state.accounts);
-    let pendingCount = 0, incomingFils = 0, outgoingFils = 0;
-    for (const row of state.transactions) {
-      if (!pending.has(row.id) || !live.has(row.accountId) || !inPeriod(row.date, period)) continue;
-      pendingCount += 1;
-      if (row.type === 'income') incomingFils += row.amountFils;
-      else outgoingFils += row.amountFils;
-    }
-    return { pendingCount, incomingFils, outgoingFils };
-  }, [state.transactions, state.accounts, period]);
   const hasPendingReview = reviewCount > 0;
   const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
     // Status/progress changes must not recompute the financial projection.
@@ -145,7 +131,6 @@ export default function JournalHomeScreen() {
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
-  const unresolvedTransfers = dashboard.unresolvedTransfers ?? { count: 0, incomeFils: 0, outgoingFils: 0 };
   const payments = dashboard.upcoming.items;
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
@@ -264,16 +249,14 @@ export default function JournalHomeScreen() {
         <ReferenceHomeSummary theme={theme} language={language} largeText={largeText}
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
           incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
+          cashInFils={dashboard.hero.cashInFils} cashOutFils={dashboard.hero.cashOutFils}
           netFils={dashboard.hero.netFils}
-          netFinal={unresolvedTransfers.count === 0}
-          unresolvedTransferCount={unresolvedTransfers.count}
-          pendingTransferCount={pendingTransfers.pendingCount}
           moneySpec={moneySpec}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/transactions?type=expense')}
-          onTransfers={() => router.push('/review-transfers')} />
+          />
 
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
         {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}

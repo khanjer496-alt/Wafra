@@ -63,27 +63,27 @@ test('changing the shared reporting period changes all three Home figures togeth
     find(previous.render('home'), 'home-net-summary').props.accessibilityLabel);
 });
 
-test('Home keeps unresolved-transfer uncertainty compact instead of turning it into a second dashboard', () => {
+test('Home keeps transfer uncertainty out of the primary dashboard and shows cash In / Out / Net', () => {
   const h = createHarness({ language: 'en', period: { mode: 'all' } });
   const previous = h.deps['@/lib/dashboard-projection'].projectDashboard();
   h.deps['@/lib/dashboard-projection'].projectDashboard = () => ({ ...previous,
-    hero: { incomeFils: 270000000, expenseFils: 345000000, netFils: -75000000 },
-    unresolvedTransfers: { count: 3108, incomeFils: 552029437, outgoingFils: 342305358 },
+    hero: {
+      incomeFils: 270000000,
+      expenseFils: 345000000,
+      cashInFils: 552029437,
+      cashOutFils: 342305358,
+      netFils: 209724079,
+    },
   });
   const tree = h.render('home');
   const net = find(tree, 'home-net-summary');
-  const transferStatus = find(tree, 'home-transfer-status');
+  const out = find(tree, 'home-out-summary');
   const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
-  assert.ok(net && transferStatus);
-  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + '.'));
-  assert.ok(text(net).includes('—'));
-  assert.doesNotMatch(text(net), /750,000|750000/,
-    'a provisional all-time subtotal is not rendered as the headline Net');
-  assert.ok(text(transferStatus).includes(words.transfersExcluded(3108)));
-  assert.doesNotMatch(text(tree), /Confirmed net|Unclear transfers remain|5,520,294\.37|3,423,053\.58|750,000/,
-    'Home does not dump accounting diagnostics into the primary money summary');
-  assert.doesNotMatch(net.props.accessibilityLabel, /1,347,|1,349,/,
-    'unclear transfer cashflow cannot leak into the confirmed headline');
+  assert.ok(net && out);
+  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + ','));
+  assert.ok(out.props.accessibilityLabel.startsWith(words.cashOut + ','));
+  assert.doesNotMatch(text(tree), /Confirmed net|Unclear transfers|Transfers that may be yours|not final|excluded.*transfer/i,
+    'Home does not dump transfer diagnostics into the primary money summary');
 });
 
 test('Home refreshes its conditional prompt after the final review is dismissed without a ledger change', () => {

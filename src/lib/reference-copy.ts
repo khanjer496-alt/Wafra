@@ -65,16 +65,16 @@ export const spendingTrendsCopy = {
 };
 
 export const homeSummaryCopy = {
-  en: { balance: 'Recorded balances', net: 'Net after spending', notBalance: 'Income minus spending · not your bank balance',
-    moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Net', netUnavailable: 'Some transfers are excluded, so Net is not shown.',
+  en: { balance: 'Recorded balances', net: 'Net cash flow', notBalance: 'Money in minus money out · not your bank balance',
+    moneyIn: 'In', moneyOut: 'Spending', cashOut: 'Out', netLabel: 'Net', cashflowNote: 'In and Out follow recorded cash movement. Transfers between your own accounts are excluded automatically.',
     noIncome: 'No confirmed income recorded for this period.',
     transfersExcluded: (count: number) => `${count.toLocaleString('en-US')} transfer${count === 1 ? '' : 's'} excluded`,
     transfersToReview: (count: number) => `${count.toLocaleString('en-US')} to review`,
     add: 'Add', import: 'Import', accounts: 'Accounts', settings: 'Settings',
     spending: 'Spending', viewSpending: 'View money out', income: 'Income this period', period: 'This period', balanceDetail: 'View accounts',
     balanceNote: 'Latest known figures · not a live bank connection' },
-  ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
-    moneyIn: 'الدخل', moneyOut: 'الإنفاق', netLabel: 'الصافي', netUnavailable: 'بعض التحويلات مستبعدة، لذلك لا يظهر الصافي.',
+  ar: { balance: 'الأرصدة المسجلة', net: 'صافي التدفق النقدي', notBalance: 'الأموال الواردة ناقص الأموال الخارجة · ليس رصيد البنك',
+    moneyIn: 'وارد', moneyOut: 'الإنفاق', cashOut: 'خارج', netLabel: 'الصافي', cashflowNote: 'الوارد والخارج يعكسان الحركة النقدية المسجلة. التحويلات بين حساباتك تُستبعد تلقائياً.',
     noIncome: 'لا يوجد دخل مؤكد مسجل لهذه الفترة.',
     transfersExcluded: (count: number) => `${count.toLocaleString('ar-AE')} تحويلات مستبعدة`,
     transfersToReview: (count: number) => `${count.toLocaleString('ar-AE')} للمراجعة`,

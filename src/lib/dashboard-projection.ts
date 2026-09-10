@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInCashflowTotals, countsInTotals, internalTransferIds, isUnresolvedTransferMovement, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
@@ -41,8 +41,9 @@ export interface DashboardProjection {
 
 export interface HomeDashboardProjection extends Pick<DashboardProjection,
   'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
-  hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
-  unresolvedTransfers: { count: number; incomeFils: number; outgoingFils: number };
+  hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'cashOutFils' | 'netFils'> & {
+    cashInFils: number;
+  };
   /** Null when a higher-priority prompt hides this calculation. */
   unreadFormats: DashboardProjection['unreadFormats'] | null;
 }
@@ -60,16 +61,6 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
-  const unresolvedTransfers = { count: 0, incomeFils: 0, outgoingFils: 0 };
-  if (homeOnly) {
-    for (const transaction of state.transactions) {
-      if (!inPeriod(transaction.date, period) ||
-          !isUnresolvedTransferMovement(transaction, liveAccounts, internal)) continue;
-      unresolvedTransfers.count += 1;
-      if (transaction.type === 'income') unresolvedTransfers.incomeFils += transaction.amountFils;
-      else unresolvedTransfers.outgoingFils += transaction.amountFils;
-    }
-  }
   const uncategorisedSummary = uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
   const hideUnreadPrompt = homeOnly && (uncategorised.shouldPrompt ||
@@ -94,12 +85,27 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
       : leavingSoon(state, now, { withinDays: UPCOMING_WITHIN_DAYS }) };
   const accountById = new Map(state.accounts.map((account) => [account.id, account] as const));
   if (homeOnly) {
+    // Home presents two different truths without mixing them:
+    // - Spending is economic spending (purchases etc.).
+    // - In / Out / Net are observed cash movements.
+    // An unpaired transfer therefore remains a real cash movement until Wafra
+    // has evidence it was between the user's own accounts. This avoids turning
+    // normal transfers into a giant "unclear" bucket or making Net disappear.
+    const cashOut = summarizeCashOutflow(state, period, { live: liveAccounts, internal });
+    let cashInFils = 0;
+    for (const transaction of state.transactions) {
+      if (transaction.type !== 'income' || !inPeriod(transaction.date, period) ||
+          !countsInCashflowTotals(transaction, liveAccounts, internal)) continue;
+      cashInFils += transaction.amountFils;
+    }
     return {
-      // The headline is an accounting claim, so it uses only movements whose
-      // role Wafra can actually establish. Unknown transfer-shaped movements
-      // are disclosed separately rather than guessed as income or spending.
-      hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
-      unresolvedTransfers,
+      hero: {
+        incomeFils,
+        expenseFils,
+        cashInFils,
+        cashOutFils: cashOut.totalFils,
+        netFils: cashInFils - cashOut.totalFils,
+      },
       upcoming, activityRows, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };
