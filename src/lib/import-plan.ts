@@ -7,6 +7,7 @@ import {
   bankFromName,
 } from '@/lib/markets';
 import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureInstrument } from '@/lib/dedupe';
+import { readBillAlias } from '@/lib/bill-alias';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
@@ -786,6 +787,7 @@ export function buildImportPlan(
   // reaches an existing row only through the two paths below that both refuse
   // to touch `userEdited`, which is what the sheet's "just future" means.
   const overrides = state.merchantOverrides ?? {};
+  const billAliases = state.billAliases ?? {};
   const applyMerchantOverride = (p: ScannedSms): ScannedSms => {
     if (p.raw !== undefined) return p;
     const hit = overrides[p.merchant.trim().toLowerCase()];
@@ -807,6 +809,20 @@ export function buildImportPlan(
     // it on the Android path: it is the same pin, applied a step later.
     return { ...p, categoryGuess: hit, categoryDeliberate: true, categoryPinned: true };
   };
+  const applyBillAlias = (p: ScannedSms): ScannedSms => {
+    if (p.paymentFlowSide !== 'receipt' || !p.billIdentity) return p;
+    const alias = readBillAlias(billAliases, p.merchant, p.billIdentity);
+    if (!alias) return p;
+    // A bill-specific human correction outranks a merchant-wide guess. The
+    // payment remains the same event: amount/date/account evidence is untouched.
+    return {
+      ...p,
+      merchant: alias.title,
+      categoryGuess: alias.category,
+      categoryDeliberate: true,
+      categoryPinned: true,
+    };
+  };
 
   // Prefer the fuller SMS when a notification and SMS for one event are in
   // the same scan. Processing a slightly-earlier push first used to leave the
@@ -814,7 +830,7 @@ export function buildImportPlan(
   const ordered = [
     ...parsed.filter((p) => p.channel !== 'push'),
     ...parsed.filter((p) => p.channel === 'push'),
-  ].map(applyMerchantOverride);
+  ].map(applyMerchantOverride).map(applyBillAlias);
 
   for (const p of ordered) {
     const date = p.date ?? toISODate(new Date());

@@ -292,6 +292,12 @@ export interface Bill {
   paidMonths: string[];
 }
 
+/** A user-confirmed display/category for one registered bank bill-pay identity. */
+export interface BillAlias {
+  title: string;
+  category: CategoryId;
+}
+
 /** A credit-card statement obligation parsed from SMS (or entered manually). */
 export interface CardDue {
   id: string;
@@ -560,6 +566,12 @@ export interface AppState {
   onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */
   merchantOverrides: Record<string, CategoryId>;
+  /**
+   * User-confirmed bill-pay nickname corrections. Keys combine the privacy-safe
+   * bill identity with the original bank nickname, so a real merchant sharing
+   * that nickname is never relabelled.
+   */
+  billAliases: Record<string, BillAlias>;
   /** Card/account last4 → accountId, learned from SMS. */
   accountHints: Record<string, string>;
   /** Merchants (lowercased) the user marked as NOT a subscription. */

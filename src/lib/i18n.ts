@@ -16,6 +16,20 @@ const S = {
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
   transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
   transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
+  rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
+  billAliasAlso: {
+    en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',
+    ar: 'استخدم {title} · {category} لعدد {n} من الدفعات السابقة المطابقة وللدفعات القادمة لهذا المفوتر.',
+  },
+  billAliasFuture: {
+    en: 'Future matching payments from this biller will use {title} · {category}.',
+    ar: 'ستستخدم الدفعات القادمة المطابقة لهذا المفوتر {title} · {category}.',
+  },
+  registeredBillPayment: { en: 'Bill payment', ar: 'دفعة فاتورة' },
+  billPatternHint: {
+    en: 'Wafra found {count} payments with this same bill reference. If the bank’s name is unclear, edit it once and Wafra can remember the name and category for matching payments.',
+    ar: 'وجد وفرة {count} دفعات تحمل مرجع الفاتورة نفسه. إذا كان اسم البنك غير واضح، عدّله مرة واحدة ويمكن لوفرة تذكّر الاسم والفئة للدفعات المطابقة.',
+  },
   accountTransferHistory: { en: 'Transfers between accounts and to others', ar: 'التحويلات بين حساباتك وإلى الآخرين' },
   transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
   filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },

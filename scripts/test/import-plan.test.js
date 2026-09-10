@@ -36,6 +36,7 @@ const BASE = {
   cardDues: [],
   accountHints: {},
   merchantOverrides: {},
+  billAliases: {},
   lastScanTs: 0,
   parserVersion: 0,
 };
@@ -2115,6 +2116,44 @@ const DECLINE_SMS = [{
   ok('a cardless bill receipt does not promote its fallback account to payment evidence',
     cardlessReceipt?.paymentInstrumentSource === undefined,
     cardlessReceipt);
+
+  const learnedBill = buildImportPlan(
+    utilityFlow.parsed,
+    {
+      ...BASE,
+      billAliases: {
+        'consumer:4036|fishbasket': { title: 'SEWA', category: 'utilities' },
+      },
+    },
+    utilityFlow.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  const learnedReceipt = learnedBill.batch.transactions.find(
+    (row) => row.paymentFlowSide === 'receipt',
+  );
+  ok('a user-confirmed bill alias names and categorises the matching future receipt',
+    learnedReceipt?.title === 'SEWA' && learnedReceipt?.category === 'utilities' &&
+      learnedReceipt?.amountFils === 1216800 && learnedReceipt?.date === '2026-08-01' &&
+      learnedReceipt?.billIdentity === 'consumer:4036',
+    learnedReceipt);
+
+  const wrongIdentity = buildImportPlan(
+    utilityFlow.parsed,
+    {
+      ...BASE,
+      billAliases: {
+        'consumer:9999|fishbasket': { title: 'SEWA', category: 'utilities' },
+      },
+    },
+    utilityFlow.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  const wrongIdentityReceipt = wrongIdentity.batch.transactions.find(
+    (row) => row.paymentFlowSide === 'receipt',
+  );
+  ok('the same bank nickname on a different bill identity is never relabelled',
+    wrongIdentityReceipt?.title === 'Fishbasket' && wrongIdentityReceipt?.category === 'other',
+    wrongIdentityReceipt);
 
   const statedCardReceipt = {
     ...utilityFlow.parsed[1],

@@ -89,6 +89,7 @@ import {
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
 import {
   createHistoryImportProgress,
   requestHistoryImportRun,
@@ -111,6 +112,7 @@ import {
   type Account,
   type AppState,
   type Bill,
+  type BillAlias,
   type Budget,
   type CardDue,
   type CategoryId,
@@ -177,6 +179,7 @@ const EMPTY_STATE: AppState = {
   onboardingPlan: null,
   onboardingCurrencyEvidence: null,
   merchantOverrides: {},
+  billAliases: {},
   accountHints: {},
   notSubscriptions: [],
   lastScanTs: 0,
@@ -656,6 +659,7 @@ type Action =
   | { type: 'upsertCardDue'; due: CardDue }
   | { type: 'payCardDue'; id: string; amountFils: number; transaction: Transaction | null; settledAt: string | null }
   | { type: 'setMerchantOverride'; merchant: string; category: CategoryId; applyToExisting: boolean; direction?: TransactionType }
+  | { type: 'setBillAlias'; sourceTitle: string; billIdentity: string; alias: BillAlias; applyToExisting: boolean }
   | { type: 'setNotSubscription'; merchant: string; dismissed: boolean }
   | { type: 'reassignAccountHint'; last4: string; accountId: string }
   | { type: 'addGoal'; goal: Goal }
@@ -1002,6 +1006,16 @@ function reduceState(state: AppState, action: Action): AppState {
           ? { ...transaction, category: action.category } : transaction) : state.transactions;
       return { ...state, merchantOverrides, transactions };
     }
+    case 'setBillAlias': {
+      const key = billAliasKey(action.sourceTitle, action.billIdentity);
+      const alias = validBillAlias(action.alias.title, action.alias.category);
+      if (!key || !alias) return state;
+      const billAliases = { ...state.billAliases, [key]: alias };
+      const transactions = action.applyToExisting
+        ? applyBillAliasToTransactions(state.transactions, action.sourceTitle, action.billIdentity, alias)
+        : state.transactions;
+      return { ...state, billAliases, transactions };
+    }
     case 'setNotSubscription': {
       const key = action.merchant.trim().toLowerCase();
       const rest = state.notSubscriptions.filter((m) => m !== key);
@@ -1187,6 +1201,7 @@ interface StoreValue {
   upsertCardDue: (due: Omit<CardDue, 'id'>) => void;
   payCardDue: (id: string, amountFils: number, transaction: Omit<Transaction, 'id'> | null, settled: boolean) => void;
   setMerchantOverride: (merchant: string, category: CategoryId, applyToExisting: boolean, direction?: TransactionType) => void;
+  setBillAlias: (sourceTitle: string, billIdentity: string, title: string, category: CategoryId, applyToExisting: boolean) => void;
   setNotSubscription: (merchant: string, dismissed: boolean) => void;
   reassignAccountHint: (last4: string, accountId: string) => void;
   addGoal: (g: Omit<Goal, 'id'>) => void;
@@ -1970,6 +1985,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [dispatch],
   );
 
+  const setBillAlias = useCallback((
+    sourceTitle: string,
+    billIdentity: string,
+    title: string,
+    category: CategoryId,
+    applyToExisting: boolean,
+  ) => {
+    const alias = validBillAlias(title, category);
+    if (!alias) return;
+    dispatch({ type: 'setBillAlias', sourceTitle, billIdentity, alias, applyToExisting });
+  }, [dispatch]);
+
   const setNotSubscription = useCallback((merchant: string, dismissed: boolean) => {
     dispatch({ type: 'setNotSubscription', merchant, dismissed });
   }, [dispatch]);
@@ -2299,6 +2326,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertCardDue,
       payCardDue,
       setMerchantOverride,
+      setBillAlias,
       setNotSubscription,
       reassignAccountHint,
       addGoal,
@@ -2358,6 +2386,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertCardDue,
       payCardDue,
       setMerchantOverride,
+      setBillAlias,
       setNotSubscription,
       reassignAccountHint,
       addGoal,

@@ -44,7 +44,10 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // but never painted as income. Preserve the shipping accounting distinction.
   const arrived = transaction.type === 'income';
   const where = pending ? transferReviewCopy(language).ownershipUnknown
-    : isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
+    : isTransfer ? t('transferLabel', language)
+      : transaction.paymentFlowSide === 'receipt' && transaction.category === 'other'
+        ? t('registeredBillPayment', language)
+        : categoryLabel(meta, language);
   const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
     ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;

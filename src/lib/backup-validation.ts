@@ -81,6 +81,9 @@ const bill: Check = (value) => record(value) && required(value, {
 }) && optional(value, {
   importIdentity: text, yearlyOnISO: isoDate, accountId: id, autoDetected: boolean,
 });
+const billAlias: Check = (value) => record(value) &&
+  required(value, { title: text, category }) &&
+  (value.title as string).trim().length >= 2;
 const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
@@ -107,7 +110,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     if (new Set(categories).size !== categories.length) return false;
   }
   return optional(value, {
-    merchantOverrides: dictionary(category), accountHints: dictionary(id),
+    merchantOverrides: dictionary(category), billAliases: dictionary(billAlias), accountHints: dictionary(id),
     notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,

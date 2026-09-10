@@ -24,6 +24,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import { billAliasAppliesTo } from '@/lib/bill-alias';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
@@ -45,7 +46,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const router = useRouter();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const { state, editTransaction, deleteTransaction, setMerchantOverride } = useStore();
+  const { state, editTransaction, deleteTransaction, setMerchantOverride, setBillAlias } = useStore();
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -70,12 +71,20 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     type: TransactionType;
     count: number;
   } | null>(null);
+  const [billRuleAsk, setBillRuleAsk] = useState<{
+    sourceTitle: string;
+    billIdentity: string;
+    title: string;
+    category: CategoryId;
+    count: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!transaction) return;
     setEditing(false);
     setConfirmingDelete(false);
     setRuleAsk(null);
+    setBillRuleAsk(null);
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -119,6 +128,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     ).length;
   }, [transaction, title, category, state.transactions]);
 
+  const sameBillCount = useMemo(() => {
+    if (!transaction?.billIdentity || transaction.paymentFlowSide !== 'receipt') return 0;
+    return state.transactions.filter((candidate) =>
+      candidate.id !== transaction.id &&
+      billAliasAppliesTo(candidate, transaction.title, transaction.billIdentity!)).length;
+  }, [transaction, state.transactions]);
+
   const hasTransaction = transaction !== null;
   const transferState = useMemo(
     () => hasTransaction ? reconcileTransfers(state.transactions, state.accounts) : null,
@@ -156,6 +172,18 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
     });
     const merchant = title.trim();
+    const billChanged = transaction.paymentFlowSide === 'receipt' && !!transaction.billIdentity &&
+      (merchant !== transaction.title || categoryChanged);
+    if (billChanged) {
+      setBillRuleAsk({
+        sourceTitle: transaction.title,
+        billIdentity: transaction.billIdentity!,
+        title: merchant,
+        category,
+        count: sameBillCount,
+      });
+      return;
+    }
     if (categoryChanged && merchant.length > 2) {
       // The rule question is drawn from inside this sheet now, so the sheet
       // cannot close first the way it did when the question was an OS dialog
@@ -172,6 +200,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   // they commit, so the store call lands after this sheet is on its way out.
   const closeRule = () => {
     setRuleAsk(null);
+    onClose();
+  };
+
+  const closeBillRule = () => {
+    setBillRuleAsk(null);
     onClose();
   };
 
@@ -246,6 +279,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
+      {!editing && transaction.paymentFlowSide === 'receipt' && transaction.billIdentity &&
+        transaction.category === 'other' && sameBillCount > 0 && (
+          <Block>
+            <ThemedText type="smallBold">{t('registeredBillPayment')}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {tf('billPatternHint', { count: sameBillCount + 1 })}
+            </ThemedText>
+          </Block>
+        )}
 
       {editing ? (
         <>
@@ -505,6 +547,51 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           confirmLabel={t('remember')}
           cancelLabel={t('no')}
           onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false, ruleAsk.type)}
+        />
+      )}
+      {billRuleAsk && billRuleAsk.count > 0 && (
+        <ChoiceSheet
+          visible
+          onClose={closeBillRule}
+          title={t('remember')}
+          question={t('rememberThisBill')}
+          body={tf('billAliasAlso', {
+            title: billRuleAsk.title,
+            category: categoryLabel(billRuleAsk.category),
+            n: billRuleAsk.count,
+            s: billRuleAsk.count === 1 ? '' : 's',
+          })}
+          options={[
+            { value: 'future', label: t('justFuture') },
+            { value: 'all', label: t('yesUpdateAll') },
+          ]}
+          onSelect={(scope) => setBillAlias(
+            billRuleAsk.sourceTitle,
+            billRuleAsk.billIdentity,
+            billRuleAsk.title,
+            billRuleAsk.category,
+            scope === 'all',
+          )}
+        />
+      )}
+      {billRuleAsk && billRuleAsk.count === 0 && (
+        <ConfirmSheet
+          visible
+          onClose={closeBillRule}
+          question={t('rememberThisBill')}
+          body={tf('billAliasFuture', {
+            title: billRuleAsk.title,
+            category: categoryLabel(billRuleAsk.category),
+          })}
+          confirmLabel={t('remember')}
+          cancelLabel={t('no')}
+          onConfirm={() => setBillAlias(
+            billRuleAsk.sourceTitle,
+            billRuleAsk.billIdentity,
+            billRuleAsk.title,
+            billRuleAsk.category,
+            false,
+          )}
         />
       )}
     </BottomSheet>

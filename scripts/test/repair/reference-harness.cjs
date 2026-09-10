@@ -53,10 +53,10 @@ function createHarness(options = {}) {
   const subs=[{title:'Netflix',category:'entertainment',lastAmountFils:4000,avgAmountFils:4000,monthlyEquivalentFils:4000,cadence:'monthly',status:'active',group:'subscription',nextExpectedISO:'2026-09-12',lastChargedISO:'2026-08-12',accountId:'credit'},
     {title:'Spotify',category:'entertainment',lastAmountFils:2200,avgAmountFils:2200,monthlyEquivalentFils:2200,cadence:'monthly',status:'active',group:'subscription',nextExpectedISO:'2026-09-18',lastChargedISO:'2026-08-18',accountId:'credit'}];
   const state={hydrated:true,onboarded:true,language:lang,accounts,transactions,budgets,bills,cardDues,goals:[],captureOptOut:false,historyImport:null,
-    privateMode:true,notSubscriptions:[],merchantOverrides:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
+    privateMode:true,notSubscriptions:[],merchantOverrides:{},billAliases:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
-  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const deps={react,'react/jsx-runtime':runtime,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
     'expo-linear-gradient':{LinearGradient:p=>jsx('Gradient',p)},
@@ -96,6 +96,7 @@ function createHarness(options = {}) {
   local('@/lib/transfer-reconciliation','src/lib/transfer-reconciliation.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
+  local('@/lib/bill-alias','src/lib/bill-alias.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
