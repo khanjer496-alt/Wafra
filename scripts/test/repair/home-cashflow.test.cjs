@@ -31,7 +31,6 @@ for (const language of ['en', 'ar']) {
         const difference = incomeFils - expenseFils;
         const sign = difference < 0 ? '−' : difference > 0 ? '+' : '';
         assert.ok(net.props.accessibilityLabel.includes(sign + amount(Math.abs(difference))));
-        assert.ok(net.props.accessibilityLabel.includes(words.cashflowNote));
         assert.equal(net.props.onPress, undefined, 'net is a figure, not a dead button');
         assert.equal(!!find(tree, 'home-no-income-note'), incomeFils === 0);
         assert.ok(!text(tree).includes(words.balance), 'account snapshots do not replace cashflow');
@@ -64,7 +63,7 @@ test('changing the shared reporting period changes all three Home figures togeth
     find(previous.render('home'), 'home-net-summary').props.accessibilityLabel);
 });
 
-test('Home separates unclear transfers from confirmed net instead of guessing their ownership', () => {
+test('Home keeps unresolved-transfer uncertainty compact instead of turning it into a second dashboard', () => {
   const h = createHarness({ language: 'en', period: { mode: 'all' } });
   const previous = h.deps['@/lib/dashboard-projection'].projectDashboard();
   h.deps['@/lib/dashboard-projection'].projectDashboard = () => ({ ...previous,
@@ -73,20 +72,16 @@ test('Home separates unclear transfers from confirmed net instead of guessing th
   });
   const tree = h.render('home');
   const net = find(tree, 'home-net-summary');
-  const unclear = find(tree, 'home-unresolved-transfer-summary');
+  const transferStatus = find(tree, 'home-transfer-status');
   const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
-  assert.ok(net && unclear);
-  assert.ok(net.props.accessibilityLabel.startsWith(words.netPending + '.'));
-  assert.ok(text(net).includes(words.notFinal));
+  assert.ok(net && transferStatus);
+  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + '.'));
+  assert.ok(text(net).includes('—'));
   assert.doesNotMatch(text(net), /750,000|750000/,
     'a provisional all-time subtotal is not rendered as the headline Net');
-  assert.match(text(unclear), /3108/);
-  assert.ok(text(unclear).includes(words.unclearTransfers));
-  assert.ok(text(unclear).includes(words.unclearTransferNote));
-  assert.match(text(unclear), /750,000/,
-    'the confirmed-only subtotal remains available as supporting context');
-  assert.match(text(unclear), /5,520,294\.37/);
-  assert.match(text(unclear), /3,423,053\.58/);
+  assert.ok(text(transferStatus).includes(words.transfersExcluded(3108)));
+  assert.doesNotMatch(text(tree), /Confirmed net|Unclear transfers remain|5,520,294\.37|3,423,053\.58|750,000/,
+    'Home does not dump accounting diagnostics into the primary money summary');
   assert.doesNotMatch(net.props.accessibilityLabel, /1,347,|1,349,/,
     'unclear transfer cashflow cannot leak into the confirmed headline');
 });

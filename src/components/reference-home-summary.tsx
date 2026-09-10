@@ -20,14 +20,14 @@ type Props = {
   netFils: number;
   netFinal: boolean;
   unresolvedTransferCount: number;
-  unresolvedIncomingFils: number;
-  unresolvedOutgoingFils: number;
+  pendingTransferCount: number;
   moneySpec: LedgerMoneySpec;
   onPeriod: () => void;
   onAdd: () => void;
   onSettings: () => void;
   onIncome: () => void;
   onSpending: () => void;
+  onTransfers: () => void;
 };
 
 /** One period, three reconciled figures. Account balances belong in Accounts. */
@@ -79,33 +79,32 @@ export function ReferenceHomeSummary(p: Props) {
       </Pressable>
       <View testID="home-net-summary" accessible accessibilityRole="text"
         accessibilityLabel={p.netFinal
-          ? `${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`
-          : `${w.netPending}. ${w.notFinal}. ${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}.`}
+          ? `${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}`
+          : `${w.netLabel}. ${w.netUnavailable}`}
         style={[styles.metric, p.largeText && styles.metricStacked]}>
-        <ThemedText type="small" themeColor="textSecondary">{p.netFinal ? w.netLabel : w.netPending}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{w.netLabel}</ThemedText>
         {p.netFinal
           ? <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
-          : <ThemedText type="smallBold">{w.notFinal}</ThemedText>}
+          : <ThemedText type="smallBold">—</ThemedText>}
       </View>
       </View>
       {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
         {w.noIncome}</ThemedText>}
-      <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
-      {p.unresolvedTransferCount > 0 && <View testID="home-unresolved-transfer-summary"
-        style={[styles.unclearTransfers, { borderColor: p.theme.cardBorder }]}>
-        <View style={styles.unclearHeading}>
-          <ThemedText type="smallBold">{w.unclearTransfers}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{p.unresolvedTransferCount}</ThemedText>
+      {p.unresolvedTransferCount > 0 && <Pressable testID="home-transfer-status"
+        accessibilityRole={p.pendingTransferCount > 0 ? 'button' : 'text'}
+        accessibilityLabel={`${w.transfersExcluded(p.unresolvedTransferCount)}. ${p.pendingTransferCount > 0 ? w.transfersToReview(p.pendingTransferCount) : w.netUnavailable}`}
+        disabled={p.pendingTransferCount <= 0}
+        onPress={p.onTransfers}
+        style={[styles.transferStatus, { borderColor: p.theme.cardBorder }]}>
+        <View style={styles.transferStatusText}>
+          <Icon name="repeat" size={15} color={p.theme.textSecondary} />
+          <ThemedText type="meta" themeColor="textSecondary">{w.transfersExcluded(p.unresolvedTransferCount)}</ThemedText>
         </View>
-        <ThemedText type="meta" themeColor="textSecondary">{w.unclearTransferNote}</ThemedText>
-        <ThemedText type="meta" tabular themeColor="textSecondary">
-          {w.netLabel}: {currency} {netSign}{formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}
-        </ThemedText>
-        <ThemedText type="meta" tabular themeColor="textSecondary">
-          {currency} {formatMinorUnits(Math.round(p.unresolvedIncomingFils), p.moneySpec)} {w.unclearIn}
-          {' · '}{currency} {formatMinorUnits(Math.round(p.unresolvedOutgoingFils), p.moneySpec)} {w.unclearOut}
-        </ThemedText>
-      </View>}
+        {p.pendingTransferCount > 0 && <View style={styles.transferReviewLink}>
+          <ThemedText type="meta" style={{ color: p.theme.primary }}>{w.transfersToReview(p.pendingTransferCount)}</ThemedText>
+          <Icon name="chevron-right" size={14} color={p.theme.primary} />
+        </View>}
+      </Pressable>}
     </View>
   </View>;
 }
@@ -122,8 +121,9 @@ const styles = StyleSheet.create({
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 12 },
   metric: { flexGrow: 1, flexShrink: 1, flexBasis: '42%', minWidth: 120, minHeight: 48, gap: 6 },
-  unclearTransfers: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, gap: 4 },
-  unclearHeading: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
+  transferStatus: { borderTopWidth: StyleSheet.hairlineWidth, minHeight: 44, paddingTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  transferStatusText: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  transferReviewLink: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metricStacked: { flexBasis: 'auto', alignSelf: 'stretch' },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
 });

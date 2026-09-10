@@ -160,7 +160,7 @@ test('narrow screens give search full width without reducing the font size', () 
   assert.equal(style(filter).alignSelf, 'flex-end');
 });
 
-test('an unresolved transfer makes the transaction Net explicitly unfinished instead of printing a misleading signed total', () => {
+test('an unresolved transfer keeps transaction Net compact and does not print diagnostic subtotals', () => {
   const rows = [
     fixtureRow('purchase', { amountFils: 12500 }),
     fixtureRow('unclear-transfer', {
@@ -171,10 +171,10 @@ test('an unresolved transfer makes the transaction Net explicitly unfinished ins
   const net = netSummary(h);
   const unclear = walk(h.tree).find(n => n.props?.testID === 'transactions-unresolved-transfers');
   assert.ok(net && unclear);
-  assert.ok(text(net).includes(h.deps['@/lib/i18n'].t('transactionNetPending')));
+  assert.ok(text(net).includes(h.deps['@/lib/i18n'].t('transactionNetTotal')));
   assert.ok(text(net).includes('—'));
-  assert.ok(text(unclear).includes(h.deps['@/lib/i18n'].tf('transactionConfirmedSubtotal', { amount: '−AED 125' })));
-  assert.ok(text(unclear).includes('AED 250,000'));
+  assert.ok(text(unclear).includes(h.deps['@/lib/i18n'].tf('unresolvedTransfersSummary', { count: 1, s: '' })));
+  assert.doesNotMatch(text(unclear), /AED 250,000|Confirmed entries|−AED 125/);
 });
 
 const fixtureRow = (id, overrides = {}) => ({

@@ -331,18 +331,12 @@ export default function TransactionsScreen() {
                 </ThemedText>
               )}
               {unresolvedTransfers.count > 0 && (
-                <View testID="transactions-unresolved-transfers">
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {trf('transactionConfirmedSubtotal', {
-                    amount: `${totalShown >= 0 ? '+' : '−'}${formatAED(Math.abs(totalShown), { decimals: false })}`,
-                  })}
-                </ThemedText>
+                <View testID="transactions-unresolved-transfers" style={styles.compactTransferNote}>
+                <Icon name="repeat" size={14} color={theme.textSecondary} />
                 <ThemedText type="meta" themeColor="textSecondary">
                   {trf('unresolvedTransfersSummary', {
                     count: unresolvedTransfers.count,
                     s: unresolvedTransfers.count === 1 ? '' : 's',
-                    incoming: formatAED(unresolvedTransfers.incomeFils, { decimals: false }),
-                    outgoing: formatAED(unresolvedTransfers.outgoingFils, { decimals: false }),
                   })}
                 </ThemedText>
                 </View>
@@ -516,6 +510,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minWidth: 0,
   },
+  compactTransferNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   sectionHeader: {
     flexWrap: 'wrap',

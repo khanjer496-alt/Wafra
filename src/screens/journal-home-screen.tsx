@@ -1,5 +1,4 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
-import { TransferReviewNotice } from '@/components/transfer-review-notice';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { liveAccountIds } from '@/lib/ledger';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -268,14 +267,13 @@ export default function JournalHomeScreen() {
           netFils={dashboard.hero.netFils}
           netFinal={unresolvedTransfers.count === 0}
           unresolvedTransferCount={unresolvedTransfers.count}
-          unresolvedIncomingFils={unresolvedTransfers.incomeFils}
-          unresolvedOutgoingFils={unresolvedTransfers.outgoingFils}
+          pendingTransferCount={pendingTransfers.pendingCount}
           moneySpec={moneySpec}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
-          onSpending={() => router.push('/transactions?type=expense')} />
-        <TransferReviewNotice {...pendingTransfers} onPress={() => router.push('/review-transfers')} />
+          onSpending={() => router.push('/transactions?type=expense')}
+          onTransfers={() => router.push('/review-transfers')} />
 
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
         {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
