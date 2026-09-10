@@ -53,12 +53,13 @@ test('Screenmap output and publishing stay private by default', () => {
   assert.equal(config.scheme, 'wafra');
   assert.equal(config.agent.enabled, false);
   for (const workflow of [baseline, pr]) {
-    assert.match(workflow, /EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'/);
-    assert.match(workflow, /EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'/);
+    assert.match(workflow,
+      /timeout-minutes: 60\n\s+env:\n\s+#?[\s\S]*?EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'[\s\S]*?EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'[\s\S]*?steps:/,
+      'Screenmap flags must be job-scoped so the action-owned Metro bundle receives them');
     assert.match(workflow, /Build local iOS simulator app/);
-    assert.match(workflow, /-configuration Release/,
-      'Screenmap must use an embedded Release JS bundle so EXPO_PUBLIC demo flags are compiled in');
-    assert.match(workflow, /app_path: \$\{\{ runner\.temp \}\}\/wafra-screenmap-derived\/Build\/Products\/Release-iphonesimulator\/Wafra\.app/);
+    assert.match(workflow, /-configuration Debug/,
+      'Screenmap requires a dev-client that can connect to the Metro server started by the action');
+    assert.match(workflow, /app_path: \$\{\{ runner\.temp \}\}\/wafra-screenmap-derived\/Build\/Products\/Debug-iphonesimulator\/Wafra\.app/);
     assert.doesNotMatch(workflow, /expo_token:/);
     assert.doesNotMatch(workflow, /eas_profile:/);
     assert.match(workflow, /publish: 'false'/);
