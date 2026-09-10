@@ -15,6 +15,13 @@ jobs:
   baseline:
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      # Screenmap launches its own Metro process after the native app is built.
+      # Keep these at job scope so BOTH the Expo prebuild and Screenmap's Metro
+      # bundle see the synthetic review flags. A Release app never connects to
+      # that Metro server, so Screenmap must receive a Debug dev-client here.
+      EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,9 +30,6 @@ jobs:
         with:
           node-version: 22.22.3
       - name: Build local iOS simulator app
-        env:
-          EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO: '1'
-          EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'
         run: |
           npm ci
           npx expo prebuild --platform ios --no-install
@@ -33,7 +37,7 @@ jobs:
           xcodebuild \
             -workspace ios/Wafra.xcworkspace \
             -scheme Wafra \
-            -configuration Release \
+            -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/wafra-screenmap-derived" \
@@ -44,7 +48,7 @@ jobs:
       - uses: aleqsio/screenmap@v1
         with:
           mode: baseline
-          app_path: ${{ runner.temp }}/wafra-screenmap-derived/Build/Products/Release-iphonesimulator/Wafra.app
+          app_path: ${{ runner.temp }}/wafra-screenmap-derived/Build/Products/Debug-iphonesimulator/Wafra.app
           simulator: iPhone 17 Pro
           agent_provider: codex
           # Wafra is reviewed privately: keep screenshots in the workflow

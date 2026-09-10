@@ -448,17 +448,13 @@ ok('compact bank shorthand produces exact income, spending and cash-out totals',
     compactCashOut.accountOutflowFils === 171000,
   JSON.stringify({ compactSummary, compactCashOut }));
 {
-  const { reconcileTransfers, applyTransferDecision, transferFingerprint } = require('./build/transfer-reconciliation');
+  const { reconcileTransfers } = require('./build/transfer-reconciliation');
   const review = reconcileTransfers(compactState.transactions, compactState.accounts);
   const pending = compactState.transactions.filter(row => review.pendingIds.has(row.id));
-  ok('compact beneficiary transfer awaits ownership without changing cash movement',
-    pending.length === 1 && pending[0].amountFils === 70000);
-  const external = applyTransferDecision(compactState.transactions, compactState.accounts, {
-    ids: [pending[0].id], ownership: 'external', now: Date.now(),
-    expectedFingerprints: { [pending[0].id]: transferFingerprint(pending[0]) },
-  });
-  ok('confirming that beneficiary as external includes the exact payment in spending',
-    summarizeMonth(external, month).expenseFils === 200799);
+  ok('ordinary named-beneficiary transfer does not create a manual ownership review task',
+    pending.length === 0);
+  ok('ordinary beneficiary transfer remains money out without becoming merchant spending',
+    compactSummary.expenseFils === 130799 && compactCashOut.accountOutflowFils === 171000);
 }
 const compactReplayPlan = buildImportPlan(
   compactParsed,

@@ -128,7 +128,13 @@ export default function ReviewTransfersScreen() {
   const focusedId = showAll ? undefined : transactionId;
   const todayISO = toISODate(new Date());
   const candidates = useMemo<Group[]>(() => filter === 'pending' ? reconciliation.groups : state.transactions
-      .filter((row) => row.transferDecision || (reconciliation.byId.has(row.id) && !reconciliation.pendingIds.has(row.id)))
+      .filter((row) => {
+        if (row.transferDecision) return true;
+        const assessment = reconciliation.byId.get(row.id);
+        return !!assessment && !reconciliation.pendingIds.has(row.id) &&
+          assessment.status !== 'ownership-unknown' && assessment.status !== 'ambiguous' &&
+          !assessment.status.startsWith('likely-');
+      })
       .sort((a, b) => (b.transferDecision?.decidedAt ?? b.ts ?? 0) - (a.transferDecision?.decidedAt ?? a.ts ?? 0))
       .map((row) => ({
         id: `reviewed:${row.id}`, transactionIds: [row.id], accountId: row.accountId, direction: row.type,

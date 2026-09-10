@@ -11,7 +11,7 @@ for (const language of ['en', 'ar']) {
       ['surplus', 200050, 125025], ['deficit', 5010, 1459316],
       ['zero', 0, 0], ['no income recorded', 0, 1459316],
     ]) {
-      test(`${language}/${theme}: ${name} exposes exact in, out and net without a bank balance`, () => {
+      test(`${language}/${theme}: ${name} exposes exact income, spending and net without a bank balance`, () => {
         const h = createHarness({ language, theme, largeText: true, width: 320 });
         const amount = fils => h.deps['@/lib/ledger-money'].formatMinorUnits(fils, h.state.ledgerMoney);
         const previous = h.deps['@/lib/dashboard-projection'].projectDashboard();
@@ -31,7 +31,6 @@ for (const language of ['en', 'ar']) {
         const difference = incomeFils - expenseFils;
         const sign = difference < 0 ? '−' : difference > 0 ? '+' : '';
         assert.ok(net.props.accessibilityLabel.includes(sign + amount(Math.abs(difference))));
-        assert.ok(net.props.accessibilityLabel.includes(words.cashflowNote));
         assert.equal(net.props.onPress, undefined, 'net is a figure, not a dead button');
         assert.equal(!!find(tree, 'home-no-income-note'), incomeFils === 0);
         assert.ok(!text(tree).includes(words.balance), 'account snapshots do not replace cashflow');
@@ -62,6 +61,27 @@ test('changing the shared reporting period changes all three Home figures togeth
   }
   assert.notEqual(find(current.render('home'), 'home-net-summary').props.accessibilityLabel,
     find(previous.render('home'), 'home-net-summary').props.accessibilityLabel);
+});
+
+test('Home keeps transfer uncertainty and raw cash movement out of the primary dashboard', () => {
+  const h = createHarness({ language: 'en', period: { mode: 'all' } });
+  const previous = h.deps['@/lib/dashboard-projection'].projectDashboard();
+  h.deps['@/lib/dashboard-projection'].projectDashboard = () => ({ ...previous,
+    hero: {
+      incomeFils: 240000000,
+      expenseFils: 190000000,
+      netFils: 50000000,
+    },
+  });
+  const tree = h.render('home');
+  const net = find(tree, 'home-net-summary');
+  const words = h.deps['@/lib/reference-copy'].homeSummaryCopy.en;
+  assert.ok(net);
+  assert.ok(net.props.accessibilityLabel.startsWith(words.netLabel + ','));
+  assert.equal(find(tree, 'home-out-summary'), undefined,
+    'raw cash-out is an Accounts detail, not a second Home headline');
+  assert.doesNotMatch(text(tree), /Confirmed net|Unclear transfers|Transfers that may be yours|not final|excluded.*transfer/i,
+    'Home does not dump transfer diagnostics into the primary money summary');
 });
 
 test('Home refreshes its conditional prompt after the final review is dismissed without a ledger change', () => {

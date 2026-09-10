@@ -294,7 +294,9 @@ export default function TransactionsScreen() {
             </ThemedText>
             {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
               {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
-                <ThemedText type="small" themeColor="textSecondary">{tr('transactionNetTotal')}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {tr('transactionNetTotal')}
+                </ThemedText>
               <ThemedText
                 type="smallBold"
                 tabular
@@ -503,6 +505,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minWidth: 0,
   },
+  compactTransferNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   sectionHeader: {
     flexWrap: 'wrap',

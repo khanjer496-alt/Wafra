@@ -594,6 +594,11 @@ function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<
 function reconcile(ctx: Context): TransferReconciliationResult {
   const byId = new Map<string, TransferAssessment>();
   const internalIds = new Set<string>();
+  // All unresolved candidates are assessed for automatic evidence, but only
+  // rows with a credible own-account possibility are put in the user's review
+  // queue. A generic bank transfer with no link to another owned account is a
+  // cash-flow movement, not 1 of thousands of meaningless review chores.
+  const unresolvedIds = new Set<string>();
   const pendingIds = new Set<string>();
   const userLinked = new Set<string>();
   const stale = new Set<string>();
@@ -630,7 +635,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       internalIds.add(tx.id);
       byId.set(tx.id, { id: tx.id, status: 'counterpart-missing', reason: 'missing-counterpart', candidateIds: [] });
     } else {
-      pendingIds.add(tx.id);
+      unresolvedIds.add(tx.id);
       byId.set(tx.id, { id: tx.id, status: 'ownership-unknown',
         reason: eligibleAccount(ctx.accounts.get(tx.accountId)) ? 'missing-evidence' : 'account-unresolved', candidateIds: [] });
     }
@@ -645,6 +650,82 @@ function reconcile(ctx: Context): TransferReconciliationResult {
         stale.add(tx.id);
         if (isTransferMatch(tx.transferMatch)) stale.add(tx.transferMatch.counterpartId);
       }
+    }
+  }
+
+  // If one bank alert already states that a movement is between the user's own
+  // accounts, use that as the ownership proof for a unique matching opposite
+  // posting on another independently known account. This is much stronger than
+  // guessing from amount/time alone: one side is already explicit-own, both
+  // accounts are in the user's ledger, the amount/currency signature matches,
+  // and the timestamps must be within five minutes. Ambiguity leaves every row
+  // untouched and reviewable by stronger evidence later.
+  {
+    const ownRows: TransferRow[] = [];
+    const unresolvedRows: TransferRow[] = [];
+    const movementTime = (tx: Transaction): number | undefined => {
+      const exact = sourceTime(tx);
+      if (exact !== undefined) return exact;
+      const day = typeof tx.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(tx.date)
+        ? Date.parse(`${tx.date}T12:00:00Z`) : NaN;
+      return Number.isFinite(day) ? day : undefined;
+    };
+    const moneyKey = (tx: Transaction) => JSON.stringify([
+      tx.amountFils,
+      tx.originalCurrency ?? null,
+      tx.originalAmountMinor ?? null,
+    ]);
+    for (const tx of ctx.rows.values()) {
+      if (!minor(tx.amountFils) || movementTime(tx) === undefined ||
+          !eligibleAccount(ctx.accounts.get(tx.accountId))) continue;
+      // Only row-local explicit ownership may seed this automatic absorption.
+      // A user-linked own transfer already has an authoritative counterpart and
+      // must never be reused to "prove" a third row just because amount/time
+      // happen to match.
+      const rowLocalOwn = !decisionOf(tx) && (
+        evidenceOf(tx)?.explicitOwn === true ||
+        (manual(tx) && tx.isTransfer === true) ||
+        (tx.isTransfer === true && OWN_TITLE.test(tx.title.trim()))
+      );
+      if (internalIds.has(tx.id) && rowLocalOwn && !isTransferMatch(tx.transferMatch)) ownRows.push(tx);
+      else if (unresolvedIds.has(tx.id)) unresolvedRows.push(tx);
+    }
+    const unresolvedBuckets = new Map<string, TransferRow[]>();
+    for (const tx of unresolvedRows) {
+      const key = JSON.stringify([moneyKey(tx), tx.type]);
+      const bucket = unresolvedBuckets.get(key) ?? [];
+      bucket.push(tx); unresolvedBuckets.set(key, bucket);
+    }
+    const possible = new Map<string, string[]>();
+    const reverseCount = new Map<string, number>();
+    for (const own of ownRows) {
+      const opposite = own.type === 'income' ? 'expense' : 'income';
+      const bucket = unresolvedBuckets.get(JSON.stringify([moneyKey(own), opposite])) ?? [];
+      const at = movementTime(own)!;
+      const candidates = bucket.filter(other => other.accountId !== own.accountId &&
+        // Exact source clocks use the tight five-minute window. Rows imported
+        // without clocks can still pair only when they share one calendar day;
+        // mutual uniqueness below prevents repeated same-amount sweeps from
+        // being guessed.
+        (sourceTime(own) !== undefined && sourceTime(other) !== undefined
+          ? Math.abs(movementTime(other)! - at) <= 5 * 60_000
+          : other.date === own.date));
+      possible.set(own.id, candidates.map(row => row.id));
+      for (const candidate of candidates) reverseCount.set(candidate.id, (reverseCount.get(candidate.id) ?? 0) + 1);
+    }
+    for (const own of ownRows) {
+      const candidates = possible.get(own.id) ?? [];
+      if (candidates.length !== 1 || reverseCount.get(candidates[0]) !== 1) continue;
+      const counterpartId = candidates[0];
+      const counterpart = ctx.rows.get(counterpartId);
+      if (!counterpart) continue;
+      internalIds.add(counterpartId);
+      unresolvedIds.delete(counterpartId);
+      pendingIds.delete(counterpartId);
+      byId.set(own.id, { id: own.id, status: 'confirmed-own', reason: 'explicit-ownership',
+        counterpartId, candidateIds: [] });
+      byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'explicit-ownership',
+        counterpartId: own.id, candidateIds: [] });
     }
   }
   const indexes = new Map<string, Entry[]>();
@@ -701,18 +782,28 @@ function reconcile(ctx: Context): TransferReconciliationResult {
     const reverse = only ? candidates.get(only) : undefined;
     if (!overflow.has(txId) && only && reverse?.size === 1 && reverse.has(txId) && !overflow.has(only)) {
       internalIds.add(txId); pendingIds.delete(txId);
+      unresolvedIds.delete(txId);
       byId.set(txId, { id: txId, status: 'confirmed-own', reason: possible.get(only)!,
         counterpartId: only, candidateIds: [] });
     } else if (!own && (ids.length > 0 || overflow.has(txId) || ctx.entries.get(txId)?.referenceReused)) {
+      pendingIds.add(txId);
       byId.set(txId, { id: txId, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: ids });
     }
   }
-  const cardRepaymentPairs = observedCardRepayments(ctx, new Set([...pendingIds, ...knownCardRepayments.keys()]), corroboratingIds);
+  const cardRepaymentPairs = observedCardRepayments(ctx, new Set([...unresolvedIds, ...knownCardRepayments.keys()]), corroboratingIds);
   for (const [debitId, receiptId] of cardRepaymentPairs) {
+    unresolvedIds.delete(debitId);
     pendingIds.delete(debitId);
     byId.set(debitId, { id: debitId, status: 'card-repayment', reason: 'credit-card-receipt', counterpartId: receiptId, candidateIds: [] });
   }
-  suggestObservedPairs(ctx, pendingIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
+  suggestObservedPairs(ctx, unresolvedIds, internalIds, corroboratingIds, cardRepaymentPairs, byId);
+  // Suggestions are deliberately non-destructive: they are the small subset
+  // worth asking the user about. Everything else unresolved defaults to normal
+  // cash-flow treatment and remains editable from the transaction itself.
+  for (const txId of unresolvedIds) {
+    const status = byId.get(txId)?.status;
+    if (status === 'likely-own' || status === 'likely-card-repayment') pendingIds.add(txId);
+  }
   const groups = new Map<string, TransferReviewGroup>();
   for (const txId of pendingIds) {
     const tx = ctx.rows.get(txId)!;

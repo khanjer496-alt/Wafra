@@ -74,7 +74,7 @@ export function ReferenceHomeSummary(p: Props) {
         <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" color={p.theme.income} />
       </Pressable>
       <View testID="home-net-summary" accessible accessibilityRole="text"
-        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}. ${w.cashflowNote}`}
+        accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}`}
         style={[styles.metric, p.largeText && styles.metricStacked]}>
         <ThemedText type="small" themeColor="textSecondary">{w.netLabel}</ThemedText>
         <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />

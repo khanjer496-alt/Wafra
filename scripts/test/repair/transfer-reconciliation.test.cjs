@@ -49,18 +49,18 @@ test('equal amounts and clocks cannot turn unknown bank transfers into own trans
   const rows = [row('out', 'expense', { isTransfer: true }), row('in', 'income')];
   const result = reconcileTransfers(rows, accounts);
   assert.deepEqual(sorted(result.internalIds), []);
-  assert.deepEqual(sorted(result.pendingIds), ['in', 'out']);
+  assert.deepEqual(sorted(result.pendingIds), [], 'low-signal transfers are not a manual-review backlog');
   assert.equal(transferOwnership(rows[0]), 'unknown');
   assert.equal(result.byId.get('out').reason, 'missing-evidence');
 });
 
-test('legacy outward-remittance and telegraphic-transfer SMS titles remain pending without evidence', () => {
+test('legacy outward-remittance and telegraphic-transfer SMS titles remain recorded without forcing review', () => {
   for (const title of ['Outward remittance', 'Telegraphic transfer']) {
     const tx = row('legacy-transfer', 'expense', { title, isTransfer: true, transferEvidence: undefined });
     assert.equal(isTransferCandidate(tx), true, title);
     assert.equal(transferOwnership(tx), 'unknown', title);
     const result = reconcileTransfers([tx], accounts);
-    assert.equal(result.pendingIds.has(tx.id), true, title);
+    assert.equal(result.pendingIds.has(tx.id), false, title);
     assert.equal(result.internalIds.has(tx.id), false, title);
   }
 });
@@ -78,7 +78,7 @@ test('only transfer semantics enter reconciliation; commerce and settlement role
   assert.equal(isTransferCandidate(row('x', 'income', { transferEvidence: undefined })), true);
 });
 
-test('a generic LLC-style transfer remains pending when reparsing changes Other to Business', () => {
+test('a generic LLC-style transfer stays unresolved without becoming a mandatory review task', () => {
   const original = row('generic-llc-credit', 'income', { transferEvidence: undefined,
     raw: 'Funds credited. B/O EXAMPLE TRADING LLC.' });
   const reclassified = { ...original, category: 'business' };
@@ -86,10 +86,22 @@ test('a generic LLC-style transfer remains pending when reparsing changes Other 
     assert.equal(isTransferCandidate(tx), true);
     assert.equal(transferOwnership(tx), 'unknown');
     const result = reconcileTransfers([tx], accounts);
-    assert.equal(result.pendingIds.has(tx.id), true);
+    assert.equal(result.pendingIds.has(tx.id), false);
     assert.equal(result.internalIds.has(tx.id), false);
     assert.equal(ledger.isIncome(tx), false, 'an inferred Business category does not prove external ownership');
   }
+});
+
+test('an explicit own-account side automatically absorbs one unique matching opposite posting', () => {
+  const rows = [
+    row('out', 'expense', { accountId: 'a', title: 'Own account transfer', isTransfer: true, ts: NOW }),
+    row('in', 'income', { accountId: 'b', title: 'Incoming transfer', isTransfer: true, ts: NOW + 35_000 }),
+  ];
+  const result = reconcileTransfers(rows, accounts);
+  assert.deepEqual(sorted(result.internalIds), ['in', 'out']);
+  assert.deepEqual(sorted(result.pendingIds), []);
+  assert.equal(result.byId.get('in').reason, 'explicit-ownership');
+  assert.equal(result.byId.get('out').counterpartId, 'in');
 });
 
 test('generic Business-labelled transfers still match evidence while named business receipts remain income', () => {
@@ -285,7 +297,7 @@ test('competing three-way matches stay ambiguous, independent of input order', (
   }
 });
 
-test('user decisions override inference and undo reopens unknown review', () => {
+test('user decisions override inference and undo returns low-signal transfers to normal cash flow', () => {
   const rows = [row('out')];
   const decided = applyTransferDecision(rows, accounts, request(rows, ['out'], 'external'));
   assert.equal(transferOwnership(decided[0]), 'external');
@@ -293,6 +305,7 @@ test('user decisions override inference and undo reopens unknown review', () => 
   const undone = applyTransferDecision(decided, accounts, request(decided, ['out'], null));
   assert.equal(transferOwnership(undone[0]), 'unknown');
   assert.equal(undone[0].transferDecision, undefined);
+  assert.equal(reconcileTransfers(undone, accounts).pendingIds.has('out'), false);
 });
 
 test('valid user ownership survives later semantic changes and remains undoable', () => {
@@ -414,20 +427,20 @@ test('reconciliation reuses only the last immutable array pair and recomputes fr
   assert.notEqual(reconcileTransfers(rows, [...accounts]), result);
 });
 
-test('review groups use stable opaque IDs and bulk only a known counterparty identity', () => {
+test('low-signal counterparty hints do not create transfer-review backlog or false ownership', () => {
   const rows = [row('one'), row('two'), row('known1', 'expense', { transferEvidence: {
     version: 1, currency: 'AED', attribution: 'source', counterparty: instrument(accounts[2]) } }),
   row('known2', 'expense', { transferEvidence: {
     version: 1, currency: 'AED', attribution: 'source', counterparty: instrument(accounts[2]) } })];
   const r = reconcileTransfers(rows, accounts);
-  assert.equal(r.groups.length, 2);
-  const bulk = r.groups.find(g => g.bulkEligible);
-  assert.deepEqual([...bulk.transactionIds].sort(), ['known1', 'known2']);
-  assert.ok(r.groups.every(g => !g.id.includes('3333') && !g.id.includes('ADCB')));
+  assert.equal(r.groups.length, 0);
+  assert.equal(r.pendingIds.size, 0);
+  assert.equal(r.internalIds.has('known1'), false);
+  assert.equal(r.internalIds.has('known2'), false);
   assert.deepEqual(r.groups.map(g => g.id).sort(), reconcileTransfers([...rows].reverse(), accounts).groups.map(g => g.id).sort());
 });
 
-test('bulk decisions reject unknown or mixed counterparties at the atomic resolver boundary', () => {
+test('bulk decisions reject low-signal or already-auto-resolved transfers at the atomic resolver boundary', () => {
   const knownEvidence = { version: 1, currency: 'AED', attribution: 'source',
     counterparty: instrument(accounts[2]) };
   const unknown = [row('one'), row('two')];
@@ -446,10 +459,8 @@ test('bulk decisions reject unknown or mixed counterparties at the atomic resolv
         /counterparty|group/i);
       assert.deepEqual(clone(rows), before, 'rejected bulk decisions change nothing');
     }
-    const decided = applyTransferDecision(known, accounts, request(known, ['one', 'two'], ownership));
-    assert.equal(decided[0].transferDecision.ownership, ownership);
-    assert.equal(decided[1].transferDecision.ownership, ownership);
-    assert.equal(decided[2].transferDecision, undefined, 'only the selected known-group subset changes');
+    assert.throws(() => applyTransferDecision(known, accounts, request(known, ['one', 'two'], ownership)),
+      /counterparty|group/i, 'automatically resolved ownership is corrected individually, not via a catchall bulk action');
   }
 });
 
