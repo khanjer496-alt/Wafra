@@ -26,11 +26,9 @@ export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | nu
     return `https://www.icloud.com/shortcuts/${id}`;
   }
 
-  // TestFlight can pin an Apple-signed Shortcut file to Wafra's own GitHub
-  // release until the equivalent iCloud share URL is published. Keep this
-  // allowlist exact so an arbitrary download can never become setup input.
-  const releaseMatch = /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/([A-Za-z0-9._-]+)\/Wafra-Local-Capture-signed\.shortcut$/.exec(value);
-  if (releaseMatch) return value;
+  // Production onboarding must only use Apple's public iCloud Shortcut share.
+  // GitHub-hosted .shortcut artifacts are intentionally rejected so an old
+  // beta fallback can never hijack the Add Shortcut CTA.
 
   return null;
 }
