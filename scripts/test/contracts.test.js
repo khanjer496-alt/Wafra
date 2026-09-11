@@ -999,7 +999,7 @@ function ktSources(dir) {
     /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
       /shouldReplayJoinedAutoImport/.test(home) &&
       /return startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home) &&
-      /if \(outcome === 'up-to-date'\)[\s\S]*upToDateNoNew/.test(home));
+      /if \([^\n]*outcome === 'up-to-date'\)[\s\S]*upToDateNoNew/.test(home));
 }
 
 /* ── every tab that shows captured money can go and refresh it ──────── */
@@ -1097,7 +1097,7 @@ function ktSources(dir) {
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
       /Platform\.OS !== 'ios'[\s\S]*Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS/.test(hook) &&
-      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated \|\| historyJustCompleted\);/.test(hook));
+      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated\);/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
   // who has just erased everything and is being shown the Shortcut cleanup
@@ -1736,7 +1736,7 @@ ok('the spoken label agrees with the sign on screen',
     /categorySupportsType\(action\.category, direction\)/.test(branch) && /scopedMerchantOverrideKey\(key, direction\)/.test(branch),
     'a merchant rule must use its explicit direction and preserve the opposite direction');
   ok('the entry sheet asks that same question before printing a count',
-    /overrideFitsDirection\(category, transaction\.type\)/.test(sheet),
+    /overrideFitsDirection\((?:category|nextCategory), transaction\.type\)/.test(sheet),
     'a prompt offering "also update 5 entries" over a rule that moves none of them');
   ok('the count on the categorise list is the override predicate, not candidacy',
     /if \(!overrideAppliesTo\(t, key\)\) continue;/.test(uncat) &&
