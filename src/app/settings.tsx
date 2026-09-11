@@ -1407,6 +1407,11 @@ export default function SettingsScreen() {
           {linkRow(t('language'), languagePreference === 'system'
             ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
             : LANGUAGE_NAMES[language], () => setRegionSheet('language'))}
+          {linkRow(
+            t('homeCustomizeTitle'),
+            t('homeCustomizeDetail'),
+            () => router.push('/home-customize'),
+          )}
           {ledgerCurrencyLocked ? (
             <Row
               last

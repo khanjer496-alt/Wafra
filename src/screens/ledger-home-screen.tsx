@@ -2,7 +2,7 @@
  * Money overview, capture status and recent activity.
  * Detailed spending insights live on Flow; upcoming payments remain actionable below.
  */
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
@@ -13,6 +13,7 @@ import { TransactionRow } from '@/components/transaction-row';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
+import { InsightCard } from '@/components/insight-card';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { MotionReveal } from '@/components/ui/motion-reveal';
@@ -43,6 +44,7 @@ import type { CardDue, Transaction } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
 import { t, tf } from '@/lib/i18n';
 import { projectDashboard } from '@/lib/dashboard-projection';
+import { DEFAULT_HOME_WIDGETS, homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import type { UncategorisedSummary } from '@/lib/uncategorised';
@@ -642,6 +644,12 @@ export default function LedgerHomeScreen() {
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
+  const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(DEFAULT_HOME_WIDGETS);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void loadHomeWidgetPreferences().then((next) => { if (active) setHomeWidgets(next); });
+    return () => { active = false; };
+  }, []));
   const lastFxAttempt = React.useRef('');
   /** A dated outgoing opens the sheet for whatever kind of thing it is. */
   const openOutgoing = useCallback(
@@ -814,89 +822,97 @@ export default function LedgerHomeScreen() {
               .then(() => beginHistoryImport())}
           />
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Ask Wafra Assistant"
-            onPress={() => router.push('/assistant')}
-            style={[styles.assistantEntry, { borderColor: theme.cardBorder }]}>
-            <View style={[styles.assistantIcon, { backgroundColor: theme.primarySoft }]}>
-              <Icon name="spark" size={18} color={theme.primary} />
-            </View>
-            <View style={styles.assistantCopy}>
-              <ThemedText type="smallBold">Ask Wafra</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">Understand spending, income and subscriptions from your ledger.</ThemedText>
-            </View>
-            <Icon name="chevron-right" size={17} color={theme.textTertiary} />
-          </Pressable>
-
-
-
-          {/* One next action, not four competing notices. */}
+          {/* Data-quality and review work is operational, not decoration: it stays visible even when Home is customized. */}
           {(reviewAlertCount > 0 || dashboard.uncategorised.shouldPrompt || dashboard.unreadFormats.shouldPrompt) && (
-          <MotionReveal delay={165} distance={16} scaleFrom={0.975}>
-            {reviewAlertCount > 0 ? (
-              <ReviewAlertsPrompt
-                count={reviewAlertCount}
-                onPress={() => router.push('/review-alerts')}
-              />
-            ) : dashboard.uncategorised.shouldPrompt ? (
-              <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
-            ) : dashboard.unreadFormats.shouldPrompt ? (
-              <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
-            ) : null}
-          </MotionReveal>
+            <MotionReveal delay={125} distance={16} scaleFrom={0.975}>
+              {reviewAlertCount > 0 ? (
+                <ReviewAlertsPrompt count={reviewAlertCount} onPress={() => router.push('/review-alerts')} />
+              ) : dashboard.uncategorised.shouldPrompt ? (
+                <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
+              ) : dashboard.unreadFormats.shouldPrompt ? (
+                <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
+              ) : null}
+            </MotionReveal>
           )}
 
-          {duePayments.length > 0 && (
-          <MotionReveal delay={215} distance={18} scaleFrom={0.97}>
-            <LeavingSoon
-              items={duePayments}
-              title={t('homeDuePayments')}
-              onOpen={openOutgoing}
-            />
-          </MotionReveal>
-          )}
-          <MotionReveal delay={265} distance={20} scaleFrom={0.97} style={styles.section}>
-            <SectionHeader
-              title={dashboard.live ? t('recentActivity') : periodLabel(period)}
-              right={t('allActivity')}
-              onPressRight={() => router.push('/transactions')}
-            />
-            {dashboard.activityRows.map((tx, i) => (
-              <View
-                key={tx.id}
-                style={
-                  i > 0
-                    ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }
-                    : undefined
-                }>
-                <TransactionRow
-                  transaction={tx}
-                  account={dashboard.accountById.get(tx.accountId)}
-                  onPress={setEntry}
-                  internal={dashboard.internalTransactionIds.has(tx.id)}
-                />
-              </View>
-            ))}
-            {dashboard.activityRows.length === 0 && (
-              <EmptyMonth
-                monthName={periodLabel(period)}
-                onReadInbox={() => void runAutoImport(true)}
-                primaryLabel={t('checkBankAlerts')}
-                onAddManually={() => router.push('/add-transaction')}
-              />
-            )}
-          </MotionReveal>
-
-          {upcomingPayments.length > 0 && (
-          <MotionReveal delay={215} distance={18} scaleFrom={0.97}>
-            <LeavingSoon
-              items={upcomingPayments}
-              title={t('homeUpcomingPayments')}
-              onOpen={openOutgoing}
-            />
-          </MotionReveal>
-          )}
+          {homeWidgets.order.map((widgetId: HomeWidgetId, widgetIndex) => {
+            if (!homeWidgetVisible(homeWidgets, widgetId)) return null;
+            const delay = 145 + widgetIndex * 40;
+            if (widgetId === 'assistant') {
+              return (
+                <MotionReveal key={widgetId} delay={delay} distance={14} scaleFrom={0.98}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('homeWidgetAssistantTitle')}
+                    onPress={() => router.push('/assistant')}
+                    style={[styles.assistantEntry, { borderColor: theme.cardBorder }]}>
+                    <View style={[styles.assistantIcon, { backgroundColor: theme.primarySoft }]}>
+                      <Icon name="spark" size={18} color={theme.primary} />
+                    </View>
+                    <View style={styles.assistantCopy}>
+                      <ThemedText type="smallBold">{t('homeWidgetAssistantTitle')}</ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary">{t('homeWidgetAssistantDetail')}</ThemedText>
+                    </View>
+                    <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+                  </Pressable>
+                </MotionReveal>
+              );
+            }
+            if (widgetId === 'insight') {
+              return dashboard.insight ? (
+                <MotionReveal key={widgetId} delay={delay} distance={14} scaleFrom={0.98} style={styles.section}>
+                  <SectionHeader title={t('insightsTitle')} />
+                  <InsightCard insight={dashboard.insight} />
+                </MotionReveal>
+              ) : null;
+            }
+            if (widgetId === 'due') {
+              return duePayments.length > 0 ? (
+                <MotionReveal key={widgetId} delay={delay} distance={16} scaleFrom={0.975}>
+                  <LeavingSoon items={duePayments} title={t('homeDuePayments')} onOpen={openOutgoing} />
+                </MotionReveal>
+              ) : null;
+            }
+            if (widgetId === 'activity') {
+              return (
+                <MotionReveal key={widgetId} delay={delay} distance={18} scaleFrom={0.97} style={styles.section}>
+                  <SectionHeader
+                    title={dashboard.live ? t('recentActivity') : periodLabel(period)}
+                    right={t('allActivity')}
+                    onPressRight={() => router.push('/transactions')}
+                  />
+                  {dashboard.activityRows.map((tx, i) => (
+                    <View
+                      key={tx.id}
+                      style={i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder } : undefined}>
+                      <TransactionRow
+                        transaction={tx}
+                        account={dashboard.accountById.get(tx.accountId)}
+                        onPress={setEntry}
+                        internal={dashboard.internalTransactionIds.has(tx.id)}
+                      />
+                    </View>
+                  ))}
+                  {dashboard.activityRows.length === 0 && (
+                    <EmptyMonth
+                      monthName={periodLabel(period)}
+                      onReadInbox={() => void runAutoImport(true)}
+                      primaryLabel={t('checkBankAlerts')}
+                      onAddManually={() => router.push('/add-transaction')}
+                    />
+                  )}
+                </MotionReveal>
+              );
+            }
+            if (widgetId === 'upcoming') {
+              return upcomingPayments.length > 0 ? (
+                <MotionReveal key={widgetId} delay={delay} distance={16} scaleFrom={0.975}>
+                  <LeavingSoon items={upcomingPayments} title={t('homeUpcomingPayments')} onOpen={openOutgoing} />
+                </MotionReveal>
+              ) : null;
+            }
+            return null;
+          })}
           </>
         )}
       </ScreenScaffold>
