@@ -249,6 +249,36 @@ ok('due-only utility wording stays a reminder rather than becoming spending',
     billDue.parsed.kind === 'billDue' && billDue.parsed.amountFils === 45000,
   JSON.stringify(billDue));
 
+const eandReminder = interpretBankAlert({
+  source: 'Your e& postpaid bill of AED 318.50 is ready to pay. Please pay by 18/09/2026.',
+  sender: 'Etisalat',
+  market: 'AE',
+});
+ok('an e& bill-to-pay reminder is an obligation, never a transaction',
+  eandReminder.outcome === 'parsed' && eandReminder.meaning === 'bill-due' &&
+    eandReminder.parsed.kind === 'billDue' && eandReminder.parsed.transferHint === false,
+  JSON.stringify(eandReminder));
+
+const eandBankPayment = interpretBankAlert({
+  source: 'BILLPAY AED 318.50 DR A/C 1234 ETISALAT CONSUMER 998877 SUCCESSFUL',
+  sender: 'FAB',
+  market: 'AE',
+});
+ok('bank-side Etisalat billpay keeps the provider identity',
+  eandBankPayment.outcome === 'parsed' && eandBankPayment.meaning === 'utility-payment' &&
+    eandBankPayment.parsed.merchant === 'E&',
+  JSON.stringify(eandBankPayment));
+
+const ownOtherAccount = interpretBankAlert({
+  source: 'AED 2,000.00 transferred from my account 1234 to my other account 7788 successfully.',
+  sender: 'FAB',
+  market: 'AE',
+});
+ok('transfer to my other account is internal money movement, not spending',
+  ownOtherAccount.outcome === 'parsed' && ownOtherAccount.meaning === 'own-account-transfer' &&
+    ownOtherAccount.parsed.transferHint === true && ownOtherAccount.parsed.merchant === 'Own account transfer',
+  JSON.stringify(ownOtherAccount));
+
 const cardStatement = interpretBankAlert({
   source: 'Your Credit Card ending 4821 statement is generated. Total due AED 3,240.00, minimum due AED 162.00 by 05/08/2026.',
   sender: 'FAB',

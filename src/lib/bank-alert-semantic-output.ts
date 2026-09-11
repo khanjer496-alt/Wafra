@@ -121,7 +121,14 @@ const genericMerchant = (
   if (meaning === 'card-settlement') {
     return card?.last4 ? `Card •${card.last4} payment` : 'Card payment';
   }
-  if (meaning === 'utility-payment') return 'Utility payment';
+  if (meaning === 'utility-payment') {
+    if (/(?:\betisalat\b|\be&(?=\s|$)|\beand(?:\.ae)?\b)/iu.test(source)) return 'E&';
+    if (/\bdewa\b/iu.test(source)) return 'DEWA';
+    if (/\bsewa\b/iu.test(source)) return 'SEWA';
+    if (/\bdu\b/iu.test(source)) return 'du';
+    if (/\bstc\b/iu.test(source)) return 'STC';
+    return 'Utility payment';
+  }
   if (meaning === 'cash-withdrawal') return 'ATM withdrawal';
   if (meaning === 'refund') return 'Refund';
   return feeMerchant(source);

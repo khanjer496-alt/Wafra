@@ -313,8 +313,14 @@ export interface ParsedCard {
  * Fbinter and Nazemhome absent from Spending. This reread is deduplicated by
  * provider/source identity and heals existing rows in place; it does not create
  * a second copy of already-imported transactions.
+ *
+ * 42: friend-feedback accounting repair. Explicit moves to the user's own or
+ * other account stay internal instead of becoming spending; bank-side e& /
+ * Etisalat bill-pay keeps the provider name; and “bill to pay” reminders are
+ * obligations rather than posted transactions. Re-read Android history once
+ * so already-imported parser-owned rows can be healed in place.
  */
-export const PARSER_VERSION = 41;
+export const PARSER_VERSION = 42;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -641,7 +647,7 @@ const AR_DEBIT_WORDS =
 // recognised, so a STATEMENT fell through to the transaction path and imported
 // as a AED 154.32 purchase at a shop called "Last Stmt 2022-05-11" — spending
 // the user never did, and no payment reminder for the money they do owe.
-const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\b(?:payment|pymt)\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
+const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable|to\s+pay)\b|\bbill amount\b|\bamount\s+payable\b|\bpay\s+by\b|\b(?:payment|pymt)\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
 /**
  * The two clauses a bill REMINDER ends with, neither of which says money moved.
  *
@@ -5333,9 +5339,10 @@ function parseSmsInner(
       if (billName) merchant = billName[1].trim();
     }
   }
+  const explicitOwnAccountMove = /\b(?:transferred|moved|sent)\b[^.\n]{0,96}\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\b(?:to|into)\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b/i.test(raw);
   let transferHint =
     !isBillDue &&
-    (TRANSFER_HINT_RE.test(raw) ||
+    (explicitOwnAccountMove || TRANSFER_HINT_RE.test(raw) ||
       (OWN_DESTINATION_RE.test(prose) && OUTGOING_MOVE_RE.test(prose)));
   descriptor = merchant;
   merchant = cleanDescriptor(merchant);
@@ -5362,6 +5369,10 @@ function parseSmsInner(
   // but calling them "Card purchase" was wrong twice over, and a row that
   // reads "Transfer to Khalid Rashid" needs no category at all.
   let structuralMerchant = false;
+  if (explicitOwnAccountMove) {
+    merchant = 'Own account transfer';
+    structuralMerchant = true;
+  }
   // "RULE TRANSFER TO SAVINGS WITH ONE-SHOT SAVING" — an automated sweep into
   // the user's own savings pot. It is the clearest possible self-transfer, and
   // three of them were being counted as spending.
