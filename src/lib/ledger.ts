@@ -28,7 +28,7 @@ export function isTransfer(transaction: Transaction): boolean {
  */
 export function isMoneyMovementOnly(transaction: Transaction): boolean {
   if (transaction.category === 'cash-withdrawal' || transaction.category === 'investing') return true;
-  return transaction.type === 'income' && transaction.title.trim().toLowerCase() === 'cash deposit';
+  return transaction.type === 'income' && transaction.title?.trim().toLowerCase() === 'cash deposit';
 }
 
 export function countsInTotals(
