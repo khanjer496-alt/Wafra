@@ -169,6 +169,11 @@ ok('opening the database verifies the key against page 1',
   /sqlite_master/.test(storage),
   'PRAGMA key never fails; only a read proves the key is right');
 
+ok('ledger chunk hydration uses one batched SQLite read',
+  /SELECT key, value FROM \$\{TABLE\} WHERE key IN/.test(storage) &&
+    /getAllAsync<\{ key: string; value: string \}>/.test(storage),
+  'cold launch must not execute one bridged SQLite query per 400-row transaction chunk');
+
 // ---------------------------------------------------------------------------
 // 1a. Serialisation, asserted structurally.
 //

@@ -206,20 +206,22 @@ const encryptedStorage: StateStorage = {
   },
 
   async multiGet(keys) {
+    if (keys.length === 0) return [];
     try {
       const db = await openEncryptedDatabase();
-      const statement = await db.prepareAsync(`SELECT value FROM ${TABLE} WHERE key = ?`);
-      try {
-        const rows: Pair[] = [];
-        for (const key of keys) {
-          const result = await statement.executeAsync<{ value: string }>(key);
-          const row = await result.getFirstAsync();
-          rows.push([key, row?.value ?? null]);
-        }
-        return rows;
-      } finally {
-        await statement.finalizeAsync();
-      }
+      // Hydration asks for every transaction chunk at once. The previous
+      // implementation reused one prepared statement but still executed one
+      // native SQLite round-trip per chunk, so launch time grew linearly with
+      // ledger history (25 chunks meant 25 bridged queries before React could
+      // leave "Loading your ledger"). Read the requested chunk set in one
+      // query, then restore the caller's exact key ordering in JS.
+      const placeholders = keys.map(() => '?').join(', ');
+      const found = await db.getAllAsync<{ key: string; value: string }>(
+        `SELECT key, value FROM ${TABLE} WHERE key IN (${placeholders})`,
+        [...keys],
+      );
+      const byKey = new Map(found.map((row) => [row.key, row.value] as const));
+      return keys.map((key): Pair => [key, byKey.get(key) ?? null]);
     } catch (error) {
       recordStorageFailure('read', error);
       throw error;
