@@ -117,11 +117,11 @@
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d",
-        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95",
+        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://wafra-app-azg.pages.dev/wafra-history-import.shortcut",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0",
-        "WAFRA_PAGED_HISTORY_BETA": "0",
-        "EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA": "0"
+        "WAFRA_PAGED_HISTORY_BETA": "1",
+        "EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA": "1"
       }
     },
     "ios-parity-device": {

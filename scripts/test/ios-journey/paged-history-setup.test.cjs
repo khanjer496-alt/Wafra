@@ -21,14 +21,20 @@ test('only authoritative bounded native progress can render; no raw text/capabil
 test('run link contains only the matching Shortcut name and local return routes', () => {
   const url = new URL(api.pagedHistoryRunUrl());
   assert.equal(url.protocol, 'shortcuts:');
-  assert.equal(url.searchParams.get('name'), 'Wafra History Paging Beta');
+  assert.equal(url.searchParams.get('name'), 'Wafra History Import');
   assert.equal(url.searchParams.get('x-error'), 'wafra://ios-paging-beta');
   assert.equal(url.searchParams.get('x-cancel'), 'wafra://ios-paging-beta');
   assert.equal([...url.searchParams].length, 3);
   assert.equal(api.pagedHistoryEnabled(), false);
-  assert.equal(load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: { EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1' } } }).pagedHistoryEnabled(), true);
+  assert.equal(api.PAGED_HISTORY_INSTALL_URL, null);
+  const beta = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut',
+  } } });
+  assert.equal(beta.pagedHistoryEnabled(), true);
+  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut');
 });
-test('production remains unchanged; the closed-beta native and UI flags agree', () => {
+test('production keeps paging UI off while every iOS binary retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
   for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
     assert.equal(config.build['history-beta'].env[key], '1');
@@ -36,17 +42,8 @@ test('production remains unchanged; the closed-beta native and UI flags agree', 
   }
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
-  const a = process.env.WAFRA_PAGED_HISTORY_BETA; const b = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
-  try {
-    delete process.env.WAFRA_PAGED_HISTORY_BETA; delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
-    assert.equal(factory({ config: base }), base);
-    process.env.WAFRA_PAGED_HISTORY_BETA = '1'; assert.throws(() => factory({ config: base }));
-    process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA = '1';
-    assert.deepEqual(factory({ config: base }).plugins, ['original', './modules/wafra-message-history/plugin/paged']);
-  } finally {
-    if (a === undefined) delete process.env.WAFRA_PAGED_HISTORY_BETA; else process.env.WAFRA_PAGED_HISTORY_BETA = a;
-    if (b === undefined) delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA; else process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA = b;
-  }
+  assert.deepEqual(factory({ config: base }).plugins,
+    ['original', './modules/wafra-message-history/plugin/paged']);
 });
 test('normal setup routes to bounded history without retiring the published original', () => {
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');

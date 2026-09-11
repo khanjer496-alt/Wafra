@@ -1,7 +1,12 @@
 /** Source-free closed-beta setup contracts. Never enable from a route parameter. */
-export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra History Paging Beta';
+export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra History Import';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v1';
-export const PAGED_HISTORY_INSTALL_URL: string | null = null;
+const HOSTED_HISTORY_SHORTCUT_URL = 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut';
+export const PAGED_HISTORY_INSTALL_URL: string | null =
+  process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' &&
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === HOSTED_HISTORY_SHORTCUT_URL
+    ? HOSTED_HISTORY_SHORTCUT_URL
+    : null;
 export const pagedHistoryEnabled = (): boolean => process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1';
 export const pagedHistoryRunUrl = (): string =>
   `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta')}`;
