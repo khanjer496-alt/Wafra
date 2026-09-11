@@ -135,10 +135,11 @@ const smsAccessSnapshot = (): boolean => sharedSmsAccessUnavailable;
 /**
  * What a scan attempt actually did, so a caller who only *joined* it — rather
  * than starting it — can tell whether it still owes its own interactive
- * feedback. `'imported'` is the one outcome that already shows a toast
- * unconditionally; every other outcome only acts when `interactive` was true
- * for THAT attempt, so a silent attempt that hit one of them delivered
- * nothing a joining interactive caller would see.
+ * feedback. A completed scan (`'up-to-date'` or `'imported'`) must never be
+ * repeated just because an interactive caller joined it: that would reread
+ * the same inbox on Android and can duplicate expensive local work. Outcomes
+ * that stopped before a completed scan may be replayed interactively so the
+ * user still gets the relevant permission/setup/paywall feedback.
  */
 export type AutoImportOutcome =
   | 'not-hydrated'
@@ -214,12 +215,11 @@ export const iosRelayIntentFor = ({
 }): 'supplemental' | null => hasRelayConfig && !privateMode ? 'supplemental' : null;
 
 export const shouldReplayJoinedAutoImport = ({
-  platform,
   outcome,
 }: {
   platform: string;
   outcome: AutoImportOutcome;
-}): boolean => outcome !== 'imported' && !(platform === 'ios' && outcome === 'up-to-date');
+}): boolean => outcome !== 'imported' && outcome !== 'up-to-date';
 
 type IosLocalCoordinator = ReturnType<typeof getSharedIosLocalCaptureCoordinator>;
 
@@ -989,7 +989,9 @@ export function useAutoImport(
       // get no feedback at all. None of those outcomes did any actual
       // reading or importing, so re-running interactively is a fresh first
       // attempt for this request, not a second scan of the same data. The one
-      // exception is `'imported'`, whose toast already fires unconditionally.
+      // completed scans (`'up-to-date'` and `'imported'`) are never re-run.
+      // `'imported'` already toasts unconditionally; an iOS joined
+      // `'up-to-date'` gets the explicit toast below.
       return existing.promise.then((outcome) => {
         if (shouldReplayJoinedAutoImport({ platform: Platform.OS, outcome })) {
           return startAutoImport(true).then(() => undefined);
