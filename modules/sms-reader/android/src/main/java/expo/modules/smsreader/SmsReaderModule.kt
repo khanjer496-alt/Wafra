@@ -109,7 +109,10 @@ class SmsReaderModule : Module() {
         throw SmsInboxAccessException("SMS inbox permission is unavailable")
       }
       val messages = mutableListOf<Map<String, Any>>()
-      val pageSize = max.coerceIn(1, 1_000)
+      // Routine scans request 1,000. The resumable first-history importer may
+      // request up to 2,000 so it can halve full-ledger durability checkpoints
+      // while still retaining a durable cursor after every bounded page.
+      val pageSize = max.coerceIn(1, 2_000)
       try {
         val cursor = context.contentResolver.query(
           Telephony.Sms.Inbox.CONTENT_URI,

@@ -20,6 +20,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
+const HISTORY_IMPORT_PAGE_SIZE = 2_000;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -63,7 +64,12 @@ export function useHistoryImport(): void {
         getStateSnapshot().merchantOverrides,
         undefined,
         undefined,
-        { cursor, maxInboxPages: 1, legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) },
+        {
+          cursor,
+          maxInboxPages: 1,
+          pageSize: HISTORY_IMPORT_PAGE_SIZE,
+          legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
+        },
       );
       return {
         ...page,

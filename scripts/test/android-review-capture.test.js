@@ -505,6 +505,24 @@ const { scanInbox } = require('./build/auto-import.js');
       unique: resumableIds.size,
     }));
 
+  inboxReadCursors.length = 0;
+  const largerHistoryPage = await scanInbox(
+    0,
+    {},
+    undefined,
+    'en-AE',
+    { maxInboxPages: 1, pageSize: 2000 },
+  );
+  ok('history scans can request the larger bounded provider page without changing ordinary defaults',
+    largerHistoryPage.inboxScannedCount === 1001 &&
+      largerHistoryPage.inboxHistoryComplete === true &&
+      inboxReadCursors.length === 1 && inboxReadCursors[0].max === 2000,
+    JSON.stringify({
+      count: largerHistoryPage.inboxScannedCount,
+      complete: largerHistoryPage.inboxHistoryComplete,
+      reads: inboxReadCursors,
+    }));
+
   // The existing synthetic Chase fixture is newly discovered by a full
   // history scan. Its old event date must not consume the review window.
   inboxRows = [{ id: 9001, address: 'CHASE', body: chase,

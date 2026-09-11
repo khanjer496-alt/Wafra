@@ -110,6 +110,16 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
   ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null => {
     if (pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR') return null;
+    // Most phone inbox rows are ordinary conversations, OTP-free service
+    // notices, delivery updates, etc. On an AED/SAR ledger the old path still
+    // ran the full launch-bank grammar over every one of them because the
+    // active market supplied a default even when the message carried no money
+    // or banking evidence. During a 10k-message history import that is a large
+    // amount of pure CPU work. Fail fast only when BOTH broad evidence gates
+    // are absent. Known launch/global institution senders remain eligible via
+    // hasGenericBankAlertContext even when an unusual template omits currency.
+    const moneyHint = hasBankAlertMoneyHint(source);
+    if (!moneyHint && !hasGenericBankAlertContext(source, sender)) return null;
     if (
       inspection?.route.decision === 'single' &&
       inspection.route.market !== 'AE' &&
@@ -121,7 +131,7 @@ export const createLaunchAlertSession = ({
           (inspection.route.market === 'AE' || inspection.route.market === 'SA')
         ? inspection.route.market
         : detectLaunchMarketFromAlert(source, sender);
-    if (hasBankAlertMoneyHint(source) && !routed) return null;
+    if (moneyHint && !routed) return null;
     const desired = routed ?? sessionMarket ?? activeMarket;
     if (desired !== 'AE' && desired !== 'SA') return null;
     if (sessionMarket && desired !== sessionMarket) return null;

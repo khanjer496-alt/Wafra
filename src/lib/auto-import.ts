@@ -42,7 +42,8 @@ import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 
-const PAGE_SIZE = 1000;
+const DEFAULT_PAGE_SIZE = 1_000;
+const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
 // Cheap superset of currencies the worldwide reviewer can currently ground.
 // It avoids running fourteen market packs over ordinary personal SMS, while
@@ -151,6 +152,12 @@ export interface ScanInboxOptions {
   cursor?: InboxScanCursor | null;
   /** Omit for the existing complete scan; history import uses one page. */
   maxInboxPages?: number;
+  /**
+   * Android provider rows per page. Ordinary capture stays at 1,000; the
+   * resumable first-history owner may use a larger bounded page to reduce
+   * expensive encrypted-ledger checkpoints without changing cursor safety.
+   */
+  pageSize?: number;
   /** Exact old source hashes currently retained by the authoritative ledger/tray. */
   legacyReviewSourceKeys?: readonly string[];
 }
@@ -565,6 +572,11 @@ export async function scanInbox(
   const maxInboxPages = options.maxInboxPages === undefined
     ? Number.POSITIVE_INFINITY
     : Math.max(1, Math.floor(options.maxInboxPages));
+  // Two is the minimum safe bounded page because resumable pagination keeps
+  // one row of overlap at a process boundary for exact-provider dedupe.
+  const pageSize = options.pageSize === undefined
+    ? DEFAULT_PAGE_SIZE
+    : Math.max(2, Math.min(Math.floor(options.pageSize), MAX_PAGE_SIZE));
 
   for (;;) {
     const readStarted = tracing ? Date.now() : 0;
@@ -572,7 +584,7 @@ export async function scanInbox(
       sinceMs,
       beforeDateMs,
       beforeId,
-      PAGE_SIZE,
+      pageSize,
     );
     captureTrace('page:read', batch.length, tracing ? Date.now() - readStarted : 0, pagesRead + 1);
     if (batch.length === 0) {
@@ -679,7 +691,7 @@ export async function scanInbox(
     if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
       throw new Error('SMS inbox pagination did not advance');
     }
-    if (batch.length < PAGE_SIZE) {
+    if (batch.length < pageSize) {
       inboxHistoryComplete = true;
       nextCursor = null;
       break;

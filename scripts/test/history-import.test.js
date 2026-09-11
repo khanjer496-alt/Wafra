@@ -20,6 +20,10 @@ const autoImportSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/u
 const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8');
+const smsReaderNativeSource = fs.readFileSync(path.join(
+  __dirname,
+  '../../modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
+), 'utf8');
 
 (async () => {
   const apiExists =
@@ -72,6 +76,12 @@ const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/
     'history progress counts every inbox or notification row it can find money in',
     /scanned: page\.scannedCount/.test(historyHookSource) &&
       /found: page\.parsed\.length \+ page\.reviewCandidates\.length/.test(historyHookSource),
+  );
+  ok(
+    'resumable history uses a larger bounded page to reduce encrypted-ledger checkpoints',
+    /HISTORY_IMPORT_PAGE_SIZE = 2_000/.test(historyHookSource) &&
+      /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
+      /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );
 
   eq('a new import starts paused with no provider cursor',
