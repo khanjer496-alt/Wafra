@@ -1,13 +1,16 @@
-// The owner-test profile includes the paged receiver without changing the
-// production Shortcut or exposing source acquisition in Android.
 module.exports = ({ config }) => {
-  const enabled = process.env.WAFRA_PAGED_HISTORY_BETA === '1';
-  if (enabled !== (process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1')) {
-    throw new Error('paged_history_flags_must_match');
-  }
-  const withPagedHistory = enabled
-    ? { ...config, plugins: [...(config.plugins || []), './modules/wafra-message-history/plugin/paged'] }
-    : config;
+  // Paged history is the shipping iOS transport. The old Shortcut crossed the
+  // app boundary once per Message; this keeps native paging intents available
+  // in every iOS build so Wafra can receive bounded batches and process them
+  // locally.
+  const pagedPlugin = './modules/wafra-message-history/plugin/paged';
+  const plugins = config.plugins || [];
+  const hasPagedPlugin = plugins.some((plugin) =>
+    (Array.isArray(plugin) ? plugin[0] : plugin) === pagedPlugin,
+  );
+  const withPagedHistory = hasPagedPlugin
+    ? config
+    : { ...config, plugins: [...plugins, pagedPlugin] };
 
   // Screenmap runs an iOS development client against a Metro server that it
   // starts inside the GitHub runner. Fingerprint runtime matching is useful for

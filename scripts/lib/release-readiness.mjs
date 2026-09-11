@@ -228,9 +228,15 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
     requireHttps(captureUrl, 'capture-shortcut', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', findings, {
       host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
     });
-    requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
-      host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
-    });
+    if (historyUrl === 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut') {
+      requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
+        host: 'wafra-app-azg.pages.dev', pathPattern: /^\/wafra-history-import\.shortcut$/,
+      });
+    } else {
+      requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
+        host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
+      });
+    }
     const captureShortcutId = typeof captureUrl === 'string'
       ? captureUrl.match(/\/shortcuts\/([0-9a-f]{32})$/i)?.[1]?.toLowerCase()
       : undefined;

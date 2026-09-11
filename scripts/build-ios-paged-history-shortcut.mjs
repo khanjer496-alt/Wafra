@@ -4,8 +4,9 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildHistoryShortcut } from './build-ios-history-shortcut.mjs';
 
-// This is a separate, opt-in beta artifact. Never overwrite the public V3 graph.
-export const PAGED_SHORTCUT_NAME = 'Wafra History Paging Beta';
+// Shipping paged history artifact. One native handoff per bounded page replaces
+// the old per-message native call loop.
+export const PAGED_SHORTCUT_NAME = 'Wafra History Import';
 export function buildPagedHistoryShortcut() {
   let serial = 0;
   const actions = [];
@@ -54,7 +55,7 @@ export function buildPagedHistoryShortcut() {
     emit('is.workflow.actions.openurl', { WFInput: attachment(output(url, 'URL')) });
   };
 
-  alert('Import available message history', 'This test Shortcut processes history locally in automatic pages. Keep this iPhone unlocked and Shortcuts open. Saved pages survive interruptions for up to 24 hours. Wafra opens for review only after the extractor verifies its final page. Nothing is uploaded.', true);
+  alert('Import your message history', 'Wafra transfers history in local pages instead of sending one message at a time. Keep this iPhone unlocked while Apple reads Messages. Finished pages are checkpointed so an interrupted import can resume. Nothing is uploaded.', true);
   const oldest = find(1, 'Oldest First'); const oldestCount = count(output(oldest, 'Message'));
   const newest = find(1, 'Latest First'); const newestCount = count(output(newest, 'Message'));
   condition(output(oldestCount, 'Count'), 0, () => {
@@ -84,7 +85,7 @@ export function buildPagedHistoryShortcut() {
     const reason = get('reason', output(dictionary, 'Dictionary'));
     const prefix = 'Your saved pages are retained. Open Wafra to check progress. Reason: ';
     alert('History paused safely', text(`${prefix}\ufffc`, { [`{${prefix.length}, 1}`]: output(reason) }));
-    open('wafra://ios-paging-beta'); stop();
+    open('wafra://ios-setup?section=history'); stop();
   });
   const before = get('before', output(dictionary, 'Dictionary'));
   const limit = get('limit', output(dictionary, 'Dictionary'));
@@ -92,7 +93,7 @@ export function buildPagedHistoryShortcut() {
   const dateCount = count(output(dates, 'Dates'));
   condition(output(dateCount, 'Count'), 0, () => {
     alert('History paused safely', 'The next page date could not be read. Saved pages are retained. Nothing was marked complete.');
-    open('wafra://ios-paging-beta'); stop();
+    open('wafra://ios-setup?section=history'); stop();
   });
   const date = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(dates, 'Dates')) });
   const noPage = emit('is.workflow.actions.list', { WFItems: [] });
@@ -104,7 +105,7 @@ export function buildPagedHistoryShortcut() {
   const found = count(variable('Page'));
   condition(output(found, 'Count'), 0, () => {
     alert('History paused safely', 'No page was returned at the saved position. This is not proof that history is complete. Your saved progress is retained.');
-    open('wafra://ios-paging-beta'); stop();
+    open('wafra://ios-setup?section=history'); stop();
   });
   const empty = emit('is.workflow.actions.list', { WFItems: [] });
   set('Encoded Page', output(empty, 'List'));
@@ -133,7 +134,7 @@ export function buildPagedHistoryShortcut() {
   set('Page', output(released, 'List')); set('Encoded Page', output(released, 'List')); nothing();
   emit('is.workflow.actions.repeat.count', { GroupingIdentifier: loop, WFControlFlowMode: 2 });
   alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
-  open('wafra://ios-paging-beta'); stop();
+  open('wafra://ios-setup?section=history'); stop();
 
   const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
   workflow.WFWorkflowName = PAGED_SHORTCUT_NAME; workflow.WFWorkflowActions = actions;
@@ -150,7 +151,7 @@ export function verifyPagedHistoryShortcut(workflow) {
   return true;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const target = resolve(process.argv[2] ?? '/tmp/WafraHistoryPagingBeta.json');
+  const target = resolve(process.argv[2] ?? '/tmp/WafraHistoryImport.json');
   const workflow = buildPagedHistoryShortcut(); verifyPagedHistoryShortcut(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

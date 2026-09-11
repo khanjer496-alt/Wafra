@@ -96,7 +96,9 @@ if (environment) {
     return match[1].toLowerCase();
   };
   const captureId = canonicalShortcutId('EXPO_PUBLIC_WAFRA_SHORTCUT_URL');
-  const historyId = canonicalShortcutId('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL');
+  const historyValue = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? '';
+  const hostedHistory = historyValue === 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut';
+  const historyId = hostedHistory ? null : canonicalShortcutId('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL');
   if (new Set([
     '03d2ab22a33f4fef9d503142575a70fb',
     '85bd1e080e5849b591049eccffb9a3a1',
