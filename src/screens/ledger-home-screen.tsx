@@ -814,6 +814,21 @@ export default function LedgerHomeScreen() {
               .then(() => beginHistoryImport())}
           />
 
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ask Wafra Assistant"
+            onPress={() => router.push('/assistant')}
+            style={[styles.assistantEntry, { borderColor: theme.cardBorder }]}>
+            <View style={[styles.assistantIcon, { backgroundColor: theme.primarySoft }]}>
+              <Icon name="spark" size={18} color={theme.primary} />
+            </View>
+            <View style={styles.assistantCopy}>
+              <ThemedText type="smallBold">Ask Wafra</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">Understand spending, income and subscriptions from your ledger.</ThemedText>
+            </View>
+            <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+          </Pressable>
+
 
 
           {/* One next action, not four competing notices. */}
@@ -895,6 +910,18 @@ export default function LedgerHomeScreen() {
 
 const styles = StyleSheet.create({
   homeLoading: { gap: 18, paddingTop: Spacing.one },
+
+  assistantEntry: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
+  },
+  assistantIcon: { width: 34, height: 34, borderRadius: Radius.tile, alignItems: 'center', justifyContent: 'center' },
+  assistantCopy: { flex: 1, minWidth: 0, gap: 1 },
 
   capture: {
     flexDirection: 'row',
