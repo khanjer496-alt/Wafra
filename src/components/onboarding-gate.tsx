@@ -1068,12 +1068,33 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
                       </View>
-                      <View style={styles.startOptions} testID="onboarding-start-options">
-                        {Platform.OS !== 'web' && (
-                          <StartOption automatic disabled={setupBusy} onPress={() => void runSetupAction(beginCapture)} />
-                        )}
-                        <StartOption automatic={false} disabled={setupBusy} onPress={() => void runSetupAction(continueManually)} />
-                      </View>
+                      {Platform.OS === 'ios' ? (
+                        <View style={styles.captureActions} testID="onboarding-start-options">
+                          <Button
+                            wrapLabel
+                            label={t('onboardAutomaticChoiceIos')}
+                            onPress={() => void runSetupAction(beginCapture)}
+                            disabled={setupBusy}
+                            labelColor={night.onPrimary}
+                            style={styles.primaryButton}
+                          />
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={setupBusy}
+                            accessibilityState={{ disabled: setupBusy }}
+                            onPress={() => void runSetupAction(continueManually)}
+                            style={({ pressed }) => [styles.skipCaptureButton, { opacity: pressed ? 0.6 : 1 }]}>
+                            <ThemedText style={styles.skipCaptureText}>{t('onboardManualChoiceIos')}</ThemedText>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <View style={styles.startOptions} testID="onboarding-start-options">
+                          {Platform.OS !== 'web' && (
+                            <StartOption automatic disabled={setupBusy} onPress={() => void runSetupAction(beginCapture)} />
+                          )}
+                          <StartOption automatic={false} disabled={setupBusy} onPress={() => void runSetupAction(continueManually)} />
+                        </View>
+                      )}
                       {setupBusy && <ThemedText style={styles.inlineNote} accessibilityLiveRegion="polite">
                         {t('onboardSetupWorking')}
                       </ThemedText>}
@@ -1087,15 +1108,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           </ThemedText>
                         </View>
                       )}
-                      {Platform.OS === 'ios' && (
-                        <Button wrapLabel
-                          variant="outline"
-                          label={t('onboardCaptureLearnMoreAction')}
-                          onPress={() => setLearnMoreVisible(true)}
-                          labelColor={night.text}
-                          style={[styles.learnMoreButton, styles.ghost]}
-                        />
-                      )}
+                      {Platform.OS !== 'ios' && (
                       <Pressable accessibilityRole="button" disabled={setupBusy}
                         accessibilityState={{ disabled: setupBusy }}
                         accessibilityLabel={t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
@@ -1112,6 +1125,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </View>
                         <Icon name="chevron-right" size={18} color={night.textSecondary} />
                       </Pressable>
+                      )}
                     </>
                   )}
 
@@ -1473,6 +1487,8 @@ const styles = StyleSheet.create({
     minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong,
     flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.five, gap: Spacing.two },
+  skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
+  skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
   startOptions: { paddingTop: Spacing.three, gap: Spacing.two },
   startOption: {
     minHeight: 78,

@@ -260,10 +260,12 @@ export default function IosSetupScreen() {
     const subscription = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
       void send({ type: 'refresh-status' });
-      void refreshSetup();
+      if (progress.activeSection === 'history' || progress.historyStatus !== 'not-started') {
+        void refreshSetup();
+      }
     });
     return () => subscription.remove();
-  }, [refreshSetup, send]);
+  }, [progress.activeSection, progress.historyStatus, refreshSetup, send]);
 
   useEffect(() => {
     if (setup.loading) return;
@@ -335,8 +337,9 @@ export default function IosSetupScreen() {
     void runOperation(async () => {
       setShowAutomationGuide(false);
       await updateProgress({ type: 'active-section-changed', section });
+      if (section === 'history') await refreshSetup(true);
     });
-  }, [runOperation, updateProgress]);
+  }, [refreshSetup, runOperation, updateProgress]);
 
   const installFutureShortcut = useCallback(() => {
     void runOperation(async () => {
@@ -645,7 +648,10 @@ export default function IosSetupScreen() {
     };
   };
   const action = primaryAction();
-  const showFooterAction = setupComplete && !showAutomationGuide;
+  const showFooterAction = !showAutomationGuide && (
+    setupComplete ||
+    (futureConfigured && !historyComplete && !historyDeferred && progress.activeSection === 'future')
+  );
   const helpActions: { label: string; onPress(): void }[] = [];
   if (progress.activeSection === 'future') {
     if (setup.supported && setup.shortcutAvailable) {
@@ -801,16 +807,18 @@ export default function IosSetupScreen() {
                   </>
                 )}
               </ChecklistRow>
-              <View style={styles.evidence}>
-                <IosSetupJourney
-                  language={language}
-                  historyStatus={progress.historyStatus}
-                  futureReadiness={setup.readiness}
-                  automationConfirmed={progress.futureAutomationConfirmed}
-                  detectedBanks={detectedBanks}
-                  captureHealth={setup.captureHealth}
-                />
-              </View>
+              {progress.activeSection === 'history' && (
+                <View style={styles.evidence}>
+                  <IosSetupJourney
+                    language={language}
+                    historyStatus={progress.historyStatus}
+                    futureReadiness={setup.readiness}
+                    automationConfirmed={progress.futureAutomationConfirmed}
+                    detectedBanks={detectedBanks}
+                    captureHealth={setup.captureHealth}
+                  />
+                </View>
+              )}
             </View>
           )}
           {error && (
