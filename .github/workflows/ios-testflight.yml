@@ -42,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       build_host:
-        description: 'eas = hosted EAS build; github-macos = signed local EAS build on a GitHub macOS runner (history-beta only). Does not change an Expo subscription.'
+        description: 'eas = hosted EAS build; github-macos = signed local EAS build on a GitHub macOS runner. Does not change an Expo subscription.'
         type: choice
         options:
           - eas
@@ -853,13 +853,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
       EXPO_NO_TELEMETRY: 1
+      BUILD_PROFILE: ${{ inputs.profile }}
     steps:
       - name: Validate the local build request
         env:
           PROFILE: ${{ inputs.profile }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
         run: |
-          test "$PROFILE" = history-beta || { echo 'Local runner currently supports history-beta only.'; exit 1; }
+          case "$PROFILE" in history-beta|production|production-candidate) ;; *) echo 'Unsupported local iOS profile.'; exit 1 ;; esac
           test -n "$EXPO_TOKEN" || { echo 'EXPO_TOKEN is required for existing managed signing credentials.'; exit 1; }
           if [ -n "$SOURCE_COMMIT" ]; then
             printf '%s' "$SOURCE_COMMIT" | grep -qE '^[0-9a-f]{40}$' || exit 1
@@ -933,13 +934,13 @@ jobs:
 
       - name: Validate beta configuration and native adapter contract
         run: |
-          node scripts/check-release-config.mjs --intent build --platform ios --profile history-beta --submit false
+          node scripts/check-release-config.mjs --intent build --platform ios --profile "${{ inputs.profile }}" --submit false
           npm run update:check
           node scripts/test/ios-history-native-contract.test.js
 
       - name: Build signed iOS archive on this macOS runner
         run: |
-          eas build --platform ios --profile history-beta --local --non-interactive \
+          eas build --platform ios --profile "${{ inputs.profile }}" --local --non-interactive \
             --freeze-credentials --output "$RUNNER_TEMP/Wafra-local.ipa"
 
       - name: Verify the actual signed IPA and App Intent resources
@@ -955,7 +956,7 @@ jobs:
           security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/wafra-profile.plist"
           bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$APP/Metadata.appintents/extract.actionsdata"
           bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$APP/WafraMessageHistoryResources.bundle"
-          if node -e 'process.exit(require("./eas.json").build["history-beta"].env.WAFRA_PAGED_HISTORY_BETA === "1" ? 0 : 1)'; then
+          if [ "${{ inputs.profile }}" = history-beta ] && node -e 'process.exit(require("./eas.json").build["history-beta"].env.WAFRA_PAGED_HISTORY_BETA === "1" ? 0 : 1)'; then
             node scripts/check-ios-paging-metadata.mjs "$APP/Metadata.appintents/extract.actionsdata"
           fi
           export APP
@@ -978,7 +979,7 @@ jobs:
           number=str(info['CFBundleVersion']); version=info['CFBundleShortVersionString']
           source=temp/'Wafra-local.ipa'; target=pathlib.Path('artifacts/ios-local')/f'Wafra-{version}-{number}.ipa'
           shutil.copyfile(source,target)
-          report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':'history-beta',
+          report={'sourceCommit':os.environ['SOURCE_COMMIT'],'buildHost':'github-macos','profile':os.environ.get('BUILD_PROFILE','history-beta'),
               'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],
               'sha256':hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),'bytes':target.stat().st_size,
               'intentCount':len(actions),'storeSigningVerified':True,'physicalCaptureVerified':False}
@@ -1013,7 +1014,7 @@ jobs:
         if: inputs.submit
         env:
           IPA_PATH: ${{ steps.ipa.outputs.ipa_path }}
-        run: eas submit --platform ios --profile history-beta --path "$IPA_PATH" --non-interactive
+        run: eas submit --platform ios --profile "${{ inputs.profile }}" --path "$IPA_PATH" --non-interactive
 
       - name: Remove temporary Apple API key
         if: always()
