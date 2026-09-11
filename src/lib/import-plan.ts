@@ -571,6 +571,37 @@ export function buildImportPlan(
   ): AccountResolution => {
     if (!p.card) {
       const evidence = buildTransferEvidence(p, false);
+      // A bank-authenticated masked source is still a real source account even
+      // when the message is an own-account transfer. Keep that durable account
+      // identity (and its quoted balance) while the transaction itself remains
+      // transfer/non-spending. The hash is persisted only as a scoped hint; it
+      // is never shown to the user.
+      if (evidence?.sourceAccountKey && evidence.sourceBank) {
+        const sourceHint = `source-account|${evidence.sourceBank}|${evidence.sourceAccountKey}`;
+        const hinted = hints[sourceHint];
+        const hintedAccount = hinted ? accountAtRef(hinted) : undefined;
+        if (hinted && hintedAccount?.kind === 'bank' && hintedAccount.bankName &&
+            bankIdentityForName(hintedAccount.bankName) === evidence.sourceBank) {
+          return { accountId: hinted, confident: true };
+        }
+        if (createMissing) {
+          const bank = bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
+          const bankName = bank?.name ?? evidence.sourceBank;
+          const idx = newAccounts.length;
+          newAccounts.push({
+            name: `${bankName} Account`,
+            kind: 'bank',
+            bankName,
+            openingFils: 0,
+            color: bank?.color ?? colorForHint(evidence.sourceAccountKey.slice(-4)),
+          });
+          const ref = String(idx);
+          hints[sourceHint] = ref;
+          newHints[sourceHint] = ref;
+          bankNames[ref] = bankName;
+          return { accountId: ref, confident: true };
+        }
+      }
       // A Liv/HSBC/YAP source without four readable terminal digits must not
       // inherit the first saved card. The bank/mask-scoped holding remains
       // explicitly unassigned and never enters the user's Accounts list.
