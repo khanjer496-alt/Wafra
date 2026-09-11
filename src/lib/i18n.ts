@@ -11,6 +11,18 @@
 export type Lang = 'en' | 'ar';
 
 const S = {
+  assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },
+  assistantBack: { en: 'Back', ar: 'رجوع' },
+  assistantHeading: { en: 'Ask about your money', ar: 'اسأل عن أموالك' },
+  assistantPrivacy: {
+    en: 'Wafra calculates answers from your ledger locally. Raw bank messages are not sent anywhere.',
+    ar: 'يحسب وفرة الإجابات من سجلك محلياً على جهازك. لا يتم إرسال رسائل البنك الخام إلى أي مكان.',
+  },
+  assistantPlaceholder: {
+    en: 'Ask about spending, income, merchants or subscriptions',
+    ar: 'اسأل عن الإنفاق أو الدخل أو التجار أو الاشتراكات',
+  },
+  assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
   // Transaction list and details: concise visible labels, complete semantics.
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },

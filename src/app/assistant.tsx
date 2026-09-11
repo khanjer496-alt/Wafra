@@ -8,6 +8,7 @@ import { Icon } from '@/components/ui/icon';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { t } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 import { answerWafraQuestion, suggestedAssistantQuestions, type AssistantAnswer } from '@/lib/wafra-assistant';
 
@@ -30,17 +31,17 @@ export default function AssistantScreen() {
     <ScreenScaffold
       keyboardAware
       header={{
-        title: 'Wafra Assistant',
-        back: { label: 'Back', onPress: () => router.back() },
+        title: t('assistantTitle'),
+        back: { label: t('assistantBack'), onPress: () => router.back() },
       }}>
       <View style={styles.hero}>
         <View style={[styles.spark, { backgroundColor: theme.primarySoft }]}>
           <Icon name="spark" size={22} color={theme.primary} />
         </View>
         <View style={styles.heroCopy}>
-          <ThemedText type="heading">Ask your money.</ThemedText>
+          <ThemedText type="heading">{t('assistantHeading')}</ThemedText>
           <ThemedText type="default" themeColor="textSecondary">
-            Wafra calculates answers from your ledger locally. Raw bank messages are not sent anywhere.
+            {t('assistantPrivacy')}
           </ThemedText>
         </View>
       </View>
@@ -81,11 +82,11 @@ export default function AssistantScreen() {
           onChangeText={setQuestion}
           onSubmitEditing={() => ask()}
           returnKeyType="send"
-          placeholder="Ask about spending, income, merchants or subscriptions"
+          placeholder={t('assistantPlaceholder')}
           placeholderTextColor={theme.textTertiary}
           style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
         />
-        <Button label="Ask Wafra" icon="spark" onPress={() => ask()} disabled={!question.trim()} />
+        <Button label={t('assistantAsk')} icon="spark" onPress={() => ask()} disabled={!question.trim()} />
       </View>
     </ScreenScaffold>
   );
