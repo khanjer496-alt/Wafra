@@ -21,6 +21,10 @@ on:
         description: 'Test APK only: enable experimental capture from trusted Google Play bank apps'
         type: boolean
         default: false
+      founder_unlock:
+        description: 'Internal test APK only: enable hidden Wafra logo Founder Pro unlock'
+        type: boolean
+        default: false
       architecture:
         description: 'ARM64 for modern Android phones; universal for all supported CPUs'
         type: choice
@@ -66,6 +70,7 @@ jobs:
       EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ github.event.inputs.founder_unlock == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
       WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
     steps:
