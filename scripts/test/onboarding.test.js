@@ -337,8 +337,8 @@ ok(
 );
 eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Start your way');
 eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Choose what works for you. You can change this later.');
-eq('iOS automatic choice names local setup and permits later history', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Set up local bank alerts. Past messages can wait.');
-eq('iOS automatic action names Apple Shortcuts rather than direct inbox access', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Set up Apple Shortcuts');
+eq('iOS automatic choice explains the Shortcut and keeps history optional', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.');
+eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank alerts');
 eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'Add entries yourself. No Messages access. Connect later.');
 eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
 eq(
@@ -376,13 +376,12 @@ ok(
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
 ok(
-  'iOS onboarding has exactly two choices and puts full details behind Learn more',
+  'iOS onboarding has exactly two primary choices and puts full details behind Learn more',
   (gateSource.match(/<StartOption/g) ?? []).length === 2 &&
-    /Platform\.OS === 'ios' \? 'onboardAutomaticChoiceIos'/.test(gateSource) &&
-    /Platform\.OS === 'ios' \? 'onboardManualChoiceIos'/.test(gateSource) &&
-    /Platform\.OS === 'ios' \? 'onboardManualChoiceIosBody'/.test(gateSource) &&
+    /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
+    /<Pressable[\s\S]{0,420}onPress=\{\(\) => void runSetupAction\(continueManually\)\}[\s\S]{0,260}onboardManualChoiceIos/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
-    /onboardCaptureLearnMoreAction/.test(gateSource) &&
+    /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&
     !iosVisibleCopy.includes(universalSenderLabel) &&
     !iosVisibleCopy.includes(universalSenderLabelArabic),
 );

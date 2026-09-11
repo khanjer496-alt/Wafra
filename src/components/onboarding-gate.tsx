@@ -1108,6 +1108,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           </ThemedText>
                         </View>
                       )}
+                      {Platform.OS === 'ios' && (
+                        <Button
+                          wrapLabel
+                          variant="outline"
+                          label={t('onboardCaptureLearnMoreAction')}
+                          onPress={() => setLearnMoreVisible(true)}
+                          disabled={setupBusy}
+                          labelColor={night.text}
+                          style={[styles.learnMoreButton, styles.ghost]}
+                        />
+                      )}
                       {Platform.OS !== 'ios' && (
                       <Pressable accessibilityRole="button" disabled={setupBusy}
                         accessibilityState={{ disabled: setupBusy }}
