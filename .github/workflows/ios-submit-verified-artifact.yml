@@ -1,0 +1,70 @@
+name: iOS submit verified artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'GitHub Actions run ID containing wafra-ios-local-* verified IPA artifact'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Wait for verified IPA artifact
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_TOKEN" || { echo 'EXPO_TOKEN is required'; exit 1; }
+          mkdir -p /tmp/wafra-submit
+          for attempt in $(seq 1 90); do
+            ARTIFACT_NAME=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[] | select(.expired == false and (.name | startswith("wafra-ios-local-"))) | .name' \
+              | head -1 || true)
+            if [ -n "$ARTIFACT_NAME" ]; then
+              echo "Found verified artifact: $ARTIFACT_NAME"
+              gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir /tmp/wafra-submit
+              exit 0
+            fi
+            echo "Verified IPA not uploaded yet; waiting..."
+            sleep 20
+          done
+          echo 'Timed out waiting for verified IPA artifact.'
+          exit 1
+
+      - name: Verify downloaded artifact
+        run: |
+          set -euo pipefail
+          IPA=$(find /tmp/wafra-submit -type f -name '*.ipa' -print -quit)
+          REPORT=$(find /tmp/wafra-submit -type f -name 'verification.json' -print -quit)
+          test -n "$IPA" && test -f "$IPA"
+          test -n "$REPORT" && test -f "$REPORT"
+          python3 - "$IPA" "$REPORT" <<'PY'
+          import hashlib,json,pathlib,sys
+          ipa=pathlib.Path(sys.argv[1]); report=json.loads(pathlib.Path(sys.argv[2]).read_text())
+          actual=hashlib.sha256(ipa.read_bytes()).hexdigest()
+          assert report.get('storeSigningVerified') is True
+          assert actual == report.get('sha256'), (actual, report.get('sha256'))
+          print('Verified IPA:', ipa.name, 'build', report.get('buildNumber'), 'source', report.get('sourceCommit'))
+          PY
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+
+      - name: Submit exact verified IPA to TestFlight
+        run: |
+          npm install -g eas-cli@22.4.0
+          eas submit --platform ios --profile history-beta --path "$IPA_PATH" --non-interactive
