@@ -9,3 +9,8 @@
 "live.stage.event_id.parameter" = "Event ID";
 "live.stage.observed_at.parameter" = "Observed at";
 "live.stage.error" = "Wafra could not stage this message.";
+"live.stage.disabled" = "Wafra automatic capture is off or your access is inactive. Open Wafra and check Capture status.";
+"live.stage.invalid" = "Wafra received the automation but could not read this message correctly. Open Wafra and run capture recovery.";
+"live.stage.capacity" = "Wafra's local capture queue is full. Open Wafra to process waiting messages, then try again.";
+"live.stage_text.title" = "Capture Wafra message text";
+"live.stage_text.message.parameter" = "Message";

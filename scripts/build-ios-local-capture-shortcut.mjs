@@ -9,6 +9,7 @@ const APP_TEAM_ID = "UV7YN4GQ66";
 const APP_BUNDLE_ID = "app.wafra.ios";
 const SETUP_INTENT = "RecordWafraCaptureSetupProofIntent";
 const STAGE_INTENT = "StageWafraLiveMessageIntent";
+const STAGE_TEXT_INTENT = "StageWafraLiveTextIntent";
 const FIND_MESSAGES = "com.apple.MobileSMS.MessageEntity";
 export const IOS_LOCAL_CAPTURE_CATCHUP_LIMIT = 300;
 
@@ -29,6 +30,10 @@ const ids = {
   guidHash: "C3BF02F3-896A-446C-91F7-3E005311B28F",
   lowercaseHash: "300400CB-8AE3-4F65-8CD2-7F9BB6D12465",
   stage: "7B9A112F-0C18-4D95-BFC5-C373523C16B6",
+  inputType: "B9C299ED-2437-40C7-A839-194976CC7282",
+  inputTypeGroup: "42D178D1-49EA-4BEF-9CE4-58FC30D00B37",
+  fallbackText: "6C7FA999-6A5A-4CC0-886A-3BAE9A9ACBD1",
+  fallbackStage: "3979D819-B1FA-49CB-B44C-768CD2ADDC84",
 };
 
 const actionOutputValue = (outputUUID, outputName) => ({
@@ -158,6 +163,15 @@ const stageAction = ({ uuid, senderUUID, bodyUUID, eventIdUUID, observedAt }) =>
   },
 });
 
+const stageTextAction = (uuid, bodyUUID) => ({
+  WFWorkflowActionIdentifier: `${APP_BUNDLE_ID}.${STAGE_TEXT_INTENT}`,
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    AppIntentDescriptor: appIntentDescriptor(STAGE_TEXT_INTENT),
+    body: outputTextToken(bodyUUID, "Fallback Message Text"),
+  },
+});
+
 const stopAction = () => ({
   WFWorkflowActionIdentifier: "is.workflow.actions.exit",
   WFWorkflowActionParameters: {},
@@ -250,6 +264,40 @@ const createLocalCaptureShortcut = () => {
         WFControlFlowMode: 2,
       },
     },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.getitemtype",
+      WFWorkflowActionParameters: {
+        UUID: ids.inputType,
+        WFInput: extensionInput(),
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+      WFWorkflowActionParameters: {
+        GroupingIdentifier: ids.inputTypeGroup,
+        WFControlFlowMode: 0,
+        WFCondition: 4,
+        WFConditionalActionString: "Text",
+        WFInput: actionOutput(ids.inputType, "Type"),
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
+      WFWorkflowActionParameters: {
+        UUID: ids.fallbackText,
+        CustomOutputName: "Fallback Message Text",
+        WFTextActionText: extensionInputTextToken([stringCoercion()]),
+      },
+    },
+    stageTextAction(ids.fallbackStage, ids.fallbackText),
+    stopAction(),
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+      WFWorkflowActionParameters: {
+        GroupingIdentifier: ids.inputTypeGroup,
+        WFControlFlowMode: 2,
+      },
+    },
     textAction(ids.senderText, "Sender Text", "Sender"),
     textAction(ids.messageBody, "Message Body", "Content"),
     textAction(ids.messageGuid, "Message GUID", "GUID"),
@@ -276,7 +324,10 @@ const createLocalCaptureShortcut = () => {
     WFWorkflowClientVersion: "4042.0.2.2",
     WFWorkflowHasOutputFallback: false,
     WFWorkflowOutputContentItemClasses: [],
-    WFWorkflowInputContentItemClasses: ["WFMessageContentItem"],
+    WFWorkflowInputContentItemClasses: [
+      "WFStringContentItem",
+      "WFMessageContentItem",
+    ],
     WFWorkflowImportQuestions: [],
     WFWorkflowTypes: ["WFWorkflowTypeShowInSearch"],
     WFQuickActionSurfaces: [],

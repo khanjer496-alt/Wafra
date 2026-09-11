@@ -10,9 +10,11 @@ const SHORTCUT_PATH = /^\/shortcuts\/[0-9a-f]{32}$/i;
 const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   '03d2ab22a33f4fef9d503142575a70fb',
   '85bd1e080e5849b591049eccffb9a3a1',
+  '96f93402213144e8885db33f48fc6168',
 ]);
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   'cc85a21db99a4e4698c1a498de670199',
+  '2869584d40ed454691cf3f916cbee158',
 ]);
 
 const finding = (code, title, detail, remediation) => ({ code, title, detail, remediation });

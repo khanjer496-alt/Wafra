@@ -8,6 +8,7 @@ const environment = environmentIndex >= 0 ? process.argv[environmentIndex + 1] :
 const failures = [];
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   'cc85a21db99a4e4698c1a498de670199',
+  '2869584d40ed454691cf3f916cbee158',
 ]);
 
 const readJson = async (relative) => JSON.parse(

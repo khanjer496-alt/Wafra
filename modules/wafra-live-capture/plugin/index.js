@@ -65,6 +65,7 @@ function ensureKnownRegion(project, localization) {
 }
 
 const intentSource = `import AppIntents
+import Foundation
 internal import WafraLiveCapture
 
 @available(iOS 16.0, *)
@@ -72,6 +73,9 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
   case setupProofFailed
   case automationInputProbeFailed
   case stageFailed
+  case captureDisabled
+  case invalidMessage
+  case captureCapacityReached
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
@@ -81,6 +85,12 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
       return WafraLiveCaptureResources.localized("live.automation_input_probe.error")
     case .stageFailed:
       return WafraLiveCaptureResources.localized("live.stage.error")
+    case .captureDisabled:
+      return WafraLiveCaptureResources.localized("live.stage.disabled")
+    case .invalidMessage:
+      return WafraLiveCaptureResources.localized("live.stage.invalid")
+    case .captureCapacityReached:
+      return WafraLiveCaptureResources.localized("live.stage.capacity")
     }
   }
 }
@@ -193,7 +203,18 @@ struct StageWafraLiveMessageIntent: AppIntent {
         eventId: eventId,
         observedAt: observedAt
       )
-      return .result(value: result.rawValue)
+      switch result {
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid:
+        throw WafraLiveCaptureIntentError.invalidMessage
+      case .capacityReached:
+        throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
     } catch {
       throw WafraLiveCaptureIntentError.stageFailed
     }
@@ -202,6 +223,61 @@ struct StageWafraLiveMessageIntent: AppIntent {
 
 @available(iOS 26.0, *)
 extension StageWafraLiveMessageIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+/// Fallback for Personal Automations that coerce the received Message to plain
+/// text before invoking the Shortcut. Keep it on-device and stage it through
+/// the same protected queue; the shared parser still decides whether it is a
+/// supported financial alert.
+@available(iOS 16.0, *)
+struct StageWafraLiveTextIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.stage_text.title",
+    table: "WafraIntents",
+    bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(
+    title: LocalizedStringResource(
+      "live.stage_text.message.parameter",
+      table: "WafraIntents",
+      bundle: .main
+    ),
+    inputConnectionBehavior: .connectToPreviousIntentResult
+  )
+  var body: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    do {
+      let result = try WafraLiveCaptureStore.shared.stage(
+        sender: "Wafra Automation",
+        body: body,
+        eventId: UUID().uuidString,
+        observedAt: Date()
+      )
+      switch result {
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid:
+        throw WafraLiveCaptureIntentError.invalidMessage
+      case .capacityReached:
+        throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
+    } catch {
+      throw WafraLiveCaptureIntentError.stageFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension StageWafraLiveTextIntent {
   static var supportedModes: IntentModes { .background }
 }
 `;

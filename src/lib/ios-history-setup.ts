@@ -36,6 +36,8 @@ const HISTORY_SHORTCUT_RETURN_URL = 'wafra://import-sms';
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   // Diagnostic graph retired after the physical V3 two-ended import passed.
   'cc85a21db99a4e4698c1a498de670199',
+  // Build 99 legacy per-message graph. The next release uses bounded paging.
+  '2869584d40ed454691cf3f916cbee158',
 ]);
 
 export interface IosHistorySetupStorage {
@@ -110,11 +112,8 @@ export const historyShortcutRunUrl = (): string => {
   )}&x-cancel=${sourceFreeReturn}&x-error=${sourceFreeReturn}`;
 };
 
-const HOSTED_HISTORY_SHORTCUT_URL = 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut';
-
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
-  if (value === HOSTED_HISTORY_SHORTCUT_URL) return value;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;
   const id = match[1].toLowerCase();
@@ -124,7 +123,7 @@ export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null =>
 
 export const historyShortcutInstallUrl = (): string | null =>
   normalizeIosHistoryShortcutUrl(
-    process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? HOSTED_HISTORY_SHORTCUT_URL,
+    process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
   );
 
 export const validIosHistorySessionId = (value: unknown): value is string =>

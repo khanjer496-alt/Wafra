@@ -6,10 +6,13 @@ const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   '03d2ab22a33f4fef9d503142575a70fb',
   // Older graph with Apple's invalid file-path action.
   '85bd1e080e5849b591049eccffb9a3a1',
+  // Build 99 public graph. It predates dual full-Message/plain-text capture and
+  // must never be offered by a binary containing the new native fallback.
+  '96f93402213144e8885db33f48fc6168',
 ]);
 
 /**
- * Accept only Wafra's approved Shortcut distribution URL shapes.
+ * Accept only Apple's exact public Shortcut URL shape.
  *
  * This deliberately does not share the relay-era normalizer. A URL with a
  * credential, query, fragment, extra path, non-hex ID, or retired graph must
@@ -18,29 +21,28 @@ const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
  */
 export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-
-  const iCloudMatch = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
-  if (iCloudMatch) {
-    const id = iCloudMatch[1].toLowerCase();
-    if (RETIRED_CAPTURE_SHORTCUT_IDS.has(id)) return null;
-    return `https://www.icloud.com/shortcuts/${id}`;
-  }
-
-  // Production onboarding must only use Apple's public iCloud Shortcut share.
-  // GitHub-hosted .shortcut artifacts are intentionally rejected so an old
-  // beta fallback can never hijack the Add Shortcut CTA.
-
-  return null;
+  const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
+  if (!match) return null;
+  const id = match[1].toLowerCase();
+  if (RETIRED_CAPTURE_SHORTCUT_IDS.has(id)) return null;
+  return `https://www.icloud.com/shortcuts/${id}`;
 }
 
 /**
- * Keep a known-good Apple share in source so onboarding never depends on a
- * missing build-time variable. Environment overrides remain available for
- * device testing, but production always has a working iCloud fallback.
+ * Public, production Shortcut share.
+ *
+ * Keep the approved iCloud URL in source instead of making onboarding depend on
+ * an EAS profile variable. We previously shipped builds where the profile did
+ * not inject the variable, leaving "Add Shortcut" with nothing useful to open;
+ * an older published graph also contained the GitHub-era handoff. Environment
+ * overrides are still accepted for device testing, but production always has a
+ * known-good Apple share as its fallback.
  */
+// Deliberately no legacy fallback. A new binary must not silently send users
+// to Build 99's older graph if its release environment was misconfigured.
 export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUrl(
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
-) ?? 'https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168';
+);
 
 /** Run the installed Shortcut without input so its local setup-proof branch executes. */
 export function iosLocalCaptureTestUrl(fromOnboarding = false): string {

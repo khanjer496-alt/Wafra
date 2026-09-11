@@ -9,12 +9,13 @@ import { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } from '../b
 const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
-  { kind: 'history', id: '2869584d40ed454691cf3f916cbee158', build: buildHistoryShortcut, verify: verifyHistoryShortcutGraph },
-  { kind: 'future', id: '96f93402213144e8885db33f48fc6168', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
+  { kind: 'history', id: 'e0ba137df950416e8c8cba8528287d95', build: buildHistoryShortcut, verify: verifyHistoryShortcutGraph },
+  { kind: 'future', id: '9a85d5f8b44d416181a76e68fcdf569d', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const decoder = 'import sys,plistlib,json\nx=plistlib.loads(sys.stdin.buffer.read())\nprint(json.dumps(x))\n';
+const python = process.platform === 'darwin' ? '/usr/bin/python3' : 'python3';
 for (const check of checks) {
   const expected = check.build();
   check.verify(expected);
@@ -40,7 +41,7 @@ for (const check of checks) {
       if (size > 2000000) { await reader.cancel(); throw new Error('graph-too-large'); } chunks.push(chunk.value); }
     const bytes = Buffer.concat(chunks);
     item.downloadSha256 = sha256(bytes);
-    const decoded = spawnSync('python3', ['-c', decoder], { input: bytes, encoding: 'utf8', maxBuffer: 4000000 });
+    const decoded = spawnSync(python, ['-c', decoder], { input: bytes, encoding: 'utf8', maxBuffer: 4000000 });
     if (decoded.status !== 0) throw new Error('unsigned-plist-decode-failed');
     const graph = JSON.parse(decoded.stdout);
     item.publishedActions = graph.WFWorkflowActions?.length;

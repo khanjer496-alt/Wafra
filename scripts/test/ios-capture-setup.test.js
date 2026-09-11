@@ -403,6 +403,11 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.stage.event_id.parameter',
       'live.stage.observed_at.parameter',
       'live.stage.error',
+      'live.stage.disabled',
+      'live.stage.invalid',
+      'live.stage.capacity',
+      'live.stage_text.title',
+      'live.stage_text.message.parameter',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -426,15 +431,16 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       appPlugins.indexOf(livePlugin) > appPlugins.indexOf('./modules/wafra-message-history/plugin'),
       JSON.stringify(appPlugins));
 
-    eq('generated source declares all three app-discoverable intents once', [
+    eq('generated source declares all four app-discoverable intents once', [
       generatedIntent.match(/struct RecordWafraCaptureSetupProofIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct ProbeWafraAutomationInputIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveMessageIntent:\s*AppIntent/g)?.length || 0,
-    ], [1, 1, 1]);
+      generatedIntent.match(/struct StageWafraLiveTextIntent:\s*AppIntent/g)?.length || 0,
+    ], [1, 1, 1, 1]);
     eq('all intents are always allowed and do not launch Wafra', [
       generatedIntent.match(/authenticationPolicy:\s*IntentAuthenticationPolicy\s*=\s*\.alwaysAllowed/g)?.length || 0,
       generatedIntent.match(/openAppWhenRun\s*=\s*false/g)?.length || 0,
-    ], [3, 3]);
+    ], [4, 4]);
     ok('setup-proof intent has no parameters and records proof version 1', (() => {
       const match = generatedIntent.match(
         /struct RecordWafraCaptureSetupProofIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}/,
@@ -460,37 +466,52 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
         /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
       swiftStore);
-    ok('stage intent keeps its exact four parameters and raw stage result', (() => {
+    ok('stage intent keeps its exact four parameters and fails visibly for rejected capture', (() => {
       const match = generatedIntent.match(
         /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
       );
       return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 4 &&
         /var sender:\s*String/.test(match[1]) && /var body:\s*String/.test(match[1]) &&
         /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
-        /return \.result\(value:\s*result\.rawValue\)/.test(match[1]);
+        /case \.accepted, \.ignored:/.test(match[1]) &&
+        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.invalid:[\s\S]*invalidMessage/.test(match[1]) &&
+        /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
     })(), generatedIntent);
-    eq('probe adds exactly one parameter without changing the stage action',
-      generatedIntent.match(/@Parameter\(/g)?.length || 0, 5);
+    ok('plain-text fallback auto-connects one String and uses the protected local queue', (() => {
+      const match = generatedIntent.match(
+        /struct StageWafraLiveTextIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveTextIntent/,
+      );
+      return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 1 &&
+        /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
+        /var body:\s*String/.test(match[1]) &&
+        /sender:\s*"Wafra Automation"/.test(match[1]) &&
+        /eventId:\s*UUID\(\)\.uuidString/.test(match[1]) &&
+        /observedAt:\s*Date\(\)/.test(match[1]) &&
+        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]);
+    })(), generatedIntent);
+    eq('probe plus live paths expose the exact six parameters',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 6);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
-      generatedIntent.match(/@Parameter\(title:\s*LocalizedStringResource\(/g)?.length || 0,
+      generatedIntent.match(/@Parameter\(\s*title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [3, 5, 0]);
+    ], [4, 6, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [8, 0]);
+    ], [10, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
-        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
+        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
       ) || [];
-      return modes.length === 3 && extensions.length === 3;
+      return modes.length === 4 && extensions.length === 4;
     })(), generatedIntent);
     ok('generated intents contain no network, file, clipboard, log, notification, or dialog capability',
       !/(?:https?:|URLSession|FileManager|NSFile|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|UNUserNotificationCenter|notification|ProvidesDialog|dialog:)/i

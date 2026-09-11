@@ -392,16 +392,16 @@ async function historyCardTests() {
       'iOS history: runtime accepts only trusted signed Shortcut install URLs',
       [
         setup.normalizeIosHistoryShortcutUrl(
-          'https://www.icloud.com/shortcuts/2869584D40ED454691CF3F916CBEE158',
+          'https://www.icloud.com/shortcuts/E0BA137DF950416E8C8CBA8528287D95',
         ),
         setup.normalizeIosHistoryShortcutUrl(
           'https://www.icloud.com/shortcuts/cc85a21db99a4e4698c1a498de670199',
         ),
         setup.normalizeIosHistoryShortcutUrl(
-          'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158?x=1',
+          'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95?x=1',
         ),
         setup.normalizeIosHistoryShortcutUrl(
-          ' https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158',
+          ' https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95',
         ),
         setup.normalizeIosHistoryShortcutUrl(
           'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut',
@@ -411,11 +411,11 @@ async function historyCardTests() {
         ),
       ],
       [
-        'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158',
+        'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95',
         null,
         null,
         null,
-        'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut',
+        null,
         null,
       ],
     );
