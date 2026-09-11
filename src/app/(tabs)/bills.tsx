@@ -890,7 +890,7 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
-  referenceGroup: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 8 },
+  referenceGroup: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },
   duesBlock: {
     gap: Spacing.one,
@@ -899,14 +899,14 @@ const styles = StyleSheet.create({
   dueRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.three,
+    gap: 12,
+    paddingVertical: 12,
   },
   dueRowIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minWidth: 0 },
   dueRowFigure: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, maxWidth: '44%' },
   agendaDate: { width: 76, flexShrink: 0, borderEndWidth: StyleSheet.hairlineWidth, paddingEnd: Spacing.two, paddingVertical: Spacing.two },
   paidCardsBlock: {
-    marginTop: Spacing.four,
+    marginTop: 18,
     gap: Spacing.one,
   },
   paidCardAmount: {
@@ -922,20 +922,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.three,
-    marginBottom: Spacing.two,
+    paddingVertical: 12,
+    marginBottom: 6,
     gap: Spacing.two,
   },
-  dueFocal: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: Spacing.four, paddingTop: Spacing.three },
+  dueFocal: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 18, paddingTop: 12 },
   deadlineHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
   deadlineDate: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  statementHero: { paddingVertical: Spacing.three, minHeight: 48 },
-  statementBody: { gap: Spacing.three },
+  statementHero: { paddingVertical: 12, minHeight: 48 },
+  statementBody: { gap: 12 },
   statementAmount: { flexWrap: 'wrap' },
   statementMinimum: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
   statementProgress: { gap: Spacing.two },
   statementAction: { alignSelf: 'flex-end', minWidth: 104 },
-  obligationRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.three },
+  obligationRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 },
   obligationRowLarge: { flexDirection: 'column', alignItems: 'stretch' },
   obligationAmountLarge: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', width: '100%' },
   dueFocalTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
@@ -955,7 +955,7 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   commitBlock: {
-    marginTop: Spacing.four,
+    marginTop: 18,
     gap: Spacing.one,
   },
   collapseHeader: {
@@ -967,11 +967,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two + 2,
-    paddingVertical: Spacing.three,
+    gap: 9,
+    paddingVertical: 11,
   },
   rowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: Spacing.two },
-  recurringIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  recurringIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
   rowIdentityLarge: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', width: '100%' },
   rowFigureLarge: { maxWidth: '100%', marginStart: 0, alignSelf: 'flex-end', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
   rowInfo: {

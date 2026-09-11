@@ -875,13 +875,13 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
-    paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four, gap: Spacing.four,
+    paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
   hints: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
-    paddingHorizontal: ScreenPadding, paddingVertical: Spacing.three,
+    paddingHorizontal: ScreenPadding, paddingVertical: 12,
   },
   footerLargeText: { paddingBottom: Spacing.four },
 });

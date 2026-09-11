@@ -109,18 +109,18 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 5,
+    paddingTop: 3,
     paddingHorizontal: Spacing.two,
     width: '100%',
     maxWidth: 800,
   },
   tab: {
     flex: 1,
-    minHeight: 58,
+    minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    paddingVertical: 5,
+    gap: 2,
+    paddingVertical: 4,
   },
   tabLabel: {
     fontSize: 12,

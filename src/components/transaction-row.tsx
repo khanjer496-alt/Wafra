@@ -113,17 +113,17 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
 // unchanged visible rows from rebuilding when import progress updates.
 export const TransactionRow = React.memo(TransactionRowInner);
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 72, paddingVertical: 10 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, minHeight: 66, paddingVertical: 8 },
   content: { flex: 1, minWidth: 0, gap: 3 },
   headline: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   headlineLarge: { flexDirection: 'column', gap: 6 },
   merchant: { flexGrow: 1, flexShrink: 1, flexBasis: 120 },
   merchantLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   amount: { flexShrink: 1 },
-  metadata: { fontSize: 12, lineHeight: 19, flexShrink: 1 },
+  metadata: { fontSize: 12, lineHeight: 17, flexShrink: 1 },
   splitRow: { flexWrap: 'wrap', alignItems: 'flex-start' },
   splitRowLarge: { flexDirection: 'column' },
-  merchantTarget: { flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+  merchantTarget: { flexDirection: 'row', alignItems: 'flex-start', gap: 10,
     flexGrow: 1, flexShrink: 1, flexBasis: 160, minWidth: 0, minHeight: 48 },
   merchantTargetLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   entryTarget: { minHeight: 48, minWidth: 72, maxWidth: '100%', flexShrink: 1,

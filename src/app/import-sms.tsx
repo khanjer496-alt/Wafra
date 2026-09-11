@@ -1728,8 +1728,8 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.five,
-    gap: Spacing.four,
+    paddingBottom: Spacing.four,
+    gap: 14,
   },
   intro: {
     gap: Spacing.three - 2,
@@ -1737,8 +1737,8 @@ const styles = StyleSheet.create({
   historyCard: {
     borderWidth: 1,
     borderRadius: Radius.sheet,
-    padding: Spacing.three,
-    gap: Spacing.three - 2,
+    padding: 14,
+    gap: 12,
   },
   historyCardHeading: {
     flexDirection: 'row',
@@ -1755,8 +1755,8 @@ const styles = StyleSheet.create({
     height: PANEL_HEIGHT,
     borderWidth: 1,
     borderRadius: Radius.sheet,
-    padding: Spacing.three + 2,
-    gap: Spacing.three - 2,
+    padding: 14,
+    gap: 12,
     overflow: 'hidden',
   },
   panelLine: {
@@ -1805,7 +1805,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: Spacing.half,
-    paddingVertical: Spacing.three - 2,
+    paddingVertical: 11,
   },
   statFigure: {
     fontSize: 20,
@@ -1830,7 +1830,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: ScreenPadding,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
+    paddingTop: 6,
+    paddingBottom: 12,
   },
 });

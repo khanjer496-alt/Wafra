@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: ScreenPadding,
-    gap: Spacing.three,
+    gap: 12,
   },
   virtualizedHeader: {
     width: '100%',
@@ -226,6 +226,6 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: ScreenPadding,
-    paddingTop: Spacing.two,
+    paddingTop: 6,
   },
 });

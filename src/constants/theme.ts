@@ -166,7 +166,12 @@ export const Motion = {
   pulse: 2800,
 } as const;
 
-export const ScreenPadding = 22;
+/**
+ * Compact phone gutters. 18px keeps Ledger & Light airy without making the
+ * interface feel zoomed-in on 390-430pt phones, and gives data-heavy screens
+ * noticeably more usable width. Tablet/web content is still capped below.
+ */
+export const ScreenPadding = 18;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;

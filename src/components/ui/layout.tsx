@@ -223,19 +223,19 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three - 2,
-    paddingVertical: 13,
+    gap: 12,
+    paddingVertical: 11,
   },
   block: {
     borderWidth: 1,
     borderRadius: Radius.sheet,
-    padding: Spacing.three + 2,
+    padding: Spacing.three,
   },
   tableRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.two,
-    paddingVertical: Spacing.three - 4,
+    paddingVertical: 10,
   },
   tableLabel: {
     width: 110,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three - 4,
-    paddingVertical: Spacing.two + 2,
+    paddingVertical: Spacing.two,
   },
   backButton: {
     width: 44,

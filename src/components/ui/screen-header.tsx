@@ -159,17 +159,17 @@ export function ScreenHeader({ mode = 'inline', ...props }: ScreenHeaderRenderer
 }
 
 const styles = StyleSheet.create({
-  inlineHeader: { width: '100%', gap: Spacing.two },
+  inlineHeader: { width: '100%', gap: 6 },
   contextRow: { alignItems: 'flex-start' },
   headerRow: {
-    minHeight: 48,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: 6,
   },
   leadingGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   actionGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  titleGroup: { flex: 1, minWidth: 0, gap: Spacing.one },
+  titleGroup: { flex: 1, minWidth: 0, gap: 2 },
   title: { flexShrink: 1 },
   // Plex Arabic needs 1.5em for its full vertical metrics.
   arabicTitle: { lineHeight: 44 },
