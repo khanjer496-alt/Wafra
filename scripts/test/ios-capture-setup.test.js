@@ -3990,9 +3990,9 @@ struct WafraBankSenderRegistryTests {
     'https://www.icloud.com/shortcuts/abcdefabcdefabcdefabcdefabcdefab');
   const signedReleaseShortcut =
     'https://github.com/khanjer496-alt/Wafra/releases/download/ios-catchup-beta-20260910-v1/Wafra-Local-Capture-signed.shortcut';
-  eq('local capture protocol: exact signed Wafra beta release is accepted',
+  eq('local capture protocol: GitHub beta release is rejected',
     protocolModule.normalizeIosLocalCaptureShortcutUrl(signedReleaseShortcut),
-    signedReleaseShortcut);
+    null);
   eq('local capture protocol: another GitHub owner is rejected',
     protocolModule.normalizeIosLocalCaptureShortcutUrl(
       'https://github.com/other/Wafra/releases/download/ios-catchup-beta-20260910-v1/Wafra-Local-Capture-signed.shortcut',
