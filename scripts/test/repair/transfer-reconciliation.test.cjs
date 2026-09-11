@@ -54,6 +54,58 @@ test('equal amounts and clocks cannot turn unknown bank transfers into own trans
   assert.equal(result.byId.get('out').reason, 'missing-evidence');
 });
 
+test('an exact owned credit-card repayment receipt confirms one unique identity-less bank debit', () => {
+  const livMask = '__unassigned-transfer__:liv:' + 'a'.repeat(64);
+  const adcbCard = {
+    id: 'adcb-card-7720', name: 'ADCB Credit Card •7720', kind: 'card', cardType: 'credit',
+    bankName: 'ADCB', last4: '7720', openingFils: 0, color: '#111111',
+  };
+  const debit = row('liv-debit', 'expense', {
+    amountFils: 117600,
+    accountId: livMask,
+    captureInstrument: undefined,
+    ts: NOW,
+    transferEvidence: {
+      version: 1, currency: 'AED', attribution: 'fallback', sourceBank: 'Liv', sourceAccountKey: 'a'.repeat(64),
+    },
+  });
+  const receipt = row('adcb-receipt', 'income', {
+    amountFils: 117600,
+    accountId: adcbCard.id,
+    title: 'Card •7720 payment',
+    ts: NOW + 60_000,
+    captureInstrument: { last4: '7720', kind: 'credit', bankIdentity: 'adcb' },
+    cardPaymentSide: 'receipt',
+    transferEvidence: undefined,
+  });
+  const result = reconcileTransfers([debit, receipt], [...accounts, adcbCard]);
+  assert.equal(result.byId.get(debit.id)?.status, 'card-repayment');
+  assert.equal(result.byId.get(debit.id)?.reason, 'credit-card-receipt');
+  assert.equal(result.byId.get(debit.id)?.counterpartId, receipt.id);
+  assert.equal(result.pendingIds.has(debit.id), false);
+});
+
+test('identity-less debit stays unresolved when card-repayment evidence is not unique or timely', () => {
+  const livMask = '__unassigned-transfer__:liv:' + 'b'.repeat(64);
+  const adcbCard = {
+    id: 'adcb-card-7720', name: 'ADCB Credit Card •7720', kind: 'card', cardType: 'credit',
+    bankName: 'ADCB', last4: '7720', openingFils: 0, color: '#111111',
+  };
+  const debit = row('liv-debit-ambiguous', 'expense', {
+    amountFils: 71500, accountId: livMask, captureInstrument: undefined, ts: NOW,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback', sourceBank: 'Liv', sourceAccountKey: 'b'.repeat(64) },
+  });
+  const receipt = (id, at) => row(id, 'income', {
+    amountFils: 71500, accountId: adcbCard.id, title: 'Card •7720 payment', ts: at,
+    captureInstrument: { last4: '7720', kind: 'credit', bankIdentity: 'adcb' },
+    cardPaymentSide: 'receipt', transferEvidence: undefined,
+  });
+  const ambiguous = reconcileTransfers([debit, receipt('r1', NOW), receipt('r2', NOW + 30_000)], [...accounts, adcbCard]);
+  assert.notEqual(ambiguous.byId.get(debit.id)?.status, 'card-repayment');
+  const late = reconcileTransfers([debit, receipt('late', NOW + 5 * 60_000 + 1)], [...accounts, adcbCard]);
+  assert.notEqual(late.byId.get(debit.id)?.status, 'card-repayment');
+});
+
 test('legacy outward-remittance and telegraphic-transfer SMS titles remain recorded without forcing review', () => {
   for (const title of ['Outward remittance', 'Telegraphic transfer']) {
     const tx = row('legacy-transfer', 'expense', { title, isTransfer: true, transferEvidence: undefined });

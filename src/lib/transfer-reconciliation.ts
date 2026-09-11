@@ -544,12 +544,16 @@ function uniqueObservedPairs(
 
 function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: Set<string>): Map<string, string> {
   const rows: ObservedRow[] = [];
+  const receipts: ObservedRow[] = [];
   for (const entry of ctx.entries.values()) {
     if (!pending.has(entry.tx.id) || secondary.has(entry.tx.id) || entry.tx.type !== 'expense' ||
         entry.tx.transferDecision || entry.tx.userEdited || evidenceOf(entry.tx)?.endpointProof !== 'explicit-transfer') continue;
     rows.push({ tx: entry.tx, at: entry.at, money: entry.money, bank: entry.bank, credit: false });
   }
-  for (const tx of ctx.rows.values()) { const receipt = observedReceipt(tx, ctx); if (receipt) rows.push(receipt); }
+  for (const tx of ctx.rows.values()) {
+    const receipt = observedReceipt(tx, ctx);
+    if (receipt) { rows.push(receipt); receipts.push(receipt); }
+  }
   const pairs = uniqueObservedPairs(rows, 86_400_000, (a, b) => {
     const debit = a.credit ? b : a, receipt = a.credit ? a : b;
     if (a.credit === b.credit || debit.tx.type !== 'expense' || debit.tx.accountId === receipt.tx.accountId) return false;
@@ -557,7 +561,33 @@ function observedCardRepayments(ctx: Context, pending: Set<string>, secondary: S
     return !!cp && (cp.kind === 'unknown' || cp.kind === 'credit') && cp.last4 === receipt.tx.captureInstrument?.last4 &&
       (!cp.bankIdentity || bankIdentityForName(cp.bankIdentity) === receipt.bank);
   });
-  return new Map([...pairs].filter(([id]) => ctx.rows.get(id)?.type === 'expense'));
+  const confirmed = new Map([...pairs].filter(([id]) => ctx.rows.get(id)?.type === 'expense'));
+
+  // Some banks (notably Liv) report an outward transfer without exposing the
+  // beneficiary/card identity. If an independently identified OWNED credit
+  // card reports an explicit repayment receipt for the exact amount within a
+  // few minutes, that receipt supplies the missing endpoint evidence. Keep
+  // this deliberately narrow: no named/partial counterparty, different banks,
+  // one unique debit, one unique receipt, and a five-minute window.
+  const implicitRows: ObservedRow[] = [...receipts];
+  for (const tx of ctx.rows.values()) {
+    if (!pending.has(tx.id) || secondary.has(tx.id) || confirmed.has(tx.id) || tx.type !== 'expense' ||
+        tx.transferDecision || tx.userEdited || (tx.source !== 'sms' && !tx.smsKey)) continue;
+    const ev = evidenceOf(tx);
+    if (!ev?.sourceBank || ev.explicitExternal || ev.counterparty !== undefined || ev.counterpartyName !== undefined) continue;
+    const at = sourceTime(tx), money = sourceMoney(tx, ev), bank = bankIdentityForName(ev.sourceBank);
+    if (at === undefined || !money || !bank) continue;
+    implicitRows.push({ tx, at, money, bank, credit: false });
+  }
+  const implicitPairs = uniqueObservedPairs(implicitRows, 5 * 60_000, (a, b) => {
+    const debit = a.credit ? b : a, receipt = a.credit ? a : b;
+    return a.credit !== b.credit && debit.tx.type === 'expense' &&
+      debit.tx.accountId !== receipt.tx.accountId && debit.bank !== receipt.bank;
+  });
+  for (const [id, counterpartId] of implicitPairs) {
+    if (ctx.rows.get(id)?.type === 'expense' && !confirmed.has(id)) confirmed.set(id, counterpartId);
+  }
+  return confirmed;
 }
 
 /**
