@@ -5544,16 +5544,15 @@ function parseSmsInner(
     titlePinned = true;
   }
   // Bank interest and explicit reversal-reference credits are completed money
-  // events, not unidentified transfers. Some Liv formats put a support footer
-  // after the credit and the generic payee grammar used to title the interest
-  // row "Our Support Team"; terse REV-* credits fell through as "Incoming
-  // transfer". Pin the accounting event before category selection so neither
-  // enters transfer ownership reconciliation.
+  // events, not unidentified transfers. Keep this narrow recognition while
+  // reverting the later masked-account routing/accounting experiment.
   if (!isBillDue && type === 'income') {
-    if (/\b(?:interest\s+payout|bonus\s+multiplier(?:\s+\w+){0,3}\s+interest)\b/i.test(raw)) {
+    const incomeText = raw.toLowerCase();
+    if (incomeText.includes('interest payout') ||
+        (incomeText.includes('bonus multiplier') && incomeText.includes('interest'))) {
       merchant = 'Interest';
       titlePinned = true;
-    } else if (/\bREV[-;:]\s*[A-Z0-9]/i.test(raw)) {
+    } else if (incomeText.includes(' rev-') || incomeText.includes(' rev;') || incomeText.includes(' rev:')) {
       merchant = 'Refund';
       titlePinned = true;
     }

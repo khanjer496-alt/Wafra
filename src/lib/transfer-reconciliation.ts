@@ -92,14 +92,9 @@ export function unassignedTransferAccountId(evidence: TransferEvidence): string 
 export const isUnassignedTransferAccount = (accountId: string): boolean =>
   /^__unassigned-transfer__:[a-z0-9-]{1,80}:(?:[a-f0-9]{64}|unknown)$/.test(accountId);
 
-/**
- * A hashed source bucket is different from a totally unknown transfer bucket:
- * the bank authenticated one stable masked account as the user's source. We
- * still do not know its displayable last four digits, but we do know that cash
- * moved through one of the user's accounts. Cash-flow views may therefore use
- * its signed movement while income/spending analytics continue to exclude the
- * transfer until ownership is resolved.
- */
+/** Compatibility predicate for persisted masked-source buckets. A hashed
+ * bucket remains identifiable for migrations/UI, but no longer proves that it
+ * should participate in cash-flow or account routing. */
 export const isObservedUnassignedTransferAccount = (accountId: string): boolean =>
   /^__unassigned-transfer__:[a-z0-9-]{1,80}:[a-f0-9]{64}$/.test(accountId);
 
@@ -586,10 +581,6 @@ function ownedTransferObservation(tx: TransferRow, ctx: Context): OwnedTransferO
 
   const account = ctx.accounts.get(tx.accountId);
   const capture = tx.captureInstrument;
-  if (eligibleAccount(account) && ev.sourceAccountKey && /^[a-f0-9]{64}$/.test(ev.sourceAccountKey) &&
-      account.bankName && bankIdentityForName(account.bankName) === bank) {
-    return { tx, at, money, bank, credit: false, identity: `mask:${bank}:${ev.sourceAccountKey}` };
-  }
   if (!eligibleAccount(account) || !isInstrument(capture) || capture.kind === 'credit' ||
       !capture.bankIdentity || capture.last4 !== account.last4 || !account.bankName) return;
   const accountBank = bankIdentityForName(account.bankName);

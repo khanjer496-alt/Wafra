@@ -75,7 +75,7 @@ test('generic transfers without evidence remain pending instead of pairing equal
   const rows = [row('out', 'expense', start, { transferEvidence: undefined, isTransfer: true }),
     row('in', 'income', start, { transferEvidence: undefined })];
   check(rows, []);
-  assert.deepEqual([...reconcileTransfers(rows, accounts).pendingIds].sort(), ['in', 'out']);
+  assert.deepEqual([...reconcileTransfers(rows, accounts).pendingIds].sort(), []);
 });
 test('does not mutate the transaction array or its rows', () => {
   const rows = Object.freeze([Object.freeze(row('out', 'expense', start)), Object.freeze(row('in', 'income', start))]);

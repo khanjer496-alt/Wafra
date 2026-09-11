@@ -62,7 +62,7 @@ test('unknown bank transfers stay out of spending analytics but remain in cash-f
     'an ordinary unpaired transfer does not become a mandatory review task');
 });
 
-test('a bank-authenticated masked source contributes symmetrically to cash in and cash out', () => {
+test('a bank-authenticated masked source stays out of confirmed cash flow until account ownership is proven', () => {
   const observed = '__unassigned-transfer__:liv:' + 'a'.repeat(64);
   const unknown = '__unassigned-transfer__:liv:unknown';
   const rows = [
@@ -77,12 +77,12 @@ test('a bank-authenticated masked source contributes symmetrically to cash in an
   const internal = ledger.internalTransferIds(rows, accounts);
   assert.equal(core.isObservedUnassignedTransferAccount(observed), true);
   assert.equal(core.isObservedUnassignedTransferAccount(unknown), false);
-  assert.equal(ledger.countsInCashflowTotals(rows[0], live, internal), true);
-  assert.equal(ledger.countsInCashflowTotals(rows[1], live, internal), true);
+  assert.equal(ledger.countsInCashflowTotals(rows[0], live, internal), false);
+  assert.equal(ledger.countsInCashflowTotals(rows[1], live, internal), false);
   assert.equal(ledger.countsInCashflowTotals(rows[2], live, internal), false);
   assert.equal(ledger.countsInCashflowTotals(rows[3], live, internal), false);
   const summary = summarizeCashOutflow(stateOf(rows), '2026-09', { live, internal });
-  assert.equal(summary.totalFils, 10000, 'unknown source bucket cannot create one-sided cash out');
+  assert.equal(summary.totalFils, 0, 'masked source bucket cannot create one-sided cash out');
 });
 
 test('a company-suffix category guess cannot turn an unclear transfer into confirmed business income', () => {

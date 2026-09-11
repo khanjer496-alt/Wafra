@@ -1,5 +1,5 @@
 import type { Account, Transaction } from '@/lib/types';
-import { isObservedUnassignedTransferAccount, isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
 
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
@@ -67,14 +67,11 @@ export function countsInCashflowTotals(
   // Settlement/funding rows are deliberately not transfer candidates. Preserve
   // their existing exclusion instead of re-labelling card payments as income.
   if (ownership === null && transaction.isTransfer === true) return false;
-  // A bank-scoped hashed source proves that one stable masked account is the
-  // user's, even though the bank never exposed four displayable digits. Keep
-  // that real movement in cash-flow totals. The `:unknown` holding still proves
-  // no source account and must remain excluded.
-  if (isUnassignedTransferAccount(transaction.accountId) &&
-      !isObservedUnassignedTransferAccount(transaction.accountId)) return false;
-  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction) &&
-      !isObservedUnassignedTransferAccount(transaction.accountId)) return false;
+  // A holding transfer source is not a user's known account, so it cannot yet
+  // establish cash flow for the ledger. Ordinary unassigned parsed activity is
+  // still governed by the live-account set below.
+  if (isUnassignedTransferAccount(transaction.accountId)) return false;
+  if (live && !live.has(transaction.accountId) && !isUnassignedIncome(transaction)) return false;
   return true;
 }
 

@@ -10,7 +10,7 @@ import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureIns
 import { readBillAlias } from '@/lib/bill-alias';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
-import { buildTransferEvidence, maskedSourceAccountKey } from '@/lib/transfer-evidence';
+import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { isUnassignedTransferAccount, unassignedTransferAccountId } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
@@ -546,15 +546,6 @@ export function buildImportPlan(
     ...state.accounts.map((account) => ({ ref: account.id, account })),
     ...newAccounts.map((account, index) => ({ ref: String(index), account })),
   ];
-  const maskedSourceIdentity = (p: ScannedSms): { bankName: string; bankIdentity: string; key: string } | undefined => {
-    if (!p.raw) return;
-    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
-    if (!bank) return;
-    const bankIdentity = bankIdentityForName(bank.name);
-    if (!bankIdentity) return;
-    const key = maskedSourceAccountKey(p.raw, bankIdentity);
-    return key ? { bankName: bank.name, bankIdentity, key } : undefined;
-  };
   const isGeneratedUnknownHolding = (
     ref: string,
     account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'>,
@@ -579,36 +570,6 @@ export function buildImportPlan(
     createMissing = true,
   ): AccountResolution => {
     if (!p.card) {
-      const masked = maskedSourceIdentity(p);
-      if (masked) {
-        const sourceHint = `source-account|${masked.bankIdentity}|${masked.key}`;
-        const hinted = hints[sourceHint];
-        const hintedAccount = hinted ? accountAtRef(hinted) : undefined;
-        if (hinted && hintedAccount?.kind === 'bank' && hintedAccount.bankName &&
-            bankIdentityForName(hintedAccount.bankName) === masked.bankIdentity) {
-          bankNames[hinted] ??= masked.bankName;
-          return { accountId: hinted, confident: true };
-        }
-        // A bank-authenticated, stable masked source is enough to create one
-        // real account without inventing four digits. Persist only the opaque
-        // scoped hint; the user sees "Liv Account", never the hash.
-        if (createMissing) {
-          const bank = bankFromName(masked.bankName);
-          const idx = newAccounts.length;
-          newAccounts.push({
-            name: `${masked.bankName} Account`,
-            kind: 'bank',
-            bankName: masked.bankName,
-            openingFils: 0,
-            color: bank?.color ?? colorForHint(masked.key.slice(-4)),
-          });
-          const ref = String(idx);
-          hints[sourceHint] = ref;
-          newHints[sourceHint] = ref;
-          bankNames[ref] = masked.bankName;
-          return { accountId: ref, confident: true };
-        }
-      }
       const evidence = buildTransferEvidence(p, false);
       // A Liv/HSBC/YAP source without four readable terminal digits must not
       // inherit the first saved card. The bank/mask-scoped holding remains
@@ -1101,7 +1062,7 @@ export function buildImportPlan(
     // format can repair an existing fallback through exact source identity.
     const partialAccount = p.raw?.match(/\baccount\s+(?:no\.?|number)?\s*[:#]?\s*([0-9xX*]{4,40})(?![0-9xX*])/i)?.[1];
     const provenPartialMask = !!partialAccount && /[x*][0-9]{1,3}$/i.test(partialAccount);
-    const unassignedIncome = !p.card && !maskedSourceIdentity(p) && p.type === 'income' && p.categoryGuess === 'business' &&
+    const unassignedIncome = !p.card && p.type === 'income' && p.categoryGuess === 'business' &&
       p.categoryDeliberate && !p.transferHint && !prior?.userEdited && !prior?.captureInstrument &&
       (!prior || provenPartialMask || prior.accountId === UNASSIGNED_INCOME_ACCOUNT_ID);
     const resolution = unassignedIncome

@@ -19,7 +19,7 @@ function harness(rows = [], options = {}) {
       buildInsights: () => { insightCalls += 1; return [{ id: 'one' }, { id: 'two' }]; } },
     '@/lib/leaving-soon': { leavingSoon: (_state, _now, opts) => { calls.upcomingKinds.push(opts.kinds);
       return ['card', 'bill', 'subscription'].filter(kind => !opts.kinds || opts.kinds.includes(kind)).map(kind => ({ kind })); } },
-    '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']) },
+    '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']) },
     '@/lib/period': { inPeriod: (date) => { periodChecks += 1; return date === '2026-09-06'; }, isCurrentMonth: () => true },
     '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [] }), worthPrompting: () => !!options.needsCategory },
   });
