@@ -20,7 +20,7 @@ type CacheRecord = {
   expiresAt: number;
 };
 
-const CACHE_PREFIX = 'wafra:merchant-logo:v1:';
+const CACHE_PREFIX = 'wafra:merchant-logo:v2:';
 const POSITIVE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const memory = new Map<string, CacheRecord>();
@@ -177,9 +177,16 @@ async function fetchRemote(candidate: string): Promise<RemoteMerchantLogo | null
       const domain = item.domain.trim().toLowerCase();
       if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+[a-z]{2,24}$/i.test(domain)) continue;
       const confidence = merchantBrandConfidence(candidate, item.name, domain);
+      const candidateTokens = tokens(candidate);
+      const exactName = normalized(candidate) === normalized(item.name);
+      const exactDomain = normalized(candidate) === normalized(domain.split('.')[0] ?? '');
       // The product requirement is "no wrong logo". A missing mark is much
       // cheaper than confidently attaching another business to a transaction.
       if (confidence < 0.94) continue;
+      // Single-word names collide constantly across countries and industries
+      // (Life, Aster, Costa, Zoom...). Require Brandfetch's claimed signal, or
+      // an exact name + domain-stem identity, before attaching that logo.
+      if (candidateTokens.length === 1 && item.claimed !== true && !(exactName && exactDomain)) continue;
       const value: RemoteMerchantLogo = Object.freeze({
         id: `brandfetch:${domain}`,
         domain,

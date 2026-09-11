@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { BankAvatar } from '@/components/ui/bank-avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -55,29 +56,10 @@ export function CategoryTile({ category, size = 34 }: { category: CategoryId; si
 
 /** Account identity, tinted by kind: what you have, what you owe, what's cash. */
 export function AccountTile({ account, size = 36 }: { account: Account; size?: number }) {
-  const theme = useTheme();
-  const credit = account.cardType === 'credit';
   if (account.kind === 'cash') {
     return <Tile icon="cash" size={size} />;
   }
-  if (credit) {
-    return (
-      <Tile
-        icon="wallet"
-        size={size}
-        background={theme.expenseSoftBg}
-        tint={theme.expense}
-      />
-    );
-  }
-  return (
-    <Tile
-      icon={account.kind === 'card' ? 'wallet' : 'bank'}
-      size={size}
-      background={theme.primarySoft}
-      tint={theme.primary}
-    />
-  );
+  return <BankAvatar account={account} size={size} />;
 }
 
 const styles = StyleSheet.create({

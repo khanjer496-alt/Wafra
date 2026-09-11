@@ -22,12 +22,15 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
   useEffect(() => {
     let alive = true;
     setRemote(null);
-    if (bundled) return () => { alive = false; };
+    // `other` frequently contains user-created biller names and local one-off
+    // merchants. Global brand search is more likely to attach the wrong company
+    // than help there. Reviewed bundled aliases still win above this guard.
+    if (bundled || category === 'other') return () => { alive = false; };
     void resolveRemoteMerchantLogo(title).then(value => {
       if (alive) setRemote(value);
     });
     return () => { alive = false; };
-  }, [title, bundled]);
+  }, [title, category, bundled]);
 
   if (bundled) {
     return <LogoTile key={bundled.id} id={bundled.id} source={bundled.source} category={category} size={size} />;
