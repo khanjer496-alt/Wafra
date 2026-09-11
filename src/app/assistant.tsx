@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
@@ -15,6 +16,7 @@ import { answerWafraQuestion, suggestedAssistantQuestions, type AssistantAnswer 
 export default function AssistantScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const { state } = useStore();
   const suggestions = useMemo(() => suggestedAssistantQuestions(state), [state]);
   const [question, setQuestion] = useState('');
@@ -60,13 +62,15 @@ export default function AssistantScreen() {
       </View>
 
       {answer ? (
-        <View style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
+        <View
+          accessibilityLiveRegion="polite"
+          style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
           <ThemedText type="micro" themeColor="primary">{answer.title}</ThemedText>
           <ThemedText type="default">{answer.body}</ThemedText>
           {answer.facts?.length ? (
             <View style={styles.facts}>
               {answer.facts.map((fact) => (
-                <View key={`${fact.label}-${fact.value}`} style={styles.factRow}>
+                <View key={`${fact.label}-${fact.value}`} style={[styles.factRow, largeText && styles.factRowLarge]}>
                   <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
                   <ThemedText type="smallBold" tabular>{fact.value}</ThemedText>
                 </View>
@@ -82,6 +86,8 @@ export default function AssistantScreen() {
           onChangeText={setQuestion}
           onSubmitEditing={() => ask()}
           returnKeyType="send"
+          accessibilityLabel={t('assistantPlaceholder')}
+          maxLength={1000}
           placeholder={t('assistantPlaceholder')}
           placeholderTextColor={theme.textTertiary}
           style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
@@ -111,6 +117,7 @@ const styles = StyleSheet.create({
   answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 14, gap: 10 },
   facts: { gap: 6, paddingTop: Spacing.one },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
+  factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1 },
   composer: { gap: 8, paddingTop: Spacing.one },
   input: {

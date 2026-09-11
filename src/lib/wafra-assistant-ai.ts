@@ -81,11 +81,37 @@ export function buildAssistantExplanationEnvelope(
         label: fact.label.slice(0, 160),
         value: fact.value.slice(0, 80),
       })),
-      data: { ...(answer.data ?? {}) },
+      data: safeExplanationData(answer.data),
     },
     instruction:
       'Explain the supplied Wafra result clearly. Never invent, recompute, or alter financial figures. Say when the supplied data is insufficient.',
   };
+}
+
+/**
+ * Defence in depth for the future provider boundary. Executor-owned answers do
+ * not currently expose any of these fields, but this keeps an accidental
+ * account/card/message identifier from crossing the boundary if a later tool
+ * adds richer local result data.
+ */
+function safeExplanationData(
+  data: AssistantAnswer['data'],
+): Record<string, string | number | boolean | null> {
+  if (!data) return {};
+  const safe: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(data)) {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (
+      normalizedKey.includes('rawsms') ||
+      normalizedKey.includes('rawmessage') ||
+      normalizedKey.includes('accountid') ||
+      normalizedKey.includes('cardid') ||
+      normalizedKey.includes('transactionid') ||
+      normalizedKey.includes('identifier')
+    ) continue;
+    safe[key.slice(0, 80)] = typeof value === 'string' ? value.slice(0, 160) : value;
+  }
+  return safe;
 }
 
 /**
@@ -132,13 +158,32 @@ function validPeriod(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const period = value as Record<string, unknown>;
   if (period.mode === 'all') return true;
-  if (period.mode === 'month') return typeof period.key === 'string' && /^\d{4}-\d{2}$/.test(period.key);
+  if (period.mode === 'month') return typeof period.key === 'string' && validMonthKey(period.key);
   if (period.mode === 'year') return Number.isSafeInteger(period.year) &&
     (period.year as number) >= 2000 && (period.year as number) <= 2200;
   if (period.mode === 'range') {
     return typeof period.from === 'string' && typeof period.to === 'string' &&
-      /^\d{4}-\d{2}-\d{2}$/.test(period.from) && /^\d{4}-\d{2}-\d{2}$/.test(period.to) &&
+      validISODate(period.from) && validISODate(period.to) &&
       period.from <= period.to;
   }
   return false;
+}
+
+function validMonthKey(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  return year >= 2000 && year <= 2200 && month >= 1 && month <= 12;
+}
+
+function validISODate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }

@@ -8,11 +8,14 @@ import { Row } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { Toggle } from '@/components/ui/controls';
 import { Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import {
   DEFAULT_HOME_WIDGETS,
   loadHomeWidgetPreferences,
+  moveHomeWidget,
   saveHomeWidgetPreferences,
+  setHomeWidgetVisible,
   type HomeWidgetId,
   type HomeWidgetPreferences,
 } from '@/lib/home-widgets';
@@ -29,7 +32,11 @@ const META: Record<HomeWidgetId, { titleKey: StringKey; detailKey: StringKey }> 
 export default function HomeCustomizeScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const [preferences, setPreferences] = useState<HomeWidgetPreferences>(DEFAULT_HOME_WIDGETS);
+  const largeText = useLargeTextLayout();
+  const [preferences, setPreferences] = useState<HomeWidgetPreferences>(() => ({
+    order: [...DEFAULT_HOME_WIDGETS.order],
+    hidden: [],
+  }));
 
   useEffect(() => {
     void loadHomeWidgetPreferences().then(setPreferences);
@@ -37,25 +44,15 @@ export default function HomeCustomizeScreen() {
 
   const update = useCallback((next: HomeWidgetPreferences) => {
     setPreferences(next);
-    void saveHomeWidgetPreferences(next);
+    void saveHomeWidgetPreferences(next).catch(() => undefined);
   }, []);
 
   const toggle = (id: HomeWidgetId, visible: boolean) => {
-    update({
-      ...preferences,
-      hidden: visible
-        ? preferences.hidden.filter((item) => item !== id)
-        : [...preferences.hidden.filter((item) => item !== id), id],
-    });
+    update(setHomeWidgetVisible(preferences, id, visible));
   };
 
   const move = (id: HomeWidgetId, direction: -1 | 1) => {
-    const index = preferences.order.indexOf(id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= preferences.order.length) return;
-    const order = [...preferences.order];
-    [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
-    update({ ...preferences, order });
+    update(moveHomeWidget(preferences, id, direction));
   };
 
   return (
@@ -79,10 +76,11 @@ export default function HomeCustomizeScreen() {
                 <ThemedText type="smallBold">{title}</ThemedText>
                 <ThemedText type="meta" themeColor="textSecondary">{detail}</ThemedText>
               </View>
-              <View style={styles.actions}>
+              <View style={[styles.actions, largeText && styles.actionsLarge]}>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${t('moveUp')} ${title}`}
+                  accessibilityState={{ disabled: index === 0 }}
                   disabled={index === 0}
                   onPress={() => move(id, -1)}
                   style={[styles.iconButton, index === 0 && styles.disabled]}>
@@ -91,6 +89,7 @@ export default function HomeCustomizeScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${t('moveDown')} ${title}`}
+                  accessibilityState={{ disabled: index === preferences.order.length - 1 }}
                   disabled={index === preferences.order.length - 1}
                   onPress={() => move(id, 1)}
                   style={[styles.iconButton, index === preferences.order.length - 1 && styles.disabled]}>
@@ -113,6 +112,7 @@ const styles = StyleSheet.create({
   list: { gap: 0 },
   copy: { flex: 1, minWidth: 0, gap: 2 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  actionsLarge: { flexWrap: 'wrap', justifyContent: 'flex-end' },
+  iconButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.25 },
 });

@@ -78,7 +78,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture \
-         wafra-assistant wafra-assistant-ai; do
+         wafra-assistant wafra-assistant-ai home-widget-preferences; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
