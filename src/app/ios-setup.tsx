@@ -645,6 +645,7 @@ export default function IosSetupScreen() {
     };
   };
   const action = primaryAction();
+  const showFooterAction = setupComplete && !showAutomationGuide;
   const helpActions: { label: string; onPress(): void }[] = [];
   if (progress.activeSection === 'future') {
     if (setup.supported && setup.shortcutAvailable) {
@@ -706,11 +707,27 @@ export default function IosSetupScreen() {
                     <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
                   </>
                 ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
-                      : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
-                  </ThemedText>
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
+                        : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
+                    </ThemedText>
+                    <Button
+                      label={t(futureStep === 'add-shortcut' ? 'iosLocalInstallShortcut' : 'iosLocalAlreadyAdded')}
+                      onPress={futureStep === 'add-shortcut' ? installFutureShortcut : confirmFutureShortcut}
+                      disabled={busy || (futureStep === 'add-shortcut' && !setup.shortcutAvailable)}
+                      wrapLabel
+                    />
+                  </>
                 ) : null}
+                {showingAutomation && (
+                  <Button
+                    label={t(progress.futureAutomationConfirmed ? 'iosMessageRetryCheck' : 'iosLocalAutomationAdded')}
+                    onPress={confirmAutomation}
+                    disabled={busy}
+                    wrapLabel
+                  />
+                )}
                 {futureConfigured && !historyComplete && !historyDeferred && !showAutomationGuide && (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{t('iosMessageFutureReadyChoice')}</ThemedText>
@@ -761,6 +778,18 @@ export default function IosSetupScreen() {
                         <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryCoverage')}</ThemedText>
                       </View>
                     )}
+                    <Button
+                      label={t(historyRunning ? 'historyContinueAction'
+                        : historyConfirmed ? 'historyStartAction'
+                          : progress.historyStatus === 'in-progress'
+                            ? 'iosMessageHistoryStartAfterAdding' : 'historyAddAction')}
+                      onPress={historyRunning ? () => openHistoryRun(false)
+                        : historyConfirmed ? () => openHistoryRun(true)
+                          : progress.historyStatus === 'in-progress'
+                            ? () => openHistoryRun(true, true) : openHistoryInstall}
+                      disabled={busy}
+                      wrapLabel
+                    />
                   </>
                 ) : null}
                 {!historyComplete && !historyDeferred && (
@@ -813,9 +842,11 @@ export default function IosSetupScreen() {
             />
           )}
         </ScrollView>
-        <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
-          <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
-        </View>
+        {showFooterAction && (
+          <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
+            <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
+          </View>
+        )}
         <ConfirmSheet
           visible={skipHistoryVisible}
           onClose={() => setSkipHistoryVisible(false)}

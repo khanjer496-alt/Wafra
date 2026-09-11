@@ -33,9 +33,14 @@ export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | nu
   return null;
 }
 
-/** Expo inlines this public value into each build profile. */
-export const IOS_LOCAL_CAPTURE_SHORTCUT_URL =
-  'https://www.icloud.com/shortcuts/e4bc02cdb9d1475daac800fb78f1574f';
+/**
+ * Keep a known-good Apple share in source so onboarding never depends on a
+ * missing build-time variable. Environment overrides remain available for
+ * device testing, but production always has a working iCloud fallback.
+ */
+export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUrl(
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
+) ?? 'https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168';
 
 /** Run the installed Shortcut without input so its local setup-proof branch executes. */
 export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
