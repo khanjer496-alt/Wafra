@@ -305,8 +305,16 @@ export interface ParsedCard {
  *
  * 40: reread exact sources to repair cross-issuer fallback assignments for
  * unidentified payments. Amounts, dates and user edits remain unchanged.
+ *
+ * 41: rerun retained Android history after restoring conservative masked-account
+ * routing and cash-flow accounting. Build 169 changed those rules without a
+ * parser-version bump, so devices already stamped at 40 only scanned the inbox
+ * tail and could leave older registered-biller receipts such as Fishbasket,
+ * Fbinter and Nazemhome absent from Spending. This reread is deduplicated by
+ * provider/source identity and heals existing rows in place; it does not create
+ * a second copy of already-imported transactions.
  */
-export const PARSER_VERSION = 40;
+export const PARSER_VERSION = 41;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
