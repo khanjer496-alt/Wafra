@@ -16,7 +16,6 @@
  *    Restore bounced a free user to /pro while Export CSV and Expense report,
  *    one hairline below them, simply worked.
  */
-import { WorkflowNavigation } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
@@ -28,7 +27,7 @@ import { buildLedgerCsv } from '@/lib/ledger-export';
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -137,16 +136,10 @@ import {
  */
 const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 
-type SettingsPanel = 'preferences' | 'imports' | 'privacy' | 'data' | 'help';
-const SETTINGS_PANELS: readonly SettingsPanel[] = ['preferences', 'imports', 'privacy', 'data', 'help'];
 export default function SettingsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const router = useRouter();
-  const params = useLocalSearchParams<{ section?: string }>();
-  const selectedPanel = SETTINGS_PANELS.includes(params.section as SettingsPanel) ? params.section as SettingsPanel : 'preferences';
-  const [panel, setPanel] = useState<SettingsPanel>(selectedPanel);
-  useEffect(() => { setPanel(selectedPanel); }, [selectedPanel]);
   const {
     state,
     setAppLock,
@@ -192,19 +185,12 @@ export default function SettingsScreen() {
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
-  const formats = useMemo(() => panel === 'data' ? unreadFormatCount(state) : 0,
-    // The count reads transactions only, not capture progress or appearance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [panel, state.transactions]);
+  const formats = useMemo(() => unreadFormatCount(state), [state]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
   // their way down to two merchants loses the only route to the screen with
   // the job half done. This row is the permanent way in, and it stays visible
   // at zero to say so.
-  const unsorted = useMemo(() => panel === 'data' ? uncategorisedMerchants(state)
-    : { merchants: [], rowCount: 0, totalFils: 0 },
-    // Merchant review reads these financial inputs; no work on other panels.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [panel, state.transactions, state.accounts, state.merchantOverrides]);
+  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
   // A count of 0 is not a verdict on every device — see noFormatsReason().
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
@@ -237,7 +223,7 @@ export default function SettingsScreen() {
       personalReviewEpoch.current++;
     };
   }, []));
-  useEffect(() => { personalReviewEpoch.current++; }, [state.privateMode, panel, personalReviewGeneration]);
+  useEffect(() => { personalReviewEpoch.current++; }, [state.privateMode, personalReviewGeneration]);
   useEffect(() => {
     const subscription = RNAppState.addEventListener('change', next => {
       if (next === 'background') personalReviewEpoch.current++;
@@ -1212,13 +1198,7 @@ export default function SettingsScreen() {
         header={settingsHeader}
         contentStyle={styles.content}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <WorkflowNavigation<SettingsPanel> value={panel} onChange={setPanel} label={words.settingsNavigation}
-          items={[{ value: 'preferences', label: words.preferences, icon: 'sliders' },
-            { value: 'imports', label: words.capture, icon: 'mail' },
-            { value: 'privacy', label: t('privacyHeader'), icon: 'lock' },
-            { value: 'data', label: t('dataHeader'), icon: 'download' },
-            { value: 'help', label: words.help, icon: 'tools' }]} />
-        {panel === 'help' && (<Section index={0} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={0} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <Block onPress={() => router.push('/pro')}>
             <View style={[styles.proRow, largeText && styles.proRowLarge]}>
               <Icon name="diamond" size={19} color={theme.warning} />
@@ -1242,9 +1222,9 @@ export default function SettingsScreen() {
               <Icon name={chevron} size={15} color={theme.textTertiary} />
             </View>
           </Block>
-        </Section>)}
+        </Section>
 
-        {panel === 'preferences' && (<Section index={1} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={1} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsMoneyHeader')} />
           {hasGlobalLedger ? (
             <Row last>
@@ -1264,9 +1244,9 @@ export default function SettingsScreen() {
             () => setRegionSheet('country'),
             { last: true },
           )}
-        </Section>)}
+        </Section>
 
-        {panel === 'imports' && (<Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
           {Platform.OS === 'ios' && linkRow(
             t('iosSetupTitle'),
@@ -1364,9 +1344,9 @@ export default function SettingsScreen() {
               gated(onNotificationAccess),
               { last: true, pro: true },
             )}
-        </Section>)}
+        </Section>
 
-        {panel === 'imports' && (<Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsNotificationsHeader')} />
           {switchRow(
             t('dailySummarySetting'),
@@ -1401,9 +1381,9 @@ export default function SettingsScreen() {
               (next) => void toggleChargeAlerts(next),
               true,
             )}
-        </Section>)}
+        </Section>
 
-        {panel === 'preferences' && (<Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsAppearanceLanguageHeader')} />
           <Block>
             <SegmentedControl
@@ -1445,9 +1425,9 @@ export default function SettingsScreen() {
             () => setCurrencySheetVisible(true),
             { last: true },
           )}
-        </Section>)}
+        </Section>
 
-        {panel === 'privacy' && (<Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('privacyHeader')} />
           {switchRow(
             t('privateMode'),
@@ -1457,7 +1437,6 @@ export default function SettingsScreen() {
           )}
           {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
           {linkRow(t('messagesPrivacy'), null, () => setPrivacyDetailsVisible(true), { last: true })}
-          {linkRow(t('dataHeader'), words.privacyBody, () => setPanel('data'), { last: true })}
           {(legacyChargeAlertsAvailable || relay === undefined) && (
             <Block style={styles.privacyCopy}>
               <Icon name="alert" size={16} color={theme.warning} />
@@ -1466,9 +1445,9 @@ export default function SettingsScreen() {
               </ThemedText>
             </Block>
           )}
-        </Section>)}
+        </Section>
 
-        {panel === 'data' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={words.needsReview} />
           {reviewAlertCount > 0 && linkRow(
             t('reviewAlertsTitle'),
@@ -1527,9 +1506,9 @@ export default function SettingsScreen() {
           )}
           {isInternalLaunchDiagnosticsEnabled() &&
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
-        </Section>)}
+        </Section>
 
-        {panel === 'help' && (<Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('supportHeader')} />
           {linkRow(
             t('sendFeedback'),
@@ -1574,12 +1553,12 @@ export default function SettingsScreen() {
               Wafra {version}
             </ThemedText>
           </View>
-        </Section>)}
+        </Section>
 
-        {panel === 'privacy' && (<Section index={8} style={styles.danger}>
+        <Section index={8} style={styles.danger}>
           <SectionHeader title={t('settingsDangerHeader')} />
           <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
-        </Section>)}
+        </Section>
       </ScreenScaffold>
 
       <BottomSheet visible={privacyDetailsVisible} onClose={() => setPrivacyDetailsVisible(false)}

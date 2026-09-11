@@ -38,9 +38,9 @@ object InstantAlert {
   const val PREFS = "wafra_alert_prefs"
   const val KEY_ENABLED = "instant_alerts"
 
-  /** Off unless the user turns it on — this is an interruption, not a default. */
+  /** On by default; the OS notification permission still controls delivery. */
   fun isEnabled(context: Context): Boolean =
-    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
 
   fun setEnabled(context: Context, enabled: Boolean) {
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -50,7 +50,7 @@ object InstantAlert {
   /** Erase is synchronous: no delivery broadcast may observe stale consent. */
   fun clear(context: Context): Boolean {
     val disabled = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      .edit().remove(KEY_ENABLED).commit()
+      .edit().putBoolean(KEY_ENABLED, false).commit()
     // Erase should also remove any bank banner already visible in the shade.
     try {
       (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancelAll()

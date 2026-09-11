@@ -195,7 +195,7 @@ const EMPTY_STATE: AppState = {
   founderPro: false,
   privateMode: false,
   captureOptOut: false,
-  dailySummary: false,
+  dailySummary: true,
   trialStartTs: 0,
   marketId: '',
   language: '',
