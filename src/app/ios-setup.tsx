@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   AppState as RNAppState,
@@ -56,8 +56,7 @@ import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
 import { onboardingLandingPath } from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
-import { IosSetupJourney } from '@/components/ios-message-setup/setup-journey';
-import { canFinishIosMessageSetup, detectedSetupBanks, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
+import { canFinishIosMessageSetup, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
 import { pagedHistoryEnabled, pagedHistoryCopy } from '@/lib/ios-paged-setup';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
@@ -99,8 +98,6 @@ export default function IosSetupScreen() {
   const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
-  const detectedBanks = useMemo(() => detectedSetupBanks(state.accounts, state.transactions),
-    [state.accounts, state.transactions]);
   const fromOnboarding = params.fromOnboarding === '1';
   const requestedSection = params.section === 'history' || params.section === 'future'
     ? params.section : null;
@@ -758,7 +755,6 @@ export default function IosSetupScreen() {
                       <View style={styles.hints}>
                         <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
                         <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryKeepOpen')}</ThemedText>
-                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryCoverage')}</ThemedText>
                       </View>
                     )}
                   </>
@@ -772,16 +768,6 @@ export default function IosSetupScreen() {
                   </>
                 )}
               </ChecklistRow>
-              <View style={styles.evidence}>
-                <IosSetupJourney
-                  language={language}
-                  historyStatus={progress.historyStatus}
-                  futureReadiness={setup.readiness}
-                  automationConfirmed={progress.futureAutomationConfirmed}
-                  detectedBanks={detectedBanks}
-                  captureHealth={setup.captureHealth}
-                />
-              </View>
             </View>
           )}
           {error && (
@@ -855,7 +841,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four, gap: Spacing.four,
   },
   checklist: { gap: Spacing.two },
-  evidence: { paddingTop: Spacing.three },
   hints: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',

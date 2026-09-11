@@ -104,13 +104,13 @@ ok('iOS message setup: Future is first, History is optional, and only the select
       screen.indexOf("title={t('iosMessagePastTitle')}") &&
     /expanded=\{progress\.activeSection === 'future'\}/.test(screen) &&
     /expanded=\{progress\.activeSection === 'history'\}/.test(screen) &&
-    translated('iosMessageFutureTitle', 'en') === 'Future alerts' &&
+    translated('iosMessageFutureTitle', 'en') === 'Automatic bank alerts' &&
     translated('iosMessagePastTitle', 'en') === 'Past messages · Optional');
 ok('iOS history explains Shortcut extraction before app review and keeps the phone-open instruction',
-  /Shortcuts.*reads.*extracts.*Review.*after return/.test(translated('iosMessageHistoryStartHelp', 'en')) &&
-    /Shortcuts.*open.*unlocked.*Review.*after return/.test(translated('iosMessageHistoryRunningHelp', 'en')) &&
-    /الاختصارات.*الرسائل.*المراجعة.*بعد العودة/.test(translated('iosMessageHistoryStartHelp', 'ar')) &&
-    /الاختصارات.*مفتوحاً.*دون قفل.*المراجعة.*بعد العودة/.test(translated('iosMessageHistoryRunningHelp', 'ar')));
+  /Shortcuts.*messages.*Wafra.*batches/.test(translated('iosMessageHistoryStartHelp', 'en')) &&
+    /unlocked.*stops.*again.*progress/.test(translated('iosMessageHistoryRunningHelp', 'en')) &&
+    /الاختصارات.*الرسائل.*وفرة.*دفعات/.test(translated('iosMessageHistoryStartHelp', 'ar')) &&
+    /مفتوح.*توقف.*مرة أخرى.*التقدم/.test(translated('iosMessageHistoryRunningHelp', 'ar')));
 ok('iOS message setup: checklist rows retain 44pt targets without clipping text',
   Number(checklistRow.match(/header:\s*\{\s*minHeight:\s*(\d+)/)?.[1]) >= 44 &&
     !/numberOfLines/.test(checklistRow) &&
@@ -174,7 +174,7 @@ eq('iOS message setup: Past row keeps only the compact inline disclosures', [
   translated('iosMessagePastTiming', 'en'),
 ], [
   'Checks retained Messages on this iPhone.',
-  'Large histories: 20–25 min',
+  'Resumes if interrupted',
 ]);
 eq('iOS message setup: History actions use the install, confirm, and start labels', [
   translated('historyAddAction', 'en'),
@@ -383,13 +383,13 @@ async function historyCardTests() {
   );
   if (typeof setup.normalizeIosHistoryShortcutUrl !== 'function') {
     ok(
-      'iOS history: runtime accepts only an exact non-retired iCloud Shortcut URL',
+      'iOS history: runtime accepts only trusted signed Shortcut install URLs',
       false,
       'normalizeIosHistoryShortcutUrl is missing',
     );
   } else {
     eq(
-      'iOS history: runtime accepts only an exact non-retired iCloud Shortcut URL',
+      'iOS history: runtime accepts only trusted signed Shortcut install URLs',
       [
         setup.normalizeIosHistoryShortcutUrl(
           'https://www.icloud.com/shortcuts/2869584D40ED454691CF3F916CBEE158',
@@ -403,11 +403,19 @@ async function historyCardTests() {
         setup.normalizeIosHistoryShortcutUrl(
           ' https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158',
         ),
+        setup.normalizeIosHistoryShortcutUrl(
+          'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut',
+        ),
+        setup.normalizeIosHistoryShortcutUrl(
+          'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut?x=1',
+        ),
       ],
       [
         'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158',
         null,
         null,
+        null,
+        'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut',
         null,
       ],
     );
@@ -1896,21 +1904,21 @@ async function historyCardTests() {
       !/historyFirstRunGuidance/.test(importScreen) &&
       /Always Allow/.test(translated('historyFirstRunGuidance', 'en')) &&
       !/physical iPhone test|2,374/i.test(translated('historyFirstRunGuidance', 'en')) &&
-      /20.?25 minutes/.test(translated('historyFirstRunGuidance', 'en')) &&
-      /can take/i.test(translated('historyFirstRunGuidance', 'en')) &&
+      /iPhone unlocked/.test(translated('historyFirstRunGuidance', 'en')) &&
+      /stops.*again.*continue/i.test(translated('historyFirstRunGuidance', 'en')) &&
       /السماح دائماً/.test(translated('historyFirstRunGuidance', 'ar')) &&
-      /٢٠.?٢٥ دقيقة/.test(translated('historyFirstRunGuidance', 'ar')),
+      /توقف.*مرة أخرى.*للمتابعة/.test(translated('historyFirstRunGuidance', 'ar')),
   );
   ok('iOS history: pending handoff directs users to Shortcuts without a made-up percentage',
     /Continue in Shortcuts/.test(translated('historyContinueBody', 'en')) &&
     /تابع في الاختصارات/.test(translated('historyContinueBody', 'ar')) &&
     !/[0-9٠-٩]+\s*[%٪]/.test(translated('historyContinueBody', 'en') + translated('historyContinueBody', 'ar')));
   ok('iOS history: English guidance preserves coverage, permission and unlocked-phone requirements',
-    /fewer than 3,000 messages and confirmed coverage/.test(translated('historyLocalProcessing', 'en')) &&
-    /Keep Shortcuts open and iPhone unlocked/.test(translated('historyFirstRunGuidance', 'en')));
+    /smaller batches/.test(translated('historyLocalProcessing', 'en')) &&
+    /iPhone unlocked/.test(translated('historyFirstRunGuidance', 'en')));
   ok('iOS history: Arabic guidance preserves coverage, permission and unlocked-phone requirements',
-    /أقل من ٣٠٠٠ رسالة وتغطية مؤكدة/.test(translated('historyLocalProcessing', 'ar')) &&
-    /الاختصارات مفتوحاً والآيفون دون قفل/.test(translated('historyFirstRunGuidance', 'ar')));
+    /دفعات أصغر/.test(translated('historyLocalProcessing', 'ar')) &&
+    /الآيفون مفتوح القفل/.test(translated('historyFirstRunGuidance', 'ar')));
   eq(
     'iOS history: English source counts name every category separately',
     copy.tf(

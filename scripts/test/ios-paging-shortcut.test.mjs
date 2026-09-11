@@ -9,9 +9,9 @@ function walk(value, visit) {
   for (const item of Object.values(value)) walk(item, visit);
 }
 
-test('deterministic beta graph stays separate from the shipping shortcut', () => {
+test('deterministic paged graph is the shipping history shortcut', () => {
   const graph = buildPagedHistoryShortcut();
-  assert.equal(graph.WFWorkflowName, 'Wafra History Paging Beta');
+  assert.equal(graph.WFWorkflowName, 'Wafra History Import');
   assert.equal(verifyPagedHistoryShortcut(graph), true);
   assert.deepEqual(graph, buildPagedHistoryShortcut());
 });

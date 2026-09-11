@@ -110,8 +110,11 @@ export const historyShortcutRunUrl = (): string => {
   )}&x-cancel=${sourceFreeReturn}&x-error=${sourceFreeReturn}`;
 };
 
+const HOSTED_HISTORY_SHORTCUT_URL = 'https://wafra-app-azg.pages.dev/wafra-history-import.shortcut';
+
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
+  if (value === HOSTED_HISTORY_SHORTCUT_URL) return value;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;
   const id = match[1].toLowerCase();
@@ -121,7 +124,7 @@ export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null =>
 
 export const historyShortcutInstallUrl = (): string | null =>
   normalizeIosHistoryShortcutUrl(
-    process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
+    process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? HOSTED_HISTORY_SHORTCUT_URL,
   );
 
 export const validIosHistorySessionId = (value: unknown): value is string =>
