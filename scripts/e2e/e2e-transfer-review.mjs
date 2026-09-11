@@ -121,15 +121,10 @@ async function home(page, expected, pendingCount) {
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  const notice = page.getByTestId('transfer-review-notice');
-  if (pendingCount) {
-    const label = await (await exposed(notice)).getAttribute('aria-label');
-    const digits = label.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[,٬]/g, '');
-    assert.match(digits, new RegExp(`\\b${pendingCount}\\b`));
-    assert.ok(label.includes('Not included in totals') || label.includes('غير محتسبة في الإجماليات'));
-    assert.ok(!(await notice.textContent()).includes('AED'), 'Home has no giant transfer totals');
-    await fits(notice);
-  } else assert.equal(await notice.count(), 0);
+  // Pending transfer review no longer interrupts Home. Current main keeps
+  // the review workflow reachable from Wallet and transaction details while
+  // Home remains focused on confirmed Income / Spending / Net.
+  assert.equal(await page.getByTestId('transfer-review-notice').count(), 0);
 }
 async function choose(page, words, id, ownership) {
   await page.goto(`${BASE}/review-transfers?transactionId=${id}`, { waitUntil: 'networkidle' });
@@ -172,7 +167,8 @@ try {
     try {
       await home(page, [200000, 10000, 190000], 4);
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
-      await click(page.getByTestId('transfer-review-notice'));
+      await page.goto(`${BASE}/wallet`, { waitUntil: 'networkidle' });
+      await click(page.getByRole('button', { name: /Transfer history|سجل التحويلات/i }));
       await page.waitForURL(/review-transfers/);
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
       await fits(page.getByTestId('transfer-search'));

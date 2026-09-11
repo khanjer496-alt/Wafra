@@ -44,8 +44,8 @@ try {
           const net = page.getByTestId('home-net-summary');
           const labels = await Promise.all([incoming, outgoing, net].map(row => row.getAttribute('aria-label')));
           const visible = await Promise.all([incoming, outgoing, net].map(row => row.innerText()));
-          assert.match(labels[0], language === 'ar' ? /^الدخل,/ : /^Money in,/);
-          assert.match(labels[1], language === 'ar' ? /^المصروفات,/ : /^Money out,/);
+          assert.match(labels[0], language === 'ar' ? /^الدخل,/ : /^Income,/);
+          assert.match(labels[1], language === 'ar' ? /^المصروفات,/ : /^Spending,/);
           assert.match(labels[2], language === 'ar' ? /^الصافي,/ : /^Net,/);
           const amounts = labels.map(minor);
           assert.deepEqual(visible.map(minor), amounts, 'visible and accessible amounts are identical');
