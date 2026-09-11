@@ -58,6 +58,7 @@ function PagedHistoryScreen() {
   };
   const install = () => void run(async () => {
     if (!await Linking.canOpenURL('shortcuts://')) { setError(w.missing); return; }
+    if (!PAGED_HISTORY_INSTALL_URL) { setError(w.missing); return; }
     await Linking.openURL(PAGED_HISTORY_INSTALL_URL);
     if (alive.current) setAdding(true);
   });

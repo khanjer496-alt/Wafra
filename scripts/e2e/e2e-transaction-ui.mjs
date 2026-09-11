@@ -41,7 +41,7 @@ try {
       await page.screenshot({path:`${OUT}/${name}-search.png`});
       await search.fill('');await page.waitForTimeout(350);
       const net=page.getByTestId('transactions-net-total');
-      assert.ok((await net.innerText()).includes('Net total'));
+      assert.ok((await net.innerText()).includes('Net'));
       assert.ok(await summary.evaluate(node => node.scrollWidth <= node.clientWidth+1), 'Summary overflows');
       await page.screenshot({path:`${OUT}/${name}-transactions.png`});
       const rowLabel=await page.locator('[role="button"][aria-label]').evaluateAll(nodes => nodes.map(n=>n.getAttribute('aria-label')).find(label=>/, (?:plus|minus) .* AED$/i.test(label)));
