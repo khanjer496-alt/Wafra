@@ -346,6 +346,26 @@ export function buildImportPlan(
     }
     return prior;
   };
+  /** A statement can heal one old parser-owned transfer, never arbitrary spend. */
+  const statementTransferPrior = (p: ScannedSms, accountId: string): Transaction | undefined => {
+    const evidence = p.transferEvidence;
+    if (!p.transferHint || evidence?.statement !== true || evidence.attribution !== 'source' || !p.date) return undefined;
+    const normalizedRef = (value: unknown): string | undefined => typeof value === 'string'
+      ? value.replace(/[\s/-]/g, '').toUpperCase() || undefined
+      : undefined;
+    const incomingRef = normalizedRef(evidence.reference);
+    const candidates = state.transactions.filter((candidate) => {
+      if (candidate.source !== 'sms' || candidate.userEdited || candidate.transferDecision || candidate.splits ||
+          candidate.accountId !== accountId || candidate.type !== p.type || candidate.amountFils !== p.amountFils ||
+          candidate.date !== p.date) return false;
+      const priorRef = normalizedRef(candidate.transferEvidence?.reference);
+      const sameReference = !!incomingRef && !!priorRef && incomingRef === priorRef;
+      const structurallyTransferLike = candidate.isTransfer === true || STRUCTURAL_TITLES.has(candidate.title.trim()) ||
+        /^(?:(?:bank|outgoing|incoming|own account|self|internal) transfer|(?:outward|inward) remittance)$/i.test(candidate.title.trim());
+      return sameReference || structurallyTransferLike;
+    });
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
   const updates: TxHealUpdate[] = [];
   const healFromReparse = (
     smsKey: string | undefined,
@@ -1105,6 +1125,15 @@ export function buildImportPlan(
     const healedAccountId = resolution.confident || unassignedIncome ||
       (!prior?.userEdited && !prior?.captureInstrument && accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) ||
       (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
+    const statementPrior = !exactPrior && !stablePrior && resolution.confident
+      ? statementTransferPrior(p, accountId)
+      : undefined;
+    if (statementPrior) {
+      healFromReparse(undefined, p, accountId, undefined, statementPrior);
+      guard.consume(statementPrior.id);
+      guard.add({ ...captureCandidate, accountId });
+      continue;
+    }
     const accountForMatchedPrior = (matched: Transaction | undefined) =>
       (unassignedIncome || accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) &&
         (matched?.captureInstrument || matched?.userEdited)

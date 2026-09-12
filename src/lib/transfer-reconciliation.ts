@@ -61,7 +61,8 @@ export function isTransferEvidence(value: unknown): value is TransferEvidence {
     optional(value, 'counterpartyName', name => typeof name === 'string' && name.trim() === name &&
       name.length >= 2 && name.length <= 80 && /^[\p{L}\p{M} .'&-]+$/u.test(name)) &&
     optional(value, 'endpointProof', proof => proof === 'explicit-transfer') &&
-    optional(value, 'postingForm', form => typeof form === 'string' && ['transfer-detail', 'remittance-debit', 'credit-receipt'].includes(form));
+    optional(value, 'postingForm', form => typeof form === 'string' && ['transfer-detail', 'remittance-debit', 'credit-receipt'].includes(form)) &&
+    optional(value, 'statement', statement => statement === true);
 }
 
 export function isTransferDecision(value: unknown): value is TransferDecision {
@@ -142,7 +143,7 @@ export function transferFingerprint(tx: Transaction): string {
       'cashOutDate', 'paymentInstrumentSource', 'billIdentity']),
     fields(tx.captureInstrument, ['last4', 'kind', 'bankIdentity']),
     fields(ev, ['version', 'currency', 'attribution', 'reference', 'explicitOwn', 'explicitExternal',
-      'sourceBank', 'sourceAccountKey', 'counterpartyName', 'endpointProof', 'postingForm']),
+      'sourceBank', 'sourceAccountKey', 'counterpartyName', 'endpointProof', 'postingForm', 'statement']),
     fields(ev?.counterparty, ['last4', 'kind', 'bankIdentity']),
     fields(row.transferDecision, ['version', 'ownership', 'decidedAt', 'counterpartId']),
     ...(ev?.sourceKindAmbiguous !== undefined ? [fields(ev, ['sourceKindAmbiguous'])] : []),
@@ -205,7 +206,7 @@ interface Context {
   accounts: Map<string, Account>;
   entries: Map<string, Entry>;
   fingerprints: Map<string, string>;
-  instrumentKey: (value: unknown) => string | undefined;
+  instrumentKey: (value: unknown, allowStatementTail?: boolean) => string | undefined;
   corroboratingOf: Map<string, string>;
   knownCounterparties: Map<string, Account>;
 }
@@ -306,26 +307,43 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
     }
     return bankCache.get(name);
   };
-  const instrumentKey = (value: unknown): string | undefined => {
-    if (!isInstrument(value) || value.kind === 'unknown' || value.kind === 'credit' || !value.bankIdentity) return undefined;
-    const bank = normalizeBank(value.bankIdentity);
-    return bank ? JSON.stringify([bank, value.kind, value.last4]) : undefined;
-  };
   const accountById = new Map<string, Account>();
   const duplicateAccounts = new Set<string>();
   const accountKeys = new Map<string, string>();
   const identityCounts = new Map<string, number>();
+  const tailOwners = new Map<string, string[]>();
+  const tailKey = (kind: Instrument['kind'], last4: string): string => JSON.stringify([kind, last4]);
   for (const account of accounts) {
     if (!id(account.id)) continue;
     if (accountById.has(account.id)) duplicateAccounts.add(account.id);
     accountById.set(account.id, account);
     if (!eligibleAccount(account)) continue;
-    const key = instrumentKey({ last4: account.last4, kind: account.kind === 'bank' ? 'account' : 'debit', bankIdentity: account.bankName });
+    const kind: Instrument['kind'] = account.kind === 'bank' ? 'account' : 'debit';
+    if (typeof account.last4 === 'string' && /^\d{4}$/.test(account.last4)) {
+      const tail = tailKey(kind, account.last4);
+      tailOwners.set(tail, [...(tailOwners.get(tail) ?? []), account.id]);
+    }
+  }
+  for (const duplicate of duplicateAccounts) accountById.delete(duplicate);
+  const instrumentKey = (value: unknown, allowStatementTail = false): string | undefined => {
+    if (!isInstrument(value) || value.kind === 'unknown' || value.kind === 'credit') return undefined;
+    if (value.bankIdentity) {
+      const bank = normalizeBank(value.bankIdentity);
+      if (bank) return JSON.stringify([bank, value.kind, value.last4]);
+    }
+    if (!allowStatementTail) return undefined;
+    const owners = tailOwners.get(tailKey(value.kind, value.last4)) ?? [];
+    const liveOwners = owners.filter(owner => accountById.has(owner));
+    return liveOwners.length === 1 ? `statement-account:${liveOwners[0]}` : undefined;
+  };
+  for (const account of accounts) {
+    if (!id(account.id) || !eligibleAccount(account) || !accountById.has(account.id)) continue;
+    const value = { last4: account.last4, kind: account.kind === 'bank' ? 'account' as const : 'debit' as const, bankIdentity: account.bankName };
+    const key = instrumentKey(value) ?? instrumentKey(value, true);
     if (!key) continue;
     accountKeys.set(account.id, key);
     identityCounts.set(key, (identityCounts.get(key) ?? 0) + 1);
   }
-  for (const duplicate of duplicateAccounts) accountById.delete(duplicate);
   const rows = new Map<string, TransferRow>();
   const duplicateIds = new Set<string>();
   for (const tx of transactions) {
@@ -367,19 +385,34 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
     if (duplicateIds.has(tx.id) || !evidence || evidence.attribution !== 'source' ||
       (tx.userEdited && !decisionOf(tx)) || !eligibleAccount(account)) continue;
     const capture = tx.captureInstrument?.kind === 'unknown' && account?.kind === 'bank' &&
-      evidence.sourceBank && bankIdentityForName(evidence.sourceBank) === bankIdentityForName(account.bankName) &&
-      observedBankAccounts.has(accountKeys.get(account.id) ?? '')
+      ((evidence.sourceBank && bankIdentityForName(evidence.sourceBank) === bankIdentityForName(account.bankName) &&
+        observedBankAccounts.has(accountKeys.get(account.id) ?? '')) || evidence.statement === true)
       ? { ...tx.captureInstrument, kind: 'account' as const } : tx.captureInstrument;
-    const key = instrumentKey(capture);
-    if (!key || key !== accountKeys.get(tx.accountId) || identityCounts.get(key) !== 1) continue;
+    const key = instrumentKey(capture, evidence.statement === true);
+    const statementAccountKey = evidence.statement === true
+      ? instrumentKey({
+          last4: account.last4,
+          kind: account.kind === 'bank' ? 'account' : 'debit',
+        }, true)
+      : undefined;
+    const expectedKey = statementAccountKey ?? accountKeys.get(tx.accountId);
+    if (!key || key !== expectedKey ||
+        (evidence.statement !== true && identityCounts.get(key) !== 1)) continue;
     const at = sourceTime(tx);
     const money = sourceMoney(tx, evidence);
     if (at === undefined || !money) continue;
+    const statementCounterparty = instrumentKey(evidence.counterparty, evidence.statement === true);
+    const statementCounterpartyAccount = statementCounterparty?.startsWith('statement-account:')
+      ? accountById.get(statementCounterparty.slice('statement-account:'.length)) : undefined;
+    const sourceBank = tx.captureInstrument?.bankIdentity ? normalizeBank(tx.captureInstrument.bankIdentity) : undefined;
     entries.set(tx.id, { tx, at, money, instrument: key,
-      counterparty: instrumentKey(evidence.counterparty),
+      counterparty: statementCounterparty,
       capture: capture!, counterpartyHint: evidence.counterparty,
-      counterpartyBank: evidence.counterparty?.bankIdentity ? normalizeBank(evidence.counterparty.bankIdentity) : undefined,
-      bank: normalizeBank(tx.captureInstrument!.bankIdentity!)!, reference: normalizedReference(evidence.reference),
+      counterpartyBank: evidence.counterparty?.bankIdentity
+        ? normalizeBank(evidence.counterparty.bankIdentity)
+        : statementCounterpartyAccount?.bankName ? normalizeBank(statementCounterpartyAccount.bankName) : undefined,
+      bank: sourceBank ?? (account.bankName ? normalizeBank(account.bankName) : undefined) ?? `account:${account.id}`,
+      reference: normalizedReference(evidence.reference),
       referenceUnique: false, referenceReused: false });
   }
   // Banks sometimes repeat an account or batch reference on many payments.

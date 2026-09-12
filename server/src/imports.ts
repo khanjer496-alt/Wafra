@@ -4,6 +4,7 @@ import { parse as parseCsvRecords } from 'csv-parse/sync';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 import { classifyMerchantDescription, type ParsedSms } from '@/lib/sms-parser';
+import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 
 const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
@@ -95,8 +96,10 @@ export async function parseRawEmail(
 
 type StatementCurrency = 'AED' | 'SAR';
 
+type StatementParsedRow = ParsedSms & { transferEvidence?: TransferEvidence };
+
 export interface StatementCsvResult {
-  rows: ParsedSms[];
+  rows: StatementParsedRow[];
   totalRows: number;
   rejectedRows: number;
 }
@@ -124,50 +127,21 @@ const HEADER_ALIASES = {
     'نوع العملية', 'نوع القيد', 'النوع',
   ],
   currency: ['currency code', 'transaction currency', 'currency', 'ccy', 'curr', 'العملة'],
-  cardNumber: ['credit card number', 'card number', 'card no', 'card no.', 'رقم البطاقة'],
-  accountNumber: ['account number', 'account no', 'account no.', 'a/c number', 'رقم الحساب'],
+  sourceAccount: [
+    'source account number', 'source account no', 'from account number', 'from account no',
+    'debit account number', 'debit account no', 'account number', 'account no', 'account no.',
+    'a/c number', 'masked account number', 'رقم الحساب', 'الحساب المصدر',
+  ],
+  sourceCard: [
+    'source card number', 'source card no', 'credit card number', 'card number', 'card no',
+    'card no.', 'masked card number', 'رقم البطاقة',
+  ],
+  reference: [
+    'transaction reference', 'transaction ref', 'transaction id', 'txn reference', 'txn ref',
+    'reference number', 'reference no', 'reference', 'ref no', 'trace number', 'trace id',
+    'رقم المرجع', 'مرجع العملية', 'رقم العملية',
+  ],
 } as const;
-
-type StatementInstrument = NonNullable<ParsedSms['card']>;
-
-function instrumentTail(value: string): string | null {
-  const digits = normalizeDigits(value).replace(/\D/g, '');
-  return digits.length >= 4 && digits.length <= 24 ? digits.slice(-4) : null;
-}
-
-/**
- * Statement-wide identity is accepted only when the document explicitly
- * labels the number. Dates, balances and reference numbers are never used as
- * account identity. This lets an HSBC/card statement create or match the same
- * Wafra account as later notifications without guessing from arbitrary digits.
- */
-function statementInstrument(text: string): StatementInstrument | null {
-  const normalized = normalizeDigits(text).normalize('NFKC');
-  const labelled = (
-    kind: StatementInstrument['kind'],
-    pattern: RegExp,
-  ): StatementInstrument | null => {
-    const match = pattern.exec(normalized);
-    if (!match?.[1]) return null;
-    const last4 = instrumentTail(match[1]);
-    return last4 ? { last4, kind } : null;
-  };
-  return labelled(
-    'credit',
-    /\bcredit\s+card\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
-  ) ?? labelled(
-    'unknown',
-    /\bcard\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
-  ) ?? labelled(
-    'account',
-    /\b(?:account|a\/c)\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
-  );
-}
-
-function statementBankHint(text: string): string | undefined {
-  if (/\bHSBC\b/i.test(text)) return 'HSBC';
-  return undefined;
-}
 
 function normalizedHeader(value: string): string {
   return value
@@ -217,6 +191,151 @@ function normalizeDigits(value: string): string {
     .replace(/[\u06f0-\u06f9]/g, (digit) => String(persian.indexOf(digit)))
     .replace(/\u066b/g, '.')
     .replace(/\u066c/g, ',');
+}
+
+function maskedTail(value: string): string | null {
+  const normalized = normalizeDigits(value).normalize('NFKC').trim();
+  if (!normalized || normalized.length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(normalized)) return null;
+  const compact = normalized.replace(/[\s._/-]+/g, '');
+  const tail = compact.match(/(\d{4})$/)?.[1] ?? null;
+  if (!tail) return null;
+  const digitCount = compact.replace(/\D/g, '').length;
+  return digitCount >= 4 && digitCount <= 34 ? tail : null;
+}
+
+type StatementInstrument = NonNullable<ParsedSms['card']>;
+
+/** Statement-wide identity from explicitly labelled document metadata only. */
+function statementInstrument(text: string): StatementInstrument | null {
+  const normalized = normalizeDigits(text).normalize('NFKC');
+  const labelled = (
+    kind: StatementInstrument['kind'],
+    pattern: RegExp,
+  ): StatementInstrument | null => {
+    const match = pattern.exec(normalized);
+    if (!match?.[1]) return null;
+    const last4 = maskedTail(match[1]);
+    return last4 ? { last4, kind } : null;
+  };
+  return labelled(
+    'credit',
+    /\bcredit\s+card\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  ) ?? labelled(
+    'unknown',
+    /\bcard\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  ) ?? labelled(
+    'account',
+    /\b(?:account|a\/c)\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  );
+}
+
+function statementBankHint(text: string): string | undefined {
+  if (/\bHSBC\b/i.test(text)) return 'HSBC';
+  return undefined;
+}
+
+function safeStatementReference(value: string): string | null {
+  const normalized = normalizeDigits(value).normalize('NFKC').trim().toUpperCase();
+  if (!normalized || normalized.length > 96 || /[\u0000-\u001f\u007f-\u009f]/.test(normalized)) return null;
+  const unlabelled = normalized.replace(
+    /^(?:REF(?:ERENCE)?|TRANSACTION|TXN|TRACE)(?:\s+(?:ID|NO\.?|NUMBER|REF))?\s*[:#-]?\s*/i,
+    '',
+  );
+  const compact = unlabelled.replace(/[\s/]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!/^[A-Z0-9][A-Z0-9-]{5,39}$/.test(compact) || !/\d/.test(compact)) return null;
+  if (/^\d{12,}$/.test(compact) || /^[A-Z]{2}\d{2}[A-Z0-9]{10,}$/.test(compact.replace(/-/g, '')) ||
+      /^(?:19|20)\d{2}-?(?:0[1-9]|1[0-2])-?(?:0[1-9]|[12]\d|3[01])$/.test(compact)) return null;
+  return compact;
+}
+
+function referenceFromDescription(description: string): string | null {
+  const match = normalizeDigits(description).match(
+    /\b(?:ref(?:erence)?|transaction\s+(?:id|ref(?:erence)?)|txn\s+(?:id|ref)|trace\s+(?:id|no\.?|number))\s*[:#-]?\s*([A-Z0-9][A-Z0-9\s/-]{5,48})/i,
+  );
+  return match ? safeStatementReference(match[1]) : null;
+}
+
+function statementCounterparty(
+  description: string,
+  type: 'expense' | 'income',
+): TransferEvidence['counterparty'] {
+  const text = normalizeDigits(description).normalize('NFKC');
+  const direction = type === 'expense'
+    ? String.raw`(?:to|beneficiary|destination|payee)`
+    : String.raw`(?:from|sender|originator|ordering\s+party)`;
+  const match = new RegExp(
+    String.raw`\b${direction}\b[\s:,-]{0,12}(?:(account|acct|a\/c|iban|card)\b[\s:#-]*)?([Xx*•·\d][Xx*•·\d .\/-]{2,48}\d{4})(?!\d)`,
+    'i',
+  ).exec(text);
+  if (!match) return undefined;
+  const last4 = maskedTail(match[2]);
+  if (!last4) return undefined;
+  return { last4, kind: (match[1] ?? '').toLowerCase() === 'card' ? 'unknown' : 'account' };
+}
+
+function statementTransferMeaning(
+  description: string,
+  type: 'expense' | 'income',
+  currency: StatementCurrency,
+  source: ParsedSms['card'],
+  explicitReference?: string | null,
+): Pick<StatementParsedRow, 'merchant' | 'transferHint'> & { transferEvidence?: TransferEvidence } | null {
+  const text = normalizeDigits(description).normalize('NFKC');
+  const isTransfer = /\b(?:transfer|remittance|wire|telegraphic\s+transfer|funds?\s+transfer|instant\s+transfer|internal\s+transfer)\b/i.test(text) ||
+    /(?:تحويل|حوالة)/u.test(text);
+  // A fee/commission about a transfer is its own expense, not the movement.
+  // Refuse that semantic promotion rather than hiding a real bank charge from spending.
+  const transferCharge = /\b(?:transfer|remittance|wire)\b[\s\S]{0,36}\b(?:fee|fees|charge|commission|vat)\b|\b(?:fee|fees|charge|commission|vat)\b[\s\S]{0,36}\b(?:transfer|remittance|wire)\b/i.test(text) ||
+    /(?:رسوم|عمولة)[^\n]{0,36}(?:تحويل|حوالة)|(?:تحويل|حوالة)[^\n]{0,36}(?:رسوم|عمولة)/u.test(text);
+  if (!isTransfer || transferCharge) return null;
+  const explicitOwn = /\b(?:own|self|internal)\s+(?:account\s+)?transfer\b|\bbetween\s+(?:my|own)\s+accounts\b/i.test(text) ||
+    /تحويل\s+(?:بين\s+)?حساب(?:ات)?(?:ي|ك)/u.test(text);
+  const reference = explicitReference ?? referenceFromDescription(description);
+  const counterparty = statementCounterparty(description, type);
+  return {
+    merchant: explicitOwn ? 'Own account transfer' : type === 'expense' ? 'Outgoing transfer' : 'Incoming transfer',
+    transferHint: true,
+    transferEvidence: {
+      version: 1,
+      currency,
+      attribution: source ? 'source' : 'fallback',
+      statement: true,
+      ...(reference ? { reference } : {}),
+      ...(counterparty ? { counterparty } : {}),
+      ...(explicitOwn ? { explicitOwn: true } : {}),
+    },
+  };
+}
+
+function uniqueColumnInstrument(
+  records: string[][],
+  index: number,
+  kind: 'account' | 'unknown',
+): ParsedSms['card'] {
+  if (index < 0) return null;
+  const tails = new Set(
+    records.slice(1)
+      .map((record) => maskedTail(record[index] ?? ''))
+      .filter((tail): tail is string => tail !== null),
+  );
+  return tails.size === 1 ? { last4: [...tails][0], kind } : null;
+}
+
+function statementHeaderInstrument(text: string): ParsedSms['card'] {
+  const lines = text.split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const found = new Map<string, NonNullable<ParsedSms['card']>>();
+  for (const line of lines.slice(0, 80)) {
+    if (ROW_END_DIRECTION.test(line) || ROW_MIDDLE_DIRECTION.test(line)) break;
+    for (const candidate of [
+      { kind: 'account' as const, re: /\b(?:account|acct|a\/c|iban)(?:\s+(?:no\.?|number))?\s*[:#-]?\s*([Xx*•·\d][Xx*•·\d .\/-]{2,48}\d{4})(?!\d)/i },
+      { kind: 'unknown' as const, re: /\bcard(?:\s+(?:no\.?|number))?\s*[:#-]?\s*([Xx*•·\d][Xx*•·\d .\/-]{2,48}\d{4})(?!\d)/i },
+    ]) {
+      const match = candidate.re.exec(normalizeDigits(line));
+      const last4 = match ? maskedTail(match[1]) : null;
+      if (last4) found.set(`${candidate.kind}:${last4}`, { last4, kind: candidate.kind });
+    }
+  }
+  return found.size === 1 ? [...found.values()][0] : null;
 }
 
 function statementCurrency(value: string): StatementCurrency | null {
@@ -301,16 +420,25 @@ export function parseStatementCsv(
   const amountIndex = headerIndex(headers, HEADER_ALIASES.amount);
   const directionIndex = headerIndex(headers, HEADER_ALIASES.direction);
   const currencyIndex = headerIndex(headers, HEADER_ALIASES.currency);
-  const cardNumberIndex = headerIndex(headers, HEADER_ALIASES.cardNumber);
-  const accountNumberIndex = headerIndex(headers, HEADER_ALIASES.accountNumber);
+  const sourceAccountIndex = headerIndex(headers, HEADER_ALIASES.sourceAccount);
+  const sourceCardIndex = headerIndex(headers, HEADER_ALIASES.sourceCard);
+  const referenceIndex = headerIndex(headers, HEADER_ALIASES.reference);
   const splitColumns = debitIndex >= 0 && creditIndex >= 0;
   const directedAmount = amountIndex >= 0 && directionIndex >= 0;
   const signedAmount = amountIndex >= 0 && directionIndex < 0;
   if (dateIndex < 0 || descriptionIndex < 0 || (!splitColumns && !directedAmount && !signedAmount)) {
     throw new Error('unsupported_statement_format');
   }
+  // A source instrument column is useful only when the whole export identifies
+  // one statement account/card. A varying column is transaction metadata, not
+  // authority to route every row to a different local account.
+  const sourceInstrument = sourceAccountIndex >= 0 && sourceCardIndex >= 0
+    ? null
+    : sourceAccountIndex >= 0
+      ? uniqueColumnInstrument(records, sourceAccountIndex, 'account')
+      : uniqueColumnInstrument(records, sourceCardIndex, 'unknown');
 
-  const rows: ParsedSms[] = [];
+  const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
   for (const record of records.slice(1)) {
     if (record.length !== headers.length) {
@@ -355,20 +483,32 @@ export function parseStatementCsv(
       type,
       defaultCurrency === 'AED' ? 'AE' : 'SA',
     );
-    const cardTail = cardNumberIndex >= 0 ? instrumentTail(record[cardNumberIndex] ?? '') : null;
-    const accountTail = accountNumberIndex >= 0 ? instrumentTail(record[accountNumberIndex] ?? '') : null;
-    const card: ParsedSms['card'] = cardTail
-      ? { last4: cardTail, kind: 'unknown' }
-      : accountTail
-        ? { last4: accountTail, kind: 'account' }
+    const reference = referenceIndex >= 0
+      ? safeStatementReference(record[referenceIndex] ?? '')
+      : referenceFromDescription(merchant);
+    const rowAccountTail = sourceAccountIndex >= 0 ? maskedTail(record[sourceAccountIndex] ?? '') : null;
+    const rowCardTail = sourceCardIndex >= 0 ? maskedTail(record[sourceCardIndex] ?? '') : null;
+    const rowInstrument: ParsedSms['card'] = rowCardTail
+      ? { last4: rowCardTail, kind: 'unknown' }
+      : rowAccountTail
+        ? { last4: rowAccountTail, kind: 'account' }
         : null;
+    const transfer = statementTransferMeaning(
+      merchant,
+      type,
+      defaultCurrency,
+      sourceInstrument,
+      reference,
+    );
     rows.push({
       kind: 'transaction', type, amountFils: minor, currency: defaultCurrency,
-      merchant: classification.merchant, date,
-      dueDay: null, minDueFils: null, card, reference: null, transferHint: false,
+      merchant: transfer?.merchant ?? classification.merchant, date,
+      dueDay: null, minDueFils: null, card: rowInstrument, reference,
+      transferHint: transfer?.transferHint ?? false,
       snapshotFils: null, snapshotKind: null,
-      categoryGuess: classification.categoryGuess,
-      categoryDeliberate: classification.categoryDeliberate,
+      categoryGuess: transfer ? 'other' : classification.categoryGuess,
+      categoryDeliberate: transfer ? true : classification.categoryDeliberate,
+      ...(transfer?.transferEvidence ? { transferEvidence: transfer.transferEvidence } : {}),
       raw: record.join(delimiter),
     });
   }
@@ -406,8 +546,9 @@ export function parseStatementText(
   text: string,
   currency: StatementCurrency = 'AED',
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
-): ParsedSms[] {
-  const rows: ParsedSms[] = [];
+): StatementParsedRow[] {
+  const rows: StatementParsedRow[] = [];
+  const sourceInstrument = identity.card ?? statementHeaderInstrument(text);
   for (const original of text.split(/\n+/)) {
     const line = original.replace(/\s+/g, ' ').trim();
     if (!line || line.length > 400) continue;
@@ -430,14 +571,18 @@ export function parseStatementText(
       type,
       currency === 'AED' ? 'AE' : 'SA',
     );
+    const reference = referenceFromDescription(merchant);
+    const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
     rows.push({
       kind: 'transaction', type, amountFils, currency,
-      merchant: classification.merchant, date,
-      dueDay: null, minDueFils: null, card: identity.card, reference: null, transferHint: false,
+      merchant: transfer?.merchant ?? classification.merchant, date,
+      dueDay: null, minDueFils: null, card: sourceInstrument, reference,
+      transferHint: transfer?.transferHint ?? false,
       ...(identity.bankHint ? { bankHint: identity.bankHint } : {}),
       snapshotFils: null, snapshotKind: null,
-      categoryGuess: classification.categoryGuess,
-      categoryDeliberate: classification.categoryDeliberate,
+      categoryGuess: transfer ? 'other' : classification.categoryGuess,
+      categoryDeliberate: transfer ? true : classification.categoryDeliberate,
+      ...(transfer?.transferEvidence ? { transferEvidence: transfer.transferEvidence } : {}),
       raw: line,
     });
   }
@@ -455,13 +600,7 @@ export async function extractPdfStatementRows(
   try {
     const extracted = await extractText(document, { mergePages: true });
     if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('PDF text exceeds limit');
-    return {
-      pages: extracted.totalPages,
-      rows: parseStatementText(extracted.text, currency, {
-        card: statementInstrument(extracted.text),
-        bankHint: statementBankHint(extracted.text),
-      }),
-    };
+    return { pages: extracted.totalPages, rows: parseStatementText(extracted.text, currency) };
   } finally {
     const disposable = document as unknown as {
       destroy?: () => Promise<void> | void;

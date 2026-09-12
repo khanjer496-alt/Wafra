@@ -121,9 +121,12 @@ export function buildTransferEvidence(
   const sourceBank = (alert.bankHint ? bankFromName(alert.bankHint) : null) ?? bankFromSender(alert.sender);
   const sourceBankIdentity = sourceBank ? bankIdentityForName(sourceBank.name) : undefined;
   let attributed = sourceAttributed && !!sourceCard;
-  let counterparty: TransferEvidence['counterparty'];
+  const carried = alert.transferEvidence?.version === 1 && alert.transferEvidence.currency === currency
+    ? alert.transferEvidence : undefined;
+  let counterparty: TransferEvidence['counterparty'] = carried?.statement ? safeCounterparty(carried.counterparty) : undefined;
   let explicitOwn = OWN_TITLE.test(alert.merchant.trim()) && alert.transferHint;
-  const reference = normalizedReference(alert.reference);
+  if (carried?.statement && carried.explicitOwn === true) explicitOwn = true;
+  const reference = normalizedReference(alert.reference) ?? (carried?.statement ? normalizedReference(carried.reference) : undefined);
   let sourceAccountKey: string | undefined;
   let sourceKindAmbiguous = false;
   let counterpartyName: string | undefined;
@@ -177,8 +180,7 @@ export function buildTransferEvidence(
       }
     }
   } else {
-    const carried = alert.transferEvidence;
-    if (carried?.version === 1 && carried.currency === currency) {
+    if (carried) {
       counterparty = safeCounterparty(carried.counterparty);
       explicitOwn ||= carried.explicitOwn === true;
       sourceAccountKey = typeof carried.sourceAccountKey === 'string' && /^[a-f0-9]{64}$/.test(carried.sourceAccountKey)
@@ -201,6 +203,7 @@ export function buildTransferEvidence(
     ...(reference ? { reference } : {}), ...(counterparty ? { counterparty } : {}),
     ...(counterpartyName ? { counterpartyName } : {}), ...(endpointProof ? { endpointProof } : {}),
     ...(postingForm ? { postingForm } : {}),
+    ...(carried?.statement === true ? { statement: true } : {}),
     ...(explicitOwn && !explicitExternal ? { explicitOwn: true } : {}),
     ...(explicitExternal && !explicitOwn ? { explicitExternal: true } : {}) };
 }

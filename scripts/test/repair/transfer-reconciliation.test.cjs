@@ -251,6 +251,53 @@ test('reciprocal instruments can prove transfers across different banks and refe
   assert.equal(reconcileTransfers(rows, ac).byId.get('out').reason, 'reciprocal-instruments');
 });
 
+test('statement evidence can reconcile unknown-bank accounts by globally unique masked tails', () => {
+  const ac = [
+    bank('alpha', '1111', 'Example Bank Alpha'),
+    bank('beta', '2222', 'Example Bank Beta'),
+  ];
+  const rows = [
+    row('out', 'expense', {
+      accountId: 'alpha',
+      captureInstrument: { last4: '1111', kind: 'account' },
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source', statement: true,
+        counterparty: { last4: '2222', kind: 'account' } },
+    }),
+    row('in', 'income', {
+      accountId: 'beta',
+      captureInstrument: { last4: '2222', kind: 'account' },
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source', statement: true,
+        counterparty: { last4: '1111', kind: 'account' } },
+    }),
+  ];
+  const result = reconcileTransfers(rows, ac);
+  assert.deepEqual(sorted(result.internalIds), ['in', 'out']);
+  assert.equal(result.byId.get('out').reason, 'reciprocal-instruments');
+});
+
+test('bankless masked tails gain no authority for alerts and collisions remain unresolved', () => {
+  const ac = [
+    bank('alpha', '1111', 'Example Bank Alpha'),
+    bank('beta', '2222', 'Example Bank Beta'),
+  ];
+  const alertRows = [
+    row('out', 'expense', { accountId: 'alpha', captureInstrument: { last4: '1111', kind: 'account' },
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source',
+        counterparty: { last4: '2222', kind: 'account' } } }),
+    row('in', 'income', { accountId: 'beta', captureInstrument: { last4: '2222', kind: 'account' },
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source',
+        counterparty: { last4: '1111', kind: 'account' } } }),
+  ];
+  assert.deepEqual(sorted(reconcileTransfers(alertRows, ac).internalIds), []);
+
+  const collisionAccounts = [...ac, bank('other', '2222', 'Example Bank Gamma')];
+  const statementRows = alertRows.map((tx) => ({
+    ...tx,
+    transferEvidence: { ...tx.transferEvidence, statement: true },
+  }));
+  assert.deepEqual(sorted(reconcileTransfers(statementRows, collisionAccounts).internalIds), []);
+});
+
 test('conflicting same-bank references reject even reciprocal instruments', () => {
   const rows = pair();
   rows[0].transferEvidence.counterparty = instrument(accounts[1]);

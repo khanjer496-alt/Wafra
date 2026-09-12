@@ -63,6 +63,8 @@ import {
 } from '@/lib/relay-crypto';
 import { isRelayTestPayload } from '@/lib/relay-protocol';
 import type { ParsedSms } from '@/lib/sms-parser';
+import { isTransferEvidence } from '@/lib/transfer-reconciliation';
+import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import type { UnparsedLaunchAlertReview } from '@/lib/unparsed-launch-alert';
 import {
   parseTrustedDevices,
@@ -1545,6 +1547,8 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
   sender?: string;
   /** Market pack the relay parsed this row under ('AE', 'SA'). */
   market?: string;
+  /** Statement/alert transfer facts are validated before becoming ledger evidence. */
+  transferEvidence?: TransferEvidence;
 };
 
 const MAX_RELAY_SENDER_LENGTH = 80;
@@ -1648,6 +1652,7 @@ export function isParsedRelayRow(
       /[\u0000-\u001F\u007F-\u009F]/u.test(row.reference))
   ) return false;
   if (typeof row.transferHint !== 'boolean') return false;
+  if (row.transferEvidence !== undefined && !isTransferEvidence(row.transferEvidence)) return false;
   if (
     row.paymentFlowSide !== undefined &&
     row.paymentFlowSide !== 'funding' &&
