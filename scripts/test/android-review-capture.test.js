@@ -103,7 +103,14 @@ const notificationReader = {
   isEnabled: () => notificationsEnabled,
   async getCaptured(sinceMs) {
     notificationReadSince.push(sinceMs);
-    return notificationRows;
+    const trusted = new Set([
+      'net.bnpparibas.mescomptes',
+      'ae.hsbc.hsbcuae',
+    ]);
+    return notificationRows.map((row) => ({
+      sourceClass: trusted.has(row.pkg) ? 'trusted-bank' : 'financial-candidate',
+      ...row,
+    }));
   },
   async ackCaptured(ids) {
     acknowledgedNotifications.push(...ids);
@@ -219,9 +226,12 @@ const { scanInbox } = require('./build/auto-import.js');
   }];
   const hostile = await scanInbox(0, {}, undefined, 'en-AE');
   await hostile.commit();
-  ok('an untrusted app cannot imitate a bank alert or earn acknowledgement',
-    hostile.parsed.length === 0 && hostile.reviewCandidates.length === 0 &&
-      acknowledgedNotifications.length === 1,
+  ok('an untrusted Play financial candidate cannot auto-post and is review-only',
+    hostile.parsed.length === 0 && hostile.reviewCandidates.length === 1 &&
+      hostile.reviewCandidates[0]?.kind === 'universal' &&
+      hostile.reviewCandidates[0]?.sourcePackage === 'com.example.chat' &&
+      hostile.reviewCandidates[0]?.sourceClass === 'financial-candidate' &&
+      acknowledgedNotifications.includes('hostile-notification-0001'),
     JSON.stringify({ hostile, acknowledgedNotifications }));
 
   const hsbcTitle = 'Your credit card transaction is approved';
@@ -240,21 +250,25 @@ const { scanInbox } = require('./build/auto-import.js');
   ];
   const inboxReadsBeforePush = inboxReadCursors.length;
   const hsbcOnly = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
-  ok('HSBC UAE push-only capture imports one purchase without reading SMS or its limit as spending',
+  ok('HSBC UAE push-only capture imports one purchase while unknown finance apps stay review-only',
     inboxReadCursors.length === inboxReadsBeforePush && !hsbcOnly.inboxHistoryComplete &&
       hsbcOnly.parsed.length === 1 && hsbcOnly.parsed[0].channel === 'push' &&
       hsbcOnly.parsed[0].amountFils === 4200 &&
       hsbcOnly.parsed[0].merchant === 'Sample Restaurant' &&
-      hsbcOnly.reviewCandidates.every(row => row.kind === 'universal' &&
+      hsbcOnly.reviewCandidates.some(row => row.kind === 'universal' &&
+        row.sourcePackage === 'ae.hsbc.hsbcuae' &&
         row.event.family === 'balance' && row.event.status === 'informational') &&
+      hsbcOnly.reviewCandidates.some(row => row.kind === 'universal' &&
+        row.sourcePackage === 'com.htsu.hsbcpersonalbanking' &&
+        row.sourceClass === 'financial-candidate') &&
       !hsbcOnly.reviewCandidates.some(row => row.observedAt === NOW + 8_000) &&
       hsbcOnly.parsed.every(row => row.amountFils !== 500000 && row.amountFils !== 5000),
     JSON.stringify({ parsed: hsbcOnly.parsed, reviews: hsbcOnly.reviewCandidates }));
   const ackBeforeHsbc = acknowledgedNotifications.length;
   await hsbcOnly.commit();
-  ok('trusted HSBC negatives are retired but the unrelated HSBC EG package is not acknowledged',
-    acknowledgedNotifications.length === ackBeforeHsbc + 4 &&
-      !acknowledgedNotifications.includes('hsbc-eg-imitator-0001'),
+  ok('trusted HSBC rows and review-only finance candidates are acknowledged after durability',
+    acknowledgedNotifications.length === ackBeforeHsbc + 5 &&
+      acknowledgedNotifications.includes('hsbc-eg-imitator-0001'),
     JSON.stringify(acknowledgedNotifications));
 
   inboxRows = [
