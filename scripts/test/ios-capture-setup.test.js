@@ -1425,6 +1425,17 @@ struct WafraBankSenderRegistryTests {
       );
       eq(`local parser rejects ${name} without source data`, result, { kind: 'invalid', milestone: 'none' });
     }
+    const legacyEmptyGuidHash = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const legacyPreflight = localMessage.preflightLocalMessageRecord(
+      envelope({ id: legacyEmptyGuidHash }), new Date(NOW),
+    );
+    const legacyParsed = localMessage.parseLocalMessageRecord(
+      envelope({ id: legacyEmptyGuidHash }), new Date(NOW), 'AE', session('AE'),
+    );
+    ok('previously staged empty-GUID record retains the established import/review path',
+      legacyPreflight?.id === legacyEmptyGuidHash && legacyPreflight.valid === true &&
+      legacyParsed.kind !== 'invalid',
+      JSON.stringify(legacyPreflight));
     const exactFutureBoundary = localMessage.parseLocalMessageRecord(
       envelope({ observedAt: '2026-08-25T12:05:00.000Z' }),
       new Date(NOW), 'AE', session('AE'),

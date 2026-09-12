@@ -221,7 +221,10 @@ public final class WafraLiveCaptureStore {
         return .disabled
       }
 
+      // Do not reject this ID in manifest validation: older queues may contain it.
+      // Only new admission must refuse the digest of a missing Message GUID.
       guard
+        eventId != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         let id = canonicalEventId(eventId),
         validAdmissionDate(observedAt, now: receiptTime),
         validSender(sender),

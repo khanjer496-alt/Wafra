@@ -223,6 +223,7 @@ struct NativeLiveCaptureStoreTests {
     let disabledPurgeRoot = root("disabled-purge")
     let oldManifestRoot = root("old-manifest")
     let malformedLeaseRoot = root("malformed-lease")
+    let legacyEmptyGuidRoot = root("legacy-empty-guid")
     let roots = [
       basicRoot, validationRoot, orderingRoot, precisionRoot, processRoot, raceRoot,
       reentrantNowRoot, expiryRoot, expiryDeletionFailureRoot,
@@ -232,6 +233,7 @@ struct NativeLiveCaptureStoreTests {
       partialManifestRoot, unicodeDigestRoot, automationInputProbeRoot,
       localLeaseRoot, storeLeaseRoot, combinedLeaseRoot, disabledPurgeRoot,
       oldManifestRoot, malformedLeaseRoot,
+      legacyEmptyGuidRoot,
     ]
     defer { remove(roots) }
 
@@ -658,6 +660,50 @@ struct NativeLiveCaptureStoreTests {
         observedAt: fixedClock
       ) == .invalid
     )
+    check(
+      "empty Message GUID SHA-256 identity is rejected",
+      try validation.stage(
+        sender: knownSender,
+        body: messageBody,
+        eventId: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        observedAt: fixedClock
+      ) == .invalid
+    )
+    // Upgrade fixture: an older binary could admit this digest. Keep its
+    // manifest readable so rejection of new input never deletes other alerts.
+    let emptyGuidHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    let legacySourceId = String(repeating: "c", count: 64)
+    let unrelatedId = String(repeating: "d", count: 64)
+    let legacySeed = store(root: legacyEmptyGuidRoot)
+    try grantLifetimeAndEnable(legacySeed)
+    _ = try legacySeed.stage(sender: knownSender, body: messageBody,
+      eventId: legacySourceId, observedAt: fixedClock)
+    _ = try legacySeed.stage(sender: knownSender, body: messageBody,
+      eventId: unrelatedId, observedAt: fixedClock)
+    let legacyManifestURL = legacyEmptyGuidRoot.appendingPathComponent("manifest.plist")
+    var legacyManifest = try PropertyListSerialization.propertyList(
+      from: Data(contentsOf: legacyManifestURL), format: nil) as! [String: Any]
+    var legacyRecords = legacyManifest["records"] as! [String: Any]
+    legacyRecords[emptyGuidHash] = legacyRecords.removeValue(forKey: legacySourceId)
+    legacyManifest["records"] = legacyRecords
+    try PropertyListSerialization.data(fromPropertyList: legacyManifest,
+      format: .binary, options: 0).write(to: legacyManifestURL, options: .atomic)
+    let legacyDirectory = legacyEmptyGuidRoot.appendingPathComponent("records", isDirectory: true)
+    let oldRecordURL = legacyDirectory.appendingPathComponent(legacySourceId + ".json")
+    let legacyRecord = String(decoding: try Data(contentsOf: oldRecordURL), as: UTF8.self)
+      .replacingOccurrences(of: legacySourceId, with: emptyGuidHash)
+    try Data(legacyRecord.utf8).write(to: legacyDirectory.appendingPathComponent(emptyGuidHash + ".json"), options: .atomic)
+    try FileManager.default.removeItem(at: oldRecordURL)
+    let legacyReloaded = store(root: legacyEmptyGuidRoot)
+    let legacyRows = try legacyReloaded.listPendingRecords(limit: 50).compactMap(rowId)
+    let legacyStatus = try legacyReloaded.status()
+    check("legacy empty-GUID digest does not tombstone unrelated queued alerts",
+      !legacyStatus.corrupt && legacyStatus.pending == 2 &&
+      Set(legacyRows) == Set([emptyGuidHash, unrelatedId]))
+    let legacyAcknowledged = (try? legacyReloaded.acknowledgeRecords(ids: [emptyGuidHash])) != nil
+    check("legacy empty-GUID digest can be retired without deleting unrelated alerts",
+      legacyAcknowledged &&
+      (try? legacyReloaded.listPendingRecords(limit: 50).compactMap(rowId)) == [unrelatedId])
     check(
       "invalid event identity is rejected",
       try validation.stage(
