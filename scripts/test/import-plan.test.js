@@ -146,6 +146,68 @@ ok('an explicitly stated AED amount confirms the deferred ledger currency',
 }
 const afterFirst = apply(BASE, first);
 
+/* ── supplemental statements heal transfer semantics without guessing ─── */
+{
+  const statementAccounts = [
+    { id: 'alpha', name: 'Primary', kind: 'bank', bankName: 'Example Bank Alpha', last4: '1111', openingFils: 0, color: '#111' },
+    { id: 'beta', name: 'Savings', kind: 'bank', bankName: 'Example Bank Beta', last4: '2222', openingFils: 0, color: '#222' },
+  ];
+  const oldTransfer = {
+    id: 'old-out', type: 'expense', amountFils: 100000, category: 'other', accountId: 'alpha',
+    title: 'Outgoing transfer', date: '2026-07-08', source: 'sms',
+    ts: Date.parse('2026-07-08T09:00:00Z'), smsKey: `s${Date.parse('2026-07-08T09:00:00Z')}-100000`,
+  };
+  const statementRow = {
+    kind: 'transaction', type: 'expense', amountFils: 100000, currency: 'AED',
+    merchant: 'Outgoing transfer', date: '2026-07-08', dueDay: null, minDueFils: null,
+    card: { last4: '1111', kind: 'account' }, reference: 'TRX-A1B2C3D4', transferHint: true,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', categoryDeliberate: true,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', statement: true,
+      reference: 'TRX-A1B2C3D4', counterparty: { last4: '2222', kind: 'account' } },
+    captureSource: 'csv', smsTs: Date.parse('2026-07-08T12:00:00Z'),
+  };
+  const statementState = { ...BASE, accounts: statementAccounts, transactions: [oldTransfer] };
+  const healed = buildImportPlan([statementRow], statementState, statementRow.smsTs);
+  ok('strong statement evidence heals one old parser transfer instead of appending a duplicate',
+    healed.txCount === 0 && healed.batch.updates.some((update) =>
+      update.id === 'old-out' && update.isTransfer === true && update.transferEvidence?.statement === true),
+    { txCount: healed.txCount, updates: healed.batch.updates });
+
+  const pinned = buildImportPlan([statementRow], {
+    ...statementState,
+    transactions: [{ ...oldTransfer, userEdited: true, title: 'My transfer note' }],
+  }, statementRow.smsTs);
+  ok('statement reconciliation never overwrites a user-edited row',
+    !pinned.batch.updates.some((update) => update.id === 'old-out'), pinned.batch.updates);
+
+  const merchantSpend = {
+    ...oldTransfer,
+    id: 'purchase', title: 'Carrefour', category: 'groceries', isTransfer: false,
+  };
+  const merchantCollision = buildImportPlan([statementRow], {
+    ...statementState,
+    transactions: [merchantSpend],
+  }, statementRow.smsTs);
+  ok('same amount/date/account cannot convert a named merchant purchase into a transfer',
+    !merchantCollision.batch.updates.some((update) => update.id === 'purchase'),
+    merchantCollision.batch.updates);
+
+  const ambiguous = buildImportPlan([statementRow], {
+    ...statementState,
+    transactions: [oldTransfer, { ...oldTransfer, id: 'old-out-2', smsKey: 'other-key' }],
+  }, statementRow.smsTs);
+  ok('two possible old transfer rows remain unresolved instead of choosing one',
+    !ambiguous.batch.updates.some((update) => update.id === 'old-out' || update.id === 'old-out-2'),
+    ambiguous.batch.updates);
+
+  const cleanState = { ...BASE, accounts: statementAccounts };
+  const imported = buildImportPlan([statementRow], cleanState, statementRow.smsTs);
+  const replayed = buildImportPlan([statementRow], apply(cleanState, imported), statementRow.smsTs);
+  ok('re-importing the same statement row is idempotent',
+    imported.txCount === 1 && replayed.txCount === 0,
+    { first: imported.txCount, replay: replayed.txCount });
+}
+
 /* ── close and reopen: the SAME messages are read again ──────────────── */
 
 {

@@ -134,6 +134,39 @@ function tinyPdf(line) {
     splitCsv.totalRows === 5 && splitCsv.rejectedRows === 2 &&
       splitCsv.rows[1].merchant === 'Salary' && splitCsv.rows[2].merchant === 'Salary');
 
+  const genericTransferCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency,Account Number,Transaction Reference',
+    '08/07/2026,"Transfer to account XXXX2222",1000.00,,AED,XXXX1111,TRX-A1B2C3D4',
+  ].join('\n'), 'AED');
+  ok('generic CSV statements retain only masked source/counterparty identity for transfers',
+    genericTransferCsv.rows.length === 1 &&
+      genericTransferCsv.rows[0].card?.last4 === '1111' &&
+      genericTransferCsv.rows[0].card?.kind === 'account' &&
+      genericTransferCsv.rows[0].transferHint === true &&
+      genericTransferCsv.rows[0].merchant === 'Outgoing transfer' &&
+      genericTransferCsv.rows[0].transferEvidence?.statement === true &&
+      genericTransferCsv.rows[0].transferEvidence?.counterparty?.last4 === '2222' &&
+      genericTransferCsv.rows[0].transferEvidence?.reference === 'TRX-A1B2C3D4',
+    JSON.stringify(genericTransferCsv.rows));
+
+  const ambiguousSourceCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit,Account Number',
+    '08/07/2026,"Transfer to account XXXX2222",1000.00,,XXXX1111',
+    '09/07/2026,"Transfer to account XXXX3333",500.00,,XXXX9999',
+  ].join('\n'), 'AED');
+  ok('a varying account column never becomes statement source-account authority',
+    ambiguousSourceCsv.rows.length === 2 &&
+      ambiguousSourceCsv.rows.every((row) => row.card === null && row.transferEvidence?.attribution === 'fallback'));
+
+  const transferFeeCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit,Account Number',
+    '10/07/2026,Bank transfer fee,25.00,,XXXX1111',
+  ].join('\n'), 'AED');
+  ok('transfer fees remain spending rows rather than transfer candidates',
+    transferFeeCsv.rows.length === 1 && transferFeeCsv.rows[0].transferHint === false &&
+      transferFeeCsv.rows[0].transferEvidence === undefined &&
+      transferFeeCsv.rows[0].merchant !== 'Outgoing transfer');
+
   const atmCsvAe = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
     '04/07/2026,ATM CASH WITHDRAWAL 1234,500.00,,AED',
@@ -242,6 +275,24 @@ function tinyPdf(line) {
     rows[0].amountFils === 4000 && rows[1].amountFils === 1850000);
   ok('ambiguous columns and impossible dates are rejected without dropping repeated purchases',
     rows.length === 3 && rows[0].merchant === rows[2].merchant);
+  const genericPdfRows = parseStatementText([
+    'Statement for Account Number: XXXX1111',
+    '08/07/2026 Transfer to account XXXX2222 Ref TRX-A1B2C3D4 AED 1,000.00 DR',
+  ].join('\n'));
+  ok('text/PDF statements use a unique header account as generic transfer evidence',
+    genericPdfRows.length === 1 && genericPdfRows[0].card?.last4 === '1111' &&
+      genericPdfRows[0].transferEvidence?.statement === true &&
+      genericPdfRows[0].transferEvidence?.counterparty?.last4 === '2222' &&
+      genericPdfRows[0].transferHint === true,
+    JSON.stringify(genericPdfRows));
+  const ownPdfRows = parseStatementText([
+    'Account No: ****1111',
+    '08/07/2026 Internal transfer to account ****2222 AED 250.00 DR',
+  ].join('\n'));
+  ok('explicit own/internal transfer wording is bank-agnostic and excludes consumption semantics',
+    ownPdfRows.length === 1 && ownPdfRows[0].merchant === 'Own account transfer' &&
+      ownPdfRows[0].categoryGuess === 'other' && ownPdfRows[0].categoryDeliberate === true &&
+      ownPdfRows[0].transferEvidence?.explicitOwn === true);
   const saRows = parseStatementText([
     '01/07/2026 PANDA SAR 45.00 DR',
     '02/07/2026 WRONG MARKET AED 10.00 DR',

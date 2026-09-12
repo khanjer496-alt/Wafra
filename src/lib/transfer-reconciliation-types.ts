@@ -25,6 +25,13 @@ export interface TransferEvidence {
   endpointProof?: 'explicit-transfer';
   /** Complementary bank alert forms may describe the same posting. */
   postingForm?: 'transfer-detail' | 'remittance-debit' | 'credit-receipt';
+  /**
+   * Evidence came from an imported statement. This marker allows a masked
+   * account tail to identify a local account only when that tail is globally
+   * unique among the user's eligible accounts; ordinary alerts gain no such
+   * bank-agnostic authority.
+   */
+  statement?: true;
 }
 
 /** A user's ownership decision survives reparsing and a missing counterpart. */
