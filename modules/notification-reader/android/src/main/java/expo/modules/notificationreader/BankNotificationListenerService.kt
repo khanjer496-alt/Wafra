@@ -106,18 +106,22 @@ class BankNotificationListenerService : NotificationListenerService() {
      * ask Android to bind the listener again; onListenerConnected() performs the
      * sweep as soon as the system completes that bind.
      */
-    fun sweepOrRequestRebind(context: Context) {
+    fun sweepOrRequestRebind(context: Context): Boolean {
       val listener = connected
       if (listener != null) {
         listener.sweepActiveNotifications()
-        return
+        return true
       }
       try {
         requestRebind(ComponentName(context, BankNotificationListenerService::class.java))
       } catch (_: Exception) {
         // The next Android lifecycle callback or app foreground can retry.
       }
+      return false
     }
+
+    /** Whether Android has actually bound the listener process right now. */
+    fun isConnected(): Boolean = connected != null
 
     private const val MAX_TITLE_CHARS = 512
     private const val MAX_TEXT_CHARS = 4096

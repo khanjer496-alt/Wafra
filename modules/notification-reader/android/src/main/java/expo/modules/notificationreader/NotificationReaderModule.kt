@@ -85,7 +85,20 @@ class NotificationReaderModule : Module() {
       // bridge was starting, after an OEM restarted the listener, or before a
       // corrected admission rule reached the current build. append() is
       // idempotent for the same package/text/postTime tuple.
-      BankNotificationListenerService.sweepOrRequestRebind(context)
+      val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
+      if (!sweptImmediately) {
+        // requestRebind() is asynchronous. Without a short bounded wait the
+        // first manual refresh always read the queue before onListenerConnected
+        // had a chance to sweep the visible notification shade. On affected OEMs
+        // that looked exactly like a successful scan that found nothing.
+        for (attempt in 0 until 10) {
+          if (BankNotificationListenerService.isConnected()) {
+            BankNotificationListenerService.sweepConnected()
+            break
+          }
+          Thread.sleep(50)
+        }
+      }
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
         val sourceClass = TrustedBankNotificationPackages.sourceClass(
           context,

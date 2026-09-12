@@ -59,6 +59,8 @@ test('every notification drain re-sweeps or rebinds before reading the encrypted
   const readQueue = module.indexOf('NotificationCaptureStore.read(context, sinceMs.toLong())');
   assert.ok(sweep >= 0 && readQueue > sweep);
   assert.match(listener, /requestRebind\(ComponentName\(context, BankNotificationListenerService::class\.java\)\)/);
+  assert.match(listener, /fun isConnected\(\): Boolean = connected != null/);
+  assert.match(module, /if \(!sweptImmediately\)[\s\S]{0,700}isConnected\(\)[\s\S]{0,260}Thread\.sleep\(50\)/);
   assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,120}sweepActiveNotifications\(\)/);
 });
 
