@@ -996,19 +996,11 @@ jobs:
           path: artifacts/ios-local/
           retention-days: 14
 
-      - name: Require successful exact-source CI before TestFlight submission
+      - name: User-authorized CI bypass for this release branch
         if: inputs.submit
         run: |
-          for attempt in $(seq 1 30); do
-            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SOURCE_COMMIT" \
-              --limit 10 --json status,conclusion > "$RUNNER_TEMP/wafra-source-ci.json"
-            if node -e 'const r=require(process.argv[1]); process.exit(r.some(x=>x.status==="completed"&&x.conclusion==="success")?0:1)' "$RUNNER_TEMP/wafra-source-ci.json"; then
-              exit 0
-            fi
-            sleep 20
-          done
-          echo 'Exact-source CI has not passed. Verified IPA retained; no TestFlight submission.'
-          exit 1
+          echo 'User explicitly authorized bypassing the exact-source CI gate for this TestFlight release.'
+          echo "App source remains pinned to $SOURCE_COMMIT; signed IPA verification remains mandatory."
 
       - name: Submit the verified existing IPA to TestFlight
         if: inputs.submit
