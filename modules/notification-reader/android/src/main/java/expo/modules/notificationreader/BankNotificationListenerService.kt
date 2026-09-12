@@ -123,6 +123,28 @@ class BankNotificationListenerService : NotificationListenerService() {
     /** Whether Android has actually bound the listener process right now. */
     fun isConnected(): Boolean = connected != null
 
+    /** Source-free visibility snapshot for Settings diagnostics. */
+    fun visibilityDiagnostics(context: Context): Map<String, Any> {
+      val listener = connected ?: return mapOf(
+        "listenerConnected" to false,
+        "activeNotificationCount" to 0,
+        "trustedBankVisibleCount" to 0,
+        "adcbVisible" to false,
+      )
+      val active = try { listener.activeNotifications?.toList() ?: emptyList() }
+      catch (_: Exception) { emptyList() }
+      return mapOf(
+        "listenerConnected" to true,
+        "activeNotificationCount" to active.size,
+        "trustedBankVisibleCount" to active.count {
+          TrustedBankNotificationPackages.isTrusted(context, it.packageName)
+        },
+        "adcbVisible" to active.any {
+          it.packageName == "com.adcb.nexgen" || it.packageName == "com.adcb.bank"
+        },
+      )
+    }
+
     private const val MAX_TITLE_CHARS = 512
     private const val MAX_TEXT_CHARS = 4096
 

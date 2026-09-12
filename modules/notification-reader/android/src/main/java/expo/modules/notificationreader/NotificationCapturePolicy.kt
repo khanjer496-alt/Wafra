@@ -15,6 +15,9 @@ internal object NotificationCapturePolicy {
     return expiresAt > System.currentTimeMillis()
   }
 
+  fun expiresAt(context: Context): Long =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(EXPIRES_AT, 0L)
+
   @Synchronized
   fun setEnabled(context: Context, enabled: Boolean, expiresAtMs: Long): Boolean {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

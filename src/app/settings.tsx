@@ -119,7 +119,7 @@ import {
 import { ClearAllError, useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
-import NotificationReader from '../../modules/notification-reader';
+import NotificationReader, { type NotificationReaderDiagnostics } from '../../modules/notification-reader';
 import {
   bankNotificationAdmissionExpiresAt,
   isBankNotificationCaptureAvailable,
@@ -605,6 +605,16 @@ export default function SettingsScreen() {
   const notifAvailable = Platform.OS === 'android' &&
     isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifDiagnostics, setNotifDiagnostics] = useState<NotificationReaderDiagnostics | null>(null);
+  const [notifDiagnosticsBusy, setNotifDiagnosticsBusy] = useState(false);
+  const refreshNotificationDiagnostics = useCallback(async () => {
+    const reader = NotificationReader;
+    if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
+    setNotifDiagnosticsBusy(true);
+    try { setNotifDiagnostics(await reader.getDiagnostics()); }
+    catch { setNotifDiagnostics(null); }
+    finally { setNotifDiagnosticsBusy(false); }
+  }, [notifAvailable]);
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
@@ -612,6 +622,7 @@ export default function SettingsScreen() {
       catch { setNotifEnabled(false); }
     };
     refresh();
+    void refreshNotificationDiagnostics();
     if (notifAvailable && !state.captureOptOut && proActive) {
       void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state))
         .then(refresh).catch(() => {});
@@ -642,7 +653,7 @@ export default function SettingsScreen() {
       })();
     });
     return () => subscription.remove();
-  }, [notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
+  }, [notifAvailable, proActive, refreshNotificationDiagnostics, setCaptureOptOut, state.captureOptOut]);
   const onNotificationAccess = () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader) {
@@ -1389,8 +1400,34 @@ export default function SettingsScreen() {
               t('bankAppNotifsTitle'),
               t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
               gated(onNotificationAccess),
-              { last: true, pro: true },
+              { pro: true },
             )}
+          {notifAvailable && (
+            <Block style={styles.historyImportSettings}>
+              <View style={styles.historyImportSettingsCopy}>
+                <ThemedText type="smallBold">{t('notifDiagnosticsTitle')}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {notifDiagnostics ? tf('notifDiagnosticsAccess', {
+                    system: t(notifDiagnostics.systemAccess ? 'settingStatusYes' : 'settingStatusNo'),
+                    admission: t(notifDiagnostics.admissionActive ? 'settingStatusYes' : 'settingStatusNo'),
+                    listener: t(notifDiagnostics.listenerConnected ? 'settingStatusYes' : 'settingStatusNo'),
+                  }) : t('notifDiagnosticsUnavailable')}
+                </ThemedText>
+                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
+                  {tf('notifDiagnosticsVisible', {
+                    active: notifDiagnostics.activeNotificationCount,
+                    trusted: notifDiagnostics.trustedBankVisibleCount,
+                    adcb: t(notifDiagnostics.adcbVisible ? 'settingStatusYes' : 'settingStatusNo'),
+                  })}
+                </ThemedText> : null}
+                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
+                  {tf('notifDiagnosticsQueue', { queued: notifDiagnostics.queuedCandidateCount })}
+                </ThemedText> : null}
+              </View>
+              <Button inline variant="outline" label={t('notifDiagnosticsRefresh')}
+                disabled={notifDiagnosticsBusy} onPress={() => void refreshNotificationDiagnostics()} />
+            </Block>
+          )}
         </Section>
 
         <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>

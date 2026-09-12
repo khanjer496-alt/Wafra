@@ -1,5 +1,16 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
+export interface NotificationReaderDiagnostics {
+  available: boolean;
+  systemAccess: boolean;
+  admissionActive: boolean;
+  listenerConnected: boolean;
+  activeNotificationCount: number;
+  trustedBankVisibleCount: number;
+  adcbVisible: boolean;
+  queuedCandidateCount: number;
+}
+
 export interface CapturedNotification {
   /** Opaque native queue identity used only for durable acknowledgement. */
   id: string;
@@ -20,6 +31,8 @@ interface NotificationReaderModule {
   /** Persist the app's tracking choice; disabling also erases queued alerts. */
   setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;
   openSettings(): boolean;
+  /** Source-free local diagnostics; never returns notification text. */
+  getDiagnostics(): Promise<NotificationReaderDiagnostics>;
   /** Captured money-related notifications with ts >= sinceMs, oldest first. */
   getCaptured(sinceMs: number): Promise<CapturedNotification[]>;
   ackCaptured(ids: string[]): Promise<boolean>;

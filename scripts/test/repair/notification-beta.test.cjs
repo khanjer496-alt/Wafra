@@ -64,6 +64,20 @@ test('every notification drain re-sweeps or rebinds before reading the encrypted
   assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,120}sweepActiveNotifications\(\)/);
 });
 
+test('notification diagnostics expose only source-free listener and queue state', () => {
+  const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
+  const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
+  const bridge = read('modules/notification-reader/index.ts');
+  const settings = read('src/app/settings.tsx');
+  assert.match(module, /AsyncFunction\("getDiagnostics"\)/);
+  assert.match(listener, /fun visibilityDiagnostics\(context: Context\): Map<String, Any>/);
+  assert.match(listener, /"adcbVisible" to active\.any/);
+  assert.match(module, /"queuedCandidateCount" to queued/);
+  assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
+  assert.match(settings, /notifDiagnosticsTitle/);
+  assert.doesNotMatch(settings, /notifDiagnostics[\s\S]{0,500}\.text/);
+});
+
 test('only the official HSBC UAE Play package is eligible for UAE capture', () => {
   const enabled = moduleFor({});
   assert.equal(enabled.trustedBankNotificationMarket('ae.hsbc.hsbcuae'), 'AE');

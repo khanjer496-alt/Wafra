@@ -72,6 +72,49 @@ class NotificationReaderModule : Module() {
       true
     }
 
+    /** Source-free diagnostics for OEM/listener troubleshooting. */
+    AsyncFunction("getDiagnostics") {
+      val context = appContext.reactContext ?: return@AsyncFunction mapOf(
+        "available" to false,
+        "systemAccess" to false,
+        "admissionActive" to false,
+        "listenerConnected" to false,
+        "activeNotificationCount" to 0,
+        "trustedBankVisibleCount" to 0,
+        "adcbVisible" to false,
+        "queuedCandidateCount" to 0,
+      )
+      val available = TrustedBankNotificationPackages.CAPTURE_ENABLED
+      val systemAccess = available && hasSystemAccess(context)
+      val admissionActive = available && NotificationCapturePolicy.isEnabled(context)
+      if (systemAccess && admissionActive) {
+        val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
+        if (!sweptImmediately) {
+          for (attempt in 0 until 10) {
+            if (BankNotificationListenerService.isConnected()) {
+              BankNotificationListenerService.sweepConnected()
+              break
+            }
+            Thread.sleep(50)
+          }
+        }
+      }
+      val visibility = BankNotificationListenerService.visibilityDiagnostics(context)
+      val queued = if (admissionActive) {
+        try { NotificationCaptureStore.read(context, 0L).size } catch (_: Exception) { -1 }
+      } else 0
+      mapOf(
+        "available" to available,
+        "systemAccess" to systemAccess,
+        "admissionActive" to admissionActive,
+        "listenerConnected" to (visibility["listenerConnected"] ?: false),
+        "activeNotificationCount" to (visibility["activeNotificationCount"] ?: 0),
+        "trustedBankVisibleCount" to (visibility["trustedBankVisibleCount"] ?: 0),
+        "adcbVisible" to (visibility["adcbVisible"] ?: false),
+        "queuedCandidateCount" to queued,
+      )
+    }
+
     /** Captured money-related notifications with ts >= sinceMs, oldest first. */
     AsyncFunction("getCaptured") { sinceMs: Double ->
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction emptyList<Map<String, Any>>()
