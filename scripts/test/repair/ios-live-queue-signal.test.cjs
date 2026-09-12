@@ -91,6 +91,7 @@ function harness(options = {}) {
     '@/lib/haptics': {}, '@/lib/i18n': {},
     '@/lib/notifications': { syncPaymentReminders: async () => {} },
     '@/lib/purchases': { isProActive: value => value.pro },
+    '@/lib/trusted-bank-notification-packages': { bankNotificationAdmissionExpiresAt: () => 0 },
     '@/lib/relay': { getRelayConfig: async () => null },
     '@/lib/ios-local-capture': { getSharedIosLocalCaptureCoordinator: () => coordinator },
     '@/lib/ios-local-capture-protocol': {},
