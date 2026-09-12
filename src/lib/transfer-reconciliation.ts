@@ -485,7 +485,7 @@ function currentStoredPair(a: TransferRow, ctx: Context): boolean {
   return !!ea && !!eb && automaticBasis(ea, eb) === link.basis;
 }
 
-const lowerBound = (entries: Entry[], at: number): number => {
+const lowerBound = (entries: readonly { at: number }[], at: number): number => {
   let low = 0; let high = entries.length;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
@@ -831,26 +831,49 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       if (internalIds.has(tx.id) && rowLocalOwn && !isTransferMatch(tx.transferMatch)) ownRows.push(tx);
       else if (unresolvedIds.has(tx.id)) unresolvedRows.push(tx);
     }
-    const unresolvedBuckets = new Map<string, TransferRow[]>();
+    interface AbsorptionBucket {
+      timed: { tx: TransferRow; at: number }[];
+      byDate: Map<string, TransferRow[]>;
+      untimedByDate: Map<string, TransferRow[]>;
+    }
+    const unresolvedBuckets = new Map<string, AbsorptionBucket>();
     for (const tx of unresolvedRows) {
       const key = JSON.stringify([moneyKey(tx), tx.type]);
-      const bucket = unresolvedBuckets.get(key) ?? [];
-      bucket.push(tx); unresolvedBuckets.set(key, bucket);
+      const bucket: AbsorptionBucket = unresolvedBuckets.get(key) ?? {
+        timed: [], byDate: new Map(), untimedByDate: new Map(),
+      };
+      const sameDate = bucket.byDate.get(tx.date) ?? [];
+      sameDate.push(tx); bucket.byDate.set(tx.date, sameDate);
+      const exact = sourceTime(tx);
+      if (exact !== undefined) bucket.timed.push({ tx, at: exact });
+      else {
+        const untimed = bucket.untimedByDate.get(tx.date) ?? [];
+        untimed.push(tx); bucket.untimedByDate.set(tx.date, untimed);
+      }
+      unresolvedBuckets.set(key, bucket);
     }
+    for (const bucket of unresolvedBuckets.values()) bucket.timed.sort((a, b) => a.at - b.at);
     const possible = new Map<string, string[]>();
     const reverseCount = new Map<string, number>();
     for (const own of ownRows) {
       const opposite = own.type === 'income' ? 'expense' : 'income';
-      const bucket = unresolvedBuckets.get(JSON.stringify([moneyKey(own), opposite])) ?? [];
-      const at = movementTime(own)!;
-      const candidates = bucket.filter(other => other.accountId !== own.accountId &&
-        // Exact source clocks use the tight five-minute window. Rows imported
-        // without clocks can still pair only when they share one calendar day;
-        // mutual uniqueness below prevents repeated same-amount sweeps from
-        // being guessed.
-        (sourceTime(own) !== undefined && sourceTime(other) !== undefined
-          ? Math.abs(movementTime(other)! - at) <= 5 * 60_000
-          : other.date === own.date));
+      const bucket = unresolvedBuckets.get(JSON.stringify([moneyKey(own), opposite]));
+      const exact = sourceTime(own);
+      let candidates: TransferRow[] = [];
+      // Index the same eligibility rule instead of scanning all historical
+      // repeats of this amount. Two exact clocks use the five-minute window,
+      // even across posting dates. If either clock is missing, require the
+      // original equal-date fallback. Include every candidate in both cases:
+      // mutual uniqueness below must still see all collisions.
+      if (bucket && exact === undefined) candidates = bucket.byDate.get(own.date) ?? [];
+      else if (bucket && exact !== undefined) {
+        candidates = [...bucket.untimedByDate.get(own.date) ?? []];
+        const first = lowerBound(bucket.timed, exact - 5 * 60_000);
+        for (let index = first; index < bucket.timed.length && bucket.timed[index].at <= exact + 5 * 60_000; index++) {
+          candidates.push(bucket.timed[index].tx);
+        }
+      }
+      candidates = candidates.filter(other => other.accountId !== own.accountId);
       possible.set(own.id, candidates.map(row => row.id));
       for (const candidate of candidates) reverseCount.set(candidate.id, (reverseCount.get(candidate.id) ?? 0) + 1);
     }
