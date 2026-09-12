@@ -1418,10 +1418,17 @@ export default function SettingsScreen() {
                     active: notifDiagnostics.activeNotificationCount,
                     trusted: notifDiagnostics.trustedBankVisibleCount,
                     adcb: t(notifDiagnostics.adcbVisible ? 'settingStatusYes' : 'settingStatusNo'),
+                    adcbCount: notifDiagnostics.adcbActiveCount ?? 0,
                   })}
                 </ThemedText> : null}
                 {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
                   {tf('notifDiagnosticsQueue', { queued: notifDiagnostics.queuedCandidateCount })}
+                </ThemedText> : null}
+                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
+                  {tf('notifDiagnosticsStages', {
+                    stages: Object.entries(notifDiagnostics.adcbAdmissionCounts ?? {})
+                      .map(([key, value]) => `${key}=${value}`).join(' · ') || 'none',
+                  })}
                 </ThemedText> : null}
               </View>
               <Button inline variant="outline" label={t('notifDiagnosticsRefresh')}

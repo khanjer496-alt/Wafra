@@ -60,6 +60,19 @@ object NotificationCaptureStore {
     writeAll(context, next)
   }
 
+  /** Source-free reason helper for admission diagnostics; never returns queue text. */
+  @Synchronized
+  fun admissionBlockReason(context: Context, pkg: String, text: String, ts: Long): String? {
+    if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
+    return try {
+      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) "duplicate" else null
+    } catch (_: Exception) {
+      "store-error"
+    }
+  }
+
   @Synchronized
   fun read(context: Context, sinceMs: Long): List<CapturedBankNotification> {
     purgeLegacyPlaintext(context)

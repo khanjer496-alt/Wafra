@@ -8,7 +8,10 @@ export interface NotificationReaderDiagnostics {
   activeNotificationCount: number;
   trustedBankVisibleCount: number;
   adcbVisible: boolean;
+  adcbActiveCount: number;
   queuedCandidateCount: number;
+  admissionCounts: Record<string, number>;
+  adcbAdmissionCounts: Record<string, number>;
 }
 
 export interface CapturedNotification {

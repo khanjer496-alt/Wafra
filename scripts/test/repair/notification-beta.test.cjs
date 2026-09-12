@@ -72,7 +72,14 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(module, /AsyncFunction\("getDiagnostics"\)/);
   assert.match(listener, /fun visibilityDiagnostics\(context: Context\): Map<String, Any>/);
   assert.match(listener, /"adcbVisible" to active\.any/);
+  assert.match(listener, /"adcbActiveCount" to active\.count/);
   assert.match(module, /"queuedCandidateCount" to queued/);
+  assert.match(module, /"adcbAdmissionCounts"/);
+  assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
+  assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
+  assert.match(listener, /recordAdmission\("exception", adcb\)/);
+  const store = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt');
+  assert.match(store, /"cleared-through"/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
   assert.match(settings, /notifDiagnosticsTitle/);
   assert.doesNotMatch(settings, /notifDiagnostics[\s\S]{0,500}\.text/);

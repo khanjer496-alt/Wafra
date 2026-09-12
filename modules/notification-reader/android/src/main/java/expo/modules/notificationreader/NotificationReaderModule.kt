@@ -82,12 +82,16 @@ class NotificationReaderModule : Module() {
         "activeNotificationCount" to 0,
         "trustedBankVisibleCount" to 0,
         "adcbVisible" to false,
+        "adcbActiveCount" to 0,
         "queuedCandidateCount" to 0,
+        "admissionCounts" to emptyMap<String, Int>(),
+        "adcbAdmissionCounts" to emptyMap<String, Int>(),
       )
       val available = TrustedBankNotificationPackages.CAPTURE_ENABLED
       val systemAccess = available && hasSystemAccess(context)
       val admissionActive = available && NotificationCapturePolicy.isEnabled(context)
       if (systemAccess && admissionActive) {
+        BankNotificationListenerService.resetAdmissionDiagnostics()
         val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
         if (!sweptImmediately) {
           for (attempt in 0 until 10) {
@@ -100,6 +104,7 @@ class NotificationReaderModule : Module() {
         }
       }
       val visibility = BankNotificationListenerService.visibilityDiagnostics(context)
+      val admission = BankNotificationListenerService.admissionDiagnostics()
       val queued = if (admissionActive) {
         try { NotificationCaptureStore.read(context, 0L).size } catch (_: Exception) { -1 }
       } else 0
@@ -111,7 +116,10 @@ class NotificationReaderModule : Module() {
         "activeNotificationCount" to (visibility["activeNotificationCount"] ?: 0),
         "trustedBankVisibleCount" to (visibility["trustedBankVisibleCount"] ?: 0),
         "adcbVisible" to (visibility["adcbVisible"] ?: false),
+        "adcbActiveCount" to (visibility["adcbActiveCount"] ?: 0),
         "queuedCandidateCount" to queued,
+        "admissionCounts" to (admission["admissionCounts"] ?: emptyMap<String, Int>()),
+        "adcbAdmissionCounts" to (admission["adcbAdmissionCounts"] ?: emptyMap<String, Int>()),
       )
     }
 

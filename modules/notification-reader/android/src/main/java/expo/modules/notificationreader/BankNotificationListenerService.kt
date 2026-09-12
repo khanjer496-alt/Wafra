@@ -50,9 +50,11 @@ class BankNotificationListenerService : NotificationListenerService() {
   }
 
   private fun capture(sbn: StatusBarNotification) {
+    val adcb = sbn.packageName == "com.adcb.nexgen" || sbn.packageName == "com.adcb.bank"
     try {
       if (sbn.packageName == packageName) return
       if (!NotificationCapturePolicy.isEnabled(this)) return
+      recordAdmission("active", adcb)
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
       // Banks do not all populate EXTRA_TEXT. Some OEM-rendered notifications
@@ -72,14 +74,43 @@ class BankNotificationListenerService : NotificationListenerService() {
       // A bank alert is short. Refuse pathological payloads rather than
       // truncating them into a different message or allowing another app to
       // fill the encrypted queue with multi-megabyte notifications.
-      if (title.length > MAX_TITLE_CHARS || text.length > MAX_TEXT_CHARS) return
+      if (title.length > MAX_TITLE_CHARS || text.length > MAX_TEXT_CHARS) {
+        recordAdmission("tooLong", adcb)
+        return
+      }
       val body = "$title $text".trim()
-      if (body.isEmpty() || SensitiveNotificationFilter.shouldReject(body) ||
-        !MONEY_RE.containsMatchIn(body)) return
+      if (body.isEmpty()) {
+        recordAdmission("emptyBody", adcb)
+        return
+      }
+      recordAdmission("body", adcb)
+      if (SensitiveNotificationFilter.shouldReject(body)) {
+        recordAdmission("securityRejected", adcb)
+        return
+      }
+      recordAdmission("securityPassed", adcb)
+      if (!MONEY_RE.containsMatchIn(body)) {
+        recordAdmission("moneyRejected", adcb)
+        return
+      }
+      recordAdmission("moneyPassed", adcb)
       // Unknown apps do not become trusted banks merely because their text
       // resembles one. Native intake still requires Google Play provenance;
       // unregistered candidates are carried as review-only source classes.
-      if (TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body) == null) return
+      if (TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body) == null) {
+        recordAdmission("sourceRejected", adcb)
+        return
+      }
+      recordAdmission("sourcePassed", adcb)
+
+      val blockReason = NotificationCaptureStore.admissionBlockReason(
+        this, sbn.packageName, text, sbn.postTime,
+      )
+      if (blockReason != null) {
+        recordAdmission(blockReason, adcb)
+        return
+      }
+      recordAdmission("appendAttempted", adcb)
 
       NotificationCaptureStore.append(
         context = this,
@@ -88,7 +119,9 @@ class BankNotificationListenerService : NotificationListenerService() {
         text = text,
         ts = sbn.postTime,
       )
+      recordAdmission("appendSucceeded", adcb)
     } catch (_: Exception) {
+      recordAdmission("exception", adcb)
       // Never crash the listener; a dropped notification is recoverable, a
       // dead listener is not.
     }
@@ -96,6 +129,26 @@ class BankNotificationListenerService : NotificationListenerService() {
 
   companion object {
     @Volatile private var connected: BankNotificationListenerService? = null
+    private val diagnosticLock = Any()
+    private val admissionCounts = mutableMapOf<String, Int>()
+    private val adcbAdmissionCounts = mutableMapOf<String, Int>()
+
+    private fun recordAdmission(stage: String, adcb: Boolean) = synchronized(diagnosticLock) {
+      admissionCounts[stage] = (admissionCounts[stage] ?: 0) + 1
+      if (adcb) adcbAdmissionCounts[stage] = (adcbAdmissionCounts[stage] ?: 0) + 1
+    }
+
+    fun resetAdmissionDiagnostics() = synchronized(diagnosticLock) {
+      admissionCounts.clear()
+      adcbAdmissionCounts.clear()
+    }
+
+    fun admissionDiagnostics(): Map<String, Any> = synchronized(diagnosticLock) {
+      mapOf(
+        "admissionCounts" to admissionCounts.toMap(),
+        "adcbAdmissionCounts" to adcbAdmissionCounts.toMap(),
+      )
+    }
 
     /** A user returning from Settings may enable capture after the listener connected. */
     fun sweepConnected() { connected?.sweepActiveNotifications() }
@@ -130,6 +183,7 @@ class BankNotificationListenerService : NotificationListenerService() {
         "activeNotificationCount" to 0,
         "trustedBankVisibleCount" to 0,
         "adcbVisible" to false,
+        "adcbActiveCount" to 0,
       )
       val active = try { listener.activeNotifications?.toList() ?: emptyList() }
       catch (_: Exception) { emptyList() }
@@ -140,6 +194,9 @@ class BankNotificationListenerService : NotificationListenerService() {
           TrustedBankNotificationPackages.isTrusted(context, it.packageName)
         },
         "adcbVisible" to active.any {
+          it.packageName == "com.adcb.nexgen" || it.packageName == "com.adcb.bank"
+        },
+        "adcbActiveCount" to active.count {
           it.packageName == "com.adcb.nexgen" || it.packageName == "com.adcb.bank"
         },
       )
