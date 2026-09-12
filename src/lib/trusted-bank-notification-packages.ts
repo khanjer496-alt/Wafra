@@ -1,8 +1,9 @@
 /**
  * Curated Android bank-app identities used as strong issuer/market evidence.
- * Native capture separately admits Google Play Finance apps and financial-looking
- * candidates. Unknown packages do not inherit this map's trust: they use the
- * universal parser and remain review-only until explicitly learned locally.
+ * Native capture separately admits financial-looking notifications from other
+ * Google Play-installed apps. Unknown packages do not inherit this map's trust:
+ * they use the universal parser and remain review-only until explicitly learned
+ * locally.
  * Keep the curated map aligned with native; contracts.test.js enforces it.
  */
 export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {

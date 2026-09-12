@@ -27,15 +27,14 @@ test('native notification admission is built into ordinary Android APKs', () => 
   assert.match(native, /installer\(context, packageName\) == "com\.android\.vending"/);
 });
 
-test('curated package identity remains exact even though native intake can discover new Play finance sources', () => {
+test('curated package identity remains exact while native intake can discover new Play financial candidates', () => {
   const enabled = moduleFor({});
   assert.equal(enabled.trustedBankNotificationMarket('com.example.notificationproducer'), null);
   assert.equal(enabled.trustedBankNotificationMarket('com.emiratesnbd.android.spoof'), null);
   assert.equal(enabled.trustedBankNotificationMarket('com.emiratesnbd.android'), 'AE');
   const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
   const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
-  assert.match(native, /ApplicationInfo\.CATEGORY_FINANCE/);
-  assert.match(native, /SOURCE_PLAY_FINANCE/);
+  assert.doesNotMatch(native, /ApplicationInfo\.CATEGORY_FINANCE/);
   assert.match(native, /SOURCE_FINANCIAL_CANDIDATE/);
   assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
   assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
@@ -134,7 +133,7 @@ test('unknown Play financial candidates stay review-only until explicitly learne
   const promotion = read('src/lib/review-promotion.ts');
   const types = read('src/lib/types.ts');
   assert.match(scanner, /sourceClass === 'financial-candidate' && learnedPackages\.has\(n\.pkg\)/);
-  assert.match(scanner, /const autoSource = sourceClass === 'trusted-bank' \|\| sourceClass === 'play-finance' \|\| learned/);
+  assert.match(scanner, /const autoSource = sourceClass === 'trusted-bank' \|\| learned/);
   assert.match(scanner, /const p = autoSource/);
   assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoSource \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
@@ -150,7 +149,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
     title: 'Card purchase',
     text: `AED ${index + 1}.00 at TEST SHOP`,
     ts: 1_800_000_000_000 + index,
-    sourceClass: 'play-finance',
+    sourceClass: 'financial-candidate',
   }));
   const parsed = {
     kind: 'transaction', type: 'expense', amountFils: 100, currency: 'AED',
@@ -177,7 +176,10 @@ test('500 queued notification candidates process without touching SMS and ACK on
     }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
-  const result = await scanner.scanInbox(0, {}, undefined, null, { notificationOnly: true });
+  const result = await scanner.scanInbox(0, {}, undefined, null, {
+    notificationOnly: true,
+    learnedNotificationPackages: ['com.example.financeapp'],
+  });
   assert.equal(smsReads, 0);
   assert.equal(parseCalls, 500);
   assert.equal(result.parsed.length, 500);

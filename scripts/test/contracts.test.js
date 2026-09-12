@@ -223,7 +223,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   ok('notification intake requires Play provenance while curated packages remain strongest issuer evidence',
     kotlinPackageIds.length >= 10 && JSON.stringify(kotlinPackageIds) === JSON.stringify(jsPackageIds) &&
       nativePackages.includes('installingPackageName') && nativePackages.includes('com.android.vending') &&
-      nativePackages.includes('ApplicationInfo.CATEGORY_FINANCE') &&
+      !nativePackages.includes('ApplicationInfo.CATEGORY_FINANCE') &&
       nativePackages.includes('SOURCE_FINANCIAL_CANDIDATE') &&
       service.includes('TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body)') &&
       service.includes('SensitiveNotificationFilter.shouldReject(body)') &&
@@ -243,7 +243,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   const stateTypes = code(read('src/lib/types.ts'));
   ok('unrecognized financial app packages remain review-only until explicit confirmation learns them locally',
     scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
-      scanner.includes("const autoSource = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned") &&
+      scanner.includes("const autoSource = sourceClass === 'trusted-bank' || learned") &&
       scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ?") &&
       promotion.includes("item.sourceClass === 'financial-candidate'") &&
       promotion.includes('learnedNotificationPackage') &&

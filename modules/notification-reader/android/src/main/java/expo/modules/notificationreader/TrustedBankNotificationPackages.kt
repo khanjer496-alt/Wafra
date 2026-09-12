@@ -1,7 +1,6 @@
 package expo.modules.notificationreader
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.os.Build
 
 /**
@@ -19,7 +18,6 @@ object TrustedBankNotificationPackages {
   val CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED
 
   const val SOURCE_TRUSTED_BANK = "trusted-bank"
-  const val SOURCE_PLAY_FINANCE = "play-finance"
   const val SOURCE_FINANCIAL_CANDIDATE = "financial-candidate"
 
   private val FINANCIAL_CONTEXT_RE = Regex(
@@ -66,22 +64,15 @@ object TrustedBankNotificationPackages {
 
   /**
    * Notification access is device-wide. Rank sources locally before queueing:
-   * exact known banks are strongest; Play Finance apps are eligible for the
-   * universal parser; other Play apps must also carry clear financial context
-   * and are review-only until the user confirms that package in Wafra.
+   * exact known banks are strongest. Any other Google Play-installed app must
+   * carry clear financial context and is review-only until the user confirms
+   * that package in Wafra. Android does not expose the Google Play "Finance"
+   * store category through ApplicationInfo, so never infer trust from an app
+   * category that the platform cannot actually provide.
    */
   fun sourceClass(context: Context, packageName: String, body: String): String? {
     if (!playInstalled(context, packageName)) return null
     if (markets.containsKey(packageName)) return SOURCE_TRUSTED_BANK
-
-    val financeCategory = try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        context.packageManager.getApplicationInfo(packageName, 0).category == ApplicationInfo.CATEGORY_FINANCE
-      } else false
-    } catch (_: Exception) {
-      false
-    }
-    if (financeCategory) return SOURCE_PLAY_FINANCE
     return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null
   }
 }

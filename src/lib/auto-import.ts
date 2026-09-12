@@ -837,10 +837,9 @@ export async function scanInbox(
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
         const sourceClass = n.sourceClass;
-        if (sourceClass !== 'trusted-bank' && sourceClass !== 'play-finance' &&
-          sourceClass !== 'financial-candidate') continue;
+        if (sourceClass !== 'trusted-bank' && sourceClass !== 'financial-candidate') continue;
         const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoSource = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        const autoSource = sourceClass === 'trusted-bank' || learned;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
@@ -851,9 +850,9 @@ export async function scanInbox(
           source,
           sender,
         );
-        // Known packages keep their exact market pin. New Play Finance apps and
-        // locally learned packages use the normal parser's own market/money
-        // evidence. Unconfirmed candidates are review-only.
+        // Known packages keep their exact market pin. Locally learned packages
+        // use the normal parser's own market/money evidence. Every unconfirmed
+        // Google Play candidate remains review-only.
         const p = autoSource
           ? trustedMarket === 'AE' || trustedMarket === 'SA'
             ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
