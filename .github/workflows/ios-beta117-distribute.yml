@@ -4,6 +4,7 @@ name: Distribute uploaded Wafra beta 117
 # upload another binary. It targets only version 1.0.0 (117) and the existing
 # external Beta group using the documented Apple group->builds endpoint.
 on:
+  workflow_dispatch:
   push:
     branches: [release/ios-beta117-public-20260912]
     paths: ['.github/workflows/ios-beta52-distribute.yml']
