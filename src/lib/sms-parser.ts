@@ -1158,6 +1158,11 @@ const PROMO_SENTENCE_RE = new RegExp(
     `)${PROMO_SENTENCE_CHAR}*`,
   'gi',
 );
+// Every promotional alternative above requires one of these tokens. Ordinary
+// posted alerts can skip the unanchored sentence scan and its backtracking.
+// Keep this test a superset: it only selects when to run the unchanged grammar.
+const PROMO_SENTENCE_TRIGGER_RE =
+  /%|\bredeem\b|\b(?:pay|manage)\b|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b/i;
 /**
  * Evidence that money ACTUALLY moved — banks append promo footers to real
  * alerts ("...Avl Bal AED 5,376. 0% instalments... bit.ly/..."), so promo
@@ -5285,7 +5290,10 @@ function parseSmsInner(
    * call-centre footer blanked out. Length-preserving, so the Arabic path can
    * still slice a name out of `clean` at these offsets.
    */
-  const payeeText = blank(blank(raw, CONTACT_FOOTER_RE), PROMO_SENTENCE_RE);
+  const contactFreeText = blank(raw, CONTACT_FOOTER_RE);
+  const payeeText = PROMO_SENTENCE_TRIGGER_RE.test(contactFreeText)
+    ? blank(contactFreeText, PROMO_SENTENCE_RE)
+    : contactFreeText;
   // English first in BOTH branches, always. On a bilingual body the two halves
   // name the same shop, and the Latin spelling is the one SERVICE_NAMES,
   // cleanDescriptor's acquirer heuristics, the merchant-override keys and

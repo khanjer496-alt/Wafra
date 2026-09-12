@@ -613,6 +613,8 @@ export interface AppState {
    * which correctly reads as "older than any version".
    */
   parserVersion?: number;
+  /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
+  hydrationReparseKey?: string;
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;

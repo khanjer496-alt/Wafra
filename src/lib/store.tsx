@@ -51,6 +51,7 @@ import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
+  PARSER_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
 import { countsInTotals, internalTransferIds } from '@/lib/ledger';
@@ -263,8 +264,13 @@ const PERSISTED_INCOME_ORIGINATOR_RE =
  * conservative capture reconciliation, so this contract does not depend on
  * every future migration author remembering every downstream transform.
  */
+interface PersistedMigrationOptions {
+  reuseCompletedReparse?: boolean;
+}
+
 export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
+  options?: PersistedMigrationOptions,
 ): Partial<Omit<AppState, 'hydrated'>> {
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
@@ -543,32 +549,46 @@ export function migratePersistedState(
       return guessed !== 'other' ? { ...t, category: guessed } : t;
     });
 
-    // Rows that kept their raw SMS re-parse under the CURRENT grammar on
-    // every launch. A hand-corrected row is the user's answer, not the
+    // Rows that kept their raw SMS re-parse under the current grammar once
+    // per local repair revision. A hand-corrected row is the user's answer, not the
     // parser's, so it remains the exact object supplied to this migration.
     // Released first for the same reason the hydrate branch releases it: this
     // runs over a backup being restored, whose pack is a property of the state
     // arriving, not of the one it replaces.
     setGlobalLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
-    parsed.transactions = parsed.transactions.flatMap((t) => {
-      if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
-      const p = parseSms(t.raw, parsed.merchantOverrides);
-      // Parser regressions and formats this release does not understand are
-      // not evidence that a persisted transaction never happened. Preserve
-      // the old row and its raw text for a future rescan instead of deleting
-      // the only local record.
-      if (!p) return [t];
-      if (p.kind === 'billDue' || p.kind === 'cardStatement') {
-        // This migration can heal transactions but cannot materialize the
-        // CardDue/Bill that now represents this message. Keep the legacy row
-        // until a rescan can atomically create that obligation; deleting it
-        // here loses the only record when lastScanTs prevents re-offering it.
-        return [t];
-      }
-      const patch = healPatch(t, p);
-      return [patch ? applyHealPatch(t, patch) : t];
-    });
+    // This receipt belongs to saved-row repair, never to the full-inbox scan
+    // represented by parserVersion. Only local hydration may reuse it;
+    // backup restore always repairs the incoming rows. Import paths already
+    // parse their new rows with this running grammar. Increment revision 1
+    // below when heal semantics change without a PARSER_VERSION change.
+    const reparseKey = JSON.stringify([
+      1, PARSER_VERSION, parsed.marketId ?? getActiveMarket().id,
+      Object.entries(parsed.merchantOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ]);
+    if (!options?.reuseCompletedReparse || parsed.hydrationReparseKey !== reparseKey) {
+      parsed.transactions = parsed.transactions.flatMap((t) => {
+        if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
+        const p = parseSms(t.raw, parsed.merchantOverrides);
+        // Parser regressions and formats this release does not understand are
+        // not evidence that a persisted transaction never happened. Preserve
+        // the old row and its raw text for a future rescan instead of deleting
+        // the only local record.
+        if (!p) return [t];
+        if (p.kind === 'billDue' || p.kind === 'cardStatement') {
+          // This migration can heal transactions but cannot materialize the
+          // CardDue/Bill that now represents this message. Keep the legacy row
+          // until a rescan can atomically create that obligation; deleting it
+          // here loses the only record when lastScanTs prevents re-offering it.
+          return [t];
+        }
+        const patch = healPatch(t, p);
+        return [patch ? applyHealPatch(t, patch) : t];
+      });
+      // Assigned only after the entire pass succeeds. The existing atomic
+      // snapshot save persists repaired rows and their receipt together.
+      parsed.hydrationReparseKey = reparseKey;
+    }
   }
 
   if (parsed.cardDues?.length && parsed.accounts?.length) {
@@ -1641,7 +1661,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const parsed = loaded;
         // Pre-onboarding builds stored data without the flag; count them as onboarded.
         if (parsed.onboarded === undefined) parsed.onboarded = true;
-        next = migratePersistedState(parsed);
+        next = migratePersistedState(parsed, { reuseCompletedReparse: true });
       }
       // The read SUCCEEDED. This is the only place writes are reopened, and
       // `loaded === null` — a database that is genuinely empty — reaches it
@@ -2273,6 +2293,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: _founderPro,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
+      hydrationReparseKey: _hydrationReparseKey,
       ...data
     } = state;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });

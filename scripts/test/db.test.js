@@ -2761,6 +2761,46 @@ asyncSuites.push((async () => {
   ok('transfer durability retry persists the decision without reapplying it', snapshots.at(-1).transactions[0].transferDecision.ownership === 'external');
 })().catch(error => ok('transfer store integration completes', false, String(error))));
 
+{
+  let calls = 0;
+  const parser = {
+    PARSER_VERSION: 999,
+    normalizeServiceName: () => null,
+    guessCategory: () => 'other',
+    parseSms: () => { calls++; return null; },
+  };
+  const h = loadHydrationExports({ '@/lib/sms-parser': parser });
+  const options = { reuseCompletedReparse: true };
+  const first = h.migratePersistedState({
+    marketId: 'AE', parserVersion: 999,
+    merchantOverrides: { cafe: 'dining' },
+    transactions: [tx('retained-raw', { raw: 'temporarily unsupported source' })],
+  }, options);
+  ok('inbox parserVersion cannot bypass the first saved-SMS migration', calls === 1);
+  const before = JSON.stringify(first.transactions);
+  const repeat = h.migratePersistedState(JSON.parse(JSON.stringify(first)), options);
+  ok('unchanged saved SMS do not re-enter the parser on the next launch', calls === 1);
+  ok('cached startup retains exact transaction data and independent inbox receipt',
+    JSON.stringify(repeat.transactions) === before && repeat.parserVersion === 999);
+  parser.PARSER_VERSION++;
+  const upgraded = h.migratePersistedState(JSON.parse(JSON.stringify(repeat)), options);
+  ok('a new parser version rechecks retained raw SMS', calls === 2);
+  upgraded.merchantOverrides.cafe = 'shopping';
+  h.migratePersistedState(upgraded, options);
+  ok('changed merchant rules invalidate saved-SMS parsing', calls === 3);
+  upgraded.marketId = 'SA';
+  h.migratePersistedState(upgraded, options);
+  ok('changed parser market invalidates saved-SMS parsing', calls === 4);
+  h.migratePersistedState(upgraded);
+  ok('ordinary migration callers still force saved-SMS repair', calls === 5);
+  const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
+  ok('restored backups cannot use a local startup receipt to bypass repair', restored && calls === 6);
+  parser.parseSms = () => { throw new Error('synthetic parser failure'); };
+  const failed = { ...upgraded, hydrationReparseKey: 'obsolete' };
+  try { h.migratePersistedState(failed, options); } catch { /* Expected. */ }
+  ok('failed startup parsing never stamps a completed receipt', failed.hydrationReparseKey === 'obsolete');
+}
+
 // The erase-race contract in 2c is behavioural, so it settles after this file
 // finishes executing. Counting before it lands would report a green run that
 // never ran it.
