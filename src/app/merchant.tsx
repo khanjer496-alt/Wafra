@@ -83,7 +83,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
             <Money fils={primaryTotal} type="display" color={income ? theme.income : undefined} />
           </View>
           {merchant && view !== 'all' && <View testID="merchant-ask-wafra" style={styles.assistantAction}>
-            <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark" inline
+            <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark"
               onPress={() => router.push({ pathname: '/assistant', params: { question: income
                 ? assistantCopy.incomeQuestion(merchant)
                 : assistantCopy.merchantChangedQuestion(merchant) } })} />

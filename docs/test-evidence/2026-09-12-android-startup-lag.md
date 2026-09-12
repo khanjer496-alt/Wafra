@@ -72,6 +72,24 @@ desktop Node timings, not Android end-to-end timings. The promo-only benchmark m
 
 ## Delivery status
 
+Build 181 from `9071ca7` subsequently built successfully and was installed over
+179 on the same OnePlus after matching the APK signing certificates. The new
+logos rendered correctly. However, repeated cold launch still consumed roughly
+13 seconds of JavaScript CPU. **The original startup stall remains unresolved**;
+the synthetic reparse improvement does not establish its device root cause.
+
+Device inspection also found the merchant screen's Ask Wafra action occupying
+the empty area below the total: its accessibility bounds spanned y=1384 through
+the viewport bottom at y=2992. The `inline` shared Button variant uses `flex: 1`,
+but this action sits inside a column. Removing that variant preserves the
+merchant facts and rows below it. Native confirmation requires the follow-up
+APK; browser checks alone did not reveal this native layout defect.
+
+The follow-up adds fixed, source-free launch timing boundaries behind the
+existing internal-APK `EXPO_PUBLIC_WAFRA_CAPTURE_TRACE=1` flag so read, migration
+substeps and reducer normalization can be distinguished on the actual phone.
+Default builds do not log these diagnostics.
+
 At source validation, no replacement APK had been built or installed, and the
 physical-device improvement was **unverified**. The user subsequently authorized
 committing and pushing the startup and merchant-logo changes and building both

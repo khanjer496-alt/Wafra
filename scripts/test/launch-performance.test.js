@@ -1,15 +1,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const load = require('./repair/load-typescript.cjs');
+const launchFile = path.join(__dirname, '../../src/lib/launch-performance.ts');
+const loadLaunch = (env = {}, output = [], clock = { now: 1_000 }) => load(launchFile, {}, {
+  process: { env },
+  performance: { now: () => clock.now },
+  console: { info: (...args) => output.push(args) },
+});
 
 const {
   createLaunchTimeline,
   LAUNCH_PHASES,
   serializeLaunchMetrics,
-} = require('./build/launch-performance.js');
+} = loadLaunch();
 const {
   buildLaunchBenchmarkBackup,
   LAUNCH_BENCHMARK_ROW_COUNTS,
-} = require('./build/launch-benchmark.js');
+} = load(path.join(__dirname, '../../src/lib/launch-benchmark.ts'), {}, { Error });
 
 const rootSource = fs.readFileSync(path.join(__dirname, '../../src/components/app-root-layout.tsx'), 'utf8');
 const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
@@ -40,6 +47,17 @@ ok('launch phases are a fixed privacy-safe vocabulary',
     'js-instrumentation-start',
     'fonts-ready',
     'ledger-load-start',
+    'ledger-read-complete',
+    'ledger-metadata-complete',
+    'ledger-overrides-complete',
+    'ledger-row-transforms-complete',
+    'ledger-reparse-complete',
+    'ledger-migration-complete',
+    'ledger-accounts-complete',
+    'ledger-repairs-complete',
+    'ledger-declines-complete',
+    'ledger-finalize-complete',
+    'ledger-reducer-normalize-start',
     'ledger-load-complete',
     'first-usable-home',
     'first-history-page',
@@ -67,6 +85,58 @@ ok('clock skew cannot produce a negative duration',
 const encoded = JSON.stringify(timeline.snapshot());
 ok('the metric shape has no open metadata field for financial or device data',
   !/merchant|amount|message|device|metadata|value/i.test(encoded), encoded);
+
+const quiet = [];
+const defaultLaunch = loadLaunch({}, quiet);
+defaultLaunch.markLaunchPhase('ledger-load-start');
+defaultLaunch.markLaunchPhase('ledger-load-complete');
+ok('console launch timing is off by default', quiet.length === 0);
+const disabled = [];
+loadLaunch({ EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: '0', EXPO_PUBLIC_WAFRA_INTERNAL_DIAGNOSTICS: '1' }, disabled)
+  .markLaunchPhase('first-usable-home');
+ok('internal export alone does not enable console timing', disabled.length === 0);
+
+const logged = [];
+const clock = { now: 1_000 };
+const traced = loadLaunch({ EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: '1' }, logged, clock);
+clock.now = 1_250;
+traced.markLaunchPhase('ledger-read-complete');
+clock.now = 1_500;
+traced.markLaunchPhase('first-usable-home', { merchant: 'DO_NOT_LOG', amount: 12345 });
+traced.markLaunchPhase('first-usable-home');
+traced.markLaunchPhase('DO_NOT_LOG');
+traced.markLaunchPhase({ merchant: 'DO_NOT_LOG' });
+ok('opt-in console timing emits only closed phases with monotonic elapsed milliseconds',
+  JSON.stringify(logged) === JSON.stringify([
+    ['WAFRA_LAUNCH_TIMING', JSON.stringify({ phase: 'js-instrumentation-start', elapsedMs: 0 })],
+    ['WAFRA_LAUNCH_TIMING', JSON.stringify({ phase: 'ledger-read-complete', elapsedMs: 250 })],
+    ['WAFRA_LAUNCH_TIMING', JSON.stringify({ phase: 'first-usable-home', elapsedMs: 500 })],
+  ]), JSON.stringify(logged));
+ok('console timing never serializes arbitrary caller arguments or unrecognized phases',
+  !JSON.stringify(logged).includes('DO_NOT_LOG'));
+
+const invalid = createLaunchTimeline(1_000);
+invalid.mark('DO_NOT_LOG', 1_010);
+invalid.mark('fonts-ready', Number.NaN);
+invalid.mark('ledger-load-start', Number.POSITIVE_INFINITY);
+ok('runtime phase and clock validation reject arbitrary metadata and nonfinite durations',
+  JSON.stringify(invalid.snapshot()) === JSON.stringify([{ phase: 'js-instrumentation-start', elapsedMs: 0 }]));
+let wallClockReads = 0;
+const missingMonotonicClock = load(launchFile, {}, {
+  process: { env: {} }, performance: undefined,
+  Date: { now: () => { wallClockReads += 1; return 99; } },
+});
+missingMonotonicClock.markLaunchPhase('fonts-ready');
+ok('missing monotonic clock never falls back to wall-clock dates',
+  wallClockReads === 0 && missingMonotonicClock.getLaunchMetrics().every((metric) => metric.elapsedMs === 0));
+let survivedLoggingFailure = false;
+try {
+  load(launchFile, {}, { process: { env: { EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: '1' } },
+    console: { info: () => { throw new Error('diagnostic sink unavailable'); } },
+  }).markLaunchPhase('ledger-load-start');
+  survivedLoggingFailure = true;
+} catch {}
+ok('a failing console sink cannot interrupt app startup', survivedLoggingFailure);
 
 ok('release benchmark fixtures cover empty, 1k, 5k and 10k ledgers',
   JSON.stringify(LAUNCH_BENCHMARK_ROW_COUNTS) === JSON.stringify([0, 1_000, 5_000, 10_000]));
