@@ -23,7 +23,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { projectDashboard } from '@/lib/dashboard-projection';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { formatAmount, shortDate } from '@/lib/format';
+import { formatAmount } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
@@ -36,6 +36,8 @@ import { useStore } from '@/lib/store';
 import type { Subscription } from '@/lib/subscriptions';
 import type { CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+import { homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
+import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -84,6 +86,7 @@ export default function JournalHomeScreen() {
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
+  const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -110,6 +113,12 @@ export default function JournalHomeScreen() {
       refreshInFlight.current = null;
     };
   }, []);
+  useEffect(() => {
+    if (!focused) return;
+    let alive = true;
+    void loadHomeWidgetPreferences().then((preferences) => { if (alive) setHomeWidgets(preferences); });
+    return () => { alive = false; };
+  }, [focused]);
 
   useEffect(() => {
     if (focused && privacyGateCleared && state.hydrated && state.onboarded) {
@@ -132,6 +141,11 @@ export default function JournalHomeScreen() {
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
   const payments = dashboard.upcoming.items;
+  const homeInsight = useMemo(() => projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight,
+    // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
+      state.merchantOverrides, state.ledgerMoney, state.marketId, period, now]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -240,6 +254,44 @@ export default function JournalHomeScreen() {
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const dateLabel = now.toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
+  const renderWidget = (id: HomeWidgetId) => {
+    if (!homeWidgetVisible(homeWidgets, id)) return null;
+    if (id === 'assistant') return <Pressable key={id} testID="home-widget-assistant" accessibilityRole="button"
+      onPress={() => router.push('/assistant')} style={[styles.assistantCard, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
+      <View style={[styles.assistantIcon, { backgroundColor: theme.backgroundElement }]}><Icon name="spark" size={20} color={theme.primary} /></View>
+      <View style={styles.grow}><ThemedText type="smallBold">{t('homeWidgetAssistantTitle')}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{t('homeWidgetAssistantDetail')}</ThemedText></View>
+      <Icon name="chevron-right" size={18} color={theme.textSecondary} />
+    </Pressable>;
+    if (id === 'insight') {
+      const insight = homeInsight;
+      return insight ? <Pressable key={id} testID="home-widget-insight" accessibilityRole="button"
+        onPress={() => insight.href && router.push(insight.href as never)} style={[styles.widgetCard, { borderColor: theme.cardBorder }]}>
+        <View style={styles.grow}><ThemedText type="micro" themeColor="textSecondary">{t('homeWidgetInsightTitle')}</ThemedText>
+          <ThemedText type="smallBold">{insight.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{insight.body}</ThemedText></View>
+        {insight.href ? <Icon name="chevron-right" size={18} color={theme.textSecondary} /> : null}
+      </Pressable> : null;
+    }
+    if (id === 'due' || id === 'upcoming') {
+      const due = payments.filter(item => id === 'due' ? (item.overdue || item.urgent) : (!item.overdue && !item.urgent));
+      if (due.length === 0) return null;
+      return <View key={id} style={styles.section} testID={`home-widget-${id}`}>
+        <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
+          <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
+        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
+          <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
+          <ThemedText type="smallBold" tabular>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>
+      </View>;
+    }
+    return <View key={id} style={styles.section} testID="home-widget-activity">
+      <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
+        <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
+      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
+        <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
+      {dashboard.activityRows.length === 0 && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
+    </View>;
+  };
+
   return <>
     <ScreenScaffold tabbed headerMode="inline" contentStyle={styles.screen}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
@@ -258,47 +310,7 @@ export default function JournalHomeScreen() {
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
         {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
 
-        {payments.length > 0 && <View style={styles.section} testID="journal-payments">
-          <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.upcoming}</ThemedText>
-            <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}>
-              <Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
-          <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{payments.slice(0, 2).map((item) => <Pressable key={item.id} accessibilityRole="button"
-            accessibilityLabel={`${item.title}, ${shortDate(item.dateISO)}, ${formatAmount(item.amountFils)} ${ledgerCurrencyCode()}`}
-            onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
-            <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
-              <Icon name={item.kind === 'card' ? 'wallet' : 'receipt'} size={20} color={theme.primary} />
-            </View>
-            <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText>
-              <ThemedText type="meta" style={{ color: item.overdue || item.urgent ? theme.warning : theme.textSecondary }}>
-                {daysPhrase(item.daysLeft)}</ThemedText></View>
-            <ThemedText type="smallBold" tabular style={styles.paymentAmount}>{formatAmount(item.amountFils)}</ThemedText>
-          </Pressable>)}</View>
-          {payments.length > 2 && <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" style={styles.inlineAction}>
-            <ThemedText type="meta">{words.more} ({payments.length})</ThemedText><Icon name="chevron-right" size={15} color={theme.text} />
-          </Pressable>}
-        </View>}
-
-        <View style={styles.section} testID="journal-activity">
-          <View style={styles.sectionHeading}>
-            <ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
-            <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}>
-              <Icon name="search" size={18} color={theme.text} />
-              <ThemedText type="meta">{t('allActivity')}</ThemedText>
-            </Pressable>
-          </View>
-          <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map((transaction, index) => <React.Fragment key={transaction.id}>
-            {(index === 0 || transaction.date !== dashboard.activityRows[index - 1].date) &&
-              <View style={styles.dateLabel}><View style={[styles.dateDot, { backgroundColor: theme.textTertiary }]} />
-                <ThemedText type="meta" themeColor="textSecondary">{shortDate(transaction.date)}</ThemedText>
-                <View style={[styles.dateRule, { backgroundColor: theme.cardBorder }]} />
-              </View>}
-            <TransactionRow transaction={transaction} account={dashboard.accountById.get(transaction.accountId)}
-              onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />
-          </React.Fragment>)}</View>
-          {dashboard.activityRows.length === 0 && <EmptyMonth monthName={periodLabel(period)}
-            onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')}
-            onAddManually={() => router.push('/add-transaction')} />}
-        </View>
+        {homeWidgets.order.map(renderWidget)}
 
         <View style={[styles.captureFooter, { borderTopColor: theme.cardBorder }]} testID="journal-import-controls">
           <Pressable accessibilityRole="button" accessibilityLabel={`${words.import}. ${captureLabel}`}
@@ -350,4 +362,7 @@ const styles = StyleSheet.create({
   captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
   captureRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },
   footerAction: { minHeight: 48, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  assistantCard: { minHeight: 72, borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  assistantIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  widgetCard: { minHeight: 72, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
 });
