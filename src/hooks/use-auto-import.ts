@@ -21,7 +21,7 @@
  */
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState as RNAppState, Linking, Platform } from 'react-native';
+import { AppState as RNAppState, Linking, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
 import {
@@ -714,19 +714,13 @@ export function useAutoImport(
     if (!current.hydrated || !current.onboarded || current.captureOptOut || !isProActive(current)) return;
     if (hasBankNotificationSystemAccess()) return;
     androidNotificationAccessPromptShown = true;
-    Alert.alert(
-      t('bankAppNotifsTitle'),
-      t('notifAccessAutoPrompt'),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('openSettings'),
-          onPress: () => {
-            void openBankNotificationAccessSettings().catch(() => { /* The Settings row remains available for retry. */ });
-          },
-        },
-      ],
-    );
+    toast.show(t('notifAccessAutoPrompt'), {
+      tone: 'warning',
+      actions: [{
+        label: t('openSettings'),
+        onPress: () => void openBankNotificationAccessSettings().catch(() => { /* The Settings row remains available for retry. */ }),
+      }],
+    });
   }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated, state.onboarded, watchForeground]);
 
   const recoverIosCapture = useCallback((): Promise<boolean> => {
