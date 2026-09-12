@@ -89,7 +89,7 @@ try {
       }, { language, businessIncomeFils });
       await page.reload({ waitUntil: 'networkidle' });
       const sourceLabel = `${language === 'ar' ? 'عرض مصدر الدخل' : 'View income source'}: `;
-      await tapOnTop(page.getByTestId('journal-activity').getByRole('button', { name: `${sourceLabel}Careem Business`, exact: true }));
+      await tapOnTop(page.getByTestId('home-widget-activity').getByRole('button', { name: `${sourceLabel}Careem Business`, exact: true }));
       await page.waitForURL(/\/merchant\?name=Careem%20Business&type=income$/);
       await active(page, 'merchant-total-received').waitFor({ state: 'visible' });
       assert.equal(minor(await active(page, 'merchant-total-received').innerText()), businessIncomeFils);
@@ -111,7 +111,7 @@ try {
       await tapOnTop(page.getByRole('button', { name: language === 'ar' ? 'رجوع' : 'Back', exact: true }));
       await page.waitForURL(url => !url.pathname.includes('/merchant'));
       const merchantLabel = `${language === 'ar' ? 'عرض تفاصيل التاجر' : 'View merchant details'}: Careem`;
-      const homeLink = page.getByTestId('journal-activity').getByRole('button', { name: merchantLabel, exact: true }).first();
+      const homeLink = page.getByTestId('home-widget-activity').getByRole('button', { name: merchantLabel, exact: true }).first();
       await tapOnTop(homeLink);
       await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
       assert.equal(new URL(page.url()).pathname, '/merchant');
