@@ -122,6 +122,19 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
   assert.equal(result.inboxHistoryComplete, false, 'notification scan cannot claim SMS history completion');
 });
 
+
+test('eligible Android users are auto-admitted and prompted only for the unavoidable system grant', () => {
+  const hook = read('src/hooks/use-auto-import.ts');
+  const autoImport = read('src/lib/auto-import.ts');
+  assert.match(hook, /current\.hydrated && current\.onboarded &&[\s\S]{0,120}!current\.captureOptOut && isProActive\(current\)/);
+  assert.match(hook, /Platform\.OS !== 'android' \|\| !watchForeground \|\| androidNotificationAccessPromptShown/);
+  assert.match(hook, /current\.captureOptOut \|\| !isProActive\(current\)/);
+  assert.match(hook, /hasBankNotificationSystemAccess\(\)/);
+  assert.match(hook, /openBankNotificationAccessSettings\(\)/);
+  assert.match(autoImport, /NotificationReader\.hasSystemAccess\?\.\(\) === true/);
+  assert.match(autoImport, /NotificationReader\.openSettings\?\.\(\) === true/);
+});
+
 test('Settings and draining use the same availability gate while permission revocation still blocks draining', () => {
   const settings = read('src/app/settings.tsx'); const scan = read('src/lib/auto-import.ts');
   assert.match(settings, /isBankNotificationCaptureAvailable\(NotificationReader\?\.isAvailable\?\.\(\) === true\)/);

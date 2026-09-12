@@ -104,6 +104,28 @@ export function hasBankNotificationAccess(): boolean {
   }
 }
 
+/** Android's system-level Notification access, independent of Wafra's local admission lease. */
+export function hasBankNotificationSystemAccess(): boolean {
+  if (Platform.OS !== 'android' || !NotificationReader) return false;
+  try {
+    return isBankNotificationCaptureAvailable(NotificationReader.isAvailable?.() === true) &&
+      NotificationReader.hasSystemAccess?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Open Android's Notification access screen. The user must approve this system permission. */
+export async function openBankNotificationAccessSettings(): Promise<boolean> {
+  if (Platform.OS !== 'android' || !NotificationReader ||
+    !isBankNotificationCaptureAvailable(NotificationReader.isAvailable?.() === true)) return false;
+  try {
+    return NotificationReader.openSettings?.() === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Older binaries remain usable; only new modules emit this source-free hint. */
 export function subscribeInboxChanges(listener: () => void): () => void {
   if (!isSmsScanningAvailable()) return () => {};

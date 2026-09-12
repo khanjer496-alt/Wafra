@@ -21,11 +21,13 @@
  */
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState as RNAppState, Linking, Platform } from 'react-native';
+import { Alert, AppState as RNAppState, Linking, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
 import {
   hasBankNotificationAccess,
+  hasBankNotificationSystemAccess,
+  openBankNotificationAccessSettings,
   hasSmsPermission,
   isSmsInboxAccessError,
   isSmsScanningAvailable,
@@ -67,6 +69,7 @@ import type {
 
 /** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
+let androidNotificationAccessPromptShown = false;
 
 type IosCaptureWarningFacts = Pick<
   IosCaptureWarningState,
@@ -704,6 +707,27 @@ export function useAutoImport(
     void syncAndroidNotificationAdmission(getStateSnapshot()).catch(() => {});
   }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated,
     state.onboarded, syncAndroidNotificationAdmission]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !watchForeground || androidNotificationAccessPromptShown) return;
+    const current = getStateSnapshot();
+    if (!current.hydrated || !current.onboarded || current.captureOptOut || !isProActive(current)) return;
+    if (hasBankNotificationSystemAccess()) return;
+    androidNotificationAccessPromptShown = true;
+    Alert.alert(
+      t('bankAppNotifsTitle'),
+      t('notifAccessAutoPrompt'),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('openSettings'),
+          onPress: () => {
+            void openBankNotificationAccessSettings().catch(() => { /* The Settings row remains available for retry. */ });
+          },
+        },
+      ],
+    );
+  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated, state.onboarded, watchForeground]);
 
   const recoverIosCapture = useCallback((): Promise<boolean> => {
     if (iosRecoveryInFlight.current) return iosRecoveryInFlight.current;

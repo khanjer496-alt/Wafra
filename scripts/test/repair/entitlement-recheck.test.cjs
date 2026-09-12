@@ -78,6 +78,7 @@ function harness(overrides = {}, options = {}) {
   const toast = { show: text => calls.toasts.push(text) };
   const native = {
     Platform: { OS: 'android', Version: 36 },
+    Alert: { alert: () => {} },
     AppState: { currentState: 'active', addEventListener: (_event, listener) => {
       appListeners.add(listener);
       return { remove: () => appListeners.delete(listener) };
@@ -111,6 +112,8 @@ function harness(overrides = {}, options = {}) {
     },
     '@/lib/auto-import': {
       hasBankNotificationAccess: () => options.notificationAccess === true && notificationPolicy,
+      hasBankNotificationSystemAccess: () => options.notificationAccess === true,
+      openBankNotificationAccessSettings: async () => true,
       subscribeInboxChanges: listener => { inboxListeners.add(listener); return () => inboxListeners.delete(listener); },
       isSmsScanningAvailable: () => true,
       hasSmsPermission: async () => { calls.permission += 1; return options.permission !== false; },
