@@ -279,6 +279,7 @@ export function migratePersistedState(
     Date.now(),
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
+  markLaunchPhase('ledger-metadata-complete');
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -437,6 +438,7 @@ export function migratePersistedState(
     }
   }
 
+  markLaunchPhase('ledger-overrides-complete');
   if (parsed.transactions) {
     parsed.transactions = parsed.transactions
       .map((t) =>
@@ -549,6 +551,7 @@ export function migratePersistedState(
       return guessed !== 'other' ? { ...t, category: guessed } : t;
     });
 
+    markLaunchPhase('ledger-row-transforms-complete');
     // Rows that kept their raw SMS re-parse under the current grammar once
     // per local repair revision. A hand-corrected row is the user's answer, not the
     // parser's, so it remains the exact object supplied to this migration.
@@ -590,6 +593,7 @@ export function migratePersistedState(
       parsed.hydrationReparseKey = reparseKey;
     }
   }
+  markLaunchPhase('ledger-reparse-complete');
 
   if (parsed.cardDues?.length && parsed.accounts?.length) {
     // A CardDue can only describe a credit-card statement. Older parsers
@@ -774,6 +778,7 @@ function reducer(state: AppState, action: Action): AppState {
   const language = getLanguage();
   try {
     const reduced = reduceState(state, action);
+    if (action.type === 'hydrate') markLaunchPhase('ledger-reducer-normalize-start');
     // Every path that changes identity or rows passes through the same atomic
     // link cleanup, including restore, account remaps and deletion/undo.
     const transactions = reduced.transactions !== state.transactions || reduced.accounts !== state.accounts
@@ -821,12 +826,14 @@ function reduceState(state: AppState, action: Action): AppState {
       // Older states can carry two rows for one card. Collapse on the way in,
       // once, rather than teaching every screen to tolerate it.
       const accountsMerged = mergeDuplicateAccounts(next);
+      if (action.type === 'hydrate') markLaunchPhase('ledger-accounts-complete');
       // Before mergeImportedCardDues, which collapses per (account, due date):
       // moving a phantom copy onto the real card is what lets that collapse
       // see the two rows as the one statement they are.
       const paymentsRepaired = repairDuplicateStatements(
         repairCardPaymentAccounts(accountsMerged),
       );
+      if (action.type === 'hydrate') markLaunchPhase('ledger-repairs-complete');
       // A declined transaction moved no money, and no rescan can take one
       // back: healing only ever adds information to a row, and a message the
       // parser now suppresses never reaches the import planner to be swept.
@@ -836,11 +843,14 @@ function reduceState(state: AppState, action: Action): AppState {
       // Requires the market pack to be live, which setActiveMarket did above:
       // it re-parses stored SMS text.
       const declinesRemoved = removeDeclinedTransactions(paymentsRepaired);
-      return {
+      if (action.type === 'hydrate') markLaunchPhase('ledger-declines-complete');
+      const finalized = {
         ...declinesRemoved,
         transactions: finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
         cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
       };
+      if (action.type === 'hydrate') markLaunchPhase('ledger-finalize-complete');
+      return finalized;
     }
     case 'setPro':
       return { ...state, pro: action.pro };
@@ -1654,6 +1664,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
+      markLaunchPhase('ledger-read-complete');
       let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
         ? demoState()
         : { onboarded: false };
@@ -1663,6 +1674,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (parsed.onboarded === undefined) parsed.onboarded = true;
         next = migratePersistedState(parsed, { reuseCompletedReparse: true });
       }
+      markLaunchPhase('ledger-migration-complete');
       // The read SUCCEEDED. This is the only place writes are reopened, and
       // `loaded === null` — a database that is genuinely empty — reaches it
       // exactly like a database full of rows, because "there is nothing here"
