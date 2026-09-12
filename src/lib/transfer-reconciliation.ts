@@ -495,7 +495,18 @@ const lowerBound = (entries: Entry[], at: number): number => {
 };
 
 interface ObservedRow { tx: Transaction; at: number; money: string; bank: string; credit: boolean }
-interface OwnedTransferObservation extends ObservedRow { identity: string }
+interface OwnedTransferObservation extends ObservedRow {
+  identity: string;
+  /**
+   * Most bank alerts repeat the source account/card instrument explicitly.
+   * Some otherwise-strong transfer formats (notably a Liv outgoing transfer
+   * paired with a FAB inward remittance) do not. Keep that distinction so the
+   * relaxed path below can demand much tighter semantic/time evidence without
+   * weakening ordinary transfer matching.
+   */
+  sourceInstrumentObserved: boolean;
+  structuralRole?: 'outgoing' | 'incoming';
+}
 
 function observedReceipt(tx: Transaction, ctx: Context): ObservedRow | undefined {
   const account = ctx.accounts.get(tx.accountId);
@@ -603,20 +614,39 @@ function ownedTransferObservation(tx: TransferRow, ctx: Context): OwnedTransferO
   if (!ev?.sourceBank || ev.explicitExternal || ev.counterpartyName) return;
   const at = sourceTime(tx), money = sourceMoney(tx, ev), bank = bankIdentityForName(ev.sourceBank);
   if (at === undefined || !money || !bank) return;
+  const structuralRole: OwnedTransferObservation['structuralRole'] =
+    tx.type === 'expense' && /^(?:outgoing transfer|outward remittance|telegraphic transfer)$/i.test(tx.title.trim())
+      ? 'outgoing'
+      : tx.type === 'income' && /^(?:incoming transfer|inward remittance)$/i.test(tx.title.trim())
+        ? 'incoming'
+        : undefined;
 
   if (isUnassignedTransferAccount(tx.accountId)) {
     if (!ev.sourceAccountKey || !/^[a-f0-9]{64}$/.test(ev.sourceAccountKey)) return;
-    return { tx, at, money, bank, credit: false, identity: `mask:${bank}:${ev.sourceAccountKey}` };
+    return { tx, at, money, bank, credit: false, identity: `mask:${bank}:${ev.sourceAccountKey}`,
+      sourceInstrumentObserved: true, ...(structuralRole ? { structuralRole } : {}) };
   }
 
   const account = ctx.accounts.get(tx.accountId);
   const capture = tx.captureInstrument;
-  if (!eligibleAccount(account) || !isInstrument(capture) || capture.kind === 'credit' ||
-      !capture.bankIdentity || capture.last4 !== account.last4 || !account.bankName) return;
+  if (!eligibleAccount(account) || !account.bankName) return;
   const accountBank = bankIdentityForName(account.bankName);
-  const captureBank = bankIdentityForName(capture.bankIdentity);
-  if (!accountBank || accountBank !== bank || captureBank !== bank) return;
-  return { tx, at, money, bank, credit: false, identity: `account:${account.id}` };
+  if (!accountBank || accountBank !== bank) return;
+
+  if (isInstrument(capture) && capture.kind !== 'credit' && capture.bankIdentity &&
+      capture.last4 === account.last4 && bankIdentityForName(capture.bankIdentity) === bank) {
+    return { tx, at, money, bank, credit: false, identity: `account:${account.id}`,
+      sourceInstrumentObserved: true, ...(structuralRole ? { structuralRole } : {}) };
+  }
+
+  // Some banks omit the source account digits from a completed transfer SMS.
+  // Account routing + issuer identity alone is not enough for a generic credit
+  // or debit. Admit only exact structural transfer/remittance language here;
+  // the pair matcher below then requires the complementary role and a <=90s
+  // clock match before it can become automatic ownership evidence.
+  if (account.kind !== 'bank' || !structuralRole) return;
+  return { tx, at, money, bank, credit: false, identity: `account:${account.id}`,
+    sourceInstrumentObserved: false, structuralRole };
 }
 
 /**
@@ -647,6 +677,10 @@ function observedOwnedTransferPairs(
   return uniqueObservedPairs(rows, 5 * 60_000, (a, b) => {
     const left = a as OwnedTransferObservation, right = b as OwnedTransferObservation;
     if (left.tx.type === right.tx.type || left.identity === right.identity) return false;
+    if (!left.sourceInstrumentObserved || !right.sourceInstrumentObserved) {
+      if (left.structuralRole === undefined || right.structuralRole === undefined ||
+          left.structuralRole === right.structuralRole || Math.abs(left.at - right.at) > 90_000) return false;
+    }
     const contradicts = (source: OwnedTransferObservation, target: OwnedTransferObservation): boolean => {
       const cp = evidenceOf(source.tx)?.counterparty;
       const targetCapture = target.tx.captureInstrument;

@@ -4211,6 +4211,70 @@ ok('stale: a stale statement that gets paid leaves openDues',
       !ledger.isIncome(externalRemittance, live, ownRemittanceInternal),
     [...ownRemittanceInternal]);
 
+  // Real-device regression: Liv reported an "Outgoing transfer" and FAB
+  // reported the exact matching "Inward remittance" at the same minute. Both
+  // rows were already routed to known bank accounts, but neither alert carried
+  // a separately usable source-account instrument, so the old reconciler left
+  // this as a user-facing amount/time suggestion. Complementary bank semantics
+  // plus exact money, known owned source accounts and a tight clock are enough.
+  const crossBankAccounts = [
+    { id: 'liv-own', name: 'Liv Account', kind: 'bank', bankName: 'Liv', last4: '1001', openingFils: 0, color: '#000' },
+    { id: 'fab-own', name: 'FAB Account •0002', kind: 'bank', bankName: 'FAB', last4: '0002', openingFils: 0, color: '#000' },
+  ];
+  const sameMoment = Date.parse('2025-11-10T01:45:00Z');
+  const screenshotPair = [
+    {
+      id: 'liv-out-10k', type: 'expense', amountFils: 1000000, category: 'other', accountId: 'liv-own',
+      title: 'Outgoing transfer', date: '2025-11-10', ts: sameMoment, source: 'sms', smsKey: `s${sameMoment}-1000000`,
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'liv' },
+    },
+    {
+      id: 'fab-in-10k', type: 'income', amountFils: 1000000, category: 'other', accountId: 'fab-own',
+      title: 'Inward remittance', date: '2025-11-10', ts: sameMoment, source: 'sms', smsKey: `s${sameMoment + 1}-1000000`,
+      transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'fab', postingForm: 'credit-receipt' },
+    },
+  ];
+  const screenshotResult = reconcileTransfers(screenshotPair, crossBankAccounts);
+  ok('internal: complementary Liv outgoing + FAB inward remittance on owned accounts auto-pair',
+    screenshotResult.internalIds.size === 2 &&
+      screenshotResult.byId.get('liv-out-10k')?.status === 'confirmed-own' &&
+      screenshotResult.byId.get('fab-in-10k')?.status === 'confirmed-own' &&
+      screenshotResult.byId.get('liv-out-10k')?.counterpartId === 'fab-in-10k' &&
+      screenshotResult.byId.get('fab-in-10k')?.counterpartId === 'liv-out-10k',
+    screenshotResult);
+
+  const notStructural = reconcileTransfers([
+    screenshotPair[0],
+    { ...screenshotPair[1], id: 'client-in-10k', title: 'Client payment', smsKey: `s${sameMoment + 2}-1000000` },
+  ], crossBankAccounts);
+  ok('internal: same money/time without complementary transfer semantics stays unconfirmed',
+    notStructural.internalIds.size === 0);
+
+  const tooFar = reconcileTransfers([
+    screenshotPair[0],
+    { ...screenshotPair[1], id: 'fab-in-late', ts: sameMoment + 2 * 60_000,
+      smsKey: `s${sameMoment + 2 * 60_000}-1000000` },
+  ], crossBankAccounts);
+  ok('internal: instrument-light structural pairing requires a tight <=90s clock',
+    tooFar.internalIds.size === 0);
+
+  const ambiguousSameMoment = reconcileTransfers([
+    screenshotPair[0],
+    screenshotPair[1],
+    { ...screenshotPair[1], id: 'fab-in-duplicate-candidate', ts: sameMoment + 10_000,
+      smsKey: `s${sameMoment + 10_000}-1000000` },
+  ], crossBankAccounts);
+  ok('internal: two matching inward candidates remain ambiguous instead of greedily pairing',
+    ambiguousSameMoment.internalIds.size === 0);
+
+  const explicitlyExternal = reconcileTransfers([
+    screenshotPair[0],
+    { ...screenshotPair[1], id: 'fab-in-third-party', smsKey: `s${sameMoment + 3}-1000000`,
+      transferEvidence: { ...screenshotPair[1].transferEvidence, explicitExternal: true } },
+  ], crossBankAccounts);
+  ok('internal: explicit third-party evidence still blocks automatic own-account pairing',
+    explicitlyExternal.internalIds.size === 0);
+
   // Strictness. A same-amount pair on ONE account is not a move between two.
   const sameAccount = [
     row('o', 'expense', 'a2', 50000, '2026-06-10'),
