@@ -1,19 +1,23 @@
-name: Inspect Wafra beta 117 export compliance
+name: Fix compliance and distribute Wafra beta 117
 on:
   push:
     branches: [release/ios-shortcuts-review-20260907]
     paths: ['.github/workflows/ios-beta52-distribute.yml']
 permissions:
   contents: read
+concurrency:
+  group: wafra-ios-beta52-submit
+  cancel-in-progress: false
 jobs:
-  inspect:
+  distribute:
     runs-on: ubuntu-latest
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
-      - name: Inspect recent build encryption state
+      - name: Apply Wafra's established export compliance setting to build 117
         env:
           EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
           EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
@@ -24,14 +28,36 @@ jobs:
           const raw=process.env.EXPO_ASC_API_KEY_P8||''; const kid=process.env.EXPO_ASC_KEY_ID; const iss=process.env.EXPO_ASC_ISSUER_ID;
           const key=createPrivateKey(raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8'));
           const b64=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
-          const now=Math.floor(Date.now()/1000); const unsigned=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;
-          const jwt=`${unsigned}.${sign('sha256',Buffer.from(unsigned),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`;
-          async function get(path){const r=await fetch('https://api.appstoreconnect.apple.com/v1/'+path,{headers:{Authorization:`Bearer ${jwt}`}}); if(!r.ok) throw new Error(path+' '+r.status+' '+await r.text()); return r.json();}
+          function token(){const now=Math.floor(Date.now()/1000); const u=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`; return `${u}.${sign('sha256',Buffer.from(u),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`;}
+          async function req(path,method='GET',body){const r=await fetch('https://api.appstoreconnect.apple.com/v1/'+path,{method,headers:{Authorization:`Bearer ${token()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}); if(!r.ok) throw new Error(`${method} ${path} ${r.status} ${await r.text()}`); return r.status===204?null:r.json();}
           (async()=>{
-            const b=await get('builds?filter[app]=6799171482&sort=-uploadedDate&limit=20&include=appEncryptionDeclaration,buildBetaDetail');
-            const inc=new Map((b.included||[]).map(x=>[x.type+':'+x.id,x]));
-            const rows=b.data.map(x=>({id:x.id,build:x.attributes.version,uploadedDate:x.attributes.uploadedDate,processingState:x.attributes.processingState,usesNonExemptEncryption:x.attributes.usesNonExemptEncryption??null,decl:(()=>{const r=x.relationships?.appEncryptionDeclaration?.data; if(!r)return null; const d=inc.get(r.type+':'+r.id); return {id:r.id,attrs:d?.attributes||null};})(),beta:(()=>{const r=x.relationships?.buildBetaDetail?.data; return r?inc.get(r.type+':'+r.id)?.attributes:null;})()}));
-            const g=await get('betaGroups/c0ee30af-8b26-408c-8ebf-aaa5530fcac7/builds?limit=100');
-            console.log(JSON.stringify({recentBuilds:rows,publicGroupBuildIds:g.data.map(x=>x.id)},null,2));
+            const q=await req('builds?filter[app]=6799171482&filter[version]=117&limit=10');
+            if(q.data.length!==1) throw new Error('Expected exactly one build 117');
+            const b=q.data[0];
+            console.log('before',JSON.stringify({id:b.id,build:b.attributes.version,usesNonExemptEncryption:b.attributes.usesNonExemptEncryption??null,processingState:b.attributes.processingState}));
+            if(b.attributes.processingState!=='VALID') throw new Error('Build 117 is not VALID');
+            if(b.attributes.usesNonExemptEncryption!==false){
+              await req(`builds/${b.id}`,'PATCH',{data:{type:'builds',id:b.id,attributes:{usesNonExemptEncryption:false}}});
+            }
+            const after=await req(`builds/${b.id}?fields[builds]=version,processingState,usesNonExemptEncryption`);
+            if(after.data.attributes.usesNonExemptEncryption!==false) throw new Error('Compliance flag did not persist');
+            console.log('after',JSON.stringify({id:after.data.id,build:after.data.attributes.version,usesNonExemptEncryption:after.data.attributes.usesNonExemptEncryption,processingState:after.data.attributes.processingState}));
           })().catch(e=>{console.error(String(e));process.exit(1)});
           NODE
+      - name: Validate release script syntax
+        run: node --check scripts/release/ios-public-beta-publish.mjs
+      - name: Verify build and distribute to the existing public group
+        env:
+          WAFRA_BETA_VERSION: '1.0.0'
+          WAFRA_BETA_BUILD_NUMBER: '117'
+          WAFRA_BETA_SOURCE_SHA: 49a4d0e5b81889f2bf813623181c121549a79589
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta117-public-${{ github.sha }}
+          path: ios-release-evidence/public-beta.json
+          retention-days: 7
