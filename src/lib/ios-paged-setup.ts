@@ -1,7 +1,7 @@
 /** Source-free closed-beta setup contracts. Never enable from a route parameter. */
 export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra History v2';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v2';
-const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08';
+const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17';
 export const PAGED_HISTORY_INSTALL_URL: string | null =
   process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' &&
   process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === VERIFIED_HISTORY_SHORTCUT_URL
