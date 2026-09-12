@@ -54,3 +54,28 @@ test('explanation envelopes keep local evidence and structured identifiers local
   assert.equal(JSON.stringify(envelope).includes('secret-'), false);
   assert.deepEqual(Object.keys(envelope.result.data), ['totalFils']);
 });
+
+test('local-analysis scopes validate arrays and retain explicit exclusions', () => {
+  for (const tool of ['spending-total', 'compare-periods', 'recurring-changes', 'unusual-charges', 'possible-duplicates', 'data-coverage']) {
+    assert.equal(boundary.isAssistantToolRequest({ tool, period,
+      categories: ['dining', 'groceries'], excludedCategories: ['groceries'],
+      merchants: ['Cedar', 'Coffee'], excludedMerchants: ['Coffee'],
+      accountIds: ['bank', 'card'], excludedAccountIds: ['card'] }), true, tool);
+  }
+  for (const filters of [
+    { merchants: [] }, { categories: [] }, { merchants: 'Coffee' },
+    { excludedMerchants: [4] }, { excludedCategories: ['not-a-category'] },
+    { excludedAccountIds: [''] }, { categories: ['dining', null] },
+    { merchant: 'Cedar', merchants: ['Coffee'] }, { category: 'dining', categories: ['groceries'] },
+  ]) assert.equal(boundary.isAssistantToolRequest({ tool: 'spending-total', period, ...filters }), false, JSON.stringify(filters));
+});
+
+test('new finding evidence never crosses the optional model explanation boundary', () => {
+  const envelope = boundary.buildAssistantExplanationEnvelope('Anything unusual?', {
+    tool: 'unusual-charges', title: 'Charges to review', body: 'One candidate',
+    findings: [{ id: 'local-finding-id', title: 'Coffee', body: 'Higher than usual',
+      evidence: [{ transactionIds: ['local-transaction-id'], accountNames: ['local-account-name'] }] }],
+    coverage: { recordCount: 8, accountCount: 1, totalAccounts: 1, notes: ['local-only-coverage'] },
+  });
+  assert.equal(JSON.stringify(envelope).includes('local-'), false);
+});

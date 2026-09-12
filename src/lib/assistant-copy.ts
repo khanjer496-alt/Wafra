@@ -18,6 +18,12 @@ export const assistantCopy = {
   recentQuestions: (count: number) => `Showing your last ${count} questions.`,
   includedPortion: (amount: string) => `Included portion of a ${amount} transaction`,
   originalCashRecord: (record: string) => `Cash funding shown above. Original record: ${record}.`,
+  reviewFinding: 'Review transactions',
+  exploreFinding: 'Explore this',
+  dataUsed: 'Data used',
+  coverageCount: (records: number, accounts: number, totalAccounts: number) =>
+    `${records} recorded transaction${records === 1 ? '' : 's'} · ${accounts} of ${totalAccounts} selected account${totalAccounts === 1 ? '' : 's'}`,
+  observedDates: (first: string, last: string) => `Recorded activity: ${first} to ${last}.`,
   period: 'Change reporting period',
   local: 'Calculated on this device',
   viewTransactions: 'View transactions',

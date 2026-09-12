@@ -37,6 +37,17 @@ const state = {
 const now = new Date('2026-09-20T12:00:00Z');
 
 {
+  let scope = planAssistantQuestion(state, 'How much did I spend at Talabat and Carrefour?', now);
+  scope = planAssistantQuestion(state, 'Exclude Carrefour', now, scope);
+  const comparison = planAssistantQuestion(state, 'Compare last month', now, scope);
+  assert.equal(comparison.tool, 'compare-periods', 'a resolved period follow-up must keep a merchant union and exclusions');
+  assert.deepEqual(comparison.excludedMerchants, ['Carrefour']);
+  const answer = executeAssistantTool(state, comparison, now);
+  assert.equal(answer.data.currentFils, 5_000);
+  assert.equal(answer.data.previousFils, 2_000);
+}
+
+{
   const answer = executeAssistantTool(state, { tool: 'largest-purchases', period: { mode: 'month', key: '2026-09' }, limit: 2 }, now);
   assert.deepEqual(answer.evidence[0].transactionIds, ['sep-food-1', 'sep-food-2'], 'proof must match the purchases shown, not every expense');
   assert.equal(answer.evidence[0].totalFils, 5_000);
@@ -495,8 +506,7 @@ console.log('✓ Wafra Assistant global hardening edge cases');
 }
 
 {
-  for (const question of ['Spend at Talabat and Carrefour', 'How much groceries and dining spending?',
-    'How much did I spend with Unknown Shop?', 'How much did I spend over 20?', 'How much did I spend in London?']) {
+  for (const question of ['How much did I spend with Unknown Shop?', 'How much did I spend over 20?', 'How much did I spend in London?']) {
     assert.equal(answerWafraQuestion(state, question, now).tool, 'help', question);
   }
   const ambiguousState = { ...state, transactions: [tx('branch-a', '2026-09-02', 'STARBUCKS MALL', 1_000), tx('branch-b', '2026-09-03', 'STARBUCKS CENTER', 2_000)] };
@@ -571,7 +581,7 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
     tx('coffee-review', '2026-09-06', 'STARBUCKS MARINA', 3_000),
     tx('business-review', '2026-09-07', 'Client invoice', 9_000, 'business', 'income'),
   ] };
-  for (const question of ['How much did I spend at Talabat or Starbucks?', 'How much did I spend on dining and Amazon?',
+  for (const question of ['How much did I spend on dining and Amazon?',
     'What is my daily average income?', 'What are my Netflix subscriptions?']) {
     const result = answerWafraQuestion(reviewState, question, now);
     assert.equal(result.tool, 'help', question);
@@ -622,7 +632,7 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
     assert.deepEqual(namedCalendar.period, { mode: 'range', from: '2026-08-01', to: '2026-08-31' },
       'an explicit named month is a calendar range even with custom reporting months');
   } finally { setMonthStartDay(1); }
-  for (const question of ['Which recurring charges changed?', 'Compare spending at Talabat vs Starbucks']) {
+  for (const question of ['Compare spending at Talabat vs Starbucks']) {
     assert.equal(answerWafraQuestion(state, question, now).tool, 'help', question);
   }
 }
@@ -659,4 +669,205 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
   assert.deepEqual(evidence.answer.evidence[0].transactionIds, ['sep-food-1', 'sep-food-2']);
   assert.equal(runWafraAssistant(state, 'Show those transactions', now).answer.tool, 'help');
   assert.equal(answerWafraQuestion(state, 'What payments are due for Netflix?', now).tool, 'help');
+}
+
+// Local multi-filter analysis: unions inside a dimension, intersections across
+// dimensions, and exclusions against individual split allocations.
+{
+  const second = { ...account, id: 'bank-2', name: 'Savings' };
+  const split = { ...tx('local-split', '2026-09-10', 'Carrefour', 10_000, 'shopping'), splits: [
+    { category: 'groceries', amountFils: 6_000 }, { category: 'dining', amountFils: 3_000 },
+    { category: 'rent', amountFils: 1_000 },
+  ] };
+  const local = { ...state, accounts: [account, second], transactions: [...state.transactions, split,
+    { ...tx('savings-dining', '2026-09-10', 'Talabat', 900), accountId: second.id },
+    tx('rent-local', '2026-09-10', 'Landlord', 50_000, 'rent'),
+  ] };
+  const combined = answerWafraQuestion(local, 'How much groceries and dining spending at Talabat and Carrefour using Everyday and Savings?', now);
+  assert.equal(combined.data?.totalFils, 15_900, 'all four named dimensions must survive');
+  assert.equal(combined.evidence[0].contributions['local-split'], 9_000);
+  const excluded = answerWafraQuestion(local, 'How much did I spend excluding rent?', now);
+  assert.equal(excluded.data?.totalFils, 15_900);
+  assert.equal(excluded.evidence[0].contributions['local-split'], 9_000);
+  const first = planAssistantQuestion(local, 'How much groceries and dining spending at Carrefour using Everyday?', now);
+  const follow = planAssistantQuestion(local, 'Exclude groceries', now, first);
+  assert.equal(executeAssistantTool(local, follow, now).data?.totalFils, 3_000);
+  const last = planAssistantQuestion(local, 'What about last month?', now, follow);
+  assert.equal(executeAssistantTool(local, last, now).data?.totalFils, 0);
+  assert.deepEqual(last.excludedCategories, ['groceries']);
+  assert.equal(last.merchant, 'Carrefour');
+  assert.deepEqual(last.accountIds, ['bank-1']);
+  assert.equal(answerWafraQuestion(local, 'How much spending excluding Unknown Shop?', now).tool, 'help');
+}
+
+{
+  const { runWafraAssistant } = require('./build/wafra-assistant');
+  const rows = [...state.transactions,
+    tx('rent-now', '2026-09-03', 'Landlord', 9_000, 'rent'),
+    tx('rent-before', '2026-08-03', 'Landlord', 8_000, 'rent'),
+    tx('prior-late', '2026-08-29', 'Late Store', 99_000),
+  ];
+  const local = { ...state, transactions: rows };
+  const first = runWafraAssistant(local, 'How much did I spend?', now);
+  const comparison = runWafraAssistant(local, 'Compare last month', now, first.request);
+  assert.equal(comparison.answer.data.currentFils, 15_000);
+  assert.equal(comparison.answer.data.previousFils, 10_000);
+  assert.deepEqual(comparison.request.period, { mode: 'range', from: '2026-09-01', to: '2026-09-20' });
+  assert.deepEqual(comparison.request.comparisonPeriod, { mode: 'range', from: '2026-08-01', to: '2026-08-20' });
+  const exclusion = runWafraAssistant(local, 'Exclude rent', now, comparison.request);
+  assert.equal(exclusion.answer.data.currentFils, 6_000);
+  assert.equal(exclusion.answer.data.previousFils, 2_000);
+  assert.deepEqual(exclusion.request.comparisonPeriod, comparison.request.comparisonPeriod);
+  const proof = runWafraAssistant(local, 'Show those transactions', now, exclusion.request);
+  assert.equal(proof.answer.showEvidence, true);
+  assert.deepEqual(proof.answer.evidence[1].transactionIds, ['aug-food']);
+  const again = runWafraAssistant(local, 'Compare the same dates', now, exclusion.request);
+  assert.deepEqual(again.answer.evidence, exclusion.answer.evidence);
+  const empty = runWafraAssistant(local, 'How much rent spending excluding rent?', now);
+  assert.equal(empty.answer.data.totalFils, 0, 'exclusions win, even against a sole inclusion');
+  assert.deepEqual(empty.answer.evidence[0].transactionIds, []);
+}
+
+{
+  const split = { ...tx('driver-split', '2026-09-10', 'Carrefour', 1_001, 'shopping'), splits: [
+    { category: 'dining', amountFils: 334 }, { category: 'groceries', amountFils: 667 },
+  ] };
+  const local = { ...state, transactions: [...state.transactions, split] };
+  for (const code of ['USD', 'JPY', 'KWD']) {
+    markets.setLedgerCurrency(code, code === 'JPY' ? 0 : code === 'KWD' ? 3 : 2);
+    const answer = answerWafraQuestion(local, 'Why did dining and groceries spending change excluding groceries?', now);
+    assert.equal(answer.data.currentFils, 5_334);
+    assert.equal(answer.data.previousFils, 2_000);
+    assert.equal(answer.data.currentCount, 3);
+    assert.ok(answer.findings.some((finding) => finding.title.endsWith('· merchant')));
+    assert.ok(answer.findings.some((finding) => finding.title.endsWith('· category')));
+    for (const finding of answer.findings) {
+      for (const group of finding.evidence) {
+        assert.equal(group.totalFils, Object.values(group.contributions).reduce((sum, value) => sum + value, 0));
+      }
+      assert.ok(finding.request, 'a drilldown is an exact local request rather than reinterpretation');
+      const drilldown = executeAssistantTool(local, finding.request, now);
+      assert.equal(drilldown.data.currentFils, finding.evidence[0].totalFils);
+      assert.equal(drilldown.data.previousFils, finding.evidence[1].totalFils);
+    }
+  }
+  markets.setLedgerCurrency(null);
+  const offset = { ...state, transactions: [tx('old-merchant', '2026-08-04', 'Old Cafe', 1_000), tx('new-merchant', '2026-09-04', 'New Cafe', 1_000)] };
+  const noNetChange = answerWafraQuestion(offset, 'Why did my spending change?', now);
+  assert.equal(noNetChange.data.deltaFils, 0);
+  assert.ok(noNetChange.findings.some((finding) => finding.title.startsWith('New Cafe')), 'merchant shifts remain visible when category changes net to zero');
+}
+
+{
+  const recurringRows = ['2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01']
+    .map((date, i) => tx(`service-${i}`, date, 'Local service', i === 3 ? 1_200 : 1_000, 'software'));
+  const unusualRows = [950, 1000, 1000, 1050, 1000].map((value, i) => tx(`usual-${i}`, `2026-08-0${i + 1}`, 'Neighborhood cafe', value));
+  unusualRows.push(tx('unusual-current', '2026-09-10', 'Neighborhood cafe', 4_000));
+  const stamp = Date.parse('2026-09-10T12:00:00Z');
+  const duplicates = [0, 1].map((i) => ({ ...tx(`candidate-${i}`, '2026-09-10', 'Local market', 2_000), ts: stamp + i * 60_000 }));
+  const split = { ...tx('pattern-split', '2026-09-10', 'Neighborhood cafe', 4_000), splits: [
+    { category: 'dining', amountFils: 2_000 }, { category: 'groceries', amountFils: 2_000 },
+  ] };
+  const fx = { ...tx('pattern-fx', '2026-09-10', 'Local service', 9_000), originalCurrency: 'EUR', originalAmountMinor: 3_000 };
+  const local = { ...state, transactions: [...recurringRows, ...unusualRows, ...duplicates, split, fx] };
+  for (const [question, tool, id, baselineCount] of [
+    ['Which recurring charges changed?', 'recurring-changes', 'service-3', 3],
+    ['Show unusual charges', 'unusual-charges', 'unusual-current', 5],
+    ['Show possible duplicate charges', 'possible-duplicates', 'candidate-0', 0],
+  ]) {
+    const answer = answerWafraQuestion(local, question, now);
+    assert.equal(answer.tool, tool, question);
+    assert.equal(answer.data.candidateCount, 1, question);
+    const finding = answer.findings[0];
+    assert.ok(finding.evidence[0].transactionIds.includes(id));
+    assert.equal(finding.evidence[1]?.transactionIds.length ?? 0, baselineCount);
+    for (const group of finding.evidence) {
+      assert.equal(group.totalFils, Object.values(group.contributions).reduce((sum, value) => sum + value, 0));
+      assert.equal(group.transactionIds.includes('pattern-split'), false);
+      assert.equal(group.transactionIds.includes('pattern-fx'), false);
+    }
+    assert.match(answer.coverage.notes.join(' '), /split|conversion/i);
+  }
+  assert.equal(answerWafraQuestion(local, 'Which recurring charges changed at Local service?', now).data.candidateCount, 1);
+  assert.equal(answerWafraQuestion(local, 'Which recurring charges changed excluding Local service?', now).data.candidateCount, 0);
+  assert.equal(answerWafraQuestion(local, 'Show unusual dining charges', now).tool, 'help', 'patterns may not compare allocated split amounts to full-charge history');
+  assert.equal(answerWafraQuestion(local, 'What is my daily average unusual spending?', now).tool, 'help', 'unsupported metric must not become a pattern list');
+  assert.equal(answerWafraQuestion(local, 'How much recurring spending?', now).tool, 'help');
+  assert.equal(answerWafraQuestion(local, 'Show unusual charges in London', now).tool, 'help');
+}
+
+{
+  const spare = { ...account, id: 'spare', name: 'Spare' };
+  const local = { ...state, accounts: [account, spare], historyImport: { status: 'complete' } };
+  const answer = answerWafraQuestion(local, 'What is my recorded history?', now);
+  assert.equal(answer.tool, 'data-coverage');
+  assert.deepEqual([answer.coverage.recordCount, answer.coverage.accountCount, answer.coverage.totalAccounts], [4, 1, 2]);
+  assert.equal(answer.coverage.firstDate, '2026-09-01');
+  assert.equal(answer.coverage.lastDate, '2026-09-06');
+  assert.match(answer.coverage.notes.join(' '), /does not confirm|do not prove/);
+  assert.equal(answer.data.totalFils, undefined, 'coverage must not add income and spending into a meaningless money total');
+  assert.equal(answer.evidence, undefined);
+  const excluded = answerWafraQuestion(local, 'How much did I spend excluding Everyday?', now);
+  assert.equal(excluded.data.totalFils, 0);
+  assert.equal(excluded.coverage.totalAccounts, 1);
+  const unknown = answerWafraQuestion(local, 'What is my recorded history using Missing account?', now);
+  assert.equal(unknown.tool, 'help');
+  const direct = executeAssistantTool(local, { tool: 'spending-total', period: { mode: 'month', key: '2026-09' }, merchants: ['Talabat'], merchant: 'Talabat' }, now);
+  assert.equal(direct.tool, 'help', 'singular/plural API ambiguity must clarify');
+  const incomplete = answerWafraQuestion({ ...local, historyImport: { status: 'paused' } }, 'What is my data coverage?', now);
+  assert.match(incomplete.coverage.notes[0], /paused/);
+}
+console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof, pattern routing and coverage');
+
+// Independent review regressions: understood words must not silently change
+// the requested direction, ranking, or relationship between dimensions.
+{
+  const local = { ...state, transactions: [...state.transactions, tx('review-rent', '2026-09-04', 'Landlord', 9_000, 'rent')] };
+  for (const phrase of ['minus rent', 'other than rent']) {
+    assert.equal(answerWafraQuestion(local, `How much did I spend ${phrase}?`, now).data?.totalFils, 6_000, phrase);
+  }
+  const top = answerWafraQuestion(local, 'Show my top 3 purchases', now);
+  assert.equal(top.tool, 'largest-purchases');
+  assert.equal(top.data.displayedPurchaseCount, 3);
+  assert.equal(top.evidence[0].transactionIds.length, 3);
+  const excludeSalary = answerWafraQuestion(local, 'How much did I spend excluding salary?', now);
+  assert.equal(excludeSalary.tool, 'spending-total');
+  assert.equal(excludeSalary.data.totalFils, 15_000);
+  for (const question of ['How much did I spend excluding rent from Everyday account?',
+    'How much income and spending this month?', 'How much did I spend on dining more than groceries?',
+    'Compare dining and groceries', 'Which recurring charges decreased?', 'What are my top 3 dining expenses by date?']) {
+    assert.equal(answerWafraQuestion(local, question, now).tool, 'help', question);
+  }
+  const second = { ...account, name: 'Travel', id: 'travel' };
+  assert.equal(answerWafraQuestion({ ...local, accounts: [account, second] }, 'Compare Everyday account and Travel account', now).tool, 'help');
+  const special = { ...state, transactions: [tx('without-title', '2026-09-04', 'Shop Without Borders', 100)] };
+  assert.equal(answerWafraQuestion(special, 'How much did I spend at "Shop Without Borders"?', now).data.totalFils, 100);
+}
+
+{
+  const local = { ...state, transactions: [tx('case-a', '2026-09-01', 'Cafe', 100), tx('case-b', '2026-09-02', ' CAFE ', 200), tx('punctuation', '2026-09-03', 'Cafe!', 400)] };
+  assert.equal(answerWafraQuestion(local, 'How much did I spend at "Cafe"?', now).data.totalFils, 300);
+  assert.equal(answerWafraQuestion(local, 'How much did I spend at "Cafe!"?', now).data.totalFils, 400);
+  const caseOnly = { ...local, transactions: local.transactions.slice(0, 2) };
+  assert.equal(answerWafraQuestion(caseOnly, 'How much did I spend at Cafe?', now).data.totalFils, 300);
+}
+
+{
+  const cash = executeAssistantTool(state, { tool: 'cash-outflow', period: { mode: 'month', key: '2026-09' }, excludedAccountIds: ['bank-1'] }, now);
+  assert.equal(cash.data.totalFils, 0);
+  assert.deepEqual(cash.evidence[0].transactionIds, []);
+  const stamp = Date.parse('2026-08-31T23:59:30Z');
+  const local = { ...state, transactions: [
+    { ...tx('boundary-before', '2026-08-31', 'Market', 1_000), ts: stamp },
+    { ...tx('boundary-selected', '2026-09-01', 'Market', 1_000), ts: stamp + 60_000 },
+  ] };
+  const result = answerWafraQuestion(local, 'Show possible duplicate charges', now);
+  assert.equal(result.data.candidateCount, 1);
+  assert.equal(result.evidence[0].from, '2026-08-31', 'proof scope includes every cited candidate, including the adjacent prior day');
+  assert.equal(result.evidence[0].to, '2026-09-01');
+  assert.equal(result.evidence[0].totalFils, 2_000);
+  const { runWafraAssistant } = require('./build/wafra-assistant');
+  const comparison = runWafraAssistant(state, 'Why did my spending change?', now);
+  const repeated = runWafraAssistant(state, 'Compare last month', now, comparison.request);
+  assert.deepEqual(repeated.answer.evidence, comparison.answer.evidence, 'repeating a resolved comparison must not drift to an adjacent 20-day range');
 }

@@ -31,6 +31,9 @@ for (const platform of ['ios', 'android']) {
       h.deps['react-native'].useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1 });
       h.deps['@/lib/period'].periodRange = () => '';
       h.deps['@/components/assistant-evidence-sheet'] = { AssistantEvidenceSheet: props => h.jsx('EvidenceSheet', props) };
+      h.deps['@/components/assistant-findings'] = {
+        AssistantFindings: props => h.jsx('Findings', props), AssistantCoverage: props => h.jsx('Coverage', props),
+      };
       const slots = [];
       let cursor = 0;
       h.deps.react.useState = initial => {

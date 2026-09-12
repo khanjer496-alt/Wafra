@@ -5,6 +5,7 @@ import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pres
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AssistantEvidenceSheet } from '@/components/assistant-evidence-sheet';
+import { AssistantCoverage, AssistantFindings } from '@/components/assistant-findings';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
@@ -23,7 +24,7 @@ import { useStore } from '@/lib/store';
 import type { AppState } from '@/lib/types';
 import {
   assistantFollowUpQuestions, executeAssistantTool, runWafraAssistant, suggestedAssistantQuestions,
-  type AssistantAnswer, type AssistantToolRequest,
+  type AssistantAnswer, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
 const MAX_TURNS = 12;
@@ -68,7 +69,7 @@ export default function AssistantScreen() {
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [droppedTurns, setDroppedTurns] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [evidenceTurnId, setEvidenceTurnId] = useState<number | null>(null);
+  const [evidenceSelection, setEvidenceSelection] = useState<{ turnId: number; findingId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [today, setToday] = useState(() => toISODate(new Date()));
   const minInputHeight = Math.max(48, Math.ceil(22 * fontScale) + 24);
@@ -82,7 +83,10 @@ export default function AssistantScreen() {
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));
-  const evidenceTurn = currentTurns.find((turn) => turn.id === evidenceTurnId);
+  const evidenceTurn = currentTurns.find((turn) => turn.id === evidenceSelection?.turnId);
+  const selectedEvidence = evidenceSelection?.findingId
+    ? evidenceTurn?.answer.findings?.find((finding) => finding.id === evidenceSelection.findingId)?.evidence
+    : evidenceTurn?.answer.evidence;
   const hasRecords = state.transactions.length > 0 || state.bills.length > 0 || state.cardDues.length > 0;
 
   const scrollToLatest = useCallback(() => {
@@ -116,18 +120,18 @@ export default function AssistantScreen() {
     setInputHeight(minInputHeight);
     if (result.answer.showEvidence && result.answer.evidence?.length) {
       Keyboard.dismiss();
-      setEvidenceTurnId(id);
+      setEvidenceSelection({ turnId: id });
     }
     if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(result.answer.title + '. ' + result.answer.body);
   };
 
-  const ask = (value = question, usePrevious = true) => {
+  const ask = (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
     const clean = value.trim().slice(0, 1000);
     const snapshot = getStateSnapshot();
-    if (!clean || !snapshot.hydrated) return;
+    if (!clean || !snapshot.hydrated || generation !== getStateGeneration()) return;
     const now = new Date();
     try {
-      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? latest?.request : null, period);
+      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? latest?.request : null, period);
       appendAnswer(clean, result, snapshot, now);
     } catch {
       // Keep the question available to edit; financial records never enter logs.
@@ -137,15 +141,39 @@ export default function AssistantScreen() {
   const askRef = useRef(ask);
   askRef.current = ask;
 
+  const exploreFinding = (turn: AssistantTurn, finding: AssistantFinding) => {
+    const snapshot = getStateSnapshot();
+    const now = new Date();
+    const latestInputs = ledgerInputs(snapshot);
+    // A queued press can arrive before React disables a stale finding. Check
+    // authoritative state again before reading or announcing financial data.
+    if (!snapshot.hydrated || turn.generation !== getStateGeneration() ||
+      toISODate(turn.answeredAt) !== toISODate(now) ||
+      turn.inputs.some((input, index) => input !== latestInputs[index])) {
+      setToday(toISODate(now));
+      setError(copy.stale);
+      return;
+    }
+    if (!finding.request) {
+      if (finding.question) ask(finding.question, true, turn.request);
+      return;
+    }
+    try {
+      appendAnswer(finding.question ?? finding.title,
+        { request: finding.request, answer: executeAssistantTool(snapshot, finding.request, now) }, snapshot, now);
+    } catch { setError(copy.failed); }
+  };
+
   const refreshAnswer = (turn: AssistantTurn) => {
     const snapshot = getStateSnapshot();
+    if (!snapshot.hydrated || turn.generation !== getStateGeneration()) return;
     const now = new Date();
     try {
       const answer = executeAssistantTool(snapshot, turn.request, now);
       setTurns((current) => current.map((item) => item.id === turn.id
         ? { ...item, answer, answeredAt: now, inputs: ledgerInputs(snapshot) } : item));
       setToday(toISODate(now));
-      setEvidenceTurnId(null);
+      setEvidenceSelection(null);
       setError(null);
     } catch { setError(copy.failed); }
   };
@@ -157,7 +185,7 @@ export default function AssistantScreen() {
     setTurns([]);
     setQuestion('');
     setDroppedTurns(false);
-    setEvidenceTurnId(null);
+    setEvidenceSelection(null);
     setError(null);
     setInputHeight(minInputHeight);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -292,12 +320,16 @@ export default function AssistantScreen() {
               <ThemedText type="smallBold" tabular selectable style={styles.factValue}>{fact.value}</ThemedText>
             </View>)}
           </View> : null}
+          {turn.answer.findings?.length ? <AssistantFindings findings={turn.answer.findings}
+            stale={isStale(turn)} onReview={(findingId) => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id, findingId }); }}
+            onAsk={(finding) => exploreFinding(turn, finding)} /> : null}
+          {turn.answer.coverage ? <AssistantCoverage coverage={turn.answer.coverage} /> : null}
           {isStale(turn) ? <View style={styles.hero}>
             <ThemedText type="meta" themeColor="textSecondary">{copy.stale}</ThemedText>
             <Button label={copy.refresh} variant="outline" onPress={() => refreshAnswer(turn)} />
           </View> : <>
             {turn.answer.evidence?.length ? <Button label={copy.viewTransactions} icon="receipt" variant="outline"
-              onPress={() => { Keyboard.dismiss(); setEvidenceTurnId(turn.id); }} /> : null}
+              onPress={() => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id }); }} /> : null}
             {turn.answer.destination ? <Button label={copy.viewPayments} variant="outline"
               onPress={() => router.push(turn.answer.destination!)} /> : null}
           </>}
@@ -311,9 +343,9 @@ export default function AssistantScreen() {
       </View> : null}
     </ScreenScaffold>
     <PeriodSheet visible={periodOpen} selectedPeriod={contextPeriod} onApply={resetConversation} onClose={() => setPeriodOpen(false)} />
-    {evidenceTurn?.answer.evidence?.length ? <AssistantEvidenceSheet key={evidenceTurn.id}
-      evidence={evidenceTurn.answer.evidence} state={state} stale={isStale(evidenceTurn)}
-      onClose={() => setEvidenceTurnId(null)} onRefresh={() => refreshAnswer(evidenceTurn)} /> : null}
+    {evidenceTurn && selectedEvidence?.length ? <AssistantEvidenceSheet key={evidenceTurn.id + ':' + (evidenceSelection?.findingId ?? 'all')}
+      evidence={selectedEvidence} state={state} stale={isStale(evidenceTurn)}
+      onClose={() => setEvidenceSelection(null)} onRefresh={() => refreshAnswer(evidenceTurn)} /> : null}
   </>;
 }
 

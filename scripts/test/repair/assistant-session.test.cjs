@@ -81,6 +81,9 @@ function sessionHarness(options = {}) {
   h.deps['@/lib/store'] = { useStore: () => ({ state, getStateSnapshot, getStateGeneration }) };
   h.deps['@/lib/period-context'] = { usePeriod: () => ({ period }) };
   h.deps['@/lib/period'].periodRange = () => '';
+  h.deps['@/components/assistant-findings'] = {
+    AssistantFindings: props => h.jsx('Findings', props), AssistantCoverage: props => h.jsx('Coverage', props),
+  };
   h.deps['expo-router'].useLocalSearchParams = () => ({ question: options.question });
   h.deps['expo-router'].useFocusEffect = callback => react.useEffect(() => focused ? callback() : undefined, [callback, focused]);
   h.deps['@react-navigation/elements'] = { useHeaderHeight: () => 90 };
@@ -176,10 +179,72 @@ const transaction = (amountFils = 6_000) => ({
   type: 'expense', source: 'manual', date: '2026-09-01',
 });
 const fixture = { hydrated: true, transactions: [transaction()], bills: [], cardDues: [], notSubscriptions: [] };
+const driverFixture = { ...fixture, transactions: [
+  { ...transaction(6_000), id: 'driver-current', title: 'Cedar', category: 'groceries' },
+  { ...transaction(1_000), id: 'driver-earlier', title: 'Cedar', category: 'groceries', date: '2026-08-01' },
+  { ...transaction(1_000), id: 'other-current', title: 'Cafe' },
+  { ...transaction(2_000), id: 'other-earlier', title: 'Cafe', date: '2026-08-01' },
+  { ...transaction(10_000), id: 'driver-rent', title: 'Rent', category: 'rent' },
+  { ...transaction(90_000), id: 'other-account', title: 'Cedar', category: 'groceries', accountId: 'adcb' },
+] };
 function using(options, run) {
   const h = sessionHarness(options);
   try { return run(h); } finally { h.dispose(); }
 }
+
+test('finding proof and an older finding exploration retain that finding exact source and scope', () => using({ state: driverFixture }, h => {
+  h.render(); h.submit('Why did my spending change from Emirates NBD account excluding rent?');
+  const component = h.find(node => node.type === 'Findings');
+  assert.ok(component, 'comparison produces actionable findings');
+  const finding = component.props.findings.find(item => item.id === 'merchant:cedar');
+  assert.ok(finding?.request);
+  component.props.onReview(finding.id); h.render();
+  const proof = h.find(node => node.type === 'EvidenceSheet');
+  assert.deepEqual(JSON.parse(JSON.stringify(proof.props.evidence.map(group => group.transactionIds))), [['driver-current'], ['driver-earlier']]);
+  proof.props.onClose(); h.render();
+  h.submit('How much income did I receive?');
+  component.props.onAsk(finding); h.render();
+  const execution = h.calls.at(-1);
+  assert.equal(execution.kind, 'refresh');
+  assert.deepEqual(execution.request, finding.request, 'an older finding executes its own typed request, never the latest unrelated context');
+  assert.deepEqual(Array.from(execution.request.accountIds), ['enbd']);
+  assert.deepEqual(Array.from(execution.request.excludedCategories), ['rent']);
+}));
+
+test('a queued finding action cannot read or announce a replacement or changed ledger', () => {
+  for (const change of ['generation', 'records', 'day']) using({ state: driverFixture }, h => {
+    h.render(); h.submit('Why did my spending change from Emirates NBD account excluding rent?');
+    const component = h.find(node => node.type === 'Findings');
+    assert.ok(component);
+    const finding = component.props.findings.find(item => item.request);
+    const callCount = h.calls.length;
+    if (change === 'generation') { h.patchState({ transactions: [transaction(400_000)] }); h.setGeneration(2); }
+    if (change === 'records') h.patchState({ transactions: [transaction(400_000)] });
+    if (change === 'day') h.setNow('2026-09-21T12:00:00Z');
+    // Invoke the callback before React has rendered the changed store or date.
+    component.props.onAsk(finding);
+    assert.equal(h.calls.length, callCount, 'stale finding callback must not execute: ' + change);
+  });
+});
+
+test('queued send and refresh actions cannot cross ledger replacement', () => {
+  for (const action of ['send', 'refresh']) using({ state: fixture }, h => {
+    h.render(); h.submit('How much did I spend?');
+    let press;
+    if (action === 'send') {
+      h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much income did I receive?');
+      h.render();
+      press = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
+    } else {
+      h.patchState({ transactions: [transaction(7_000)] }); h.render();
+      press = h.button('Refresh answer').props.onPress;
+    }
+    const count = h.calls.length;
+    h.patchState({ transactions: [transaction(900_000)] }); h.setGeneration(2);
+    press();
+    assert.equal(h.calls.length, count, 'obsolete action must not read replacement ledger: ' + action);
+  });
+});
 
 function coldHydrationScenario(sourceTransform) {
   return using({ sourceTransform, generation: 0, question: 'How much did I spend?',
@@ -294,9 +359,10 @@ test('regression proof: a cold-hydration route marked handled too early is caugh
     'if (hadHydratedLedger.current) routeQuestionHandled.current =', 'routeQuestionHandled.current =')),
   /route question executes exactly once/);
 });
-test('regression proof: removing the queued-frame generation check is caught', () => {
-  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(source,
-    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */')),
+test('regression proof: removing both queued-frame and request generation checks is caught', () => {
+  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(replaceOnce(source,
+    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */'),
+  ' || generation !== getStateGeneration()', '')),
   /old route frame must check/);
 });
 test('regression proof: refreshing at the original answer date is caught', () => {

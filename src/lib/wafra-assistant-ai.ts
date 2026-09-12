@@ -6,7 +6,8 @@ import type {
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/categories';
 
 const ASSISTANT_CATEGORY_IDS = new Set<string>([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].map((category) => category.id));
-const PERIOD_FILTER_ARGUMENTS = ['period', 'accountIds', 'merchant', 'category'] as const;
+const PERIOD_FILTER_ARGUMENTS = ['period', 'accountIds', 'merchant', 'category',
+  'merchants', 'categories', 'excludedMerchants', 'excludedCategories', 'excludedAccountIds'] as const;
 
 /**
  * Provider-neutral catalog for the future interpretation model.
@@ -34,8 +35,12 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'daily-average', purpose: 'Average recorded spending per elapsed day', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'net-income-spending', purpose: 'Recorded income minus economic spending', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'upcoming-payments', purpose: 'Bills, card dues and subscriptions due soon', arguments: ['withinDays'] },
-  { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds'] },
+  { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds', 'excludedAccountIds'] },
   { tool: 'month-forecast', purpose: 'Current-month pace estimate when observed history is sufficient', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'unusual-charges', purpose: 'Review purchases unusually high against established earlier history', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'possible-duplicates', purpose: 'Review possible duplicate purchases without changing any records', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'data-coverage', purpose: 'Describe recorded activity and known import limitations without claiming full bank coverage', arguments: PERIOD_FILTER_ARGUMENTS },
 ] as const;
 
 export interface AssistantInterpretationEnvelope {
@@ -134,11 +139,23 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
   const catalog = ASSISTANT_TOOL_CATALOG.find((item) => item.tool === candidate.tool);
   if (!catalog || !onlyKeys(candidate, ['tool', ...catalog.arguments])) return false;
   if (candidate.accountIds !== undefined && (!Array.isArray(candidate.accountIds) ||
-    candidate.accountIds.length === 0 || candidate.accountIds.length > 100 ||
+    candidate.accountIds.length === 0 || candidate.accountIds.length > 20 ||
     !candidate.accountIds.every((id) => validName(id)))) return false;
   if (candidate.merchant !== undefined && !validName(candidate.merchant)) return false;
   if (candidate.category !== undefined && (typeof candidate.category !== 'string' ||
     !ASSISTANT_CATEGORY_IDS.has(candidate.category))) return false;
+  for (const key of ['merchants', 'excludedMerchants', 'excludedAccountIds'] as const) {
+    const values = candidate[key];
+    if (values !== undefined && (!Array.isArray(values) || values.length > 20 ||
+      values.length === 0 || !values.every(validName))) return false;
+  }
+  for (const key of ['categories', 'excludedCategories'] as const) {
+    const values = candidate[key];
+    if (values !== undefined && (!Array.isArray(values) || values.length > 20 ||
+      values.length === 0 || !values.every((item) => typeof item === 'string' && ASSISTANT_CATEGORY_IDS.has(item)))) return false;
+  }
+  if (candidate.merchant !== undefined && candidate.merchants !== undefined) return false;
+  if (candidate.category !== undefined && candidate.categories !== undefined) return false;
   if (candidate.comparisonPeriod !== undefined && !validPeriod(candidate.comparisonPeriod)) return false;
 
   switch (candidate.tool) {
@@ -169,6 +186,10 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'net-income-spending':
     case 'cash-outflow':
     case 'month-forecast':
+    case 'recurring-changes':
+    case 'unusual-charges':
+    case 'possible-duplicates':
+    case 'data-coverage':
       return validPeriod(candidate.period);
     default:
       return false;
