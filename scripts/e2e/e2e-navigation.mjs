@@ -148,15 +148,17 @@ const scrollTo = (page, y) => page.evaluate((v) => {
   );
   const el = scr[scr.length - 1];
   if (el) el.scrollTop = v;
+  return el ? { top: el.scrollTop, end: el.scrollHeight - el.clientHeight } : { top: 0, end: 0 };
 }, y);
 
 /** Every pressable on a screen, including the ones below the fold. */
-async function everyControl(page) {
+async function everyControl(page, { fullScroll = false } = {}) {
   const seen = new Set();
-  for (let y = 0; y <= 2400; y += 500) {
-    await scrollTo(page, y);
+  for (let y = 0; fullScroll || y <= 2400; y += 500) {
+    const position = await scrollTo(page, y);
     await page.waitForTimeout(220);
     for (const k of await visibleControls(page)) seen.add(k);
+    if (fullScroll && position.top >= position.end - 1) break;
   }
   await scrollTo(page, 0);
   await page.waitForTimeout(150);
@@ -260,9 +262,9 @@ await reload();
  * native-only. The dead-destination check that catches the actual bug class
  * is a separate, sharper assertion further down.
  */
-async function pressEverything(name, enter, { skip = [] } = {}) {
+async function pressEverything(name, enter, { skip = [], fullScroll = false } = {}) {
   await enter();
-  const controls = await everyControl(page);
+  const controls = await everyControl(page, { fullScroll });
   const base = await url(page);
   const dead = [];
   const unreachable = [];
@@ -358,11 +360,10 @@ const flow = async () => { await reload(); await tapTab(page, 'Spending'); };
 const bills = async () => { await reload(); await tapTab(page, 'Bills'); };
 const wallet = async () => { await reload(); await tapTab(page, 'Accounts'); };
 
-const settingsPanel = async (name = 'Preferences') => {
+const settings = async () => {
   await home();
   if (!(await tapKey(page, 'Settings'))) throw new Error('Settings is unreachable');
   await page.waitForURL(/\/settings/);
-  if (!(await tapKey(page, name))) throw new Error(`Settings panel missing: ${name}`);
   await page.waitForTimeout(300);
 };
 const spendingView = async (name) => {
@@ -398,20 +399,30 @@ await pressEverything('bills all obligations', async () => {
 });
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/); });
-for (const panel of ['Preferences', 'Imports', 'Privacy', 'Data', 'Help']) {
-  await pressEverything(`settings ${panel}`, () => settingsPanel(panel),
-    { skip: ['Erase everything on this phone'] });
+// Settings groups are sections in one continuous screen. Assert that each
+// capability is present, then sweep the complete scroll range; the former
+// 2400 px limit stopped before Data and Support on this longer screen.
+await settings();
+for (const section of ['Money', 'Imports', 'Notifications', 'Appearance & language', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
+  ok(`settings: ${section} section is reachable`, !!(await locate(page, section)));
+}
+const settingsSweep = await pressEverything('settings', settings,
+  { skip: ['Erase all data'], fullScroll: true });
+for (const control of [
+  'Wafra Pro', 'Bank-message region', 'Daily spend summary', 'System', 'Light', 'Dark',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
+  'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
+  'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
+]) {
+  ok(`settings: complete sweep includes ${control}`, settingsSweep.controls.some(key => key === control || key.startsWith(control)));
 }
 
 /**
  * Put the settings back.
  *
- * Pressing everything on Settings means pressing all 28 bars of the money-month
- * picker, so the app is left reporting a month that starts on the 28th — under
- * which "Jul 2026" runs 28 Jun to 27 Jul and today is its last day. Every
- * arithmetic assertion below reads a different month than the one the seed was
- * written for, which is how a green sweep produced "the hero equals In minus
- * Spent (0 − 0 = 0)".
+ * The sweep can change appearance and other preferences. Restore the seeded
+ * calendar and language before the financial checks, so all drill-downs use
+ * the same reporting window as their expected totals.
  */
 const resetPreferences = async () => {
   await page.evaluate(() => {
@@ -427,11 +438,11 @@ const resetPreferences = async () => {
 await resetPreferences();
 await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
-  await settingsPanel('Help');
+  await settings();
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
 });
 await pressEverything('accuracy', async () => {
-  await settingsPanel('Data');
+  await settings();
   await tapKey(page, 'Improve accuracy'); await page.waitForTimeout(1300);
 });
 await pressEverything('import', async () => {
@@ -482,9 +493,9 @@ await goesTo('Home all activity opens the ledger', home, 'All activity', /^\/tra
 await goesTo('Home settings action', home, 'Settings', /^\/settings/);
 await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
 await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
-await goesTo('Settings Pro', () => settingsPanel('Help'), 'Wafra Pro', /^\/pro/);
-await goesTo('Settings accuracy', () => settingsPanel('Data'), 'Improve accuracy', /^\/accuracy/);
-await goesTo('Settings feedback', () => settingsPanel('Help'), 'Send feedback', /^\/feedback/);
+await goesTo('Settings Pro', settings, 'Wafra Pro', /^\/pro/);
+await goesTo('Settings accuracy', settings, 'Improve accuracy', /^\/accuracy/);
+await goesTo('Settings feedback', settings, 'Send feedback', /^\/feedback/);
 
 /* ── 3. Search, manual entry, cancellation and filter clearing ────────── */
 {
@@ -511,7 +522,7 @@ for (const [name, enter] of [
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
   ['cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
-  ['feedback', async () => { await settingsPanel('Help'); await tapKey(page, 'Send feedback'); }],
+  ['feedback', async () => { await settings(); await tapKey(page, 'Send feedback'); }],
 ]) {
   await enter();
   await page.waitForTimeout(1300);

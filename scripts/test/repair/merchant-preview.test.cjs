@@ -52,6 +52,7 @@ function renderMerchant({ name = 'Cedar & Cafe', type, language = 'en', hydrated
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
     '@/hooks/use-theme': { useTheme: () => ({ cardBorder: 'rule', income: 'income' }) },
+    '@/lib/assistant-copy': load(path.join(root, 'src/lib/assistant-copy.ts')),
     '@/lib/merchant-spending-copy': load(path.join(root, 'src/lib/merchant-spending-copy.ts')),
     '@/lib/period-context': { usePeriod: () => ({ period,
       setPeriod: p => events.push(['period', p]) }) },

@@ -21,7 +21,7 @@ const tx = (id, type, amountFils, extra = {}) => ({
   title: type === 'expense' ? 'Outgoing transfer' : 'Incoming transfer',
   date, ts: now, source: 'sms', smsKey: `s${now}-${id}`,
   captureInstrument: { last4: '4111', kind: 'account', bankIdentity: 'adcb' },
-  transferEvidence: { version: 1, currency: 'AED', attribution: 'source' }, ...extra,
+  transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'COLLISION984512' }, ...extra,
 });
 const rows = [
   tx('salary', 'income', 200000, { title: 'Salary', category: 'salary', transferEvidence: undefined }),
@@ -30,7 +30,7 @@ const rows = [
   tx('unknown-in', 'income', 30000, { category: 'business' }),
   tx('unknown-out', 'expense', 7000, { isTransfer: true }),
   ...[['group-a', 12000], ['group-b', 8000]].map(([id, amount]) => tx(id, 'expense', amount, {
-    isTransfer: true, transferEvidence: { version: 1, currency: 'AED', attribution: 'source',
+    isTransfer: true, transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'COLLISION984512',
       counterparty: { last4: '4999', kind: 'account', bankIdentity: 'adcb' } },
   })),
   tx('legacy-own', 'expense', 4000, { title: 'Own account transfer', isTransfer: true, transferEvidence: undefined }),
@@ -56,8 +56,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave unclassified' },
-  ar: { save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه غير مصنف' },
+  en: { transferEntry: 'Transfers', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave as recorded' },
+  ar: { transferEntry: 'التحويلات', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه كما هو مسجل' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -168,15 +168,19 @@ try {
       await home(page, [200000, 10000, 190000], 4);
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
       await page.goto(`${BASE}/wallet`, { waitUntil: 'networkidle' });
-      await click(page.getByRole('button', { name: /Transfer history|سجل التحويلات/i }));
+      await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
       await fits(page.getByTestId('transfer-search'));
       await page.screenshot({ path: path.join(OUT, `${name}-recent-groups.png`) });
       await click(page.getByTestId('transfer-review-group').filter({ hasText: '4999' }).getByTestId('transfer-group-toggle'));
-      await click(page.getByRole('button', { name: words.group, exact: true }));
+      assert.equal(await page.getByRole('button', { name: words.group, exact: true }).count(), 0,
+        'a repeated bank reference and shared recipient hint do not authorize bulk ownership');
+      await choose(page, words, 'group-a', 'own');
+      await page.goto(`${BASE}/review-transfers?transactionId=group-b`, { waitUntil: 'networkidle' });
+      await click(page.getByTestId('transfer-review-entry'));
       await fits(page.getByTestId('transfer-review-confirmation'));
-      await page.screenshot({ path: path.join(OUT, `${name}-group-confirmation.png`) });
+      await page.screenshot({ path: path.join(OUT, `${name}-individual-confirmation.png`) });
       assert.equal(await page.getByRole('button', { name: words.save, exact: true }).isDisabled(), true);
       await click(page.getByTestId('transfer-choice-own'));
       await fits(page.getByTestId('transfer-choice-external'));
