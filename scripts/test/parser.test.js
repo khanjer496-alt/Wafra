@@ -863,6 +863,32 @@ t('a channel-code bill keeps a short payee whole',
   'Your ADCB Credit Card XXX2518 has been used for AED 620.00 at MB BILL DR:DEWA DUBAI on 04/08/2026.',
   { merchant: 'DEWA', amountFils: 62000, category: 'utilities' });
 
+// Redacted equivalent of an ADCB app alert: the purchase figure precedes a
+// separate available-limit figure, and the event date precedes the merchant.
+t('ADCB app notification imports the purchase, not the available limit',
+  'ADCBAlert Credit Card XX1234 was used for AED42.00 on 11/09/2026 23:53:12 at SAMPLE CAFE, AJMAN-AE. Available limit AED5000.00',
+  { kind: 'transaction', type: 'expense', amountFils: 4200, merchant: 'Sample Cafe',
+    category: 'dining', date: '2026-09-11', card: { last4: '1234', kind: 'credit' },
+    snapshotFils: 500000, snapshotKind: 'limit' });
+
+// Synthetic HSBC UAE app notification, including its title. The second AED
+// figure is available credit, not another purchase.
+const hsbcAppSender = { sender: 'ae.hsbc.hsbcuae Your credit card transaction is approved' };
+t('HSBC UAE app notification imports only the completed purchase',
+  'Your credit card transaction is approved Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.',
+  { kind: 'transaction', type: 'expense', amountFils: 4200, merchant: 'Sample Restaurant',
+    date: '2026-09-11', card: { last4: '1234', kind: 'credit' },
+    snapshotFils: 500000, snapshotKind: 'limit' }, hsbcAppSender);
+t('HSBC UAE available-limit notification is not spending',
+  'HSBC UAE Your available limit is AED 5,000.00 on Credit Card ending *** 1234.',
+  null, hsbcAppSender);
+t('HSBC UAE card offer is not spending',
+  'HSBC UAE Get AED 50 cashback when you use your credit card for a purchase this weekend.',
+  null, hsbcAppSender);
+t('HSBC UAE OTP alert is not spending',
+  'HSBC UAE OTP 123456 for your card transaction of AED 42.00. Never share your code.',
+  null, hsbcAppSender);
+
 // A colon that ends a LABEL is still not a merchant. This is the reason the
 // rule is anchored on the channel shape rather than on the colon.
 t('a labelled figure is not read as a channel bill',

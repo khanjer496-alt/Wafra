@@ -58,6 +58,24 @@ test('all scalar text variable ranges actually cover the placeholder', () => {
     }
   });
 });
+test('conditional subjects are explicitly typed for Shortcuts on-device comparisons', () => {
+  const actions = buildPagedHistoryShortcut().WFWorkflowActions
+    .filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
+      action.WFWorkflowActionParameters.WFControlFlowMode === 0);
+  assert.ok(actions.length > 0);
+  for (const action of actions) {
+    const p = action.WFWorkflowActionParameters;
+    const variable = p.WFInput?.Variable?.Value;
+    if (variable?.Type !== 'ActionOutput') continue;
+    const coercion = variable.Aggrandizements?.find(item => item.Type === 'WFCoercionVariableAggrandizement');
+    assert.ok(coercion, 'Dictionary/Action outputs used by If must be explicitly typed');
+    assert.equal(
+      coercion.CoercionItemClass,
+      typeof p.WFNumberValue === 'number' ? 'WFNumberContentItem' : 'WFStringContentItem',
+    );
+  }
+});
+
 test('repeat and conditional blocks are nested and closed correctly', () => {
   const stack = [];
   for (const action of buildPagedHistoryShortcut().WFWorkflowActions) {

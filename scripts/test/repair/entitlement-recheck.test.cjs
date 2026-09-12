@@ -69,7 +69,8 @@ function harness(overrides = {}, options = {}) {
     transactions: [], dailySummary: false, iosCaptureWarning: null,
     ...overrides,
   };
-  const calls = { scans: 0, permission: 0, routes: [], toasts: [], setup: 0 };
+  const calls = { scans: 0, permission: 0, intents: [], policy: [], routes: [], toasts: [], setup: 0 };
+  let notificationPolicy = false;
   const appListeners = new Set();
   const inboxListeners = new Set();
   const runtime = hookRuntime();
@@ -104,13 +105,22 @@ function harness(overrides = {}, options = {}) {
       useFocusEffect: effect => runtime.react.useEffect(effect, [effect]),
     },
     '@/components/ui/toast': { useToast: () => toast },
+    '@/lib/trusted-bank-notification-packages': {
+      bankNotificationAdmissionExpiresAt: current =>
+        (current.pro || current.founderPro || current.trialStartTs > 0) ? Clock.now() + 86_400_000 : 0,
+    },
     '@/lib/auto-import': {
+      hasBankNotificationAccess: () => options.notificationAccess === true && notificationPolicy,
       subscribeInboxChanges: listener => { inboxListeners.add(listener); return () => inboxListeners.delete(listener); },
       isSmsScanningAvailable: () => true,
       hasSmsPermission: async () => { calls.permission += 1; return options.permission !== false; },
       requestSmsPermission: async () => options.permission !== false,
-      isSmsInboxAccessError: () => false, openSmsPermissionSettings: async () => {},
+      isSmsInboxAccessError: error => error?.code === 'ERR_SMS_INBOX_ACCESS',
+      openSmsPermissionSettings: async () => {},
     },
+    '../../modules/notification-reader': { __esModule: true, default: {
+      setCaptureEnabled: async enabled => { notificationPolicy = enabled; calls.policy.push(enabled); return true; },
+    } },
     '@/lib/background-relay': {
       enableRelayBackgroundSync: async () => { calls.setup += 1; },
       setChargeAlertsEnabled: async () => {},
@@ -120,10 +130,14 @@ function harness(overrides = {}, options = {}) {
       publishIosCaptureStatusRefresh: () => {}, subscribeIosCaptureStatusRefresh: () => () => {},
     },
     '@/lib/capture-executor': { createCaptureExecutor: () => ({ execute: async intent => {
-      assert.equal(intent, 'routine');
+      assert.ok(intent === 'routine' || intent === 'notification-only');
+      calls.intents.push(intent);
       calls.scans += 1;
+      if (intent === 'routine' && options.smsScanError) {
+        throw Object.assign(new Error('provider unavailable'), { code: 'ERR_SMS_INBOX_ACCESS' });
+      }
       if (options.scanGate) await options.scanGate;
-      return { kind: 'up-to-date', source: 'sms', transactions: 0, dues: 0,
+      return { kind: 'up-to-date', source: intent === 'notification-only' ? 'push' : 'sms', transactions: 0, dues: 0,
         bills: 0, healed: 0, newAccounts: 0, transactionIds: [], reviewAlerts: 0 };
     } }) },
     '@/lib/haptics': { committed: () => {} },
@@ -250,6 +264,49 @@ test('an entitlement refresh cannot enable a denied permission or bypass the int
   assert.equal(h.calls.permission, 1);
   assert.equal(h.calls.scans, 0);
   assert.equal(h.model.needsPermission, true);
+});
+
+test('a Play bank notification scans with SMS denied and paused SMS history, then opt-out stops admission', async t => {
+  const h = harness({ pro: true, historyImport: { status: 'paused' } },
+    { permission: false, notificationAccess: true });
+  t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  assert.deepEqual(h.calls.intents, ['notification-only']);
+  assert.equal(h.model.captureState, 'waiting-for-alert');
+  assert.equal(h.model.needsPermission, false, 'push capture does not demand SMS permission');
+  assert.equal(h.calls.policy.at(-1), true);
+  await h.update({ captureOptOut: true });
+  assert.equal(h.calls.policy.at(-1), false);
+  await h.resume();
+  assert.deepEqual(h.calls.intents, ['notification-only']);
+});
+
+test('an SMS history import does not block an independent bank push drain', async t => {
+  const h = harness({ pro: true, historyImport: { status: 'paused' } },
+    { permission: true, notificationAccess: true });
+  t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  assert.deepEqual(h.calls.intents, ['notification-only']);
+  assert.equal(h.model.captureState, 'waiting-for-alert');
+});
+
+test('a restricted SMS provider falls back to the independent bank notification queue', async t => {
+  const h = harness({ pro: true }, { notificationAccess: true, smsScanError: true });
+  t.after(h.runtime.cleanup);
+  h.render(); await h.settle(); await h.settle();
+  assert.deepEqual(h.calls.intents, ['routine', 'notification-only']);
+  assert.equal(h.model.captureState, 'waiting-for-alert');
+  assert.equal(h.model.needsPermission, false);
+});
+
+test('revoking Notification access with SMS denied stops bank queue reads', async t => {
+  const options = { permission: false, notificationAccess: true };
+  const h = harness({ pro: true }, options); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  assert.deepEqual(h.calls.intents, ['notification-only']);
+  options.notificationAccess = false;
+  await h.resume();
+  assert.deepEqual(h.calls.intents, ['notification-only']);
 });
 
 test('status-only consumers do not become additional foreground scan owners', async t => {

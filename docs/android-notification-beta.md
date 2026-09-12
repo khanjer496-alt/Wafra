@@ -1,59 +1,57 @@
-# Android bank notification test builds
+# Android bank-app notifications
 
-Bank-app notification capture is experimental and disabled in normal builds.
-The owner can request an APK with the `notification_capture_beta` input enabled
-in **Build Android APK** on canonical `main`. Keep `bundle=false`; the workflow
-refuses to combine this test feature with a Play bundle.
+Normal Android builds include a local bank-notification listener. A user must
+explicitly enable **Settings → Imports → Bank app notifications**, review the
+disclosure, and grant Wafra **Notification access** in Android Settings. The
+listener accepts only exact supported bank packages installed through Google
+Play. It never treats an arbitrary app name or notification body as bank
+identity. The current package list is in
+`modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt`.
 
-The workflow supplies both `WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA=1` and
-`EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA=1`. Native compilation
-requires both values. The JavaScript drain and Settings also require the public
-flag and native availability. An OTA cannot activate a normally compiled
-binary. EAS/production profiles remain unchanged and default to capture off.
+This source works **without READ_SMS permission or a completed SMS inbox scan**.
+Bank SMS and bank-app push alerts use separate Android permissions. Wafra still
+respects the saved global tracking opt-out and existing Pro/trial entitlement.
+The local admission choice is default-off until the hydrated app enables it;
+turning tracking off erases the encrypted notification queue. Android's system
+access can be revoked at any time. Wafra processes eligible alerts when the
+app opens or refreshes, not as an immediate background ledger write.
 
-## On the test phone
+The listener rejects OTP/security prompts before persistence. A bounded,
+seven-day queue stores candidates under an AndroidKeyStore key and acknowledges
+them only after the ledger or source-free review write is durable. A newly
+granted listener also checks notifications still posted in the shade. A
+dismissed alert cannot be recovered. Uncertain transaction facts go to Review;
+balance-only information and offers must never create spending.
 
-1. Install the new test APK without uninstalling the existing app. Confirm its
-   signing certificate matches the installed build before updating.
-2. In Settings → Imports, enable bank SMS reading and finish the initial inbox
-   scan. The current import coordinator requires this permission and enabled
-   tracking before it can drain bank-app notifications too.
-3. Open **Bank app notifications · Test**, read the experimental disclosure,
-   then grant Wafra notification access in Android Settings. Return to Wafra;
-   the access status should refresh.
-4. Receive a real spending notification from a supported bank app installed
-   through Google Play. Open or refresh Wafra and check the amount, currency,
-   merchant, account/card and date in the ledger or review tray.
-5. Reopen/refresh again and verify the same notification is not added twice.
-   Check a balance-only update, marketing message and OTP separately: they
-   must not become spending. Revoke notification access and confirm the UI
-   reports that it is off.
+## HSBC UAE qualification
 
-Permission is device-wide, but Wafra's capture filter accepts only the exact
-bank package identities in
-`modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt`,
-with Google Play recorded as installer. Unknown apps and sideloaded lookalikes
-remain excluded. Do not forge installer identity or widen the package list to
-make a test pass. A synthetic untrusted notification is a useful rejection
-control, not evidence of successful bank-app capture.
+`ae.hsbc.hsbcuae` is the [official HSBC UAE Google Play app](https://play.google.com/store/apps/details?id=ae.hsbc.hsbcuae)
+and is Play-installed on the test phone. HSBC's [UAE mobile FAQ](https://www.hsbc.ae/ways-to-bank/mobile/app-faqs/)
+also directs customers to Google Play. The other installed HSBC package,
+`com.htsu.hsbcpersonalbanking`, is listed as [HSBC EG for Egypt](https://play.google.com/store/apps/details?id=com.htsu.hsbcpersonalbanking)
+and is intentionally excluded from the UAE map.
 
-The money marker, sensitive-message filter, encrypted queue and durable
-acknowledgement remain active. A notification becomes a candidate; uncertain
-facts must still go through financial review rather than being guessed into
-the ledger. Notification access alone is not proof of compatibility with a
-particular bank's templates.
+The user's HSBC UAE purchase screenshot supplied a positive grammar shape;
+tests use synthetic card, merchant, amount and limit values. They cover a
+completed purchase followed by available credit, a balance-only alert, an
+offer, OTP and an approval request. This does **not** establish which package
+posted that screenshot, negative-format completeness, or live callback and
+ledger behavior on the user's phone. Keep those outcomes explicit in release
+evidence after installing the new build.
 
-## SMS, notifications and banners are separate
+## Device acceptance
 
-- **Read bank SMS** imports supported messages from Android's Messages inbox.
-- **Bank app notifications · Test** reads eligible bank-app push alerts via
-  Android's notification listener, then imports when Wafra runs.
-- **Alert me on every charge** displays Wafra's own optional banner when a
-  supported spending SMS arrives. It does not grant access to other apps'
-  notifications.
+1. Check build signing and install as an update without deleting app data.
+2. Enable Notification access from Wafra Settings. Verify Wafra reports it on.
+   With READ_SMS denied, leave a supported bank's real alert posted and return
+   to Wafra; verify the correct amount, merchant, card and date in the ledger
+   or Review. Refresh twice to check deduplication.
+3. Receive a new real spending alert while Wafra is backgrounded, then open or
+   refresh it. Check the same fields and that no duplicate appears.
+4. Check real OTP, marketing, balance-only, pending and declined alerts without
+   putting source text in logs. Revoke access and the app's tracking choice;
+   confirm no further capture and that queued candidates are erased on opt-out.
 
-Do not describe a passing SMS test, a Wafra charge banner, or an untrusted
-notification rejection as a positive bank-app notification test. Keep the
-installed build, source revision, permissions, producer app/provenance and
-actual outcome in the test record. Real bank-package positive and negative
-templates remain required before considering production enablement.
+Supported packages and parsed templates are a growing, bounded set. Do not
+describe this as coverage for every bank or every push format. The public APK
+should be released only after the native build and device path above pass.

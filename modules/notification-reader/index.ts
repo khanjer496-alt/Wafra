@@ -14,7 +14,10 @@ export interface CapturedNotification {
 interface NotificationReaderModule {
   isAvailable(): boolean;
   isEnabled(): boolean;
-  openSettings(): void;
+  hasSystemAccess(): boolean;
+  /** Persist the app's tracking choice; disabling also erases queued alerts. */
+  setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;
+  openSettings(): boolean;
   /** Captured money-related notifications with ts >= sinceMs, oldest first. */
   getCaptured(sinceMs: number): Promise<CapturedNotification[]>;
   ackCaptured(ids: string[]): Promise<boolean>;

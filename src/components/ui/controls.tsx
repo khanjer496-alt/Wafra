@@ -31,7 +31,7 @@ interface ButtonProps {
   variant?: ButtonVariant;
   icon?: IconName;
   disabled?: boolean;
-  /** Sits inline in a row of actions instead of filling the width. */
+  /** Shares width in a row of actions. Omit in columns or standalone actions. */
   inline?: boolean;
   /** Overrides the label colour on surfaces that ignore the OS theme. */
   labelColor?: string;

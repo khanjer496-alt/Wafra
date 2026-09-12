@@ -31,6 +31,15 @@ class BankNotificationListenerService : NotificationListenerService() {
    * already handles seeing the same notification twice.
    */
   override fun onListenerConnected() {
+    connected = this
+    sweepActiveNotifications()
+  }
+
+  override fun onListenerDisconnected() {
+    if (connected === this) connected = null
+  }
+
+  private fun sweepActiveNotifications() {
     try {
       activeNotifications?.forEach { capture(it) }
     } catch (_: Exception) {
@@ -41,6 +50,7 @@ class BankNotificationListenerService : NotificationListenerService() {
   private fun capture(sbn: StatusBarNotification) {
     try {
       if (sbn.packageName == packageName) return
+      if (!NotificationCapturePolicy.isEnabled(this)) return
       // Notification access is device-wide. Exact package identity is the
       // security boundary that keeps chats, shops and an app imitating a bank
       // alert out of both the encrypted queue and the launch parser.
@@ -73,6 +83,11 @@ class BankNotificationListenerService : NotificationListenerService() {
   }
 
   companion object {
+    @Volatile private var connected: BankNotificationListenerService? = null
+
+    /** A user returning from Settings may enable capture after the listener connected. */
+    fun sweepConnected() { connected?.sweepActiveNotifications() }
+
     private const val MAX_TITLE_CHARS = 512
     private const val MAX_TEXT_CHARS = 4096
 

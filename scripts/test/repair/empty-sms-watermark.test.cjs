@@ -6,17 +6,18 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const source = name => path.join(root, 'src/lib', `${name}.ts`);
 
-function harness(result = {}, initial = {}) {
+function harness(result = {}, initial = {}, options = {}) {
   let current = { hydrated: true, parserVersion: 39, lastScanTs: 1000,
     merchantOverrides: {}, transactions: [], accounts: [], captureOptOut: false,
     privateMode: false, marketId: 'AE', ...initial };
-  const events = [], requested = [], batches = [];
+  const events = [], requested = [], modes = [], batches = [];
   const relay = { isRelayPlatform: () => false, getRelayConfig: async () => null,
     getBackgroundRelayConfig: async () => null, syncRelay: async () => { throw Error('Unexpected relay'); } };
   const capture = load(source('capture'), {
     '@/lib/auto-import': { isSmsScanningAvailable: () => true,
-      scanInbox: async since => {
+      scanInbox: async (since, _overrides, _progress, _region, options) => {
         requested.push(since);
+        modes.push(options?.notificationOnly === true);
         return { parsed: [], reviewCandidates: [], reviewSourceBindings: [], declined: [],
           newestTs: since, inboxScannedCount: 0, scannedCount: 0, inboxHistoryComplete: true,
           detectedLaunchMarket: null, commit: async () => { events.push('commit'); }, ...result };
@@ -37,16 +38,19 @@ function harness(result = {}, initial = {}) {
         return { ids: [], durable: Promise.resolve().then(() => { events.push('durable'); }) };
       },
       stageReviewAlerts: () => ({ admitted: 1, durable: Promise.resolve().then(() => { events.push('review-durable'); }) }),
-      ensureDurable: async () => { events.push('flush'); },
+      ensureDurable: async () => {
+        events.push('flush');
+        if (options.failFlush) throw Error('synthetic pending ledger save failed');
+      },
     },
     dependencies: {
       // Planning is explicitly empty to isolate the collector/executor cursor
       // contract; separate importer suites own money and dedupe behavior.
-      planRows: (_rows, state, newestTs) => ({ txCount: 0, dueCount: 0, healedCount: 0,
-        newAccountCount: 0, batch: { lastScanTs: Math.max(state.lastScanTs, newestTs) } }),
+      planRows: (rows, state, newestTs) => ({ txCount: rows.length, dueCount: 0, healedCount: 0,
+        newAccountCount: 0, batch: { transactions: rows, lastScanTs: Math.max(state.lastScanTs, newestTs) } }),
     },
   });
-  return { capture, executor, events, requested, batches, getState: () => current };
+  return { capture, executor, events, requested, modes, batches, getState: () => current };
 }
 
 test('ten empty incremental scans keep the original watermark and never schedule a ledger save', async () => {
@@ -86,6 +90,30 @@ test('a notification-only scan retains its new timestamp and post-durability ack
   await h.executor.execute('routine');
   assert.equal(h.getState().lastScanTs, 1300);
   assert.deepEqual(h.events, ['save', 'durable', 'commit']);
+});
+
+test('explicit push-only import saves before ACK without advancing SMS or parser cursors', async () => {
+  const h = harness({ scannedCount: 1, newestTs: 1300,
+    parsed: [{ smsTs: 1300, channel: 'push' }] }, { parserVersion: 38 });
+  const outcome = await h.executor.execute('notification-only');
+  assert.equal(outcome.source, 'push');
+  assert.deepEqual(h.modes, [true]);
+  assert.deepEqual(h.requested, [0]);
+  assert.equal(h.getState().lastScanTs, 1000);
+  assert.equal(h.batches[0].parserRereadComplete, undefined);
+  assert.deepEqual(h.events, ['save', 'durable', 'commit']);
+});
+
+test('deduped push alerts flush pending ledger state before ACK in both Android modes', async () => {
+  for (const intent of ['routine', 'notification-only']) {
+    const result = { scannedCount: 1, newestTs: 1000, requiresDurableCommit: true };
+    const success = harness(result);
+    await success.executor.execute(intent);
+    assert.deepEqual(success.events, ['flush', 'commit'], intent);
+    const failure = harness(result, {}, { failFlush: true });
+    await assert.rejects(failure.executor.execute(intent), /pending ledger save failed/);
+    assert.deepEqual(failure.events, ['flush'], `${intent} must retain ciphertext after save failure`);
+  }
 });
 
 test('completed historical rereads still save the migration receipt even without ledger changes', async () => {

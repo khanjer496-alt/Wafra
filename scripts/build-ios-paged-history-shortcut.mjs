@@ -29,7 +29,16 @@ export function buildPagedHistoryShortcut() {
   const alert = (title, message, cancel = false) => emit('is.workflow.actions.alert', { WFAlertActionTitle: title, WFAlertActionMessage: message, WFAlertActionCancelButtonShown: cancel });
   const condition = (value, comparison, operation) => {
     const group = uuid();
-    emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 0, WFInput: { Type: 'Variable', Variable: attachment(value) }, WFCondition: 4,
+    // Dictionary Value outputs are untyped. Shortcuts leaves the comparison
+    // parameter unresolved on-device unless the conditional subject is
+    // explicitly coerced to the type of the literal being compared.
+    const typedValue = value?.Type === 'ActionOutput'
+      ? { ...value, Aggrandizements: [...(value.Aggrandizements ?? []), {
+          Type: 'WFCoercionVariableAggrandizement',
+          CoercionItemClass: typeof comparison === 'number' ? 'WFNumberContentItem' : 'WFStringContentItem',
+        }] }
+      : value;
+    emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 0, WFInput: { Type: 'Variable', Variable: attachment(typedValue) }, WFCondition: 4,
       ...(typeof comparison === 'number' ? { WFNumberValue: comparison } : { WFConditionalActionString: comparison }) });
     operation(); emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 2 });
   };

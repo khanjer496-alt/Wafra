@@ -43,7 +43,7 @@ import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/r
 import type { AppState } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
 
-export type CaptureSource = 'sms' | 'relay' | 'none';
+export type CaptureSource = 'sms' | 'push' | 'relay' | 'none';
 
 export interface CaptureResult {
   parsed: ScannedSms[];
@@ -77,6 +77,8 @@ export interface CaptureResult {
   source: CaptureSource;
   /** Acknowledge collected rows. Safe to call when there is nothing to ack. */
   commit: () => Promise<void>;
+  /** Native queue rows need a durability flush even when planning is a no-op. */
+  requiresDurableCommit?: boolean;
   /**
    * The platform can capture, but the user has not finished setting it up —
    * on iOS that means no paired relay. Screens use this to offer the setup
@@ -308,7 +310,10 @@ function relayLaunchMarket(
  * because only it knows whether this is an interactive refresh or a silent
  * background sync.
  */
-export async function collectNewMessages(state: AppState): Promise<CaptureResult> {
+export async function collectNewMessages(
+  state: AppState,
+  options: { notificationOnly?: boolean } = {},
+): Promise<CaptureResult> {
   // An Android runtime permission can remain granted after the user turns
   // capture off inside Wafra, so the durable app preference must stop before
   // the inbox reader is called. Private Mode is a different promise on
@@ -317,6 +322,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
   if (state.captureOptOut || (state.privateMode && isRelayPlatform())) return EMPTY;
 
   if (isSmsScanningAvailable()) {
+    const notificationOnly = options.notificationOnly === true;
     // The routine scan reads only what arrived since last time. That is right
     // for a normal refresh and wrong after a parser change: a message is
     // imported once and can never arrive again, so every improvement would
@@ -324,8 +330,8 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // would stay filed as spending forever. When the parser has moved on,
     // re-read everything — existing rows are recognized by fingerprint and
     // healed in place, not duplicated.
-    const reread = state.parserVersion !== PARSER_VERSION;
-    const sinceMs = reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
+    const reread = !notificationOnly && state.parserVersion !== PARSER_VERSION;
+    const sinceMs = notificationOnly || reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
     // `declined` is the other half of that re-read. A decline the old parser
     // booked as an expense cannot be healed into anything — the money never
     // moved — so the row has to be retired, and the proof is the message
@@ -342,6 +348,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       scannedCount = 0,
       detectedLaunchMarket = null,
       nextCursor = null,
+      requiresDurableCommit = false,
       commit,
     } = await scanInbox(
       sinceMs,
@@ -349,7 +356,8 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
-        maxInboxPages: reread ? 1 : undefined },
+        maxInboxPages: reread ? 1 : undefined,
+        notificationOnly },
     );
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep
@@ -380,7 +388,9 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       reviewCandidates,
       reviewSourceBindings,
       declined,
-      newestTs: emptyScan ? state.lastScanTs : newestTs,
+      // Push rows carry their own event timestamp. Never use them to skip SMS
+      // that may appear later when READ_SMS is granted again.
+      newestTs: notificationOnly || emptyScan ? state.lastScanTs : newestTs,
       inboxScannedCount,
       scannedCount,
       historicalReread: reread && inboxHistoryComplete,
@@ -390,7 +400,8 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
         updatedAt: migrationTime, error: null,
       } } : {}),
       detectedLaunchMarket,
-      source: 'sms',
+      source: notificationOnly ? 'push' : 'sms',
+      requiresDurableCommit,
       commit,
       needsSetup: false,
     };

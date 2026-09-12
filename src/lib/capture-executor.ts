@@ -28,7 +28,7 @@ import type { ReviewEntry } from '@/lib/alert-review-tray';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 
-export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 'background';
+export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
 export interface CaptureImportSummary {
   transactions: number;
@@ -88,7 +88,7 @@ export interface BackgroundCaptureAdapter {
 }
 
 interface CaptureExecutorDependencies {
-  collectRoutine: (state: AppState) => Promise<CaptureResult>;
+  collectRoutine: (state: AppState, options?: { notificationOnly?: boolean }) => Promise<CaptureResult>;
   planRows: typeof buildImportPlan;
   getRelay: () => Promise<RelayConfig | null>;
   getBackgroundRelay: () => Promise<BackgroundRelayConfig | null>;
@@ -222,7 +222,7 @@ export const createCaptureExecutor = ({
     await dependencies.recordAutomationProof(active, marker);
   };
 
-  const executeRoutine = async (): Promise<CaptureExecutionOutcome> => {
+  const executeRoutine = async (notificationOnly = false): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
     const state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
@@ -230,7 +230,7 @@ export const createCaptureExecutor = ({
     const tracing = captureTraceEnabled();
     const traceStarted = tracing ? Date.now() : 0;
     captureTrace('routine:start');
-    const collected = await dependencies.collectRoutine(state);
+    const collected = await dependencies.collectRoutine(state, { notificationOnly });
     captureTrace('collect:done', collected.parsed.length, tracing ? Date.now() - traceStarted : 0);
     if (collected.needsSetup) return { kind: 'needs-setup' };
     // Inbox/relay I/O can overlap a hand edit or another import. Do not use
@@ -315,6 +315,15 @@ export const createCaptureExecutor = ({
         collected.source === 'relay' &&
         (reviewCandidates.length === 0 || collected.parsed.length > 0)
       ) {
+        await activeLedger.ensureDurable();
+        if (captureStopped(activeLedger, collected.source)) {
+          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+        }
+      }
+      // A push row can dedupe against a transaction that is still only in
+      // React state after a pending/failed save. Flush that state before
+      // deleting its sole encrypted native copy, even in a mixed SMS scan.
+      if (collected.requiresDurableCommit) {
         await activeLedger.ensureDurable();
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -521,6 +530,7 @@ export const createCaptureExecutor = ({
   return {
     execute: async (intent) => {
       if (intent === 'routine') return executeRoutine();
+      if (intent === 'notification-only') return executeRoutine(true);
       if (intent === 'supplemental') return executeSupplemental();
       if (intent === 'setup-verification') return executeSetupVerification();
       return executeBackground();

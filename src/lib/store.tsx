@@ -2175,8 +2175,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setCaptureOptOut = useCallback(async (enabled: boolean) => {
     if (enabled) {
-      const { setIosCaptureEnabled } = await import('@/lib/capture');
-      await setIosCaptureEnabled(false);
+      if (Platform.OS === 'android') {
+        const { default: reader } = await import('../../modules/notification-reader');
+        if (reader?.isAvailable() === true &&
+          !(await reader.setCaptureEnabled(false, 0))) {
+          throw new Error('Android notification capture could not be disabled');
+        }
+      } else if (Platform.OS === 'ios') {
+        const { setIosCaptureEnabled } = await import('@/lib/capture');
+        await setIosCaptureEnabled(false);
+      }
     }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);

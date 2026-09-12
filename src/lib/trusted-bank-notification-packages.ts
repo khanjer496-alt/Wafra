@@ -12,6 +12,7 @@ export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {
   'com.vipera.ts.starter.MashreqAE': 'AE',
   'io.wio.retail': 'AE',
   'ae.wio.personal': 'AE',
+  'ae.hsbc.hsbcuae': 'AE',
   'com.alrajhiretailapp': 'SA',
   'com.BankAlBilad': 'SA',
   'com.bankalbilad.NewRMB': 'SA',
@@ -25,9 +26,30 @@ export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {
 export type TrustedBankNotificationMarket =
   typeof TRUSTED_BANK_NOTIFICATION_PACKAGES[keyof typeof TRUSTED_BANK_NOTIFICATION_PACKAGES];
 
-/** Build opt-in never replaces Android notification-access consent. */
+/** Native availability never replaces Android notification-access consent. */
 export const isBankNotificationCaptureAvailable = (nativeAvailable: boolean): boolean =>
-  process.env.EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA === '1' && nativeAvailable === true;
+  nativeAvailable === true;
+
+const LOCAL_TRIAL_MS = 3 * 86_400_000;
+const STORE_ENTITLEMENT_LEASE_MS = 25 * 60 * 60 * 1000;
+
+/**
+ * Native listener admission must expire on its own while the JS app is closed.
+ * Founder access is lifetime. The local trial uses its exact deadline. A
+ * purchased entitlement receives a bounded lease and is refreshed whenever
+ * Wafra runs; this prevents an old cached Pro boolean from authorizing capture
+ * forever after a subscription later expires.
+ */
+export const bankNotificationAdmissionExpiresAt = (
+  state: { pro: boolean; founderPro?: boolean; trialStartTs: number },
+  nowMs: number = Date.now(),
+): number => {
+  if (state.founderPro === true) return Number.MAX_SAFE_INTEGER;
+  if (state.pro === true) return nowMs + STORE_ENTITLEMENT_LEASE_MS;
+  if (!Number.isFinite(state.trialStartTs) || state.trialStartTs <= 0) return 0;
+  const expiresAt = state.trialStartTs + LOCAL_TRIAL_MS;
+  return Number.isFinite(expiresAt) && expiresAt > nowMs ? expiresAt : 0;
+};
 
 export const trustedBankNotificationMarket = (
   packageName: string,

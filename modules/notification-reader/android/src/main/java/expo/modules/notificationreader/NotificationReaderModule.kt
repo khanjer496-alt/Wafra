@@ -1,11 +1,26 @@
 package expo.modules.notificationreader
 
+import android.content.Context
 import android.content.Intent
+import android.content.ComponentName
 import android.provider.Settings
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class NotificationReaderModule : Module() {
+  private fun hasSystemAccess(context: Context): Boolean {
+    val enabled = Settings.Secure.getString(
+      context.contentResolver,
+      "enabled_notification_listeners"
+    ) ?: ""
+    return enabled.split(':').any { value ->
+      ComponentName.unflattenFromString(value)?.let { component ->
+        component.packageName == context.packageName &&
+          component.className == BankNotificationListenerService::class.java.name
+      } == true
+    }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("NotificationReader")
 
@@ -18,7 +33,7 @@ class NotificationReaderModule : Module() {
       NotificationCaptureStore.purgeLegacyPlaintext(context)
     }
 
-    /** Only explicitly enabled test APKs expose this experimental surface. */
+    /** Whether this Android build includes bank-notification capture. */
     Function("isAvailable") {
       TrustedBankNotificationPackages.CAPTURE_ENABLED
     }
@@ -27,22 +42,33 @@ class NotificationReaderModule : Module() {
     Function("isEnabled") {
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false
       val context = appContext.reactContext ?: return@Function false
-      val enabled = Settings.Secure.getString(
-        context.contentResolver,
-        "enabled_notification_listeners"
-      ) ?: ""
-      enabled.contains(context.packageName)
+      if (!NotificationCapturePolicy.isEnabled(context)) return@Function false
+      hasSystemAccess(context)
+    }
+
+    /** The OS grant, even while Wafra's saved tracking choice is off. */
+    Function("hasSystemAccess") {
+      val context = appContext.reactContext ?: return@Function false
+      hasSystemAccess(context)
+    }
+
+    /** The app's hydrated tracking/entitlement choice, separate from OS access. */
+    AsyncFunction("setCaptureEnabled") { enabled: Boolean, expiresAtMs: Double ->
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val expiresAt = if (expiresAtMs.isFinite() && expiresAtMs > 0.0) expiresAtMs.toLong() else 0L
+      val changed = NotificationCapturePolicy.setEnabled(context, enabled, expiresAt)
+      if (enabled && changed) BankNotificationListenerService.sweepConnected()
+      true
     }
 
     /** Opens the system Notification access screen for the user to enable it. */
     Function("openSettings") {
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false
-      val context = appContext.reactContext
-      if (context != null) {
-        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-      }
+      val context = appContext.reactContext ?: return@Function false
+      val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
       true
     }
 
@@ -51,6 +77,9 @@ class NotificationReaderModule : Module() {
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction emptyList<Map<String, Any>>()
       val context = appContext.reactContext
         ?: return@AsyncFunction emptyList<Map<String, Any>>()
+      if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
+        return@AsyncFunction emptyList<Map<String, Any>>()
+      }
       NotificationCaptureStore.read(context, sinceMs.toLong()).map { row ->
         mapOf(
           "id" to row.id,

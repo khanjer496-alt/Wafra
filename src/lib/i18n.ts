@@ -1015,15 +1015,13 @@ const S = {
     ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل تنبيهات البنك يعمل بإذن قراءة الرسائل المنفصل.',
   },
   bankPushOn: {
-    en: 'On · bank-app money alerts import automatically',
-    ar: 'مفعّل · تُستورد تنبيهات المال من تطبيق البنك تلقائياً',
+    en: 'On · processed when Wafra opens or refreshes',
+    ar: 'مفعّل · تُعالج عند فتح وفرة أو تحديثه',
   },
   bankPushOff: {
-    en: 'Off · for banks that push instead of SMS',
-    ar: 'متوقف · للبنوك التي ترسل إشعارات بدلاً من الرسائل',
+    en: 'Off · grant bank notification access',
+    ar: 'متوقف · امنح إذن إشعارات البنوك',
   },
-  bankPushBetaOn: { en: 'On · processed when Wafra opens or refreshes', ar: 'مفعّل · تُعالج عند فتح وفرة أو تحديثه' },
-  bankPushBetaOff: { en: 'Off · notification and SMS-reading access needed', ar: 'متوقف · يلزم الوصول إلى الإشعارات وقراءة الرسائل' },
   regionHeader: { en: 'Language & bank formats', ar: 'اللغة وتنسيقات البنوك' },
   countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
   parserPack: { en: 'Bank-message region', ar: 'منطقة رسائل البنك' },
@@ -1321,7 +1319,6 @@ const S = {
   notificationsOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   notificationsOffBody: { en: 'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك. فعّله من الإعدادات ← التطبيقات ← وفرة ← الإشعارات.' },
   bankAppNotifsTitle: { en: 'Bank app notifications', ar: 'إشعارات تطبيقات البنوك' },
-  bankAppNotifsBetaTitle: { en: 'Bank app notifications · Test', ar: 'إشعارات تطبيقات البنوك · تجريبي' },
   eraseEverythingQ: { en: 'Erase everything on this phone?', ar: 'حذف كل شيء من هذا الهاتف؟' },
   eraseAction: { en: 'Erase', ar: 'مسح' },
   eraseEverythingBody: {
@@ -1496,8 +1493,7 @@ const S = {
   merchantRuleAlso: { en: 'Future imports from {merchant} will use this category. Also update {n} existing {entries}?', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف. هل تحدّث أيضاً {n} من العمليات الحالية؟' },
   leavingInDays: { en: 'Leaving in {days} days', ar: 'تخرج خلال {days} أيام' },
   rememberForMerchant: { en: 'Remember for {merchant}?', ar: 'تذكّر لـ {merchant}؟' },
-  notifAccessFull: { en: 'Some banks send push notifications instead of SMS. Grant Wafra notification access and money alerts import automatically. Only alerts that mention an amount are kept, and they never leave this phone.', ar: 'ترسل بعض البنوك إشعارات بدل الرسائل. امنح وفرة إذن قراءة الإشعارات لتُستورد تنبيهات المال تلقائياً. تُحفظ فقط التنبيهات التي تذكر مبلغاً، ولا تغادر هذا الهاتف أبداً.' },
-  notifAccessBetaFull: { en: 'Experimental for selected bank apps installed from Google Play. This beta also needs SMS-reading access and a finished inbox scan. With tracking enabled, alerts are processed when Wafra opens or refreshes; some go to Review alerts. Not all bank formats are verified. Temporary candidates are encrypted on this phone; OTP and security alerts are rejected.', ar: 'ميزة تجريبية لتطبيقات بنوك محددة مثبّتة من Google Play. تحتاج هذه النسخة أيضاً إلى إذن قراءة الرسائل وإكمال فحص الوارد. عند تفعيل التتبع، تُعالج التنبيهات عند فتح وفرة أو تحديثه، ويذهب بعضها إلى مراجعة التنبيهات. لم تُتحقّق كل صيغ البنوك بعد. تبقى البيانات المؤقتة مشفّرة على هذا الهاتف، وتُرفض رموز التحقق والتنبيهات الأمنية.' },
+  notifAccessFull: { en: 'For selected Google Play bank apps. This works without SMS access: grant Wafra Notification access, then supported money alerts are processed when Wafra opens or refreshes. Uncertain alerts go to Review. Temporary candidates are encrypted on this phone; OTP and security alerts are rejected. Not every bank or alert format is supported.', ar: 'لتطبيقات بنوك محددة مثبّتة من Google Play. تعمل دون إذن الرسائل: امنح وفرة إذن الوصول إلى الإشعارات، ثم تُعالج تنبيهات المال المدعومة عند فتح وفرة أو تحديثه. تُعرض التنبيهات غير المؤكدة للمراجعة. تُشفّر البيانات المؤقتة على هذا الهاتف، وتُرفض رموز التحقق والتنبيهات الأمنية. ليست كل البنوك أو صيغ التنبيهات مدعومة.' },
   startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
   alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
   // Storage recovery. Shown INSTEAD of onboarding when the encrypted ledger

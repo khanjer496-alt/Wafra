@@ -93,6 +93,17 @@ export function isSmsScanningAvailable(): boolean {
   return Platform.OS === 'android' && SmsReader != null;
 }
 
+/** Android's explicit Notification access plus Wafra's local admission choice. */
+export function hasBankNotificationAccess(): boolean {
+  if (Platform.OS !== 'android' || !NotificationReader) return false;
+  try {
+    return isBankNotificationCaptureAvailable(NotificationReader.isAvailable?.() === true) &&
+      NotificationReader.isEnabled?.() === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Older binaries remain usable; only new modules emit this source-free hint. */
 export function subscribeInboxChanges(listener: () => void): () => void {
   if (!isSmsScanningAvailable()) return () => {};
@@ -148,6 +159,8 @@ export interface InboxScanCursor {
 }
 
 export interface ScanInboxOptions {
+  /** Read the bank-app queue without requiring or advancing the SMS inbox. */
+  notificationOnly?: boolean;
   /** Resume strictly before this lossless Android provider date/id pair. */
   cursor?: InboxScanCursor | null;
   /** Omit for the existing complete scan; history import uses one page. */
@@ -197,6 +210,8 @@ export interface ScanResult {
   detectedLaunchMarket: 'AE' | 'SA' | null;
   /** Retire native notification rows only after ledger/review durability. */
   commit: () => Promise<void>;
+  /** Queue ACK requires a flush even when every candidate deduplicated. */
+  requiresDurableCommit?: boolean;
 }
 
 const NOOP_SCAN_COMMIT = async () => {};
@@ -351,6 +366,14 @@ export function inspectSourceFreeRefusedAlert(input: {
 }): SourceFreeRefusedAlertDecision {
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
+  // A generic amount detector can read "Get AED 50 cashback on your next
+  // purchase" as a posted purchase. The launch parser already refused it;
+  // never turn a bank-app offer into an actionable spending review.
+  if (input.channel === 'push' &&
+    /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(input.source) &&
+    !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(input.source)) {
+    return { kind: 'ignored' };
+  }
   if (!hasBankAlertMoneyHint(input.source) &&
     !hasGenericBankAlertContext(input.source, input.sender)) return { kind: 'ignored' };
 
@@ -432,7 +455,7 @@ export async function scanInbox(
   regionHint: string | null = deviceRegionHint(),
   options: ScanInboxOptions = {},
 ): Promise<ScanResult> {
-  if (!isSmsScanningAvailable() || !SmsReader) {
+  if (Platform.OS !== 'android' || (!options.notificationOnly && !SmsReader)) {
     return {
       parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs,
       inboxScannedCount: 0, inboxHistoryComplete: false, scannedCount: 0,
@@ -578,9 +601,14 @@ export async function scanInbox(
     ? DEFAULT_PAGE_SIZE
     : Math.max(2, Math.min(Math.floor(options.pageSize), MAX_PAGE_SIZE));
 
+  // A bank can send push alerts without any SMS. Keep SMS history/cursor work
+  // separate so declining READ_SMS does not prevent the user's explicitly
+  // granted notification listener from draining its encrypted queue.
+  const smsReader = options.notificationOnly ? null : SmsReader;
   for (;;) {
+    if (!smsReader) break;
     const readStarted = tracing ? Date.now() : 0;
-    const batch: InboxSms[] = await SmsReader.getInboxSms(
+    const batch: InboxSms[] = await smsReader.getInboxSms(
       sinceMs,
       beforeDateMs,
       beforeId,
@@ -716,7 +744,7 @@ export async function scanInbox(
   // query above already found them; this covers the case where a message
   // never reached the SMS provider, and is the hook a live alert hangs off.
   // Duplicates collapse on the date/amount/title fingerprint in the plan.
-  if (inboxHistoryComplete && SmsReader.getReceived) {
+  if (inboxHistoryComplete && SmsReader?.getReceived) {
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
@@ -762,7 +790,7 @@ export async function scanInbox(
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
   const notificationReader = NotificationReader;
-  if (inboxHistoryComplete && notificationReader &&
+  if ((inboxHistoryComplete || options.notificationOnly) && notificationReader &&
     isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true) &&
     notificationReader?.isEnabled?.()) {
     try {
@@ -842,6 +870,7 @@ export async function scanInbox(
     nextCursor,
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
+    requiresDurableCommit: notificationIds.size > 0,
     commit: notificationIds.size > 0 && notificationReader
       ? async () => {
           const acknowledged = await notificationReader.ackCaptured([...notificationIds]);

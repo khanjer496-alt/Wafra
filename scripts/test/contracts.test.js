@@ -226,11 +226,14 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       service.includes('TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)') &&
       scanner.includes('trustedBankNotificationMarket(n.pkg)'));
   const notificationGradle = read('modules/notification-reader/android/build.gradle');
-  ok('bank-app capture defaults closed and only an explicit paired beta flag opens the native and JS gates',
-    nativePackages.includes('CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') &&
-      notificationGradle.includes("System.getenv('WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1' &&") &&
-      notificationGradle.includes("System.getenv('EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') == '1'") &&
-      jsPackages.includes("process.env.EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA === '1'") &&
+  ok('normal Android builds expose bank capture while local consent and OS access still gate collection',
+    nativePackages.includes('CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED') &&
+      notificationGradle.includes("buildConfigField 'boolean', 'WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED', 'true'") &&
+      jsPackages.includes('nativeAvailable === true') &&
+      !jsPackages.includes('EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA') &&
+      service.includes('NotificationCapturePolicy.isEnabled(this)') &&
+      service.indexOf('NotificationCapturePolicy.isEnabled(this)') < service.indexOf('NotificationCaptureStore.append(') &&
+      nativeModule.includes('AsyncFunction("setCaptureEnabled")') &&
       scanner.includes('isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true)') &&
       nativeModule.includes('Function("isAvailable")'));
   ok('notification erase prevents old shade rows from being swept back in',
@@ -1056,10 +1059,10 @@ function ktSources(dir) {
       /<CaptureOwner \/>/.test(tabsLayout));
   ok('Home observes status without registering a second foreground scan',
     /useAutoImport\(false, true\)/.test(home));
-  ok('a hidden shell access failure reaches Home capture status',
+  ok('a hidden SMS access failure reaches Home unless bank notifications remain available',
     /React\.useSyncExternalStore\(\s*subscribeSmsAccess/.test(hook) &&
       /setSharedSmsAccessUnavailable\(true\)/.test(hook) &&
-      /captureState: sharedAccessUnavailable \? 'off' : captureState/.test(hook));
+      /captureState: sharedAccessUnavailable &&[\s\S]{0,120}hasBankNotificationAccess\(\)[\s\S]{0,80}\? 'off' : captureState/.test(hook));
   ok('Home refresh surfaces a native inbox failure',
     /await runAutoImport\(true\);[\s\S]*?catch \{[\s\S]*?captureRefreshFailed/.test(home));
 }

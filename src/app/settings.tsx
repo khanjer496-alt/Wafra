@@ -120,7 +120,10 @@ import { ClearAllError, useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
-import { isBankNotificationCaptureAvailable } from '@/lib/trusted-bank-notification-packages';
+import {
+  bankNotificationAdmissionExpiresAt,
+  isBankNotificationCaptureAvailable,
+} from '@/lib/trusted-bank-notification-packages';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
 import {
@@ -602,27 +605,64 @@ export default function SettingsScreen() {
   const notifAvailable = Platform.OS === 'android' &&
     isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
       try { setNotifEnabled(notifAvailable && NotificationReader?.isEnabled() === true); }
       catch { setNotifEnabled(false); }
     };
     refresh();
+    if (notifAvailable && !state.captureOptOut && proActive) {
+      void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state))
+        .then(refresh).catch(() => {});
+    }
     const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') refresh();
+      if (next !== 'active') return;
+      const reader = NotificationReader;
+      if (!pendingNotificationConsent.current || !reader) { refresh(); return; }
+      pendingNotificationConsent.current = false;
+      let granted = false;
+      try { granted = reader.hasSystemAccess(); } catch { /* Treat an unreadable OS grant as absent. */ }
+      if (!granted || !proActive) { refresh(); return; }
+      void (async () => {
+        const wasOptedOut = state.captureOptOut;
+        try {
+          // A canceled system permission flow must leave a prior global
+          // opt-out intact. Resume only after the OS confirms this grant.
+          if (wasOptedOut) await setCaptureOptOut(false);
+          if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state)))) {
+            throw new Error('notification_capture_unavailable');
+          }
+          refresh();
+        } catch {
+          if (wasOptedOut) await setCaptureOptOut(true).catch(() => {});
+          refresh();
+          Alert.alert(t('capturePreferenceFailed'));
+        }
+      })();
     });
     return () => subscription.remove();
-  }, [notifAvailable]);
+  }, [notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
   const onNotificationAccess = () => {
-    if (!notifAvailable || !NotificationReader) {
+    const reader = NotificationReader;
+    if (!notifAvailable || !reader) {
       Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
     setConfirmation({
-      question: t('bankAppNotifsBetaTitle'),
-      body: t('notifAccessBetaFull'),
+      question: t('bankAppNotifsTitle'),
+      body: t('notifAccessFull'),
       confirmLabel: notifEnabled ? t('openSettings') : t('enableAction'),
-      onConfirm: () => NotificationReader?.openSettings(),
+      onConfirm: () => {
+        try {
+          pendingNotificationConsent.current = true;
+          pendingNotificationConsent.current = reader.openSettings() === true;
+          if (!pendingNotificationConsent.current) Alert.alert(t('capturePreferenceFailed'));
+        } catch {
+          pendingNotificationConsent.current = false;
+          Alert.alert(t('capturePreferenceFailed'));
+        }
+      },
     });
   };
 
@@ -1346,8 +1386,8 @@ export default function SettingsScreen() {
             )}
           {notifAvailable &&
             linkRow(
-              t('bankAppNotifsBetaTitle'),
-              t(notifEnabled ? 'bankPushBetaOn' : 'bankPushBetaOff'),
+              t('bankAppNotifsTitle'),
+              t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
               gated(onNotificationAccess),
               { last: true, pro: true },
             )}

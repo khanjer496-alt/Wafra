@@ -13,10 +13,9 @@ import android.os.Build
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.
  */
 object TrustedBankNotificationPackages {
-  // Production remains closed pending package-specific held-out positive and
-  // marketing/OTP/balance-negative evidence. An explicitly requested test APK
-  // may enable the existing admission path without changing its trust rules.
-  val CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA
+  // Ordinary Android builds expose the listener. Exact Play-installed package
+  // identity and the user's Notification access remain mandatory.
+  val CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED
 
   val markets: Map<String, String> = mapOf(
     "com.emiratesnbd.android" to "AE",
@@ -26,6 +25,7 @@ object TrustedBankNotificationPackages {
     "com.vipera.ts.starter.MashreqAE" to "AE",
     "io.wio.retail" to "AE",
     "ae.wio.personal" to "AE",
+    "ae.hsbc.hsbcuae" to "AE",
     "com.alrajhiretailapp" to "SA",
     "com.BankAlBilad" to "SA",
     "com.bankalbilad.NewRMB" to "SA",

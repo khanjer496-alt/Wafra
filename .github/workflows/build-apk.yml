@@ -17,10 +17,6 @@ on:
         description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
         type: boolean
         default: false
-      notification_capture_beta:
-        description: 'Test APK only: enable experimental capture from trusted Google Play bank apps'
-        type: boolean
-        default: false
       founder_unlock:
         description: 'Internal test APK only: enable hidden Wafra logo Founder Pro unlock'
         type: boolean
@@ -75,8 +71,6 @@ jobs:
       WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ github.event.inputs.founder_unlock == 'true' && '1' || '0' }}
-      EXPO_PUBLIC_WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
-      WAFRA_ANDROID_NOTIFICATION_CAPTURE_BETA: ${{ github.event.inputs.notification_capture_beta == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
@@ -85,12 +79,6 @@ jobs:
         if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'
         run: |
           echo '::error::Capture tracing is for a local device test APK, not a Play bundle.'
-          exit 1
-
-      - name: Refuse experimental bank notification capture in a Play bundle
-        if: github.event.inputs.notification_capture_beta == 'true' && github.event.inputs.bundle == 'true'
-        run: |
-          echo '::error::Bank notification capture is an opt-in test APK feature. Turn off bundle or notification_capture_beta.'
           exit 1
 
       - name: Require the approved Claude design baseline

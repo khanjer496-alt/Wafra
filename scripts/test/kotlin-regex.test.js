@@ -108,6 +108,8 @@ const CREDENTIAL_CASES = [
   ['Use 458213 to authenticate your purchase of AED 500.00 at NOON.', true],
   ['Enter 458213 to confirm the payment of SAR 250.00.', true],
   ['Your OTP is 458213 for an AED 80.00 transaction.', true],
+  ['Approve this payment of AED 42.00 to SAMPLE RESTAURANT in the app.', true],
+  ['Your credit card transaction is approved. Your Credit Card has been used for AED 42.00 at SAMPLE RESTAURANT.', false],
   ['AED 89.50 spent at CARREFOUR. Do not share your OTP with anyone.', false],
   ['Purchase of AED 89.50 at CARREFOUR authenticated via 3D Secure.', false],
   ['Purchase of AED 89.50 at CARREFOUR with Debit Card ending 1234.', false],

@@ -224,6 +224,39 @@ const { scanInbox } = require('./build/auto-import.js');
       acknowledgedNotifications.length === 1,
     JSON.stringify({ hostile, acknowledgedNotifications }));
 
+  const hsbcTitle = 'Your credit card transaction is approved';
+  const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';
+  notificationRows = [
+    { id: 'hsbc-uae-purchase-0001', pkg: 'ae.hsbc.hsbcuae', title: hsbcTitle,
+      text: hsbcPurchase, ts: NOW + 6_000 },
+    { id: 'hsbc-uae-limit-000001', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE',
+      text: 'Your available limit is AED 5,000.00.', ts: NOW + 7_000 },
+    { id: 'hsbc-uae-offer-000001', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE',
+      text: 'Get AED 50 cashback on your next card purchase.', ts: NOW + 8_000 },
+    { id: 'hsbc-uae-otp-0000001', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE',
+      text: 'OTP 123456 for an AED 42.00 card transaction.', ts: NOW + 9_000 },
+    { id: 'hsbc-eg-imitator-0001', pkg: 'com.htsu.hsbcpersonalbanking',
+      title: hsbcTitle, text: hsbcPurchase, ts: NOW + 10_000 },
+  ];
+  const inboxReadsBeforePush = inboxReadCursors.length;
+  const hsbcOnly = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('HSBC UAE push-only capture imports one purchase without reading SMS or its limit as spending',
+    inboxReadCursors.length === inboxReadsBeforePush && !hsbcOnly.inboxHistoryComplete &&
+      hsbcOnly.parsed.length === 1 && hsbcOnly.parsed[0].channel === 'push' &&
+      hsbcOnly.parsed[0].amountFils === 4200 &&
+      hsbcOnly.parsed[0].merchant === 'Sample Restaurant' &&
+      hsbcOnly.reviewCandidates.every(row => row.kind === 'universal' &&
+        row.event.family === 'balance' && row.event.status === 'informational') &&
+      !hsbcOnly.reviewCandidates.some(row => row.observedAt === NOW + 8_000) &&
+      hsbcOnly.parsed.every(row => row.amountFils !== 500000 && row.amountFils !== 5000),
+    JSON.stringify({ parsed: hsbcOnly.parsed, reviews: hsbcOnly.reviewCandidates }));
+  const ackBeforeHsbc = acknowledgedNotifications.length;
+  await hsbcOnly.commit();
+  ok('trusted HSBC negatives are retired but the unrelated HSBC EG package is not acknowledged',
+    acknowledgedNotifications.length === ackBeforeHsbc + 4 &&
+      !acknowledgedNotifications.includes('hsbc-eg-imitator-0001'),
+    JSON.stringify(acknowledgedNotifications));
+
   inboxRows = [
     { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
     { address: 'ADCB', body: uae, date: NOW + 2_000 },

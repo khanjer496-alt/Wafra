@@ -42,6 +42,9 @@ object NotificationCaptureStore {
 
   @Synchronized
   fun append(context: Context, pkg: String, title: String, text: String, ts: Long) {
+    // Recheck while holding the queue lock: an opt-out racing a callback must
+    // never leave a candidate behind after the opt-out's clear completes.
+    if (!NotificationCapturePolicy.isEnabled(context)) return
     purgeLegacyPlaintext(context)
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return

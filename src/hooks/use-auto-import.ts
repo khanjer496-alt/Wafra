@@ -25,6 +25,7 @@ import { AppState as RNAppState, Linking, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
 import {
+  hasBankNotificationAccess,
   hasSmsPermission,
   isSmsInboxAccessError,
   isSmsScanningAvailable,
@@ -44,6 +45,7 @@ import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
+import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import {
   getRelayConfig,
   isLegacyShortcutCaptureActive,
@@ -581,6 +583,17 @@ export function useAutoImport(
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
   const [iosCaptureStatus, setIosCaptureStatus] = useState<WafraLiveCaptureStatus | null>(null);
   const entitlementActive = isProActive(state);
+  const syncAndroidNotificationAdmission = useCallback(async (current: AppState): Promise<void> => {
+    if (Platform.OS !== 'android') return;
+    const { default: reader } = await import('../../modules/notification-reader');
+    if (!reader?.setCaptureEnabled) return;
+    const enabled = current.hydrated && current.onboarded &&
+      !current.captureOptOut && isProActive(current);
+    await reader.setCaptureEnabled(
+      enabled,
+      enabled ? bankNotificationAdmissionExpiresAt(current) : 0,
+    );
+  }, []);
   const sharedAccessUnavailable = React.useSyncExternalStore(
     subscribeSmsAccess,
     smsAccessSnapshot,
@@ -599,6 +612,7 @@ export function useAutoImport(
       return;
     }
     if (current.captureOptOut) {
+      await syncAndroidNotificationAdmission(current).catch(() => {});
       if (Platform.OS === 'ios' && iosNative) {
         // Opt-out stops admission, but a previously staged record can cross
         // its logical 30-day expiry while capture is off. Touch only the
@@ -659,6 +673,7 @@ export function useAutoImport(
       return;
     }
     if (Platform.OS === 'android' && isSmsScanningAvailable()) {
+      await syncAndroidNotificationAdmission(current).catch(() => {});
       const granted = await hasSmsPermission().catch(() => false);
       if (!isCurrent()) return;
       // A status-only read can say the permission is absent through this
@@ -666,11 +681,12 @@ export function useAutoImport(
       // actual provider/scan failure; otherwise a permission denied behind
       // onboarding survives the later grant and keeps Home falsely off.
       setNeedsPermission(!granted);
-      setCaptureState(granted && !sharedAccessUnavailable ? 'waiting-for-alert' : 'off');
+      setCaptureState((granted && !sharedAccessUnavailable) || hasBankNotificationAccess()
+        ? 'waiting-for-alert' : 'off');
       return;
     }
     if (isCurrent()) setCaptureState('unsupported');
-  }, [getStateSnapshot, iosCycleDependencies, iosNative, sharedAccessUnavailable]);
+  }, [getStateSnapshot, iosCycleDependencies, iosNative, sharedAccessUnavailable, syncAndroidNotificationAdmission]);
   const latestStatusRead = useRef(readAndCommitCaptureStatus);
   latestStatusRead.current = readAndCommitCaptureStatus;
   const statusRefresh = useMemo(
@@ -683,6 +699,11 @@ export function useAutoImport(
     (): Promise<void> => statusRefresh.request(),
     [statusRefresh],
   );
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !state.hydrated) return;
+    void syncAndroidNotificationAdmission(getStateSnapshot()).catch(() => {});
+  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated,
+    state.onboarded, syncAndroidNotificationAdmission]);
 
   const recoverIosCapture = useCallback((): Promise<boolean> => {
     if (iosRecoveryInFlight.current) return iosRecoveryInFlight.current;
@@ -787,11 +808,15 @@ export function useAutoImport(
         if (interactive) toast.show(t('stillLoading'));
         return 'not-hydrated';
       }
+      // Re-evaluate expiry on every foreground attempt, even if React state
+      // did not change while the app was closed.
+      await syncAndroidNotificationAdmission(state).catch(() => {});
       // The first-history owner reads bounded pages from a durable cursor.
       // Running the incremental scanner beside it would parse the same inbox
       // against a competing ledger snapshot and could advance lastScanTs past
       // history the page coordinator has not committed yet.
-      if (state.historyImport && state.historyImport.status !== 'complete') {
+      const historyRunning = state.historyImport && state.historyImport.status !== 'complete';
+      if (historyRunning && Platform.OS !== 'android') {
         return 'history-import-running';
       }
       // Hard paywall: tracking pauses when the trial ends without Pro.
@@ -805,10 +830,14 @@ export function useAutoImport(
       // on.
       if (state.captureOptOut) return 'unavailable';
       if (!isCaptureAvailable()) return 'unavailable';
+      if (historyRunning && Platform.OS === 'android' && !hasBankNotificationAccess()) {
+        return 'history-import-running';
+      }
       let outcome: Awaited<ReturnType<typeof captureExecutor.execute>> | null = null;
-      // Android needs the SMS permission before it can read anything. iOS has
-      // no permission to ask for — its messages arrive over the relay — so the
-      // prompt is skipped there rather than shown and refused.
+      let notificationOnly = false;
+      // SMS and bank-app notifications have separate Android permissions.
+      // A user with Notification access can process push alerts without
+      // granting Wafra access to the SMS inbox.
       if (Platform.OS === 'ios') {
         if (!iosCycleDependencies) return 'unavailable';
         const localCycle = await runIosLocalCaptureCycle(iosCycleDependencies, 'drain');
@@ -841,8 +870,10 @@ export function useAutoImport(
         };
       } else if (isSmsScanningAvailable()) {
         let granted = await hasSmsPermission();
-        if (!granted && interactive) granted = await requestSmsPermission();
-        if (!granted) {
+        const notificationAccess = hasBankNotificationAccess();
+        if (!granted && !notificationAccess && interactive) granted = await requestSmsPermission();
+        if (historyRunning && granted && !notificationAccess) return 'history-import-running';
+        if (!granted && !notificationAccess) {
           setSharedSmsAccessUnavailable(true);
           setNeedsPermission(true);
           setCaptureState('off');
@@ -857,17 +888,25 @@ export function useAutoImport(
           }
           return 'no-permission';
         }
-        setNeedsPermission(false);
+        notificationOnly = !granted || Boolean(historyRunning && notificationAccess);
+        setNeedsPermission(!granted);
         setCaptureState('waiting-for-alert');
       }
 
       if (Platform.OS !== 'ios') {
         try {
-          outcome = await captureExecutor.execute('routine');
+          outcome = await captureExecutor.execute(notificationOnly ? 'notification-only' : 'routine');
         } catch (error) {
           if (!isSmsInboxAccessError(error)) throw error;
           setSharedSmsAccessUnavailable(true);
           setNeedsPermission(true);
+          if (hasBankNotificationAccess()) {
+            // A restricted SMS provider must not strand the independent,
+            // encrypted bank-app queue or advance the SMS cursor.
+            notificationOnly = true;
+            outcome = await captureExecutor.execute('notification-only');
+            setCaptureState('waiting-for-alert');
+          } else {
           setCaptureState('off');
           if (interactive) {
             toast.show(t('smsAccessOff'), {
@@ -879,10 +918,11 @@ export function useAutoImport(
             });
           }
           return 'no-permission';
+          }
         }
       }
       if (!outcome) return 'unavailable';
-      setSharedSmsAccessUnavailable(false);
+      if (!notificationOnly) setSharedSmsAccessUnavailable(false);
       // Only a completed native/relay read makes capture fresh. A provider
       // restriction thrown above must not suppress the immediate retry after
       // the user returns from Android settings.
@@ -945,7 +985,8 @@ export function useAutoImport(
       );
       return 'imported';
     },
-    [captureExecutor, getStateSnapshot, iosCycleDependencies, undoBatch, toast, router],
+    [captureExecutor, getStateSnapshot, iosCycleDependencies, syncAndroidNotificationAdmission,
+      undoBatch, toast, router],
   );
 
   // The single owner of `importInFlight`. Always starts a fresh scan — callers
@@ -1033,14 +1074,12 @@ export function useAutoImport(
 
   useEffect(() => {
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
-      !state.onboarded || state.captureOptOut || !entitlementActive ||
-      (state.historyImport && state.historyImport.status !== 'complete')) return;
+      !state.onboarded || state.captureOptOut || !entitlementActive) return;
     let mounted = true;
     const canScan = () => {
       const current = getStateSnapshot();
       return mounted && RNAppState.currentState === 'active' && current.hydrated &&
-        current.onboarded && !current.captureOptOut && isProActive(current) &&
-        (!current.historyImport || current.historyImport.status === 'complete');
+        current.onboarded && !current.captureOptOut && isProActive(current);
     };
     const scheduler = createInboxRefreshScheduler(async () => {
       // A provider change can arrive after the running scan's last page.
@@ -1217,8 +1256,10 @@ export function useAutoImport(
 
   return {
     runAutoImport,
-    needsPermission: needsPermission || sharedAccessUnavailable,
-    captureState: sharedAccessUnavailable ? 'off' : captureState,
+    needsPermission: (needsPermission || sharedAccessUnavailable) &&
+      !(Platform.OS === 'android' && hasBankNotificationAccess()),
+    captureState: sharedAccessUnavailable &&
+      !(Platform.OS === 'android' && hasBankNotificationAccess()) ? 'off' : captureState,
     iosCaptureStatus,
     recoverIosCaptureQueue: recoverIosCapture,
   };
