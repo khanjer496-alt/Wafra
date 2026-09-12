@@ -66,8 +66,8 @@ const validFixture = () => {
     submit: { production: { android: { track: 'internal' } } },
   });
   write(root, 'server/wrangler.toml', 'database_id = "fa920e7b-c661-4517-917d-26e8b4878721"\n');
-  write(root, 'docs/privacy-policy.md', 'Nasida Apps LLC. Contact support@wafra.example.');
-  write(root, 'docs/terms-of-use.md', 'Nasida Apps LLC; laws chosen by publisher. support@wafra.example');
+  write(root, 'docs/privacy-policy.md', 'Nasidaapps LLC. Contact support@wafra.example.');
+  write(root, 'docs/terms-of-use.md', 'Nasidaapps LLC; laws chosen by publisher. support@wafra.example');
   write(root, 'docs/store-listing.md', 'Support: support@wafra.example. Privacy: https://wafra.example/privacy');
   write(root, 'docs/store-compliance/google-play.md', 'Google Play declaration package.');
   write(root, 'docs/store-compliance/apple-app-store.md', 'Apple App Store declaration package.');

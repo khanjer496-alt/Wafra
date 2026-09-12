@@ -282,8 +282,8 @@ const checkStoreDocuments = async (root, findings) => {
   if (privacy?.includes('[[PUBLIC SUPPORT CONTACT') || terms?.includes('[[PUBLIC SUPPORT CONTACT')) {
     findings.push(finding('legal-contact', 'Legal documents still use a placeholder support contact', 'Customers and reviewers need a monitored real contact route.', 'Replace the PUBLIC SUPPORT CONTACT placeholder in both legal documents.'));
   }
-  if (privacy && !privacy.includes('Nasida Apps LLC')) findings.push(finding('privacy-publisher', 'The privacy policy does not identify the publisher', 'The public policy must identify the entity responsible for Wafra.', 'Name the approved publisher in the privacy policy.'));
-  if (terms && !terms.includes('Nasida Apps LLC')) findings.push(finding('terms-publisher', 'The terms do not identify the publisher', 'The contracting entity must be named before publication.', 'Name the approved publisher in the terms.'));
+  if (privacy && !privacy.includes('Nasidaapps LLC')) findings.push(finding('privacy-publisher', 'The privacy policy does not identify the publisher', 'The public policy must identify the entity responsible for Wafra.', 'Name the approved publisher in the privacy policy.'));
+  if (terms && !terms.includes('Nasidaapps LLC')) findings.push(finding('terms-publisher', 'The terms do not identify the publisher', 'The contracting entity must be named before publication.', 'Name the approved publisher in the terms.'));
   if (terms?.includes('[[GOVERNING LAW')) findings.push(finding('terms-governing-law', 'The governing-law clause is unresolved', 'Choosing governing law is a publisher/counsel decision and cannot be inferred from the repository.', 'Have the publisher/counsel choose the governing law and replace the placeholder.'));
   if (listing && /\[(business email|host the landing page privacy section)[^\]]*pending\]/i.test(listing)) {
     findings.push(finding('store-listing-placeholders', 'The store listing contains launch placeholders', 'Contact or hosted privacy details are unfinished.', 'Complete the pending store-listing fields.'));

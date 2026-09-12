@@ -1,14 +1,14 @@
 # Wafra Terms of Use
 
-_Last updated: 10 September 2026_
+_Last updated: 12 September 2026_
 
 > **Launch draft — needs counsel review and one legal decision before publishing.**
-> The publisher is known. The governing-law clause and monitored public support
-> contact remain deliberate placeholders because neither should be guessed from
-> where the company was formed or where a user happens to live.
+> The support contact has been supplied by the publisher. The governing-law
+> clause remains unresolved; it should not be guessed from where the company
+> was formed or where a user happens to live.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android and iOS published by **Nasida Apps LLC** ("we", "us").
+for Android and iOS published by **Nasidaapps LLC** ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -124,4 +124,4 @@ These terms are governed by the laws of `[[GOVERNING LAW — PUBLISHER/COUNSEL T
 
 ## Contact
 
-[[PUBLIC SUPPORT CONTACT — required before publishing]]
+Email: [support@nasidaapps.com](mailto:support@nasidaapps.com)
