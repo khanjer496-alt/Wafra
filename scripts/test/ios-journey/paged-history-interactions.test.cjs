@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('../repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
-const historyInstallUrl = 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08';
+const historyInstallUrl = 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17';
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });

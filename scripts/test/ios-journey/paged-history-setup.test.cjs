@@ -29,10 +29,10 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(api.PAGED_HISTORY_INSTALL_URL, null);
   const beta = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
-    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17',
   } } });
   assert.equal(beta.pagedHistoryEnabled(), true);
-  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08');
+  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17');
 });
 test('production keeps paging UI off while every iOS binary retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
