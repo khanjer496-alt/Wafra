@@ -3526,6 +3526,7 @@ struct WafraBankSenderRegistryTests {
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
         if (id === '@/lib/auto-import') {
           return {
+            hasBankNotificationAccess: () => false,
             hasSmsPermission: async () => false,
             isSmsInboxAccessError: () => false,
             isSmsScanningAvailable: () => false,
@@ -3749,6 +3750,7 @@ struct WafraBankSenderRegistryTests {
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
         if (id === '@/lib/auto-import') {
           return {
+            hasBankNotificationAccess: () => false,
             hasSmsPermission: async () => {
               permissionChecks += 1;
               return permissionGranted;
