@@ -105,7 +105,7 @@ export default function FlowScreen() {
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
       {view === 'categories' && <View testID="spending-ask-wafra" style={styles.assistantAction}>
-        <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline
+        <Button label={assistantCopy.explain} variant="ghost" icon="spark"
           onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
       </View>}
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
@@ -125,7 +125,7 @@ export default function FlowScreen() {
       {view === 'trends' && analysis && <>
         <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
         <View testID="spending-ask-wafra" style={styles.assistantAction}>
-          <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline
+          <Button label={assistantCopy.explain} variant="ghost" icon="spark"
             onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
         </View>
         <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
@@ -156,7 +156,7 @@ export default function FlowScreen() {
           <ThemedText type="meta" themeColor="textSecondary">{categoryHistory[0] ? monthLabel(categoryHistory[0].key, true) : ''} — {monthLabel(key, true)}</ThemedText>
         </View>
         <View testID="category-ask-wafra" style={styles.assistantAction}>
-          <Button label={assistantCopy.explainCategory} variant="ghost" icon="spark" inline onPress={() => {
+          <Button label={assistantCopy.explainCategory} variant="ghost" icon="spark" onPress={() => {
             const question = assistantCopy.categoryChangedQuestion(categoryLabel(category, 'en'));
             setCategory(null);
             router.push({ pathname: '/assistant', params: { question } });
