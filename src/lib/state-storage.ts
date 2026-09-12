@@ -9,6 +9,8 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { withLogoCacheErase } from '@/lib/logo-cache-lifecycle';
+
 type Pair = readonly [string, string | null];
 type WritePair = readonly [string, string];
 
@@ -26,9 +28,11 @@ export const stateStorage: StateStorage = {
   multiSet: (entries) => AsyncStorage.multiSet([...entries]),
   multiRemove: (keys) => AsyncStorage.multiRemove([...keys]),
   async destroy(prefix) {
-    const keys = await AsyncStorage.getAllKeys();
-    const owned = keys.filter((key) => key === prefix || key.startsWith(`${prefix}:`));
-    if (owned.length > 0) await AsyncStorage.multiRemove(owned);
+    return withLogoCacheErase(async () => {
+      const keys = await AsyncStorage.getAllKeys();
+      const owned = keys.filter((key) => key === prefix || key.startsWith(`${prefix}:`));
+      if (owned.length > 0) await AsyncStorage.multiRemove(owned);
+    });
   },
 };
 

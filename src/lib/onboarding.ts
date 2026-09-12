@@ -115,7 +115,10 @@ export function onboardingResumeDestination({
 }): OnboardingJourneyStage | 'ios-setup' {
   if (completedCallback) return 'complete';
   if (platform === 'ios' && pendingIosSetup) return 'ios-setup';
-  if (savedStage && savedStage !== 'complete') return savedStage;
+  // Completion's outcome is local to the mounted gate. After a cold restart,
+  // return to the saved capture choices instead of inventing a successful
+  // setup outcome or restarting the welcome questionnaire.
+  if (savedStage) return savedStage === 'complete' ? 'capture' : savedStage;
   return hasSavedPlan ? 'capture' : 'welcome';
 }
 

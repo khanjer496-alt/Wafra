@@ -37,6 +37,44 @@ const state = {
 const now = new Date('2026-09-20T12:00:00Z');
 
 {
+  const incoming = tx('income-regression', '2026-09-12', 'Incoming transfer', 5_000, 'other', 'income');
+  const evidence = { version: 1, currency: 'AED', attribution: 'source' };
+  const cases = [
+    { name: 'cash deposit is money movement, not income',
+      row: { ...incoming, title: 'Cash deposit' }, additionalIncomeFils: 0 },
+    { name: 'external decision overrides the legacy transfer flag',
+      row: { ...incoming, isTransfer: true,
+        transferDecision: { version: 1, ownership: 'external', decidedAt: now.getTime() } },
+      additionalIncomeFils: 5_000 },
+    { name: 'own decision excludes income without a legacy transfer flag',
+      row: { ...incoming,
+        transferDecision: { version: 1, ownership: 'own', decidedAt: now.getTime() } },
+      additionalIncomeFils: 0 },
+    { name: 'unresolved transfer ownership stays outside confirmed income',
+      row: { ...incoming, transferEvidence: evidence }, additionalIncomeFils: 0 },
+    { name: 'source-proven external income survives the legacy transfer flag',
+      row: { ...incoming, isTransfer: true, transferEvidence: { ...evidence, explicitExternal: true } },
+      additionalIncomeFils: 5_000 },
+    { name: 'source-proven own transfer is not earned income',
+      row: { ...incoming, transferEvidence: { ...evidence, explicitOwn: true } }, additionalIncomeFils: 0 },
+    { name: 'completed cashback remains income',
+      row: { ...incoming, title: 'Cashback credit', amountFils: 250 }, additionalIncomeFils: 250 },
+    { name: 'card repayment receipt is not income',
+      row: { ...incoming, title: 'Card payment', isTransfer: true, cardPaymentSide: 'receipt' },
+      additionalIncomeFils: 0 },
+  ];
+  const actual = cases.map(({ name, row }) => {
+    const withIncoming = { ...state, transactions: [...state.transactions, row] };
+    const income = answerWafraQuestion(withIncoming, 'How much income did I receive this month?', now);
+    const net = answerWafraQuestion(withIncoming, 'Did I spend more than I earned this month?', now);
+    return { name, incomeFils: income.data.totalFils, netFils: net.data.netFils };
+  });
+  assert.deepEqual(actual, cases.map(({ name, additionalIncomeFils }) => ({
+    name, incomeFils: 20_000 + additionalIncomeFils, netFils: 14_000 + additionalIncomeFils,
+  })), 'Assistant income and net must follow the same financial inclusion rules as the ledger');
+}
+
+{
   const request = planAssistantQuestion(state, 'What are my top spending categories?', now);
   assert.equal(request.tool, 'top-categories');
   const answer = executeAssistantTool(state, request, now);

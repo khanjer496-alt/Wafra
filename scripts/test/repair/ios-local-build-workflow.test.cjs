@@ -12,7 +12,7 @@ const workflow = YAML.parse(source);
 const job = workflow.jobs['local-build'];
 const steps = job.steps;
 
-test('local build is an explicit beta-only alternative, not a hosted quota or billing change', () => {
+test('local build accepts only the explicit supported store profiles without changing billing', () => {
   assert.equal(workflow.on.workflow_dispatch.inputs.build_host.default, 'eas');
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.build_host.options, ['eas', 'github-macos']);
   assert.match(job.if, /build_host == 'github-macos'/);
@@ -24,7 +24,9 @@ test('local build is an explicit beta-only alternative, not a hosted quota or bi
   }).status;
   assert.equal(run('history-beta', 'a'.repeat(40)), 0);
   assert.equal(run('history-beta', ''), 0);
-  assert.notEqual(run('production', 'a'.repeat(40)), 0);
+  assert.equal(run('production', 'a'.repeat(40)), 0);
+  assert.equal(run('production-candidate', 'a'.repeat(40)), 0);
+  for (const profile of ['preview', 'development', 'unknown']) assert.notEqual(run(profile, 'a'.repeat(40)), 0);
   for (const bad of ['main', '../main', 'a'.repeat(39), 'a'.repeat(40) + '; echo unsafe']) {
     assert.notEqual(run('history-beta', bad), 0);
   }

@@ -11,7 +11,9 @@ export type IosHistoryCardState =
   | 'review';
 
 export const IOS_HISTORY_HANDOFF_TTL_MS = 60 * 60_000;
-export const IOS_HISTORY_SHORTCUT_NAME = 'Wafra History Import';
+export const IOS_HISTORY_SHORTCUT_NAME = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1'
+  ? 'Wafra History v2'
+  : 'Wafra History Import';
 export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v1';
 export const IOS_HISTORY_HANDOFF_MARKER = 'wafra/ios-history-handoff-started-at/v1';
 export const IOS_HISTORY_RETURN_ORIGIN_MARKER = 'wafra/ios-history-return-origin/v1';

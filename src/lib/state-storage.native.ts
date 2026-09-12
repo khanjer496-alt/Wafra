@@ -18,6 +18,7 @@ import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { recordStorageFailure } from '@/lib/storage-diagnostics';
+import { withLogoCacheErase } from '@/lib/logo-cache-lifecycle';
 
 type Pair = readonly [string, string | null];
 type WritePair = readonly [string, string];
@@ -299,7 +300,7 @@ const encryptedStorage: StateStorage = {
    * and the legacy sweep have to be indivisible with respect to other writes.
    */
   async destroy(prefix) {
-    return serialiseWrite(async () => {
+    return serialiseWrite(() => withLogoCacheErase(async () => {
       // Stop using the live handle first. Deleting the key before the file
       // makes any file-removal failure fail closed: the remaining bytes are
       // SQLCipher ciphertext whose only key has already left the Keychain.
@@ -341,7 +342,7 @@ const encryptedStorage: StateStorage = {
         recordStorageFailure('destroy', failure);
         throw failure;
       }
-    });
+    }));
   },
 };
 

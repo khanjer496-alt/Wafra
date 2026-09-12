@@ -1,12 +1,17 @@
 // Smoke suite: visits every screen of the four-tab IA, opens each detail
 // sheet, exercises the import paste flow, the paywall, hidden-unlock defenses, and
 // trial expiry.
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { chromium } from 'playwright';
 
 const BASE = process.env.BASE ?? 'http://localhost:8126';
+const OUT = process.env.OUT;
+if (OUT) mkdirSync(OUT, { recursive: true });
+const results = [];
 let pass = 0, fail = 0;
 const ok = (name, cond) => {
+  results.push({ name, passed: !!cond });
   if (cond) { pass++; console.log(`✓ ${name}`); }
   else { fail++; console.log(`✗ ${name}`); }
 };
@@ -212,7 +217,9 @@ const browser = await chromium.launch(
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
+let aborted = null;
 
+try {
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2200);
 
@@ -221,30 +228,37 @@ ok('home hero focuses on spending instead of a total balance',
   await page.getByTestId('home-spending-total').isVisible() &&
   await page.getByText('Recorded balances', { exact: true }).count() === 0);
 ok('home splits income and spending', await page.getByTestId('home-spending-total').count() === 1 && await page.getByTestId('home-income-summary').count() === 1);
-ok('home lists upcoming obligations', !!(await visibleText(page, /^(Upcoming|Coming up)$/i)));
+ok('home lists due or upcoming obligations', !!(await visibleText(page, /^(Due & overdue|Due payments|Upcoming|Coming up)$/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 
-// The journal Home no longer invents one aggregate for unlike obligations.
-// Every visible payment row states its own date and exact amount. Read those
-// rows from the accessibility contract and verify that the same amount is
-// painted in the row, catching clipping or mismatched money without coupling
-// the check to the retired card composition.
-{
-  const payments = await page.evaluate(() => {
-    const section = document.querySelector('[data-testid="journal-payments"]');
-    if (!section) return [];
-    return [...section.querySelectorAll('[role="button"][aria-label$=" AED"]')].map((node) => ({
-      label: node.getAttribute('aria-label') || '',
-      text: (node.textContent || '').replace(/\s+/g, ''),
-    }));
-  });
-  const sound = payments.every(({ label, text }) => {
-    const match = label.match(/, ([\d,]+(?:\.\d{1,2})?) AED$/);
-    return !!match && text.includes(match[1].replace(/\s+/g, ''));
-  });
-  ok(`home: every upcoming payment keeps its date and exact amount (${payments.length} rows)`,
-    payments.length > 0 && sound);
-}
+// Ledger & Light splits due/upcoming widgets and exposes the row's text as
+// its accessible name. The old journal-payments aria-label no longer exists.
+// Keep every painted title/date/amount, then reconcile these exact figures and
+// dates against the independent Bills agenda presentation below.
+const homePayments = await page.evaluate(() => {
+  const now = new Date();
+  return [...document.querySelectorAll('[data-testid="home-widget-due"], [data-testid="home-widget-upcoming"]')]
+    .flatMap(section => [...section.querySelectorAll('[role="button"]')])
+    .filter(node => (node.textContent || '').trim()) // exclude empty section chevrons
+    .map(node => {
+      const leaves = [...node.querySelectorAll('div,span')].filter(n => !n.children.length && n.textContent.trim());
+      return { fields: leaves.map(n => n.textContent.trim()),
+        clipped: leaves.some(n => n.scrollWidth > n.clientWidth + 1 || /…/.test(n.textContent)),
+        today: [now.getFullYear(), now.getMonth(), now.getDate()] };
+    });
+});
+const paymentDayOffset = (phrase) => {
+  if (/^today$/i.test(phrase)) return 0;
+  if (/^tomorrow$/i.test(phrase)) return 1;
+  const future = phrase.match(/^in (\d+) days?$/i);
+  if (future) return Number(future[1]);
+  const late = phrase.match(/^(\d+) days? late$/i);
+  return late ? -Number(late[1]) : NaN;
+};
+ok(`home: every payment exposes a readable date and exact amount (${homePayments.length} rows)`,
+  homePayments.length > 0 && homePayments.every(({ fields, clipped }) =>
+    fields.length === 3 && fields[0] && Number.isFinite(paymentDayOffset(fields[1])) &&
+    /^[\d,]+(?:\.\d{1,2})?$/.test(fields[2]) && !clipped));
 
 // Entry detail sheet.
 //
@@ -253,17 +267,18 @@ ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 // rolls and the top six rows shift — a suite failure that says nothing about
 // the app. Read the first row and its account off the screen instead.
 const firstEntry = await page.evaluate(() => {
-  const section = document.querySelector('[data-testid="journal-activity"]');
-  const row = [...(section?.querySelectorAll('[role="button"][aria-label]') ?? [])].find(
-    (node) => /, (?:plus|minus) [\d,.]+ AED$/i.test(node.getAttribute('aria-label') || ''),
-  );
+  const section = document.querySelector('[data-testid="home-widget-activity"]');
+  const candidates = [...(section?.querySelectorAll('[data-testid="transaction-details-link"]') ?? [])];
+  // Exercise actual nonzero cents: rounding 251.36 must fail this test, while
+  // an integer-only specimen cannot detect that regression.
+  const row = candidates.find(node => /, (?:plus|minus) [\d,]+\.(?!00\b)\d{2} AED$/i.test(node.getAttribute('aria-label') || ''));
   if (!row) return null;
   const label = row.getAttribute('aria-label') || '';
   const parts = label.split(', ');
   return { label, title: parts[0] || '', account: parts[2] || '' };
 });
 ok('home lists an entry to open', !!firstEntry?.title && !!firstEntry?.label);
-if (!firstEntry) throw new Error('Home rendered no accessible journal transaction row');
+if (!firstEntry) throw new Error('Home rendered no accessible transaction Details row with nonzero cents');
 await tapLabel(page, firstEntry.label, 1200);
 ok('entry sheet opens on a row', !!(await visibleText(page, /TRANSACTION DETAILS/i)));
 ok(`entry sheet names the account (${firstEntry.account})`,
@@ -280,30 +295,24 @@ ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)
  * reopen, and the amount has to come back byte-identical.
  */
 {
-  const amountValue = () => page.evaluate(() => {
-    for (const i of document.querySelectorAll('input')) {
-      const r = i.getBoundingClientRect();
-      if (r.width && r.height && /^\d+(\.\d+)?$/.test(i.value)) return i.value;
-    }
-    return null;
-  });
+  const amountValue = () => page.getByTestId('entry-detail-sheet').getByRole('textbox', { name: 'Amount', exact: true }).inputValue();
   const before = await amountValue();
   ok(`edit form seeds the amount with its fils (${before})`, !!before && /\.\d\d$/.test(before));
-  // The category row is a horizontal scroller; reach a chip that is not the
-  // current one without touching any other field.
-  const picked = await page.evaluate(() => {
-    const row = [...document.querySelectorAll('div')].find(
-      (d) => d.scrollWidth > d.clientWidth + 40 && d.clientHeight < 80 && d.clientHeight > 20,
-    );
-    if (row) row.scrollLeft = row.scrollWidth;
-    return !!row;
-  });
-  await page.waitForTimeout(500);
-  if (picked) await tapText(page, /^Charity$|^Government$|^Other$/, 900).catch(() => {});
-  await tapText(page, /^SAVE CHANGES$/i, 1600).catch(() => {});
-  await page.waitForTimeout(600);
-  await tapText(page, firstEntry.title, 1200).catch(() => {});
-  await tapText(page, 'Edit transaction', 1100).catch(() => {});
+  const chosenCategory = firstEntry.label.includes(', Charity,') ? 'Government' : 'Charity';
+  await tapText(page, new RegExp(`^${chosenCategory}$`), 500);
+  await tapText(page, /^SAVE CHANGES$/i, 500);
+  // Saving a changed category asks whether to remember a merchant rule. Close
+  // that real question before reopening the transaction. Never swallow a
+  // failed save or navigate through the separate merchant-summary target.
+  if (await visibleText(page, /^Remember for /i, 2500)) await tapLabel(page, 'Close', 500);
+  await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
+  const freshLabel = await page.getByTestId('home-widget-activity').getByTestId('transaction-details-link')
+    .evaluateAll((nodes, title) => nodes.map(n => n.getAttribute('aria-label')).find(label => label.startsWith(`${title}, `)), firstEntry.title);
+  ok('category edit saved and remains attached to the same transaction',
+    !!freshLabel && freshLabel.includes(`, ${chosenCategory},`) && freshLabel.includes(`, ${firstEntry.account},`));
+  if (!freshLabel) throw new Error('Edited transaction lost its Home Details control');
+  await tapLabel(page, freshLabel, 500);
+  await tapText(page, 'Edit transaction', 500);
   const after = await amountValue();
   ok(`editing only the category leaves the amount alone (${before} → ${after})`, !!before && before === after);
 }
@@ -388,6 +397,21 @@ ok('Agenda amounts are exactly visible in their own rows',rows.every(n=>{
  const amount=n.label.match(/AED ([\d,]+(?:\.\d+)?)/)?.[1];
  return amount && n.text.replace(/\s/g,'').includes(amount);
 }));
+for (const payment of homePayments) {
+  const [title, relativeDate, paintedAmount] = payment.fields;
+  const offset = paymentDayOffset(relativeDate);
+  const date = new Date(...payment.today);
+  date.setDate(date.getDate() + offset);
+  const agendaDate = offset === 0 ? 'Today' : offset === 1 ? 'Tomorrow'
+    : `${date.getDate()} ${date.toLocaleString('en', { month: 'short' })}`;
+  const matching = rows.filter(row => row.label.startsWith(`${title}. ${agendaDate}. `));
+  ok(`Home payment agrees with Bills date and exact amount (${title}, ${relativeDate}, ${paintedAmount})`,
+    Number.isFinite(offset) && matching.length > 0 && matching.some(row => {
+      const amount = row.label.match(/AED ([\d,]+(?:\.\d+)?)/)?.[1];
+      return amount && Math.round(money(amount) * 100) === Math.round(money(paintedAmount) * 100) &&
+        row.text.replace(/\s/g, '').includes(amount);
+    }));
+}
 // Monthly-equivalent headings and three buckets are intentionally retired.
 // Verify estimates are identified and preserve the actual charge-history sum below.
 ok('Predicted recurring charges remain identified as estimates',rows.some(n=>/Estimated/.test(n.label)));
@@ -437,15 +461,17 @@ await tapLabel(page, 'Back', 1200);
 // ── Settings ──────────────────────────────────────────────────────────
 await tapLabel(page, 'Settings', 1400);
 {
- const panels=await Promise.all(['Preferences','Imports','Privacy','Data','Help'].map(x=>visibleText(page,x)));
- ok('Settings exposes all five task panels',panels.every(Boolean));
+ // Settings now presents task sections in one scrollable screen. Read each
+ // actual heading sequentially: parallel scroll attempts race one another.
+ const sections=[];
+ for (const title of ['Money','Imports','Notifications','Appearance & language','Privacy','Data','Support & feedback']) {
+   sections.push(!!(await visibleText(page,new RegExp(`^${title}$`,'i'))));
+ }
+ ok('Settings exposes its money, import, appearance, privacy, data and support sections',sections.every(Boolean));
 }
-await tapText(page,'Help',500);
-ok('Help keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
-ok('Help keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
-await tapText(page,'Privacy',500);
+ok('Settings keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
+ok('Support keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
 ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
-await tapText(page,'Preferences',500);
 
 /**
  * Appearance. The context is `colorScheme: 'dark'`, so picking Light has to
@@ -454,17 +480,20 @@ await tapText(page,'Preferences',500);
  * one of them is reading the OS directly.
  */
 {
-  ok('settings offers an Appearance section', !!(await visibleText(page, 'Appearance')));
+  ok('settings offers an Appearance & language section', !!(await visibleText(page, /^Appearance & language$/i)));
   for (const opt of ['System', 'Light', 'Dark']) {
     ok(`appearance offers ${opt}`, !!(await visibleText(page, opt)));
   }
   const acrossTheApp = async (want) => {
     const seen = [await paintedScheme(page)];
+    if (OUT) await page.screenshot({ path: path.join(OUT, `${want}-settings.png`), fullPage: true });
     await tapLabel(page, 'Back', 1300);
     seen.push(await paintedScheme(page));
+    if (OUT) await page.screenshot({ path: path.join(OUT, `${want}-home.png`), fullPage: true });
     for (const t of ['Spending', 'Bills', 'Accounts']) {
       await tapTab(page, t);
       seen.push(await paintedScheme(page));
+      if (OUT) await page.screenshot({ path: path.join(OUT, `${want}-${t.toLowerCase()}.png`), fullPage: true });
     }
     await tapTab(page, 'Home');
     await tapLabel(page, 'Settings', 1500);
@@ -481,7 +510,6 @@ await tapText(page,'Preferences',500);
 }
 
 // ── Import ────────────────────────────────────────────────────────────
-await tapText(page,'Data',500);
 await tapText(page, 'Improve accuracy', 1200);
 ok('accuracy screen opens', !!(await visibleText(page, /reads clean|could not be fully read/)));
 await tapLabel(page, 'Back', 1200);
@@ -510,7 +538,6 @@ await tapLabel(page, 'Back', 1200);
 await tapTab(page, 'Home');
 await tapLabel(page, 'Settings', 1400);
 await page.setViewportSize({ width: 402, height: 874 });
-await tapText(page,'Help',500);
 await tapText(page, 'Wafra Pro', 1400);
 {
   const hits = await overlappingText(page, 'Wafra Pro');
@@ -528,21 +555,23 @@ ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial �
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
-await tapText(page,'Help',500);
 const about = await visibleText(page, 'Know where it goes');
 if (about) await about.scrollIntoViewIfNeeded();
 await page.waitForTimeout(400);
-const mark = page.getByText(/^Wafra\s+\d/).last();
-await mark.scrollIntoViewIfNeeded().catch(() => {});
+const mark = await visibleText(page, /^Wafra\s+\d/);
+ok('the version label is exposed for the old seven-tap trigger', !!mark);
+if (!mark) throw new Error('No exposed Wafra version label for hidden-unlock regression');
 for (let i = 0; i < 7; i++) {
-  await mark.click({ timeout: 4000 }).catch(() => {});
+  await mark.click({ timeout: 4000 });
   await page.waitForTimeout(140);
 }
 await page.waitForTimeout(800);
-const proStored = await page.evaluate(
-  () => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').pro === true,
-);
-ok('repeated version taps cannot grant Pro', !proStored);
+const entitlementStored = await page.evaluate(() => {
+  const state = JSON.parse(localStorage.getItem('wafra/state/v1') || '{}');
+  return { pro: state.pro === true, founderPro: state.founderPro === true };
+});
+ok('repeated version taps cannot grant Pro', !entitlementStored.pro);
+ok('repeated version taps cannot grant founder Pro', !entitlementStored.founderPro);
 
 // ── Trial expiry: rewind the clock, drop pro, reload → hard paywall ────
 await page.evaluate(() => {
@@ -556,7 +585,6 @@ await page.waitForTimeout(2000);
 // Web correctly says phone capture is unsupported instead of pretending to be
 // Android/iOS. Verify expiry on the actual cross-platform entitlement surface.
 await tapLabel(page, 'Settings', 1200);
-await tapText(page,'Help',500);
 await tapText(page, 'Wafra Pro', 1200);
 ok('expired trial shows the paused-capture paywall', !!(await visibleText(
   page,
@@ -566,6 +594,16 @@ ok('expired trial shows the paused-capture paywall', !!(await visibleText(
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));
 
-console.log(`\n${pass} passed, ${fail} failed`);
-await browser.close();
-process.exit(fail ? 1 : 0);
+} catch (error) {
+  aborted = error.stack ?? String(error);
+  console.error(aborted);
+  if (OUT) await page.screenshot({ path: path.join(OUT, 'FAILED.png'), fullPage: true }).catch(() => {});
+} finally {
+  if (OUT) writeFileSync(path.join(OUT, 'results.json'), JSON.stringify({
+    base: BASE, generatedAt: new Date().toISOString(), browser: browser.version(),
+    pass, fail, aborted, errors, results,
+  }, null, 2));
+  await browser.close();
+}
+console.log(`\n${pass} passed, ${fail} failed${aborted ? ', suite aborted' : ''}`);
+process.exitCode = fail || aborted ? 1 : 0;

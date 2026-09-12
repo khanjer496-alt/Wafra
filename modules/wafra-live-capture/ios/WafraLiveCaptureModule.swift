@@ -61,8 +61,56 @@ private func epochMilliseconds(_ seconds: TimeInterval?) throws -> Double? {
 }
 
 public class WafraLiveCaptureModule: Module {
+  private static let queueLocalNotification = Notification.Name(
+    WafraLiveCaptureStore.queueChangedNotificationName
+  )
+  // The callback owns no module pointer and lives for the process lifetime.
+  // Darwin notifications also reach an already-running app when an App Intent
+  // stages from a different process. They do not launch a closed JS runtime.
+  private static let installQueueBridge: Void = {
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(), nil,
+      { _, _, _, _, _ in
+        NotificationCenter.default.post(name: queueLocalNotification, object: nil)
+      },
+      WafraLiveCaptureStore.queueChangedNotificationName as CFString,
+      nil, .deliverImmediately
+    )
+  }()
+  private let queueObserverLock = NSLock()
+  private var queueObserver: NSObjectProtocol?
+
+  private func startQueueObservation() {
+    queueObserverLock.lock()
+    defer { queueObserverLock.unlock() }
+    guard queueObserver == nil else { return }
+    _ = Self.installQueueBridge
+    queueObserver = NotificationCenter.default.addObserver(
+      forName: Self.queueLocalNotification, object: nil, queue: nil
+    ) { [weak self] _ in
+      self?.sendEvent("onQueueChanged", [:])
+    }
+    // Close the registration/read race by requesting a fresh disk read once
+    // observation is installed. The JS scheduler coalesces this with a burst.
+    sendEvent("onQueueChanged", [:])
+  }
+
+  private func stopQueueObservation() {
+    queueObserverLock.lock()
+    defer { queueObserverLock.unlock() }
+    if let queueObserver { NotificationCenter.default.removeObserver(queueObserver) }
+    queueObserver = nil
+  }
+
+  deinit { stopQueueObservation() }
+
   public func definition() -> ModuleDefinition {
     Name("WafraLiveCapture")
+    Constant("queueChangeEventsSupported") { true }
+    Events("onQueueChanged")
+    OnStartObserving { self.startQueueObservation() }
+    OnStopObserving { self.stopQueueObservation() }
+    OnDestroy { self.stopQueueObservation() }
 
     AsyncFunction("setCaptureEnabled") { (enabled: Bool) in
       try WafraLiveCaptureStore.shared.setCaptureEnabled(enabled)

@@ -5,88 +5,50 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '../..');
-const filename = path.join(root, 'src/lib/bank-logo-resolver.ts');
-
-function load({ fetchImpl = async () => ({ ok: false }), storage } = {}) {
-  const exports = {};
-  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    fileName: filename,
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-  }).outputText;
-  const map = new Map();
-  const memoryStorage = storage ?? {
-    async getItem(k) { return map.has(k) ? map.get(k) : null; },
-    async setItem(k, v) { map.set(k, v); },
-    async removeItem(k) { map.delete(k); },
-  };
-  vm.runInNewContext(output, {
-    exports,
-    require(id) {
-      if (id === '@react-native-async-storage/async-storage') return { default: memoryStorage };
-      if (id === '@/lib/markets') return {
-        bankBrandForName(name) {
-          const known = {
-            FAB: { name: 'FAB', color: '#000', domain: 'bankfab.com' },
-            'Emirates NBD': { name: 'Emirates NBD', color: '#000', domain: 'emiratesnbd.com' },
-            'Al Rajhi': { name: 'Al Rajhi', color: '#000', domain: 'alrajhibank.com.sa' },
-          };
-          return known[name] ?? null;
-        },
-      };
-      throw new Error(`unexpected require: ${id}`);
-    },
-    process: { env: { EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID: 'bank-test-client' } },
-    fetch: fetchImpl,
-    AbortController,
-    setTimeout,
-    clearTimeout,
-    console,
-    encodeURIComponent,
-  }, { filename });
-  return exports;
+function load({ fetchImpl = async () => ({ ok: false }), data = new Map() } = {}) {
+  const storage = { async getItem(k) { return data.get(k) ?? null; }, async setItem(k,v) { data.set(k,v); }, async removeItem(k) { data.delete(k); } };
+  const modules = new Map();
+  function requireModule(id) {
+    if (id === '@react-native-async-storage/async-storage') return storage;
+    if (modules.has(id)) return modules.get(id);
+    assert.ok(id.startsWith('@/lib/'), id);
+    const filename = path.join(root, 'src/lib', id.slice(6) + '.ts');
+    const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+    }).outputText;
+    const exports = {};
+    modules.set(id, exports);
+    vm.runInNewContext(output, { exports, require: requireModule, process: { env: {} },
+      fetch: fetchImpl, AbortController, setTimeout, clearTimeout, console }, { filename });
+    return exports;
+  }
+  return { ...requireModule('@/lib/bank-logo-resolver'), marketBanks: requireModule('@/lib/markets').MARKETS.flatMap(market => market.banks) };
 }
-
 (async () => {
-  {
-    let calls = 0;
-    const m = load({ fetchImpl: async () => { calls++; throw new Error('must not search known bank'); } });
-    const fab = await m.resolveBankLogo('FAB');
-    assert.equal(fab.domain, 'bankfab.com');
-    assert.equal(fab.source, 'market');
-    assert.equal(calls, 0);
-    const rajhi = await m.resolveBankLogo('Al Rajhi');
-    assert.equal(rajhi.domain, 'alrajhibank.com.sa');
+  let calls = 0;
+  const data = new Map();
+  const m = load({ data, fetchImpl: async () => { calls++; return { ok: false }; } });
+  for (const name of ['Fixture Bank', 'Household savings 1234', 'FAB Plumbing', 'Emirates NBD Secret Account', undefined]) {
+    assert.equal(await m.resolveBankLogo(name), null, 'unknown institutions stay local');
   }
-
-  {
-    let calls = 0;
-    const m = load({ fetchImpl: async (url) => {
-      calls++;
-      assert.match(String(url), /search\/Monzo/);
-      return { ok: true, async json() { return [
-        { name: 'Monzo', domain: 'monzo.com', claimed: true },
-        { name: 'Monzo Design', domain: 'monzodesign.example', claimed: true },
-      ]; } };
-    } });
-    const first = await m.resolveBankLogo('Monzo');
-    const second = await m.resolveBankLogo('Monzo');
-    assert.equal(first.domain, 'monzo.com');
-    assert.equal(first.source, 'brandfetch');
-    assert.equal(second.domain, 'monzo.com');
-    assert.equal(calls, 1, 'verified global bank mapping is cached');
+  assert.equal(calls, 0, 'unknown bank names must not be searched remotely');
+  assert.equal(data.size, 0, 'unknown institution strings must not become cache identities');
+  for (const [name, domain] of [['FAB', 'bankfab.com'], ['Emirates NBD', 'emiratesnbd.com'], ['Al Rajhi', 'alrajhibank.com.sa']]) {
+    const logo = await m.resolveBankLogo(name);
+    assert.equal(logo.domain, domain);
+    assert.equal(logo.source, 'market');
+    assert.equal(logo.logoUrl, `https://cdn.brandfetch.io/domain/${domain}?c=1idPBg9EKr252UlBUPZ`);
   }
-
-  {
-    const m = load({ fetchImpl: async () => ({ ok: true, async json() { return [
-      { name: 'Chase Plumbing', domain: 'chaseplumbing.example', claimed: true },
-      { name: 'Another Bank', domain: 'anotherbank.example', claimed: true },
-    ]; } }) });
-    assert.equal(await m.resolveBankLogo('Chase'), null, 'ambiguous search must fall back instead of guessing');
-    assert.equal(await m.resolveBankLogo(undefined), null, 'no institution identity means no network lookup');
+  for (const bank of m.marketBanks.filter(bank => bank.domain)) {
+    assert.equal((await m.resolveBankLogo(bank.name))?.domain, bank.domain, `preserve market bank ${bank.name}`);
   }
-
-  console.log('✓ bank logos prefer verified market domains, resolve exact global institutions, cache, and reject ambiguity');
-})().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+  const hostile = JSON.stringify({ expiresAt: Date.now() + 60_000, value: {
+    id: 'bank:attacker.invalid', domain: 'attacker.invalid', canonicalName: 'Fixture Bank',
+    logoUrl: 'https://attacker.invalid/account-1234', source: 'brandfetch',
+  } });
+  const poisoned = load({ data: new Map([['wafra:bank-logo:v1:fixture%20bank', hostile], ['wafra:bank-logo:v1:fab', hostile]]) });
+  assert.equal(await poisoned.resolveBankLogo('Fixture Bank'), null, 'legacy unknown mapping cannot authorize a remote image');
+  assert.equal((await poisoned.resolveBankLogo('FAB')).domain, 'bankfab.com', 'cache cannot replace verified market domain');
+  assert.equal(calls, 0, 'known bank identity needs no search');
+  console.log('✓ bank logos keep fixed market domains, reject unknown/cache identities, and never search remotely');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -3,15 +3,18 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
 
-test('Home puts one spending summary and dated activity before capture controls', () => {
+test('Home puts one spending summary and recent activity before capture controls', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
-  assert.ok(section('journal-summary') < section('journal-activity'));
-  assert.ok(section('journal-activity') < section('journal-import-controls'));
+  for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
+    assert.notEqual(section(id), -1, `${id} is rendered`);
+  }
+  assert.ok(section('journal-summary') < section('home-widget-activity'));
+  assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(nodes.find((node) => node.type === 'Money').props.fils, 508700);
   assert.match(text(h.tree), /View spending breakdown/);
-  assert.match(text(h.tree), /6 Sept/);
+  assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
   const h = harness();
@@ -80,13 +83,17 @@ test('Arabic and larger text render the same controls without English journal he
   assert.ok(walk(h.tree).some((node) => node.props.testID === 'journal-import-controls'));
 });
 
-test('reference composition places actionable upcoming payments before recent activity', () => {
+test('Home places nonurgent upcoming payments after recent activity', () => {
   const nodes = walk(harness().tree);
   const at = (id) => nodes.findIndex((node) => node.props.testID === id);
-  assert.ok(at('journal-summary') < at('journal-payments'));
+  for (const id of ['journal-summary', 'home-widget-activity', 'home-widget-upcoming']) {
+    assert.notEqual(at(id), -1, `${id} is rendered`);
+  }
+  assert.ok(at('journal-summary') < at('home-widget-activity'));
   assert.equal(at('reference-quick-actions'), -1);
   assert.equal(at('reference-month-cards'), -1);
-  assert.ok(at('journal-payments') < at('journal-activity'));
+  assert.equal(at('home-widget-due'), -1, 'the nonurgent fixture has no due-now payment');
+  assert.ok(at('home-widget-activity') < at('home-widget-upcoming'));
 });
 test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });

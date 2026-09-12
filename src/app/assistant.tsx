@@ -50,6 +50,7 @@ export default function AssistantScreen() {
   return (
     <ScreenScaffold
       keyboardAware
+      scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
       header={{
         title: t('assistantTitle'),
         back: { label: t('assistantBack'), onPress: () => router.back() },

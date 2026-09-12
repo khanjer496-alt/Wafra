@@ -49,6 +49,7 @@ scripts/test/build/
 # Local development assistants, editor state, and MCP configuration are not
 # application build inputs and must never be uploaded to EAS.
 /.agents/
+/.agents
 /.argent/
 /.claude/
 /.codex/
@@ -66,4 +67,7 @@ scripts/test/build/
 artifacts/
 builds/
 /--output
+/validation/
+/.screenmap/
+/out/
 /modules/*/android/build/

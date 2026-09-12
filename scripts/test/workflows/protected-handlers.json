@@ -8,13 +8,9 @@
     },
     {
       "file": "src/app/settings.tsx",
-      "name": "enablePrivateMode",
-      "sha256": "e9fab9adea4f9d6ded6752d9b522b4f5d57f3843adc3017698b6714999cf85c5"
-    },
-    {
-      "file": "src/app/settings.tsx",
-      "name": "togglePrivateMode",
-      "sha256": "b090f4e6b073f9b038ad6894856ae2e9dd31b6126d3093ecd12486e6cbc6ce68"
+      "name": "reviewLegacyPrivacyPreference",
+      "sha256": "486ee3234f5b62c37630f23e1e3aa00cb4556209c436b65c2889eb8bc534a725",
+      "reviewedChange": "User requested built-in privacy without a general mode switch. Saved local-only choices change only after explicit legacy review and confirmation; source-component tests cover no mount mutation, disclosure, cancellation and explicit resume."
     },
     {
       "file": "src/app/settings.tsx",
@@ -99,7 +95,8 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "leaveScreen",
-      "sha256": "d402a49ae512386ada51d958fa23d3cd6ab48de46e2f66a0c959c71d1651ff47"
+      "sha256": "1680e8b837d65708ebd1e4f58e9c7b05547d0a148d89576a220079eed466f826",
+      "reviewedChange": "2026-09-12: Preserve shared-write and failed-storage guards; after native cancellation recheck the active review before marking skipped or navigating. Covered by onboarding-extreme-import-back.test.cjs."
     },
     {
       "file": "src/app/import-sms.tsx",
@@ -149,17 +146,20 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openHistoryInstall",
-      "sha256": "a7a9bb49c5cbe4502549ae715db90c728082ea600389ce8b2abf6e4f58206247"
+      "sha256": "5ae63471db60f1b08caabfa0f9599d96bee26a78068dc5007f3a7342f33b13e1",
+      "reviewedChange": "2026-09-12: Open the public HTTPS Shortcut installer without an unreliable shortcuts scheme probe; retain explicit installation confirmation and restore progress on link failure. Covered by onboarding-extreme-setup.test.cjs and setup UX tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openHistoryRun",
-      "sha256": "26551be9086aec669fc5b699eb5167882087e76c376e7190cd97f3d058004edb"
+      "sha256": "2e4af6e5fae2b1f82cfb731229940df3d0da9a7e3a17d20d98ffa59c12b8c6b7",
+      "reviewedChange": "2026-09-12: Report Shortcut run failure with the run-specific message while preserving explicit confirmation, existing-handoff behavior and failed-handoff cleanup. Covered by onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "resetStoppedHistory",
-      "sha256": "b855734f2edd87d60d3b0a9b4edb704e43640489f92db13613ed6cb858df9012"
+      "sha256": "216a55a5be4f116b0caee86edbefb0bb79f82efb61def1df245a7578a9462ea5",
+      "reviewedChange": "2026-09-12: Bind Reset consent to the attempt shown when the sheet opened; compare the raw durable marker under the coordinator before any discard or cleanup. Covered by onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -271,8 +271,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "finishPreferences",
-      "sha256": "10ed151b74939aad71f855b19b0eaad7c49250885b37c853c71c4ec27ce7d566",
-      "reviewedChange": "2026-09-10: Save the optional plan, persist capture as the resume stage, hide optional progress, and return to capture; executed by workflow-source.test.cjs."
+      "sha256": "ea1a194c8cf782d7a7e2bd8cf71eb325000146a2f7a51ac70fac4c1b3d4293d7",
+      "reviewedChange": "2026-09-12: Apply the short transition guard before saving the optional plan and capture resume stage. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
@@ -295,14 +295,14 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "a63774d96540c8c03c1419873b2a100b6f7ef0cc63a89b463b58528e47fc5dde",
-      "reviewedChange": "2026-09-10: Back navigation now follows the value-first funnel and persists resumable journey stages while optional plan steps still return to capture; executed by workflow-source.test.cjs."
+      "sha256": "9db6cf1ceaf634d3a56dfef504a2d225a35398509f63be64150e3321a8bd2889",
+      "reviewedChange": "2026-09-12: Apply the short transition guard while preserving actual Back entry points, saved stages and completion callback cleanup. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "a33ca9ec1d7e035fb559ad9d32c0d9183e6f597b6e00ff8551a52ada5cdc1579",
-      "reviewedChange": "2026-09-10: Hold completion through persistence, retain save retry/Add route, record source-free completion, and route to the selected first view or explicit Pro destination."
+      "sha256": "b0c863f785c12063a598cd0ca16b7cf9e042dd5770f9184809c56bcc7878d591",
+      "reviewedChange": "2026-09-12: Preserve the requested Pro destination along with first-entry intent for durable-save retry; completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
     },
     {
       "file": "src/app/review-alerts.tsx",

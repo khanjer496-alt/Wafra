@@ -501,6 +501,11 @@ export default function TrustedDevicesScreen() {
                   </ThemedText>
                 </Block>
               )}
+              {privateModeBlocksRelay && <Button
+                label={t('privacyLegacyReview', language)}
+                variant="outline"
+                onPress={() => router.push('/settings?section=privacy')}
+              />}
               <View style={styles.actions}>
                 <Button
                   label={busy ? t('trustedConnecting', language) : t('trustedCreateVault', language)}

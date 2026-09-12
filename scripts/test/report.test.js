@@ -292,6 +292,47 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
     { schemaVersion: 2, currency: 'AED', exponent: 2 });
   ok('CSV quotes embedded commas, quotes, and newlines in titles and accounts',
     csv?.includes('"Food, ""tea""\nmeal"') && csv?.includes('"My ""travel"", card\nA"'));
+
+  // Parse the exported artifact independently: CSV quoting alone does not stop
+  // spreadsheet software from interpreting a cell as a formula.
+  const { parse } = require(require.resolve('csv-parse/sync', {
+    paths: [path.join(__dirname, '../../server')],
+  }));
+  const exportRecord = (title, name = title, overrides = {}) => parse(buildLedgerCsv(
+    [{ ...rows[0], title, ...overrides }], [{ ...accounts[0], name }],
+    { schemaVersion: 2, currency: 'AED', exponent: 2 },
+  ), { columns: true })[0];
+
+  for (const marker of ['=', '+', '-', '@', '＝', '＋', '－', '＠']) {
+    for (const prefix of ['', ' ', '\t', '\r', '\n', '\u0000', '\u001b', '\u007f', '\u0085', '\u00a0', '\ufeff', '\u200b', ' \t\r\n']) {
+      const formula = `${prefix}${marker}1+1`;
+      const record = exportRecord(formula);
+      ok(`CSV treats formula text ${JSON.stringify(formula)} as a literal in titles and accounts`,
+        record.title === `'${formula}` && record.account === `'${formula}`);
+    }
+  }
+  for (const control of ['\t', '\r', '\n', '\u0000']) {
+    const value = `${control}Cafe`;
+    ok(`CSV protects a leading control character ${JSON.stringify(control)}`,
+      exportRecord(value).title === `'${value}`);
+  }
+  const quotedFormula = '=HYPERLINK("https://example.invalid","a,b")\nnext line';
+  ok('CSV formula protection survives embedded quotes, commas, and newlines',
+    exportRecord(quotedFormula).title === `'${quotedFormula}`);
+  for (const title of ['Food, "tea"\nmeal', 'ACME + Sons', 'Account - debit', "'=1+1", '  Cafe', '', 'مطعم']) {
+    ok(`CSV preserves ordinary text ${JSON.stringify(title)}`,
+      exportRecord(title).title === title);
+  }
+  const negative = exportRecord('-123.45', '+123.45', { amountFils: -12345, isTransfer: true });
+  ok('CSV protects numeric-looking labels without turning generated financial columns into text',
+    negative.title === "'-123.45" && negative.account === "'+123.45" &&
+      negative.amount === '-123.45' && negative.transfer === '1');
+  const untrustedText = exportRecord('Cafe', 'Bank', {
+    date: '=1+1', type: '+1+1', category: '@SUM(1)',
+  });
+  ok('CSV applies formula protection to all transaction text columns',
+    untrustedText.date === "'=1+1" && untrustedText.type === "'+1+1" &&
+      untrustedText.category === "'@SUM(1)");
 }
 
 if (!process.exitCode) console.log(`${passed} report tests passed`);

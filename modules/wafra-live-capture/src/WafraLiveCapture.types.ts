@@ -15,6 +15,13 @@ export interface WafraLiveCaptureStatus {
 }
 
 export interface WafraLiveCaptureNativeModule {
+  /** Absent on older binaries; launch/resume reconciliation still works there. */
+  readonly queueChangeEventsSupported?: boolean;
+  /** Source-free, best-effort hint. Read the protected queue for actual records. */
+  addListener?(
+    eventName: 'onQueueChanged',
+    listener: () => void,
+  ): { remove(): void };
   setLocalCaptureEntitlementLease(expiresAtMs: number | null, lifetime: boolean): Promise<boolean>;
   setStoreCaptureEntitlementLease(
     expiresAtMs: number | null,

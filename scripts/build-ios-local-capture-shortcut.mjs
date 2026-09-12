@@ -12,6 +12,7 @@ const STAGE_INTENT = "StageWafraLiveMessageIntent";
 const STAGE_TEXT_INTENT = "StageWafraLiveTextIntent";
 const FIND_MESSAGES = "com.apple.MobileSMS.MessageEntity";
 export const IOS_LOCAL_CAPTURE_CATCHUP_LIMIT = 300;
+export const IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER = "WAFRA_SETUP_CHECK_V1";
 
 const ids = {
   noInputGroup: "C335E95B-5E0C-4455-A135-C598E297ECAE",
@@ -177,8 +178,57 @@ const stopAction = () => ({
   WFWorkflowActionParameters: {},
 });
 
+// The app sends this nonfinancial control text only for a verified new graph.
+// Empty input still reaches catch-up; Message entities and ordinary text retain
+// their existing capture path. Presence is checked before asking for input type.
+const setupCheckActions = () => {
+  const uuid = (number) => `C17E0000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+  const endIf = (number, group) => ({
+    WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+    WFWorkflowActionParameters: { UUID: uuid(number), GroupingIdentifier: uuid(group), WFControlFlowMode: 2 },
+  });
+  return [
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+      WFWorkflowActionParameters: {
+        UUID: uuid(1), GroupingIdentifier: uuid(101), WFControlFlowMode: 0,
+        WFCondition: 100, WFInput: { Type: "Variable", Variable: extensionInput() },
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.getitemtype",
+      WFWorkflowActionParameters: { UUID: uuid(2), WFInput: extensionInput() },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+      WFWorkflowActionParameters: {
+        UUID: uuid(3), GroupingIdentifier: uuid(102), WFControlFlowMode: 0,
+        WFCondition: 4, WFConditionalActionString: "Text",
+        WFInput: { Type: "Variable", Variable: actionOutput(uuid(2), "Type") },
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+      WFWorkflowActionParameters: {
+        UUID: uuid(4), GroupingIdentifier: uuid(103), WFControlFlowMode: 0,
+        WFCondition: 4, WFConditionalActionString: IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER,
+        WFInput: { Type: "Variable", Variable: extensionInput() },
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: `${APP_BUNDLE_ID}.${SETUP_INTENT}`,
+      WFWorkflowActionParameters: { UUID: uuid(5), AppIntentDescriptor: appIntentDescriptor(SETUP_INTENT) },
+    },
+    { ...stopAction(), WFWorkflowActionParameters: { UUID: uuid(6) } },
+    endIf(7, 103),
+    endIf(8, 102),
+    endIf(9, 101),
+  ];
+};
+
 const createLocalCaptureShortcut = () => {
   const actions = [
+    ...setupCheckActions(),
     {
       WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
       WFWorkflowActionParameters: {
@@ -314,7 +364,7 @@ const createLocalCaptureShortcut = () => {
   ];
 
   return {
-    WFWorkflowName: "Wafra Local Capture",
+    WFWorkflowName: "Wafra Capture v2",
     WFWorkflowMinimumClientVersionString: "1106",
     WFWorkflowMinimumClientVersion: 1106,
     WFWorkflowIcon: {

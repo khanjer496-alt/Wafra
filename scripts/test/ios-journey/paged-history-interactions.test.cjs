@@ -4,13 +4,14 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('../repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
+const historyInstallUrl = 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08';
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
-async function screen({ progress = null, installed = false, language = 'en', fromOnboarding = true, available = true } = {}) {
+async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, available = true, installUrl = historyInstallUrl } = {}) {
   const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [];
   const listeners = []; let cursor = 0, generation = 1, nativeReads = 0;
-  const values = new Map(); if (installed) values.set('wafra/ios-paged-shortcut-confirmed/v1', 'true');
+  const values = new Map(); if (legacyInstalled) values.set('wafra/ios-paged-shortcut-confirmed/v1', 'true');
   const slot = fn => slots[cursor++] ?? (slots[cursor - 1] = fn());
   const react = {
     useRef: value => slot(() => ({ current: value })),
@@ -23,7 +24,10 @@ async function screen({ progress = null, installed = false, language = 'en', fro
   const native = { getPagedStatus: async () => { nativeReads++; if (pending) await pending; return progress === null ? null : JSON.stringify(progress); },
     discardSession: async id => { discards.push(id); progress = null; } };
   const store = { getStateGeneration: () => generation };
-  const api = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: { EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1' } } });
+  const api = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1', EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: installUrl,
+  } } });
+  if (installed) values.set(api.PAGED_HISTORY_INSTALL_KEY, 'true');
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Platform: { OS: 'ios', Version: '26.6' }, View: 'View', ScrollView: 'ScrollView',
@@ -63,12 +67,34 @@ test('fresh setup does not import on render or install; explicit confirmation st
   assert.deepEqual(s.urls, []); assert.deepEqual(s.changes, []);
   assert.equal(s.button('Add the history Shortcut').disabled, false);
   s.button('Add the history Shortcut').onPress(); await s.flush();
-  assert.match(s.urls[0], /^https:\/\/github.com\/khanjer496-alt\/Wafra\/releases\/download\//);
+  assert.equal(s.urls[0], historyInstallUrl);
   assert.deepEqual(s.handoffs, []); assert.equal(s.values.size, 0);
   s.button('I added it — start import').onPress(); await s.flush();
   assert.match(s.urls[1], /^shortcuts:\/\/x-callback-url\/run-shortcut\?/);
   assert.equal(s.handoffs[0][0], 'onboarding');
   assert.equal(s.changes[0].type, 'history-status-changed'); assert.equal(s.changes[0].status, 'in-progress');
+});
+test('missing or unapproved install configuration never opens a different shortcut or starts a handoff', async () => {
+  for (const installUrl of ['', 'https://example.invalid/unverified.shortcut']) {
+    const s = await screen({ installUrl });
+    s.button('Add the history Shortcut').onPress(); await s.flush();
+    assert.deepEqual(s.urls, []);
+    assert.deepEqual(s.handoffs, []);
+    assert.deepEqual(s.changes, []);
+    assert.equal(s.values.size, 0);
+    assert.ok(s.text().includes('Shortcuts is not available'));
+  }
+});
+test('an older confirmed shortcut cannot bypass the new installation even with saved history', async () => {
+  const pending = session();
+  const s = await screen({ legacyInstalled: true, progress: pending });
+  s.button('Add the history Shortcut').onPress(); await s.flush();
+  assert.deepEqual(s.urls, [historyInstallUrl]);
+  assert.deepEqual(s.handoffs, []);
+  assert.deepEqual(s.discards, []);
+  s.button('I added it — start import').onPress(); await s.flush();
+  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra History v2');
+  assert.equal(s.handoffs[0][1], Math.floor(pending.createdAtMs));
 });
 test('resume retains original session timing; completion opens review rather than claiming ledger save', async () => {
   const progress = session(); const s = await screen({ progress, installed: true });

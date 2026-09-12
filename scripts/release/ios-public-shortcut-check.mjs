@@ -2,15 +2,15 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { spawnSync } from 'node:child_process';
-import { buildHistoryShortcut, verifyHistoryShortcutGraph } from '../build-ios-history-shortcut.mjs';
+import { buildPagedHistoryShortcut, verifyPagedHistoryShortcut } from '../build-ios-paged-history-shortcut.mjs';
 import { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } from '../build-ios-local-capture-shortcut.mjs';
 
 // Public, read-only downloads. Never execute or install a Shortcut.
 const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
-  { kind: 'history', id: 'e0ba137df950416e8c8cba8528287d95', build: buildHistoryShortcut, verify: verifyHistoryShortcutGraph },
-  { kind: 'future', id: '9a85d5f8b44d416181a76e68fcdf569d', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
+  { kind: 'history', id: '5bd032fe9a464af390ac1aae22af2f08', installedName: 'Wafra History v2', build: buildPagedHistoryShortcut, verify: verifyPagedHistoryShortcut },
+  { kind: 'future', id: '822bcc1dd2964b9f887ef9b93601441d', installedName: 'Wafra Capture v2', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -27,6 +27,8 @@ for (const check of checks) {
     if (!response.ok) throw new Error('public-record-unavailable');
     const record = await response.json();
     item.recordName = record.recordName;
+    item.installedName = record.fields?.name?.value ?? null;
+    item.installedNameMatches = item.installedName === check.installedName;
     item.signingStatus = record.fields?.signingStatus?.value ?? null;
     const assetUrl = record.fields?.shortcut?.value?.downloadURL;
     if (typeof assetUrl !== 'string') { item.availableFields = Object.keys(record.fields ?? {}); throw new Error('unsigned-graph-download-missing'); }
@@ -63,7 +65,7 @@ for (const check of checks) {
     item.actionsIdentical = isDeepStrictEqual(graph.WFWorkflowActions, expected.WFWorkflowActions);
     item.graphIdenticalAfterShareMetadata = isDeepStrictEqual(normalized, expected);
     item.otherDifferentTopLevelKeys = [...new Set([...Object.keys(normalized), ...Object.keys(expected)])].filter((key) => !isDeepStrictEqual(normalized[key], expected[key]));
-    if (item.graphIdenticalAfterShareMetadata && item.signingStatus === 'APPROVED') { check.verify(normalized); item.publicValidation = 'passed'; }
+    if (item.graphIdenticalAfterShareMetadata && item.installedNameMatches && item.signingStatus === 'APPROVED') { check.verify(normalized); item.publicValidation = 'passed'; }
     else item.publicValidation = 'mismatch';
   } catch (error) {
     const allowed = new Set(['public-record-unavailable', 'unsigned-graph-download-missing', 'unexpected-asset-host', 'graph-download-failed', 'graph-too-large', 'unsigned-plist-decode-failed']);

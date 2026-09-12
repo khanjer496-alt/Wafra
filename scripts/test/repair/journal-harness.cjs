@@ -78,7 +78,11 @@ function harness(options = {}) {
     '@/lib/format': { formatAmount: amount, clockTime: () => '', shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED', ledgerCurrencyDisplay: () => 'AED' },
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
-    '@/lib/dashboard-projection': { projectDashboard: (request) => { if (request.includeInsights !== false) throw new Error('Home requested unused insights'); return dashboard; } },
+    '@/lib/dashboard-projection': { projectDashboard: (request) => {
+      if (request.surface === 'home' && request.includeInsights === false) return dashboard;
+      if (request.surface === 'dashboard' && request.includeInsights === true) return dashboard;
+      throw new Error('Home requested an unexpected financial projection');
+    } },
     '@/lib/auto-import': { openSmsPermissionSettings: async () => events.push(['permissions']) },
     '@/lib/fx': { buildReferenceFxUpdates: async () => [] },
     '@/lib/leaving-soon': { daysPhrase: (days) => language === 'ar' ? `خلال ${days} أيام` : `In ${days} days` },
@@ -96,6 +100,9 @@ function harness(options = {}) {
   }
   dependencies['@/lib/currency-metadata'] = load(path.join(root, 'src/lib/currency-metadata.ts'));
   dependencies['@/lib/ledger-money'] = load(path.join(root, 'src/lib/ledger-money.ts'), dependencies);
+  dependencies['@react-native-async-storage/async-storage'] = { getItem: async () => null, setItem: async () => {} };
+  dependencies['@/lib/home-widget-preferences'] = load(path.join(root, 'src/lib/home-widget-preferences.ts'));
+  dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
   if (options.render) {
     const svg = { __esModule: true, default: 'svg', Circle: 'circle', Line: 'line', Path: 'path', Rect: 'rect' };
     dependencies['react-native-svg'] = svg;

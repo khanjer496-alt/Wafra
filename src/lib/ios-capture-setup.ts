@@ -467,6 +467,9 @@ export function createIosCaptureSetup({
           return;
         case 'shortcut-callback':
           await refreshStatus(false);
+          if (intent.result === 'error' && model.failure !== 'load') {
+            publish({ failure: 'shortcut-run' });
+          }
           return;
         case 'go-to-stage':
           ++operationGeneration;

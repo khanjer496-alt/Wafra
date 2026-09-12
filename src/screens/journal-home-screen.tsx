@@ -277,7 +277,7 @@ export default function JournalHomeScreen() {
       if (due.length === 0) return null;
       return <View key={id} style={styles.section} testID={`home-widget-${id}`}>
         <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
-          <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
+          <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
           <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
           <ThemedText type="smallBold" tabular>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>

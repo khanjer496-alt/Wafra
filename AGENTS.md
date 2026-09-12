@@ -7,9 +7,13 @@ Expo SDK version.
 # Repository workflow
 
 `main` is the only ongoing development branch. The canonical checkout is
-`/Users/naserkhanjar/Documents/Wafra`, tracking `origin/main`. Start every task
+`/Users/naserkhanjar/Wafra`, tracking `origin/main`. Start every task
 by checking the branch, status, remote and current upstream revision. Do not
 resume an old repair, build, validation or release branch as a competing main.
+
+The older `Documents/Wafra` checkout and `Wafra-preserved-*` directories are
+preserved recovery copies, not active source. Do not import their conflicted
+or unreviewed files over `main`.
 
 All shipping source and executable tests belong in their normal source paths.
 Never keep newer app code only in encoded validation bundles or reconstruct an

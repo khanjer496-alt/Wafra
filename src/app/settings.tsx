@@ -27,7 +27,7 @@ import { buildLedgerCsv } from '@/lib/ledger-export';
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -36,6 +36,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
@@ -205,7 +206,23 @@ export default function SettingsScreen() {
     Platform.OS !== 'web' && isFounderUnlockBuild();
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
-  const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(false);
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const importsOffset = useRef<number | null>(null);
+  const contentHeight = useRef(0);
+  const recoveredSection = useRef<string | null>(null);
+  const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(section === 'privacy');
+  const scrollToRequestedSection = useCallback(() => {
+    if (section !== 'imports' || recoveredSection.current === section ||
+      importsOffset.current === null || contentHeight.current <= importsOffset.current || !scrollRef.current) return;
+    scrollRef.current.scrollTo({ y: Math.max(0, importsOffset.current - Spacing.three), animated: false });
+    recoveredSection.current = section;
+  }, [section]);
+  useEffect(() => {
+    recoveredSection.current = null;
+    if (section === 'privacy') setPrivacyDetailsVisible(true);
+    scrollToRequestedSection();
+  }, [section, scrollToRequestedSection]);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const [personalReviewBusy, setPersonalReviewBusy] = useState(false);
   const [personalReviewCount, setPersonalReviewCount] = useState(0);
@@ -345,34 +362,17 @@ export default function SettingsScreen() {
     if (result.success) setAppLock(true);
   };
 
-  const enablePrivateMode = async () => {
-    try {
-      if (Platform.OS === 'ios') {
-        const relay = await getRelayConfig();
-        if (relay) await unpairDevice(relay);
-      }
-      await setPrivateMode(true);
-    } catch {
-      Alert.alert(t('privateModeFailed'));
-    }
-  };
-
-  const togglePrivateMode = (enabled: boolean) => {
-    if (!enabled) {
-      void setPrivateMode(false).catch(() => {
-        Alert.alert(t('privateModeFailed'));
-      });
-      return;
-    }
-    if (Platform.OS !== 'ios') {
-      void enablePrivateMode();
-      return;
-    }
+  // Older versions offered a global local-only opt-out. Preserve that saved
+  // choice until the person explicitly reviews what resuming would allow.
+  const reviewLegacyPrivacyPreference = () => {
+    setPrivacyDetailsVisible(false);
     setConfirmation({
-      question: t('privateModeEnableTitle'),
-      body: t('privateModeEnableIosBody'),
-      confirmLabel: t('privateModeEnable'),
-      onConfirm: () => void enablePrivateMode(),
+      question: t('privacyResumeTitle'),
+      body: t('privacyResumeBody'),
+      confirmLabel: t('privacyResumeAction'),
+      onConfirm: () => {
+        void setPrivateMode(false).catch(() => Alert.alert(t('privacyPreferenceFailed')));
+      },
     });
   };
 
@@ -1037,7 +1037,7 @@ export default function SettingsScreen() {
 
   /* ── Rows ───────────────────────────────────────────────────────────── */
 
-  const chevron = language === 'ar' ? 'chevron-left' : 'chevron-right';
+  const chevron = 'chevron-right';
   const settingsHeader: ScreenHeaderProps = {
     title: t('settingsTitle'),
     back: { label: t('back'), onPress: () => router.back() },
@@ -1194,10 +1194,14 @@ export default function SettingsScreen() {
   return (
     <React.Fragment>
       <ScreenScaffold
+        scrollRef={scrollRef}
+        scrollProps={{ showsVerticalScrollIndicator: false, onContentSizeChange: (_width, height) => {
+          contentHeight.current = height;
+          scrollToRequestedSection();
+        } }}
         headerMode="native"
         header={settingsHeader}
-        contentStyle={styles.content}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
+        contentStyle={styles.content}>
         <Section index={0} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <Block onPress={() => router.push('/pro')}>
             <View style={[styles.proRow, largeText && styles.proRowLarge]}>
@@ -1246,7 +1250,10 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={2} testID="settings-imports" onLayout={({ nativeEvent }) => {
+          importsOffset.current = nativeEvent.layout.y;
+          scrollToRequestedSection();
+        }} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
           {Platform.OS === 'ios' && linkRow(
             t('iosSetupTitle'),
@@ -1434,14 +1441,8 @@ export default function SettingsScreen() {
 
         <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('privacyHeader')} />
-          {switchRow(
-            t('privateMode'),
-            t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
-            state.privateMode,
-            togglePrivateMode,
-          )}
           {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
-          {linkRow(t('messagesPrivacy'), null, () => setPrivacyDetailsVisible(true), { last: true })}
+          {linkRow(t('messagesPrivacy'), t('privacyBuiltInDetail'), () => setPrivacyDetailsVisible(true), { last: true })}
           {(legacyChargeAlertsAvailable || relay === undefined) && (
             <Block style={styles.privacyCopy}>
               <Icon name="alert" size={16} color={theme.warning} />
@@ -1569,8 +1570,15 @@ export default function SettingsScreen() {
       <BottomSheet visible={privacyDetailsVisible} onClose={() => setPrivacyDetailsVisible(false)}
         title={t('messagesPrivacy')}>
         <View style={{ gap: Spacing.three }}>
+          <ThemedText themeColor="textSecondary">{t('privacyBuiltInBody')}</ThemedText>
           <ThemedText themeColor="textSecondary">{t('privacyRetentionExact')}</ThemedText>
           <ThemedText themeColor="textSecondary">{t('privacySecurityExact')}</ThemedText>
+          <ThemedText themeColor="textSecondary">{t('privacyLogosBody')}</ThemedText>
+          {state.privateMode && <Block>
+            <ThemedText type="smallBold">{t('privacyLegacyTitle')}</ThemedText>
+            <ThemedText themeColor="textSecondary">{t('privacyLegacyBody')}</ThemedText>
+            <Button label={t('privacyLegacyReview')} variant="outline" onPress={reviewLegacyPrivacyPreference} />
+          </Block>}
         </View>
       </BottomSheet>
 

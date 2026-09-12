@@ -97,6 +97,9 @@ function createHarness(options = {}) {
     useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
+  deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
+  local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
+  local('@/lib/home-widgets','src/lib/home-widgets.ts');
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
   local('@/lib/ledger-money','src/lib/ledger-money.ts');

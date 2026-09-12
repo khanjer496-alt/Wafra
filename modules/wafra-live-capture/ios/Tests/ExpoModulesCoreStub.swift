@@ -2,7 +2,29 @@ public typealias ModuleDefinition = Void
 
 open class Module {
   public init() {}
+
+  public func sendEvent(_ name: String, _ body: [String: Any?]) {
+    TestEventRegistry.emitted.append((name, body))
+  }
 }
+
+public enum TestEventRegistry {
+  public static var emitted: [(String, [String: Any?])] = []
+  public static var constants: [String: Any] = [:]
+  public static var names: [String] = []
+  public static var start: (() -> Void)?
+  public static var stop: (() -> Void)?
+  public static var destroy: (() -> Void)?
+}
+
+public func Constant<Value>(_ name: String, _ body: () -> Value) {
+  TestEventRegistry.constants[name] = body()
+}
+
+public func Events(_ names: String...) { TestEventRegistry.names = names }
+public func OnStartObserving(_ body: @escaping () -> Void) { TestEventRegistry.start = body }
+public func OnStopObserving(_ body: @escaping () -> Void) { TestEventRegistry.stop = body }
+public func OnDestroy(_ body: @escaping () -> Void) { TestEventRegistry.destroy = body }
 
 public protocol Record {}
 

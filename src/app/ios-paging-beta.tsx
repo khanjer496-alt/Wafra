@@ -99,14 +99,17 @@ function PagedHistoryScreen() {
     const setup = await loadIosMessageSetupProgress();
     router.replace({ pathname: '/ios-setup', params: { section: 'history', ...(origin === 'onboarding' || setup.returnToOnboarding ? { fromOnboarding: '1' } : {}) } });
   });
-  const label = progress?.status === 'complete' ? w.review : progress ? w.resume : installed ? w.start : adding ? w.installed : w.install;
+  const canRunShortcut = installed || adding;
+  const label = progress?.status === 'complete' ? w.review
+    : !canRunShortcut ? w.install : adding && !installed ? w.installed
+      : progress ? w.resume : w.start;
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
     <Stack.Screen options={{ title: w.title, gestureEnabled: !busy }} />
     <ScrollView contentContainerStyle={{ width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', padding: ScreenPadding, gap: Spacing.four }}>
       <ScreenHeader mode="inline" title={w.title} subtitle={w.intro} back={{ label: w.back, onPress: leave, disabled: busy }} />
       <View testID="paged-history-setup" style={{ gap: Spacing.three }}>
         <ThemedText>{w.privacy}</ThemedText>
-        {!installed && !progress && <ThemedText type="small" themeColor="textSecondary">{w.installHelp}</ThemedText>}
+        {!installed && progress?.status !== 'complete' && <ThemedText type="small" themeColor="textSecondary">{w.installHelp}</ThemedText>}
         <ThemedText type="small" themeColor="textSecondary">{w.runningHelp}</ThemedText>
         {progress && <View testID="paged-history-progress" accessibilityLiveRegion="polite" style={{ gap: Spacing.two }}>
           <ThemedText type="heading">{progress.checked.toLocaleString()} · {w.counts}</ThemedText>
@@ -114,7 +117,7 @@ function PagedHistoryScreen() {
           <ThemedText>{progress.status === 'complete' ? w.completed : w.pending}</ThemedText>
         </View>}
         {error && <ThemedText accessibilityRole="alert">{error}</ThemedText>}
-        <Button label={label} disabled={busy || !ready} onPress={installed || adding || progress ? start : install} wrapLabel />
+        <Button label={label} disabled={busy || !ready} onPress={canRunShortcut || progress?.status === 'complete' ? start : install} wrapLabel />
         <Button label={w.refresh} variant="outline" disabled={busy} onPress={() => { void refresh(); }} wrapLabel />
         {(installed || adding || progress) && <Button label={w.again} variant="ghost" disabled={busy} onPress={install} wrapLabel />}
         {progress && <Button label={w.remove} variant="ghost" disabled={busy} onPress={() => setConfirmDiscard(true)} wrapLabel />}

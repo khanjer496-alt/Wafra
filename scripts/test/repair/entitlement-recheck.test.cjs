@@ -94,6 +94,9 @@ function harness(overrides = {}, options = {}) {
   };
   const hook = load(path.join(root, 'src/hooks/use-auto-import.ts'), {
     '@/lib/inbox-refresh-scheduler': load(path.join(root, 'src/lib/inbox-refresh-scheduler.ts')),
+    '@/lib/ios-local-capture-protocol': load(
+      path.join(root, 'src/lib/ios-local-capture-protocol.ts'), {}, { process: { env: {} } },
+    ),
     react: runtime.react,
     'react-native': native,
     'expo-router': {
@@ -154,7 +157,9 @@ function harness(overrides = {}, options = {}) {
     get model() { return model; },
     update: async patch => { state = { ...state, ...patch }; render(); await settle(); },
     advance: ms => { now += ms; },
-    resume: async () => { for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    background: () => { native.AppState.currentState = 'background'; for (const listener of appListeners) listener('background'); },
+    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    emitInboxChange: () => { for (const listener of inboxListeners) listener(); },
     inboxChanged: async () => { for (const listener of inboxListeners) listener(); await new Promise(r => setTimeout(r, 280)); await settle(); },
     observerCount: () => inboxListeners.size,
     active: () => purchases.isProActive(state),
@@ -253,6 +258,7 @@ test('status-only consumers do not become additional foreground scan owners', as
   await h.update({ pro: true });
   assert.equal(h.calls.scans, 0);
   assert.equal(h.calls.permission, 0);
+  assert.equal(h.observerCount(), 0);
 });
 
 test('the mounted Android owner imports a new provider event without a pull gesture', async t => {
@@ -262,6 +268,85 @@ test('the mounted Android owner imports a new provider event without a pull gest
   await h.inboxChanged(); assert.equal(h.calls.scans, 2);
   await h.update({ captureOptOut: true }); assert.equal(h.observerCount(), 0);
   await h.inboxChanged(); assert.equal(h.calls.scans, 2, 'capture opt-out removes the listener');
+});
+
+test('Android provider bursts coalesce and unmount cancels a scheduled refresh', async t => {
+  const h = harness({ pro: true }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  for (let i = 0; i < 10; i++) h.emitInboxChange();
+  await h.inboxChanged();
+  assert.equal(h.calls.scans, 2, 'one provider burst earns only one follow-up read');
+  h.emitInboxChange();
+  h.runtime.cleanup();
+  assert.equal(h.observerCount(), 0);
+  await new Promise(resolve => setTimeout(resolve, 280));
+  assert.equal(h.calls.scans, 2, 'disposed timers cannot read after the owner unmounts');
+});
+
+test('a provider event during an Android scan waits for it and then rereads once', async t => {
+  let finish;
+  const scanGate = new Promise(resolve => { finish = resolve; });
+  t.after(() => finish());
+  const h = harness({ pro: true }, { scanGate }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  assert.equal(h.calls.scans, 1);
+  await h.inboxChanged();
+  assert.equal(h.calls.scans, 1, 'the provider hint cannot start a competing ledger scan');
+  finish(); await h.settle();
+  assert.equal(h.calls.scans, 2, 'joining the old read must not lose a later provider change');
+});
+
+test('Android provider hints stay silent in background and resume catches up immediately', async t => {
+  const h = harness({ pro: true }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  h.background(); await h.inboxChanged();
+  assert.equal(h.calls.scans, 1);
+  await h.resume();
+  assert.equal(h.calls.scans, 2, 'the pending foreground read does not wait for the freshness timeout');
+});
+
+test('Android resume preserves a background provider hint while the previous scan is still running', async t => {
+  let finish;
+  const scanGate = new Promise(resolve => { finish = resolve; });
+  t.after(() => finish());
+  const h = harness({ pro: true }, { scanGate }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  h.background(); await h.inboxChanged(); await h.resume();
+  assert.equal(h.calls.scans, 1, 'resume waits for the existing scan to finish');
+  finish(); await h.settle();
+  assert.equal(h.calls.scans, 2, 'resume must reread the provider after the older in-flight snapshot');
+});
+
+test('Android reattaches its native observer after denied SMS permission is restored', async t => {
+  const options = { permission: false };
+  const h = harness({ pro: true }, options); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  assert.equal(h.observerCount(), 0, 'a permission-denied native subscription cannot deliver provider events');
+  assert.equal(h.calls.scans, 0);
+  options.permission = true;
+  await h.resume();
+  assert.equal(h.calls.scans, 1);
+  assert.equal(h.observerCount(), 1, 'OnStartObserving must run again after permission is granted');
+  await h.inboxChanged();
+  assert.equal(h.calls.scans, 2);
+});
+
+test('revocation cancels a queued Android hint and denied permission still prevents inbox reads', async t => {
+  const h = harness({ pro: true }); t.after(h.runtime.cleanup);
+  h.render(); await h.settle();
+  h.emitInboxChange(); await h.update({ pro: false });
+  await h.inboxChanged();
+  assert.equal(h.observerCount(), 0);
+  assert.equal(h.calls.scans, 1);
+  assert.equal(h.calls.permission, 1, 'revocation stops before even checking native permission');
+
+  const denied = harness({ pro: true }, { permission: false }); t.after(denied.runtime.cleanup);
+  denied.render(); await denied.settle();
+  await denied.inboxChanged();
+  assert.equal(denied.calls.scans, 0);
+  assert.equal(denied.model.needsPermission, true);
+  assert.deepEqual(denied.calls.routes, []);
+  assert.deepEqual(denied.calls.toasts, []);
 });
 
 test('two mounted foreground owners and effect replay join one activation scan', async t => {

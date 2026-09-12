@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -22,7 +23,8 @@ import { Block } from '@/components/ui/layout';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { t, type StringKey } from '@/lib/i18n';
+import { t, tf, type StringKey } from '@/lib/i18n';
+import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
 import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
@@ -41,6 +43,7 @@ import {
   historyShortcutRunUrl,
   iosSupportsMessageHistory,
   iosHistorySetupStorageCoordinator,
+  IOS_HISTORY_HANDOFF_MARKER,
   IOS_HISTORY_HANDOFF_TTL_MS,
   loadIosHistorySetup,
   reconcileIosHistorySetup,
@@ -129,7 +132,10 @@ export default function IosSetupScreen() {
   const [shortcutsMissing, setShortcutsMissing] = useState(false);
   const [showAutomationGuide, setShowAutomationGuide] = useState(false);
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
+  const resetHistoryAttempt = useRef<number | null>(null);
   const [skipHistoryVisible, setSkipHistoryVisible] = useState(false);
+  const skipHistoryAttempt = useRef<number | null | undefined>(undefined);
+  const setupInitialized = useRef(false);
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
@@ -232,6 +238,7 @@ export default function IosSetupScreen() {
 
   useEffect(() => {
     let active = true;
+    setupInitialized.current = false;
     void (async () => {
       try {
         if (fromOnboarding) {
@@ -240,7 +247,10 @@ export default function IosSetupScreen() {
         if (requestedSection) {
           await dispatchIosMessageSetup({ type: 'active-section-changed', section: requestedSection });
         }
-        if (active) await refreshSetup();
+        if (active) {
+          setupInitialized.current = true;
+          await refreshSetup();
+        }
       } catch {
         if (active) {
           setProgressLoaded(true);
@@ -277,6 +287,12 @@ export default function IosSetupScreen() {
     void (async () => {
       await send({ type: 'shortcut-callback', result });
       await refreshSetup();
+      if (result === 'error' && screenActive.current &&
+        controllerRef.current?.getModel().failure !== 'load') {
+        // Foreground receipt refreshes can succeed even when the Shortcut
+        // failed. Keep the error visible until the owner takes a retry action.
+        setLocalError((current) => current ?? t('iosLocalShortcutRunFailed'));
+      }
     })();
     router.setParams({ shortcutResult: undefined });
   }, [params.shortcutResult, refreshSetup, router, send, setup.loading]);
@@ -426,30 +442,47 @@ export default function IosSetupScreen() {
         }
         throw error;
       }
-    }, t('iosLocalShortcutInstallFailed'));
+    }, t('iosLocalShortcutRunFailed'));
   }, [historyReturnOrigin, runOperation, updateProgress]);
 
   const resetStoppedHistory = useCallback(() => {
+    const confirmedAttempt = resetHistoryAttempt.current;
+    resetHistoryAttempt.current = null;
     setResetHistoryVisible(false);
+    if (confirmedAttempt === null) return;
     void runOperation(async () => {
       const native = await historyNativeModule();
-      await iosHistorySetupStorageCoordinator.run(() => cancelIosHistoryHandoff({
-        recover: () => recoverIosHistoryHandoff(historySetup.handoffStartedAt, native),
-        discard: (sessionId) => native.discardSession(sessionId),
-        clearHandoff: async () => {
-          await clearIosHistoryHandoff();
-          await clearIosHistoryReturnOrigin();
-        },
-      }));
+      const reset = await iosHistorySetupStorageCoordinator.run(async () => {
+        // Read without expiring/clearing markers: this confirmation belongs
+        // only to the attempt visible when the owner opened the sheet.
+        const currentAttempt = await AsyncStorage.getItem(IOS_HISTORY_HANDOFF_MARKER);
+        if (currentAttempt !== String(confirmedAttempt)) {
+          if (screenActive.current) setLocalError(t('historySetupStateFailed'));
+          return false;
+        }
+        await cancelIosHistoryHandoff({
+          recover: () => recoverIosHistoryHandoff(confirmedAttempt, native),
+          discard: (sessionId) => native.discardSession(sessionId),
+          clearHandoff: async () => {
+            await clearIosHistoryHandoff();
+            await clearIosHistoryReturnOrigin();
+          },
+        });
+        return true;
+      });
+      if (!reset) return;
       await updateProgress({ type: 'history-status-changed', status: 'not-started' });
       if (screenActive.current) {
         setHistorySetup((current) => ({ ...current, handoffStartedAt: null }));
       }
     }, t('historyCancelCleanupFailed'));
-  }, [historySetup.handoffStartedAt, runOperation, updateProgress]);
+  }, [runOperation, updateProgress]);
 
   const skipHistory = useCallback(() => {
+    const confirmedAttempt = skipHistoryAttempt.current;
+    skipHistoryAttempt.current = undefined;
     setSkipHistoryVisible(false);
+    if (confirmedAttempt === undefined) return;
     void runOperation(async () => {
       // Recheck the native action after the confirmation sheet. This choice
       // cannot enable capture or replace the owner's automation confirmation.
@@ -463,6 +496,23 @@ export default function IosSetupScreen() {
       if (current.historyStatus === 'complete') return;
       const native = await historyNativeModule();
       await iosHistorySetupStorageCoordinator.run(async () => {
+        const currentAttempt = await AsyncStorage.getItem(IOS_HISTORY_HANDOFF_MARKER);
+        if (currentAttempt !== (confirmedAttempt === null ? null : String(confirmedAttempt))) {
+          const startedAt = currentAttempt === null ? NaN : Number(currentAttempt);
+          if (Number.isSafeInteger(startedAt) && startedAt >= 0 &&
+            Date.now() - startedAt >= IOS_HISTORY_HANDOFF_TTL_MS) {
+            // A late completed import can still be reviewed. Recover it
+            // without expiring its marker or treating stale consent as
+            // permission to delete the replacement attempt.
+            const recovered = await recoverIosHistoryHandoff(startedAt, native);
+            if (recovered !== null) {
+              router.replace({ pathname: '/import-sms', params: { history: recovered } });
+              return;
+            }
+          }
+          if (screenActive.current) setLocalError(t('iosMessageSkipHistoryChanged'));
+          return;
+        }
         // Read the durable marker under the same lock used by import/reset.
         // An unavailable lookup must preserve recovery, including expired
         // handoffs whose completed protected session is still readable.
@@ -473,7 +523,8 @@ export default function IosSetupScreen() {
             handoffStartedAt: reconciliation.snapshot.handoffStartedAt,
           });
         }
-        if (reconciliation.snapshot.expired && reconciliation.recoveredSessionId !== null) {
+        if ((reconciliation.snapshot.expired || confirmedAttempt === null) &&
+          reconciliation.recoveredSessionId !== null) {
           // Expiry hides the original timestamp from the visible snapshot.
           // A late completed session may belong to a different attempt than
           // the one confirmed here. Preserve it for explicit review/decline.
@@ -481,7 +532,7 @@ export default function IosSetupScreen() {
           return;
         }
         if (reconciliation.snapshot.handoffStartedAt !== null &&
-          reconciliation.snapshot.handoffStartedAt !== historySetup.handoffStartedAt) {
+          reconciliation.snapshot.handoffStartedAt !== confirmedAttempt) {
           if (screenActive.current) setLocalError(t('iosMessageSkipHistoryChanged'));
           return;
         }
@@ -499,7 +550,12 @@ export default function IosSetupScreen() {
         await updateProgress({ type: 'history-skipped-for-now', readiness });
       });
     }, t('historyCancelCleanupFailed'));
-  }, [historySetup.handoffStartedAt, router, runOperation, send, updateProgress]);
+  }, [router, runOperation, send, updateProgress]);
+
+  const confirmSkipHistory = () => {
+    skipHistoryAttempt.current = historySetup.handoffStartedAt;
+    setSkipHistoryVisible(true);
+  };
 
   const resumeHistory = useCallback(() => {
     void runOperation(async () => {
@@ -637,7 +693,7 @@ export default function IosSetupScreen() {
     }
     if (futureStep === 'confirm-shortcut') return { label: 'iosLocalAlreadyAdded', onPress: confirmFutureShortcut };
     if (futureStep === 'ready' && !showAutomationGuide) {
-      return { label: 'iosMessageSkipHistory', onPress: () => setSkipHistoryVisible(true) };
+      return { label: 'iosMessageSkipHistory', onPress: confirmSkipHistory };
     }
     return {
       label: progress.futureAutomationConfirmed ? 'iosMessageRetryCheck' : 'iosLocalAutomationAdded',
@@ -663,7 +719,10 @@ export default function IosSetupScreen() {
       router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } });
     } });
   } else if (historyRunning) {
-    helpActions.push({ label: t('iosMessageResetHistory'), onPress: () => setResetHistoryVisible(true) });
+    helpActions.push({ label: t('iosMessageResetHistory'), onPress: () => {
+      resetHistoryAttempt.current = historySetup.handoffStartedAt;
+      setResetHistoryVisible(true);
+    } });
   } else if (historyReady && historyInstallUrl) {
     helpActions.push({ label: t('iosMessageAddAgain'), onPress: openHistoryInstall });
     if (historyComplete) {
@@ -712,8 +771,9 @@ export default function IosSetupScreen() {
                 ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
-                        : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
+                      {tf(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
+                        : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp',
+                      { shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME })}
                     </ThemedText>
                     <Button
                       label={t(futureStep === 'add-shortcut' ? 'iosLocalInstallShortcut' : 'iosLocalAlreadyAdded')}
@@ -799,7 +859,7 @@ export default function IosSetupScreen() {
                     {!futureConfigured && <Button label={t('iosMessageNextFuture')} variant="ghost"
                       onPress={() => selectSection('future')} disabled={busy} wrapLabel />}
                     <Button label={t('iosMessageSkipHistory')} variant="ghost"
-                      onPress={() => setSkipHistoryVisible(true)} disabled={busy || !futureConfigured} wrapLabel />
+                      onPress={confirmSkipHistory} disabled={busy || !futureConfigured} wrapLabel />
                   </>
                 )}
               </ChecklistRow>
@@ -813,6 +873,17 @@ export default function IosSetupScreen() {
                   label={t('iosMessageRetrySetup')}
                   variant="ghost"
                   onPress={() => void runOperation(async () => {
+                    // A failed first write must be retried before restoring
+                    // the route; otherwise imported history loses its origin.
+                    if (!setupInitialized.current) {
+                      if (fromOnboarding) {
+                        await updateProgress({ type: 'onboarding-started' });
+                      }
+                      if (requestedSection) {
+                        await updateProgress({ type: 'active-section-changed', section: requestedSection });
+                      }
+                      setupInitialized.current = true;
+                    }
                     await send({ type: 'refresh-status' });
                     await refreshSetup(true);
                   })}

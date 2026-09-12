@@ -7,9 +7,12 @@ import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
+import { useStore } from '@/lib/store';
 
 export function BankAvatar({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
+  const { state } = useStore();
+  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -17,14 +20,14 @@ export function BankAvatar({ account, size = 36 }: { account: Account; size?: nu
     let alive = true;
     setLogo(null);
     setFailed(false);
-    if (!account.bankName) return () => { alive = false; };
+    if (!allowRemote || !account.bankName) return () => { alive = false; };
     void resolveBankLogo(account.bankName).then(value => {
       if (alive) setLogo(value);
     });
     return () => { alive = false; };
-  }, [account.bankName]);
+  }, [account.bankName, allowRemote]);
 
-  if (!logo || failed) {
+  if (!allowRemote || !logo || failed) {
     const credit = account.cardType === 'credit';
     return <View style={[
       styles.tile,

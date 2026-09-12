@@ -7,6 +7,7 @@ import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
 import { Radius } from '@/constants/theme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
+import { useStore } from '@/lib/store';
 
 interface MerchantAvatarProps {
   title: string;
@@ -14,8 +15,10 @@ interface MerchantAvatarProps {
   size?: number;
 }
 
-/** Bundled artwork first; unknown merchants can be enriched from a safe remote brand lookup. */
+/** Bundled artwork first; only locally verified identities may use CDN artwork. */
 export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
+  const { state } = useStore();
+  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
 
@@ -23,19 +26,19 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
     let alive = true;
     setRemote(null);
     // `other` frequently contains user-created biller names and local one-off
-    // merchants. Global brand search is more likely to attach the wrong company
-    // than help there. Reviewed bundled aliases still win above this guard.
-    if (bundled || category === 'other') return () => { alive = false; };
+    // merchants. Keep the local category fallback unless reviewed bundled
+    // artwork already established an identity above this guard.
+    if (!allowRemote || bundled || category === 'other') return () => { alive = false; };
     void resolveRemoteMerchantLogo(title).then(value => {
       if (alive) setRemote(value);
     });
     return () => { alive = false; };
-  }, [title, category, bundled]);
+  }, [title, category, bundled, allowRemote]);
 
   if (bundled) {
     return <LogoTile key={bundled.id} id={bundled.id} source={bundled.source} category={category} size={size} />;
   }
-  if (remote) {
+  if (allowRemote && remote) {
     return <LogoTile key={remote.id} id={remote.id} source={{ uri: remote.logoUrl }} category={category} size={size} />;
   }
   return <CategoryAvatar category={category} size={size} />;

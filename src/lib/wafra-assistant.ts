@@ -1,7 +1,7 @@
 import { categoryLabel } from '@/lib/categories';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { formatAED as formatLedgerMoney, toISODate } from '@/lib/format';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { checkedMinorSum } from '@/lib/ledger-money';
 import { leavingSoon, outgoingTotalFils } from '@/lib/leaving-soon';
 import {
@@ -96,13 +96,7 @@ function spendingRows(state: AppState, period: Period): Transaction[] {
 
 function incomeRows(state: AppState, period: Period): Transaction[] {
   const { live, internal } = ledgerScope(state);
-  return state.transactions.filter((tx) =>
-    inPeriod(tx.date, period) &&
-    live.has(tx.accountId) &&
-    !internal.has(tx.id) &&
-    tx.type === 'income' &&
-    !tx.isTransfer,
-  );
+  return state.transactions.filter((tx) => inPeriod(tx.date, period) && isIncome(tx, live, internal));
 }
 
 function total(rows: Transaction[]): number {

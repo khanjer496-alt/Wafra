@@ -32,6 +32,8 @@ public struct WafraLiveCaptureStatus: Codable {
 
 public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
+  /// A wake-up hint only. No SMS content, identifiers, or counts cross this channel.
+  public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
 
   public static let maxBodyBytes = 16 * 1024
   public static let maxSenderCharacters = 80
@@ -182,17 +184,26 @@ public final class WafraLiveCaptureStore {
   private let rootOverride: URL?
   private let clock: () -> Date
   private let acknowledgementRemoveItem: (URL) throws -> Void
+  private let queueDidChange: () -> Void
 
   public init(
     root: URL? = nil,
     now: @escaping () -> Date = Date.init,
     acknowledgementRemoveItem: @escaping (URL) throws -> Void = {
       try FileManager.default.removeItem(at: $0)
+    },
+    queueDidChange: @escaping () -> Void = {
+      CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        CFNotificationName(WafraLiveCaptureStore.queueChangedNotificationName as CFString),
+        nil, nil, true
+      )
     }
   ) {
     rootOverride = root
     clock = now
     self.acknowledgementRemoveItem = acknowledgementRemoveItem
+    self.queueDidChange = queueDidChange
   }
 
   public func stage(
@@ -201,7 +212,8 @@ public final class WafraLiveCaptureStore {
     eventId: String,
     observedAt: Date
   ) throws -> WafraLiveStageResult {
-    try withExclusiveLock { root in
+    var newlyQueued = false
+    let result: WafraLiveStageResult = try withExclusiveLock { root in
       var manifest = try loadManifest(in: root)
       let receiptTime = clock()
       _ = try purgeExpiredUnlocked(manifest: &manifest, in: root, now: receiptTime)
@@ -274,8 +286,14 @@ public final class WafraLiveCaptureStore {
         try? FileManager.default.removeItem(at: file)
         throw error
       }
+      newlyQueued = true
       return .accepted
     }
+    // Notify only after the record and manifest are durable and the file lock
+    // is released. Replays already pending/acknowledged do not trigger work.
+    // A missed/coalesced notification is harmless: launch/resume rereads disk.
+    if newlyQueued { queueDidChange() }
+    return result
   }
 
   public func setCaptureEnabled(_ enabled: Bool) throws {

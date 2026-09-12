@@ -116,6 +116,7 @@ function loadAvatar(identities) {
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
+      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }) };
       case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
       case '@/constants/theme': return { Radius: { control: 12, tile: 8 } };
       default: throw new Error(`Unexpected runtime dependency: ${id}`);

@@ -1,13 +1,12 @@
 # Wafra Privacy Policy
 
-_Last updated: 10 September 2026_
+_Last updated: 12 September 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
-**Nasida Apps LLC** ("Wafra", "we", "us").
+**Nasidaapps LLC** ("Wafra", "we", "us").
 
-**Launch draft.** Have counsel review this before publishing. A monitored public
-support contact and any jurisdiction-specific transfer language required for the
-final distribution territories must still be confirmed before release.
+**Launch draft.** Have counsel review this before publishing. Any jurisdiction-specific transfer language required for the final distribution
+territories must still be confirmed before release.
 
 ## The short version
 
@@ -20,8 +19,11 @@ final distribution territories must still be confirmed before release.
   Unsupported content is discarded; successfully processed raw text and sender
   are deleted after durable local processing. Pending records expire after 30
   days. This local path uploads no Message content.
-- **Private Mode:** local iPhone automatic capture and history import still
-  work. Private Mode blocks optional relay-backed processing and sharing.
+- **Privacy is built in:** local capture and encrypted native ledger storage
+  do not require a separate mode. A local-only preference saved in an older
+  version remains in effect until explicitly reviewed in Settings → Privacy
+  and data; it pauses cloud imports, reference FX and online logos and removes
+  retained diagnostic message text. Local capture and history import still work.
 - **iPhone history import:** on iOS 26 or later, a user-run Apple Shortcut can
   check up to 1,500 newest and 1,500 oldest retained Messages. It continues only
   if a stable overlap proves that the two bounded results cover the retained
@@ -109,8 +111,9 @@ available protected queue.
 Older TestFlight builds used a separately paired relay-backed Shortcut. During
 migration, that old automation can continue sending previously selected alerts
 until it is deleted or its token is retired. The current local Shortcut contains
-no relay URL or credential. Private Mode blocks the old relay path but does not
-disable local automatic capture.
+no relay URL or credential. A saved local-only preference blocks relay
+processing in the app but does not disable local automatic capture. An old
+automation must still be removed or have its token retired.
 
 ## iPhone message-history import
 
@@ -166,6 +169,16 @@ performs that check and returns success or failure. Wafra does not receive or
 store biometric templates.
 
 ## Other network activity
+
+- **Automatic logos:** 112 merchant logos are bundled with the app. Additional
+  reviewed merchant identities and supported bank identities are matched
+  locally to fixed brand domains. Their artwork may load from Brandfetch's
+  image CDN, which receives the requested brand domain and the device's network
+  address. Transaction titles, unknown institution names, amounts, account
+  tails and Message text are not sent to a logo search API. Unknown names use
+  a local fallback. Older local-only opt-outs also block these image requests.
+  Legacy name caches are ignored for unknown identities and removed by Erase
+  all data; image bitmap caching remains managed by the platform image library.
 
 - **Purchases:** when store billing is configured, Apple or Google processes
   the payment and RevenueCat manages an anonymous subscription entitlement.
@@ -229,7 +242,7 @@ archive exists.
 
 ## Processing location
 
-Nasida Apps LLC uses Cloudflare Workers and D1 for Wafra's optional relay-backed
+Nasidaapps LLC uses Cloudflare Workers and D1 for Wafra's optional relay-backed
 features. Internet routing and infrastructure may process data outside the
 user's country. The main Android and iPhone local-capture paths described above
 do not upload bank-message text to this relay. Where local law requires more
@@ -245,8 +258,8 @@ The user can:
 - choose whether to install or run the iPhone history Shortcut, choose its date
   range, review the results and cancel before saving;
 - decline or revoke bank-email forwarding and trusted-device sharing;
-- enable Private Mode to block optional relay-backed processing while keeping
-  local iPhone capture and history import available;
+- review a previously saved local-only preference in Settings → Privacy and
+  data before resuming optional online features;
 - edit, export or delete local financial records; and
 - erase the iPhone relay device and queue through **Erase all data** while
   online.
@@ -269,4 +282,4 @@ will be surfaced in the app.
 
 ## Contact
 
-[[PUBLIC SUPPORT CONTACT — required before publishing]]
+Email: [support@nasidaapps.com](mailto:support@nasidaapps.com)

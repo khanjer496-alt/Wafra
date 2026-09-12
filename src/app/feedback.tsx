@@ -170,7 +170,6 @@ export default function FeedbackScreen() {
   };
 
   const words = workflowCopy(language);
-  const chevron = language === 'ar' ? 'chevron-left' : 'chevron-right';
   const feedbackHeader: ScreenHeaderProps = {
     title: t('sendFeedback'),
     back: { label: t('back'), onPress: () => router.back() },
@@ -202,7 +201,7 @@ export default function FeedbackScreen() {
                     {t('feedbackParserDetail')}
                   </ThemedText>
                 </View>
-                <Icon name={chevron} size={15} color={theme.textTertiary} />
+                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
               </Row>
             </Section>
           )}

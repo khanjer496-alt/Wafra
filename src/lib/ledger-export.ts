@@ -1,8 +1,16 @@
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import type { Account, Transaction } from '@/lib/types';
 
-const csvField = (value: string): string => /[",\r\n]/.test(value)
-  ? `"${value.replace(/"/g, '""')}"` : value;
+/** CSV quoting preserves cells; a leading apostrophe keeps risky text literal. */
+function csvTextField(value: string): string {
+  // Spreadsheet importers may ignore leading whitespace/control characters,
+  // and some locales recognize full-width formula markers as well.
+  const needsLiteral = /^[\s\p{Cc}\p{Cf}]*[=+\-@＝＋－＠]/u.test(value)
+    || /^[\p{Cc}\p{Cf}]/u.test(value);
+  const safeValue = needsLiteral ? `'${value}` : value;
+  return needsLiteral || /[",\r\n]/.test(safeValue)
+    ? `"${safeValue.replace(/"/g, '""')}"` : safeValue;
+}
 
 /** Decimal digits come from the stored integer, never floating-point division. */
 function exactMajorUnits(amount: number, exponent: number): string {
@@ -25,7 +33,9 @@ export function buildLedgerCsv(
   if (!money) throw new Error('Export requires an accounting currency');
   const names = new Map(accounts.map((account) => [account.id, account.name]));
   return [header, ...transactions.map((tx) => [
-    tx.date, tx.type, exactMajorUnits(tx.amountFils, money.exponent), money.currency,
-    tx.category, tx.title, names.get(tx.accountId) ?? '', tx.isTransfer ? '1' : '0',
-  ].map(csvField).join(','))].join('\n');
+    csvTextField(tx.date), csvTextField(tx.type),
+    exactMajorUnits(tx.amountFils, money.exponent), csvTextField(money.currency),
+    csvTextField(tx.category), csvTextField(tx.title),
+    csvTextField(names.get(tx.accountId) ?? ''), tx.isTransfer ? '1' : '0',
+  ].join(','))].join('\n');
 }

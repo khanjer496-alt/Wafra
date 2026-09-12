@@ -41,7 +41,8 @@ const pending = (rows, ac = accounts) => {
   const r = assess(rows, ac);
   assert.equal(r.internalIds.has('transfer'), false);
   assert.equal(r.knownCardRepayments.has('transfer'), false);
-  assert.equal(r.pendingIds.has('transfer'), true);
+  assert.equal(r.byId.get('transfer')?.status, 'ownership-unknown');
+  assert.equal(r.pendingIds.has('transfer'), false, 'unknown ownership alone does not force a review');
 };
 const override = (rows, ownership) => core.applyTransferDecision(rows, accounts, {
   ids: ['transfer'], ownership, now: NOW,

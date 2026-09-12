@@ -648,15 +648,16 @@ function ktSources(dir) {
       /setCaptureOptOut\(false\)/.test(settings));
   ok('Private Mode blocks the non-local relay without disabling local Android parsing',
     /state\.privateMode && isRelayPlatform\(\)/.test(capture));
-  ok('enabling Private Mode disconnects an existing iOS relay first',
-    settings.indexOf('await unpairDevice(relay)') <
-      settings.indexOf('setPrivateMode(true)'));
+  ok('the saved local-only preference can resume only through explicit review',
+    /reviewLegacyPrivacyPreference[\s\S]*setConfirmation\([\s\S]*onConfirm:[\s\S]*setPrivateMode\(false\)/.test(settings) &&
+      /state\.privateMode && <Block>[\s\S]*onPress=\{reviewLegacyPrivacyPreference\}/.test(settings) &&
+      !/togglePrivateMode|setPrivateMode\(true\)/.test(settings));
   ok('privacy copy names both local platform paths and protected retention',
     /Android SMS alerts are processed on this phone/.test(copy) &&
       /local iPhone capture never uploads SMS content/.test(copy) &&
       /protected local capture queue/.test(copy) &&
       /short-lived encrypted queue/.test(copy) &&
-      /Private Mode keeps local capture working/.test(copy));
+      /Local capture works with your saved preferences/.test(copy));
 }
 
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
@@ -873,6 +874,7 @@ function ktSources(dir) {
   const setup = read('src/app/ios-setup.tsx');
   const setupWorkflow = read('src/lib/ios-capture-setup.ts');
   const copy = read('src/lib/i18n.ts');
+  const automationGuide = read('src/components/ios-message-setup/automation-guide.tsx');
   const shortcutSpec = read('docs/superpowers/specs/2026-08-25-ios-local-capture-design.md');
   const releaseCheck = read('scripts/lib/release-readiness.mjs');
   const updateCheck = read('scripts/check-update-config.mjs');
@@ -881,8 +883,9 @@ function ktSources(dir) {
 
   ok('iOS setup shows the exact local Shortcut action with complete Received Message input',
     /<AutomationGuide/.test(setup) &&
-      read('src/components/ios-message-setup/automation-guide.tsx').includes("'iosMessageGuideRunShortcut'") &&
-      /Run Wafra Local Capture · full Received Message/.test(copy));
+      automationGuide.includes("'iosMessageGuideRunShortcut'") &&
+      /tf\(step, \{ shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME \}\)/.test(automationGuide) &&
+      /iosMessageGuideRunShortcut:\s*\{ en: 'Run \{shortcut\} · full Received Message'/.test(copy));
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
       /run with no input invokes the native setup-proof action/.test(shortcutSpec));
@@ -896,17 +899,23 @@ function ktSources(dir) {
       `${setup}\n${setupWorkflow}`) &&
       /isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow) &&
       /setupProofVersion === 1/.test(setupWorkflow));
+  const shortcutCallback = code(setupWorkflow.match(
+    /case 'shortcut-callback':([\s\S]*?)case 'go-to-stage':/,
+  )?.[1] ?? '').replace(/\s+/g, ' ').trim();
   ok('callbacks and foreground returns refresh native status without forging proof',
     /AppState\.addEventListener\('change'/.test(setup) &&
       /next !== 'active'\) return;[\s\S]{0,160}send\(\{ type: 'refresh-status' \}\)/.test(setup) &&
-      /case 'shortcut-callback':\s*await refreshStatus\(false\);\s*return;/.test(
-        setupWorkflow) &&
-      !/case 'shortcut-callback':[\s\S]{0,180}setCaptureEnabled/.test(setupWorkflow));
+      shortcutCallback === `await refreshStatus(false);
+        if (intent.result === 'error' && model.failure !== 'load') {
+          publish({ failure: 'shortcut-run' });
+        }
+        return;`.replace(/\s+/g, ' ').trim() &&
+      !/setCaptureEnabled/.test(shortcutCallback));
   ok('local setup exposes no clipboard, setup-code, token, or credential clearing path',
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /شغّل Wafra Local Capture · الرسالة المستلمة كاملة/.test(copy) &&
+    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'شغّل \{shortcut\} · الرسالة المستلمة كاملة'/.test(copy) &&
       /أكملت الإعداد/.test(copy) &&
       /اختر مرسلي البنوك/.test(copy) &&
       /مرسل بنك تختاره/.test(copy) &&

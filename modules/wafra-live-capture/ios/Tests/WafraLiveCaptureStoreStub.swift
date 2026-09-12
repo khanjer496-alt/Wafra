@@ -16,6 +16,7 @@ public struct WafraLiveCaptureStatus {
 
 public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
+  public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
   public static let maxBridgeRecords = 50
 
   public private(set) var calls: [String] = []

@@ -4,8 +4,8 @@ const root=path.resolve(__dirname,'../../..');
 const manifest=require('./protected-handlers.json');
 const source=file=>ts.createSourceFile(file,fs.readFileSync(path.join(root,file),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const traverse=(node,cb)=>{cb(node);ts.forEachChild(node,n=>traverse(n,cb));};
-test('61 protected action bodies match their individually reviewed fingerprints',()=>{
- assert.equal(manifest.records.length,61);const printer=ts.createPrinter({removeComments:true});
+test('60 protected action bodies match their individually reviewed fingerprints',()=>{
+ assert.equal(manifest.records.length,60);const printer=ts.createPrinter({removeComments:true});
  for(const record of manifest.records){const sf=source(record.file);let found=null;traverse(sf,n=>{if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.name.text===record.name)found=n.initializer});
   assert.ok(found,`${record.file}:${record.name}`);const value=printer.printNode(ts.EmitHint.Unspecified,found,sf);
   assert.equal(crypto.createHash('sha256').update(value).digest('hex'),record.sha256,`${record.file}:${record.name} changed`);
@@ -22,12 +22,14 @@ test('workflow consumers have real imports for their current localized presentat
    for(const name of ['MoneyPreview','t','useLanguage','useMotionPreference'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('SetupIllustration')&&!names.has('workflowCopy'),'Welcome uses its inline example and current translated copy');
   }else if(file.endsWith('/ios-setup.tsx')){
-   for(const name of ['ScreenHeader','ChecklistRow','IosSetupJourney','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
+   for(const name of ['ScreenHeader','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
   }else{
    assert.ok(names.has('workflowCopy'),`${file}: copy import`);
    if(file.endsWith('/settings.tsx')){
-    assert.ok(names.has('WorkflowNavigation'),'Settings exposes the section controls directly');
+    assert.ok(names.has('useLocalSearchParams'),'Settings resolves its recovery deep-links');
+    assert.match(fs.readFileSync(path.join(root,file),'utf8'), /testID="settings-imports"[\s\S]*onLayout/);
+    assert.ok(!names.has('WorkflowNavigation'),'Settings retains its current continuous sections');
     assert.ok(!names.has('WorkflowHero'),'Settings must not duplicate its page heading');
    }else if(file.endsWith('/review-alerts.tsx')){
     assert.ok(!names.has('WorkflowHero'),'Review alerts has one compact intro instead of a repeated hero');
@@ -39,13 +41,17 @@ test('workflow consumers have real imports for their current localized presentat
 
 // Execute the shipping preference handlers as well as fingerprinting them.
 // Their route behavior changed intentionally; no native service is involved.
-const onboardingAction=(name,inputs)=>{
+const onboardingAction=(name,inputs,transitionAllowed=true)=>{
  const sf=source('src/components/onboarding-gate.tsx');let found;
  traverse(sf,n=>{if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.name.text===name)found=n.initializer});
  assert.ok(found,`shipping ${name} exists`);
  const action=ts.createPrinter().printNode(ts.EmitHint.Unspecified,found,sf);
  const js=ts.transpileModule(`const action = ${action}; action();`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
- require('node:vm').runInNewContext(js,inputs);
+ let transitionChecks=0;
+ require('node:vm').runInNewContext(js,{...inputs,beginStepTransition:()=>{
+  transitionChecks++;return transitionAllowed;
+ }});
+ assert.equal(transitionChecks,1,`shipping ${name} checks the transition guard exactly once`);
 };
 test('value-first and optional-plan Back actions return to their actual entry points',()=>{
  const cases=[
@@ -69,6 +75,22 @@ test('saving optional preferences records the chosen plan, resumes capture, and 
  onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),setPersonalizing:value=>events.push(['personalizing',value]),
   saveJourney:stage=>events.push(['journey',stage]),setStep:value=>events.push(['step',value])});
  assert.deepEqual(events,[['plan',plan],['personalizing',false],['journey','capture'],['step','capture']]);
+});
+test('blocked onboarding Back transitions preserve their stage, journey and completion callback',()=>{
+ for(const activeStep of ['capture','privacy','preview','tracking','focus','goals','budget','scanning','complete','welcome']){
+  const events=[];
+  onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},
+   setStep:step=>events.push(['step',step]),saveJourney:stage=>events.push(['journey',stage]),
+   router:{setParams:params=>events.push(['params',params])}},false);
+  assert.deepEqual(events,[],`${activeStep}: a blocked press cannot navigate, persist progress or clear the callback`);
+ }
+});
+test('blocked optional preference save neither records a plan nor changes the journey',()=>{
+ const plan={goalIds:['travel'],budgetId:'flexible'},events=[];
+ onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),
+  setPersonalizing:value=>events.push(['personalizing',value]),saveJourney:stage=>events.push(['journey',stage]),
+  setStep:value=>events.push(['step',value])},false);
+ assert.deepEqual(events,[],'a blocked press cannot write preferences, close personalization or resume capture');
 });
 test('new workflow files transpile without syntax errors',()=>{
  for(const file of ['src/components/workflows/workflow-copy.ts','src/components/workflows/workflow-surfaces.tsx']){

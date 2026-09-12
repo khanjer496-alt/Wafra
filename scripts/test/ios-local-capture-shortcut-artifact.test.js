@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 const { execFileSync, spawnSync } = require("node:child_process");
 const {
   existsSync,
@@ -63,13 +64,72 @@ const main = async () => {
     buildLocalCaptureShortcut,
     verifyLocalCaptureShortcutGraph,
     IOS_LOCAL_CAPTURE_CATCHUP_LIMIT,
+    IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER,
   } =
     await import(pathToFileURL(builderPath));
   const shortcut = buildLocalCaptureShortcut();
-  const actions = shortcut.WFWorkflowActions;
+  const prefix = shortcut.WFWorkflowActions.slice(0, 9);
+  const actions = shortcut.WFWorkflowActions.slice(9);
   const ids = actions.map(identifier);
 
-  assert.equal(shortcut.WFWorkflowName, "Wafra Local Capture");
+  assert.equal(shortcut.WFWorkflowActions.length, 35,
+    "the setup check must stop before the existing 300-message catch-up branch");
+  assert.equal(createHash('sha256').update(JSON.stringify(actions)).digest('hex'),
+    'ecf134df50108d6338bf35e894a2e09852d6d12c5014dc1d4689fe41d56ba0ff',
+    "all 26 existing catch-up, full-Message and text actions must remain unchanged");
+  assert.equal(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER, 'WAFRA_SETUP_CHECK_V1');
+  const prefixIds = prefix.map(action => parameters(action).UUID);
+  const existingIds = new Set(actions.map(action => parameters(action).UUID).filter(Boolean));
+  assert.equal(new Set(prefixIds).size, prefix.length);
+  assert.ok(prefixIds.every(id => typeof id === 'string' && !existingIds.has(id)));
+
+  // Evaluate only control flow and type/presence/equality over synthetic input.
+  // Apple deserialization is a separate host check; no Message query is run here.
+  const traceSetupCheck = (input) => {
+    const outputs = new Map();
+    const stack = [];
+    const effects = [];
+    const read = (value) => {
+      if (value?.Type === 'Variable' && value.Variable) return read(value.Variable);
+      if (value?.WFSerializationType === 'WFTextTokenAttachment') return read(value.Value);
+      if (value?.Type === 'ExtensionInput') return input;
+      if (value?.Type === 'ActionOutput') return outputs.get(value.OutputUUID);
+      assert.fail('unexpected setup-check variable binding');
+    };
+    for (const action of prefix) {
+      const p = parameters(action);
+      if (identifier(action) === 'is.workflow.actions.conditional') {
+        if (p.WFControlFlowMode === 2) { assert.equal(stack.pop().group, p.GroupingIdentifier); continue; }
+        assert.equal(p.WFControlFlowMode, 0);
+        const parentActive = stack.every(entry => entry.active);
+        const value = parentActive ? read(p.WFInput) : undefined;
+        assert.ok(p.WFCondition === 100 || p.WFCondition === 4);
+        const matches = p.WFCondition === 100 ? value != null && value !== '' : value === p.WFConditionalActionString;
+        stack.push({ group: p.GroupingIdentifier, active: parentActive && matches });
+      } else if (stack.every(entry => entry.active)) {
+        if (identifier(action) === 'is.workflow.actions.getitemtype') {
+          const value = read(p.WFInput);
+          assert.ok(value != null && value !== '', 'type extraction must not run for empty input');
+          outputs.set(p.UUID, typeof value === 'string' ? 'Text' : 'Message');
+        } else if (identifier(action) === SETUP) {
+          assert.deepEqual(Object.keys(p).sort(), ['AppIntentDescriptor', 'UUID']);
+          assert.deepEqual(p.AppIntentDescriptor, EXPECTED_DESCRIPTOR('RecordWafraCaptureSetupProofIntent'));
+          effects.push('setup-proof');
+        } else if (identifier(action) === 'is.workflow.actions.exit') {
+          effects.push('stop'); return effects;
+        } else assert.fail(`setup check can reach ${identifier(action)}`);
+      }
+    }
+    assert.equal(stack.length, 0);
+    return [...effects, 'legacy-capture-path'];
+  };
+  assert.deepEqual(traceSetupCheck(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER), ['setup-proof', 'stop']);
+  for (const input of [undefined, null, '', 'Card charged AED 10 at SHOP', `${IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER} `,
+    { Content: IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER }]) {
+    assert.deepEqual(traceSetupCheck(input), ['legacy-capture-path']);
+  }
+
+  assert.equal(shortcut.WFWorkflowName, "Wafra Capture v2");
   assert.deepEqual(shortcut.WFWorkflowInputContentItemClasses, [
     "WFStringContentItem",
     "WFMessageContentItem",
@@ -296,7 +356,9 @@ const main = async () => {
 
   const mutate = (change) => {
     const candidate = structuredClone(shortcut);
-    change(candidate, candidate.WFWorkflowActions);
+    const existing = candidate.WFWorkflowActions.slice(9);
+    change(candidate, existing);
+    candidate.WFWorkflowActions = [...candidate.WFWorkflowActions.slice(0, 9), ...existing];
     return candidate;
   };
   const rejects = (name, change) => {

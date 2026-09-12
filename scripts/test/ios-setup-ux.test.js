@@ -138,7 +138,7 @@ eq('iOS message setup: Future guide has the four exact sender-scoped choices',
     'Message',
     'Choose bank senders',
     'Run Immediately',
-    'Run Wafra Local Capture · full Received Message',
+    'Run {shortcut} · full Received Message',
   ]);
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(

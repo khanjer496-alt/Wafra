@@ -49,6 +49,7 @@ import { ThemedView } from '@/components/themed-view';
 import { SupplementImports } from '@/components/supplement-imports';
 import { HistoryDetailsSheet } from '@/components/ios-message-setup/history-details-sheet';
 import { Button } from '@/components/ui/controls';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
@@ -277,6 +278,17 @@ export default function ImportSmsScreen() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [historyLeaveSession, setHistoryLeaveSession] = useState<string | null>(null);
+  const pendingHistoryLeave = useRef<string | null>(null);
+  const activeHistoryReview = useRef<string | null | undefined>(history);
+  activeHistoryReview.current = history;
+  useEffect(() => {
+    activeHistoryReview.current = history;
+    return () => {
+      activeHistoryReview.current = null;
+      pendingHistoryLeave.current = null;
+    };
+  }, [history]);
   const [applying, setApplying] = useState(false);
   const [historyResult, setHistoryResult] = useState<LoadedIosHistorySession | null>(null);
   const [historySourceSummary, setHistorySourceSummary] = useState<{
@@ -703,6 +715,7 @@ export default function ImportSmsScreen() {
   }, [router]);
 
   const leaveScreen = async () => {
+    if (applying || historyOperationLocked.current) return;
     if (!history || !validIosHistorySessionId(history)) {
       if (historyOperationLocked.current) return;
       router.back();
@@ -715,6 +728,9 @@ export default function ImportSmsScreen() {
       return;
     }
     const result = await historyOperationController.discard(discardHistorySession);
+    // A completed cancellation belongs to the review that requested it.
+    // Do not mark or navigate over a new review opened during native cleanup.
+    if (activeHistoryReview.current !== history) return;
     if (result === 'busy') return;
     if (result === 'complete') {
       await finishHistoryReview('skipped');
@@ -730,6 +746,25 @@ export default function ImportSmsScreen() {
           ? t('historySourceCleanupFailed')
           : t('historyCancelCleanupFailed'),
     });
+  };
+
+  const requestLeaveScreen = () => {
+    if (applying || historyOperationLocked.current) return;
+    if (Platform.OS === 'ios' && validIosHistorySessionId(history) &&
+      historyCommitState !== 'storage-failed') {
+      pendingHistoryLeave.current = history;
+      setHistoryLeaveSession(history);
+      return;
+    }
+    void leaveScreen();
+  };
+
+  const confirmLeaveHistory = () => {
+    const confirmedSession = pendingHistoryLeave.current;
+    pendingHistoryLeave.current = null;
+    setHistoryLeaveSession(null);
+    if (confirmedSession === null || confirmedSession !== activeHistoryReview.current) return;
+    void leaveScreen();
   };
 
   const leaveProtectedSessionForExpiry = () => {
@@ -1167,7 +1202,7 @@ export default function ImportSmsScreen() {
               "Read my inbox" named something the screen cannot do there. This
               key is deliberately platform-neutral rather than branched on
               Platform.OS — it is true on both, and it has an Arabic value. */}
-          <ScreenHeader title={t('importBankActivity')} onBack={leaveScreen} />
+          <ScreenHeader title={t('importBankActivity')} onBack={requestLeaveScreen} />
         </View>
 
         <ScrollView
@@ -1704,6 +1739,16 @@ export default function ImportSmsScreen() {
             />
           </View>
         )}
+        <ConfirmSheet
+          visible={historyLeaveSession !== null && historyLeaveSession === history}
+          onClose={() => setHistoryLeaveSession(null)}
+          question={t('historyLeaveReviewTitle')}
+          body={t('historyLeaveReviewBody')}
+          cancelLabel={t('historyKeepReviewing')}
+          confirmLabel={t('historyDiscardAndLeave')}
+          destructive
+          onConfirm={confirmLeaveHistory}
+        />
         <HistoryDetailsSheet
           visible={historyDetailsVisible}
           onClose={() => setHistoryDetailsVisible(false)}

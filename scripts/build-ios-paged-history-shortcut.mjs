@@ -2,11 +2,12 @@
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { buildHistoryShortcut } from './build-ios-history-shortcut.mjs';
 
 // Shipping paged history artifact. One native handoff per bounded page replaces
 // the old per-message native call loop.
-export const PAGED_SHORTCUT_NAME = 'Wafra History Import';
+export const PAGED_SHORTCUT_NAME = 'Wafra History v2';
 export function buildPagedHistoryShortcut() {
   let serial = 0;
   const actions = [];
@@ -89,7 +90,10 @@ export function buildPagedHistoryShortcut() {
   });
   const before = get('before', output(dictionary, 'Dictionary'));
   const limit = get('limit', output(dictionary, 'Dictionary'));
-  const dates = emit('is.workflow.actions.detect.date', { WFInput: scalar(output(before)) });
+  // Get Dates uses WFVariablePickerParameter, not WFDateFieldParameter.
+  // Apple discards a scalar token here and can fall back to the preceding
+  // limit value rather than the explicit cursor date.
+  const dates = emit('is.workflow.actions.detect.date', { WFInput: attachment(output(before)) });
   const dateCount = count(output(dates, 'Dates'));
   condition(output(dateCount, 'Count'), 0, () => {
     alert('History paused safely', 'The next page date could not be read. Saved pages are retained. Nothing was marked complete.');
@@ -143,7 +147,7 @@ export function buildPagedHistoryShortcut() {
 }
 
 export function verifyPagedHistoryShortcut(workflow) {
-  if (JSON.stringify(workflow) !== JSON.stringify(buildPagedHistoryShortcut())) throw new Error('Paged graph differs from the audited generator');
+  if (!isDeepStrictEqual(workflow, buildPagedHistoryShortcut())) throw new Error('Paged graph differs from the audited generator');
   const text = JSON.stringify(workflow);
   if (/https?:|downloadurl|clipboard|savefile|appendfile|sendmessage|sendemail/.test(text)) throw new Error('Forbidden external/source-output action');
   const queries = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity');

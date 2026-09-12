@@ -116,6 +116,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/lib/i18n': execute('src/lib/i18n.ts'),
     }).DetailsSheet;
     const component = execute('src/app/ios-setup.tsx', {
+      '@react-native-async-storage/async-storage': storage,
       '@/lib/ios-paged-setup': execute('src/lib/ios-paged-setup.ts'),
       react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'react-native': platform,

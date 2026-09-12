@@ -273,6 +273,11 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       lastHandledAt?: number | null;
     }`.replace(/\s+/g, ' ').trim();
     const exactNativeModule = `export interface WafraLiveCaptureNativeModule {
+      readonly queueChangeEventsSupported?: boolean;
+      addListener?(
+        eventName: 'onQueueChanged',
+        listener: () => void,
+      ): { remove(): void };
       setLocalCaptureEntitlementLease(expiresAtMs: number | null, lifetime: boolean): Promise<boolean>;
       setStoreCaptureEntitlementLease(
         expiresAtMs: number | null,
@@ -3739,6 +3744,7 @@ struct WafraBankSenderRegistryTests {
             },
             isSmsInboxAccessError: (error) => error?.message === 'sms-provider-failure',
             isSmsScanningAvailable: () => true,
+            subscribeInboxChanges: () => () => {},
             openSmsPermissionSettings: async () => {},
             requestSmsPermission: async () => permissionGranted,
           };
@@ -3994,15 +4000,15 @@ struct WafraBankSenderRegistryTests {
   };
 
   eq('local capture protocol: stable Shortcut name',
-    protocolModule.IOS_LOCAL_CAPTURE_SHORTCUT_NAME, 'Wafra Local Capture');
+    protocolModule.IOS_LOCAL_CAPTURE_SHORTCUT_NAME, 'Wafra Capture v2');
   eq('local capture protocol: obsolete Text sentinel is not exported',
     Object.hasOwn(protocolModule, 'IOS_LOCAL_CAPTURE_TEST_SENTINEL'), false);
   eq('local capture protocol: exact no-input x-callback URL',
     protocolModule.iosLocalCaptureTestUrl(),
-    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror');
+    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Capture%20v2&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror');
   eq('local capture protocol: onboarding survives every callback',
     protocolModule.iosLocalCaptureTestUrl(true),
-    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess%26fromOnboarding%3D1&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel%26fromOnboarding%3D1&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror%26fromOnboarding%3D1');
+    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Capture%20v2&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess%26fromOnboarding%3D1&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel%26fromOnboarding%3D1&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror%26fromOnboarding%3D1');
 
   eq('local capture protocol: valid iCloud IDs normalize to lowercase',
     protocolModule.normalizeIosLocalCaptureShortcutUrl(

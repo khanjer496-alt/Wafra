@@ -1,5 +1,4 @@
 /** Shared constants for the credential-free, device-local iPhone Shortcut. */
-export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = 'Wafra Local Capture';
 
 const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   // Retired relay-backed release URL.
@@ -44,7 +43,22 @@ export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUr
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
 );
 
-/** Run the installed Shortcut without input so its local setup-proof branch executes. */
+// Apple installs this published share with the name in its public record,
+// which differs from the generator's default name. A name-based run must match
+// that record, or a device with both versions can run the older Shortcut.
+export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = IOS_LOCAL_CAPTURE_SHORTCUT_URL ===
+  'https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d'
+  ? 'WafraLocalCapture'
+  : 'Wafra Capture v2';
+
+const IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER = 'WAFRA_SETUP_CHECK_V1';
+// Configure this version only with the verified share containing the control
+// branch. Never send its marker into a legacy graph's plain-text capture path.
+const hasSetupCheckBranch = IOS_LOCAL_CAPTURE_SHORTCUT_URL !== null &&
+  IOS_LOCAL_CAPTURE_SHORTCUT_URL !== 'https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d' &&
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION === '1';
+
+/** New graphs check setup without scanning Messages; legacy shares keep their no-input contract. */
 export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
   const callback = (result: 'success' | 'cancel' | 'error') =>
     encodeURIComponent(
@@ -56,6 +70,7 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
     IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
+    (hasSetupCheckBranch ? `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)}` : '') +
     `&x-success=${callback('success')}` +
     `&x-cancel=${callback('cancel')}` +
     `&x-error=${callback('error')}`;

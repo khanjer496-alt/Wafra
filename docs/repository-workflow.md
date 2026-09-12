@@ -1,6 +1,6 @@
 # One development line: main
 
-The working repository is `/Users/naserkhanjar/Documents/Wafra` and the remote
+The working repository is `/Users/naserkhanjar/Wafra` and the remote
 is `khanjer496-alt/Wafra`. `main`, tracking `origin/main`, is the canonical
 development line for every platform.
 

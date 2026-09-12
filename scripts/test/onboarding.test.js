@@ -313,8 +313,8 @@ ok(
 );
 ok(
   'capture choice is presented as two explicit accessible start modes',
-  /<StartOption automatic disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
-    /<StartOption automatic=\{false\} disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
+  /<StartOption automatic disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
+    /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /accessibilityRole="button"/.test(gateSource) &&
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
@@ -322,7 +322,7 @@ ok(
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
   /Platform\.OS !== 'web' && \([\s\S]{0,180}<StartOption automatic disabled=/.test(gateSource) &&
-    /<StartOption automatic=\{false\} disabled=\{setupBusy\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
+    /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
 );
 ok(
@@ -412,7 +412,12 @@ ok(
     /discoveredResult\.bills/.test(gateSource) &&
     /state\.transactions\.length/.test(gateSource) &&
     /state\.bills\.length \+ state\.cardDues\.length/.test(gateSource) &&
-    !/setTimeout/i.test(gateSource),
+    // The navigation guard only re-enables controls; it cannot manufacture
+    // scan progress or import results. Any other timer still fails this gate.
+    !/\bset(?:Timeout|Interval)\s*\(/.test(gateSource.replace(
+      /stepTransitionTimer\.current = setTimeout\(\(\) => \{\s*stepTransitionTimer\.current = null;\s*setTransitioning\(false\);\s*\}, STEP_TRANSITION_MS\);/,
+      '',
+    )),
 );
 ok(
   'first run waits for encrypted hydration and separates value-funnel progress from optional planning',
@@ -454,7 +459,7 @@ ok(
   'manual completion keeps the gate visible through a failed durable save',
   /const showOverlay\s*=[\s\S]{0,220}\(!state\.onboarded \|\| finishing\)/.test(gateSource) &&
     /const openWafra = async[\s\S]*?setFinishing\(true\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setFinishing\(false\)[\s\S]*?catch[\s\S]*?setFinishSaveFailed\(true\)/.test(gateSource) &&
-    /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current\)/.test(gateSource),
+    /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
 );
 ok(
   'completion copy matches automatic, manual, denied, and failed outcomes',

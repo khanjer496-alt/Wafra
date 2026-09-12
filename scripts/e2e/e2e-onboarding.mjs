@@ -286,11 +286,14 @@ async function scenario(name, { language = 'en', width = 412, text = 1, reducedM
     }, emptySeed(language));
     await page.goto(new URL('/', BASE).href, { waitUntil: 'networkidle' });
     const c = copy[language];
+    const originalHeadlineSize = await (await exposed(page.getByRole('heading', { name: c.headline, exact: true })))
+      .evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
     await stage(page, c.headline, `${name}-welcome`, c.choose);
     await assertEmpty(page, { optOut: false });
     if (text === 2) {
       const size = await page.getByRole('heading', { name: c.headline }).evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
-      assert.ok(size >= 68, 'the large-text case actually doubled the 34px headline');
+      assert.ok(Math.abs(size - originalHeadlineSize * 2) < 0.5,
+        'the large-text case actually doubles the current design headline');
     }
     if (language === 'ar') {
       assert.equal(await page.getByTestId('onboarding-welcome').evaluate((node) => getComputedStyle(node).direction), 'rtl');

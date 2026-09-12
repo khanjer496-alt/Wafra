@@ -5,14 +5,16 @@ const byLabel=(tree,label)=>walk(tree).find(n=>n.props?.onPress&&n.props.accessi
 const boundary=(tree,name)=>walk(tree).find(n=>n.type==='Boundary'&&n.props.name===name);
 const pending=(id='pending',overrides={})=>({id,sourceKey:'test-fixture:'+id,observedAt:Date.now()-60000,expiresAt:Date.now()+86400000,channel:'inbox',parserVersion:1,market:'AE',institution:'emirates-nbd',grammar:'test-purchase',amount:{currency:'AED',minorUnits:'12345',exponent:2},direction:'debit',family:'purchase',rail:null,instrument:{kind:'card',last4:'1234'},...overrides});
 for(const language of ['en','ar'])for(const theme of ['light','dark']){
- test(`settings panels render with actual copy and no writes: ${language}/${theme}`,()=>{
+ test(`settings sections render with actual copy and no writes: ${language}/${theme}`,()=>{
   for(const section of ['preferences','imports','privacy','data','help']){
-   const h=createWorkflowHarness({language,theme,params:{section}}),tree=h.renderScreen('settings'),words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
+   const h=createWorkflowHarness({language,theme,params:{section}}),tree=h.renderScreen('settings');
+   const t=h.deps['@/lib/i18n'].t;
    const scaffold=walk(tree).find(n=>n.type==='Scaffold');
-   assert.equal(scaffold.props.header.title,h.deps['@/lib/i18n'].t('settingsTitle'));
-   assert.ok(!text(tree).includes(words.settingsTitle),'no duplicate settings hero');
-   const selected=walk(tree).filter(n=>n.props?.accessibilityState?.selected&&n.props?.accessibilityLabel);
-   assert.ok(selected.some(n=>n.props.accessibilityLabel===({preferences:words.preferences,imports:words.capture,privacy:h.deps['@/lib/i18n'].t('privacyHeader'),data:h.deps['@/lib/i18n'].t('dataHeader'),help:words.help})[section]));
+   assert.equal(scaffold.props.header.title,t('settingsTitle'));
+   assert.ok(scaffold.props.scrollRef,'continuous Settings supports targeted recovery scrolling');
+   assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
+   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('settingsNotificationsHeader')));
+   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('privacyHeader')));
    assert.deepEqual(h.events,[]);
   }
  });
@@ -23,15 +25,19 @@ for(const language of ['en','ar'])for(const theme of ['light','dark']){
   assert.deepEqual(h.events,[]);
  });
 }
-test('settings navigation is explicit and does not change preferences',()=>{
+test('privacy details open explicitly without changing saved preferences',()=>{
  const h=createWorkflowHarness(),tree=h.renderScreen('settings');
- byLabel(tree,h.deps['@/lib/i18n'].t('privacyHeader')).props.onPress();
- assert.deepEqual(h.events,[['state',0,'privacy']]);
+ const label=h.deps['@/lib/i18n'].t('messagesPrivacy');
+ walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(label)).props.onPress();
+ assert.equal(h.events.length,1);
+ assert.equal(h.events[0][0],'state');
+ assert.equal(h.events[0][2],true);
 });
-test('unknown settings deep-link falls back to preferences',()=>{
+test('unknown settings deep-links retain the complete screen without acting on the value',()=>{
  const h=createWorkflowHarness({params:{section:'erase-now'}}),tree=h.renderScreen('settings');
- const n=byLabel(tree,h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').preferences);
- assert.equal(n.props.accessibilityState.selected,true);assert.deepEqual(h.events,[]);
+ assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
+ assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===h.deps['@/lib/i18n'].t('settingsDangerHeader')));
+ assert.deepEqual(h.events,[]);
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
  const h=createWorkflowHarness({state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
@@ -121,12 +127,19 @@ for(const language of ['en','ar'])test(`iOS setup renders actual checklist witho
  assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'));assert.deepEqual(h.events,[]);
 });
 
-for (const language of ['en', 'ar']) test(language + ': notification controls remain in Imports, not Privacy or Data', () => {
+for (const language of ['en', 'ar']) test(language + ': notification controls remain grouped independently from imports and privacy', () => {
   for (const section of ['imports', 'privacy', 'data']) {
     const h = createWorkflowHarness({ language, params: { section } });
     const tree = h.renderScreen('settings');
-    const label = h.deps['@/lib/i18n'].t('dailySummarySetting');
-    assert.equal(text(tree).includes(label), section === 'imports');
-    assert.deepEqual(h.events, [], 'reading a settings section must not alter notifications');
+    const t = h.deps['@/lib/i18n'].t;
+    // Locate the direct Section by its localized heading, independently of animations.
+    const sections = walk(tree).filter(node => node.type === 'View' && Array.isArray(node.props?.children));
+    const group = sections.find(node =>
+      node.props.children.some(child => child?.type === 'SectionHeader' && child.props.title === t('settingsNotificationsHeader')));
+    assert.ok(group);
+    assert.ok(text(group).includes(t('dailySummarySetting')));
+    assert.ok(!text(group).includes(t('messagesPrivacy')));
+    assert.ok(!text(group).includes(t('settingsImportsHeader')));
+    assert.deepEqual(h.events, [], 'reading settings must not change notifications');
   }
 });

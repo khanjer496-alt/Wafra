@@ -3,6 +3,23 @@ import { test } from 'node:test';
 import { buildPagedHistoryShortcut, verifyPagedHistoryShortcut } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 
+test('Get Dates from Input uses a variable-picker attachment while Format Date keeps its date-field token', () => {
+  const actions = buildPagedHistoryShortcut().WFWorkflowActions;
+  const detect = actions.find(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.detect.date');
+  assert.ok(detect);
+  const input = detect.WFWorkflowActionParameters.WFInput;
+  assert.equal(input.WFSerializationType, 'WFTextTokenAttachment',
+    'Apple WFVariablePickerParameter discards scalar text tokens during parameter deserialization');
+  assert.equal(input.Value.Type, 'ActionOutput');
+  const source = actions.find(action => action.WFWorkflowActionParameters.UUID === input.Value.OutputUUID);
+  assert.equal(source?.WFWorkflowActionIdentifier, 'is.workflow.actions.getvalueforkey');
+  assert.equal(source.WFWorkflowActionParameters.WFDictionaryKey, 'before');
+  for (const action of actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.format.date')) {
+    assert.equal(action.WFWorkflowActionParameters.WFDate.WFSerializationType, 'WFTextTokenString',
+      'WFDateFieldParameter needs the scalar wrapper; this is not a global wrapper replacement');
+  }
+});
+
 function walk(value, visit) {
   if (!value || typeof value !== 'object') return;
   visit(value);
@@ -11,9 +28,16 @@ function walk(value, visit) {
 
 test('deterministic paged graph is the shipping history shortcut', () => {
   const graph = buildPagedHistoryShortcut();
-  assert.equal(graph.WFWorkflowName, 'Wafra History Import');
+  assert.equal(graph.WFWorkflowName, 'Wafra History v2');
   assert.equal(verifyPagedHistoryShortcut(graph), true);
   assert.deepEqual(graph, buildPagedHistoryShortcut());
+});
+test('a published plist may reorder dictionary keys without changing its action graph', () => {
+  const reorder = value => Array.isArray(value) ? value.map(reorder)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).reverse().map(key => [key, reorder(value[key])]))
+      : value;
+  assert.equal(verifyPagedHistoryShortcut(reorder(buildPagedHistoryShortcut())), true);
 });
 test('every generated action reference resolves and all action IDs are unique', () => {
   for (const graph of [buildPagedHistoryShortcut(), buildQueryProbe()]) {

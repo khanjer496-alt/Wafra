@@ -834,8 +834,8 @@ const S = {
     ar: 'أنشئ جهاز المالك الأول، أو الصق دعوة للاستخدام مرة واحدة من شخص تثق به. لا تحتوي الدعوة على بيانات بنكية أو بيانات السجل.',
   },
   trustedPrivateModeBody: {
-    en: 'Private Mode blocks relay enrollment. Turn it off in Settings before creating or joining a trusted vault.',
-    ar: 'يمنع الوضع الخاص الانضمام إلى المرحّل. أوقفه في الإعدادات قبل إنشاء خزنة موثوقة أو الانضمام إليها.',
+    en: 'Your saved local-only preference pauses online services. Review it in Settings → Privacy and data before connecting trusted devices.',
+    ar: 'يوقف تفضيل المعالجة المحلية المحفوظ الخدمات المتصلة. راجعه في الإعدادات ← الخصوصية والبيانات قبل ربط الأجهزة الموثوقة.',
   },
   trustedConnecting: { en: 'Connecting…', ar: 'جارٍ الاتصال…' },
   trustedCreateVault: { en: 'Create trusted vault', ar: 'أنشئ خزنة موثوقة' },
@@ -1071,8 +1071,8 @@ const S = {
     ar: '{count} صيغة رسالة غير مقروءة · الأرقام مخفية',
   },
   settingsTagline: {
-    en: 'Know where it goes. Watch it grow. Your retention choice is shown above.',
-    ar: 'اعرف أين تذهب أموالك وراقبها تنمو. خيار الاحتفاظ ببياناتك موضح أعلاه.',
+    en: 'Know where it goes. Watch it grow.',
+    ar: 'اعرف أين تذهب أموالك وراقبها تنمو.',
   },
   settingsTrialDays: {
     en: 'Free trial · {count} day{s} left',
@@ -1084,7 +1084,32 @@ const S = {
   importFromSms: { en: 'Import from bank SMS', ar: 'استيراد من رسائل البنك' },
   bankAppNotifs: { en: 'Bank app notifications (beta)', ar: 'إشعارات تطبيقات البنوك (تجريبي)' },
   appLock: { en: 'App lock (biometric)', ar: 'قفل التطبيق (بصمة)' },
-  privateMode: { en: 'Private Mode', ar: 'الوضع الخاص' },
+  privacyBuiltInDetail: {
+    en: 'Protected on your phone. Sharing is your choice.',
+    ar: 'بياناتك محمية على هاتفك، ومشاركتها باختيارك.',
+  },
+  privacyBuiltInBody: {
+    en: 'Privacy is built into Wafra. Your ledger is encrypted on iPhone and Android. Local bank-message capture works without uploading your messages. App lock adds protection when someone else is using your unlocked phone.',
+    ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
+  },
+  privacyLogosBody: {
+    en: 'Logos appear automatically. Many ship with the app; others load using a verified brand domain. Unknown transaction names are never sent to a logo search service. The image provider can see a requested brand domain and your network address.',
+    ar: 'تظهر الشعارات تلقائياً. يأتي كثير منها مع التطبيق، ويُحمَّل بعضها باستخدام نطاق علامة تجارية موثّق. لا تُرسل أسماء العمليات غير المعروفة إلى خدمة بحث عن الشعارات. ويمكن لمزوّد الصور رؤية نطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+  },
+  privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
+  privacyLegacyBody: {
+    en: 'Your earlier choice still pauses cloud imports, reference exchange rates and online logos, and prevents new diagnostic message text from being kept. Local capture still works. Wafra has not changed that choice.',
+    ar: 'يبقى اختيارك السابق بإيقاف الاستيراد السحابي وأسعار الصرف المرجعية والشعارات المتصلة ومنع الاحتفاظ بنصوص رسائل تشخيصية جديدة محفوظاً. ويستمر الالتقاط المحلي. لم تغيّر وفرة هذا الاختيار.',
+  },
+  privacyLegacyReview: { en: 'Review online features', ar: 'مراجعة الميزات المتصلة' },
+  privacyResumeTitle: { en: 'Resume optional online features?', ar: 'استئناف الميزات المتصلة الاختيارية؟' },
+  privacyResumeBody: {
+    en: 'This restores automatic reference exchange-rate and logo requests, allows you to set up cloud imports, and lets unclear message text stay on this phone for correction. A previously connected relay can resume syncing. Creating a connection or uploading a statement still needs its own action. Previously removed message text cannot be recovered.',
+    ar: 'يستأنف هذا طلبات أسعار الصرف المرجعية والشعارات التلقائية، ويتيح إعداد الاستيراد السحابي والاحتفاظ بنص الرسائل غير الواضحة على هذا الهاتف لتصحيحها. وقد تستأنف خدمة مربوطة سابقاً المزامنة. ويتطلب إنشاء اتصال أو رفع كشف إجراءً منفصلاً. ولا يمكن استعادة نصوص الرسائل المحذوفة سابقاً.',
+  },
+  privacyResumeAction: { en: 'Resume online features', ar: 'استئناف الميزات المتصلة' },
+  privacyPreferenceFailed: { en: 'Wafra could not save this preference. Try again.', ar: 'تعذّر على وفرة حفظ هذا التفضيل. حاول مرة أخرى.' },
+  privateMode: { en: 'Saved local-only preference', ar: 'تفضيل المعالجة المحلية المحفوظ' },
   privateModeOn: {
     en: 'On · local structured data only; raw text is dropped',
     ar: 'مفعّل · بيانات منظّمة محلية فقط؛ يُحذف النص الخام',
@@ -1108,8 +1133,8 @@ const S = {
     ar: 'تعذّر على وفرة حفظ إعداد الالتقاط التلقائي. حاول مرة أخرى.',
   },
   privacyRetentionExact: {
-    en: 'The capture status and warning on this screen keep only source-free counts; they do not keep Message text or sender. Pending Message records wait in the protected local capture queue—a short-lived encrypted queue. They expire after 30 days and are removed the next time capture runs or Wafra checks the queue. Private Mode keeps local capture working.',
-    ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي في الوضع الخاص.',
+    en: 'The capture status and warning on this screen keep only source-free counts; they do not keep Message text or sender. Pending Message records wait in the protected local capture queue—a short-lived encrypted queue. They expire after 30 days and are removed the next time capture runs or Wafra checks the queue. Local capture works with your saved preferences.',
+    ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي وفق تفضيلاتك المحفوظة.',
   },
   privacySecurityExact: {
     en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank alerts you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, directly access your Messages inbox, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
@@ -1154,8 +1179,8 @@ const S = {
   },
   personalReviewExportConfirm: { en: 'Prepare my file', ar: 'تجهيز ملفي' },
   personalReviewExportPrivateMode: {
-    en: 'Turn off Private Mode to export original messages.',
-    ar: 'أوقف الوضع الخاص لتصدير الرسائل الأصلية.',
+    en: 'Your saved preference excludes original message text. Review it in Settings → Privacy and data.',
+    ar: 'يستبعد تفضيلك المحفوظ نص الرسائل الأصلية. راجعه في الإعدادات ← الخصوصية والبيانات.',
   },
   personalReviewExportFailed: { en: 'Could not export your data', ar: 'تعذّر تصدير بياناتك' },
   smsCorpusExportDetail: {
@@ -2310,6 +2335,13 @@ const S = {
     ar: 'لم تتم قراءة أي شيء. غادر هذه الشاشة وشغّل «استيراد سجل وفرة» مجدداً من اختصارات Apple.',
   },
   historyImportFailed: { en: 'Could not finish the import', ar: 'تعذّر إكمال الاستيراد' },
+  historyLeaveReviewTitle: { en: 'Discard this import?', ar: 'حذف هذا الاستيراد؟' },
+  historyLeaveReviewBody: {
+    en: 'This closes the review and deletes its temporary import. Transactions already saved and your Messages inbox stay unchanged.',
+    ar: 'سيؤدي هذا إلى إغلاق المراجعة وحذف نسخة الاستيراد المؤقتة. لن تتغير العمليات المحفوظة سابقاً ولا صندوق رسائلك.',
+  },
+  historyKeepReviewing: { en: 'Keep reviewing', ar: 'متابعة المراجعة' },
+  historyDiscardAndLeave: { en: 'Discard and leave', ar: 'حذف ومغادرة' },
   historyImportFailedBody: {
     en: 'The protected source session is still on this iPhone. Try reading it again or cancel to delete it.',
     ar: 'ما زالت جلسة المصدر المحمية على هذا الآيفون. أعد قراءتها أو ألغِ لحذفها.',
@@ -2370,7 +2402,7 @@ const S = {
   // Arabic is written as Arabic rather than transliterated from the English:
   // "Shortcut" is اختصار, the Apple term, not شورت‌كت.
   legacyCapturePrivacyWarning: { en: 'An old Shortcut may still upload bank alerts. Review it in Shortcuts.', ar: 'قد يواصل اختصار قديم رفع التنبيهات البنكية. راجعه في تطبيق الاختصارات.' },
-  messagesPrivacy: { en: 'Messages & privacy', ar: 'الرسائل والخصوصية' },
+  messagesPrivacy: { en: 'Privacy and data', ar: 'الخصوصية والبيانات' },
   iosSetupTitle: { en: 'Bank alerts', ar: 'تنبيهات البنك' },
   iosMessageSettingsDetail: { en: 'Set up new messages or import history', ar: 'إعداد الرسائل الجديدة أو استيراد السجل' },
   iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
@@ -2403,8 +2435,8 @@ const S = {
   iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
   iosMessageGuideSender: { en: 'Choose bank senders', ar: 'اختر مرسلي البنوك' },
   iosMessageGuideNoFilter: { en: 'Message Contains: leave empty', ar: 'تحتوي الرسالة على: اتركه فارغاً' },
-  iosMessageFutureInstallHelp: { en: 'Step 1 of 2 · Add Wafra Local Capture in Apple Shortcuts.', ar: 'الخطوة ١ من ٢ · أضف Wafra Local Capture في اختصارات Apple.' },
-  iosMessageFutureReturnHelp: { en: 'Added Wafra Local Capture?', ar: 'أضفت Wafra Local Capture؟' },
+  iosMessageFutureInstallHelp: { en: 'Step 1 of 2 · Add {shortcut} in Apple Shortcuts.', ar: 'الخطوة ١ من ٢ · أضف {shortcut} في اختصارات Apple.' },
+  iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
   iosMessageFutureReadyChoice: { en: 'New-alert setup is checked. You can import past messages later or choose history now.', ar: 'تم فحص إعداد التنبيهات الجديدة. يمكنك استيراد الرسائل السابقة لاحقاً أو اختيار السجل الآن.' },
   iosMessageNextHistory: { en: 'Import past messages', ar: 'استيراد الرسائل السابقة' },
   iosMessageNextFuture: { en: 'Set up new alerts', ar: 'إعداد التنبيهات الجديدة' },
@@ -2431,7 +2463,7 @@ const S = {
   iosMessageResetHistoryTitle: { en: 'Stopped in Shortcuts?', ar: 'أوقفته في الاختصارات؟' },
   iosMessageResetHistoryBody: { en: 'Stop the Shortcut first. Reset this attempt; saved entries stay unchanged.', ar: 'أوقف الاختصار أولاً. أعد ضبط المحاولة؛ تبقى العمليات المحفوظة كما هي.' },
   iosMessageGuideImmediate: { en: 'Run Immediately', ar: 'تشغيل فوراً' },
-  iosMessageGuideRunShortcut: { en: 'Run Wafra Local Capture · full Received Message', ar: 'شغّل Wafra Local Capture · الرسالة المستلمة كاملة' },
+  iosMessageGuideRunShortcut: { en: 'Run {shortcut} · full Received Message', ar: 'شغّل {shortcut} · الرسالة المستلمة كاملة' },
   iosMessageLearnMore: { en: 'Help', ar: 'مساعدة' },
   iosMessageDone: { en: 'Done', ar: 'تم' },
   iosMessageCloseSetup: { en: 'Close setup', ar: 'إغلاق الإعداد' },

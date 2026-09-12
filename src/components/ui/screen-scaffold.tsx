@@ -24,6 +24,7 @@ export type ScreenScaffoldProps = {
   headerMode?: 'auto' | 'native' | 'inline';
   footer?: React.ReactNode;
   scroll?: boolean;
+  scrollRef?: React.Ref<ScrollView>;
   virtualized?: boolean;
   scrollProps?: Omit<
     ScrollViewProps,
@@ -77,6 +78,7 @@ export function ScreenScaffold({
   headerMode = 'auto',
   footer,
   scroll = true,
+  scrollRef,
   virtualized = false,
   scrollProps,
   refreshControl,
@@ -143,6 +145,7 @@ export function ScreenScaffold({
 
   const content = scroll ? (
     <ScrollView
+      ref={scrollRef}
       contentOffset={initialContentOffset}
       {...scrollProps}
       style={[styles.flex, scrollProps?.style]}

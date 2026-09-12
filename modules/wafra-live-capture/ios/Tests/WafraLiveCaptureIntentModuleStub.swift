@@ -9,6 +9,10 @@ public enum WafraLiveCaptureResources {
 
 public enum WafraLiveStageResult: String {
   case accepted
+  case ignored
+  case invalid
+  case capacityReached
+  case disabled
 }
 
 public final class WafraLiveCaptureStore {

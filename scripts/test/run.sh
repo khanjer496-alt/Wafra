@@ -10,9 +10,9 @@ cd "$(dirname "$0")"
 # that have nothing to do with the code. Queue them instead.
 if [ "${WAFRA_TEST_LOCKED:-}" != "1" ]; then
   if command -v flock >/dev/null 2>&1; then
-    exec env WAFRA_TEST_LOCKED=1 flock /tmp/wafra-test.lock "$SELF" "$@"
+    exec env WAFRA_TEST_LOCKED=1 flock /tmp/wafra-test.lock bash "$SELF" "$@"
   elif command -v lockf >/dev/null 2>&1; then
-    exec env WAFRA_TEST_LOCKED=1 lockf -k /tmp/wafra-test.lock "$SELF" "$@"
+    exec env WAFRA_TEST_LOCKED=1 lockf -k /tmp/wafra-test.lock bash "$SELF" "$@"
   fi
 fi
 # kotlin-regex.test.js needs a working javac, and skips itself (printing
@@ -69,6 +69,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
   bash native-history-store.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
   bash native-live-capture-store.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-live-queue-signal.sh
   NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi
 
@@ -189,7 +191,7 @@ for t in "${SUITES[@]}"; do
 done
 
 # Execute new interaction regressions in addition to every original gate.
-node --test repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs
+node --test repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

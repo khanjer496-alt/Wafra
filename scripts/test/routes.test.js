@@ -188,7 +188,7 @@ function sources(dir = SRC) {
     ['iPhone local capture', /setIosAutomaticCapture/],
     ['history recovery', /beginHistoryImport\(\)[\s\S]*confirmIosCaptureRecovery/],
     ['bank notification import', /gated\(onNotificationAccess\)/],
-    ['Private Mode', /togglePrivateMode/],
+    ['saved privacy preference review', /reviewLegacyPrivacyPreference[\s\S]*privacyLegacyReview/],
     ['App Lock', /toggleAppLock/],
     ['retention and security', /privacyRetentionExact[\s\S]*privacySecurityExact/],
     ['Review Alerts', /router\.push\('\/review-alerts'\)/],

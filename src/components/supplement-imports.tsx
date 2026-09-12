@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
@@ -44,6 +45,7 @@ function interpolate(template: string, values: Record<string, string | number>):
 }
 
 export function SupplementImports() {
+  const router = useRouter();
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
   const theme = useTheme();
@@ -111,6 +113,7 @@ export function SupplementImports() {
   }, []);
 
   const loadCapabilities = useCallback(async (active: RelayConfig) => {
+    if (stateRef.current.privateMode) return;
     setBusy('capabilities');
     setError(null);
     try {
@@ -130,7 +133,7 @@ export function SupplementImports() {
       .then((existing) => {
         if (!live) return;
         setCfg(existing);
-        if (existing) void loadCapabilities(existing);
+        if (existing && !stateRef.current.privateMode) void loadCapabilities(existing);
       })
       .finally(() => {
         if (live) setLoadingConfig(false);
@@ -327,6 +330,7 @@ export function SupplementImports() {
             <ThemedText type="small">{copy.privateTitle}</ThemedText>
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{copy.privateBody}</ThemedText>
+          <Button label={copy.reviewPrivacy} variant="outline" onPress={() => router.push('/settings?section=privacy')} />
         </Block>
       ) : loadingConfig ? (
         <Block>

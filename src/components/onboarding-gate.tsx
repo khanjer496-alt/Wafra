@@ -66,6 +66,7 @@ type Step =
   | 'complete';
 const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview', 'privacy'];
 const PLAN_STEPS: readonly Step[] = ['goals', 'budget'];
+const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
@@ -289,10 +290,30 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [learnMoreVisible, setLearnMoreVisible] = useState(false);
   const [setupBusy, setSetupBusy] = useState(false);
   const setupBusyRef = useRef(false);
+  const [transitioning, setTransitioning] = useState(false);
+  const stepTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [finishSaveFailed, setFinishSaveFailed] = useState(false);
   const requestedFirstEntry = useRef(false);
+  const requestedDestination = useRef<'/pro' | undefined>(undefined);
   const startedEventSent = useRef(false);
+
+  useEffect(() => () => {
+    if (stepTransitionTimer.current !== null) clearTimeout(stepTransitionTimer.current);
+    stepTransitionTimer.current = null;
+  }, []);
+
+  const beginStepTransition = (): boolean => {
+    if (stepTransitionTimer.current !== null || setupBusyRef.current || finishing) return false;
+    setTransitioning(true);
+    // Adjacent steps share button positions. Ignore the second physical tap
+    // while the new step settles, including when reduced motion is enabled.
+    stepTransitionTimer.current = setTimeout(() => {
+      stepTransitionTimer.current = null;
+      setTransitioning(false);
+    }, STEP_TRANSITION_MS);
+    return true;
+  };
 
   const saveJourney = (
     stage: 'welcome' | 'focus' | 'tracking' | 'preview' | 'privacy' | 'capture' | 'complete',
@@ -333,7 +354,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     // These routes own their own handoff. Returning normally to the root must
     // re-read that progress, even when this gate stayed mounted underneath.
     if (!state.onboarded && Platform.OS === 'ios' &&
-      (pathname === '/ios-setup' || pathname === '/import-sms')) {
+      (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/import-sms')) {
       resumeHandled.current = false;
       setResumeReady(true);
       return;
@@ -401,6 +422,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // to iPhone so an Android deep link cannot bypass the first-run gate.
   const isIosSetupRoute = Platform.OS === 'ios' && (
     pathname === '/ios-setup' ||
+    pathname === '/ios-paging-beta' ||
     pathname === '/import-sms'
   );
   const showOverlay =
@@ -411,7 +433,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // Serialize permission, cleanup and durable completion actions. A second tap
   // must never start the other capture choice while the first is unresolved.
   const runSetupAction = async (action: () => Promise<void>) => {
-    if (setupBusyRef.current) return;
+    if (setupBusyRef.current || stepTransitionTimer.current !== null) return;
     setupBusyRef.current = true;
     setSetupBusy(true);
     try {
@@ -443,7 +465,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const showValuePreview = () => {
-    if (!focus || !tracking) return;
+    if (!focus || !tracking || !beginStepTransition()) return;
     saveJourney('preview');
     setStep('preview');
     trackGrowthEvent('onboarding_value_previewed', {
@@ -454,6 +476,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const showPrivacy = () => {
+    if (!beginStepTransition()) return;
     saveJourney('privacy');
     setStep('privacy');
     trackGrowthEvent('onboarding_privacy_seen', {
@@ -464,6 +487,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const showCapture = () => {
+    if (!beginStepTransition()) return;
     saveJourney('capture');
     setStep('capture');
   };
@@ -483,6 +507,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const finishPreferences = () => {
+    if (!beginStepTransition()) return;
     setOnboardingPlan(plan);
     setPersonalizing(false);
     saveJourney('capture');
@@ -609,6 +634,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const goBack = () => {
+    if (!beginStepTransition()) return;
     if (activeStep === 'complete') {
       setStep('capture');
       saveJourney('capture');
@@ -645,6 +671,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   ) => {
     setFinishing(true);
     requestedFirstEntry.current = addFirstEntry;
+    requestedDestination.current = destination;
     try {
       saveJourney('complete');
       setOnboarded();
@@ -783,10 +810,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 <Button wrapLabel
                   label={t('onboardChooseStart')}
                   onPress={() => {
+                    if (!beginStepTransition()) return;
                     setPersonalizing(false);
                     saveJourney('focus');
                     setStep('focus');
                   }}
+                  disabled={transitioning}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
@@ -799,7 +828,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           ) : (
             <>
               {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack}
-                disabled={setupBusy || finishing}
+                disabled={setupBusy || finishing || transitioning}
                 progressSteps={personalizing
                   ? (PLAN_STEPS.includes(activeStep) ? PLAN_STEPS : null)
                   : (JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null)} />}
@@ -831,9 +860,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={!focus}
+                          disabled={!focus || transitioning}
                           onPress={() => {
-                            if (!focus) return;
+                            if (!focus || !beginStepTransition()) return;
                             saveJourney('tracking');
                             setStep('tracking');
                           }}
@@ -867,7 +896,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={!tracking}
+                          disabled={!tracking || transitioning}
                           onPress={showValuePreview}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
@@ -915,6 +944,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         <Button wrapLabel
                           label={t('continueWord')}
                           onPress={showPrivacy}
+                          disabled={transitioning}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
@@ -951,6 +981,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         <Button wrapLabel
                           label={t('onboardPrivacyContinue')}
                           onPress={showCapture}
+                          disabled={transitioning}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
@@ -992,13 +1023,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={plan.goalIds.length === 0}
-                          onPress={() => setStep('budget')}
+                          disabled={plan.goalIds.length === 0 || transitioning}
+                          onPress={() => { if (beginStepTransition()) setStep('budget'); }}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
                         <Button wrapLabel variant="outline" label={t('onboardSkipPersonalization')}
-                          onPress={() => { setPersonalizing(false); saveJourney('capture'); setStep('capture'); }}
+                          disabled={transitioning}
+                          onPress={() => {
+                            if (!beginStepTransition()) return;
+                            setPersonalizing(false); saveJourney('capture'); setStep('capture');
+                          }}
                           labelColor={night.text} style={styles.ghost} />
                       </View>
                     </>
@@ -1046,6 +1081,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         <Button wrapLabel
                           label={t('onboardBudgetContinue')}
                           onPress={finishPreferences}
+                          disabled={transitioning}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
@@ -1074,14 +1110,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             wrapLabel
                             label={t('onboardAutomaticChoiceIos')}
                             onPress={() => void runSetupAction(beginCapture)}
-                            disabled={setupBusy}
+                            disabled={setupBusy || transitioning}
                             labelColor={night.onPrimary}
                             style={styles.primaryButton}
                           />
                           <Pressable
                             accessibilityRole="button"
-                            disabled={setupBusy}
-                            accessibilityState={{ disabled: setupBusy }}
+                            disabled={setupBusy || transitioning}
+                            accessibilityState={{ disabled: setupBusy || transitioning }}
                             onPress={() => void runSetupAction(continueManually)}
                             style={({ pressed }) => [styles.skipCaptureButton, { opacity: pressed ? 0.6 : 1 }]}>
                             <ThemedText style={styles.skipCaptureText}>{t('onboardManualChoiceIos')}</ThemedText>
@@ -1090,9 +1126,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       ) : (
                         <View style={styles.startOptions} testID="onboarding-start-options">
                           {Platform.OS !== 'web' && (
-                            <StartOption automatic disabled={setupBusy} onPress={() => void runSetupAction(beginCapture)} />
+                            <StartOption automatic disabled={setupBusy || transitioning} onPress={() => void runSetupAction(beginCapture)} />
                           )}
-                          <StartOption automatic={false} disabled={setupBusy} onPress={() => void runSetupAction(continueManually)} />
+                          <StartOption automatic={false} disabled={setupBusy || transitioning} onPress={() => void runSetupAction(continueManually)} />
                         </View>
                       )}
                       {setupBusy && <ThemedText style={styles.inlineNote} accessibilityLiveRegion="polite">
@@ -1120,11 +1156,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         />
                       )}
                       {Platform.OS !== 'ios' && (
-                      <Pressable accessibilityRole="button" disabled={setupBusy}
-                        accessibilityState={{ disabled: setupBusy }}
+                      <Pressable accessibilityRole="button" disabled={setupBusy || transitioning}
+                        accessibilityState={{ disabled: setupBusy || transitioning }}
                         accessibilityLabel={t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
                         accessibilityHint={t(state.onboardingPlan ? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote')}
-                        onPress={() => { tapped(); setPersonalizing(true); setStep('goals'); }}
+                        onPress={() => {
+                          if (!beginStepTransition()) return;
+                          tapped(); setPersonalizing(true); setStep('goals');
+                        }}
                         style={({ pressed }) => [styles.personalizeRow, { opacity: pressed ? 0.65 : 1 }]}>
                         <View style={styles.choiceCopy}>
                           <ThemedText style={styles.choiceTitle}>
@@ -1308,7 +1347,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
                       <View style={styles.captureActions}>
                         {finishSaveFailed ? <Button wrapLabel label={t('storageRecoveryRetry')}
-                          onPress={() => void runSetupAction(() => openWafra(requestedFirstEntry.current))}
+                          onPress={() => void runSetupAction(() => openWafra(requestedFirstEntry.current, requestedDestination.current))}
                           disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
                         : completionOutcome === 'manual' && !automaticCompletion ? <>
                           <Button wrapLabel label={t('onboardAddFirstEntry')}
@@ -1319,7 +1358,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             disabled={setupBusy} labelColor={night.text} />
                         </> : failedCompletion || smsDenied ? <>
                           <Button wrapLabel label={t('onboardRetrySetup')}
-                            onPress={goBack} disabled={setupBusy}
+                            onPress={goBack} disabled={setupBusy || transitioning}
                             labelColor={night.onPrimary} style={styles.primaryButton} />
                           <Button wrapLabel variant="outline" label={t('onboardManualChoice')}
                             onPress={() => void runSetupAction(continueManually)} disabled={setupBusy}

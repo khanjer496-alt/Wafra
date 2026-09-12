@@ -14,8 +14,8 @@
  *
  *  - `importInFlight` — two screens must join one scan, not run two against
  *    the same stale ledger. Per-component, each screen would have had its own.
- *  - `lastScanAt` — the 30s freshness throttle is a property of the inbox, not
- *    of whoever is looking at it.
+ *  - `lastScanAt` — ordinary mounts and ledger updates share a 30s freshness
+ *    throttle instead of each screen repeating the same inbox read.
  *  - `sessionSetupRan` — entitlement refresh and reminder sync happen once per
  *    launch, not once per screen that mounts.
  */
@@ -30,6 +30,7 @@ import {
   isSmsScanningAvailable,
   openSmsPermissionSettings,
   requestSmsPermission,
+  subscribeInboxChanges,
 } from '@/lib/auto-import';
 import { enableRelayBackgroundSync, setChargeAlertsEnabled } from '@/lib/background-relay';
 import {
@@ -55,6 +56,7 @@ import { iosLocalCaptureCatchupUrl } from '@/lib/ios-local-capture-protocol';
 import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
   WafraLiveCaptureNativeModule,
@@ -97,12 +99,9 @@ const retireLegacyShortcutCapture = async (): Promise<'not-needed' | 'complete'>
 };
 
 /**
- * How long a scan stays fresh enough to skip on returning to the app.
- *
- * Coming back from the banking app to see the charge is the single most
- * common way this app is opened, so the bar for re-scanning is low. It is
- * not zero only because flicking between two apps should not run a full inbox
- * read on every flick.
+ * Ordinary mounts and ledger updates can reuse a recent scan. Returning from
+ * another app or receiving an Android provider event can mean a new bank
+ * message arrived, so those triggers bypass this throttle.
  */
 const RESCAN_AFTER_MS = 30_000;
 let lastScanAt = 0;
@@ -1032,6 +1031,68 @@ export function useAutoImport(
     latestScan.current = runAutoImport;
   }, [runAutoImport]);
 
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
+      !state.onboarded || state.captureOptOut || !entitlementActive ||
+      (state.historyImport && state.historyImport.status !== 'complete')) return;
+    let mounted = true;
+    const canScan = () => {
+      const current = getStateSnapshot();
+      return mounted && RNAppState.currentState === 'active' && current.hydrated &&
+        current.onboarded && !current.captureOptOut && isProActive(current) &&
+        (!current.historyImport || current.historyImport.status === 'complete');
+    };
+    const scheduler = createInboxRefreshScheduler(async () => {
+      // A provider change can arrive after the running scan's last page.
+      // Wait for its durable completion, then reread through the shared lane.
+      const ongoing = importInFlight?.promise;
+      if (ongoing) await ongoing.catch(() => {});
+      if (canScan()) await latestScan.current(false);
+    }, canScan);
+    // The native observer checks permission only when it starts. Recreate it
+    // after a denied permission is restored; foreground checks stay available
+    // while it is denied so returning from Settings can recover capture.
+    const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => scheduler.request());
+    const foreground = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') scheduler.request();
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+      foreground.remove();
+      scheduler.dispose();
+    };
+  }, [entitlementActive, getStateSnapshot, needsPermission, state.captureOptOut, state.historyImport,
+    state.hydrated, state.onboarded, watchForeground]);
+
+  // The native signal carries no source data and is only a foreground hint.
+  // The same serialized drain, parser and durable-save-before-ACK boundary do
+  // the work; launch/resume below reconciles signals missed while suspended.
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'ios' ||
+      iosNative?.queueChangeEventsSupported !== true || !iosNative.addListener) return;
+    let mounted = true;
+    const canScan = () => {
+      const current = getStateSnapshot();
+      return mounted && RNAppState.currentState === 'active' && current.hydrated &&
+        !current.captureOptOut && isProActive(current) &&
+        (!current.historyImport || current.historyImport.status === 'complete');
+    };
+    const scheduler = createInboxRefreshScheduler(async () => {
+      // A signal may arrive after another scan read its final native page.
+      // Joining that scan alone would lose the wake-up. Wait, then reread.
+      const ongoing = importInFlight?.promise;
+      if (ongoing) await ongoing.catch(() => {});
+      if (canScan()) await latestScan.current(false);
+    }, canScan);
+    const subscription = iosNative.addListener('onQueueChanged', () => scheduler.request());
+    return () => {
+      mounted = false;
+      subscription.remove();
+      scheduler.dispose();
+    };
+  }, [getStateSnapshot, iosNative, watchForeground]);
+
   // Silent auto-import on open, and again every time the app comes back to
   // the foreground.
   //
@@ -1061,8 +1122,8 @@ export function useAutoImport(
     }
 
     /**
-     * @param force ignore the freshness throttle. Only the call below passes
-     * it for a reset ledger or when capture becomes eligible again.
+     * @param force ignore the freshness throttle for a reset ledger or
+     * renewed eligibility. Android foreground returns use the scheduler above.
      */
     const scan = (force = false) => {
       if (!force && Platform.OS !== 'ios' &&
@@ -1090,7 +1151,7 @@ export function useAutoImport(
      * throttle. It cannot storm: the effect re-runs on a CHANGE to
      * `lastScanTs`, so a ledger sitting at 0 (a phone with no parseable bank
      * messages) forces exactly once and is then only reachable through the
-     * throttled resume path, and a rebuild that does import moves the
+     * foreground-resume path, and a rebuild that does import moves the
      * watermark off 0 — which re-runs this effect once more into a throttle
      * that was just stamped.
      */
@@ -1117,7 +1178,7 @@ export function useAutoImport(
     }
 
     const sub = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') scan();
+      if (next === 'active' && Platform.OS !== 'android') scan();
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps

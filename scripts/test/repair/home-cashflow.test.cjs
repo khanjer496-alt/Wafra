@@ -88,8 +88,16 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
   const h = createHarness({ state: { reviewTray: { pending: [{ expiresAt: Date.now() + 864000000 }] } } });
   const project = h.deps['@/lib/dashboard-projection'].projectDashboard;
   let projections = 0;
+  let insightProjections = 0;
   const memoSlots = [];
   let memoCursor = 0;
+  const stateSlots = [];
+  let stateCursor = 0;
+  const readStateSlot = h.deps.react.useState;
+  h.deps.react.useState = initial => {
+    const index = stateCursor++;
+    return stateSlots[index] ?? (stateSlots[index] = readStateSlot(initial));
+  };
   h.deps.react.useMemo = (factory, deps) => {
     const index = memoCursor++;
     const previous = memoSlots[index];
@@ -97,17 +105,24 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
     const value = factory(); memoSlots[index] = { value, deps }; return value;
   };
   h.deps['@/lib/dashboard-projection'].projectDashboard = request => {
+    if (request.surface === 'dashboard') {
+      assert.equal(request.includeInsights, true);
+      insightProjections++;
+      return project();
+    }
     projections++;
     assert.equal(request.surface, 'home');
+    assert.equal(request.includeInsights, false);
     const projected = project();
     return { ...projected, unreadFormats: request.state.reviewTray.pending.length ? null : { count: 3, shouldPrompt: true } };
   };
-  const render = () => { memoCursor = 0; return h.render('home'); };
+  const render = () => { memoCursor = 0; stateCursor = 0; return h.render('home'); };
   render();
   const sameTransactions = h.state.transactions;
   h.state.reviewTray = { pending: [] };
   const tree = render();
   assert.equal(h.state.transactions, sameTransactions);
   assert.equal(projections, 2, 'the changed prompt priority invalidates only the existing Home projection memo');
+  assert.equal(insightProjections, 1, 'dismissing a review does not recompute historical insight analysis');
   assert.ok(text(tree).includes(h.deps['@/lib/i18n'].tf('unreadFormatCount', { count: 3, s: 's' })));
 });
