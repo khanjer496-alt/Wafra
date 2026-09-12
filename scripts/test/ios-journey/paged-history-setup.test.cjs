@@ -21,7 +21,7 @@ test('only authoritative bounded native progress can render; no raw text/capabil
 test('run link contains only the matching Shortcut name and local return routes', () => {
   const url = new URL(api.pagedHistoryRunUrl());
   assert.equal(url.protocol, 'shortcuts:');
-  assert.equal(url.searchParams.get('name'), 'Wafra History v2');
+  assert.equal(url.searchParams.get('name'), 'Wafra-History-v2-fixed.signed');
   assert.equal(url.searchParams.get('x-error'), 'wafra://ios-paging-beta');
   assert.equal(url.searchParams.get('x-cancel'), 'wafra://ios-paging-beta');
   assert.equal([...url.searchParams].length, 3);
@@ -29,10 +29,10 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(api.PAGED_HISTORY_INSTALL_URL, null);
   const beta = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
-    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/b02fdd70b9b84805a8d8e9684dd684d5',
   } } });
   assert.equal(beta.pagedHistoryEnabled(), true);
-  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17');
+  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/b02fdd70b9b84805a8d8e9684dd684d5');
 });
 test('production keeps paging UI off while every iOS binary retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
