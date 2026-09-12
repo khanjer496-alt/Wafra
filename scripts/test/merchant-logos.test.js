@@ -106,6 +106,8 @@ for (const title of samples) {
 }
 
 let failed = false;
+let themeText = '#F5F4EF';
+let colorScheme = 'dark';
 const jsx = (type, props, key) => ({ type, props, key });
 function loadAvatar(identities) {
   return compile('src/components/ui/merchant-avatar.tsx', (id) => {
@@ -117,6 +119,8 @@ function loadAvatar(identities) {
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
       case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }) };
+      case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
+      case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
       case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
       case '@/constants/theme': return { Radius: { control: 12, tile: 8 } };
       default: throw new Error(`Unexpected runtime dependency: ${id}`);
@@ -143,6 +147,10 @@ const image = tile.props.children;
 assert.equal(image.type, 'image');
 assert.equal(image.props.source, 1);
 assert.equal(image.props.contentFit, 'contain', 'preserve artwork proportions');
+assert.equal(image.props.style.width, 44, 'artwork fills the avatar without white padding');
+assert.equal(image.props.style.height, 44);
+assert.equal(Object.assign({}, ...tile.props.style).backgroundColor, undefined, 'transparent tile has no white backing');
+assert.equal(image.props.tintColor, undefined, 'colored artwork keeps its brand colors');
 assert.equal(image.props.accessible, false);
 assert.equal(image.props.cachePolicy, 'memory-disk');
 assert.equal(image.props.recyclingKey, 'qa-one');
@@ -151,6 +159,17 @@ image.props.onError();
 assert.equal(known.type(known.props).type, 'category', 'an unreadable image falls back immediately');
 assert.notEqual(PrototypeAvatar({ title: 'Another QA Shop', category: 'transport' }).key, known.key);
 failed = false;
+for (const ink of ['#F5F4EF', '#161510']) {
+  themeText = ink;
+  colorScheme = ink === '#F5F4EF' ? 'dark' : 'light';
+  const apple = MerchantAvatar({ title: 'Apple', category: 'shopping', size: 34 });
+  assert.equal(apple.type(apple.props).props.children.props.tintColor, ink, 'single-ink logo stays readable in each theme');
+  const tabby = MerchantAvatar({ title: 'Tabby', category: 'shopping', size: 34 });
+  assert.equal(tabby.type(tabby.props).props.children.props.tintColor, undefined, 'Tabby retains its green artwork');
+  const qatar = MerchantAvatar({ title: 'Qatar Airways', category: 'travel', size: 34 });
+  assert.equal(qatar.type(qatar.props).props.children.props.tintColor, colorScheme === 'dark' ? ink : undefined,
+    'Qatar Airways uses a readable dark-mode rendition and keeps burgundy in light mode');
+}
 const real = MerchantAvatar({ title: 'Lulu Hypermarket', category: 'groceries', size: 64 });
 assert.equal(real.key, 'lulu');
 assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');

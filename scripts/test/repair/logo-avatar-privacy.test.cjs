@@ -39,6 +39,7 @@ function harness(kind, { privateMode = false, bundled = null } = {}) {
     'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {} },
     '@/lib/store': { useStore: () => ({ state }) },
     '@/hooks/use-theme': { useTheme: () => ({}) }, '@/components/ui/icon': { Icon: 'Icon' },
+    '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
     '@/components/ui/category-avatar': { CategoryAvatar: 'Category' },
     '@/components/ui/merchant-logo-assets': { merchantLogoFor: () => bundled },
     '@/lib/merchant-logo-resolver': { resolveRemoteMerchantLogo: resolve },

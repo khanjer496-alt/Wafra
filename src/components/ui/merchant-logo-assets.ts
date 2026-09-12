@@ -3,6 +3,8 @@ export interface MerchantLogo {
   readonly id: string;
   /** Metro's static asset identifier; remote image URLs are not supported. */
   readonly source: number;
+  /** Single-color transparent marks use the theme ink for contrast. */
+  readonly tint?: 'theme' | 'dark';
 }
 
 // Static requires are intentional: Metro includes these files in native builds
@@ -134,9 +136,17 @@ function keyFor(title: string): string {
     .replace(/\s+/g, ' ').trim();
 }
 
+// Reviewed transparent, single-ink artwork. Colored brand marks retain their
+// original pixels; only these silhouettes adapt to light/dark backgrounds.
+const MONOCHROME_LOGOS = new Set([
+  'adidas', 'apple', 'cursor', 'epicgames', 'github', 'nike', 'notion',
+  'puma', 'steam', 'uber', 'underarmour', 'vercel', 'zara',
+]);
+
 const LOGOS = new Map<string, MerchantLogo>();
 for (const [id, source, aliases] of ENTRIES) {
-  const logo: MerchantLogo = Object.freeze({ id, source });
+  const tint = MONOCHROME_LOGOS.has(id) ? 'theme' : id === 'qatarairways' ? 'dark' : undefined;
+  const logo: MerchantLogo = Object.freeze({ id, source, ...(tint ? { tint } : {}) });
   for (const alias of aliases) {
     const key = keyFor(alias);
     if (LOGOS.has(key) && LOGOS.get(key)!.id !== id) throw new Error('merchant_logo_alias_conflict');

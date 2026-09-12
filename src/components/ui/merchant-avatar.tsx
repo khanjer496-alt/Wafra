@@ -5,6 +5,8 @@ import { StyleSheet, View } from 'react-native';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
 import { Radius } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
 import { useStore } from '@/lib/store';
@@ -36,7 +38,7 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
   }, [title, category, bundled, allowRemote]);
 
   if (bundled) {
-    return <LogoTile key={bundled.id} id={bundled.id} source={bundled.source} category={category} size={size} />;
+    return <LogoTile key={bundled.id} id={bundled.id} source={bundled.source} tint={bundled.tint} category={category} size={size} />;
   }
   if (allowRemote && remote) {
     return <LogoTile key={remote.id} id={remote.id} source={{ uri: remote.logoUrl }} category={category} size={size} />;
@@ -44,12 +46,15 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
   return <CategoryAvatar category={category} size={size} />;
 }
 
-function LogoTile({ id, source, category, size }: {
+function LogoTile({ id, source, tint, category, size }: {
   id: string;
   source: number | { uri: string };
+  tint?: 'theme' | 'dark';
   category: CategoryId;
   size: number;
 }) {
+  const theme = useTheme();
+  const dark = useColorScheme() === 'dark';
   const [failed, setFailed] = useState(false);
   if (failed) return <CategoryAvatar category={category} size={size} />;
 
@@ -69,9 +74,10 @@ function LogoTile({ id, source, category, size }: {
         cachePolicy="memory-disk"
         recyclingKey={id}
         transition={0}
+        tintColor={tint === 'theme' || (tint === 'dark' && dark) ? theme.text : undefined}
         accessible={false}
         onError={() => setFailed(true)}
-        style={{ width: Math.max(1, size - 8), height: Math.max(1, size - 8) }}
+        style={{ width: size, height: size }}
       />
     </View>
   );
@@ -81,6 +87,6 @@ const styles = StyleSheet.create({
   tile: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
 });
