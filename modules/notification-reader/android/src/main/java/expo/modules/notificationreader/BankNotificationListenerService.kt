@@ -1,6 +1,8 @@
 package expo.modules.notificationreader
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -53,10 +55,20 @@ class BankNotificationListenerService : NotificationListenerService() {
       if (!NotificationCapturePolicy.isEnabled(this)) return
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-      val text = (
-        extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-          ?: extras.getCharSequence(Notification.EXTRA_TEXT)
-        )?.toString() ?: ""
+      // Banks do not all populate EXTRA_TEXT. Some OEM-rendered notifications
+      // put the visible body in BIG_TEXT, TEXT_LINES or SUB_TEXT instead. Read
+      // the same bounded textual surfaces Android itself renders so a visible
+      // ADCB charge cannot be dropped merely because it chose another standard
+      // Notification field.
+      val textCandidates = mutableListOf<String>()
+      extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.let(textCandidates::add)
+      extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.let(textCandidates::add)
+      extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        ?.map { it.toString() }
+        ?.filter { it.isNotBlank() }
+        ?.let { textCandidates.add(it.joinToString("\n")) }
+      extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.let(textCandidates::add)
+      val text = textCandidates.firstOrNull { it.isNotBlank() } ?: ""
       // A bank alert is short. Refuse pathological payloads rather than
       // truncating them into a different message or allowing another app to
       // fill the encrypted queue with multi-megabyte notifications.
@@ -87,6 +99,25 @@ class BankNotificationListenerService : NotificationListenerService() {
 
     /** A user returning from Settings may enable capture after the listener connected. */
     fun sweepConnected() { connected?.sweepActiveNotifications() }
+
+    /**
+     * Foreground recovery for OEMs that granted access but later killed the
+     * listener process. If connected, recover shade alerts immediately. If not,
+     * ask Android to bind the listener again; onListenerConnected() performs the
+     * sweep as soon as the system completes that bind.
+     */
+    fun sweepOrRequestRebind(context: Context) {
+      val listener = connected
+      if (listener != null) {
+        listener.sweepActiveNotifications()
+        return
+      }
+      try {
+        requestRebind(ComponentName(context, BankNotificationListenerService::class.java))
+      } catch (_: Exception) {
+        // The next Android lifecycle callback or app foreground can retry.
+      }
+    }
 
     private const val MAX_TITLE_CHARS = 512
     private const val MAX_TEXT_CHARS = 4096

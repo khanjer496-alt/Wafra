@@ -80,6 +80,12 @@ class NotificationReaderModule : Module() {
       if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
         return@AsyncFunction emptyList<Map<String, Any>>()
       }
+      // Re-sweep notifications that are still visible in the shade on every
+      // drain. This recovers an alert if Android delivered it while the JS
+      // bridge was starting, after an OEM restarted the listener, or before a
+      // corrected admission rule reached the current build. append() is
+      // idempotent for the same package/text/postTime tuple.
+      BankNotificationListenerService.sweepOrRequestRebind(context)
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
         val sourceClass = TrustedBankNotificationPackages.sourceClass(
           context,

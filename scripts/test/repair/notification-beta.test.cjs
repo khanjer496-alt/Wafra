@@ -25,6 +25,7 @@ test('native notification admission is built into ordinary Android APKs', () => 
   const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
   assert.match(native, /CAPTURE_ENABLED[^\n]*BuildConfig\.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED/);
   assert.match(native, /installer\(context, packageName\) == "com\.android\.vending"/);
+  assert.match(native, /CAPTURE_ENABLED && markets\.containsKey\(packageName\)/);
 });
 
 test('curated package identity remains exact while native intake can discover new Play financial candidates', () => {
@@ -39,6 +40,26 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
   assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
   assert.match(listener, /MONEY_RE\.containsMatchIn\(body\)/);
+  assert.match(listener, /Notification\.EXTRA_TEXT_LINES/);
+  assert.match(listener, /Notification\.EXTRA_SUB_TEXT/);
+});
+
+test('known bank packages survive OEM/restore installer metadata while unknown apps still require Play provenance', () => {
+  const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
+  const trustedBranch = native.indexOf('if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK');
+  const playBranch = native.indexOf('if (!playInstalled(context, packageName)) return null');
+  assert.ok(trustedBranch >= 0 && playBranch > trustedBranch,
+    'exact curated package ids must be admitted before the unknown-app Play installer gate');
+});
+
+test('every notification drain re-sweeps or rebinds before reading the encrypted queue', () => {
+  const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
+  const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
+  const sweep = module.indexOf('BankNotificationListenerService.sweepOrRequestRebind(context)');
+  const readQueue = module.indexOf('NotificationCaptureStore.read(context, sinceMs.toLong())');
+  assert.ok(sweep >= 0 && readQueue > sweep);
+  assert.match(listener, /requestRebind\(ComponentName\(context, BankNotificationListenerService::class\.java\)\)/);
+  assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,120}sweepActiveNotifications\(\)/);
 });
 
 test('only the official HSBC UAE Play package is eligible for UAE capture', () => {

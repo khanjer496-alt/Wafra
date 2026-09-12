@@ -4,10 +4,10 @@ import android.content.Context
 import android.os.Build
 
 /**
- * Exact package identities from current official Google Play listings plus
- * launch-tested legacy bank packages. Package name alone is not identity: a
- * sideload can claim an absent name, so capture also requires Google Play to
- * be the recorded installer. Unknown/sideloaded apps fail closed.
+ * Exact package identities from current official bank listings plus
+ * launch-tested legacy bank packages. Known bank ids may come from Play, an OEM
+ * store or an Android restore/clone. Unknown apps still require Google Play as
+ * installer and remain review-only until explicitly learned locally.
  *
  * Keep this map byte-for-byte aligned with
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.
@@ -60,7 +60,7 @@ object TrustedBankNotificationPackages {
     CAPTURE_ENABLED && installer(context, packageName) == "com.android.vending"
 
   fun isTrusted(context: Context, packageName: String): Boolean =
-    markets.containsKey(packageName) && playInstalled(context, packageName)
+    CAPTURE_ENABLED && markets.containsKey(packageName)
 
   /**
    * Notification access is device-wide. Rank sources locally before queueing:
@@ -71,8 +71,15 @@ object TrustedBankNotificationPackages {
    * category that the platform cannot actually provide.
    */
   fun sourceClass(context: Context, packageName: String, body: String): String? {
+    // Exact curated bank package ids are accepted regardless of installer.
+    // Android restores, OEM stores and phone-clone migrations can legitimately
+    // leave installingPackageName null/non-Play even for the real bank app.
+    // A second APK cannot coexist under the same package id, so requiring the
+    // installer here made real ADCB/ENBD notifications silently disappear on
+    // otherwise healthy phones. Unknown packages still require Play provenance
+    // and remain review-only.
+    if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
     if (!playInstalled(context, packageName)) return null
-    if (markets.containsKey(packageName)) return SOURCE_TRUSTED_BANK
     return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null
   }
 }
