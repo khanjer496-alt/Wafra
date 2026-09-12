@@ -11,7 +11,20 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
-import { answerWafraQuestion, suggestedAssistantQuestions, type AssistantAnswer } from '@/lib/wafra-assistant';
+import {
+  assistantFollowUpQuestions,
+  runWafraAssistant,
+  suggestedAssistantQuestions,
+  type AssistantAnswer,
+  type AssistantToolRequest,
+} from '@/lib/wafra-assistant';
+
+interface AssistantTurn {
+  id: number;
+  question: string;
+  answer: AssistantAnswer;
+  request: AssistantToolRequest;
+}
 
 export default function AssistantScreen() {
   const router = useRouter();
@@ -19,14 +32,19 @@ export default function AssistantScreen() {
   const largeText = useLargeTextLayout();
   const { state } = useStore();
   const suggestions = useMemo(() => suggestedAssistantQuestions(state), [state]);
+  const followUps = useMemo(() => assistantFollowUpQuestions(), []);
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState<AssistantAnswer | null>(null);
+  const [turns, setTurns] = useState<AssistantTurn[]>([]);
 
   const ask = (value = question) => {
     const clean = value.trim();
     if (!clean) return;
-    setQuestion(clean);
-    setAnswer(answerWafraQuestion(state, clean));
+    const previousRequest = turns.at(-1)?.request ?? null;
+    const result = runWafraAssistant(state, clean, new Date(), previousRequest);
+    setTurns((current) => [...current.slice(-5), {
+      id: Date.now(), question: clean, answer: result.answer, request: result.request,
+    }]);
+    setQuestion('');
   };
 
   return (
@@ -48,28 +66,31 @@ export default function AssistantScreen() {
         </View>
       </View>
 
-      <View style={styles.suggestions}>
-        {suggestions.map((item) => (
-          <Pressable
-            key={item}
-            accessibilityRole="button"
-            onPress={() => ask(item)}
-            style={[styles.suggestion, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-            <ThemedText type="small">{item}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-          </Pressable>
-        ))}
-      </View>
+      {turns.length === 0 ? <View style={styles.suggestions}>
+          {suggestions.map((item) => (
+            <Pressable
+              key={item}
+              accessibilityRole="button"
+              onPress={() => ask(item)}
+              style={[styles.suggestion, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+              <ThemedText type="small">{item}</ThemedText>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
+          ))}
+        </View> : null}
 
-      {answer ? (
+      {turns.map((turn, index) => <View key={turn.id} style={styles.turn}>
+        <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+          <ThemedText type="smallBold">{turn.question}</ThemedText>
+        </View>
         <View
-          accessibilityLiveRegion="polite"
+          accessibilityLiveRegion={index === turns.length - 1 ? 'polite' : 'none'}
           style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-          <ThemedText type="micro" themeColor="primary">{answer.title}</ThemedText>
-          <ThemedText type="default">{answer.body}</ThemedText>
-          {answer.facts?.length ? (
+          <ThemedText type="micro" themeColor="primary">{turn.answer.title}</ThemedText>
+          <ThemedText type="default">{turn.answer.body}</ThemedText>
+          {turn.answer.facts?.length ? (
             <View style={styles.facts}>
-              {answer.facts.map((fact) => (
+              {turn.answer.facts.map((fact) => (
                 <View key={`${fact.label}-${fact.value}`} style={[styles.factRow, largeText && styles.factRowLarge]}>
                   <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
                   <ThemedText type="smallBold" tabular>{fact.value}</ThemedText>
@@ -78,7 +99,15 @@ export default function AssistantScreen() {
             </View>
           ) : null}
         </View>
-      ) : null}
+      </View>)}
+
+      {turns.length > 0 ? <View style={styles.quickFollowUps}>
+        {followUps.map((item) =>
+          <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
+            style={[styles.followUpChip, { borderColor: theme.cardBorder }]}>
+            <ThemedText type="meta">{item}</ThemedText>
+          </Pressable>)}
+      </View> : null}
 
       <View style={styles.composer}>
         <TextInput
@@ -115,10 +144,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 14, gap: 10 },
+  turn: { gap: 8 },
+  questionBubble: { alignSelf: 'flex-end', maxWidth: '88%', borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.control, paddingHorizontal: 12, paddingVertical: 10 },
   facts: { gap: 6, paddingTop: Spacing.one },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1 },
+  quickFollowUps: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  followUpChip: { minHeight: 44, borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, paddingHorizontal: 12, paddingVertical: 9, justifyContent: 'center' },
   composer: { gap: 8, paddingTop: Spacing.one },
   input: {
     minHeight: 52,

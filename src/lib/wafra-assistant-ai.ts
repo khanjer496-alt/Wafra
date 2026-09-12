@@ -19,6 +19,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   purpose: string;
   arguments: readonly string[];
 }[] = [
+  { tool: 'help', purpose: 'Explain what financial questions Wafra can answer', arguments: [] },
   { tool: 'spending-total', purpose: 'Total economic spending for a period', arguments: ['period'] },
   { tool: 'income-total', purpose: 'Total income for a period', arguments: ['period'] },
   { tool: 'merchant-breakdown', purpose: 'Spending at one known merchant', arguments: ['period', 'merchant'] },
@@ -27,6 +28,9 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'compare-periods', purpose: 'Compare spending with the preceding equivalent period', arguments: ['period'] },
   { tool: 'top-merchants', purpose: 'Largest merchants by spending', arguments: ['period', 'limit'] },
   { tool: 'top-categories', purpose: 'Largest categories by spending', arguments: ['period', 'limit'] },
+  { tool: 'largest-purchases', purpose: 'Largest individual purchases in a period', arguments: ['period', 'limit'] },
+  { tool: 'daily-average', purpose: 'Average spending per elapsed day in a period', arguments: ['period'] },
+  { tool: 'net-income-spending', purpose: 'Income minus economic spending for a period', arguments: ['period'] },
   { tool: 'upcoming-payments', purpose: 'Bills, card dues and subscriptions due soon', arguments: ['withinDays'] },
   { tool: 'cash-outflow', purpose: 'Cash that actually left funded accounts', arguments: ['period'] },
   { tool: 'month-forecast', purpose: 'Conservative current-month spending pace forecast', arguments: ['period'] },
@@ -125,6 +129,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
   if (typeof candidate.tool !== 'string') return false;
 
   switch (candidate.tool) {
+    case 'help':
     case 'subscriptions':
       return true;
     case 'upcoming-payments':
@@ -139,6 +144,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
         ASSISTANT_CATEGORY_IDS.has(candidate.category);
     case 'top-merchants':
     case 'top-categories':
+    case 'largest-purchases':
       return validPeriod(candidate.period) &&
         (candidate.limit === undefined ||
           (Number.isSafeInteger(candidate.limit) && (candidate.limit as number) >= 1 &&
@@ -146,6 +152,8 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'spending-total':
     case 'income-total':
     case 'compare-periods':
+    case 'daily-average':
+    case 'net-income-spending':
     case 'cash-outflow':
     case 'month-forecast':
       return validPeriod(candidate.period);

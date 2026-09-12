@@ -1,6 +1,6 @@
 import { categoryLabel } from '@/lib/categories';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
-import { formatAED as formatLedgerMoney } from '@/lib/format';
+import { formatAED as formatLedgerMoney, toISODate } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { checkedMinorSum } from '@/lib/ledger-money';
 import { leavingSoon, outgoingTotalFils } from '@/lib/leaving-soon';
@@ -9,6 +9,7 @@ import {
   daysInPeriod,
   elapsedDays,
   inPeriod,
+  periodLabel,
   previousPeriod,
   type Period,
 } from '@/lib/period';
@@ -17,6 +18,7 @@ import { activeSubscriptions, detectSubscriptions, trueSubscriptions } from '@/l
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
 export type AssistantTool =
+  | 'help'
   | 'spending-total'
   | 'income-total'
   | 'merchant-breakdown'
@@ -25,6 +27,9 @@ export type AssistantTool =
   | 'compare-periods'
   | 'top-merchants'
   | 'top-categories'
+  | 'largest-purchases'
+  | 'daily-average'
+  | 'net-income-spending'
   | 'upcoming-payments'
   | 'cash-outflow'
   | 'month-forecast';
@@ -37,6 +42,7 @@ export type AssistantTool =
  * Every amount still comes from Wafra's local ledger through this executor.
  */
 export type AssistantToolRequest =
+  | { tool: 'help' }
   | { tool: 'spending-total'; period: Period }
   | { tool: 'income-total'; period: Period }
   | { tool: 'merchant-breakdown'; period: Period; merchant: string }
@@ -45,6 +51,9 @@ export type AssistantToolRequest =
   | { tool: 'compare-periods'; period: Period }
   | { tool: 'top-merchants'; period: Period; limit?: number }
   | { tool: 'top-categories'; period: Period; limit?: number }
+  | { tool: 'largest-purchases'; period: Period; limit?: number }
+  | { tool: 'daily-average'; period: Period }
+  | { tool: 'net-income-spending'; period: Period }
   | { tool: 'upcoming-payments'; withinDays?: number }
   | { tool: 'cash-outflow'; period: Period }
   | { tool: 'month-forecast'; period: Period };
@@ -59,6 +68,20 @@ export interface AssistantAnswer {
 }
 
 const normalize = (value: string) => value.trim().toLowerCase();
+
+const normalizeMerchantText = (value: string) => value
+  .normalize('NFKC')
+  .toLocaleLowerCase('en-US')
+  .replace(/[’'`]/g, '')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
+  .trim()
+  .replace(/\s+/g, ' ');
+
+const MERCHANT_STOP_WORDS = new Set([
+  'at', 'from', 'how', 'much', 'did', 'i', 'spend', 'spent', 'pay', 'paid', 'payment',
+  'purchase', 'purchases', 'transaction', 'transactions', 'this', 'last', 'month', 'year',
+  'today', 'yesterday', 'online', 'card', 'debit', 'credit',
+]);
 
 function ledgerScope(state: AppState) {
   const live = liveAccountIds(state.accounts);
@@ -89,6 +112,24 @@ function total(rows: Transaction[]): number {
 function selectedPeriod(question: string, now: Date): Period {
   const current = currentMonthPeriod(now);
   const currentYear = now.getFullYear();
+  const today = toISODate(now);
+  const dayRange = (days: number): Period => {
+    const from = new Date(now);
+    from.setHours(12, 0, 0, 0);
+    from.setDate(from.getDate() - Math.max(0, days - 1));
+    return { mode: 'range', from: toISODate(from), to: today };
+  };
+  if (/\btoday\b/.test(question)) return { mode: 'range', from: today, to: today };
+  if (/\byesterday\b/.test(question)) {
+    const day = new Date(now);
+    day.setDate(day.getDate() - 1);
+    const iso = toISODate(day);
+    return { mode: 'range', from: iso, to: iso };
+  }
+  const rollingDays = question.match(/(?:last|past)\s+(\d{1,2})\s+days?/);
+  if (rollingDays) return dayRange(Math.max(1, Math.min(Number(rollingDays[1]), 90)));
+  if (/\blast 7 days\b|\bpast week\b|\blast week\b/.test(question)) return dayRange(7);
+  if (/\blast 30 days\b|\bpast 30 days\b/.test(question)) return dayRange(30);
   if (/all time|ever|since i started/.test(question)) {
     return { mode: 'all' };
   }
@@ -101,14 +142,56 @@ function selectedPeriod(question: string, now: Date): Period {
   if (/last month|previous month/.test(question)) {
     return previousPeriod(current) ?? current;
   }
+  const months = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december',
+  ];
+  const namedMonth = months.findIndex((month) => new RegExp(`\\b${month}\\b`).test(question));
+  if (namedMonth >= 0) {
+    const yearMatch = question.match(/\b(20\d{2})\b/);
+    const year = yearMatch ? Number(yearMatch[1]) : namedMonth > now.getMonth() ? currentYear - 1 : currentYear;
+    return { mode: 'month', key: `${year}-${String(namedMonth + 1).padStart(2, '0')}` };
+  }
   return current;
 }
 
 function merchantFromQuestion(question: string, rows: Transaction[]): string | null {
-  const q = normalize(question);
+  const q = normalizeMerchantText(question);
   const titles = [...new Set(rows.map((tx) => tx.title.trim()).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
-  return titles.find((title) => q.includes(normalize(title))) ?? null;
+  const exact = titles.find((title) => q.includes(normalizeMerchantText(title)));
+  if (exact) return exact;
+
+  // Bank descriptors often append a branch, city or processor suffix. Permit a
+  // shorter user phrase only when it identifies exactly one stored merchant;
+  // ambiguity is safer than silently choosing the wrong shop.
+  const qTokens = new Set(q.split(' ').filter((token) => token.length >= 4 && !MERCHANT_STOP_WORDS.has(token)));
+  if (qTokens.size === 0) return null;
+  const candidates = titles.filter((title) => {
+    const tokens = normalizeMerchantText(title).split(' ')
+      .filter((token) => token.length >= 4 && !MERCHANT_STOP_WORDS.has(token));
+    return tokens.some((token) => qTokens.has(token));
+  });
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function requestedLimit(question: string): number | undefined {
+  const match = question.match(/\btop\s+(\d{1,2})\b/);
+  if (!match) return undefined;
+  return Math.max(1, Math.min(Number(match[1]), 10));
+}
+
+function requestedUpcomingDays(question: string): number {
+  const match = question.match(/(?:next|within)\s+(\d{1,2})\s+days?/);
+  if (match) return Math.max(1, Math.min(Number(match[1]), 90));
+  if (/\bthis week\b|\bnext week\b/.test(question)) return 7;
+  if (/\bnext month\b/.test(question)) return 30;
+  return 30;
+}
+
+function hasExplicitPeriod(question: string): boolean {
+  return /\b(?:today|yesterday|this month|last month|previous month|this year|current year|last year|previous year|all time|ever|since i started|last \d{1,2} days|past \d{1,2} days|past week|last week)\b/.test(question) ||
+    /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?\b/.test(question);
 }
 
 function categoryFromQuestion(question: string): CategoryId | null {
@@ -194,10 +277,24 @@ export function executeAssistantTool(
   now = new Date(),
 ): AssistantAnswer {
   const period = 'period' in request ? request.period : currentMonthPeriod(now);
+  const scope = periodLabel(period);
   const spending = spendingRows(state, period);
   const income = incomeRows(state, period);
 
   switch (request.tool) {
+    case 'help':
+      return {
+        tool: request.tool,
+        title: 'What you can ask',
+        body: 'Ask Wafra about spending, income, merchants, categories, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
+        facts: [
+          { label: 'Example', value: 'Why did my spending change?' },
+          { label: 'Example', value: 'What was my biggest purchase?' },
+          { label: 'Example', value: 'What is due in the next 7 days?' },
+        ],
+        data: {},
+      };
+
     case 'subscriptions': {
       const { live, internal } = ledgerScope(state);
       const subs = activeSubscriptions(trueSubscriptions(
@@ -224,7 +321,7 @@ export function executeAssistantTool(
       return {
         tool: request.tool,
         title: categoryLabel(request.category),
-        body: `You spent ${formatLedgerMoney(amount)} across ${rows.length} transaction${rows.length === 1 ? '' : 's'} in this category.`,
+        body: `In ${scope}, you spent ${formatLedgerMoney(amount)} across ${rows.length} transaction${rows.length === 1 ? '' : 's'} in this category.`,
         facts: groupedCategoryMerchants(rows, request.category)
           .slice(0, 5)
           .map((item) => ({ label: item.key, value: formatLedgerMoney(item.totalFils) })),
@@ -235,38 +332,47 @@ export function executeAssistantTool(
     case 'merchant-breakdown': {
       const rows = spending.filter((tx) => normalize(tx.title) === normalize(request.merchant));
       const amount = total(rows);
+      const average = rows.length > 0 ? Math.round(amount / rows.length) : 0;
+      const largest = rows.reduce((max, row) => Math.max(max, row.amountFils), 0);
       return {
         tool: request.tool,
         title: request.merchant,
-        body: `You spent ${formatLedgerMoney(amount)} at ${request.merchant} across ${rows.length} transaction${rows.length === 1 ? '' : 's'}.`,
-        data: { totalFils: amount, transactionCount: rows.length, merchant: request.merchant },
+        body: `In ${scope}, you spent ${formatLedgerMoney(amount)} at ${request.merchant} across ${rows.length} transaction${rows.length === 1 ? '' : 's'}.`,
+        facts: rows.length ? [
+          { label: 'Average purchase', value: formatLedgerMoney(average) },
+          { label: 'Largest purchase', value: formatLedgerMoney(largest) },
+        ] : [],
+        data: { totalFils: amount, transactionCount: rows.length, averageFils: average, largestFils: largest, merchant: request.merchant },
       };
     }
 
     case 'compare-periods': {
       const previous = previousPeriod(period);
+      const previousScope = previous ? periodLabel(previous) : null;
       const prior = previous ? total(spendingRows(state, previous)) : 0;
       const current = total(spending);
       const delta = checkedMinorSum([current, -prior]);
       const pct = prior > 0 ? Math.round((Math.abs(delta) / prior) * 100) : null;
       const topCurrent = groupedCategoryTotals(spending);
       const topPrior = previous ? groupedCategoryTotals(spendingRows(state, previous)) : [];
+      const currentByCategory = new Map(topCurrent.map((item) => [item.key, item.totalFils] as const));
       const priorByCategory = new Map(topPrior.map((item) => [item.key, item.totalFils] as const));
-      const categoryChanges = topCurrent
-        .map((item) => ({
-          key: item.key,
-          delta: checkedMinorSum([item.totalFils, -(priorByCategory.get(item.key) ?? 0)]),
+      const categoryChanges = [...new Set([...currentByCategory.keys(), ...priorByCategory.keys()])]
+        .map((key) => ({
+          key,
+          delta: checkedMinorSum([(currentByCategory.get(key) ?? 0), -(priorByCategory.get(key) ?? 0)]),
         }))
+        .filter((item) => item.delta !== 0)
         .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
       return {
         tool: request.tool,
         title: 'Spending change',
         body: prior === 0
-          ? `You spent ${formatLedgerMoney(current)} this period. I do not have enough previous-period spending to make a reliable comparison.`
-          : `You spent ${formatLedgerMoney(current)}, ${pct}% ${delta >= 0 ? 'more' : 'less'} than the previous period.`,
+          ? `You spent ${formatLedgerMoney(current)} in ${scope}. I do not have enough earlier spending to make a reliable comparison.`
+          : `You spent ${formatLedgerMoney(current)} in ${scope}, ${pct}% ${delta >= 0 ? 'more' : 'less'} than ${previousScope}.`,
         facts: [
-          { label: 'This period', value: formatLedgerMoney(current) },
-          { label: 'Previous period', value: formatLedgerMoney(prior) },
+          { label: scope, value: formatLedgerMoney(current) },
+          { label: previousScope ?? 'Previous period', value: formatLedgerMoney(prior) },
           ...categoryChanges.slice(0, 3).map((item) => ({
             label: `${categoryLabel(item.key)} change`,
             value: `${item.delta >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(item.delta))}`,
@@ -284,8 +390,8 @@ export function executeAssistantTool(
         tool: request.tool,
         title: 'Top merchants',
         body: top.length
-          ? `${top[0].key} is your biggest merchant in this period at ${formatLedgerMoney(top[0].totalFils)}.`
-          : 'I do not see any spending in this period yet.',
+          ? `${top[0].key} is your biggest merchant in ${scope} at ${formatLedgerMoney(top[0].totalFils)}.`
+          : `I do not see any spending in ${scope} yet.`,
         facts: top.map((item) => ({ label: item.key, value: formatLedgerMoney(item.totalFils) })),
         data: { merchantCount: groups.length, spendingFils: total(spending) },
       };
@@ -299,10 +405,64 @@ export function executeAssistantTool(
         tool: request.tool,
         title: 'Top categories',
         body: top.length
-          ? `${categoryLabel(top[0].key)} is your biggest spending category at ${formatLedgerMoney(top[0].totalFils)}.`
-          : 'I do not see any spending in this period yet.',
+          ? `${categoryLabel(top[0].key)} is your biggest spending category in ${scope} at ${formatLedgerMoney(top[0].totalFils)}.`
+          : `I do not see any spending in ${scope} yet.`,
         facts: top.map((item) => ({ label: categoryLabel(item.key), value: formatLedgerMoney(item.totalFils) })),
         data: { categoryCount: groups.length, spendingFils: total(spending) },
+      };
+    }
+
+    case 'largest-purchases': {
+      const limit = Math.max(1, Math.min(request.limit ?? 5, 10));
+      const rows = [...spending]
+        .sort((a, b) => b.amountFils - a.amountFils || b.date.localeCompare(a.date))
+        .slice(0, limit);
+      return {
+        tool: request.tool,
+        title: 'Largest purchases',
+        body: rows.length
+          ? `Your largest purchase in ${scope} was ${formatLedgerMoney(rows[0].amountFils)} at ${rows[0].title}.`
+          : `I do not see any spending in ${scope} yet.`,
+        facts: rows.map((row) => ({ label: row.title, value: formatLedgerMoney(row.amountFils) })),
+        data: {
+          purchaseCount: spending.length,
+          largestFils: rows[0]?.amountFils ?? 0,
+        },
+      };
+    }
+
+    case 'daily-average': {
+      const spent = total(spending);
+      const elapsed = elapsedDays(period, now, state.transactions);
+      const average = elapsed > 0 ? Math.round(spent / elapsed) : 0;
+      return {
+        tool: request.tool,
+        title: 'Daily average',
+        body: `In ${scope}, you averaged ${formatLedgerMoney(average)} of spending per day across ${elapsed} day${elapsed === 1 ? '' : 's'}.`,
+        facts: [
+          { label: 'Total spending', value: formatLedgerMoney(spent) },
+          { label: 'Days counted', value: String(elapsed) },
+        ],
+        data: { totalFils: spent, elapsedDays: elapsed, dailyAverageFils: average },
+      };
+    }
+
+    case 'net-income-spending': {
+      const spent = total(spending);
+      const received = total(income);
+      const net = checkedMinorSum([received, -spent]);
+      return {
+        tool: request.tool,
+        title: 'Income minus spending',
+        body: net >= 0
+          ? `In ${scope}, income was ${formatLedgerMoney(net)} higher than spending.`
+          : `In ${scope}, spending was ${formatLedgerMoney(Math.abs(net))} higher than income.`,
+        facts: [
+          { label: 'Income', value: formatLedgerMoney(received) },
+          { label: 'Spending', value: formatLedgerMoney(spent) },
+          { label: 'Difference', value: `${net >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(net))}` },
+        ],
+        data: { incomeFils: received, spendingFils: spent, netFils: net },
       };
     }
 
@@ -316,7 +476,10 @@ export function executeAssistantTool(
         body: items.length
           ? `You have ${items.length} payment${items.length === 1 ? '' : 's'} due within ${withinDays} days, totaling ${formatLedgerMoney(amount)}.`
           : `I do not see any payments due within the next ${withinDays} days.`,
-        facts: items.slice(0, 6).map((item) => ({ label: item.title, value: formatLedgerMoney(item.amountFils) })),
+        facts: items.slice(0, 6).map((item) => ({
+          label: `${item.title} · ${item.daysLeft < 0 ? `${Math.abs(item.daysLeft)}d late` : item.daysLeft === 0 ? 'today' : `in ${item.daysLeft}d`}`,
+          value: formatLedgerMoney(item.amountFils),
+        })),
         data: { withinDays, paymentCount: items.length, totalFils: amount },
       };
     }
@@ -327,7 +490,7 @@ export function executeAssistantTool(
       return {
         tool: request.tool,
         title: 'Cash out',
-        body: `${formatLedgerMoney(summary.totalFils)} actually left your accounts in this period.`,
+        body: `${formatLedgerMoney(summary.totalFils)} actually left your accounts in ${scope}.`,
         facts: [
           { label: 'Card repayments', value: formatLedgerMoney(summary.cardPaymentsFils) },
           { label: 'Other account outflow', value: formatLedgerMoney(summary.accountOutflowFils) },
@@ -365,22 +528,30 @@ export function executeAssistantTool(
 
     case 'income-total': {
       const amount = total(income);
+      const sources = groupedTotals(income, (tx) => tx.title.trim() || 'Unknown');
       return {
         tool: request.tool,
         title: 'Income',
-        body: `You received ${formatLedgerMoney(amount)} across ${income.length} income transaction${income.length === 1 ? '' : 's'}.`,
-        data: { totalFils: amount, transactionCount: income.length },
+        body: `In ${scope}, you received ${formatLedgerMoney(amount)} across ${income.length} income transaction${income.length === 1 ? '' : 's'}.`,
+        facts: sources.slice(0, 3).map((item) => ({ label: item.key, value: formatLedgerMoney(item.totalFils) })),
+        data: { totalFils: amount, transactionCount: income.length, sourceCount: sources.length },
       };
     }
 
     case 'spending-total':
     default: {
       const amount = total(spending);
+      const categories = groupedCategoryTotals(spending);
+      const average = spending.length > 0 ? Math.round(amount / spending.length) : 0;
       return {
         tool: 'spending-total',
         title: 'Spending',
-        body: `You spent ${formatLedgerMoney(amount)} across ${spending.length} transaction${spending.length === 1 ? '' : 's'}.`,
-        data: { totalFils: amount, transactionCount: spending.length },
+        body: `In ${scope}, you spent ${formatLedgerMoney(amount)} across ${spending.length} transaction${spending.length === 1 ? '' : 's'}.`,
+        facts: [
+          ...(categories[0] ? [{ label: 'Top category', value: `${categoryLabel(categories[0].key)} · ${formatLedgerMoney(categories[0].totalFils)}` }] : []),
+          ...(spending.length ? [{ label: 'Average transaction', value: formatLedgerMoney(average) }] : []),
+        ],
+        data: { totalFils: amount, transactionCount: spending.length, averageTransactionFils: average },
       };
     }
   }
@@ -396,14 +567,24 @@ export function planAssistantQuestion(
   state: AppState,
   question: string,
   now = new Date(),
+  previousRequest?: AssistantToolRequest | null,
 ): AssistantToolRequest {
   const q = normalize(question);
-  const period = selectedPeriod(q, now);
-  const spending = spendingRows(state, period);
+  const period = previousRequest && 'period' in previousRequest && !hasExplicitPeriod(q)
+    ? previousRequest.period
+    : selectedPeriod(q, now);
+  const limit = requestedLimit(q);
 
+  if (previousRequest && /^(?:and\s+)?(?:what about|how about)\s+(?:last month|previous month|this month|today|yesterday|last \d{1,2} days)\??$/.test(q)) {
+    if ('period' in previousRequest) return { ...previousRequest, period };
+  }
+
+  if (/^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) {
+    return { tool: 'help' };
+  }
   if (/subscription|subscriptions/.test(q)) return { tool: 'subscriptions' };
   if (/bill|bills|due|upcoming payment|what.*pay/.test(q)) {
-    return { tool: 'upcoming-payments', withinDays: 30 };
+    return { tool: 'upcoming-payments', withinDays: requestedUpcomingDays(q) };
   }
   if (/cash out|left my account|money out|actual outflow/.test(q)) {
     return { tool: 'cash-outflow', period };
@@ -411,18 +592,30 @@ export function planAssistantQuestion(
   if (/forecast|on track|end of (the )?month|projected/.test(q)) {
     return { tool: 'month-forecast', period };
   }
-  if (/top(?: spending)? merchant|biggest merchant|where.*spend most|merchant.*most/.test(q)) {
-    return { tool: 'top-merchants', period };
+  if (/biggest purchase|largest purchase|largest transaction|most expensive purchase/.test(q)) {
+    return { tool: 'largest-purchases', period, ...(limit ? { limit } : { limit: 5 }) };
   }
-  if (/top(?: spending)? categor|biggest categor|which categor/.test(q)) {
-    return { tool: 'top-categories', period };
+  if (/per day|daily average|average daily|spend.*daily|spend.*each day/.test(q)) {
+    return { tool: 'daily-average', period };
   }
+  if (/income minus spending|spend more than i earned|spent more than i earned|more than i earn|what.*net|net spending|net cashflow/.test(q)) {
+    return { tool: 'net-income-spending', period };
+  }
+  if (/top(?:\s+\d{1,2})?(?: spending)? merchants?|biggest merchant|where.*spend most|merchant.*most/.test(q)) {
+    return { tool: 'top-merchants', period, ...(limit ? { limit } : {}) };
+  }
+  if (/top(?:\s+\d{1,2})?(?: spending)? categor|biggest categor|which categor/.test(q)) {
+    return { tool: 'top-categories', period, ...(limit ? { limit } : {}) };
+  }
+
+  // Search the whole ledger for a merchant name so "Talabat last month" still
+  // answers Talabat=0 instead of falling back to total spending when Talabat
+  // happened to have no rows in the selected month.
+  const merchant = merchantFromQuestion(q, state.transactions);
+  if (merchant) return { tool: 'merchant-breakdown', period, merchant };
 
   const category = categoryFromQuestion(q);
   if (category) return { tool: 'category-breakdown', period, category };
-
-  const merchant = merchantFromQuestion(q, spending);
-  if (merchant) return { tool: 'merchant-breakdown', period, merchant };
 
   if (/compare|more than|less than|increase|decrease|changed|why.*spend|vs|versus/.test(q)) {
     return { tool: 'compare-periods', period };
@@ -430,15 +623,29 @@ export function planAssistantQuestion(
   if (/income|salary|earned|received/.test(q)) {
     return { tool: 'income-total', period };
   }
-  return { tool: 'spending-total', period };
+  if (/spend|spent|spending|expense|expenses|purchase|purchases|paid|cost me/.test(q)) {
+    return { tool: 'spending-total', period };
+  }
+  return { tool: 'help' };
 }
 
 export function answerWafraQuestion(
   state: AppState,
   question: string,
   now = new Date(),
+  previousRequest?: AssistantToolRequest | null,
 ): AssistantAnswer {
-  return executeAssistantTool(state, planAssistantQuestion(state, question, now), now);
+  return executeAssistantTool(state, planAssistantQuestion(state, question, now, previousRequest), now);
+}
+
+export function runWafraAssistant(
+  state: AppState,
+  question: string,
+  now = new Date(),
+  previousRequest?: AssistantToolRequest | null,
+): { request: AssistantToolRequest; answer: AssistantAnswer } {
+  const request = planAssistantQuestion(state, question, now, previousRequest);
+  return { request, answer: executeAssistantTool(state, request, now) };
 }
 
 export function suggestedAssistantQuestions(state: AppState): string[] {
@@ -452,8 +659,17 @@ export function suggestedAssistantQuestions(state: AppState): string[] {
   }
   suggestions.push('What are my biggest subscriptions?');
   suggestions.push('What am I on track to spend this month?');
-  const { live, internal } = ledgerScope(state);
-  const topMerchant = state.transactions.find((tx) => isSpending(tx, live, internal))?.title;
+  const current = currentMonthPeriod(new Date());
+  const topMerchant = groupedTotals(spendingRows(state, current), (tx) => tx.title.trim() || 'Unknown')[0]?.key;
   if (topMerchant) suggestions.splice(3, 0, `How much did I spend at ${topMerchant}?`);
   return suggestions.slice(0, 5);
+}
+
+/** Lightweight local follow-ups; they carry no ledger data and need no model. */
+export function assistantFollowUpQuestions(): string[] {
+  return [
+    'What about last month?',
+    'Top 3 merchants',
+    'What is due in the next 7 days?',
+  ];
 }
