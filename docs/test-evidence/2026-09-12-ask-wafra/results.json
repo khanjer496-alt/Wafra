@@ -1,0 +1,771 @@
+{
+  "results": [
+    {
+      "name": "en-light-390-conversation",
+      "passed": true,
+      "evidence": {
+        "unknown": "How much did I spend at Unknown Example Shop?\nLET’S CLARIFY THAT\nI could not find a recorded merchant matching “unknown example shop”. Check the name in Transactions.",
+        "ambiguous": "How much did I spend at Starbucks?\nLET’S CLARIFY THAT\nSeveral recorded merchants match “starbucks”. Choose the exact merchant.",
+        "input": {
+          "x": 18,
+          "y": 632,
+          "width": 298,
+          "height": 160,
+          "bottom": 792,
+          "right": 316
+        }
+      }
+    },
+    {
+      "name": "en-light-390-evidence-and-refresh",
+      "passed": true,
+      "evidence": {
+        "count": 27,
+        "beforeMinor": 15525,
+        "afterMinor": 16025
+      }
+    },
+    {
+      "name": "en-light-390-comparison-groups",
+      "passed": true,
+      "evidence": {
+        "labels": [
+          "First period",
+          "Comparison period"
+        ],
+        "current": 16025,
+        "previous": 7000
+      }
+    },
+    {
+      "name": "en-light-390-largest-purchases",
+      "passed": true,
+      "evidence": {
+        "count": 3,
+        "totalMinor": 20500
+      }
+    },
+    {
+      "name": "en-dark-390-conversation",
+      "passed": true,
+      "evidence": {
+        "unknown": "How much did I spend at Unknown Example Shop?\nLET’S CLARIFY THAT\nI could not find a recorded merchant matching “unknown example shop”. Check the name in Transactions.",
+        "ambiguous": "How much did I spend at Starbucks?\nLET’S CLARIFY THAT\nSeveral recorded merchants match “starbucks”. Choose the exact merchant.",
+        "input": {
+          "x": 18,
+          "y": 632,
+          "width": 298,
+          "height": 160,
+          "bottom": 792,
+          "right": 316
+        }
+      }
+    },
+    {
+      "name": "en-dark-390-evidence-and-refresh",
+      "passed": true,
+      "evidence": {
+        "count": 27,
+        "beforeMinor": 15525,
+        "afterMinor": 16025
+      }
+    },
+    {
+      "name": "en-dark-390-comparison-groups",
+      "passed": true,
+      "evidence": {
+        "labels": [
+          "First period",
+          "Comparison period"
+        ],
+        "current": 16025,
+        "previous": 7000
+      }
+    },
+    {
+      "name": "en-dark-390-largest-purchases",
+      "passed": true,
+      "evidence": {
+        "count": 3,
+        "totalMinor": 20500
+      }
+    },
+    {
+      "name": "en-light-320-conversation",
+      "passed": true,
+      "evidence": {
+        "unknown": "How much did I spend at Unknown Example Shop?\nLET’S CLARIFY THAT\nI could not find a recorded merchant matching “unknown example shop”. Check the name in Transactions.",
+        "ambiguous": "How much did I spend at Starbucks?\nLET’S CLARIFY THAT\nSeveral recorded merchants match “starbucks”. Choose the exact merchant.",
+        "input": {
+          "x": 18,
+          "y": 632,
+          "width": 228,
+          "height": 160,
+          "bottom": 792,
+          "right": 246
+        }
+      }
+    },
+    {
+      "name": "en-light-320-evidence-and-refresh",
+      "passed": true,
+      "evidence": {
+        "count": 27,
+        "beforeMinor": 15525,
+        "afterMinor": 16025
+      }
+    },
+    {
+      "name": "en-light-320-comparison-groups",
+      "passed": true,
+      "evidence": {
+        "labels": [
+          "First period",
+          "Comparison period"
+        ],
+        "current": 16025,
+        "previous": 7000
+      }
+    },
+    {
+      "name": "en-light-320-largest-purchases",
+      "passed": true,
+      "evidence": {
+        "count": 3,
+        "totalMinor": 20500
+      }
+    },
+    {
+      "name": "en-dark-320-conversation",
+      "passed": true,
+      "evidence": {
+        "unknown": "How much did I spend at Unknown Example Shop?\nLET’S CLARIFY THAT\nI could not find a recorded merchant matching “unknown example shop”. Check the name in Transactions.",
+        "ambiguous": "How much did I spend at Starbucks?\nLET’S CLARIFY THAT\nSeveral recorded merchants match “starbucks”. Choose the exact merchant.",
+        "input": {
+          "x": 18,
+          "y": 632,
+          "width": 228,
+          "height": 160,
+          "bottom": 792,
+          "right": 246
+        }
+      }
+    },
+    {
+      "name": "en-dark-320-evidence-and-refresh",
+      "passed": true,
+      "evidence": {
+        "count": 27,
+        "beforeMinor": 15525,
+        "afterMinor": 16025
+      }
+    },
+    {
+      "name": "en-dark-320-comparison-groups",
+      "passed": true,
+      "evidence": {
+        "labels": [
+          "First period",
+          "Comparison period"
+        ],
+        "current": 16025,
+        "previous": 7000
+      }
+    },
+    {
+      "name": "en-dark-320-largest-purchases",
+      "passed": true,
+      "evidence": {
+        "count": 3,
+        "totalMinor": 20500
+      }
+    },
+    {
+      "name": "context-period-reselect",
+      "passed": true,
+      "evidence": {
+        "amountMinor": 25302
+      }
+    },
+    {
+      "name": "direct-route-start-day-1",
+      "passed": true,
+      "evidence": {
+        "answer": "How much did I spend?\nSPENDING\nIn Sep 2026, you spent USD 253.02 across 30 transactions. Period: 2026-09-01 to 2026-09-30. Based on recorded transactions; missing imports may change these figures.\nTop category\nGroceries · USD 155.25\nAverage transaction\nUSD 8.43\nView transactions",
+        "evidence": "Transactions behind this answer\nSpending\nUSD 253.02\n2026-09-01 – 2026-09-30 · 30 recorded transactions\nEveryday account\nCarrefour\nUSD 70\n2026-09-05 · Everyday account\nPantry purchase 1\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 2\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 3\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 4\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 5\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 6\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 7\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 8\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 9\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 10\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 11\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 12\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 13\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 14\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 15\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 16\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 17\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 18\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 19\nUSD 1.01\n2026-09-05 · Everyday account\nPage 1 of 2\nPrevious page\nNext page\nBased on recorded transactions. Missing imports can affect totals and comparisons."
+      }
+    },
+    {
+      "name": "direct-route-start-day-25",
+      "passed": true,
+      "evidence": {
+        "answer": "How much did I spend?\nSPENDING\nIn Aug 2026, you spent USD 253.02 across 30 transactions. Period: 2026-08-25 to 2026-09-24. Based on recorded transactions; missing imports may change these figures.\nTop category\nGroceries · USD 155.25\nAverage transaction\nUSD 8.43\nView transactions",
+        "evidence": "Transactions behind this answer\nSpending\nUSD 253.02\n2026-08-25 – 2026-09-24 · 30 recorded transactions\nEveryday account\nCarrefour\nUSD 70\n2026-09-05 · Everyday account\nPantry purchase 1\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 2\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 3\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 4\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 5\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 6\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 7\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 8\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 9\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 10\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 11\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 12\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 13\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 14\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 15\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 16\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 17\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 18\nUSD 1.01\n2026-09-05 · Everyday account\nPantry purchase 19\nUSD 1.01\n2026-09-05 · Everyday account\nPage 1 of 2\nPrevious page\nNext page\nBased on recorded transactions. Missing imports can affect totals and comparisons."
+      }
+    },
+    {
+      "name": "context-home",
+      "passed": true,
+      "evidence": {
+        "answer": "How much did I spend?\nSPENDING\nIn Aug 2026, you spent USD 83.33 across 4 transactions. Period: 2026-08-01 to 2026-08-31. Based on recorded transactions; missing imports may change these figures.\nTop category\nGroceries · USD 70\nAverage transaction\nUSD 20.83\nView transactions"
+      }
+    },
+    {
+      "name": "context-flow",
+      "passed": true,
+      "evidence": {
+        "answer": "Why did my spending change?\nSPENDING CHANGE\nYou spent USD 83.33 in 1 Aug – 31 Aug. I do not have enough earlier spending to make a reliable comparison. Period: 2026-08-01 to 2026-08-31. Comparison: 2026-07-01 to 2026-07-31. Based on recorded transactions; missing imports may change these figures.\n1 Aug – 31 Aug\nUSD 83.33\nJul 2026\nUSD 0\nGroceries change\n+USD 70\nDining change\n+USD 13.33\nView transactions"
+      }
+    },
+    {
+      "name": "context-merchant",
+      "passed": true,
+      "evidence": {
+        "answer": "Why did spending at \"Cedar \\\"Express\\\" \\\\ West\" change?\nSPENDING CHANGE\nYou spent USD 3.33 in 1 Aug – 31 Aug. I do not have enough earlier spending to make a reliable comparison. Merchant: Cedar \"Express\" \\ West. Period: 2026-08-01 to 2026-08-31. Comparison: 2026-07-01 to 2026-07-31. Based on recorded transactions; missing imports may change these figures.\n1 Aug – 31 Aug\nUSD 3.33\nJul 2026\nUSD 0\nDining change\n+USD 3.33\nView transactions"
+      }
+    }
+  ],
+  "errors": [],
+  "blockedRequests": [
+    {
+      "scenario": "bootstrap",
+      "origin": "https://api.frankfurter.dev",
+      "resource": "fetch"
+    },
+    {
+      "scenario": "bootstrap",
+      "origin": "https://api.frankfurter.dev",
+      "resource": "fetch"
+    }
+  ],
+  "layouts": [
+    {
+      "name": "en-light-390-initial",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-light-390-four-answers",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-light-390-multiline",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 571,
+        "width": 354,
+        "height": 249,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 632,
+        "width": 298,
+        "height": 160,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-light-390-refreshed",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-dark-390-initial",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-dark-390-four-answers",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-dark-390-multiline",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 571,
+        "width": 354,
+        "height": 249,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 632,
+        "width": 298,
+        "height": 160,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-dark-390-refreshed",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 354,
+        "height": 137,
+        "bottom": 820,
+        "right": 372
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 298,
+        "height": 48,
+        "bottom": 792,
+        "right": 316
+      },
+      "send": {
+        "x": 324,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 372
+      }
+    },
+    {
+      "name": "en-light-320-initial",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-light-320-four-answers",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-light-320-multiline",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 571,
+        "width": 284,
+        "height": 249,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 632,
+        "width": 228,
+        "height": 160,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-light-320-refreshed",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-dark-320-initial",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-dark-320-four-answers",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-dark-320-multiline",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 571,
+        "width": 284,
+        "height": 249,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 632,
+        "width": 228,
+        "height": 160,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "en-dark-320-refreshed",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    },
+    {
+      "name": "context-merchant-rerender",
+      "width": 320,
+      "height": 844,
+      "scrollWidth": 320,
+      "clipping": [],
+      "composer": {
+        "x": 18,
+        "y": 683,
+        "width": 284,
+        "height": 137,
+        "bottom": 820,
+        "right": 302
+      },
+      "input": {
+        "x": 18,
+        "y": 744,
+        "width": 228,
+        "height": 48,
+        "bottom": 792,
+        "right": 246
+      },
+      "send": {
+        "x": 254,
+        "y": 744,
+        "width": 48,
+        "height": 48,
+        "bottom": 792,
+        "right": 302
+      }
+    }
+  ],
+  "scope": "Fresh exported web app, English synthetic USD fixture only; external requests blocked. No native device claim."
+}

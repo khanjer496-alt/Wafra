@@ -19,6 +19,7 @@ function createHarness(options = {}) {
   const amount=(fils, opts={})=>(fils/100).toLocaleString(lang==='ar'?'ar-AE':'en-AE', {minimumFractionDigits:opts.decimals===false?0:2,maximumFractionDigits:opts.decimals===false?0:2});
   const formatAED=(fils,opts)=>`${lang==='ar'?'د.إ':'AED'} ${amount(fils,opts)}`;
   const i18n=load(path.join(root,'src/lib/i18n.ts'));i18n.setLanguage(lang);
+  const assistantCopy=load(path.join(root,'src/lib/assistant-copy.ts'));
   const parseAmountWithMoneySpec=(value,spec)=>{
     const text=String(value??'').trim().replace(/,/g,'');
     if(!/^\d+(?:\.\d+)?$/.test(text))return null;
@@ -67,7 +68,7 @@ function createHarness(options = {}) {
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
   for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
-  const deps={react,'react/jsx-runtime':runtime,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
+  const deps={react,'react/jsx-runtime':runtime,'@/lib/assistant-copy':assistantCopy,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
     'expo-linear-gradient':{LinearGradient:p=>jsx('Gradient',p)},
     '@/hooks/use-theme':{useTheme:()=>theme},'@/hooks/use-language':{useLanguage:()=>lang},'@/hooks/use-large-text-layout':{useLargeTextLayout:()=>!!options.largeText},

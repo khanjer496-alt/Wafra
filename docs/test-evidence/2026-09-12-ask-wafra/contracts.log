@@ -1,0 +1,291 @@
+✓ every icon name has an SVG fallback
+✓ every icon name has an iOS symbol
+✓ every icon shape has a name
+✓ the native symbol keeps the portable SVG fallback
+✓ the phone icon uses the minimum-iOS-safe iphone symbol
+✓ the receipt icon uses the minimum-iOS-safe doc.text symbol
+✓ every category has a label and an icon
+✓ every category row is a real category
+✓ every category icon exists
+✓ the string table was read
+✓ every string has Arabic
+✓ every string has English
+✓ every string the app asks for exists
+✓ the banner has strings
+✓ every banner string is translated
+✓ no orphan Arabic banner string
+✓ every string the banner asks for is defined
+✓ sms-reader: the module name matches
+✓ sms-reader: every function TypeScript calls exists in Kotlin
+✓ notification-reader: the module name matches
+✓ notification-reader: every function TypeScript calls exists in Kotlin
+✓ SMS delivery never writes a second raw-message buffer
+✓ upgrades and erase synchronously purge the retired plaintext SMS buffer
+✓ incoming SMS permission is requested only for the optional instant banner
+✓ restricted SMS access is an error, never a successful empty inbox
+✓ notification bodies are sealed with AndroidKeyStore AES-GCM before persistence
+✓ notification candidates are bounded and expire from the encrypted queue
+✓ notification parsing is restricted to curated Play-installed bank packages
+✓ bank-app capture defaults closed and only an explicit paired beta flag opens the native and JS gates
+✓ notification erase prevents old shade rows from being swept back in
+✓ a transient KeyStore failure never compacts the ciphertext queue
+✓ the old plaintext notification preference is erased instead of migrated
+✓ notification capture exposes separate read, acknowledge and erase operations
+✓ notification rows are acknowledged only through the scan commit boundary
+✓ nothing re-defines spending by hand
+✓ ledger exports isSpending
+✓ ledger exports isIncome
+✓ ledger exports liveAccountIds
+✓ ledger exports isInboundTransfer
+✓ every running money total knows about internal transfers
+✓ the paywall gives away no free unlock
+✓ Settings founder access cannot forge a store entitlement or reach production
+✓ free recovery and salary-day months are not sold as Pro benefits
+✓ the paywall renders the storefront price instead of ledger Money
+✓ native pricing never falls back to an unlabeled USD reference
+✓ a failed catalog load can be retried without reopening the paywall
+✓ the paywall discloses renewal and reaches store subscription management
+✓ the paywall builds no English sentence inline
+✓ the yearly saving is derived from the prices, not written down
+✓ no hard-coded month count survives in the copy
+✓ an editable ledger backup cannot grant Pro or restart the trial
+✓ no screen writes an English sentence of its own
+✓ no translated string is evaluated at import time
+✓ the entitlement id is named once and exported
+✓ entitlement is re-checked on launch
+✓ a null entitlement leaves the cached flag alone
+✓ refreshEntitlement can return null
+✓ billing snapshots carry the exact RevenueCat expiration into native capture
+✓ active-to-active renewals update native capture before the cached Pro shortcut
+✓ offline unknown never writes a storefront capture lease
+✓ purchase and restore mirror their exact CustomerInfo before reporting completion
+✓ the Android RevenueCat key is empty or a Google public SDK key
+✓ the iOS RevenueCat key is empty or an Apple public SDK key
+✓ no secret RevenueCat key is committed
+✓ the release gate rejects prefix-only RevenueCat placeholders
+✓ billing is unavailable without a key
+✓ billing is unavailable on web
+✓ both plans have a product id and an explicit USD preview reference
+✓ the setup doc names the same product ids
+✓ native SQLite is built with SQLCipher
+✓ Android does not cloud-backup the encrypted database
+✓ the iOS config declares the data retained by Wafra services
+✓ RevenueCat purchase history declares both entitlement and dashboard use
+✓ the database key is generated on-device and kept device-only
+✓ SQLCipher receives its key before the ledger table is touched
+✓ the active store persists through the encrypted adapter
+✓ plaintext legacy data is removed only after encrypted migration succeeds
+✓ Private Mode is persisted as part of app state
+✓ Private Mode strips retained and newly imported raw text
+✓ capture opt-out is durable and stops every source before it can read messages
+✓ erasing data preserves capture opt-out while automatic enable clears it explicitly
+✓ Private Mode blocks the non-local relay without disabling local Android parsing
+✓ the saved local-only preference can resume only through explicit review
+✓ privacy copy names both local platform paths and protected retention
+✓ an import exposes an encrypted-write durability promise
+✓ routine relay sync waits for SQLCipher before commit
+✓ setup test waits for SQLCipher before acknowledging
+✓ iOS build enables background remote notifications
+✓ the notification task is defined at module scope and loaded early
+✓ the wake contains no financial or visible notification fields
+✓ Android notification permission is never requested on cold launch
+✓ headless sync writes SQLCipher before relay acknowledgement
+✓ background sync reserves setup proof markers for the foreground verifier
+✓ only a parsed Messages-automation delivery records proof after durable storage
+✓ email, PDF, and manual Shortcut delivery cannot impersonate Message automation
+✓ a synthetic relay probe cannot make Home claim local automation is ready
+✓ locked background credentials use the sync-only bearer
+✓ the durable local inbox is cleared only by the UI import commit
+✓ erase intent survives restart and prevents staged rows re-entering the ledger
+✓ a 401 from sync records the refusal rather than only throwing
+✓ the refusal is a marker, never a deletion of the keys it would need back
+✓ a stamped credential reads as "no pairing" on both keychain surfaces
+✓ relay revocation cannot replace truthful local capture state
+✓ and Home never turns a healthy local queue off because the relay was revoked
+✓ a revocation found mid-scan degrades to needs-setup rather than throwing
+✓ non-setup executor intents reserve setup probe ids
+✓ the foreground collector still reserves setup probe ids internally
+✓ background and supplemental adapters no longer receive queue ids
+✓ supplemental connect cannot replace an unread existing Shortcut identity
+✓ the setup intent is still the one place that acknowledges probe ids
+✓ the reader and the writer name the same staging key
+✓ the snapshot is read before the rows are parsed, never after
+✓ the import commit clears only the snapshot it read
+✓ both storage backends implement the conditional delete
+✓ the shipping backend compares and deletes in one statement
+✓ an empty read owns nothing and deletes nothing
+✓ iOS setup shows the exact local Shortcut action with complete Received Message input
+✓ the installed Shortcut uses Message input and a separate no-input setup proof
+✓ iOS setup discloses selected-sender retention and raw Message deletion
+✓ local setup has no relay proof, test-limit, or captured-merchant state
+✓ callbacks and foreground returns refresh native status without forging proof
+✓ local setup exposes no clipboard, setup-code, token, or credential clearing path
+✓ the Message-object and setup instructions have first-class Arabic copy
+✓ the next production build rejects every exact retired Capture Shortcut snapshot
+✓ runtime, build, and OTA gates all reject the superseded History Shortcut
+✓ OTA accepts distinct canonical current Shortcut artifacts
+✓ OTA rejects a Shortcut URL with an explicit port that runtime refuses
+✓ OTA compares canonical Shortcut IDs rather than raw URL casing
+✓ the replacement Shortcut contract prohibits file-backed configuration
+✓ SMS parsing yields by elapsed time with a bounded fast-device ceiling
+✓ concurrent capture requests join one scan
+✓ the in-flight scan is shared across screens, not per component
+✓ an interactive join preserves feedback without duplicating a successful scan
+✓ the pull-to-refresh helper exists and scans interactively
+✓ a failed pull-to-refresh tells the user instead of rejecting into nothing
+✓ permission denial does not mark the inbox fresh and offers Android settings
+✓ Home rechecks Android permission as soon as onboarding enables capture
+✓ bills can pull to refresh
+✓ wallet can pull to refresh
+✓ flow can pull to refresh
+✓ the tabs shell owns parser migrations independent of the active tab
+✓ Home observes status without registering a second foreground scan
+✓ a hidden shell access failure reaches Home capture status
+✓ Home refresh surfaces a native inbox failure
+✓ erasing resets the scan watermark to nothing
+✓ a zero watermark reads the whole inbox, not just what is new
+✓ the foreground watch re-runs when the ledger is wiped
+✓ the rebuild scan is not refused by the freshness throttle
+✓ the rebuild scan asks for nothing and redirects nowhere
+✓ the resume listener scans the current ledger, not the one it subscribed with
+✓ the staged relay inbox is a different database from the ledger
+✓ erasing empties the staged relay inbox too
+✓ every erase keeps capture cleanup inside the blocked ledger transaction
+✓ the hook shares the local coordinator from the authoritative ledger adapter
+✓ iOS lifecycle work is hydration-gated and every active event reaches the current scan
+✓ iOS local capture bypasses only the Android freshness throttle
+✓ iOS relay collection is supplemental and only selected with a config outside Private Mode
+✓ status and foreground retirement retries stay behind the local coordinator
+✓ source-free status refresh is published and observed without message attributes
+✓ the native capability query is optional, iOS-16 gated, and never statically imports the module
+✓ the source-free warning state is exact and persisted on AppState
+✓ only targeted recovery acknowledges the exact warning after encrypted durability
+✓ opting out disables native admission before dispatch or persistence
+✓ clearing opt-out never enables native admission implicitly
+✓ ledger erase preserves the original entitlement and trial clock
+✓ demo loading cannot restart the trial or discard cached access
+✓ Settings erase disables admission before clearAll and retries native erase inside cleanup
+✓ storage recovery applies the same native disable and retryable erase ordering
+✓ native erase deterministically requests local and store entitlement reseeding
+✓ erase can replay the same verified store snapshot while ordinary duplicates stay deduped
+✓ storage recovery offers conditional legacy Shortcut cleanup after a successful erase
+✓ generic relay pairing never claims that an old Shortcut definitely exists
+✓ captureIosNeedsAutomation has exact English and genuine Arabic copy
+✓ captureIosWaitingForAlert has exact English and genuine Arabic copy
+✓ captureIosFirstAlertCaptured has exact English and genuine Arabic copy
+✓ captureIosQueueWarning has exact English and genuine Arabic copy
+✓ captureIosMigrationRetry has exact English and genuine Arabic copy
+✓ Home renders every closed local status instead of relay proof states
+✓ Home queue warning distinguishes source-free warning counts from protected pending source records
+✓ Home waiting state qualifies local no-upload truth against the old uploading automation
+✓ Home migration warning distinguishes the local new path from the uploading old automation
+✓ Settings capture truth is the same closed local status and Private Mode is not off
+✓ Settings exposes a race-safe iOS capture switch whose off path is durable
+✓ Settings recovery is explicit, compare-and-clear, and independent of the Pro import gate
+✓ legacy iPhone charge alerts are gated for fresh and post-retirement local capture
+✓ privacy copy separates source-free UI counts from encrypted pending Message records
+✓ privacy copy states exact opportunistic 30-day expiry and removal
+✓ privacy copy discloses that a legacy Shortcut can upload until removal or retirement
+✓ Accuracy renders a local-capture-aware iOS source-retention state
+✓ Pro models iPhone automation as local capture and does not promise every alert imports
+✓ the budget editor derives the live-account and internal-transfer sets
+✓ every spend figure in the budget editor applies both exclusions
+✓ the merchant breakdown adds up to the total printed above it
+✓ the limit editor uses the shared sheet and field contracts
+✓ the limit editor keeps picker, current, amount, suggestions, and merchant blocks in order
+✓ the limit editor keeps shared footer actions and existing delete behavior
+✓ the card detail sheet reads its figures from cards.ts
+✓ the card detail sheet keeps no statement rules of its own
+✓ an SMS card payment supplies the paid and outstanding focal figures
+✓ Bills agenda and detail use allocated remainder, never manual-only paid values
+✓ no library rollup spells spending out in the positive form either
+✓ every analytics rollup applies both exclusions
+✓ the biggest-purchase insight is chosen from countable spending
+✓ src/app/cards.tsx derives the internal-transfer set
+✓ src/app/cards.tsx excludes own-account moves from per-account spend
+✓ Wallet uses shared card figures and transfer-aware cash outflow
+✓ detectSubscriptions applies the live-account and internal-transfer exclusions
+✓ reportExpenses applies the same two exclusions
+✓ buildExpenseReportHtml derives the live-account and internal-transfer sets from its own inputs
+✓ src/app/settings.tsx derives the live-account and internal-transfer sets
+✓ src/app/settings.tsx threads both sets into its subscription/export call
+✓ src/app/(tabs)/bills.tsx derives the live-account and internal-transfer sets
+✓ src/app/(tabs)/bills.tsx threads both sets into its subscription/export call
+✓ src/lib/leaving-soon.ts derives the live-account and internal-transfer sets
+✓ src/lib/leaving-soon.ts threads both sets into its subscription/export call
+✓ src/lib/reminders.ts derives the live-account and internal-transfer sets
+✓ src/lib/reminders.ts threads both sets into its subscription/export call
+✓ the subscription-load insight applies the live-account and internal-transfer exclusions
+✓ PeriodProvider re-answers which month it is once the start day is known
+✓ a period the user picked is not overwritten by that recompute
+✓ the sign follows the direction of the money, not whether it counts as income
+✓ green is still reserved for money actually earned
+✓ the spoken label agrees with the sign on screen
+✓ the blast radius is one exported predicate, not three key matches
+✓ the store applies a merchant rule through that predicate
+✓ a bulk merchant rule does not forge a hand edit
+✓ the entry sheet counts the same rows the store will move
+✓ a merchant rule is not applied across the direction it was chosen under
+✓ the entry sheet asks that same question before printing a count
+✓ the count on the categorise list is the override predicate, not candidacy
+✓ titleEdited is an optional, additive field on Transaction
+✓ an edit sets titleEdited only when the title actually changed
+✓ titleEdited stays true once set
+✓ a bulk merchant rule never claims the title was retyped
+✓ the screen uses the tested indexed filter projection
+✓ the transactions total asks ledger.ts what counts
+✓ the category filter matches every part of a split row
+✓ the total counts only the filtered categories of a split row
+✓ "Last 3 months" is bounded at both ends
+✓ a merchant drill-down opens in the period the figure was read in
+✓ a category or merchant drill-down is scoped to spending
+✓ the SMS restriction is state rather than a route param
+✓ "Clear all filters" clears the SMS restriction and counts it
+✓ "Oldest first" sorts by date rather than reversing store order
+✓ the custom range is usable where there is no native picker
+✓ a split row belongs to every category it touches
+✓ a split row contributes only its own part to a category total
+✓ a pooled slice sums exactly the parts it stands for
+✓ an unsplit row still counts whole, under its own category
+✓ a trial that has just started is the full length
+✓ a trial that has run out is over
+✓ a trial start in the future grants no more than the trial has
+✓ no clock reading produces a day count outside 0…TRIAL_DAYS
+✓ the native local-capture trial lease keeps the original absolute deadline
+✓ a cached purchased flag cannot mint a native lifetime lease
+✓ founder capture is the only local lifetime grant
+✓ an invalid local trial timestamp creates no native entitlement
+✓ restorePro has three answers, not two
+✓ the paywall tells a subscriber to retry rather than that nothing exists
+✓ a purchase reports why it did not happen
+✓ backing out of the store sheet is told apart from a broken store
+✓ the paywall reports a failed purchase and stays silent on a cancelled one
+✓ an unconfirmed entitlement never guarantees that the store charged nothing
+✓ the paywall exposes one live announcement path instead of announcing twice
+✓ `processing` is declared only with the identifiers Apple demands for it
+✓ no BGTaskScheduler identifiers without the mode that uses them
+✓ the declared background mode matches how the app actually wakes
+✓ app.json links the app to an EAS project
+✓ app.json declares the iOS bundle identifier
+✓ the relay is pointed at the same EAS project as the app
+✓ the workflow directory is readable
+✓ no env: value expects a shell to expand it
+✓ no workflow reads the runner context outside a step
+✓ no workflow reads the bare inputs context (32 files)
+✓ drafts reach only the reviewed extraction modules and isolated research redactor
+✓ the Gulf fallback can reach only the explicit encrypted review path
+✓ parser research cannot mutate the ledger or perform its own network request
+✓ ISO metadata is confined to currency routing, exact money and transfer evidence validation
+✓ global review semantics have no direct ledger writer or network transport
+✓ generation and publication each validate original consent through trusted input code
+✓ the prompt builder independently refuses reports without AI consent
+✓ the agent is actually invoked
+✓ the prompt asks for a summary outside the checkout
+✓ the agent is given access to the directory the prompt tells it to write into
+✓ the prompt requires the agent to run the suite
+✓ the agent is permitted the shell the prompt requires
+✓ the agent is permitted to create files, not only edit them
+✓ the agent output is captured, not published
+✓ a refused draft reports its surviving checked branch without publishing raw output
+
+289 passed, 0 failed

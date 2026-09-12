@@ -48,6 +48,7 @@ node scripts/e2e/e2e-merchant-spending.mjs
 node scripts/e2e/e2e-merchant-entrypoints.mjs
 node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
+node scripts/e2e/e2e-assistant.mjs
 node scripts/e2e/e2e-persist.mjs
 node scripts/e2e/e2e-navigation.mjs
 

@@ -1,0 +1,1039 @@
+TAP version 13
+# ✓ every golden bank alert is understood
+# ✓ an incremental import cannot claim an older restored ledger was fully reread
+# ✓ only a completed full-history batch advances the durable parser version
+# ✓ one ledger batch applies page rows and the next history cursor atomically
+# ✓ a bank-alert batch durably records its observed onboarding currency
+# ✓ same-time same-value card purchases remain two real events
+# ✓ Talabat settlement is countable business income, not an internal transfer
+# ✓ linked utility funding and receipt collapse to one named payment
+# ✓ e& and SEWA become separate current fixed obligations
+# ✓ card-funded utility purchase counts once in spending
+# ✓ Talabat settlement reaches income totals
+# ✓ the two-sided credit-card repayment contributes to cash out exactly once
+# ✓ replaying the complete bank history makes no ledger or accounting change
+# ✓ semantic salary and own transfer both survive the launch capture seam
+# ✓ semantic meanings produce one reconciled set of income, spending and cash movement
+# ✓ semantic accounting replay is idempotent
+# ✓ every compact bank shorthand alert survives the launch parser
+# ✓ compact meanings retain their accounting roles before import
+# ✓ compact bank shorthand produces exact income, spending and cash-out totals
+# ✓ ordinary named-beneficiary transfer does not create a manual ownership review task
+# ✓ ordinary beneficiary transfer remains money out without becoming merchant spending
+# ✓ compact bank shorthand replay is idempotent
+# ✓ materialization preserves the parser-validated batch currency and exponent
+# ✓ USD/2: a stale import preview cannot mutate a differently denominated ledger
+# ✓ KWD/3: a stale import preview cannot mutate a differently denominated ledger
+# ✓ JPY/0: a stale import preview cannot mutate a differently denominated ledger
+# ✓ SAR/2: a stale import preview cannot mutate a differently denominated ledger
+# ✓ AED/3: a stale import preview cannot mutate a differently denominated ledger
+# ✓ monetary batches without denomination evidence fail closed
+# ✓ first accepted batch pins its explicit currency rather than a display preference
+# ✓ cursor-only metadata never pins a new ledger currency
+# ✓ cursor-only metadata never replaces a pinned ledger currency
+# ✓ cursor-only metadata never pins a new ledger currency
+# ✓ cursor-only metadata never replaces a pinned ledger currency
+# ✓ cursor-only metadata never pins a new ledger currency
+# ✓ cursor-only metadata never replaces a pinned ledger currency
+# ✓ cursor-only metadata never pins a new ledger currency
+# ✓ cursor-only metadata never replaces a pinned ledger currency
+# ✓ cursor-only metadata never pins a new ledger currency
+# ✓ cursor-only metadata never replaces a pinned ledger currency
+# ✓ independent bill tracking has a currency-validated import boundary
+# ✓ tracking only adds the selected bill and preserves its currency without moving the scan cursor
+# ✓ the first tracked reminder pins its explicit currency rather than default AED
+# ✓ a stale tracked reminder cannot be relabelled into a restored KWD ledger
+# ✓ historical: a yearless statement retains an unknown full deadline
+# ✓ historical: Message receipt cannot create a fabricated card payment deadline
+# ✓ local live: a yearless statement retains an unknown full deadline
+# ✓ local live: Message receipt cannot create a fabricated card payment deadline
+# accounting-pipeline: 48 passed, 0 failed
+# Subtest: scripts/test/accounting-pipeline.test.js
+ok 1 - scripts/test/accounting-pipeline.test.js
+  ---
+  duration_ms: 320.802416
+  type: 'test'
+  ...
+# ✓ yearly: due in its anniversary month
+# ✓ yearly: absent from every other month
+# ✓ yearly: absent eleven months of twelve
+# ✓ yearly: recurs in following years
+# ✓ yearly: the due date is the anniversary, not the month start
+# ✓ yearly: 29 Feb falls back to the 28th in a common year
+# ✓ yearly: 29 Feb is itself in a leap year
+# ✓ yearly: a month that does not contain the anniversary
+# ✓ yearly: anniversary in the second calendar year of a money month
+# ✓ yearly: anniversary in the first calendar year of a money month
+# ✓ monthly bills are untouched by any of this
+# ✓ reconcile: a charge on a live account settles the bill
+# ✓ reconcile: a charge on an ARCHIVED account does not settle the bill
+# ✓ reconcile: a paired internal transfer does not settle the bill
+# ✓ reconcile: still works with no account sets passed
+# ✓ limits: summary and spentInMonthForCategory agree on groceries
+# ✓ limits: summary and spentInMonthForCategory agree on shopping
+# ✓ limits: summary and spentInMonthForCategory agree on dining
+# ✓ limits: summary and spentInMonthForCategory agree on travel
+# ✓ limits: a split row is counted per part
+# ✓ limits: the archived account contributes nothing
+# ✓ limits: the paired transfer is excluded
+# ✓ Bills agenda retains recurring, card and manual bill sources
+# ✓ Subscriptions still come from true active detected subscriptions
+# ✓ Cards still use open and recently settled dues
+# ✓ Utilities retains reminders, loans, fixed commitments, and other repeats
+# ✓ bills.tsx: two addBill call sites (sheet and adder)
+# ✓ bills.tsx: the subscription call site goes through billFromSubscription
+# ✓ bills.tsx: the raw subscription charge is read exactly once
+# ✓ bills.tsx: the remind affordance is gated on a representable cadence
+# ✓ manual reminders keep one detail target without a nested payment/deletion action
+# ✓ manual reminder detail owns visible payment and delete footer actions
+# ✓ bills.tsx: Save is disabled by the same rule saveBill enforces
+# ✓ bills.tsx: marking a bill paid prefers an account still in play
+# ✓ subscription history E2E is scoped to the sheet instead of a mounted page scroller
+# ✓ utility payment cannot settle another explicitly identified account
+# ✓ one unidentified provider receipt cannot mark two obligations paid
+# ✓ separate identified receipts settle both obligations independently
+# ✓ Arabic provider identity can settle its exact structured account
+# ✓ Arabic title equality works without a structured account identifier
+# ✓ Arabic generic bill words cannot join unrelated providers
+# ✓ an exact identified receipt beats a weak legacy provider-title claim
+# ✓ two exact identity claims remain ambiguous rather than sharing a payment
+# ✓ a refund alone never proves a utility obligation paid
+# bills.test.js: 44 passed, 0 failed
+# Subtest: scripts/test/bills.test.js
+ok 2 - scripts/test/bills.test.js
+  ---
+  duration_ms: 87.801541
+  type: 'test'
+  ...
+# ✓ an empty ledger has one reconciled zero hero
+# ✓ the selected current month is marked live
+# ✓ an empty ledger exposes no comparison, insight, rows, or upcoming money
+# ✓ empty parser and categorisation prompts stay quiet
+# ✓ hero figures preserve exact amounts and live-account/transfer exclusions
+# ✓ hero net remains shown income less shown spending
+# ✓ the comparison uses the same eligible current rows
+# ✓ period activity excludes archived and both internal-transfer halves
+# ✓ the internal-transfer fact is reusable by row rendering
+# ✓ the latest automatic capture fact follows existing ledger order
+# ✓ foreign activity uses the same live-account scope as the hero
+# ✓ a due bill inside the horizon is part of the same view model
+# ✓ three distinct unread formats and uncategorised merchants cross both prompt floors
+# ✓ Home preserves the exact financial hero without calculating unused cash-out fields
+# ✓ Home preserves due cards and bills from the full timeline
+# ✓ Home preserves activity, account lookup and both transfer identities
+# ✓ Home keeps the exact category prompt while withholding hidden unread work
+# ✓ projection has no mutation side effect on the store snapshot
+# ✓ dismissing one insight projects the next one rather than filtering in the screen
+# ✓ eligible Home fallback exposes the exact unread-format count
+# ✓ a live review takes priority without scanning unread formats
+# ✓ expired reviews restore the unread fallback on the same transaction array
+# ✓ dismissed reviews restore the unread fallback on the same transaction array
+# ✓ the interface owns Home activity ordering and its six-row cap
+# ✓ AED 49,49 keeps Home spending exact
+# ✓ AED 49,49 keeps income and net exact
+# ✓ AED 49,49 keeps pooled Flow total equal to raw slices
+# ✓ AED Wallet preserves small balances and debts without rounding
+# ✓ AED 51,51 keeps Home spending exact
+# ✓ AED 51,51 keeps income and net exact
+# ✓ AED 51,51 keeps pooled Flow total equal to raw slices
+# ✓ AED Wallet preserves small balances and debts without rounding
+# ✓ KWD 1,2 keeps Home spending exact
+# ✓ KWD 1,2 keeps income and net exact
+# ✓ KWD 1,2 keeps pooled Flow total equal to raw slices
+# ✓ KWD Wallet preserves small balances and debts without rounding
+# ✓ JPY 1,2 keeps Home spending exact
+# ✓ JPY 1,2 keeps income and net exact
+# ✓ JPY 1,2 keeps pooled Flow total equal to raw slices
+# ✓ JPY Wallet preserves small balances and debts without rounding
+# 40 passed, 0 failed
+# Subtest: scripts/test/dashboard-projection.test.js
+ok 3 - scripts/test/dashboard-projection.test.js
+  ---
+  duration_ms: 718.508583
+  type: 'test'
+  ...
+# ✓ exact AED/KWD/JPY display, optional precision, compact estimates and checked totals
+# Subtest: scripts/test/money-display.test.js
+ok 4 - scripts/test/money-display.test.js
+  ---
+  duration_ms: 286.178708
+  type: 'test'
+  ...
+# ✓ the route table was read off disk
+# ✓ the tab routes are there
+# ✓ card and review routes retain their serializable IDs
+# ✓ Wallet opens cards by serializable account ID on a normal row press
+# ✓ Improve Accuracy sends named uncategorised shops to the local sorter
+# ✓ Improve Accuracy shares only genuinely unread formats
+# ✓ Parser Research remains gated to internal and test builds
+# ✓ last-owner recovery can still reach Trusted Devices
+# ✓ Trusted Devices remains absent from the ordinary Settings rows
+# ✓ every route the app pushes to exists
+# ✓ the insight destinations are declared in one place
+# ✓ every insight destination exists
+# ✓ every insight destination is built from a declared route
+# ✓ every insight the builder pushes carries a destination (12 of 12)
+# ✓ no insight sends you to the screen the insight list is drawn on
+# ✓ Settings retains its complete capability inventory (23)
+# ✓ region rows never mutate settings directly, and worldwide money has no dead parser picker
+# ✓ the region pickers are drawn, not delegated to Alert
+# ✓ the country picker offers every pack rather than the next one
+# ✓ a country pack the ledger will not accept is refused visibly, not silently
+# ✓ both languages are named in the language picker
+# ✓ the language row shows the language that is on
+# ✓ ledger backup and restore remain available without Pro
+# ✓ Payment cards names stored instruments and keeps their details accessible
+# ✓ large text moves six-month figures into a wrapping readable list
+# ✓ Arabic labels retain their language face and amounts stay tabular
+# ✓ empty large-text months are no-data rather than zero balances
+# ✓ erase is a destructive button, not a chevron row
+# ✓ erase stands after everything else on the screen
+# ✓ every paywalled row is marked as one (1 of 1)
+# ✓ the notification switches are out of the Privacy group and above it
+# ✓ the per-charge alert has one label on both platforms
+# ✓ the founder logo gesture is test-build gated and never forges store Pro
+# ✓ Trusted devices and family are hidden from Settings for now
+# ✓ a toggle row is tappable across its whole width, without eating the switch
+# ✓ the SMS revoke alert can open the system settings it names
+# ✓ no styles survive for the removed money-month grid
+# ✓ app/(tabs)/bills.tsx commits nothing from inside an alert
+# ✓ app/(tabs)/bills.tsx still performs its committing actions (4)
+# ✓ components/card-payment-sheet.tsx commits nothing from inside an alert
+# ✓ components/card-payment-sheet.tsx still performs its committing actions (1)
+# ✓ app/pro.tsx commits nothing from inside an alert
+# ✓ app/pro.tsx still performs its committing actions (2)
+# ✓ no alert anywhere in src/ carries an onPress (0 found)
+# ✓ every Bills commit hangs off a confirmation (4 of 4)
+# ✓ Bills draws the confirmation it gates on
+# ✓ Bills still says what it always said (8 strings)
+# ✓ the card sheet files its payment from a drawn confirmation
+# ✓ the reminder answers are shown in the sheet rather than announced
+# ✓ the card sheet still says what it always said (4 strings)
+# ✓ every paywall outcome reaches the screen (5 of 5)
+# ✓ the paywall renders the answer it just produced
+# ✓ the confirmation sheet is drawn, not delegated
+# ✓ the confirmation sheet offers a way out and a destructive variant
+# 54 passed, 0 failed
+# Subtest: scripts/test/routes.test.js
+ok 5 - scripts/test/routes.test.js
+  ---
+  duration_ms: 144.445292
+  type: 'test'
+  ...
+# ✓ formatAED with cents
+# ✓ formatAED whole drops decimals
+# ✓ formatAED legacy false preserves fractional units
+# ✓ formatAED legacy false preserves lower fractional units
+# ✓ formatAED legacy false keeps a near-whole figure exact
+# ✓ formatAED negative
+# ✓ formatAED sub-dirham negative is not erased
+# ✓ formatAED sub-dirham negative keeps its sign with decimals
+# ✓ rows add up to their own total
+# ✓ totalAsShown of nothing
+# ✓ totalAsShown keeps whole amounts exact
+# ✓ formatAED millions grouping
+# ✓ parseAmountToFils decimal
+# ✓ parseAmountToFils with junk chars
+# ✓ parseAmountToFils invalid
+# ✓ parseAmountToFils zero
+# ✓ parseAmountToFils Arabic-Indic digits
+# ✓ parseAmountToFils extended Arabic-Indic digits
+# ✓ parseAmountToFils Arabic decimal separator
+# ✓ parseAmountToFils Arabic grouping and decimals
+# ✓ parseAmountToFils Persian grouping and decimals
+# ✓ parseAmountToFils Arabic excess precision is rejected
+# ✓ parseAmountToFils Arabic bad grouping is rejected
+# ✓ parseAmountToFils Arabic zero is rejected
+# ✓ monthKey
+# ✓ shiftMonthKey back over year
+# ✓ shiftMonthKey forward
+# ✓ daysInMonth feb non-leap
+# ✓ daysInMonth feb leap
+# ✓ shortDate
+# ✓ friendlyDate today
+# ✓ friendlyDate yesterday
+# ✓ monthLabel short
+# ✓ bill paid status
+# ✓ bill overdue
+# ✓ bill due-soon (today)
+# ✓ bill due-soon (5d)
+# ✓ bill upcoming
+# ✓ bill dueDay 31 clamps in Jun
+# ✓ an imported reminder never rewrites a manually managed bill
+# ✓ a newer automatic reminder refreshes only its changing statement facts
+# ✓ different Arabic biller titles retain separate identities
+# ✓ two imported accounts at one provider do not overwrite each other
+# ✓ summary: a day with no spending says nothing at all
+# ✓ summary: the total is the day's spending only
+# ✓ summary: and the count matches it
+# ✓ summary: another day is not in it
+# ✓ summary: income is not spending
+# ✓ summary: the largest row is named first
+# ✓ summary: an internal sweep is not spending
+# ✓ summary: ...and does not pad the count
+# ✓ summary: only the top rows are named
+# ✓ summary: the rest are counted, not dropped
+# ✓ summary: unbudgeted categories do not blow past the limit
+# ✓ summary: no limits set means no budget line
+# ✓ bill: a payee token reconciles a bill whose name does not nest
+# ✓ bill: two bills from one payee each take their own charge (a)
+# ✓ bill: two bills from one payee each take their own charge (b)
+# ✓ bill: one charge two bills could both claim settles neither (a)
+# ✓ bill: one charge two bills could both claim settles neither (b)
+# ✓ bill: a generic word is not a payee match
+# ✓ bill: another telecom at a similar amount is not a match
+# ✓ bill: an exactly nesting title still settles
+# ✓ money month: a day-28 bill belongs to the June money month
+# ✓ money month: a day-3 bill falls in the second calendar month
+# ✓ money month: day 31 clamps to a day that exists
+# ✓ money month: a bill paid this money month stays paid
+# ✓ money month: and its date is the one it was paid on, not next month
+# ✓ money month: its countdown agrees with that date
+# ✓ bills sorted most urgent first
+# ✓ summarize income
+# ✓ summarize expense
+# ✓ summarize top category
+# ✓ summarize share
+# ✓ other month empty
+# ✓ budget-over insight fires
+# ✓ savings insight fires
+# ✓ warnings ranked before neutral
+# ✓ spentInMonthForCategory
+# ✓ seed deterministic
+# ✓ seed sorted desc
+# ✓ seed has salary each month
+# ✓ seed no future dates
+# ✓ seed reasonable volume
+# ✓ a cardless bill receipt never presents the fallback account as evidence
+# ✓ an unrelated edit does not turn a fallback receipt account into evidence
+# ✓ an explicitly stated receipt card is shown in recurring history
+# ✓ an explicit user account correction is shown in recurring history
+# ✓ ordinary card charges retain their proven payment account
+# ✓ the parser-only heal seam cannot claim an account without resolution evidence
+# ✓ subscription: monthly cadence detected
+# ✓ subscription: price increase flagged
+# ✓ subscription: next expected on the monthly billing day
+# ✓ subscription: weekly cadence detected
+# ✓ recurring court bookings are commitments without membership evidence
+# ✓ recurring cinema visits are commitments without subscription evidence
+# ✓ subscription: weekly monthly-equivalent ~4.33x
+# ✓ subscription: known merchant needs only one interval
+# ✓ subscription: irregular merchant rejected
+# ✓ groups: rent classified as housing
+# ✓ groups: DEWA variants use one provider title and stay utilities
+# ✓ groups: Netflix stays a subscription
+# ✓ groups: trueSubscriptions excludes rent/utilities
+# ✓ groups: business supplier is a commitment, not a subscription
+# ✓ groups: recurring other-category payment is a commitment
+# ✓ groups: commitments never count in trueSubscriptions
+# ✓ groups: commitments listed under fixedCommitments
+# ✓ registered monthly payees tolerate early and late payment days
+# ✓ registered irregular top-up is visible without a fake due date
+# ✓ calendar-month relaxation is exclusive to registered payment receipts
+# ✓ same-day mixed evidence cannot inherit registered-receipt status
+# ✓ as-needed average includes inactive time inside its observation window
+# ✓ posted annual fees do not become commitments without durable card identity
+# ✓ generic and penalty fees never mint fixed commitments from cadence alone
+# ✓ groups: a supplier is not a bill
+# ✓ groups: a supplier is an other repeat payment
+# ✓ groups: rent and DEWA are bills
+# ✓ groups: rent and DEWA are not other repeat payments
+# ✓ bills: two unrelated amounts are not a monthly bill
+# ✓ bills: a swinging utility bill is still detected
+# ✓ bills: proven Etisalat payment-channel variants form one E& commitment
+# ✓ bills: a generic internet word is not renamed to a telecom provider
+# ✓ dismiss: not-a-subscription merchant skipped
+# ✓ lapse: silent-for-months subscription marked stopped
+# ✓ lapse: recently charged subscription stays active
+# ✓ lapse: stopped subscriptions cost nothing in the monthly total
+# ✓ lapse: helper splits active and stopped
+# ✓ stopped list hides unknown merchants, keeps known services
+# ✓ openDues: debit-card dues never surface
+# ✓ openDues: dues stale past 30d overdue decay away
+# ✓ openDues: recent overdue credit due still shows
+# ✓ openDues: a cached answer equals the computed one
+# ✓ openDues: each caller gets its own array
+# ✓ openDues: emptying one caller's list leaves the next intact
+# ✓ openDues: a new transactions array invalidates the cache
+# ✓ openDues: and the old state still reads the same as before
+# ✓ openDues: a day later is a day fewer
+# ✓ pairing: the settlement the payment was for is paid
+# ✓ pairing: the surplus does NOT spill onto next month
+# ✓ pairing: an unsided compat payment on its own still settles the statement
+# ✓ pairing: same amount on different days is two payments, not one
+# ✓ openDues: one statement per account and due date
+# ✓ openDues: one statement stored twice is one row
+# ✓ openDues: a payment counts for the statement, not for each copy of it
+# ✓ openDues: only the newest statement on a card is owed
+# ✓ openDues: the total is the newest statement, not the sum of both
+# ✓ dues: two active same-bank same-suffix accounts both remain visible
+# ✓ dues: a different bank with the same last4 remains visible too
+# ✓ openDues: archived cards contribute no dues
+# ✓ dormancy: recently used card stays active
+# ✓ dormancy: card silent since last year is inactive
+# ✓ dormancy: a fresh bank snapshot counts as activity
+# ✓ dormancy: hand-added account with no history stays active
+# ✓ dormancy: archived beats recent activity (hidden means hidden)
+# ✓ dormancy: last activity date reported
+# ✓ online services detected as subscriptions
+# ✓ ChatGPT cadence and next date known
+# ✓ groups: fixedCommitments has rent + DEWA
+# ✓ reconcile: imported DEWA debit marks bill paid
+# ✓ reconcile: consumer receipt settles differently named provider account
+# ✓ reconcile: prior-month consumer receipt cannot settle current bill
+# ✓ reconcile: matching amount without bill identity cannot settle a differently named bill
+# ✓ reconcile: amount outside ±15% does not match
+# ✓ reconcile: other month does not match
+# ✓ reconcile: transfers never match bills
+# ✓ due: upcoming 7d out
+# ✓ due: below minimum flagged
+# ✓ due: urgent within 3d
+# ✓ due: overdue after date
+# ✓ due: transfer payment settles it
+# ✓ due: partial payment reduces remaining
+# ✓ due: partial above minimum clears flag
+# ✓ analytics: top merchant aggregated
+# ✓ analytics: dining moved down vs June
+# ✓ analytics: transfers excluded from weekday spend
+# ✓ period: string coerces to month
+# ✓ period: inPeriod month
+# ✓ period: inPeriod year
+# ✓ period: inPeriod range inclusive
+# ✓ period: inPeriod all
+# ✓ period: previous month wraps year
+# ✓ period: previous year
+# ✓ period: previous range equal length
+# ✓ period: all has no previous
+# ✓ period: current month detected
+# ✓ period: elapsed days current month
+# ✓ period: elapsed days past month is full
+# ✓ period: elapsed days future month is zero
+# ✓ period: elapsed days current year
+# ✓ period: elapsed days range clamps at today
+# ✓ period: elapsed days all from earliest tx
+# ✓ period: end of past month
+# ✓ period: end of current month clamps to today
+# ✓ period: end of past year
+# ✓ period: end of range
+# ✓ period: label month
+# ✓ period: year summary aggregates all months
+# ✓ period: all-time summary equals year here
+# ✓ period: movers empty for all-time
+# ✓ period: range-scoped top merchants
+# ✓ salary month: day before start belongs to previous month
+# ✓ salary month: start day opens the new month
+# ✓ salary month: start ISO uses the start day
+# ✓ salary month: end is day before next start
+# ✓ salary month: inPeriod follows the shifted boundary
+# ✓ salary month: elapsed days counted from the start day
+# ✓ salary month: period end for a past month
+# ✓ the month a date belongs to CHANGES when the start day loads
+# ✓ a period fixed before hydration would hold none of that day's spending
+# ✓ calendar months restore cleanly
+# ✓ trial: fresh install has full trial days
+# ✓ trial: pro active during trial
+# ✓ trial: expires after day 3
+# ✓ trial: purchase beats an expired trial
+# ✓ market: SAR renders in amounts
+# ✓ market: Saudi SMS parses under the SA pack
+# ✓ market: Saudi bank recognized with logo domain
+# ✓ market: USD converts into SAR under the SA pack
+# ✓ market: STC categorized as telecom in SA
+# ✓ market: AED restores cleanly
+# ✓ market: UAE parsing unchanged after switching back
+# ✓ reliable: credit card uses bank outstanding as negative
+# ✓ reliable: credit card with only a limit snapshot is unknowable
+# ✓ reliable: debit card uses bank balance snapshot
+# ✓ reliable: SMS-fed account without a quote never shows derived garbage
+# ✓ reliable: fully-manual account derives from opening + entries
+# ✓ net worth sums only reliable, skips archived
+# ✓ net worth breakdown exposes the same auditable equation as the headline
+# ✓ net worth breakdown distinguishes included, missing and archived accounts
+# ✓ net worth breakdown row figures agree with the reliable-balance contract
+# ✓ dues: a single payment settles only the statement it covers
+# ✓ dues: the unpaid second statement stays open
+# ✓ dues: an overpayment spills onto the next statement
+# ✓ dues: two payments settle two statements
+# ✓ dues: marking June paid does not settle the July statement
+# ✓ dues: the June payment still covers June
+# ✓ dues: July stays open after June is marked paid
+# ✓ dues: a bank receipt two days after Mark paid is the same payment, not a second one
+# ✓ dues: the August statement the phantom leg had settled is still owed
+# ✓ dues: and the July statement it really paid is still covered
+# ✓ dues: a bank receipt fifteen days later is a different payment
+# ✓ dues: two bank alerts four days apart stay two payments
+# ✓ dues: the two legs of one settlement a night apart are still one payment
+# ✓ dues: one payment across two overlapping statements is counted exactly once
+# ✓ dues: each statement names only the payment credited to it
+# ✓ dues: a payment that spills is named against both statements it paid
+# ✓ dues: six monthly payments read as ONE against the statement one of them paid
+# ✓ dues: the lifetime filter the sheet used to run would have said six
+# ✓ dues: a settlement that arrived in two legs counts once in the matched list
+# ✓ dues: the compat expense-side settlement row is a matched payment
+# ✓ dues: a payment inside the 40-day window settles the statement
+# ✓ dues: a payment from the previous cycle does not settle this statement
+# ✓ dues: a year of older payments does not settle the one captured statement
+# ✓ dues: and that statement is still shown as owed in full
+# ✓ subs: a single charge from a known merchant is not a subscription
+# ✓ subs: two charges a month apart still detect
+# ✓ heal: re-parsing a stored row does produce a different title and category
+# ✓ bills: a row whose title normalizes to nothing never marks a bill paid
+# ✓ recurring: a utility with swinging amounts is still detected
+# ✓ recurring: an unstable shop is not a subscription
+# ✓ recurring: an outlier charge does not become the price
+# ✓ recurring: a prorated first charge is not a price rise
+# ✓ recurring: a real price rise still reports
+# ✓ recurring: an upgrade becomes the reported price
+# ✓ recurring: an upgrade reports as a price rise
+# ✓ recurring: a single bad parse still does not set the price
+# ✓ brand mark: Noon → n
+# ✓ brand mark: Tabby → tb
+# ✓ brand mark: YouTube Premium → yt
+# ✓ brand mark: Apple → ap
+# ✓ brand mark: Steam → st
+# ✓ brand mark: Kokoro Qlub → ql
+# ✓ brand mark: Kitopi → kt
+# ✓ brand mark: Capital.com → cp
+# ✓ brand mark: Name.com → dn
+# ✓ brand mark: Claude → cl
+# ✓ brand mark: ChatGPT → ai
+# ✓ brand mark: Exinity Me Ltd → ex
+# ✓ brand mark: Road & Transport Auth → rta
+# ✓ brand mark: % Arabica → %
+# ✓ brand mark: Carrefour → cf
+# ✓ brand mark: "Al Nimar Al Abyadh" has none
+# ✓ brand mark: "Account debit" has none
+# ✓ brand mark: "Pineapple Cafe" has none
+# ✓ brand mark: "Dubai Families" has none
+# ✓ brand mark: "ATM withdrawal" has none
+# ✓ brand mark: "Transfer to Khalid Rashid" has none
+# ✓ brand mark: "" has none
+# ✓ brand marks: every mark is 1-3 chars, hex-coloured and distinguishable
+# ✓ leavingSoon merges dues and bills
+# ✓ leavingSoon sorts by how soon
+# ✓ leavingSoon totals the window
+# ✓ leavingSoon drops anything past the window
+# ✓ leavingSoon can ask for one kind
+# ✓ leavingSoon keeps an overdue statement
+# ✓ daysPhrase late
+# ✓ daysPhrase today
+# ✓ daysPhrase tomorrow
+# ✓ daysPhrase future
+# ✓ lifecycle: a fresh statement owes its full total
+# ✓ lifecycle: a fresh statement is below its stated minimum
+# ✓ lifecycle: a fresh statement is open
+# ✓ lifecycle: a partial payment reduces the due, not settles it
+# ✓ lifecycle: the partial remainder is total minus payment
+# ✓ lifecycle: a partial payment over the minimum clears the warning
+# ✓ lifecycle: a part-paid statement is still open
+# ✓ lifecycle: a payment under the stated minimum still warns
+# ✓ lifecycle: both payments together cover the statement
+# ✓ lifecycle: a fully-paid statement owes nothing and reads settled
+# ✓ lifecycle: a settled statement never reports below-minimum
+# ✓ lifecycle: a fully-paid statement leaves openDues
+# ✓ lifecycle: a settlement marker without payment evidence stays unpaid
+# ✓ lifecycle: a marker-only legacy statement remains in openDues
+# ✓ lifecycle: settling July does not settle August
+# ✓ lifecycle: August stays open after July is settled
+# ✓ minimum: an estimated minimum is flagged as not known
+# ✓ minimum: an estimated minimum never claims the user is below it
+# ✓ minimum: a bank-stated minimum is known and still warns
+# ✓ minimum: an estimate changes nothing about what is owed
+# ✓ stale: an unpaid statement with no successor survives, not vanishes
+# ✓ stale: the surviving statement is flagged stale, not passed off as current
+# ✓ stale: the surviving statement still reports what is owed
+# ✓ stale: a superseded statement is dropped
+# ✓ stale: the statement that replaced it remains
+# ✓ stale: a current statement is never flagged stale
+# ✓ stale: a stale statement that gets paid leaves openDues
+# ✓ net worth: an archived account contributes nothing
+# ✓ net worth: paying a card does not create money
+# ✓ net worth: real spending still moves it
+# ✓ net worth: moving money between your own accounts creates none
+# ✓ net worth: confirmed external income with no matching outflow still counts
+# ✓ net worth: an unpaired generic receipt remains pending until ownership is known
+# ✓ artifact cleanup: empty debit fallback beside active credit is removed
+# ✓ artifact cleanup: a different bank and cash account stay untouched
+# ✓ artifact cleanup: the hint follows the only substantive target
+# ✓ artifact cleanup: running it again changes nothing
+# ✓ duplicate bank accounts are merged (they were skipped entirely before)
+# ✓ the survivor is the one the bank spoke to most recently
+# ✓ a duplicated balance is no longer counted twice
+# ✓ transactions follow the survivor rather than dangling
+# ✓ hints follow the survivor too
+# ✓ merging a duplicated list is idempotent
+# ✓ an exactly duplicated card is folded together as well
+# ✓ two genuinely different cards sharing a suffix are still left alone
+# ✓ a sub-brand card folds into its issuer
+# ✓ the ISSUER survives, not the sub-brand, even with an older snapshot
+# ✓ the payment moves onto the surviving card, so the due can settle
+# ✓ a real Liv card with different digits stays its own card
+# ✓ two differently NAMED cards at one bank are never fused
+# ✓ ...so neither statement is discarded
+# ✓ two differently NAMED bank accounts keep both balances
+# ✓ contradicting statements on one date block even a cross-brand fold
+# ✓ artifact cleanup: account metadata variant 1 blocks deletion
+# ✓ artifact cleanup: account metadata variant 2 blocks deletion
+# ✓ artifact cleanup: account metadata variant 3 blocks deletion
+# ✓ artifact cleanup: account metadata variant 4 blocks deletion
+# ✓ artifact cleanup: account metadata variant 5 blocks deletion
+# ✓ artifact cleanup: a bill reference blocks deletion
+# ✓ artifact cleanup: a user-named empty card is not a proven parser artifact
+# ✓ artifact cleanup: two active same-last4 siblings are never auto-merged
+# ✓ artifact cleanup: two empty explicit debit/credit siblings remain ambiguous
+# ✓ artifact cleanup: ambiguous typed hints are never remapped by array order
+# ✓ artifact cleanup: an unknown holding with transactions is never dropped
+# ✓ artifact cleanup: unknown bank is not proof two same-last4 rows share a bank
+# ✓ artifact cleanup: distinct Arabic bank names never collapse into one identity
+# ✓ a duplicated import block with no bank on any row is folded
+# ✓ the unattributed survivor is the most recently quoted copy
+# ✓ the duplicated unattributed balance is no longer counted twice
+# ✓ history on the dropped copy follows the survivor
+# ✓ folding an unattributed block is idempotent
+# ✓ unattributed fold stops one step short: two banks, one suffix, is two cards
+# ✓ unattributed fold stops one step short: an unattributed row never folds into one that names a bank
+# ✓ unattributed fold stops one step short: unattributed rows quoting DIFFERENT figures are two instruments
+# ✓ unattributed fold stops one step short: ...and so are two quoting different KINDS of figure
+# ✓ unattributed fold stops one step short: one row with a bank-quoted figure and one without stay apart
+# ✓ unattributed fold stops one step short: a different card type is a different card, bank or no bank
+# ✓ unattributed fold stops one step short: a card and a bank account sharing four digits are not one thing
+# ✓ two unattributed rows that both carry a statement are never fused
+# ✓ artifact cleanup: a state with no duplicates is returned as-is
+# ✓ repro: a paid FAB statement is still shown as owed on the phantom card
+# ✓ the duplicate statement moves to the card that has the history
+# ✓ no statement is deleted — both copies survive, on the right card
+# ✓ and no card row is deleted either: the split stays visible
+# ✓ so the app stops billing for money already paid
+# ✓ repairing duplicate statements is idempotent
+# ✓ statements stay on their own cards: a different total is a different statement
+# ✓ statements stay on their own cards: a different due date is a different statement
+# ✓ statements stay on their own cards: a different stated minimum is a different statement
+# ✓ statements stay on their own cards: an ESTIMATED minimum is this app's 5% guess, not evidence
+# ✓ two cards that BOTH have history keep both statements
+# ✓ two cards with no history at all keep both statements
+# ✓ an identical statement at another bank is another bank's statement
+# ✓ a debit row never absorbs or surrenders a credit statement
+# ✓ payment account repair: Card •3749 payment moves off FAB •3324
+# ✓ payment account repair: same last4 at another bank cannot steal it
+# ✓ payment account repair: the corrected payment settles the named card
+# ✓ payment account repair: same-suffix debit row yields to the unique credit card
+# ✓ payment account repair: debit-to-credit correction settles the credit statement
+# ✓ payment account repair: two same-bank targets are ambiguous and stay untouched
+# ✓ payment account repair: a user-edited account choice is never overwritten
+# ✓ payment account repair: no bank identity means no automatic reassignment
+# ✓ a row whose raw SMS says the transaction was refused is deleted
+# ✓ removing declines is idempotent
+# ✓ decline removal: a row the user corrected by hand is theirs
+# ✓ decline removal: no raw text is no evidence: a manual entry is never deleted
+# ✓ decline removal: no raw text is no evidence: an iOS relay row keeps its row
+# ✓ decline removal: a transfer is what card allocation reconciles against and is left alone
+# ✓ decline removal: a hand-built split is hand-built allocation
+# ✓ decline removal: a merchant genuinely named "Insufficient Funds" keeps its purchase
+# ✓ decline removal: an insufficient-balance FEE is money that actually moved
+# ✓ decline removal: a purchase whose stored raw carries a MASKED figure is not a decline
+# ✓ decline removal: a raw excerpt truncated before its amount is not a decline
+# ✓ decline removal takes the declined row and nothing beside it
+# ✓ decline removal leaves a ledger with nothing to remove untouched
+# ✓ paid card: the message reads as a card payment
+# ✓ paid card: a rescan corrects the direction
+# ✓ paid card: a stale rescan patch cannot overwrite an edit made while capture was waiting
+# ✓ paid card: a stale rescan removal cannot delete an edit made while capture was waiting
+# ✓ paid card: the statement is settled and leaves the list
+# ✓ paid card: a payment stored the old way settles the statement anyway
+# ✓ paid card: an ordinary purchase on the card settles nothing
+# ✓ paid card: an outgoing transfer on a bank account is not a card payment
+# ✓ paid card: an outgoing transfer from a credit card does not settle its statement
+# ✓ paid card: a hand-edited row is left alone
+# ✓ paid card: the corrected row stops carrying source text
+# ✓ paid card: after a relaunch it is an income-side transfer
+# ✓ paid card: after a relaunch it carries no source text
+# ✓ paid card: a relaunched row settles the statement
+# ✓ income healing: a raw-bearing legacy inward remittance clears the stale transfer flag
+# ✓ income healing: a user-edited inward remittance remains byte-for-byte untouched
+# ✓ direction healing: expense to income also replaces stale category and merchant
+# ✓ direction healing: income to expense also replaces stale category and merchant
+# ✓ card sheet: an unconfirmed sibling statement is not silently pooled
+# ✓ card sheet: a payment on an unconfirmed sibling does not settle this card
+# ✓ card sheet: the paid lookup covers every statement it lists
+# ✓ card sheet: the payment total stays on its resolved account
+# ✓ card sheet: a hidden card still owes what it owes
+# ✓ card sheet: only the newest statement is owed
+# ✓ card sheet: the older statement stays visible as history
+# ✓ card sheet: money leaving the card is not money paid toward it
+# ✓ card sheet: a legacy expense-direction card payment settles the statement
+# ✓ card sheet: that same payment appears in Payments Made and its total
+# ✓ card sheet: an ordinary outgoing transfer off the card is still not a payment
+# ✓ card sheet: another bank's card sharing last4 is not this card
+# ✓ statement merge: a repeated reminder remains one statement
+# ✓ statement merge: a repeated reminder preserves the paid amount
+# ✓ statement merge: a repeated reminder preserves settlement proof
+# ✓ statement merge: an older reminder cannot replace the current statement
+# ✓ statement merge: two banks sharing last4 remain separate obligations
+# ✓ card identity: an unconfirmed sibling payment cannot settle this statement
+# ✓ card identity: the unconfirmed statement remains open
+# ✓ card identity: a row with no bank name stays separate until confirmed
+# ✓ one card: two named banks with the same digits stay two cards
+# ✓ one card: an unattributable row stands alone rather than guessing
+# ✓ one card: a payment to one card at a bank leaves the other alone
+# ✓ card identity: one same-suffix card payment settles only its own due
+# ✓ statement merge: two active same-bank same-suffix cards stay separate
+# ✓ window: a payment made before the statement existed is not credited to it
+# ✓ window: a payment made after the statement was issued is credited
+# ✓ window: a partial payment leaves the remainder owing
+# ✓ window: a part-paid statement is still open
+# ✓ window: a payment split across two messages settles the statement
+# ✓ window: the newest statement accepts a payment 25 days late
+# ✓ window: the newest statement accepts a payment 60 days late
+# ✓ window: one payment settles one of two overlapping statements, not both
+# ✓ window: a payment made after the next statement was issued belongs to it
+# ✓ window: paying the current statement clears the card
+# ✓ window: marking a late statement paid does not pay the next one
+# ✓ window: the July statement is still owed in full
+# ✓ real SMS: the reminder is a statement, with the bank's own minimum
+# ✓ real SMS: the payment is a card payment against the card it names
+# ✓ real SMS: both messages name the same card
+# ✓ real SMS: before the payment the statement is overdue for its full total
+# ✓ real SMS: the payment settles it and it leaves the list
+# ✓ real SMS: and it leaves "leaving soon" with it
+# ✓ leaving soon: every open statement is in the list
+# ✓ leaving soon: the heading equals the three rows plus the remainder
+# ✓ leaving soon: the remainder covers exactly what the rows do not
+# ✓ leaving soon: a 42-day-late statement is carried, and marked stale
+# ✓ leaving soon: this week's statement is not stale
+# ✓ accuracy: the message reads with a real category
+# ✓ accuracy: an unreadable row is listed
+# ✓ accuracy: a row with no merchant is marked unread
+# ✓ accuracy: a named merchant with no category is marked uncategorized
+# ✓ accuracy: a named row already categorised by a local rule is no longer reported
+# ✓ accuracy: an intentionally Other accounting role is no longer reported
+# ✓ accuracy: unread formats sort ahead of uncategorized ones
+# ✓ accuracy: the rescan names it
+# ✓ accuracy: the rescan drops the source text
+# ✓ accuracy: the healed row is no longer reported
+# ✓ accuracy: and it no longer counts
+# ✓ accuracy: a still-unreadable row keeps its source text
+# ✓ accuracy: with retention on, an empty list is a real finding
+# ✓ accuracy: a legacy-only relay platform cannot know, and says so
+# ✓ accuracy: current iOS local capture is not mislabeled as relay-only
+# ✓ accuracy: private mode cannot know either
+# ✓ accuracy: Private Mode truth wins on local-capture iOS
+# ✓ coverage: an empty ledger divides by nothing
+# ✓ coverage: three purchases, one unnamed
+# ✓ coverage: one of three carries a real category
+# ✓ coverage: nothing was skipped
+# ✓ coverage: a ledger of pure transfers measures nothing rather than failing
+# ✓ coverage: and it still reports how many rows it saw
+# ✓ coverage: no structural title is ever a miss
+# ✓ coverage: the card/statement/bill titles are structural too
+# ✓ coverage: without the pin, a deliberate other reads as a miss
+# ✓ coverage: a merchant the user pinned to "other" leaves the category count
+# ✓ coverage: pinning a category does not remove the row from the shop count
+# ✓ coverage: credits are left out of both counts
+# ✓ coverage: a manual entry, and a pre-v2 row with no source, measure the user
+# ✓ coverage: a hand-edited row stays in the denominator
+# ✓ coverage: a name the user typed is not counted as one the parser read
+# ✓ coverage: but a hand edit to some other field does not invent a miss
+# ✓ coverage: their category is theirs, so it leaves the category count only
+# ✓ coverage: a bulk override cannot erase the naming misses under it
+# ✓ coverage: and the misses are still ten of fifteen
+# ✓ coverage: measured is exactly the decided rows plus the asked-about ones
+# ✓ coverage: a pin and a hand-filed row are both decided
+# ✓ coverage: an income pin does not decide a merchant's expense rows
+# ✓ coverage: an expense pin on those same rows still does
+# ✓ coverage: and measured still closes either way
+# ✓ coverage: every reportable "could not read" row is an un-named row
+# ✓ coverage: every reportable "no category" row is an uncategorised row
+# ✓ coverage: the format list is blind without raw text
+# ✓ coverage: the measurement is not
+# ✓ heal: a deliberate category correction reaches a row that was not "other"
+# ✓ heal: a non-deliberate guess never overwrites a real category
+# ✓ heal: a deliberate "other" never demotes a categorised row
+# ✓ heal: an income-only category on an expense is repaired even to cautious Other
+# ✓ heal: a contact number retained in a merchant title is removed on reread
+# ✓ heal: a hand-corrected row is still untouchable
+# ✓ heal: a transfer is not re-categorised as spending
+# ✓ duplicate: the same SMS caught twice is one row
+# ✓ duplicate: a push about an SMS already imported is one row
+# ✓ duplicate: two same-day same-amount SMS charges stay two rows
+# ✓ duplicate: the same shop seconds later is one row
+# ✓ duplicate: the same shop again later in the day is a second row
+# ✓ duplicate: an SMS supersedes the push row it duplicates
+# ✓ duplicate: a push never supersedes an SMS row
+# ✓ duplicate: a push with no SMS behind it still imports
+# ✓ duplicate: a later same-value push is a second real purchase
+# ✓ duplicate: persisted event time keeps a later smsKey-less repeat purchase
+# ✓ duplicate: one opposite settlement receipt consumes the debit alert
+# ✓ duplicate: a second real receipt is not consumed by the same debit
+# ✓ duplicate: Mark paid suppresses the matching bank debit side
+# ✓ duplicate: the same Mark paid also suppresses its matching receipt side
+# ✓ duplicate: a second real payment is not consumed by the manual token
+# ✓ duplicate: the second real payment still coalesces its own opposite side
+# ✓ duplicate repair: an existing push/SMS pair becomes one row
+# ✓ duplicate repair: the fuller SMS account and identity win
+# ✓ duplicate repair: two genuine later purchases are preserved
+# ✓ duplicate repair: an edited strong-identity copy wins without double counting
+# ✓ duplicate repair: two edited copies are never destructively reconciled
+# ✓ duplicate repair: opposite settlement alerts become one retained payment
+# ✓ duplicate repair: opposite settlement sides across midnight become one payment
+# ✓ duplicate repair: same-side payments on adjacent dates stay distinct
+# ✓ duplicate repair: one AED 4,000 settlement leaves AED 3,000 of AED 7,000 open
+# ✓ duplicate repair: one debit consumes only one of two real receipts
+# ✓ duplicate repair: two genuine settlement pairs remain two payments
+# ✓ duplicate repair: weak settlement pairing never removes a user-edited row
+# ✓ duplicate repair: equal settlements on different cards remain separate
+# ✓ duplicate repair: 5,000-row ledger stays linear (22ms)
+# ✓ duplicate: the first copy is not a duplicate
+# ✓ duplicate: the second copy in the same batch is
+# ✓ duplicate: body prints ignore how the PDUs were rejoined
+# ✓ ledger: an archived account is not live
+# ✓ ledger: an ordinary purchase is spending
+# ✓ ledger: a transfer is not spending
+# ✓ ledger: income is not spending
+# ✓ ledger: a hidden account spends nothing
+# ✓ ledger: without an account list, the transfer rule still applies
+# ✓ ledger: the inbound leg of a transfer is findable
+# ✓ ledger: the hidden account was counted before
+# ✓ ledger: and is not counted now
+# ✓ ledger: income skips transfers either way
+# ✓ ledger: a category total agrees with the summary
+# ✓ insights: the destination list is not empty
+# ✓ insights: the fixture produces a useful spread
+# ✓ insights: every card has somewhere to go
+# ✓ insights: no card points at a route that does not exist
+#   insight kinds exercised: budget, daily, largest, overspend, pace, top
+# ✓ insights: budget cards were among them
+# ✓ price: the rise is detected
+# ✓ price: the prior typical is the figure it was judged against
+# ✓ price: the recent average has already absorbed the rise
+# ✓ price: the card is shown
+# ✓ price: the sentence names two different amounts
+# ✓ time: a new row carries its own timestamp
+# ✓ time: an older row recovers it from the SMS fingerprint
+# ✓ time: a manual row simply has none
+# ✓ time: a malformed fingerprint is not a date
+# ✓ time: the full stamp carries the year
+# ✓ time: and the clock
+# ✓ time: a row with no clock still names its day
+# ✓ reissue: the statement-only card is spotted
+# ✓ reissue: it points at the card holding the history
+# ✓ reissue: a card that has been spent on is not suggested
+# ✓ reissue: a different bank is never suggested
+# ✓ reissue: candidates are ranked by most recent use
+# ✓ link suggestion: Liv/ENBD same-last4 split is offered for confirmation
+# ✓ link suggestion: a payment row does not hide the split-card prompt
+# ✓ link suggestion: issuer context never auto-merges the rows
+# ✓ link suggestion: same-bank debit/credit split is offered, not auto-merged
+# ✓ link suggestion: unrelated banks sharing last4 are not suggested
+# ✓ reissue: the old row is gone
+# ✓ reissue: the survivor is the NEW number
+# ✓ reissue: it remembers what it replaced
+# ✓ reissue: the history came across
+# ✓ reissue: the last-four hints follow
+# ✓ reissue: the due is on the same card as the history
+# ✓ reissue: account metadata and bill references survive the confirmed link
+# ✓ reissue: a payment now settles the statement
+# ✓ reissue: a declined suggestion is not offered again
+# ✓ period: a calendar month needs no explaining
+# ✓ period: a salary month states its real dates
+# ✓ period: and it still calls itself June
+# ✓ period: a 3 July payment sits in the June salary month
+# ✓ period: and a 27 July one sits in July
+# ✓ period: a year needs no range
+# ✓ period: all time needs no range
+# ✓ internal: both halves of the move are paired
+# ✓ internal: the salary is untouched
+# ✓ internal: real spending is untouched
+# ✓ internal: an unreviewed generic arrival never inflates income even without a supplied pairing set
+# ✓ internal: In is just the salary now
+# ✓ internal: Out drops the outgoing half too
+# ✓ internal: an unpaired inward remittance stays unresolved without becoming income or a review backlog item
+# ✓ internal: a confirmed external remittance counts as income
+# ✓ internal: a matched inward remittance is excluded only with its own-account leg
+# ✓ internal: complementary Liv outgoing + FAB inward remittance on owned accounts auto-pair
+# ✓ internal: same money/time without complementary transfer semantics stays unconfirmed
+# ✓ internal: instrument-light structural pairing requires a tight <=90s clock
+# ✓ internal: two matching inward candidates remain ambiguous instead of greedily pairing
+# ✓ internal: explicit third-party evidence still blocks automatic own-account pairing
+# ✓ internal: one account cannot transfer to itself
+# ✓ internal: weeks apart is not a pair
+# ✓ internal: competing arrivals do not use a greedy first-match tie-break
+# ✓ internal: ordinary spend and real income of the same value are not paired
+# ✓ internal: a salary is never consumed as an arriving transfer leg
+# ✓ internal: structural transfers without the legacy flag pair only with independent evidence
+# ✓ internal: the category budget agrees with the transfer-safe headline
+# ✓ internal: insights do not call an own-account move a budget overrun
+# ✓ residual: the sweep pairs and nothing else does
+# ✓ residual: a same-value purchase is not mistaken for the outgoing leg
+# ✓ residual: generic transfers cannot become the biggest purchase even without account context
+# ✓ residual: the biggest purchase is a purchase
+# ✓ residual: the biggest surviving purchase is the one named
+# ✓ residual: Out counts only the two surviving purchases
+# ✓ residual: without account visibility, categoryTrend includes hidden purchases but never uncertain transfers
+# ✓ residual: categoryTrend agrees with the month it is drawn under
+# ✓ residual: no merchant is a transfer or a hidden card
+# ✓ residual: topMerchants totals what the headline totals
+# ✓ residual: dayOfWeekSpend totals what the headline totals
+# ✓ residual: categoryMovers rises by exactly the surviving spend
+# ✓ sweep: all three months of the sweep pair off
+# ✓ sweep: the same-value furniture purchase is not swept into the pairing
+# ✓ sweep: uncertain transfers cannot become subscriptions even without supplied pairing context
+# ✓ sweep: with live accounts and internal transfers passed in, the sweep never becomes a subscription
+# ✓ sweep: the real Netflix subscription still surfaces
+# ✓ sweep: a one-off purchase is not treated as a recurring commitment
+# ✓ export: uncertain transfers cannot print as expenses even without supplied pairing context
+# ✓ export: with live accounts and internal transfers passed in, no sweep leg reaches the report
+# ✓ export: the real Netflix charges still print
+# ✓ export: the same-value furniture purchase still prints
+# ✓ export: spending on an archived account does not print
+# ✓ google: the subscription is detected
+# ✓ google: a halved price is NOT a rise
+# ✓ google: the price it is compared against is the one before, not the lifetime median
+# ✓ google: the reported price is what it costs now
+# ✓ google: the tier upgrade itself still reports as a rise
+# ✓ google: and names the old price it rose from
+# ✓ google: a steady price is never a rise
+# ✓ wallet: a credit card leads with what is owed
+# ✓ wallet: and it is the REMAINDER, not the statement total
+# ✓ wallet: a settled credit card owes zero
+# ✓ wallet: a debit card leads with its balance
+# ✓ wallet: an unknown balance is never guessed at
+# ✓ wallet: cards are grouped by their bank
+# ✓ wallet: the biggest group leads
+# ✓ wallet: a card with no known bank is not its own bank
+# ✓ wallet: every card appears exactly once
+# ✓ allocationsOf: an unsplit row is one allocation of the whole amount
+# ✓ normalizeSplits: an exact split is left alone
+# ✓ normalizeSplits: exact split still sums to the charge
+# ✓ splitEvenly: three-way rounding remainder is absorbed
+# ✓ splitEvenly: every part stays positive
+# ✓ normalizeSplits: a short split is topped up to the charge
+# ✓ normalizeSplits: an overshooting split is pulled back to the charge
+# ✓ normalizeSplits: the same category twice is folded into one part
+# ✓ normalizeSplits: a single part is not a split
+# ✓ normalizeSplits: zero and negative parts are dropped
+# ✓ amountInCategory: reads the part, not the whole charge
+# ✓ amountInCategory: a category not in the split contributes nothing
+# ✓ amountInCategory: an unsplit row still answers for its own category
+# ✓ dominantCategory: the largest part wins
+# ✓ isSplit
+# ✓ a split never changes the total spent
+# ✓ insights: category spend follows the split, not the headline category
+# ✓ analytics: the category trend follows the split too
+# ✓ net worth agrees with its exact displayed parts
+# ✓ routes: every declared route has a screen
+# ✓ routes: the analytics screen exists
+# ✓ routes: the seed still produces insights
+# ✓ routes: no insight points at a screen that does not exist
+# ✓ analytics: rent excluded from weekday spend
+# ✓ analytics: business costs excluded from weekday spend
+# ✓ analytics: heaviest day is a real habit, not rent day
+# ✓ analytics: trend window ends at the month asked for
+# ✓ analytics: trend window walks backwards from there
+# ✓ trendShape: identical months read flat
+# ✓ trendShape: sub-1% wobble still reads flat
+# ✓ trendShape: a rising series is not flat
+# ✓ trendShape: average across the window
+# ✓ trendShape: latest against average
+# ✓ trendShape: latest recognised as the peak
+# ✓ trendShape: latest recognised as the floor
+# ✓ trendShape: empty series is flat and zero
+# ✓ billDueISO clamps day 31 into February
+# ✓ billDueISO clamps day 31 into a leap February
+# ✓ billDueISO leaves a day that fits alone
+# ✓ reminders: a 31st-of-the-month bill is reminded inside February
+# ✓ reminders: never spill into the next month
+# ✓ reminders: fire at 09:00 local, not midnight
+# ✓ reminders: the day-before one is worded as tomorrow
+# ✓ reminders: a manually paid bill is silent
+# ✓ reminders: a bill already reconciled from its debit is silent
+# ✓ reminders: a due date already gone is not scheduled
+# ✓ reminders: a card statement gets three days of warning, then the day itself
+# ✓ reminders: a subscription is flagged the day before it renews
+# ✓ reminders: a merchant already tracked as a bill is not reminded twice
+# ✓ reminders: capped and sorted soonest first
+# ✓ demo: Bills → Subscriptions is not empty
+# ✓ demo: Netflix, Spotify and the gym are among them
+# ✓ demo: Bills → Cards is not empty
+# ✓ demo: the card due is real money
+# ✓ demo: du, E&, DEWA and Salik are detected as fixed commitments
+# ✓ demo: one cancelled subscription to show
+# ✓ demo: exactly one thing worth noticing (a price rise)
+# ✓ demo: the price rise reads as a rise, not a tautology
+# ✓ demo: subscriptions on every one of 1095 launch dates
+# ✓ demo: a card due on every one of 1095 launch dates
+# ✓ demo: never opens on an overdue bill
+# ✓ demo: always has exactly one price rise
+# ✓ demo: the cash wallet never goes negative
+# ✓ demo: a past month reads the same from any later launch date
+# ✓ demo: a new day adds rows, it does not rewrite them
+# ✓ salary month: daysInMonth IS the report-month length
+# ✓ salary month: a due day at or after the start sits in the first half
+# ✓ salary month: a due day before the start sits in the tail
+# ✓ salary month: the tail is still clamped to its own month length
+# ✓ salary month: a due day already passed in the window reads overdue
+# ✓ salary month: a due day still ahead in the window reads upcoming
+# ✓ salary month: reminders land either side of the date Bills shows
+# ✓ an identical month is not reported as a fall
+# ✓ the comparison window starts where the previous period starts
+# ✓ the comparison window is the same length as the elapsed period
+# ✓ a finished period compares against the whole previous one
+# ✓ doubling the daily rate is reported as a rise
+# ✓ a ledger with no history has no comparison
+# ✓ a like-for-like comparison of identical months is zero
+# ✓ and its ratio is zero, not null
+# ✓ it knows it is comparing part of a period
+# ✓ it names the previous period, not the date range
+# ✓ opening card detail agrees with the Bills outstanding figure
+# ✓ opening card detail cannot reorder cached payments and change the due
+# ✓ a recently settled card remains visible beneath current dues
+# ✓ repeated retail payments remain commitments outside cancellable subscriptions
+# ✓ known services retain subscription classification even in shopping
+# ✓ renewal calendar: February keeps the regular billing day
+# ✓ renewal calendar: January 31 clamps in February
+# ✓ renewal calendar: February clamp retains a prior day 31
+# ✓ renewal calendar: February clamp retains a prior day 30
+# ✓ renewal calendar: leap-year February clamp
+# ✓ renewal calendar: year rollover retains monthly day
+# ✓ renewal calendar: yearly anniversary spans a leap year
+# ✓ renewal calendar: yearly leap-day anniversary clamps
+# ✓ renewal calendar: yearly leap anchor survives three ordinary Februaries
+# ✓ renewal calendar: ordinary February 28 anniversary does not become leap day
+# ✓ renewal calendar: weekly remains seven days
+# ✓ corrected total: correction arrives last owes the remaining amount
+# ✓ corrected total: correction arrives last agrees across open dues and card detail
+# ✓ corrected total: correction arrives last preserves prior payment and its timing
+# ✓ corrected total: correction arrives last settles after sufficient numeric manual payment
+# ✓ corrected total: old reminder arrives last owes the remaining amount
+# ✓ corrected total: old reminder arrives last agrees across open dues and card detail
+# ✓ corrected total: old reminder arrives last preserves prior payment and its timing
+# ✓ corrected total: old reminder arrives last settles after sufficient numeric manual payment
+# ✓ corrected total: an unchanged fully paid reminder stays settled
+# ✓ corrected total: the late payment stays on the statement marked paid
+# ✓ corrected total: one payment in overlapping windows is counted exactly once
+# ✓ corrected total: the timestamp cannot settle the unpaid corrected remainder
+# ✓ corrected total: sufficient late manual payment settles only its statement
+# ✓ future-only pin preserves existing other expense on reparse
+# ✓ future-only pin preserves existing dining expense on reparse
+# ✓ an apply-all category already stored remains unchanged on reparse
+# ✓ a future-only income Other pin preserves existing Business income
+# ✓ an incompatible old category repairs to safe Other instead of the future-only pin
+# ✓ a real direction correction never applies a future-only category to old history
+# ✓ source-backed deliberate refund Other repairs old Business income
+# ✓ uncertain income Other does not erase an existing Business classification
+# ✓ user-edited refund categories remain untouched
+# 800 passed, 0 failed
+# Subtest: scripts/test/unit.test.js
+ok 6 - scripts/test/unit.test.js
+  ---
+  duration_ms: 2417.667083
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3985.093125

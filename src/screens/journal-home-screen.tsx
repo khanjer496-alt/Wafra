@@ -257,10 +257,11 @@ export default function JournalHomeScreen() {
   const renderWidget = (id: HomeWidgetId) => {
     if (!homeWidgetVisible(homeWidgets, id)) return null;
     if (id === 'assistant') return <Pressable key={id} testID="home-widget-assistant" accessibilityRole="button"
-      onPress={() => router.push('/assistant')} style={[styles.assistantCard, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-      <View style={[styles.assistantIcon, { backgroundColor: theme.backgroundElement }]}><Icon name="spark" size={20} color={theme.primary} /></View>
-      <View style={styles.grow}><ThemedText type="smallBold">{t('homeWidgetAssistantTitle')}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{t('homeWidgetAssistantDetail')}</ThemedText></View>
+      accessibilityLabel={t('homeWidgetAssistantTitle')} accessibilityHint={t('homeWidgetAssistantDetail')}
+      onPress={() => router.push('/assistant')}
+      style={({ pressed }) => [styles.assistantCard, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+      <Icon name="spark" size={18} color={theme.primary} />
+      <ThemedText type="smallBold" style={styles.grow}>{t('homeWidgetAssistantTitle')}</ThemedText>
       <Icon name="chevron-right" size={18} color={theme.textSecondary} />
     </Pressable>;
     if (id === 'insight') {
@@ -362,7 +363,7 @@ const styles = StyleSheet.create({
   captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
   captureRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },
   footerAction: { minHeight: 48, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
-  assistantCard: { minHeight: 72, borderWidth: 1, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  assistantIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  assistantCard: { minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
   widgetCard: { minHeight: 72, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

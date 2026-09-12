@@ -3,16 +3,18 @@ import type {
   AssistantTool,
   AssistantToolRequest,
 } from '@/lib/wafra-assistant';
-import { EXPENSE_CATEGORIES } from '@/lib/categories';
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/categories';
 
-const ASSISTANT_CATEGORY_IDS = new Set<string>(EXPENSE_CATEGORIES.map((category) => category.id));
+const ASSISTANT_CATEGORY_IDS = new Set<string>([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].map((category) => category.id));
+const PERIOD_FILTER_ARGUMENTS = ['period', 'accountIds', 'merchant', 'category'] as const;
 
 /**
  * Provider-neutral catalog for the future interpretation model.
  *
  * The model gets these capabilities plus the user's question. It does not get
  * the ledger, SMS bodies, account numbers, or transaction history in order to
- * choose a tool. Wafra executes the chosen tool locally afterwards.
+ * choose a tool. Wafra executes the chosen tool locally afterwards. Account
+ * identifiers must be resolved locally, never invented by a model.
  */
 export const ASSISTANT_TOOL_CATALOG: readonly {
   tool: AssistantTool;
@@ -20,20 +22,20 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   arguments: readonly string[];
 }[] = [
   { tool: 'help', purpose: 'Explain what financial questions Wafra can answer', arguments: [] },
-  { tool: 'spending-total', purpose: 'Total economic spending for a period', arguments: ['period'] },
-  { tool: 'income-total', purpose: 'Total income for a period', arguments: ['period'] },
-  { tool: 'merchant-breakdown', purpose: 'Spending at one known merchant', arguments: ['period', 'merchant'] },
-  { tool: 'category-breakdown', purpose: 'Spending inside one Wafra category', arguments: ['period', 'category'] },
+  { tool: 'spending-total', purpose: 'Total recorded economic spending, with optional locally resolved filters', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'income-total', purpose: 'Total recorded income, with optional account, source or income-category filters', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'merchant-breakdown', purpose: 'Spending at one exact known merchant', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'category-breakdown', purpose: 'Spending inside one Wafra category, including split allocations', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'subscriptions', purpose: 'Active recurring subscriptions and monthly equivalent', arguments: [] },
-  { tool: 'compare-periods', purpose: 'Compare spending with the preceding equivalent period', arguments: ['period'] },
-  { tool: 'top-merchants', purpose: 'Largest merchants by spending', arguments: ['period', 'limit'] },
-  { tool: 'top-categories', purpose: 'Largest categories by spending', arguments: ['period', 'limit'] },
-  { tool: 'largest-purchases', purpose: 'Largest individual purchases in a period', arguments: ['period', 'limit'] },
-  { tool: 'daily-average', purpose: 'Average spending per elapsed day in a period', arguments: ['period'] },
-  { tool: 'net-income-spending', purpose: 'Income minus economic spending for a period', arguments: ['period'] },
+  { tool: 'compare-periods', purpose: 'Compare filtered spending with an explicit comparison period or matching elapsed preceding period', arguments: [...PERIOD_FILTER_ARGUMENTS, 'comparisonPeriod'] },
+  { tool: 'top-merchants', purpose: 'Largest merchants by recorded spending', arguments: [...PERIOD_FILTER_ARGUMENTS, 'limit'] },
+  { tool: 'top-categories', purpose: 'Largest categories by recorded spending', arguments: [...PERIOD_FILTER_ARGUMENTS, 'limit'] },
+  { tool: 'largest-purchases', purpose: 'Largest individual purchases in a period', arguments: [...PERIOD_FILTER_ARGUMENTS, 'limit'] },
+  { tool: 'daily-average', purpose: 'Average recorded spending per elapsed day', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'net-income-spending', purpose: 'Recorded income minus economic spending', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'upcoming-payments', purpose: 'Bills, card dues and subscriptions due soon', arguments: ['withinDays'] },
-  { tool: 'cash-outflow', purpose: 'Cash that actually left funded accounts', arguments: ['period'] },
-  { tool: 'month-forecast', purpose: 'Conservative current-month spending pace forecast', arguments: ['period'] },
+  { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds'] },
+  { tool: 'month-forecast', purpose: 'Current-month pace estimate when observed history is sufficient', arguments: PERIOD_FILTER_ARGUMENTS },
 ] as const;
 
 export interface AssistantInterpretationEnvelope {
@@ -113,6 +115,8 @@ function safeExplanationData(
       normalizedKey.includes('transactionid') ||
       normalizedKey.includes('identifier')
     ) continue;
+    if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) continue;
+    if (typeof value === 'number' && !Number.isFinite(value)) continue;
     safe[key.slice(0, 80)] = typeof value === 'string' ? value.slice(0, 160) : value;
   }
   return safe;
@@ -127,6 +131,15 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.tool !== 'string') return false;
+  const catalog = ASSISTANT_TOOL_CATALOG.find((item) => item.tool === candidate.tool);
+  if (!catalog || !onlyKeys(candidate, ['tool', ...catalog.arguments])) return false;
+  if (candidate.accountIds !== undefined && (!Array.isArray(candidate.accountIds) ||
+    candidate.accountIds.length === 0 || candidate.accountIds.length > 100 ||
+    !candidate.accountIds.every((id) => validName(id)))) return false;
+  if (candidate.merchant !== undefined && !validName(candidate.merchant)) return false;
+  if (candidate.category !== undefined && (typeof candidate.category !== 'string' ||
+    !ASSISTANT_CATEGORY_IDS.has(candidate.category))) return false;
+  if (candidate.comparisonPeriod !== undefined && !validPeriod(candidate.comparisonPeriod)) return false;
 
   switch (candidate.tool) {
     case 'help':
@@ -162,15 +175,23 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
   }
 }
 
+function validName(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 160;
+}
+
+function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
 function validPeriod(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const period = value as Record<string, unknown>;
-  if (period.mode === 'all') return true;
-  if (period.mode === 'month') return typeof period.key === 'string' && validMonthKey(period.key);
-  if (period.mode === 'year') return Number.isSafeInteger(period.year) &&
+  if (period.mode === 'all') return onlyKeys(period, ['mode']);
+  if (period.mode === 'month') return onlyKeys(period, ['mode', 'key']) && typeof period.key === 'string' && validMonthKey(period.key);
+  if (period.mode === 'year') return onlyKeys(period, ['mode', 'year']) && Number.isSafeInteger(period.year) &&
     (period.year as number) >= 2000 && (period.year as number) <= 2200;
   if (period.mode === 'range') {
-    return typeof period.from === 'string' && typeof period.to === 'string' &&
+    return onlyKeys(period, ['mode', 'from', 'to']) && typeof period.from === 'string' && typeof period.to === 'string' &&
       validISODate(period.from) && validISODate(period.to) &&
       period.from <= period.to;
   }

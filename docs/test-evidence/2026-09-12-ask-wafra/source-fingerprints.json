@@ -1,0 +1,18 @@
+{
+  "baseHead": "62c1aebc2c5444da0d7a0b1a1a861fcab360c220",
+  "scope": "Current working tree, not a published build",
+  "files": {
+    "src/app/assistant.tsx": "85bf98b7f812f39643b6eb7dca6f192f1f2498dbc18f99f794c31593e38ff70c",
+    "src/lib/wafra-assistant.ts": "c8600a756c9a68d43d369a84cd8f4c8c2027f9b430b64d2210b461a902d4cb76",
+    "src/lib/wafra-assistant-ai.ts": "eaeaa17be4b20a9e27926256b8acd06baefa16b6c8170b6543533d9f5148bad6",
+    "src/lib/assistant-copy.ts": "a6b8468a6e90a48f725e6bd4a1225f4eb2c9451db460ea99e9a754cf5e8ea8c0",
+    "src/components/assistant-evidence-sheet.tsx": "69199a252f6965b367e58e1e84dff3efcf4ee95293754cebb55aabd21d7dfda2",
+    "src/components/period-sheet.tsx": "0849672ce2797783806c7c5ea7980e4e63f37fdc2a427f6051e6a93a7fb854eb",
+    "src/components/ui/screen-scaffold.tsx": "cca58e2da0f34d3ac6e425ce94641a916592ef026a9409e54c8946b828c322ec",
+    "src/app/(tabs)/flow.tsx": "46c4ca2df86d86180809233dffa313766bd2198c90544829b96bd7446ac4cd56",
+    "src/app/merchant.tsx": "f9660ead4f7ecee6d9c1e283195917f80b028c12bae757e96c57eea28bc2b9c6",
+    "src/screens/journal-home-screen.tsx": "c09314d6923aa61be0db39d3dd648ed715dc1cb28e92f652098791542b72882b",
+    "src/lib/home-widget-preferences.ts": "f5586597fcc1d1bcc6308893042efb09685bbeb486e759ae9d4cfaf556335ab6",
+    "scripts/e2e/e2e-assistant.mjs": "6a6a8e652089b640e0104510cf6dded2fdb1e434fc758b4e3b20a5a5d8daec09"
+  }
+}

@@ -35,6 +35,7 @@ export type ScreenScaffoldProps = {
   >;
   refreshControl?: React.ReactElement<RefreshControlProps>;
   keyboardAware?: boolean;
+  keyboardVerticalOffset?: number;
   tabbed?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
   testID?: string;
@@ -83,6 +84,7 @@ export function ScreenScaffold({
   scrollProps,
   refreshControl,
   keyboardAware = false,
+  keyboardVerticalOffset = 0,
   tabbed = false,
   contentStyle,
   testID,
@@ -200,6 +202,7 @@ export function ScreenScaffold({
       {keyboardAware ? (
         <KeyboardAvoidingView
           style={styles.flex}
+          keyboardVerticalOffset={keyboardVerticalOffset}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           {frame}
         </KeyboardAvoidingView>

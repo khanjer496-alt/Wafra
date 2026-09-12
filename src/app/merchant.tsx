@@ -14,6 +14,7 @@ import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-s
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
+import { assistantCopy } from '@/lib/assistant-copy';
 import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
@@ -81,6 +82,12 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
             <ThemedText type="small" themeColor="textSecondary">{income ? w.totalReceived : w.total}</ThemedText>
             <Money fils={primaryTotal} type="display" color={income ? theme.income : undefined} />
           </View>
+          {merchant && view !== 'all' && <View testID="merchant-ask-wafra" style={styles.assistantAction}>
+            <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark" inline
+              onPress={() => router.push({ pathname: '/assistant', params: { question: income
+                ? assistantCopy.incomeQuestion(merchant)
+                : assistantCopy.merchantChangedQuestion(merchant) } })} />
+          </View>}
           <View style={[styles.facts, { borderColor: theme.cardBorder }, large && styles.stack]}>
             <View style={styles.fact}><ThemedText type="meta" themeColor="textSecondary">{income ? w.incomeCount : w.purchases}</ThemedText>
               <ThemedText type="heading" tabular testID={income ? 'merchant-income-count' : 'merchant-purchase-count'}>{primaryRows.length}</ThemedText></View>
@@ -120,6 +127,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 }
 
 const styles = StyleSheet.create({
+  assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
   listContent: { gap: 0 },
   header: { gap: 12, paddingBottom: 12 }, identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   period: { alignSelf: 'flex-start', maxWidth: '100%' },

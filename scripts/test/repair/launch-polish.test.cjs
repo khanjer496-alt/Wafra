@@ -24,6 +24,13 @@ for (const platform of ['ios', 'android']) {
   for (const language of ['en', 'ar']) {
     test(`${platform}/${language}: Assistant passes handled taps to its actual scroller and submits entered text`, () => {
       const h = scaffoldHarness(language, platform);
+      h.deps['@react-navigation/elements'] = { useHeaderHeight: () => 90 };
+      h.deps['expo-router'].useFocusEffect = () => {};
+      h.deps['react-native'].AccessibilityInfo = { announceForAccessibility() {} };
+      h.deps['react-native'].Keyboard = { dismiss() {} };
+      h.deps['react-native'].useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1 });
+      h.deps['@/lib/period'].periodRange = () => '';
+      h.deps['@/components/assistant-evidence-sheet'] = { AssistantEvidenceSheet: props => h.jsx('EvidenceSheet', props) };
       const slots = [];
       let cursor = 0;
       h.deps.react.useState = initial => {
@@ -36,7 +43,7 @@ for (const platform of ['ios', 'android']) {
         suggestedAssistantQuestions: () => [], assistantFollowUpQuestions: () => [],
         runWafraAssistant: (_state, question) => {
           calls.push(question);
-          return { answer: { title: 'Answer', body: 'A local answer' }, request: { type: 'overview' } };
+          return { answer: { tool: 'spending-total', title: 'Answer', body: 'A local answer' }, request: { tool: 'spending-total', period: { mode: 'month', key: '2026-09' } } };
         },
       };
       const Screen = load(path.join(root, 'src/app/assistant.tsx'), h.deps).default;
@@ -46,7 +53,7 @@ for (const platform of ['ios', 'android']) {
       assert.equal(scroller.props.keyboardShouldPersistTaps, 'handled');
       walk(tree).find(node => node.type === 'TextInput').props.onChangeText('  What did I spend?  ');
       tree = render();
-      const ask = walk(tree).find(node => node.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('assistantAsk'));
+      const ask = walk(tree).find(node => node.props?.testID === 'assistant-send');
       assert.equal(ask.props.disabled, false);
       ask.props.onPress();
       assert.deepEqual(calls, ['What did I spend?']);

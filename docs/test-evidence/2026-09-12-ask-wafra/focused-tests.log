@@ -1,0 +1,254 @@
+TAP version 13
+# ✓ Home widget preferences, ordering and accessibility hardening
+# Subtest: scripts/test/home-widget-preferences.test.js
+ok 1 - scripts/test/home-widget-preferences.test.js
+  ---
+  duration_ms: 75.678792
+  type: 'test'
+  ...
+# Subtest: provider plans cannot silently drop a filter or accept malformed account scope
+ok 2 - provider plans cannot silently drop a filter or accept malformed account scope
+  ---
+  duration_ms: 0.966042
+  type: 'test'
+  ...
+# Subtest: provider comparison windows reject invalid dates and extra boundaries
+ok 3 - provider comparison windows reject invalid dates and extra boundaries
+  ---
+  duration_ms: 0.335959
+  type: 'test'
+  ...
+# Subtest: valid combined filters and income categories survive the boundary
+ok 4 - valid combined filters and income categories survive the boundary
+  ---
+  duration_ms: 0.136125
+  type: 'test'
+  ...
+# Subtest: explanation envelopes keep local evidence and structured identifiers local
+ok 5 - explanation envelopes keep local evidence and structured identifiers local
+  ---
+  duration_ms: 0.901208
+  type: 'test'
+  ...
+# Subtest: light: compact Home Ask entry opens the conversation with an accessible touch target
+ok 6 - light: compact Home Ask entry opens the conversation with an accessible touch target
+  ---
+  duration_ms: 365.790875
+  type: 'test'
+  ...
+# Subtest: light/categories: Explain this opens a question without replacing the active spending period
+ok 7 - light/categories: Explain this opens a question without replacing the active spending period
+  ---
+  duration_ms: 340.9765
+  type: 'test'
+  ...
+# Subtest: light/trends: Explain this opens a question without replacing the active spending period
+ok 8 - light/trends: Explain this opens a question without replacing the active spending period
+  ---
+  duration_ms: 266.939709
+  type: 'test'
+  ...
+# Subtest: dark: compact Home Ask entry opens the conversation with an accessible touch target
+ok 9 - dark: compact Home Ask entry opens the conversation with an accessible touch target
+  ---
+  duration_ms: 110.890833
+  type: 'test'
+  ...
+# Subtest: dark/categories: Explain this opens a question without replacing the active spending period
+ok 10 - dark/categories: Explain this opens a question without replacing the active spending period
+  ---
+  duration_ms: 230.721416
+  type: 'test'
+  ...
+# Subtest: dark/trends: Explain this opens a question without replacing the active spending period
+ok 11 - dark/trends: Explain this opens a question without replacing the active spending period
+  ---
+  duration_ms: 257.020417
+  type: 'test'
+  ...
+# Subtest: spending search does not offer an explanation that would silently discard its query
+ok 12 - spending search does not offer an explanation that would silently discard its query
+  ---
+  duration_ms: 224.444416
+  type: 'test'
+  ...
+# Subtest: category explanation carries the selected category and dismisses the detail sheet
+ok 13 - category explanation carries the selected category and dismisses the detail sheet
+  ---
+  duration_ms: 227.997375
+  type: 'test'
+  ...
+# Subtest: merchant question quotes the full recorded name: Starbucks
+ok 14 - merchant question quotes the full recorded name: Starbucks
+  ---
+  duration_ms: 215.018958
+  type: 'test'
+  ...
+# Subtest: merchant question quotes the full recorded name: R&D / Cafe? \#2 + 20%
+ok 15 - merchant question quotes the full recorded name: R&D / Cafe? \#2 + 20%
+  ---
+  duration_ms: 228.628708
+  type: 'test'
+  ...
+# Subtest: merchant question quotes the full recorded name: Cedar "Express" \\ West
+ok 16 - merchant question quotes the full recorded name: Cedar "Express" \\ West
+  ---
+  duration_ms: 230.022667
+  type: 'test'
+  ...
+# Subtest: merchant question quotes the full recorded name: Salary & bills
+ok 17 - merchant question quotes the full recorded name: Salary & bills
+  ---
+  duration_ms: 221.487834
+  type: 'test'
+  ...
+# Subtest: an income source asks about income, even when its name looks like a spending keyword
+ok 18 - an income source asks about income, even when its name looks like a spending keyword
+  ---
+  duration_ms: 231.064375
+  type: 'test'
+  ...
+# Subtest: blank, loading and all-activity merchant views do not offer an incorrectly scoped question
+ok 19 - blank, loading and all-activity merchant views do not offer an incorrectly scoped question
+  ---
+  duration_ms: 626.613959
+  type: 'test'
+  ...
+# Subtest: cold route waits for hydration and the salary-day reporting period, then asks exactly once
+ok 20 - cold route waits for hydration and the salary-day reporting period, then asks exactly once
+  ---
+  duration_ms: 554.146125
+  type: 'test'
+  ...
+# Subtest: equal-value period objects retain the conversation and its open evidence
+ok 21 - equal-value period objects retain the conversation and its open evidence
+  ---
+  duration_ms: 311.866125
+  type: 'test'
+  ...
+# Subtest: replacement of a loaded ledger clears turns and evidence without replaying the route question
+ok 22 - replacement of a loaded ledger clears turns and evidence without replaying the route question
+  ---
+  duration_ms: 251.808208
+  type: 'test'
+  ...
+# Subtest: a queued route frame cannot cross a ledger erase before React cleanup
+ok 23 - a queued route frame cannot cross a ledger erase before React cleanup
+  ---
+  duration_ms: 235.07725
+  type: 'test'
+  ...
+# Subtest: focus/date rollover marks old answers stale and refresh uses the current date
+ok 24 - focus/date rollover marks old answers stale and refresh uses the current date
+  ---
+  duration_ms: 252.083625
+  type: 'test'
+  ...
+# Subtest: native app activation catches midnight and ledger edits invalidate open evidence until refreshed
+ok 25 - native app activation catches midnight and ledger edits invalidate open evidence until refreshed
+  ---
+  duration_ms: 221.464041
+  type: 'test'
+  ...
+# Subtest: regression proof: a cold-hydration route marked handled too early is caught
+ok 26 - regression proof: a cold-hydration route marked handled too early is caught
+  ---
+  duration_ms: 251.322166
+  type: 'test'
+  ...
+# Subtest: regression proof: removing the queued-frame generation check is caught
+ok 27 - regression proof: removing the queued-frame generation check is caught
+  ---
+  duration_ms: 228.317166
+  type: 'test'
+  ...
+# Subtest: regression proof: refreshing at the original answer date is caught
+ok 28 - regression proof: refreshing at the original answer date is caught
+  ---
+  duration_ms: 228.601375
+  type: 'test'
+  ...
+# Subtest: period picker cancel preserves context; explicit current-month apply resets an old question even when the shared period is unchanged
+ok 29 - period picker cancel preserves context; explicit current-month apply resets an old question even when the shared period is unchanged
+  ---
+  duration_ms: 231.754916
+  type: 'test'
+  ...
+# Subtest: ios/en: Assistant passes handled taps to its actual scroller and submits entered text
+ok 30 - ios/en: Assistant passes handled taps to its actual scroller and submits entered text
+  ---
+  duration_ms: 643.082
+  type: 'test'
+  ...
+# Subtest: ios/en: Home exposes a named Bills action for due and upcoming widgets
+ok 31 - ios/en: Home exposes a named Bills action for due and upcoming widgets
+  ---
+  duration_ms: 296.671542
+  type: 'test'
+  ...
+# Subtest: ios/ar: Assistant passes handled taps to its actual scroller and submits entered text
+ok 32 - ios/ar: Assistant passes handled taps to its actual scroller and submits entered text
+  ---
+  duration_ms: 249.806875
+  type: 'test'
+  ...
+# Subtest: ios/ar: Home exposes a named Bills action for due and upcoming widgets
+ok 33 - ios/ar: Home exposes a named Bills action for due and upcoming widgets
+  ---
+  duration_ms: 235.967875
+  type: 'test'
+  ...
+# Subtest: android/en: Assistant passes handled taps to its actual scroller and submits entered text
+ok 34 - android/en: Assistant passes handled taps to its actual scroller and submits entered text
+  ---
+  duration_ms: 240.074
+  type: 'test'
+  ...
+# Subtest: android/en: Home exposes a named Bills action for due and upcoming widgets
+ok 35 - android/en: Home exposes a named Bills action for due and upcoming widgets
+  ---
+  duration_ms: 251.342709
+  type: 'test'
+  ...
+# Subtest: android/ar: Assistant passes handled taps to its actual scroller and submits entered text
+ok 36 - android/ar: Assistant passes handled taps to its actual scroller and submits entered text
+  ---
+  duration_ms: 242.265125
+  type: 'test'
+  ...
+# Subtest: android/ar: Home exposes a named Bills action for due and upcoming widgets
+ok 37 - android/ar: Home exposes a named Bills action for due and upcoming widgets
+  ---
+  duration_ms: 254.22
+  type: 'test'
+  ...
+# Subtest: en: feedback parser disclosure points onward and opens its named route
+ok 38 - en: feedback parser disclosure points onward and opens its named route
+  ---
+  duration_ms: 241.136042
+  type: 'test'
+  ...
+# Subtest: ar: feedback parser disclosure points onward and opens its named route
+ok 39 - ar: feedback parser disclosure points onward and opens its named route
+  ---
+  duration_ms: 218.24
+  type: 'test'
+  ...
+# ✓ Wafra Assistant deterministic tools and AI boundary
+# ✓ Wafra Assistant global hardening edge cases
+# ✓ Ask Wafra exact scopes, evidence, global currency and contextual questions
+# Subtest: scripts/test/wafra-assistant.test.js
+ok 6 - scripts/test/wafra-assistant.test.js
+  ---
+  duration_ms: 131.208833
+  type: 'test'
+  ...
+1..40
+# tests 40
+# suites 0
+# pass 40
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10833.407625

@@ -22,6 +22,7 @@ import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { assistantCopy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
 import { summarizeMonth } from '@/lib/insights';
@@ -103,6 +104,10 @@ export default function FlowScreen() {
       <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
+      {view === 'categories' && <View testID="spending-ask-wafra" style={styles.assistantAction}>
+        <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline
+          onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+      </View>}
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
         onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
@@ -119,6 +124,10 @@ export default function FlowScreen() {
       </View>}
       {view === 'trends' && analysis && <>
         <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
+        <View testID="spending-ask-wafra" style={styles.assistantAction}>
+          <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline
+            onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+        </View>
         <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
           onMonth={(key) => setPeriod({ mode: 'month', key })}
           onMerchant={(merchant) => router.push(merchantSpendingHref(merchant))}
@@ -146,6 +155,13 @@ export default function FlowScreen() {
           </View>
           <ThemedText type="meta" themeColor="textSecondary">{categoryHistory[0] ? monthLabel(categoryHistory[0].key, true) : ''} — {monthLabel(key, true)}</ThemedText>
         </View>
+        <View testID="category-ask-wafra" style={styles.assistantAction}>
+          <Button label={assistantCopy.explainCategory} variant="ghost" icon="spark" inline onPress={() => {
+            const question = assistantCopy.categoryChangedQuestion(categoryLabel(category, 'en'));
+            setCategory(null);
+            router.push({ pathname: '/assistant', params: { question } });
+          }} />
+        </View>
         <Button label={w.details} onPress={() => { const id = category; setCategory(null); router.push(`/transactions?type=expense&category=${id}`); }} />
         {period.mode === 'month' && <Button label={selectedCategory?.limitFils != null ? w.manage : w.setLimit} variant="outline"
           onPress={() => { setLimitFor(category); setCategory(null); }} />}
@@ -155,6 +171,7 @@ export default function FlowScreen() {
   </>;
 }
 const styles = StyleSheet.create({
+  assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
   activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
   empty: { paddingVertical: 24 }, categoryDetail: { gap: 16 },
   categoryHistory: { gap: 10 }, categoryBars: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 8 },

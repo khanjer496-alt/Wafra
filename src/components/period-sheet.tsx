@@ -15,13 +15,17 @@ import type { Period } from '@/lib/period';
 interface PeriodSheetProps {
   visible: boolean;
   onClose: () => void;
+  /** A contextual view can show its active period without changing the shared selection until Apply. */
+  selectedPeriod?: Period;
+  onApply?: (period: Period) => void;
 }
 
 /** The reporting period every screen reads from: presets, month grid, range. */
-export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
+export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: PeriodSheetProps) {
   const theme = useTheme();
   const language = useLanguage();
-  const { period, setPeriod } = usePeriod();
+  const { period: sharedPeriod, setPeriod } = usePeriod();
+  const period = selectedPeriod ?? sharedPeriod;
 
   const now = useMemo(() => new Date(), []);
   const nowKey = monthKey(now);
@@ -33,6 +37,7 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
 
   const apply = (p: Period) => {
     setPeriod(p);
+    onApply?.(p);
     onClose();
   };
 

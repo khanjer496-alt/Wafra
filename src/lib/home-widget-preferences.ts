@@ -6,7 +6,7 @@ export interface HomeWidgetPreferences {
 }
 
 export const DEFAULT_HOME_WIDGETS: HomeWidgetPreferences = {
-  order: ['assistant', 'insight', 'due', 'activity', 'upcoming'],
+  order: ['due', 'assistant', 'insight', 'activity', 'upcoming'],
   hidden: [],
 };
 
