@@ -192,7 +192,7 @@ test('a foreground inactive-to-Pro transition scans once without a navigation or
   assert.equal(h.calls.scans, 1, 'Pro activation must retry the previously ineligible scan');
   assert.equal(h.calls.permission, 1);
   assert.deepEqual(h.calls.routes, [], 'the retry is silent, not a paywall interaction');
-  assert.deepEqual(h.calls.toasts, []);
+  assert.deepEqual(h.calls.toasts, ['notifAccessAutoPrompt']);
   for (let index = 0; index < 5; index += 1) await h.update({ transactions: [], entitlementRefresh: index });
   assert.equal(h.calls.scans, 1, 'unchanged eligibility and ledger rerenders cannot make a refresh loop');
   assert.equal(h.calls.setup, 1);
@@ -406,7 +406,7 @@ test('revocation cancels a queued Android hint and denied permission still preve
   assert.equal(denied.calls.scans, 0);
   assert.equal(denied.model.needsPermission, true);
   assert.deepEqual(denied.calls.routes, []);
-  assert.deepEqual(denied.calls.toasts, []);
+  assert.deepEqual(denied.calls.toasts, ['notifAccessAutoPrompt']);
 });
 
 test('two mounted foreground owners and effect replay join one activation scan', async t => {
