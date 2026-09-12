@@ -134,6 +134,16 @@ function tinyPdf(line) {
     splitCsv.totalRows === 5 && splitCsv.rejectedRows === 2 &&
       splitCsv.rows[1].merchant === 'Salary' && splitCsv.rows[2].merchant === 'Salary');
 
+  const identifiedCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency,Card Number,Account Number',
+    '01/07/2026,Carrefour,40.00,,AED,XXXX XXXX XXXX 4821,',
+    '02/07/2026,Salary,,18500.00,AED,,AE070331234567890123456',
+  ].join('\n'), 'AED');
+  ok('CSV statement identity carries card/account tails into the shared account resolver',
+    identifiedCsv.rows[0]?.card?.last4 === '4821' && identifiedCsv.rows[0]?.card?.kind === 'unknown' &&
+      identifiedCsv.rows[1]?.card?.last4 === '3456' && identifiedCsv.rows[1]?.card?.kind === 'account',
+    JSON.stringify(identifiedCsv.rows.map((row) => row.card)));
+
   const atmCsvAe = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
     '04/07/2026,ATM CASH WITHDRAWAL 1234,500.00,,AED',
@@ -242,6 +252,14 @@ function tinyPdf(line) {
     rows[0].amountFils === 4000 && rows[1].amountFils === 1850000);
   ok('ambiguous columns and impossible dates are rejected without dropping repeated purchases',
     rows.length === 3 && rows[0].merchant === rows[2].merchant);
+  const identifiedText = parseStatementText(
+    '01/07/2026 CARREFOUR MARKET AED 40.00 DR',
+    'AED',
+    { card: { last4: '4821', kind: 'credit' }, bankHint: 'HSBC' },
+  );
+  ok('text statement rows preserve document-level bank and instrument identity',
+    identifiedText[0]?.card?.last4 === '4821' && identifiedText[0]?.card?.kind === 'credit' &&
+      identifiedText[0]?.bankHint === 'HSBC');
   const saRows = parseStatementText([
     '01/07/2026 PANDA SAR 45.00 DR',
     '02/07/2026 WRONG MARKET AED 10.00 DR',

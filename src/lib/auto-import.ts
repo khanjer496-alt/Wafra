@@ -183,6 +183,8 @@ export interface InboxScanCursor {
 export interface ScanInboxOptions {
   /** Read the bank-app queue without requiring or advancing the SMS inbox. */
   notificationOnly?: boolean;
+  /** Packages explicitly learned after the user confirmed a review candidate. */
+  learnedNotificationPackages?: readonly string[];
   /** Resume strictly before this lossless Android provider date/id pair. */
   cursor?: InboxScanCursor | null;
   /** Omit for the existing complete scan; history import uses one page. */
@@ -550,6 +552,10 @@ export async function scanInbox(
     channel: CaptureChannel,
     existingInspection: UniversalAlertReview | null = null,
     sourceEventId?: string,
+    pushSource?: {
+      packageName: string;
+      sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
+    },
   ): Promise<boolean> => {
     const decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -584,6 +590,10 @@ export async function scanInbox(
     const reviewPrepared = {
       ...identified,
       ...sourceIdentity,
+      ...(pushSource && channel === 'push' ? {
+        sourcePackage: pushSource.packageName,
+        sourceClass: pushSource.sourceClass,
+      } : {}),
       // Discovery is now even when this full scan finds an old Message.
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
@@ -820,37 +830,45 @@ export async function scanInbox(
       // retained row: using the ledger watermark here could strand an older
       // unacknowledged notification forever after a newer SMS advances it.
       const captured = await notificationReader.getCaptured(0);
+      const learnedPackages = new Set(options.learnedNotificationPackages ?? []);
       const notificationYield = createParseYieldState();
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
-        if (!trustedMarket) continue;
+        const sourceClass = n.sourceClass;
+        if (sourceClass !== 'trusted-bank' && sourceClass !== 'play-finance' &&
+          sourceClass !== 'financial-candidate') continue;
+        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
+        const autoSource = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
-        // Package names usually contain the bank ("com.enbd...", "adcb...").
         const source = `${n.title} ${n.text}`.trim();
-        const sender = `${n.pkg} ${n.title}`;
+        // An unconfirmed arbitrary package name never gets to impersonate a
+        // bank merely by choosing a convincing Android package/title string.
+        const sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ? `${n.pkg} ${n.title}` : '');
         const worldwide = inspectWorldwide(
           source,
-          trustedBankNotificationSender(n.pkg) ?? sender,
+          sender,
         );
-        // Only the active launch market may auto-import from a bank app. A
-        // Saudi app on a UAE ledger (or vice versa) must never relabel/convert
-        // its money through the active parser; global packages remain review.
-        const p = trustedMarket === 'AE' || trustedMarket === 'SA'
-          ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
+        // Known packages keep their exact market pin. New Play Finance apps and
+        // locally learned packages use the normal parser's own market/money
+        // evidence. Unconfirmed candidates are review-only.
+        const p = autoSource
+          ? trustedMarket === 'AE' || trustedMarket === 'SA'
+            ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
+            : parseLaunchAlert(source, sender, worldwide)
           : null;
+        const pushSource = { packageName: n.pkg, sourceClass } as const;
         const reviewed = p && shouldReviewParsedIncome(p)
-          ? await inspectRefused(source, n.ts, sender, 'push', worldwide)
+          ? await inspectRefused(source, n.ts, sender, 'push', worldwide, undefined, pushSource)
           : false;
         if (p && !reviewed) {
           parsed.push({
             ...p,
             date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(n.ts)),
             smsTs: n.ts,
-            // Package names usually contain the bank ("com.enbd...", "adcb...").
-            sender: `${n.pkg} ${n.title}`,
+            sender,
             channel: 'push',
           });
         } else if (!p) {
@@ -860,6 +878,8 @@ export async function scanInbox(
             sender,
             'push',
             worldwide,
+            undefined,
+            pushSource,
           );
         }
         // Claim the row only after all parser/review work for it completed.

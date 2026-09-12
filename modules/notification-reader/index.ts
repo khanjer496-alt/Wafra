@@ -9,6 +9,8 @@ export interface CapturedNotification {
   text: string;
   /** Epoch milliseconds. */
   ts: number;
+  /** Native source confidence; unknown candidates are review-only initially. */
+  sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
 }
 
 interface NotificationReaderModule {

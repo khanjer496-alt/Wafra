@@ -51,10 +51,6 @@ class BankNotificationListenerService : NotificationListenerService() {
     try {
       if (sbn.packageName == packageName) return
       if (!NotificationCapturePolicy.isEnabled(this)) return
-      // Notification access is device-wide. Exact package identity is the
-      // security boundary that keeps chats, shops and an app imitating a bank
-      // alert out of both the encrypted queue and the launch parser.
-      if (!TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)) return
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
       val text = (
@@ -68,6 +64,10 @@ class BankNotificationListenerService : NotificationListenerService() {
       val body = "$title $text".trim()
       if (body.isEmpty() || SensitiveNotificationFilter.shouldReject(body) ||
         !MONEY_RE.containsMatchIn(body)) return
+      // Unknown apps do not become trusted banks merely because their text
+      // resembles one. Native intake still requires Google Play provenance;
+      // unregistered candidates are carried as review-only source classes.
+      if (TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body) == null) return
 
       NotificationCaptureStore.append(
         context = this,

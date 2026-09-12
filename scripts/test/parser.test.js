@@ -1811,6 +1811,12 @@ t('a stopped purchase on a blocked card is a decline', 'Your card 1234 was block
 // Issuer reason codes arrive with no refusal verb at all — the code IS the signal.
 t('"DO NOT HONOUR" is a decline', 'Purchase of AED 500.00 at NOON. Reason: DO NOT HONOUR.', null);
 t('an expired card is a decline', 'Purchase of AED 500.00 at NOON. Reason: card expired.', null);
+t('a card-expiry notice cannot become a fake income transaction',
+  'HSBC Credit Card ending 231 is Expiring on 08/09/2026. Please review your card details.',
+  null);
+t('card-expiry wording before the card is also informational',
+  'Expiring 08/09/2026: your Credit Card ending 231 will be renewed automatically.',
+  null);
 t('a card blocked for online use is a decline', 'Purchase of AED 500.00 at NOON. Your card is blocked for online transactions.', null);
 // These returned null before only because they carried no known debit verb.
 // Teaching the parser "transaction of ..." would have turned each into a

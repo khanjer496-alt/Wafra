@@ -124,7 +124,50 @@ const HEADER_ALIASES = {
     'نوع العملية', 'نوع القيد', 'النوع',
   ],
   currency: ['currency code', 'transaction currency', 'currency', 'ccy', 'curr', 'العملة'],
+  cardNumber: ['credit card number', 'card number', 'card no', 'card no.', 'رقم البطاقة'],
+  accountNumber: ['account number', 'account no', 'account no.', 'a/c number', 'رقم الحساب'],
 } as const;
+
+type StatementInstrument = NonNullable<ParsedSms['card']>;
+
+function instrumentTail(value: string): string | null {
+  const digits = normalizeDigits(value).replace(/\D/g, '');
+  return digits.length >= 4 && digits.length <= 24 ? digits.slice(-4) : null;
+}
+
+/**
+ * Statement-wide identity is accepted only when the document explicitly
+ * labels the number. Dates, balances and reference numbers are never used as
+ * account identity. This lets an HSBC/card statement create or match the same
+ * Wafra account as later notifications without guessing from arbitrary digits.
+ */
+function statementInstrument(text: string): StatementInstrument | null {
+  const normalized = normalizeDigits(text).normalize('NFKC');
+  const labelled = (
+    kind: StatementInstrument['kind'],
+    pattern: RegExp,
+  ): StatementInstrument | null => {
+    const match = pattern.exec(normalized);
+    if (!match?.[1]) return null;
+    const last4 = instrumentTail(match[1]);
+    return last4 ? { last4, kind } : null;
+  };
+  return labelled(
+    'credit',
+    /\bcredit\s+card\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  ) ?? labelled(
+    'unknown',
+    /\bcard\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  ) ?? labelled(
+    'account',
+    /\b(?:account|a\/c)\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  );
+}
+
+function statementBankHint(text: string): string | undefined {
+  if (/\bHSBC\b/i.test(text)) return 'HSBC';
+  return undefined;
+}
 
 function normalizedHeader(value: string): string {
   return value
@@ -258,6 +301,8 @@ export function parseStatementCsv(
   const amountIndex = headerIndex(headers, HEADER_ALIASES.amount);
   const directionIndex = headerIndex(headers, HEADER_ALIASES.direction);
   const currencyIndex = headerIndex(headers, HEADER_ALIASES.currency);
+  const cardNumberIndex = headerIndex(headers, HEADER_ALIASES.cardNumber);
+  const accountNumberIndex = headerIndex(headers, HEADER_ALIASES.accountNumber);
   const splitColumns = debitIndex >= 0 && creditIndex >= 0;
   const directedAmount = amountIndex >= 0 && directionIndex >= 0;
   const signedAmount = amountIndex >= 0 && directionIndex < 0;
@@ -310,10 +355,17 @@ export function parseStatementCsv(
       type,
       defaultCurrency === 'AED' ? 'AE' : 'SA',
     );
+    const cardTail = cardNumberIndex >= 0 ? instrumentTail(record[cardNumberIndex] ?? '') : null;
+    const accountTail = accountNumberIndex >= 0 ? instrumentTail(record[accountNumberIndex] ?? '') : null;
+    const card: ParsedSms['card'] = cardTail
+      ? { last4: cardTail, kind: 'unknown' }
+      : accountTail
+        ? { last4: accountTail, kind: 'account' }
+        : null;
     rows.push({
       kind: 'transaction', type, amountFils: minor, currency: defaultCurrency,
       merchant: classification.merchant, date,
-      dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
+      dueDay: null, minDueFils: null, card, reference: null, transferHint: false,
       snapshotFils: null, snapshotKind: null,
       categoryGuess: classification.categoryGuess,
       categoryDeliberate: classification.categoryDeliberate,
@@ -353,6 +405,7 @@ function isoDate(value: string): string | null {
 export function parseStatementText(
   text: string,
   currency: StatementCurrency = 'AED',
+  identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
 ): ParsedSms[] {
   const rows: ParsedSms[] = [];
   for (const original of text.split(/\n+/)) {
@@ -380,7 +433,8 @@ export function parseStatementText(
     rows.push({
       kind: 'transaction', type, amountFils, currency,
       merchant: classification.merchant, date,
-      dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
+      dueDay: null, minDueFils: null, card: identity.card, reference: null, transferHint: false,
+      ...(identity.bankHint ? { bankHint: identity.bankHint } : {}),
       snapshotFils: null, snapshotKind: null,
       categoryGuess: classification.categoryGuess,
       categoryDeliberate: classification.categoryDeliberate,
@@ -401,7 +455,13 @@ export async function extractPdfStatementRows(
   try {
     const extracted = await extractText(document, { mergePages: true });
     if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('PDF text exceeds limit');
-    return { pages: extracted.totalPages, rows: parseStatementText(extracted.text, currency) };
+    return {
+      pages: extracted.totalPages,
+      rows: parseStatementText(extracted.text, currency, {
+        card: statementInstrument(extracted.text),
+        bankHint: statementBankHint(extracted.text),
+      }),
+    };
   } finally {
     const disposable = document as unknown as {
       destroy?: () => Promise<void> | void;

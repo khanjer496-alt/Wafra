@@ -190,47 +190,56 @@ export function SupplementImports() {
     if (!cfg || !capabilities) return;
     setError(null);
     setStatus(null);
-    let pickedFile: File | null = null;
+    const pickedFiles: File[] = [];
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
       });
-      if (picked.canceled || !picked.assets[0]) return;
-      const asset = picked.assets[0];
-      pickedFile = new File(asset.uri);
+      if (picked.canceled || picked.assets.length === 0) return;
       setBusy('statement');
-      const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
-        capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
-      const accepted = csv
-        ? await uploadCsvStatement(cfg, asset, capabilities)
-        : await uploadPdfStatement(cfg, asset, capabilities);
+      let acceptedRows = 0;
+      let rejectedRows = 0;
+      let pages = 0;
+      for (let index = 0; index < picked.assets.length; index += 1) {
+        const asset = picked.assets[index];
+        pickedFiles.push(new File(asset.uri));
+        const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
+          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        const accepted = csv
+          ? await uploadCsvStatement(cfg, asset, capabilities)
+          : await uploadPdfStatement(cfg, asset, capabilities);
+        acceptedRows += accepted.acceptedRows;
+        if ('pages' in accepted) pages += accepted.pages;
+        else rejectedRows += accepted.rejectedRows;
+        // Statement parsing/upload is deliberately serial. Yield between files
+        // so selecting a long bank-history set never monopolizes the JS frame.
+        if (index + 1 < picked.assets.length) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      }
       try {
         const imported = await syncQueued();
-        if ('pages' in accepted) {
-          setStatus(interpolate(imported > 0 ? copy.pdfSuccess : copy.pdfNoNew, {
-            accepted: accepted.acceptedRows,
-            pages: accepted.pages,
-            imported,
-          }));
-        } else {
-          setStatus(interpolate(imported > 0 ? copy.csvSuccess : copy.csvNoNew, {
-            accepted: accepted.acceptedRows,
-            rejected: accepted.rejectedRows,
-            imported,
-          }));
-        }
+        setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+          files: picked.assets.length,
+          accepted: acceptedRows,
+          rejected: rejectedRows,
+          pages,
+          imported,
+        }));
         if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {
-        setStatus(interpolate(copy.acceptedPending, { accepted: accepted.acceptedRows }));
+        setStatus(interpolate(copy.acceptedPending, { accepted: acceptedRows }));
       }
     } catch (e) {
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       try {
-        if (pickedFile?.exists) pickedFile.delete();
+        for (const pickedFile of pickedFiles) {
+          if (pickedFile.exists) pickedFile.delete();
+        }
       } catch {
         // The OS may already have reclaimed its picker cache copy.
       }
@@ -385,7 +394,7 @@ export function SupplementImports() {
             )}
             <Button
               icon="upload"
-              label={busy === 'statement' ? copy.uploading : copy.chooseStatement}
+              label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
               disabled={!capabilities || busy !== null}
             />

@@ -24,15 +24,22 @@ test('native notification admission is built into ordinary Android APKs', () => 
   assert.match(gradle, /buildConfigField 'boolean', 'WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED', 'true'/);
   const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
   assert.match(native, /CAPTURE_ENABLED[^\n]*BuildConfig\.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED/);
-  assert.match(native, /if \(!CAPTURE_ENABLED\) return false/);
-  assert.match(native, /return installer == "com\.android\.vending"/);
+  assert.match(native, /installer\(context, packageName\) == "com\.android\.vending"/);
 });
 
-test('normal-build activation does not expand trusted package identities', () => {
+test('curated package identity remains exact even though native intake can discover new Play finance sources', () => {
   const enabled = moduleFor({});
   assert.equal(enabled.trustedBankNotificationMarket('com.example.notificationproducer'), null);
   assert.equal(enabled.trustedBankNotificationMarket('com.emiratesnbd.android.spoof'), null);
   assert.equal(enabled.trustedBankNotificationMarket('com.emiratesnbd.android'), 'AE');
+  const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
+  const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
+  assert.match(native, /ApplicationInfo\.CATEGORY_FINANCE/);
+  assert.match(native, /SOURCE_PLAY_FINANCE/);
+  assert.match(native, /SOURCE_FINANCIAL_CANDIDATE/);
+  assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
+  assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
+  assert.match(listener, /MONEY_RE\.containsMatchIn\(body\)/);
 });
 
 test('only the official HSBC UAE Play package is eligible for UAE capture', () => {
@@ -120,6 +127,64 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
   assert.equal(smsReads, 0);
   assert.equal(notificationReads, 1);
   assert.equal(result.inboxHistoryComplete, false, 'notification scan cannot claim SMS history completion');
+});
+
+test('unknown Play financial candidates stay review-only until explicitly learned on that phone', () => {
+  const scanner = read('src/lib/auto-import.ts');
+  const promotion = read('src/lib/review-promotion.ts');
+  const types = read('src/lib/types.ts');
+  assert.match(scanner, /sourceClass === 'financial-candidate' && learnedPackages\.has\(n\.pkg\)/);
+  assert.match(scanner, /const autoSource = sourceClass === 'trusted-bank' \|\| sourceClass === 'play-finance' \|\| learned/);
+  assert.match(scanner, /const p = autoSource/);
+  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoSource \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
+  assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
+  assert.match(promotion, /learnedNotificationPackage/);
+  assert.match(types, /trustedNotificationPackages: string\[\]/);
+});
+
+test('500 queued notification candidates process without touching SMS and ACK only after commit', async () => {
+  let smsReads = 0, parseCalls = 0, acknowledgements = 0;
+  const rows = Array.from({ length: 500 }, (_, index) => ({
+    id: `notification-row-${String(index).padStart(4, '0')}`,
+    pkg: 'com.example.financeapp',
+    title: 'Card purchase',
+    text: `AED ${index + 1}.00 at TEST SHOP`,
+    ts: 1_800_000_000_000 + index,
+    sourceClass: 'play-finance',
+  }));
+  const parsed = {
+    kind: 'transaction', type: 'expense', amountFils: 100, currency: 'AED',
+    merchant: 'Test Shop', date: null, dueDay: null, minDueFils: null, card: null,
+    reference: null, transferHint: false, snapshotFils: null, snapshotKind: null,
+    categoryGuess: 'other', categoryDeliberate: false, raw: 'synthetic',
+  };
+  const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/capture-trace': { captureTrace: () => {}, captureTraceEnabled: () => false },
+    'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
+    'expo-crypto': {}, 'expo-secure-store': {},
+    '../../modules/notification-reader': { __esModule: true, default: {
+      isAvailable: () => true, isEnabled: () => true,
+      getCaptured: async () => rows,
+      ackCaptured: async ids => { acknowledgements += ids.length; return true; },
+    } },
+    '../../modules/sms-reader': { __esModule: true, default: {
+      getInboxSms: async () => { smsReads++; return []; },
+    } },
+    '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
+    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+      inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
+    }) },
+    '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
+  });
+  const result = await scanner.scanInbox(0, {}, undefined, null, { notificationOnly: true });
+  assert.equal(smsReads, 0);
+  assert.equal(parseCalls, 500);
+  assert.equal(result.parsed.length, 500);
+  assert.equal(result.scannedCount, 500);
+  assert.equal(acknowledgements, 0);
+  await result.commit();
+  assert.equal(acknowledgements, 500);
 });
 
 

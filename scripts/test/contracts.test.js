@@ -220,10 +220,13 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     .map((match) => match[1]).sort();
   const jsPackageIds = [...jsPackages.matchAll(/'([A-Za-z0-9_.]+)': '[A-Z]{2}'/g)]
     .map((match) => match[1]).sort();
-  ok('notification parsing is restricted to curated Play-installed bank packages',
+  ok('notification intake requires Play provenance while curated packages remain strongest issuer evidence',
     kotlinPackageIds.length >= 10 && JSON.stringify(kotlinPackageIds) === JSON.stringify(jsPackageIds) &&
       nativePackages.includes('installingPackageName') && nativePackages.includes('com.android.vending') &&
-      service.includes('TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)') &&
+      nativePackages.includes('ApplicationInfo.CATEGORY_FINANCE') &&
+      nativePackages.includes('SOURCE_FINANCIAL_CANDIDATE') &&
+      service.includes('TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body)') &&
+      service.includes('SensitiveNotificationFilter.shouldReject(body)') &&
       scanner.includes('trustedBankNotificationMarket(n.pkg)'));
   const notificationGradle = read('modules/notification-reader/android/build.gradle');
   ok('normal Android builds expose bank capture while local consent and OS access still gate collection',
@@ -236,6 +239,15 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('AsyncFunction("setCaptureEnabled")') &&
       scanner.includes('isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true)') &&
       nativeModule.includes('Function("isAvailable")'));
+  const promotion = code(read('src/lib/review-promotion.ts'));
+  const stateTypes = code(read('src/lib/types.ts'));
+  ok('unrecognized financial app packages remain review-only until explicit confirmation learns them locally',
+    scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
+      scanner.includes("const autoSource = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned") &&
+      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ?") &&
+      promotion.includes("item.sourceClass === 'financial-candidate'") &&
+      promotion.includes('learnedNotificationPackage') &&
+      stateTypes.includes('trustedNotificationPackages: string[]'));
   ok('notification erase prevents old shade rows from being swept back in',
     store.includes('CLEARED_THROUGH') && store.includes('.putLong(CLEARED_THROUGH, clearedThrough)') &&
       store.includes('if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return'));

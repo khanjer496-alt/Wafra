@@ -600,6 +600,8 @@ export interface AppState {
   billAliases: Record<string, BillAlias>;
   /** Card/account last4 → accountId, learned from SMS. */
   accountHints: Record<string, string>;
+  /** User-confirmed Google Play packages learned from notification Review. */
+  trustedNotificationPackages: string[];
   /** Merchants (lowercased) the user marked as NOT a subscription. */
   notSubscriptions: string[];
   /** Epoch ms of the newest SMS already scanned. */

@@ -3665,12 +3665,24 @@ export type NonPostingReason =
   | 'security-challenge'
   | 'preauthorisation'
   | 'returned-unpaid'
-  | 'pending-processing';
+  | 'pending-processing'
+  | 'card-lifecycle';
+
+/**
+ * Card lifecycle notices can contain a last-3/last-4 number and an expiry date,
+ * which are exactly the two shapes a permissive transaction parser can mistake
+ * for money and a merchant/date. They describe the card itself, not movement
+ * of money. Keep this structural and card-anchored so a real purchase at a
+ * merchant whose name happens to contain "Expiring" is not suppressed.
+ */
+const CARD_LIFECYCLE_NOTICE_RE =
+  /(?:\b(?:credit|debit|covered|prepaid)?\s*card\b[^.\n]{0,120}\bexpir(?:y|e[sd]?|ing)\b|\bexpir(?:y|e[sd]?|ing)\b[^.\n]{0,120}\b(?:credit|debit|covered|prepaid)?\s*card\b)/i;
 
 function nonPostingReasonInBody(
   body: string,
   suppressible: string,
 ): NonPostingReason | null {
+  if (CARD_LIFECYCLE_NOTICE_RE.test(suppressible)) return 'card-lifecycle';
   if (declinedInBody(body, suppressible)) return 'declined';
   if (
     OTP_RE.test(body) ||

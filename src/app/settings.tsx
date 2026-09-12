@@ -1523,6 +1523,11 @@ export default function SettingsScreen() {
             () => router.push('/accuracy'),
           )}
           <SectionHeader title={t('dataHeader')} />
+          {linkRow(
+            t('statementImportTitle'),
+            t('statementImportSettingsDetail'),
+            () => router.push('/statement-import'),
+          )}
           {linkRow(t('backupJson'), null, backupJson)}
           {isSmsCorpusExportAvailable() && (
             <Block>

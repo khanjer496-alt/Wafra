@@ -357,7 +357,8 @@ export async function collectNewMessages(
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
         maxInboxPages: reread ? 1 : undefined,
-        notificationOnly },
+        notificationOnly,
+        learnedNotificationPackages: state.trustedNotificationPackages },
     );
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep

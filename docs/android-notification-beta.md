@@ -1,20 +1,27 @@
 # Android bank-app notifications
 
-Normal Android builds include a local bank-notification listener. A user must
-explicitly enable **Settings → Imports → Bank app notifications**, review the
-disclosure, and grant Wafra **Notification access** in Android Settings. The
-listener accepts only exact supported bank packages installed through Google
-Play. It never treats an arbitrary app name or notification body as bank
-identity. The current package list is in
-`modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt`.
+Normal Android builds include a local financial-notification listener. For an
+eligible hydrated Pro/trial/founder user, Wafra enables its local listener
+automatically while tracking is active. Android still requires the user to
+grant **Notification access** once. No separate Wafra opt-in toggle is required.
 
 This source works **without READ_SMS permission or a completed SMS inbox scan**.
 Bank SMS and bank-app push alerts use separate Android permissions. Wafra still
 respects the saved global tracking opt-out and existing Pro/trial entitlement.
-The local admission choice is default-off until the hydrated app enables it;
+Native admission starts closed before hydration, then the eligible app enables it automatically;
 turning tracking off erases the encrypted notification queue. Android's system
 access can be revoked at any time. Wafra processes eligible alerts when the
 app opens or refreshes, not as an immediate background ledger write.
+
+Because Android Notification access is device-wide, intake is layered. Wafra
+refuses non-Play/sideloaded apps. Exact package identities in
+`TrustedBankNotificationPackages.kt` provide strong issuer and market evidence.
+Other Google Play apps in Android's Finance category may use the universal
+parser. An otherwise unknown Play app must carry both a supported money marker
+and financial transaction/account context; that source is **review-only**.
+Its package name is not treated as issuer proof. If the user confirms the review
+item, Wafra learns that package locally on that phone and future high-confidence
+alerts may auto-import. Dismissing the candidate teaches nothing.
 
 The listener rejects OTP/security prompts before persistence. A bounded,
 seven-day queue stores candidates under an AndroidKeyStore key and acknowledges
@@ -52,6 +59,7 @@ evidence after installing the new build.
    putting source text in logs. Revoke access and the app's tracking choice;
    confirm no further capture and that queued candidates are erased on opt-out.
 
-Supported packages and parsed templates are a growing, bounded set. Do not
-describe this as coverage for every bank or every push format. The public APK
-should be released only after the native build and device path above pass.
+This design can discover new bank/finance apps without an app update, but parser
+coverage is still evidence-based. Do not claim every bank or every push format
+will parse automatically. Unknown sources fail into Review rather than silently
+writing money to the ledger.

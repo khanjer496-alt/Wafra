@@ -80,13 +80,19 @@ class NotificationReaderModule : Module() {
       if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
         return@AsyncFunction emptyList<Map<String, Any>>()
       }
-      NotificationCaptureStore.read(context, sinceMs.toLong()).map { row ->
+      NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
+        val sourceClass = TrustedBankNotificationPackages.sourceClass(
+          context,
+          row.pkg,
+          "${row.title} ${row.text}".trim(),
+        ) ?: return@mapNotNull null
         mapOf(
           "id" to row.id,
           "pkg" to row.pkg,
           "title" to row.title,
           "text" to row.text,
           "ts" to row.ts.toDouble(),
+          "sourceClass" to sourceClass,
         )
       }
     }

@@ -37,7 +37,7 @@ const state = (item, over = {}) => ({
   reviewTray: { ...emptyAlertReviewTray(), pending: [item] },
   accounts: [{ id: 'acc-1', name: 'Card', kind: 'card', openingFils: 0, color: '#000', last4: '1234' }],
   transactions: [], budgets: [], bills: [], cardDues: [], goals: [],
-  merchantOverrides: {}, accountHints: {}, notSubscriptions: [], lastScanTs: 0,
+  merchantOverrides: {}, accountHints: {}, trustedNotificationPackages: [], notSubscriptions: [], lastScanTs: 0,
   onboarded: true, userName: 'Test', appLock: false, monthStartDay: 1,
   pro: false, privateMode: false, dailySummary: false, trialStartTs: NOW,
   marketId: 'AE', language: 'en', themePreference: 'system',
@@ -73,6 +73,44 @@ for (const [currency, exponent, minorUnits] of [
   );
   ok('review money can never be relabelled into a different ledger currency',
     result.outcome === 'refused' && result.reason === 'currency-mismatch', JSON.stringify(result));
+}
+
+{
+  const candidate = review({
+    channel: 'push',
+    sourcePackage: 'com.example.newbank',
+    sourceClass: 'financial-candidate',
+    amount: { currency: 'AED', exponent: 2, minorUnits: '4250' },
+    market: 'AE', institution: 'new-bank',
+  });
+  const result = planReviewPromotion(
+    state(candidate, { ledgerMoney: ledgerMoneySpec('AED') }),
+    command(candidate),
+    'tx-learn-package', NOW + 1,
+  );
+  ok('confirming an unknown push candidate learns only that Play package locally',
+    result.outcome === 'added' && result.learnedNotificationPackage === 'com.example.newbank',
+    JSON.stringify(result));
+
+  const finance = { ...candidate, sourceClass: 'play-finance' };
+  const financeResult = planReviewPromotion(
+    state(finance, { ledgerMoney: ledgerMoneySpec('AED') }),
+    command(finance),
+    'tx-finance-package', NOW + 1,
+  );
+  ok('a Play Finance source does not need a user-learned package grant',
+    financeResult.outcome === 'added' && financeResult.learnedNotificationPackage === undefined,
+    JSON.stringify(financeResult));
+
+  const malformed = { ...candidate, sourcePackage: 'not a package' };
+  const malformedResult = planReviewPromotion(
+    state(malformed, { ledgerMoney: ledgerMoneySpec('AED') }),
+    command(malformed),
+    'tx-malformed-package', NOW + 1,
+  );
+  ok('malformed package metadata can never become a learned notification source',
+    malformedResult.outcome === 'added' && malformedResult.learnedNotificationPackage === undefined,
+    JSON.stringify(malformedResult));
 }
 
 {

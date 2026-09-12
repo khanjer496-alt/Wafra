@@ -1145,6 +1145,11 @@ const S = {
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
+  statementImportTitle: { en: 'Import bank statements', ar: 'استيراد كشوف البنك' },
+  statementImportSettingsDetail: {
+    en: 'Add history from one or several PDF, CSV, or TSV statements',
+    ar: 'أضف السجل من كشف واحد أو عدة كشوف PDF أو CSV أو TSV',
+  },
   launchMetricsInternal: { en: 'Launch metrics (internal)', ar: 'مقاييس التشغيل (داخلية)' },
   launchMetricsDetail: {
     en: 'Fixed timings only · no ledger data',
@@ -1493,8 +1498,8 @@ const S = {
   merchantRuleAlso: { en: 'Future imports from {merchant} will use this category. Also update {n} existing {entries}?', ar: 'ستستخدم العمليات القادمة من {merchant} هذا التصنيف. هل تحدّث أيضاً {n} من العمليات الحالية؟' },
   leavingInDays: { en: 'Leaving in {days} days', ar: 'تخرج خلال {days} أيام' },
   rememberForMerchant: { en: 'Remember for {merchant}?', ar: 'تذكّر لـ {merchant}؟' },
-  notifAccessFull: { en: 'For selected Google Play bank apps. This works without SMS access: grant Wafra Notification access, then supported money alerts are processed when Wafra opens or refreshes. Uncertain alerts go to Review. Temporary candidates are encrypted on this phone; OTP and security alerts are rejected. Not every bank or alert format is supported.', ar: 'لتطبيقات بنوك محددة مثبّتة من Google Play. تعمل دون إذن الرسائل: امنح وفرة إذن الوصول إلى الإشعارات، ثم تُعالج تنبيهات المال المدعومة عند فتح وفرة أو تحديثه. تُعرض التنبيهات غير المؤكدة للمراجعة. تُشفّر البيانات المؤقتة على هذا الهاتف، وتُرفض رموز التحقق والتنبيهات الأمنية. ليست كل البنوك أو صيغ التنبيهات مدعومة.' },
-  notifAccessAutoPrompt: { en: 'Wafra automatically uses supported bank-app notifications when tracking is active. Android requires you to approve Notification access once. No SMS permission is required for this path, and not every bank or alert format is supported.', ar: 'يستخدم وفرة إشعارات تطبيقات البنوك المدعومة تلقائياً عندما يكون التتبع مفعّلاً. يتطلب أندرويد موافقتك مرة واحدة على إذن الوصول إلى الإشعارات. لا يلزم إذن الرسائل لهذا المسار، وليست كل البنوك أو صيغ التنبيهات مدعومة.' },
+  notifAccessFull: { en: 'Wafra can process financial notifications from Google Play apps without SMS access. Known bank apps and Android Finance apps can use the local parser automatically. A new app that only looks financial goes to Review first; if you confirm it, Wafra learns that app on this phone for future alerts. Temporary candidates are encrypted locally, and OTP/security alerts are rejected before queueing. Android Notification access is required, and not every bank format is guaranteed.', ar: 'يمكن لوفرة معالجة الإشعارات المالية من التطبيقات المثبّتة عبر Google Play من دون إذن الرسائل. يمكن لتطبيقات البنوك المعروفة وتطبيقات فئة التمويل في أندرويد استخدام المحلل المحلي تلقائياً. إذا كان التطبيق جديداً ويبدو مالياً فقط، ينتقل التنبيه أولاً إلى المراجعة؛ وبعد تأكيدك يتعلّم وفرة هذا التطبيق على هذا الهاتف للتنبيهات القادمة. تُشفّر البيانات المؤقتة محلياً، وتُرفض رموز التحقق والتنبيهات الأمنية قبل إدخالها إلى قائمة الانتظار. يلزم إذن الوصول إلى إشعارات أندرويد، ولا يوجد ضمان لدعم كل صيغة بنكية.' },
+  notifAccessAutoPrompt: { en: 'Wafra automatically uses eligible financial app notifications when tracking is active. Android requires you to approve Notification access once. No SMS permission is required. New unrecognized financial apps are reviewed before Wafra learns them on this phone.', ar: 'يستخدم وفرة تلقائياً إشعارات التطبيقات المالية المؤهلة عندما يكون التتبع مفعّلاً. يتطلب أندرويد موافقتك مرة واحدة على إذن الوصول إلى الإشعارات. لا يلزم إذن الرسائل. تُراجع التطبيقات المالية الجديدة غير المعروفة قبل أن يتعلّمها وفرة على هذا الهاتف.' },
   startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
   alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
   // Storage recovery. Shown INSTEAD of onboarding when the encrypted ledger

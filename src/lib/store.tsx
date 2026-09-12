@@ -184,6 +184,7 @@ const EMPTY_STATE: AppState = {
   merchantOverrides: {},
   billAliases: {},
   accountHints: {},
+  trustedNotificationPackages: [],
   notSubscriptions: [],
   lastScanTs: 0,
   historyImport: null,
@@ -279,6 +280,12 @@ export function migratePersistedState(
     Date.now(),
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
+  parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
+    ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
+        typeof value === 'string' && value.length <= 255 &&
+        /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(value),
+      ))].slice(-64)
+    : [];
   markLaunchPhase('ledger-metadata-complete');
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
@@ -719,6 +726,7 @@ type Action =
       reviewTray: AppState['reviewTray'];
       sourceKeyUpdates?: { id: string; smsKey: string }[];
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+      learnedNotificationPackage?: string;
     }
   | {
       type: 'promoteReviewAlert';
@@ -726,6 +734,7 @@ type Action =
       counterpartId?: string;
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
+      learnedNotificationPackage?: string;
     }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -879,10 +888,15 @@ function reduceState(state: AppState, action: Action): AppState {
       if ((state.languagePreference ?? 'system') !== 'system') return state;
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
-    case 'setReviewTray':
+    case 'setReviewTray': {
+      const learned = action.learnedNotificationPackage &&
+        /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
+        ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
+        : state.trustedNotificationPackages;
       return {
         ...state,
         reviewTray: action.reviewTray,
+        trustedNotificationPackages: learned,
         ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
           const update = action.sourceKeyUpdates!.find((candidate) => candidate.id === transaction.id);
           return update ? { ...transaction, smsKey: update.smsKey } : transaction;
@@ -891,6 +905,7 @@ function reduceState(state: AppState, action: Action): AppState {
           ? { localCaptureQualifications: action.localCaptureQualifications }
           : {}),
       };
+    }
     case 'recordIosCaptureWarning':
       return { ...state, iosCaptureWarning: action.warning };
     case 'clearIosCaptureWarning':
@@ -906,6 +921,10 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
+        trustedNotificationPackages: action.learnedNotificationPackage &&
+          /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
+          ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
+          : state.trustedNotificationPackages,
         transactions: sortTxs([
           action.transaction,
           ...state.transactions.map((transaction) =>
@@ -2032,13 +2051,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       saveTimer.current = null;
     }
     const next = plan.outcome === 'duplicate'
-      ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray })
+      ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray,
+          learnedNotificationPackage: plan.learnedNotificationPackage })
       : dispatch({
           type: 'promoteReviewAlert',
           transaction: plan.transaction,
           counterpartId: plan.counterpartId,
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
+          learnedNotificationPackage: plan.learnedNotificationPackage,
         });
     if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
     return plan.outcome;
