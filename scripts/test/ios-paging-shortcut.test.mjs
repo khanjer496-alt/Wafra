@@ -102,6 +102,11 @@ test('bounded list collection does not retain per-record repeat results', () => 
   assert.ok(actions.some(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.appendvariable' && a.WFWorkflowActionParameters.WFVariableName === 'Encoded Page'));
   const stage = actions.find(a => a.WFWorkflowActionIdentifier === 'app.wafra.ios.StageWafraPagedImportIntent');
   assert.equal(stage.WFWorkflowActionParameters.frame.WFSerializationType, 'WFTextTokenString');
+  const dictionaries = actions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.dictionary');
+  assert.equal(dictionaries.length, 0, 'records must not rely on Dictionary-to-Text JSON coercion');
+  const recordText = actions.find(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.gettext' &&
+    a.WFWorkflowActionParameters.WFTextActionText?.Value?.string === '\ufffc|\ufffc|\ufffc|\ufffc');
+  assert.ok(recordText, 'records use deterministic four-field scalar framing');
 });
 test('empty pages and the safety work budget cannot be advertised as completion', () => {
   const graph = buildPagedHistoryShortcut();

@@ -53,6 +53,51 @@ public final class WafraPagedHistoryStore {
     let record: String?
   }
 
+  private func decodeBase64Field(_ value: Substring, maximum: Int) throws -> String {
+    guard value.utf8.count <= ((maximum + 2) / 3) * 4 + 8,
+          let data = Data(base64Encoded: String(value)),
+          data.base64EncodedString() == value,
+          data.count <= maximum,
+          let text = String(data: data, encoding: .utf8) else {
+      throw Failure.invalidInput
+    }
+    return text
+  }
+
+  private func preparedRow(_ line: Substring) throws -> PreparedRow {
+    let guid: String
+    let body: String
+    let sender: String
+    let dateText: String
+    let fields = line.split(separator: "|", omittingEmptySubsequences: false)
+    if fields.count == 4 {
+      guid = try decodeBase64Field(fields[0], maximum: 1_024)
+      body = try decodeBase64Field(fields[1], maximum: 16 * 1_024)
+      sender = try decodeBase64Field(fields[2], maximum: 1_024)
+      dateText = try decodeBase64Field(fields[3], maximum: 64)
+    } else {
+      // Backward-compatible reader for the first beta graph. New graphs never
+      // depend on Shortcuts' Dictionary-to-Text representation.
+      guard line.utf8.count <= 128 * 1_024,
+            let data = Data(base64Encoded: String(line)),
+            data.base64EncodedString() == line,
+            WafraMessageHistoryStore.hasUniqueJSONMemberNames(data),
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            Set(object.keys) == Set(["guid", "body", "sender", "date"]),
+            let parsedGuid = object["guid"] as? String,
+            let parsedBody = object["body"] as? String, parsedBody.utf8.count <= 16 * 1024,
+            let parsedSender = object["sender"] as? String, parsedSender.utf8.count <= 1_024,
+            let parsedDate = object["date"] as? String, parsedDate.utf8.count <= 64 else {
+        throw Failure.invalidInput
+      }
+      guid = parsedGuid; body = parsedBody; sender = parsedSender; dateText = parsedDate
+    }
+    let ref = try reference(guid: guid, dateText: dateText)
+    let record = WafraMessageHistoryImporter.preparedRecord(guid: guid, body: body,
+      sender: sender, date: try date(dateText), now: now())
+    return PreparedRow(reference: ref, record: record == "{\"v\":0}" ? nil : record)
+  }
+
   private let configuredRoot: URL?
   private let now: () -> Date
   private let byteLimit: Int
@@ -175,22 +220,7 @@ public final class WafraPagedHistoryStore {
       guard lines.count == found else { throw Failure.invalidInput }
       var prepared: [PreparedRow] = []
       for line in lines {
-        guard line.utf8.count <= 128 * 1024,
-              let data = Data(base64Encoded: String(line)),
-              data.base64EncodedString() == line,
-              WafraMessageHistoryStore.hasUniqueJSONMemberNames(data),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              Set(object.keys) == Set(["guid", "body", "sender", "date"]),
-              let guid = object["guid"] as? String,
-              let body = object["body"] as? String, body.utf8.count <= 16 * 1024,
-              let sender = object["sender"] as? String, sender.utf8.count <= 1_024,
-              let dateText = object["date"] as? String, dateText.utf8.count <= 64 else {
-          throw Failure.invalidInput
-        }
-        let ref = try reference(guid: guid, dateText: dateText)
-        let record = WafraMessageHistoryImporter.preparedRecord(guid: guid, body: body,
-          sender: sender, date: try date(dateText), now: now())
-        prepared.append(PreparedRow(reference: ref, record: record == "{\"v\":0}" ? nil : record))
+        prepared.append(try preparedRow(line))
       }
       let decision = try WafraHistoryCursor.advance(head.checkpoint,
         records: prepared.map(\.reference))

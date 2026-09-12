@@ -128,16 +128,20 @@ export function buildPagedHistoryShortcut() {
   const body = field(variable('Repeat Item'), 'Body');
   const sender = field(variable('Repeat Item'), 'Sender');
   const received = dateText(variable('Repeat Item'));
-  const record = emit('is.workflow.actions.dictionary', { WFItems: { WFSerializationType: 'WFDictionaryFieldValue', Value: {
-    WFDictionaryFieldValueItems: [['guid', guid], ['body', body], ['sender', sender], ['date', received]].map(([key, value]) => ({
-      WFKey: text(key), WFItemType: 0, WFValue: scalar(output(value)),
-    })),
-  } } });
-  const serialized = emit('is.workflow.actions.gettext', { WFTextActionText: scalar(output(record, 'Dictionary', {
-    Aggrandizements: [{ Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }],
-  })) });
-  const encodedRecord = emit('is.workflow.actions.base64encode', { WFEncodeMode: 'Encode', WFBase64LineBreakMode: 'None', WFInput: attachment(output(serialized, 'Text')) });
-  emit('is.workflow.actions.appendvariable', { WFVariableName: 'Encoded Page', WFInput: attachment(output(encodedRecord, 'Base64 Encoded')) });
+  // Do not coerce a Shortcut Dictionary to Text here. On-device that coercion
+  // is not guaranteed to be JSON, which made the first real page fail native
+  // validation with `invalid-input`. Frame four independently base64-encoded
+  // scalar fields instead; base64 never contains `|`, so the native parser can
+  // split this deterministically without retaining Message entities.
+  const guid64 = emit('is.workflow.actions.base64encode', { WFEncodeMode: 'Encode', WFBase64LineBreakMode: 'None', WFInput: attachment(output(guid)) });
+  const body64 = emit('is.workflow.actions.base64encode', { WFEncodeMode: 'Encode', WFBase64LineBreakMode: 'None', WFInput: attachment(output(body)) });
+  const sender64 = emit('is.workflow.actions.base64encode', { WFEncodeMode: 'Encode', WFBase64LineBreakMode: 'None', WFInput: attachment(output(sender)) });
+  const date64 = emit('is.workflow.actions.base64encode', { WFEncodeMode: 'Encode', WFBase64LineBreakMode: 'None', WFInput: attachment(output(received)) });
+  const record = emit('is.workflow.actions.gettext', { WFTextActionText: text('\ufffc|\ufffc|\ufffc|\ufffc', {
+    '{0, 1}': output(guid64, 'Base64 Encoded'), '{2, 1}': output(body64, 'Base64 Encoded'),
+    '{4, 1}': output(sender64, 'Base64 Encoded'), '{6, 1}': output(date64, 'Base64 Encoded'),
+  }) });
+  emit('is.workflow.actions.appendvariable', { WFVariableName: 'Encoded Page', WFInput: attachment(output(record, 'Text')) });
   nothing();
   emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
   const frame = emit('is.workflow.actions.text.combine', { WFTextSeparator: 'New Lines', WFInput: attachment(variable('Encoded Page')) });
