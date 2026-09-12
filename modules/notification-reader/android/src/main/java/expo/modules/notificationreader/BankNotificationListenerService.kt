@@ -70,7 +70,14 @@ class BankNotificationListenerService : NotificationListenerService() {
         ?.filter { it.isNotBlank() }
         ?.let { textCandidates.add(it.joinToString("\n")) }
       extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.let(textCandidates::add)
-      val text = textCandidates.firstOrNull { it.isNotBlank() } ?: ""
+      // ColorOS can expose several populated standard fields for the same
+      // notification. ADCB's first non-blank field is not necessarily the
+      // visible charge body. Prefer the bounded field that actually carries a
+      // money amount; otherwise retain the old first-nonblank fallback.
+      val nonBlankTextCandidates = textCandidates.filter { it.isNotBlank() }
+      val text = nonBlankTextCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }
+        ?: nonBlankTextCandidates.firstOrNull()
+        ?: ""
       // A bank alert is short. Refuse pathological payloads rather than
       // truncating them into a different message or allowing another app to
       // fill the encrypted queue with multi-megabyte notifications.
@@ -78,7 +85,10 @@ class BankNotificationListenerService : NotificationListenerService() {
         recordAdmission("tooLong", adcb)
         return
       }
-      val body = "$title $text".trim()
+      // Security rejection considers every textual surface, not only the one
+      // selected for parsing, so an OTP/security warning cannot be hidden in a
+      // secondary Android notification field.
+      val body = (listOf(title) + nonBlankTextCandidates).joinToString(" ").trim()
       if (body.isEmpty()) {
         recordAdmission("emptyBody", adcb)
         return
@@ -89,7 +99,7 @@ class BankNotificationListenerService : NotificationListenerService() {
         return
       }
       recordAdmission("securityPassed", adcb)
-      if (!MONEY_RE.containsMatchIn(body)) {
+      if (!MONEY_RE.containsMatchIn("$title $text")) {
         recordAdmission("moneyRejected", adcb)
         return
       }
@@ -210,6 +220,10 @@ class BankNotificationListenerService : NotificationListenerService() {
     // prefix-only tests and every one of its notifications was dropped here,
     // before anything downstream could see it.
     val MONEY_RE = Regex(
+      // Bank apps commonly concatenate the ISO currency and amount (for
+      // example ADCB posts "AED181.00"). \s* already permits that; keep the
+      // currency alternatives explicit so this remains only a cheap native
+      // admission gate rather than a second transaction parser.
       "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
         "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE

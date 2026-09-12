@@ -78,6 +78,8 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
   assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
   assert.match(listener, /recordAdmission\("exception", adcb\)/);
+  assert.match(listener, /firstOrNull \{ MONEY_RE\.containsMatchIn\(it\) \}/);
+  assert.match(listener, /listOf\(title\) \+ nonBlankTextCandidates/);
   const store = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt');
   assert.match(store, /"cleared-through"/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
