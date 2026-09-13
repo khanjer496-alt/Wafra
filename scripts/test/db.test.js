@@ -404,7 +404,10 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
-    '@/lib/ledger': { internalTransferIds: () => new Set() },
+    '@/lib/ledger': {
+      internalTransferIds: () => new Set(),
+      primeInternalTransferIds() {},
+    },
     '@/lib/categories': require('./build/categories'),
     '@/lib/review-source-bindings': require('./build/review-source-bindings'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
