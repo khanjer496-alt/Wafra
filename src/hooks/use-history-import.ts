@@ -32,6 +32,21 @@ const HISTORY_IMPORT_PAGE_SIZE = 500;
 // with the next provider read. Not a measured phone constant; see the parse
 // yield notes in auto-import.ts for the trace flag that verifies it.
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
+// ...but a fixed window is the wrong shape, because the thing it is meant to
+// offset is not fixed. A page commit reconciles the WHOLE ledger — capture
+// duplicates, transfer links, the transfer graph — so it costs more with every
+// page that lands. Measured over the shipping modules with 500-row pages, the
+// commit alone grows from 22ms at 1k rows to 199ms at 20k, and four mounted
+// tab screens reproject on top of each one. A 120ms window against a 200ms
+// block leaves the interface a minority share of the thread for the whole
+// import, which is what "I cannot even open Settings" is.
+//
+// So yield for as long as the last page actually took, bounded. The import
+// takes longer in wall-clock and the app stays usable while it runs, which is
+// the right trade for maintenance work that is explicitly not
+// interaction-critical. Ceiling keeps a pathological page from stalling
+// progress altogether; floor keeps the original behaviour on small ledgers.
+const FOREGROUND_HISTORY_PAGE_GAP_CEILING_MS = 1_000;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -56,7 +71,12 @@ export function useHistoryImport(): void {
       (current.historyImport?.status === 'paused' || current.historyImport?.status === 'running');
   }, [getStateSnapshot]);
 
-  const coordinator = useMemo(() => createHistoryImportCoordinator<HistoryScanPage>({
+  const coordinator = useMemo(() => {
+  // How long the previous page's commit held the thread. It belongs to the
+  // coordinator rather than the component: nothing renders from it, and it
+  // must reset with the coordinator it paces.
+  let lastPageCostMs = 0;
+  return createHistoryImportCoordinator<HistoryScanPage>({
     getProgress: () => getStateSnapshot().historyImport,
     getGeneration: getStateGeneration,
     shouldContinue: () => {
@@ -75,7 +95,12 @@ export function useHistoryImport(): void {
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
       await new Promise<void>((resolve) =>
-        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
+        setTimeout(resolve, RNAppState.currentState === 'active'
+          ? Math.min(
+            FOREGROUND_HISTORY_PAGE_GAP_CEILING_MS,
+            Math.max(FOREGROUND_HISTORY_PAGE_GAP_MS, lastPageCostMs),
+          )
+          : 0));
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -124,18 +149,23 @@ export function useHistoryImport(): void {
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
         : getStateSnapshot();
       const plan = buildImportPlan(page.parsed, ledger, page.newestTs, undefined, page.declined);
+      // Measured around the synchronous planning/reducer work and its write,
+      // which is the part that actually holds the thread.
+      const commitStartedAt = Date.now();
       await importBatch({
         ...plan.batch,
         parserRereadComplete: page.inboxHistoryComplete,
         historyImport: next,
       }).durable;
+      lastPageCostMs = Math.max(0, Date.now() - commitStartedAt);
       markLaunchPhase('first-history-page');
       // Never acknowledge transient native rows before the ledger write.
       // A pause during persistence leaves them available for safe replay.
       if (canCommit()) await page.commit();
       return true;
     },
-  }), [
+  });
+  }, [
     getStateGeneration,
     getStateSnapshot,
     importBatch,
