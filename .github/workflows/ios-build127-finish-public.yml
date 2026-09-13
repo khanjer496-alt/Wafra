@@ -24,6 +24,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Apply export-compliance declaration to build 127
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const buildId='6e22a60a-526f-4b34-99cf-dd33fa3b3de9';
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'';
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem), kid=process.env.EXPO_ASC_KEY_ID, iss=process.env.EXPO_ASC_ISSUER_ID;
+          const b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const token=()=>{const now=Math.floor(Date.now()/1000),signed=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;return `${signed}.${sign('sha256',Buffer.from(signed),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path,{method='GET',body}={}){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{method,headers:{Authorization:`Bearer ${token()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const text=await r.text();if(!r.ok)throw new Error(`${method} ${path}: ${r.status} ${text}`);return text?JSON.parse(text):null;}
+          const before=await api(`builds/${buildId}`);
+          if(before.data?.attributes?.version!=='127') throw new Error(`Refusing unexpected Apple build ${before.data?.attributes?.version}`);
+          if(before.data.attributes.usesNonExemptEncryption === null) {
+            await api(`builds/${buildId}`,{method:'PATCH',body:{data:{type:'builds',id:buildId,attributes:{usesNonExemptEncryption:false}}}});
+          } else if(before.data.attributes.usesNonExemptEncryption !== false) {
+            throw new Error('Build already has a conflicting export-compliance declaration');
+          }
+          const after=await api(`builds/${buildId}?include=buildBetaDetail`);
+          console.log(JSON.stringify({build:after.data.attributes.version,usesNonExemptEncryption:after.data.attributes.usesNonExemptEncryption,processingState:after.data.attributes.processingState},null,2));
+          if(after.data.attributes.usesNonExemptEncryption !== false) throw new Error('Export-compliance declaration was not accepted');
+          NODE
+
       - name: Publish build 127 to existing public TestFlight group
         run: node scripts/release/ios-public-beta-publish.mjs --publish
 
