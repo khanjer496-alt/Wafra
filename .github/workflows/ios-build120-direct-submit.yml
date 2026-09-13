@@ -21,6 +21,7 @@ jobs:
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EXPO_NO_TELEMETRY: 1
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
       EXPECTED_SOURCE_SHA: 5a4356838d64eb1354c1176d1eb36d8b5fdc8576
       EXPECTED_IPA_SHA256: 798bbe6b718ea0eaf94b5682af5633340c7cf665bf6e227f7e696246b6ef600c
       WAFRA_BETA_VERSION: '1.0.0'
@@ -70,6 +71,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
+          cache: npm
+
+      - name: Install app dependencies required to resolve Expo config
+        run: npm ci
 
       - name: Prepare App Store Connect API key for EAS submit
         shell: bash
