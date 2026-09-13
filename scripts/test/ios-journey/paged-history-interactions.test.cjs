@@ -33,7 +33,7 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
     'react-native': { Platform: { OS: 'ios', Version: '26.6' }, View: 'View', ScrollView: 'ScrollView',
       AppState: { addEventListener: (_kind, fn) => { listeners.push(fn); return { remove() {} }; } },
       Linking: { canOpenURL: async () => available, openURL: async value => urls.push(value) } },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ push: v => routes.push(v), replace: v => routes.push(v) }),
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ push: v => routes.push(v), replace: v => routes.push(v), dismissTo: v => routes.push(v), canGoBack: () => true }),
       useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings' }) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '@react-native-async-storage/async-storage': { getItem: async k => values.get(k) ?? null, setItem: async (k, v) => values.set(k, v) },

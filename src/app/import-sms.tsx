@@ -110,6 +110,7 @@ import {
   loadIosMessageSetupProgress,
   type IosMessageSetupStatus,
 } from '@/lib/ios-message-onboarding';
+import { pagedHistoryEnabled } from '@/lib/ios-paged-setup';
 import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
@@ -256,7 +257,7 @@ export default function ImportSmsScreen() {
   // The native history session exists only in the Apple module graph.
   const history = Platform.OS === 'ios' ? historyParam : undefined;
   const usePagedHistory = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26 &&
-    process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1';
+    pagedHistoryEnabled();
   const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
 
   const [text, setText] = useState('');

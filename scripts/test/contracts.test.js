@@ -904,8 +904,9 @@ function ktSources(dir) {
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
       /run with no input invokes the native setup-proof action/.test(shortcutSpec));
-  ok('iOS setup discloses selected-sender retention and raw Message deletion',
-    /bank sender you select/.test(copy) &&
+  ok('iOS setup discloses the unfiltered trigger, queue retention and raw Message deletion',
+    /runs with an empty Sender for every new message/.test(copy) &&
+      !/Apple requires a bank sender you select|alerts only from bank senders you select/.test(copy) &&
       /protected queue on this iPhone/.test(copy) &&
       /After a durable local result, Wafra deletes the raw Message/.test(copy) &&
       /uploads no Message data/.test(copy));
@@ -932,8 +933,8 @@ function ktSources(dir) {
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'شغّل \{shortcut\} · الرسالة المستلمة كاملة'/.test(copy) &&
       /أكملت الإعداد/.test(copy) &&
-      /قد تعرض Apple جهات الاتصال فقط/.test(copy) &&
-      /بعض معرّفات رسائل البنوك لا تظهر/.test(copy) &&
+      /جهات الاتصال فقط/.test(copy) &&
+      /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
       /يحذف وفرة الرسالة الخام/.test(copy));
   ok('the next production build rejects every exact retired Capture Shortcut snapshot',

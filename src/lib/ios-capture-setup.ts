@@ -124,8 +124,11 @@ const iosVersionMajor = (): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const SENDER_SCOPED_MESSAGE_TRIGGER = {
-  selectedSenderCount: 1,
+// The guided automation. Apple's Sender picker lists Contacts only and bank
+// SMS IDs are not Contacts, so the trigger is left unfiltered and Wafra keeps
+// only supported bank alerts on-device.
+const UNFILTERED_MESSAGE_TRIGGER = {
+  selectedSenderCount: 0,
   messageContains: null,
 } as const;
 
@@ -149,11 +152,17 @@ export function resolveIosSetupReadiness(
   return 'not-added';
 }
 
+/**
+ * A Message automation Wafra can process. Zero selected senders is the guided
+ * configuration (Apple cannot select bank SMS IDs); explicitly selected
+ * Contacts are still accepted. A "Message Contains" text filter is not: it
+ * would silently drop alerts that do not contain the chosen keyword.
+ */
 export const isSupportedIosMessageAutomationTrigger = (
   trigger: IosMessageAutomationTrigger,
 ): boolean =>
   Number.isSafeInteger(trigger.selectedSenderCount) &&
-  Number(trigger.selectedSenderCount) > 0 &&
+  Number(trigger.selectedSenderCount) >= 0 &&
   trigger.messageContains === null;
 
 export const resolveIosFutureSetupStep = (
@@ -361,7 +370,7 @@ export function createIosCaptureSetup({
   });
 
   const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
-    if (!isSupportedIosMessageAutomationTrigger(SENDER_SCOPED_MESSAGE_TRIGGER)) {
+    if (!isSupportedIosMessageAutomationTrigger(UNFILTERED_MESSAGE_TRIGGER)) {
       publish({ failure: 'shortcut-run' });
       return;
     }

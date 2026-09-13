@@ -7,12 +7,18 @@
 export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date.signed';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v3';
 const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa';
+// A build that installs the paged record runs the paged graph whether or not
+// the beta flag is set: production shipped `5a0da9b5…` without the flag, so its
+// users ran a paged Shortcut while the app still showed the legacy history UI
+// (no saved-page progress, no resume, import review gated off). The paged
+// surfaces therefore follow the configured record; the flag only widens them
+// to builds testing an unverified URL.
+const installsVerifiedPagedRecord = (): boolean =>
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === VERIFIED_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_INSTALL_URL: string | null =
-  process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' &&
-  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === VERIFIED_HISTORY_SHORTCUT_URL
-    ? VERIFIED_HISTORY_SHORTCUT_URL
-    : null;
-export const pagedHistoryEnabled = (): boolean => process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1';
+  installsVerifiedPagedRecord() ? VERIFIED_HISTORY_SHORTCUT_URL : null;
+export const pagedHistoryEnabled = (): boolean =>
+  process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
 export const pagedHistoryRunUrl = (): string =>
   `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta')}`;
 
@@ -56,7 +62,7 @@ export const pagedHistoryCopy = {
     error: 'Progress is unavailable or has expired. No transactions were added by this check. Retry without deleting your app data.',
     paused: 'History import paused before the next page could be saved. Your completed pages are still here. Try again, skip it for now, or continue using Wafra.',
     missing: 'Shortcuts is not available. Install Apple Shortcuts, then return here.', failed: 'The action could not finish. Your saved ledger is unchanged.',
-    beta: 'Closed beta: this version checks available Messages on iOS 26 or later. If a boundary cannot be verified, it stops without claiming complete history. Large-inbox device testing is still in progress.',
+    beta: 'Checks available Messages on iOS 26 or later. If a boundary cannot be verified, it stops without claiming complete history. Very large inboxes can take a long time.',
     back: 'Back to setup', again: 'Add Shortcut again', unavailable: 'Update Wafra to the matching beta before importing. No diagnostic developer settings are needed.',
   },
   ar: {
@@ -72,7 +78,7 @@ export const pagedHistoryCopy = {
     error: 'التقدّم غير متاح أو انتهت صلاحيته. لم تُضف عمليات بهذا الفحص. أعد المحاولة دون حذف بيانات التطبيق.',
     paused: 'توقف استيراد السجل قبل حفظ الدفعة التالية. ما زالت الدفعات المكتملة محفوظة. حاول مجدداً أو تخطَّها حالياً أو تابع استخدام وفرة.',
     missing: 'تطبيق الاختصارات غير متاح. ثبّت اختصارات آبل ثم عد إلى هنا.', failed: 'لم تكتمل الخطوة. لم يتغير سجلك المحفوظ.',
-    beta: 'نسخة تجريبية محدودة: تفحص الرسائل المتاحة على iOS 26 أو أحدث. إذا تعذر التحقق من حدود دفعة تتوقف دون الادعاء باكتمال السجل. اختبار السجلات الكبيرة على الأجهزة ما زال جارياً.',
+    beta: 'يفحص الرسائل المتاحة على iOS 26 أو أحدث. إذا تعذر التحقق من حدود دفعة يتوقف دون الادعاء باكتمال السجل. قد تستغرق صناديق الرسائل الكبيرة جداً وقتاً طويلاً.',
     back: 'العودة للإعداد', again: 'إضافة الاختصار مجدداً', unavailable: 'حدّث وفرة إلى النسخة التجريبية المتوافقة قبل الاستيراد. لا تحتاج إلى إعدادات المطوّر.',
   },
 };

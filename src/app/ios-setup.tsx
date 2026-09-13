@@ -62,7 +62,12 @@ import { onboardingLandingPath } from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { canFinishIosMessageSetup, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
-import { pagedHistoryEnabled, pagedHistoryCopy } from '@/lib/ios-paged-setup';
+import {
+  pagedHistoryEnabled,
+  pagedHistoryCopy,
+  parsePagedHistoryProgress,
+  type PagedHistoryProgress,
+} from '@/lib/ios-paged-setup';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
   version: 1,
@@ -103,7 +108,16 @@ export default function IosSetupScreen() {
   const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
-  const fromOnboarding = params.fromOnboarding === '1';
+  // The History Shortcut returns through `wafra://ios-setup?section=history`,
+  // which cannot carry the onboarding query, and a deep link into the mounted
+  // route replaces its params. First-run state is durable in the store, so
+  // latch onboarding mode from it: losing the flag used to hide the manual
+  // exit and turn Back into a loop through the onboarding gate's redirect.
+  const onboardingLatch = useRef(false);
+  if (params.fromOnboarding === '1' || (state.hydrated === true && state.onboarded === false)) {
+    onboardingLatch.current = true;
+  }
+  const fromOnboarding = onboardingLatch.current;
   const requestedSection = params.section === 'history' || params.section === 'future'
     ? params.section : null;
   const historyReturnOrigin = fromOnboarding ? 'onboarding' : 'ios-setup';
@@ -126,6 +140,7 @@ export default function IosSetupScreen() {
     installed: false,
     handoffStartedAt: null as number | null,
   });
+  const [pagedProgress, setPagedProgress] = useState<PagedHistoryProgress | null>(null);
   const [busy, setBusy] = useState(false);
   const [finishRetryRequired, setFinishRetryRequired] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -204,6 +219,7 @@ export default function IosSetupScreen() {
     try {
       let nextHistory: Awaited<ReturnType<typeof loadIosHistorySetup>>;
       let recoveredSessionId: string | null = null;
+      let nextPagedProgress: PagedHistoryProgress | null = null;
       if (historySupported) {
         const native = await historyNativeModule();
         if (!native || typeof native.getCompletedSession !== 'function' ||
@@ -216,6 +232,15 @@ export default function IosSetupScreen() {
         );
         nextHistory = reconciliation.snapshot;
         recoveredSessionId = reconciliation.recoveredSessionId;
+        if (pagedEnabled && typeof native.getPagedStatus === 'function') {
+          // The paged Shortcut says "open Wafra to check progress" when it
+          // pauses. Source-free counts only; a malformed status reads as none.
+          try {
+            nextPagedProgress = parsePagedHistoryProgress(await native.getPagedStatus());
+          } catch {
+            nextPagedProgress = null;
+          }
+        }
       } else {
         nextHistory = await iosHistorySetupStorageCoordinator.run(() => loadIosHistorySetup());
       }
@@ -225,6 +250,7 @@ export default function IosSetupScreen() {
         installed: nextHistory.installed,
         handoffStartedAt: nextHistory.handoffStartedAt,
       });
+      setPagedProgress(nextPagedProgress);
       if (recoveredSessionId) {
         router.replace({
           pathname: '/import-sms',
@@ -236,7 +262,21 @@ export default function IosSetupScreen() {
       setHistoryReady(false);
       setLocalError(t('historySetupStateFailed'));
     }
-  }, [historySupported, router]);
+  }, [historySupported, pagedEnabled, router]);
+
+  // `router.replace` from this pushed screen swaps it for a NEW tabs route
+  // while the original tabs route stays at the stack root, so two tab
+  // navigators end up mounted: two Home screens, doubled scans and a first
+  // screen that flickers. Pop to the existing root and switch tabs there. A
+  // cold deep-link launch with nothing beneath this screen keeps the replace.
+  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath>) => {
+    if (router.canGoBack()) {
+      router.dismissAll();
+      router.navigate(href);
+      return;
+    }
+    router.replace(href);
+  }, [router]);
 
   useEffect(() => {
     let active = true;
@@ -614,7 +654,7 @@ export default function IosSetupScreen() {
           outcome: 'automatic',
           placement: GROWTH_PLACEMENTS.onboarding,
         });
-        router.replace(onboardingLandingPath(onboardingFocus));
+        exitToRoot(onboardingLandingPath(onboardingFocus));
         return;
       }
       if (router.canGoBack()) {
@@ -625,6 +665,7 @@ export default function IosSetupScreen() {
     }, t('iosMessageFinishFailed'));
   }, [
     ensureDurable,
+    exitToRoot,
     finishRetryRequired,
     fromOnboarding,
     setupComplete,
@@ -684,14 +725,14 @@ export default function IosSetupScreen() {
         outcome: 'manual',
         placement: GROWTH_PLACEMENTS.onboarding,
       });
-      router.replace(onboardingLandingPath(onboardingFocus));
+      exitToRoot(onboardingLandingPath(onboardingFocus));
     }, t('iosMessageFinishFailed'));
   }, [
     busy,
     ensureDurable,
+    exitToRoot,
     finishRetryRequired,
     fromOnboarding,
-    router,
     runOperation,
     send,
     setCaptureOptOut,
@@ -707,9 +748,9 @@ export default function IosSetupScreen() {
       if (fromOnboarding) {
         await updateProgress({ type: 'onboarding-return-cleared' });
         // Do not walk back through every Shortcut/iCloud handoff that happened
-        // during setup. Replace the route once and let the onboarding gate show
-        // the previous product step exactly once.
-        router.replace('/');
+        // during setup. Return to the root once and let the onboarding gate
+        // show the previous product step exactly once.
+        exitToRoot('/');
         return;
       }
       if (router.canGoBack()) {
@@ -718,7 +759,7 @@ export default function IosSetupScreen() {
       }
       router.replace('/');
     });
-  }, [busy, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
+  }, [busy, exitToRoot, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
 
   const futureStep = setup.failure === 'shortcut-install' &&
     !progress.futureShortcutConfirmed
@@ -886,10 +927,37 @@ export default function IosSetupScreen() {
                 ) : pagedEnabled ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{pagingCopy.intro}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">
-                      {historyRunning ? pagingCopy.paused : pagingCopy.runningHelp}
-                    </ThemedText>
-                    <Button label={historyRunning ? pagingCopy.resume : pagingCopy.start} variant="ghost" onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } })} disabled={busy} wrapLabel />
+                    {pagedProgress ? (
+                      <View testID="ios-setup-paged-progress" accessibilityLiveRegion="polite" style={styles.progress}>
+                        <ThemedText type="smallBold">
+                          {`${pagedProgress.checked.toLocaleString()} · ${pagingCopy.counts}`}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {`${pagedProgress.accepted.toLocaleString()} ${pagingCopy.accepted} · ${pagedProgress.skipped.toLocaleString()} ${pagingCopy.skipped}`}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {pagedProgress.status === 'complete' ? pagingCopy.completed : pagingCopy.paused}
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      <ThemedText type="meta" themeColor="textSecondary">
+                        {historyRunning ? pagingCopy.paused : pagingCopy.runningHelp}
+                      </ThemedText>
+                    )}
+                    <Button
+                      label={pagedProgress?.status === 'complete' ? pagingCopy.review
+                        : pagedProgress || historyRunning ? pagingCopy.resume : pagingCopy.start}
+                      variant="ghost"
+                      onPress={() => {
+                        if (pagedProgress?.status === 'complete') {
+                          router.push({ pathname: '/import-sms', params: { history: pagedProgress.sessionId } });
+                          return;
+                        }
+                        router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } });
+                      }}
+                      disabled={busy}
+                      wrapLabel
+                    />
                   </>
                 ) : !historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">
@@ -1045,6 +1113,7 @@ const styles = StyleSheet.create({
   },
   checklist: { gap: Spacing.two },
   hints: { marginTop: Spacing.one },
+  progress: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
     paddingHorizontal: ScreenPadding, paddingVertical: 12,
