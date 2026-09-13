@@ -598,11 +598,25 @@ export function migratePersistedState(
     // This receipt belongs to saved-row repair, never to the full-inbox scan
     // represented by parserVersion. Only local hydration may reuse it;
     // backup restore always repairs the incoming rows. Import paths already
-    // parse their new rows with this running grammar. Increment revision 1
+    // parse their new rows with this running grammar. Increment revision 2
     // below when heal semantics change without a PARSER_VERSION change.
+    //
+    // Deliberately keyed on the GRAMMAR only. `merchantOverrides` used to be
+    // part of this key, which meant saving one merchant rule re-parsed every
+    // raw-bearing row in the ledger on the next launch — seconds of blocked
+    // UI on a large ledger, and it got worse with each rule, because
+    // `healPatch` keeps `raw` forever on precisely the rows a rule pinned
+    // (heal.ts: the `prior.raw && !p.categoryPinned` branch). So the cost grew
+    // with the number of rules while the benefit was already nil: a pinned
+    // category reaches `if (p.categoryPinned) … delete patch.category`, which
+    // exists so that "remember for future" stays a default for NEW rows and a
+    // rescan cannot widen it to history. Overrides are still passed to
+    // `parseSms` below, so a grammar re-parse applies them exactly as before;
+    // only the trigger is narrowed. The one outcome this defers is the pinned
+    // direction-incompatible repair (`patch.category = 'other'`), which
+    // repairs an already-corrupt row and still lands on the next parser bump.
     const reparseKey = JSON.stringify([
-      1, PARSER_VERSION, parsed.marketId ?? getActiveMarket().id,
-      Object.entries(parsed.merchantOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+      2, PARSER_VERSION, parsed.marketId ?? getActiveMarket().id,
     ]);
     if (!options?.reuseCompletedReparse || parsed.hydrationReparseKey !== reparseKey) {
       parsed.transactions = parsed.transactions.flatMap((t) => {
