@@ -88,6 +88,7 @@ function harness(options = {}) {
     '@/lib/leaving-soon': { daysPhrase: (days) => language === 'ar' ? `خلال ${days} أيام` : `In ${days} days` },
     '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/notifications': { syncPaymentReminders: async () => events.push(['reminders']) },
+    '@/lib/reminders': { reminderScheduleInputsChanged: (before, after) => before !== after },
     '@/lib/period': { periodLabel: () => language === 'ar' ? 'سبتمبر 2026' : 'September 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },

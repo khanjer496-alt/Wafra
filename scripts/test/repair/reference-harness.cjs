@@ -89,7 +89,7 @@ function createHarness(options = {}) {
     '@/lib/fx':{buildReferenceFxUpdates:async()=>[]},'@/lib/fx-summary':{summarizeForeignActivity:()=>({groups:[]})},
     '@/lib/cash-flow':{summarizeCashOutflow:()=>({totalFils:536000,cardPaymentsFils:0,accountOutflowFils:536000})},
     '@/components/lock-gate':{usePrivacyGateCleared:()=>true},'@/lib/purchases':{isProActive:()=>true},
-    '@/lib/notifications':{syncPaymentReminders:async()=>{}},'@/lib/launch-performance':{markLaunchPhase(){}},
+    '@/lib/notifications':{syncPaymentReminders:async()=>{}},'@/lib/reminders':{reminderScheduleInputsChanged:(before,after)=>before!==after},'@/lib/launch-performance':{markLaunchPhase(){}},
     '@/components/ui/toast':{useToast:()=>({show:m=>events.push(['toast',m])})},
     '@/components/ui/states':{EmptyMonth:p=>jsx('EmptyMonth',p),SkeletonRows:p=>jsx('SkeletonRows',p)},
   };
