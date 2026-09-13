@@ -890,8 +890,9 @@ jobs:
           BEST=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
           test -n "$BEST"
           sudo xcode-select -s "$BEST/Contents/Developer"
-          xcodebuild -version
-          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          xcodebuild -version > "$RUNNER_TEMP/xcode-version.txt"
+          cat "$RUNNER_TEMP/xcode-version.txt"
+          VER=$(sed -n '1s/^Xcode //p' "$RUNNER_TEMP/xcode-version.txt")
           node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if (!(major>26 || (major===26 && minor>=2))) process.exit(1)' "$VER"
 
       - uses: ruby/setup-ruby@v1
