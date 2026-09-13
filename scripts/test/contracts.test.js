@@ -932,7 +932,10 @@ function ktSources(dir) {
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'شغّل \{shortcut\} · الرسالة المستلمة كاملة'/.test(copy) &&
       /أكملت الإعداد/.test(copy) &&
-      /اختر مرسلي البنوك/.test(copy) &&
+      // ec71e1b reworded the sender step: Apple does not expose every bank
+      // SMS id to Automations, so the guidance says the sender is optional
+      // rather than telling the user to choose bank senders.
+      /المرسل اختياري/.test(copy) &&
       /مرسل بنك تختاره/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
       /يحذف وفرة الرسالة الخام/.test(copy));

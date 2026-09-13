@@ -88,6 +88,10 @@ function harness(options = {}) {
     '@/lib/leaving-soon': { daysPhrase: (days) => language === 'ar' ? `خلال ${days} أيام` : `In ${days} days` },
     '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/notifications': { syncPaymentReminders: async () => events.push(['reminders']) },
+    // The real comparison, not a double: Home uses it to decide whether a
+    // ledger change can possibly move a reminder, and a stub that always
+    // answered one way would hide exactly the bug this harness looks for.
+    '@/lib/reminders': require('../build/reminders.js'),
     '@/lib/period': { periodLabel: () => language === 'ar' ? 'سبتمبر 2026' : 'September 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },
