@@ -8,8 +8,14 @@ internal import WafraMessageHistory
 @available(iOS 26.0, *)
 private enum WafraPagedIntentError: Error, CustomLocalizedStringResourceConvertible {
   case begin
+  case cursor
   var localizedStringResource: LocalizedStringResource {
-    "Wafra could not start or resume this history import. Open the history beta screen to check saved progress."
+    switch self {
+    case .begin:
+      "Wafra could not start or resume this history import. Open the history beta screen to check saved progress."
+    case .cursor:
+      "Wafra could not read the saved history cursor. Open Wafra to check saved progress."
+    }
   }
 }
 
@@ -29,6 +35,34 @@ struct BeginWafraPagedImportIntent: AppIntent {
         oldestGUID: oldestGUID, oldestDate: oldestDate,
         newestGUID: newestGUID, newestDate: newestDate))
     } catch { throw WafraPagedIntentError.begin }
+  }
+}
+
+@available(iOS 26.0, *)
+struct WafraPagedCursorDateIntent: AppIntent {
+  static let title: LocalizedStringResource = "Read Wafra history cursor date"
+  static let description = IntentDescription("Returns the protected saved history cursor as a typed date for the Messages query.")
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let supportedModes: IntentModes = .background
+  @Parameter(title: "Import request") var request: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<Date> {
+    do {
+      guard request.utf8.count <= 16_384,
+            WafraMessageHistoryStore.hasUniqueJSONMemberNames(Data(request.utf8)),
+            let object = try JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any],
+            object["status"] as? String == "continue",
+            let before = object["before"] as? String,
+            before.utf8.count <= 64 else {
+        throw WafraPagedIntentError.cursor
+      }
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      guard let value = formatter.date(from: before) else { throw WafraPagedIntentError.cursor }
+      return .result(value: value)
+    } catch {
+      throw WafraPagedIntentError.cursor
+    }
   }
 }
 

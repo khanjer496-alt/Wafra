@@ -3,17 +3,21 @@ import { test } from 'node:test';
 import { buildPagedHistoryShortcut, verifyPagedHistoryShortcut } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 
-test('Get Dates from Input uses a variable-picker attachment while Format Date keeps its date-field token', () => {
+test('saved paging cursor is returned by Wafra as a typed date; Shortcuts never reparses it', () => {
   const actions = buildPagedHistoryShortcut().WFWorkflowActions;
-  const detect = actions.find(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.detect.date');
-  assert.ok(detect);
-  const input = detect.WFWorkflowActionParameters.WFInput;
-  assert.equal(input.WFSerializationType, 'WFTextTokenAttachment',
-    'Apple WFVariablePickerParameter discards scalar text tokens during parameter deserialization');
-  assert.equal(input.Value.Type, 'ActionOutput');
-  const source = actions.find(action => action.WFWorkflowActionParameters.UUID === input.Value.OutputUUID);
-  assert.equal(source?.WFWorkflowActionIdentifier, 'is.workflow.actions.getvalueforkey');
-  assert.equal(source.WFWorkflowActionParameters.WFDictionaryKey, 'before');
+  assert.equal(actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.detect.date').length, 0);
+  const cursor = actions.find(action => action.WFWorkflowActionIdentifier === 'app.wafra.ios.WafraPagedCursorDateIntent');
+  assert.ok(cursor);
+  assert.equal(cursor.WFWorkflowActionParameters.request.WFSerializationType, 'WFTextTokenString');
+  assert.equal(cursor.WFWorkflowActionParameters.request.Value.attachmentsByRange['{0, 1}'].Type, 'Variable');
+  assert.equal(cursor.WFWorkflowActionParameters.request.Value.attachmentsByRange['{0, 1}'].VariableName, 'Request');
+  const queries = actions.filter(action => action.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity').slice(2);
+  for (const query of queries) {
+    const date = query.WFWorkflowActionParameters.WFContentItemFilter.Value.WFActionParameterFilterTemplates[0].Values.Date;
+    const ref = date.Value.attachmentsByRange['{0, 1}'];
+    assert.equal(ref.Type, 'ActionOutput');
+    assert.equal(ref.OutputUUID, cursor.WFWorkflowActionParameters.UUID);
+  }
   for (const action of actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.format.date')) {
     assert.equal(action.WFWorkflowActionParameters.WFDate.WFSerializationType, 'WFTextTokenString',
       'WFDateFieldParameter needs the scalar wrapper; this is not a global wrapper replacement');

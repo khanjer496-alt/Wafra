@@ -99,21 +99,15 @@ export function buildPagedHistoryShortcut() {
   });
   const before = get('before', output(dictionary, 'Dictionary'));
   const limit = get('limit', output(dictionary, 'Dictionary'));
-  // Get Dates uses WFVariablePickerParameter, not WFDateFieldParameter.
-  // Apple discards a scalar token here and can fall back to the preceding
-  // limit value rather than the explicit cursor date.
-  const dates = emit('is.workflow.actions.detect.date', { WFInput: attachment(output(before)) });
-  const dateCount = count(output(dates, 'Dates'));
-  condition(output(dateCount, 'Count'), 0, () => {
-    alert('History paused safely', 'The next page date could not be read. Saved pages are retained. Nothing was marked complete.');
-    open('wafra://ios-setup?section=history'); stop();
-  });
-  const date = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(dates, 'Dates')) });
+  // Never ask Shortcuts to parse Wafra's ISO cursor string. iOS 26 has
+  // produced both unresolved parameters and empty Detect Dates results for
+  // valid cursors. Wafra returns the exact same cursor as a typed Date.
+  const date = native('WafraPagedCursorDateIntent', { request: scalar(variable('Request')) });
   const noPage = emit('is.workflow.actions.list', { WFItems: [] });
   set('Page', output(noPage, 'List'));
   // Four literal bounds avoid relying on dynamic limit-field serialization.
   for (const n of [51, 102, 204, 408]) {
-    condition(output(limit), n, () => { const page = find(n, 'Latest First', output(date, 'Date')); set('Page', output(page, 'Message')); });
+    condition(output(limit), n, () => { const page = find(n, 'Latest First', output(date)); set('Page', output(page, 'Message')); });
   }
   const found = count(variable('Page'));
   condition(output(found, 'Count'), 0, () => {
