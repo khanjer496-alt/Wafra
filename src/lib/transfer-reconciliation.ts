@@ -1045,12 +1045,22 @@ export function reconcileTransfers(transactions: Transaction[], accounts: Accoun
   return memoizedReconcile(transactions, accounts);
 }
 
+/** The exact transaction ids analytics treats as internal after reconciliation. */
+export function reconciliationInternalIds(result: TransferReconciliationResult): Set<string> {
+  return new Set([
+    ...result.internalIds,
+    ...result.corroboratingIds,
+    ...result.cardRepaymentPairs.keys(),
+    ...result.knownCardRepayments.keys(),
+  ]);
+}
+
 /**
  * Durable receipt for persisted ledgers already normalized by the current
- * transfer-link semantics. Increment when matching/link semantics change and
- * existing saved ledgers require one fresh full pass.
+ * transfer-link semantics. Increment when matching/link semantics or the
+ * persisted derived receipt changes and existing saved ledgers need one pass.
  */
-export const TRANSFER_NORMALIZATION_VERSION = 1;
+export const TRANSFER_NORMALIZATION_VERSION = 2;
 
 /** Never changes amounts, routing, type, IDs or legacy transfer flags. */
 export function normalizeTransferLinks(transactions: Transaction[], accounts: Account[]): Transaction[] {

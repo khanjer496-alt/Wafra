@@ -24,6 +24,8 @@ import {
   applyTransferDecision,
   isTransferCandidate,
   normalizeTransferLinks,
+  reconcileTransfers,
+  reconciliationInternalIds,
   transferFingerprint,
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
@@ -60,7 +62,7 @@ import {
   PARSER_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
-import { countsInTotals, internalTransferIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIds, primeInternalTransferIds } from '@/lib/ledger';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -218,8 +220,30 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${idCounter}-${Math.floor(Math.random() * 1e6)}`;
 }
 
+function mapTransactionsPreservingIdentity(
+  transactions: Transaction[],
+  mapper: (transaction: Transaction) => Transaction,
+): Transaction[] {
+  let changed = false;
+  const next = transactions.map((transaction) => {
+    const mapped = mapper(transaction);
+    if (mapped !== transaction) changed = true;
+    return mapped;
+  });
+  return changed ? next : transactions;
+}
+
 function sortTxs(transactions: Transaction[]): Transaction[] {
-  return [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  let alreadySorted = true;
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) {
+      alreadySorted = false;
+      break;
+    }
+  }
+  return alreadySorted
+    ? transactions
+    : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
 /**
@@ -455,80 +479,69 @@ export function migratePersistedState(
 
   markLaunchPhase('ledger-overrides-complete');
   if (parsed.transactions) {
-    parsed.transactions = parsed.transactions
-      .map((t) =>
-        t.userEdited
-          ? t
-          : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-            ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-            : t,
-      )
-      // Income mis-filed into spending categories (a Talabat payout is
-      // revenue, not dining): re-file as business/salary.
-      .map((t) =>
-        t.userEdited
-          ? t
-          : t.source === 'sms' &&
-              t.type === 'income' &&
-              !['salary', 'business', 'other'].includes(t.category)
-            ? { ...t, category: 'business' as const }
-            : t,
-      )
-      // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
-      // clearly and group as one subscription.
-      .map((t) => {
-        if (t.userEdited || t.source !== 'sms') return t;
-        const canonical = normalizeServiceName(t.title);
-        return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-      })
-      // Parser versions before T215 filed anonymous incoming money as
-      // Business (or even retained a spending category). Structural titles
-      // mean no payer was identified. Refile only those exact SMS rows, while
-      // retaining salary/Other and raw messages carrying explicit originator
-      // or company evidence.
-      .map((t) => {
-        if (
-          t.userEdited ||
-          t.source !== 'sms' ||
-          t.type !== 'income' ||
-          (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
-          t.category === 'salary' ||
-          t.category === 'other' ||
-          (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
-        ) {
-          return t;
-        }
-        return { ...t, category: 'other' as const };
-      })
-      // Older imports marked every inward remittance as a transfer. An
-      // unpaired arrival is real income; only ledger pairing can prove it
-      // moved between the user's own accounts.
-      //
-      // This used to skip raw-bearing rows, on the reasoning that they could
-      // reparse their way out. They could not: healing only ever ADDS the
-      // transfer flag (`if (p.transferHint && !prior.isTransfer)`) and never
-      // clears it, so those rows stayed stranded no matter how often they were
-      // re-read. The parser no longer sets the flag at all, so every stored
-      // row of this exact shape is now safe to release.
-      .map((t) => {
-        if (
-          t.userEdited ||
-          t.source !== 'sms' ||
-          t.type !== 'income' ||
-          t.title !== 'Inward remittance' ||
-          t.isTransfer !== true
-        ) {
-          return t;
-        }
-        const { isTransfer: _stale, ...income } = t;
-        return income;
-      });
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
+      t.userEdited
+        ? t
+        : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
+          ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
+          : t,
+    );
+    // Income mis-filed into spending categories (a Talabat payout is
+    // revenue, not dining): re-file as business/salary.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
+      t.userEdited
+        ? t
+        : t.source === 'sms' &&
+            t.type === 'income' &&
+            !['salary', 'business', 'other'].includes(t.category)
+          ? { ...t, category: 'business' as const }
+          : t,
+    );
+    // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
+    // clearly and group as one subscription.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+      if (t.userEdited || t.source !== 'sms') return t;
+      const canonical = normalizeServiceName(t.title);
+      return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
+    });
+    // Parser versions before T215 filed anonymous incoming money as
+    // Business (or even retained a spending category). Structural titles mean
+    // no payer was identified. Refile only those exact SMS rows.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+      if (
+        t.userEdited ||
+        t.source !== 'sms' ||
+        t.type !== 'income' ||
+        (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
+        t.category === 'salary' ||
+        t.category === 'other' ||
+        (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
+      ) {
+        return t;
+      }
+      return { ...t, category: 'other' as const };
+    });
+    // Older imports marked every inward remittance as a transfer. An unpaired
+    // arrival is real income; only ledger pairing can prove own-account motion.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+      if (
+        t.userEdited ||
+        t.source !== 'sms' ||
+        t.type !== 'income' ||
+        t.title !== 'Inward remittance' ||
+        t.isTransfer !== true
+      ) {
+        return t;
+      }
+      const { isTransfer: _stale, ...income } = t;
+      return income;
+    });
 
     // ATM rows have always carried this exact structural title. Releases
     // before parser v17 could file the machine's mall/street address under a
     // merchant category, so repair every parser-owned expense rather than
     // only rows currently in Other. Hand edits remain authoritative.
-    parsed.transactions = parsed.transactions.map((t) => {
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -551,7 +564,7 @@ export function migratePersistedState(
     // Re-file rows stuck in Other: each parser release widens the merchant
     // vocabulary, so imported-as-Other rows get another chance without
     // needing a rescan. User overrides still win.
-    parsed.transactions = parsed.transactions.map((t) => {
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -806,16 +819,24 @@ function reducer(state: AppState, action: Action): AppState {
     // launch dominated startup on real ledgers, so hydrate trusts that receipt
     // and missing/older receipts fail safe by doing one full pass.
     const persistedTransferGraphIsCurrent = action.type === 'hydrate' &&
-      reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION;
+      reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+      Array.isArray(reduced.transferInternalIds);
     const needsTransferNormalization = !persistedTransferGraphIsCurrent && (accountsChanged || (
       transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
     ));
+    const transferReconciliation = needsTransferNormalization
+      ? reconcileTransfers(reduced.transactions, reduced.accounts)
+      : null;
     const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;
     const normalized = transactions === reduced.transactions ? reduced : { ...reduced, transactions };
-    const stamped = needsTransferNormalization
-      ? { ...normalized, transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION }
+    const stamped = needsTransferNormalization && transferReconciliation
+      ? {
+          ...normalized,
+          transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+          transferInternalIds: [...reconciliationInternalIds(transferReconciliation)],
+        }
       : normalized;
     return syncLedgerCurrency(stamped);
   } catch (error) {
@@ -1672,6 +1693,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stateGeneration.current += 1;
     }
     authoritativeState.current = next;
+    if (next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+        Array.isArray(next.transferInternalIds)) {
+      primeInternalTransferIds(next.transactions, next.accounts, next.transferInternalIds);
+    }
     authoritativeRevision.current += 1;
     setState(next);
     return next;

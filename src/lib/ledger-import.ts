@@ -23,7 +23,7 @@ import {
   migrateLegacyLedgerMoney,
 } from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
-import { normalizeTransferLinks, TRANSFER_NORMALIZATION_VERSION } from '@/lib/transfer-reconciliation';
+import { normalizeTransferLinks, reconcileTransfers, reconciliationInternalIds, TRANSFER_NORMALIZATION_VERSION } from '@/lib/transfer-reconciliation';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type {
   Account,
@@ -211,6 +211,7 @@ export const applyMaterializedImportBatch = (
   }));
   const repaired = repairDuplicateStatements(merged);
   const retained = reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions));
+  const transferReconciliation = reconcileTransfers(retained, repaired.accounts);
 
   return {
     ...repaired,
@@ -222,5 +223,6 @@ export const applyMaterializedImportBatch = (
       normalizeTransferLinks(retained, repaired.accounts),
     ),
     transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: [...reconciliationInternalIds(transferReconciliation)],
   };
 };

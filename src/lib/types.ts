@@ -638,6 +638,8 @@ export interface AppState {
    * fail safe by rebuilding once on hydration.
    */
   transferNormalizationVersion?: number;
+  /** Exact reconciled internal-transfer ids for the matching normalization receipt. */
+  transferInternalIds?: string[];
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;

@@ -170,7 +170,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "leave",
-      "sha256": "fe52d456cdcfd8e2c728f8ae408b671f5509ee722fa321b12e6343870680d83c"
+      "sha256": "1872e5de16c136abe2a2a5bf71f3d98ecfd5dce4e0a571bd507b18c50b11f9d9",
+      "reviewedChange": "2026-09-13: During guided onboarding, Back clears the return marker and replaces the route once instead of walking backward through Shortcut/iCloud handoffs. Settings behavior remains ordinary back navigation. Covered by iOS setup UX/navigation tests."
     },
     {
       "file": "src/app/feedback.tsx",
