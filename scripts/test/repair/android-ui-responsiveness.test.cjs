@@ -44,7 +44,7 @@ function filterProbe(language = 'en', options = {}) {
     '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/components/ui/category-chips': { CategoryChips: 'Categories' },
     '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({}) },
-    '@/constants/theme': { Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
+    '@/constants/theme': { Fonts: { sansMedium: 'Geist-Medium' }, Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
   });
   const filters = load(path.join(root, 'src/lib/transaction-filter.ts'), deps);
   deps['@/lib/transaction-filter'] = filters;

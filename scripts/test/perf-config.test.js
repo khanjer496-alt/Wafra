@@ -92,13 +92,12 @@ function stripComments(text) {
 
 const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
   'src/app/(tabs)/bills.tsx',
-  // Not a tab screen, but it reaches Android through the card and bill detail
-  // sheets with a per-segment stagger — the exact shape this guard exists for,
-  // in a file the tab-screen list did not cover.
-  'src/components/ui/charts.tsx',
 ];
-// The shipping Home. `src/app/(tabs)/index.tsx` re-exports it; the older
-// ledger-home-screen below is retained for its own suites but is not rendered.
+// The shipping Home: `src/app/(tabs)/index.tsx` re-exports it. The
+// ledger-home-screen list further down keeps its persistent-reveal contract
+// for the day that screen is rendered again; today nothing imports it, so a
+// stall there is not a stall the user can hit, and this list guards the Home
+// that is.
 const SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION = [
   'src/screens/journal-home-screen.tsx',
 ];

@@ -56,16 +56,17 @@ A page therefore costs the same handful of actions whether it holds 51 or 408
 Messages. No App Intent array parameter is bound; the entity-property array
 binding that failed on-device for the earlier bulk intent is not used.
 
-Natively, `WafraPagedHistoryStore.stageColumns` splits each column, requires the
-GUID, body and date columns to line up exactly with the page count, rebuilds the
-existing `b64|b64|b64|b64` line frame, and calls the unchanged `stage`. Every
-cursor, journal, retry-idempotence, capacity and record rule applies as before.
-A sender column that does not line up is dropped as a whole (sender is optional
-in the stored record) rather than shifted across rows. A GUID, body or date
-mismatch — a body containing the sentinel, or a nil property dropped by
-Combine Text — is refused as `frame-columns`, and the graph then runs the exact
-v2 per-message framing for that page only, bound to the untouched request, so
-no page is ever committed misaligned and no inbox is blocked by one odd message.
+Natively, `WafraPagedHistoryStore.stageColumns` bounds each column by what the
+page's records may carry, splits it, requires all four columns to line up
+exactly with the page count, rebuilds the existing `b64|b64|b64|b64` line frame,
+and calls the unchanged `stage`. Every cursor, journal, retry-idempotence,
+capacity and record rule applies as before. Any mismatch — a body containing the
+sentinel, or a nil property dropped by Combine Text — is refused as
+`frame-columns`, and the graph then runs the exact v2 per-message framing for
+that page only, bound to the untouched request, so no page is ever committed
+misaligned and no inbox is blocked by one odd message. The sender column is
+held to the same rule deliberately: the sender is the bank identity downstream,
+and blanking it for a page would import bank alerts as unattributable rows.
 
 The v2 generator output is byte-identical to before this change
 (SHA-256 `0a39c7f5d5dce2954ee8c8e098a7db922f6b09feffa4f56c186fb603923b6c43` of its
@@ -100,10 +101,9 @@ Sign it with `shortcuts sign --mode anyone` on a Mac, run it on the iPhone with
 a conversation that contains an attachment-only Message and a group thread in
 the newest 25, and record the alert. All five counts equal means column framing
 is viable and v3 can be signed as `Wafra History Import.shortcut` and taken
-through the existing physical import acceptance. `bodies` or `guids` below
+through the existing physical import acceptance. Any column below
 `messages` means Combine Text drops nil items on this iOS build; v3 would then
 fall back to per-message framing on every such page, which is correct but not
-faster — do not publish it in that case. `senders` below `messages` is tolerated
-by design.
+faster — do not publish it in that case.
 
 Nothing in this document is evidence of a measured phone import time.

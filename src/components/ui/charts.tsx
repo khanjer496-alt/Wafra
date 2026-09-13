@@ -15,7 +15,6 @@ import { rampColor } from '@/components/ui/data-viz';
 import { DataViz, Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
 import { isRTL, t, tf } from '@/lib/i18n';
@@ -63,9 +62,6 @@ export function CompositionBar({
   const dark = useColorScheme() === 'dark';
   const dataViz = DataViz[dark ? 'dark' : 'light'];
   const ramp = useRamp();
-  // Reached from the card and bill detail sheets on Android, where a staggered
-  // layout entrance is the same draw-path stall the tab screens removed.
-  const enter = useScreenEntering();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
     return (
@@ -97,7 +93,7 @@ export function CompositionBar({
         <Animated.View
           key={s.key}
           accessible={false}
-          entering={enter(FadeIn.delay(i * 60).duration(Motion.sectionEnter))}
+          entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
           style={{
             flexGrow: s.value,
             flexBasis: 0,

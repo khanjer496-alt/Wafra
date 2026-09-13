@@ -163,17 +163,28 @@ struct PagedHistoryTests {
         found: 2, guids: "a\(sep)b", bodies: "x\(sep)y\(sep)z", senders: "s\(sep)s", dates: "\(stamp(fixedNow))\(sep)\(stamp(fixedNow))")
     }
     try check("column refusal leaves the cursor untouched", try json(columnar.status()!)["checked"] as! Int == col["checked"] as! Int)
+    try rejected("a sender column that does not line up is refused, never silently blanked for the page") {
+      let next = page(rows(100), col); let (g2, b2, _, d2) = columns(next)
+      _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
+        authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
+        found: next.count, guids: g2, bodies: b2, senders: "", dates: d2)
+    }
+    try rejected("a column larger than its records could carry is refused before splitting") {
+      _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
+        authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
+        found: 1, guids: String(repeating: "g", count: 1_025), bodies: "x", senders: "s", dates: stamp(fixedNow))
+    }
     while col["status"] as! String != "complete" {
       let next = page(rows(100), col); let (g2, b2, s2, d2) = columns(next)
       col = try json(columnar.stageColumns(sessionId: col["sessionId"] as! String,
         authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
-        found: next.count, guids: g2, bodies: b2, senders: "", dates: d2))
+        found: next.count, guids: g2, bodies: b2, senders: s2, dates: d2))
     }
-    try check("column framing with a dropped sender column completes the full source", col["checked"] as! Int == 100)
+    try check("column framing completes the full source", col["checked"] as! Int == 100)
     let colSession = col["sessionId"] as! String
     let colRecord = try json(columnar.readChunk(sessionId: colSession, chunkIndex: 0)[0])
     try check("column-framed body survives the round trip unchanged", colRecord["text"] as! String == rows(100)[0].body)
-    try check("misaligned sender column is dropped rather than misattributed", colRecord["sender"] == nil)
+    try check("column-framed sender survives the round trip unchanged", colRecord["sender"] as? String == "TEST")
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")
   }
 }

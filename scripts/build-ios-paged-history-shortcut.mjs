@@ -13,9 +13,10 @@ export const PAGED_SHORTCUT_NAME = 'Wafra History v2';
 // Text, one Append), so a 10,000-message inbox is ~100,000 interpreted actions.
 // v3 builds each field for the whole page with one list-wide Combine Text and
 // hands the four columns to Wafra in one call, so a page costs the same handful
-// of actions whether it holds 51 or 408 messages. If Wafra cannot reconcile a
-// page's columns (a body containing the sentinel, a dropped nil property), the
-// graph falls back to the exact v2 per-message framing for that page only.
+// of actions whether it holds 51 or 408 messages. If Wafra cannot reconcile any
+// of a page's four columns (a body containing the sentinel, a dropped nil
+// property), the graph falls back to the exact v2 per-message framing for that
+// page only.
 export const COLUMNAR_SHORTCUT_NAME = 'Wafra History v3';
 // Printable and absent from real SMS; the native side counts items per column
 // against the page count and refuses any page where they disagree.

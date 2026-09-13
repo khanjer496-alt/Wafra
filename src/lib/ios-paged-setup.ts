@@ -2,7 +2,7 @@
 // This must match the name Apple actually installs from the canonical public
 // iCloud record. Do not use a prettier alias here: Shortcuts' run URL resolves
 // by installed name, which is how an older duplicate was executed on-device.
-// The same record/name pair lives in IOS_HISTORY_SHORTCUT_INSTALLED_NAMES
+// The same record/name pair lives in IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS
 // (ios-history-setup.ts); this module stays dependency-free for its tests.
 export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date.signed';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v3';

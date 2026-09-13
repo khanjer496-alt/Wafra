@@ -35,7 +35,11 @@ test('local build accepts only the explicit supported store profiles without cha
 
 test('source and signing are pinned, and only a verified exact-source build may reach TestFlight', () => {
   const checkout = steps.find(s => s.uses === 'actions/checkout@v4');
-  assert.equal(checkout.with.ref, '${{ inputs.source_commit || github.sha }}');
+  // 7faf341 pinned mobile release builds to main: a manual dispatch without an
+  // explicit source_commit builds main itself, never whichever ref the
+  // dispatcher happened to be on. The exact-source and ancestry gates below
+  // still apply to whatever that resolves to.
+  assert.equal(checkout.with.ref, "${{ inputs.source_commit || 'main' }}");
   assert.equal(checkout.with['fetch-depth'], 0);
   assert.ok(steps.some(s => /merge-base --is-ancestor.*origin\/main/.test(s.run || '')));
   const build = steps.find(s => s.name === 'Build signed iOS archive on this macOS runner').run;

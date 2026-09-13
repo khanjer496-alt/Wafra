@@ -256,16 +256,23 @@ public final class WafraPagedHistoryStore {
   /// Column framing: the Shortcut builds one string per field for the whole
   /// page with list-wide Apple actions instead of a per-message loop. The
   /// columns are rebuilt into the line frame that `stage` already validates,
-  /// so every cursor, journal, retry and record rule applies unchanged. GUID,
-  /// body and date columns must line up exactly with the page count; a body
-  /// containing the sentinel or a dropped nil property therefore refuses the
-  /// page as `frame-columns` rather than committing misaligned records. Sender
-  /// is optional in the stored record, so a sender column that does not line
-  /// up is dropped as a whole rather than misattributed across rows.
+  /// so every cursor, journal, retry and record rule applies unchanged. All
+  /// four columns must line up exactly with the page count; a body containing
+  /// the sentinel or a dropped nil property therefore refuses the page as
+  /// `frame-columns` rather than committing misaligned records. That includes
+  /// the sender column: the sender is the bank identity downstream, and a page
+  /// of alerts with no sender would import "successfully" as unattributable
+  /// rows, so the producer's per-message fallback handles such a page instead.
   public func stageColumns(sessionId: String, authorizationSecret: String, revision: Int, found: Int,
                            guids: String, bodies: String, senders: String, dates: String) throws -> String {
+    // Bound each column by what `found` records may legitimately carry before
+    // anything is split or Base64-inflated; `stage` re-checks the frame.
+    let separators = max(found - 1, 0)
     guard found > 0, found <= WafraHistoryCursor.maximumLimit,
-          [guids, bodies, senders, dates].allSatisfy({ $0.utf8.count <= 8 * 1024 * 1024 }) else {
+          guids.utf8.count <= found * 1_024 + separators * 3,
+          bodies.utf8.count <= found * 16 * 1_024 + separators * 3,
+          senders.utf8.count <= found * 1_024 + separators * 3,
+          dates.utf8.count <= found * 64 + separators * 3 else {
       throw Failure.invalidInput
     }
     func column(_ value: String) -> [Substring] {
@@ -273,15 +280,14 @@ public final class WafraPagedHistoryStore {
     }
     let guidColumn = column(guids)
     let bodyColumn = column(bodies)
+    let senderColumn = column(senders)
     let dateColumn = column(dates)
-    guard guidColumn.count == found, bodyColumn.count == found, dateColumn.count == found else {
+    guard guidColumn.count == found, bodyColumn.count == found,
+          senderColumn.count == found, dateColumn.count == found else {
       throw Failure.columnMismatch
     }
-    let senderColumn = column(senders)
-    let alignedSenders: [Substring] = senderColumn.count == found
-      ? senderColumn : Array(repeating: Substring(""), count: found)
     let lines = (0..<found).map { index in
-      [guidColumn[index], bodyColumn[index], alignedSenders[index], dateColumn[index]]
+      [guidColumn[index], bodyColumn[index], senderColumn[index], dateColumn[index]]
         .map { Data($0.utf8).base64EncodedString() }
         .joined(separator: "|")
     }
