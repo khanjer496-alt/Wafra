@@ -60,9 +60,14 @@ public final class WafraPagedHistoryStore {
   }
 
   private func decodeBase64Field(_ value: Substring, maximum: Int) throws -> String {
-    guard value.utf8.count <= ((maximum + 2) / 3) * 4 + 8,
-          let data = Data(base64Encoded: String(value)),
-          data.base64EncodedString() == value,
+    // Shortcuts can hand an App Intent text scalar a trailing CR/space even
+    // when Base64 Encode itself is configured with no line breaks. Treat only
+    // surrounding ASCII whitespace as transport noise; never ignore characters
+    // inside the encoded value.
+    let encoded = String(value).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard encoded.utf8.count <= ((maximum + 2) / 3) * 4 + 8,
+          let data = Data(base64Encoded: encoded),
+          data.base64EncodedString() == encoded,
           data.count <= maximum,
           let text = String(data: data, encoding: .utf8) else {
       throw Failure.invalidInput
@@ -98,8 +103,16 @@ public final class WafraPagedHistoryStore {
       }
       guid = parsedGuid; body = parsedBody; sender = parsedSender; dateText = parsedDate
     }
-    let ref = try reference(guid: guid, dateText: dateText)
-    let record = WafraMessageHistoryImporter.preparedRecord(guid: guid, body: body,
+    // MessageEntity has returned a blank GUID for individual real-device rows
+    // even when the oldest/newest boundary rows expose one. Do not throw away
+    // the whole page for that Apple metadata gap. Build a local, deterministic
+    // identifier from the other immutable row fields; only its hash is ever
+    // persisted. The normal GUID remains preferred whenever Apple supplies it.
+    let stableGuid = guid.isEmpty
+      ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(sender)\u{0}\(body)".utf8)))"
+      : guid
+    let ref = try reference(guid: stableGuid, dateText: dateText)
+    let record = WafraMessageHistoryImporter.preparedRecord(guid: stableGuid, body: body,
       sender: sender, date: try date(dateText), now: now())
     return PreparedRow(reference: ref, record: record == "{\"v\":0}" ? nil : record)
   }
@@ -222,7 +235,20 @@ public final class WafraPagedHistoryStore {
         return try response(head, token: authorizationSecret)
       }
       guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
-      let lines = frame.split(separator: "\n", omittingEmptySubsequences: false)
+      // Combine Text normally returns no trailing newline, but real Shortcuts
+      // builds have produced CRLF/trailing-newline variants when crossing the
+      // App Intent boundary. Empty records are impossible (every record has
+      // three `|` separators), so dropping transport-only empty lines is safe
+      // and prevents an otherwise valid page from becoming `invalid-input`.
+      // Swift treats CRLF as a single extended grapheme cluster in Character
+      // iteration, so splitting the original String on the `"\n"` Character
+      // can leave an entire CRLF-delimited Shortcut page unsplit. Normalize the
+      // transport delimiters first. Raw newlines cannot occur inside these
+      // Base64 fields, so this does not change record content.
+      let normalizedFrame = frame
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+      let lines = normalizedFrame.split(separator: "\n", omittingEmptySubsequences: true)
       guard lines.count == found else { throw Failure.invalidInput }
       var prepared: [PreparedRow] = []
       for line in lines {

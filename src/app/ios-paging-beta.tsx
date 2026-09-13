@@ -20,8 +20,9 @@ import { PAGED_HISTORY_INSTALL_KEY, PAGED_HISTORY_INSTALL_URL, pagedHistoryCopy,
 const nativeModule = async () => (await import('../../modules/wafra-message-history')).default;
 function PagedHistoryScreen() {
   const theme = useTheme(); const language = useLanguage(); const w = pagedHistoryCopy[language === 'ar' ? 'ar' : 'en'];
-  const router = useRouter(); const params = useLocalSearchParams<{ origin?: string }>();
+  const router = useRouter(); const params = useLocalSearchParams<{ origin?: string; blocked?: string }>();
   const origin = iosHistoryReturnOriginFromParam(params.origin) ?? 'ios-setup';
+  const blockedOnReturn = params.blocked === '1';
   const { getStateGeneration } = useStore();
   const [progress, setProgress] = useState<PagedHistoryProgress | null>(null);
   const [installed, setInstalled] = useState(false); const [adding, setAdding] = useState(false);
@@ -38,9 +39,9 @@ function PagedHistoryScreen() {
       if (!native?.getPagedStatus || !native.discardSession) throw new Error('missing_paged_receiver');
       const [raw, confirmed] = await Promise.all([native.getPagedStatus(), AsyncStorage.getItem(PAGED_HISTORY_INSTALL_KEY)]);
       const next = parsePagedHistoryProgress(raw);
-      if (current()) { setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(null); }
+      if (current()) { setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(blockedOnReturn ? w.paused : null); }
     } catch { if (current()) { setProgress(null); setReady(false); setError(w.error); } }
-  }, [getStateGeneration, w.error]);
+  }, [blockedOnReturn, getStateGeneration, w.error, w.paused]);
   useEffect(() => {
     const epoch = sequence;
     alive.current = true; void refresh();
@@ -63,6 +64,7 @@ function PagedHistoryScreen() {
     if (alive.current) setAdding(true);
   });
   const start = () => void run(async () => {
+    if (blockedOnReturn) router.setParams({ blocked: undefined });
     const ledger = getStateGeneration();
     const stillCurrent = () => alive.current && ledger === getStateGeneration();
     if (!await Linking.canOpenURL('shortcuts://')) { setError(w.missing); return; }
@@ -118,6 +120,7 @@ function PagedHistoryScreen() {
         </View>}
         {error && <ThemedText accessibilityRole="alert">{error}</ThemedText>}
         <Button label={label} disabled={busy || !ready} onPress={canRunShortcut || progress?.status === 'complete' ? start : install} wrapLabel />
+        {blockedOnReturn && <Button label={w.back} variant="ghost" disabled={busy} onPress={leave} wrapLabel />}
         <Button label={w.refresh} variant="outline" disabled={busy} onPress={() => { void refresh(); }} wrapLabel />
         {(installed || adding || progress) && <Button label={w.again} variant="ghost" disabled={busy} onPress={install} wrapLabel />}
         {progress && <Button label={w.remove} variant="ghost" disabled={busy} onPress={() => setConfirmDiscard(true)} wrapLabel />}

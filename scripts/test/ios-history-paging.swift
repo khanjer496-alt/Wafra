@@ -23,6 +23,11 @@ struct PagedHistoryTests {
         "date": stamp(date), "body": body, "sender": "TEST"], options: [.sortedKeys])
       return data.base64EncodedString()
     }
+    var framed: String {
+      [guid, body, "TEST", stamp(date)]
+        .map { Data($0.utf8).base64EncodedString() }
+        .joined(separator: "|")
+    }
   }
   static func rows(_ count: Int) -> [Row] {
     (0..<count).map { Row(guid: "synthetic-\($0)",
@@ -140,6 +145,47 @@ struct PagedHistoryTests {
     let c = try begin(small, rows(100))
     try rejected("capacity fails before any page is committed") { _ = try send(small, c, page(rows(100), c)) }
     try check("capacity preserves the original checkpoint", try json(small.status()!)["checked"] as! Int == 0)
+
+    let transportRows = rows(100)
+    let transport = make("transport"); let transportState = try begin(transport, transportRows)
+    let transportPage = page(transportRows, transportState)
+    let transported = transportPage.map(\.framed).joined(separator: "\n")
+    let transportResult: [String: Any]
+    do {
+      transportResult = try json(transport.stage(sessionId: transportState["sessionId"] as! String,
+        authorizationSecret: transportState["authorizationSecret"] as! String,
+        revision: transportState["revision"] as! Int, found: transportPage.count, frame: transported))
+    } catch { fatalError("transport-noise failed: \(error)") }
+    try check("four-field row framing accepts a valid page",
+      transportResult["checked"] as! Int > 0)
+
+    let noisy = make("transport-noise"); let noisyState = try begin(noisy, transportRows)
+    let noisyPage = page(transportRows, noisyState)
+    let noisyFrame = noisyPage.map(\.framed).joined(separator: "\r\n") + "\r\n"
+    let noisyResult: [String: Any]
+    do {
+      noisyResult = try json(noisy.stage(sessionId: noisyState["sessionId"] as! String,
+        authorizationSecret: noisyState["authorizationSecret"] as! String,
+        revision: noisyState["revision"] as! Int, found: noisyPage.count, frame: noisyFrame))
+    } catch { fatalError("transport-CRLF failed: \(error)") }
+    try check("CRLF and one trailing newline from Shortcuts do not reject a valid page",
+      noisyResult["checked"] as! Int == transportResult["checked"] as! Int)
+
+    let missingGuidRows = rows(100).enumerated().map { index, row in
+      index == 10 ? Row(guid: "", date: row.date, body: row.body) : row
+    }
+    let missingGuid = make("missing-guid"); let missingState = try begin(missingGuid, missingGuidRows)
+    let missingPage = page(missingGuidRows, missingState)
+    let missingResult: [String: Any]
+    do {
+      missingResult = try json(missingGuid.stage(sessionId: missingState["sessionId"] as! String,
+        authorizationSecret: missingState["authorizationSecret"] as! String,
+        revision: missingState["revision"] as! Int, found: missingPage.count,
+        frame: missingPage.map(\.framed).joined(separator: "\n")))
+    } catch { fatalError("missing-guid failed: \(error)") }
+    try check("a row whose MessageEntity GUID is blank does not reject the whole page",
+      missingResult["checked"] as! Int > 0)
+
     // Column framing rebuilds the same line frame, so a page staged from
     // joined columns must land on exactly the cursor the row frame reaches.
     let sep = String(WafraPagedHistoryStore.columnSeparator)
