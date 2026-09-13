@@ -721,7 +721,7 @@ export function useAutoImport(
         onPress: () => void openBankNotificationAccessSettings().catch(() => { /* The Settings row remains available for retry. */ }),
       }],
     });
-  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated, state.onboarded, watchForeground]);
+  }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated, state.onboarded, toast, watchForeground]);
 
   const recoverIosCapture = useCallback((): Promise<boolean> => {
     if (iosRecoveryInFlight.current) return iosRecoveryInFlight.current;
@@ -971,36 +971,43 @@ export function useAutoImport(
         return 'up-to-date';
       }
       if (outcome.kind !== 'imported') return 'up-to-date';
-      committed();
-      toast.show(
-        tf('importedTransactions', {
-          count: outcome.transactions,
-          s: outcome.transactions === 1 ? '' : 's',
-          bills:
-            outcome.bills > 0
-              ? tf('importedBills', {
-                  count: outcome.bills,
-                  s: outcome.bills === 1 ? '' : 's',
-                })
-              : '',
-          cards:
-            outcome.newAccounts > 0
-              ? tf('importedNewCards', {
-                  count: outcome.newAccounts,
-                  s: outcome.newAccounts === 1 ? '' : 's',
-                })
-              : '',
-        }),
-        {
-          tone: 'success',
-          actions: [
-            ...(outcome.transactionIds.length > 0
-              ? [{ label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) }]
-              : []),
-            { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
-          ],
-        },
-      );
+      // Automatic foreground/provider scans are intentionally quiet. A bank
+      // alert can arrive while the user is doing something unrelated in Wafra;
+      // showing the same success toast/haptic as a pull-to-refresh makes the
+      // app look like it is repeatedly importing on its own even though this is
+      // normal capture. Explicit refreshes still get confirmation and Undo.
+      if (interactive) {
+        committed();
+        toast.show(
+          tf('importedTransactions', {
+            count: outcome.transactions,
+            s: outcome.transactions === 1 ? '' : 's',
+            bills:
+              outcome.bills > 0
+                ? tf('importedBills', {
+                    count: outcome.bills,
+                    s: outcome.bills === 1 ? '' : 's',
+                  })
+                : '',
+            cards:
+              outcome.newAccounts > 0
+                ? tf('importedNewCards', {
+                    count: outcome.newAccounts,
+                    s: outcome.newAccounts === 1 ? '' : 's',
+                  })
+                : '',
+          }),
+          {
+            tone: 'success',
+            actions: [
+              ...(outcome.transactionIds.length > 0
+                ? [{ label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) }]
+                : []),
+              { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
+            ],
+          },
+        );
+      }
       return 'imported';
     },
     [captureExecutor, getStateSnapshot, iosCycleDependencies, syncAndroidNotificationAdmission,
@@ -1267,10 +1274,10 @@ export function useAutoImport(
    */
   useEffect(() => {
     if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
-    void syncDailySummary(state).catch(() => {
+    void syncDailySummary(getStateSnapshot()).catch(() => {
       // A digest is never worth surfacing an error over.
     });
-  }, [state, watchForeground]);
+  }, [getStateSnapshot, state.dailySummary, state.hydrated, state.onboarded, state.transactions, watchForeground]);
 
   return {
     runAutoImport,

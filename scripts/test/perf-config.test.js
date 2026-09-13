@@ -768,5 +768,22 @@ function bodyOf(source, header) {
       'the new layout over old chunks is the same data-scrambling bug from the other side');
 }
 
+
+// ---------------------------------------------------------------------------
+// Automatic capture must stay quiet and avoid unrelated notification work.
+// ---------------------------------------------------------------------------
+
+{
+  const autoImport = stripComments(read('src/hooks/use-auto-import.ts'));
+  ok('silent automatic imports do not fire the success toast or haptic',
+    /if \(interactive\) \{\s*committed\(\);\s*toast\.show\(\s*tf\('importedTransactions'/.test(autoImport),
+    'provider/foreground scans are background bookkeeping; only an explicit refresh should announce success');
+
+  ok('daily summary work is keyed to ledger changes, not every store mutation',
+    /\[getStateSnapshot, state\.dailySummary, state\.hydrated, state\.onboarded, state\.transactions, watchForeground\]/.test(autoImport) &&
+      !/\}, \[state, watchForeground\]\);/.test(autoImport),
+    'history progress, settings changes, and other unrelated reducer updates must not reschedule the daily summary');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
