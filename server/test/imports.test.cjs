@@ -609,6 +609,99 @@ function wideTextPdf(lines) {
     /amazon/i.test(balanceLabelled.rows[1].merchant) && balanceLabelled.rows[1].type === 'expense' &&
       balanceLabelled.rows[1].amountFils === 16530,
     JSON.stringify(balanceLabelled.rows[1]));
+  // A running balance proves which figure is the amount and which way it went,
+  // for the many statements that mark an empty cell with nothing at all. The
+  // flattening at the top of parseStatementLines removes the spacing, so these
+  // rows reach the reader as two bare figures and used to be rejected whole.
+  const balanceChain = parseStatementLines([
+    'Statement of Account',
+    'Date Description Debit Credit Balance',
+    '01/07/2026 OPENING ROW 100.00 9,900.00',
+    '02/07/2026 CARREFOUR MARKET 40.00 9,860.00',
+    '03/07/2026 SALARY JULY 18,500.00 28,360.00',
+    '04/07/2026 DEWA BILL 350.00 28,010.00',
+    '05/07/2026 NOON REFUND 25.50 28,035.50',
+    '06/07/2026 TALABAT 60.50 27,975.00',
+  ].join('\n'), 'AED');
+  ok('a reconciling balance column reads rows that carry no placeholder at all',
+    balanceChain.rows.length === 5 &&
+      balanceChain.rows[0].merchant === 'CARREFOUR MARKET' && balanceChain.rows[0].type === 'expense' &&
+      balanceChain.rows[0].amountFils === 4000 &&
+      balanceChain.rows[1].type === 'income' && balanceChain.rows[1].amountFils === 1850000 &&
+      balanceChain.rows[2].type === 'expense' && balanceChain.rows[2].amountFils === 35000 &&
+      balanceChain.rows[3].type === 'income' && balanceChain.rows[3].amountFils === 2550 &&
+      balanceChain.rows[4].type === 'expense' && balanceChain.rows[4].amountFils === 6050,
+    JSON.stringify(balanceChain.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  ok('the first row is not guessed: nothing precedes it to say which way the balance moved',
+    balanceChain.rejectedRows === 1, String(balanceChain.rejectedRows));
+  // The whole safeguard: the column is only readable because it reconciles.
+  const balancesDisagree = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    '01/07/2026 FIRST ROW 100.00 9,900.00',
+    '02/07/2026 CARREFOUR MARKET 40.00 7,111.00',
+    '03/07/2026 SALARY JULY 18,500.00 2,020.00',
+    '04/07/2026 DEWA BILL 350.00 5,555.00',
+    '05/07/2026 NOON REFUND 25.50 1,234.00',
+    '06/07/2026 TALABAT 60.50 9,999.00',
+  ].join('\n'), 'AED');
+  ok('figures that do not reconcile are still refused rather than guessed at',
+    balancesDisagree.rows.length === 0 && balancesDisagree.rejectedRows === 6,
+    JSON.stringify(balancesDisagree));
+  // An overdraft, and every credit card that states what is owed.
+  const overdraft = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    '01/07/2026 FIRST ROW 100.00 150.00',
+    '02/07/2026 CARREFOUR MARKET 200.00 -50.00',
+    '03/07/2026 DEWA BILL 350.00 -400.00',
+    '04/07/2026 SALARY JULY 1,000.00 600.00',
+    '05/07/2026 TALABAT 60.50 539.50',
+    '06/07/2026 NOON 39.50 500.00',
+  ].join('\n'), 'AED');
+  ok('a balance that goes negative keeps reading instead of stopping at the red',
+    overdraft.rows.length === 5 &&
+      overdraft.rows[0].type === 'expense' && overdraft.rows[0].amountFils === 20000 &&
+      overdraft.rows[1].type === 'expense' && overdraft.rows[1].amountFils === 35000 &&
+      overdraft.rows[2].type === 'income' && overdraft.rows[2].amountFils === 100000,
+    JSON.stringify(overdraft.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  // The label names the balance; the charge is the figure before it.
+  const labelledChain = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    '01/07/2026 FIRST ROW 100.00 9,900.00 DR',
+    '02/07/2026 CARREFOUR MARKET 40.00 9,860.00 DR',
+    '03/07/2026 SALARY JULY 18,500.00 28,360.00 CR',
+    '04/07/2026 DEWA BILL 350.00 28,010.00 DR',
+    '05/07/2026 SPINNEYS JLT 120.00 27,890.00 DR',
+    '06/07/2026 NOON REFUND 25.50 27,915.50 CR',
+  ].join('\n'), 'AED');
+  ok('a DR/CR label after two figures labels the balance, and the charge is still read',
+    labelledChain.rows.length === 6 && labelledChain.rejectedRows === 0 &&
+      labelledChain.rows[1].merchant === 'CARREFOUR MARKET' &&
+      labelledChain.rows[1].type === 'expense' && labelledChain.rows[1].amountFils === 4000 &&
+      labelledChain.rows[2].type === 'income' && labelledChain.rows[2].amountFils === 1850000 &&
+      // `SPINNEYS JLT` and `FIRST ROW` end in three capitals; under the old
+      // `[A-Z]{3}` guard both imported the running balance as the amount.
+      labelledChain.rows[4].merchant === 'SPINNEYS JLT' && labelledChain.rows[4].amountFils === 12000 &&
+      labelledChain.rows[0].merchant === 'FIRST ROW' && labelledChain.rows[0].amountFils === 10000 &&
+      labelledChain.rows[5].type === 'income' && labelledChain.rows[5].amountFils === 2550,
+    JSON.stringify(labelledChain.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  // A company suffix is not a currency, and a real code still is.
+  const suffixes = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    '01/07/2026 FIRST ROW 100.00 9,900.00',
+    '02/07/2026 GULF TRADING FZ LLC 40.00 9,860.00',
+    '03/07/2026 SOME SUPPLIER FZE 60.00 9,800.00',
+    '04/07/2026 ANOTHER ONE LTD 30.00 9,770.00',
+    '05/07/2026 SPINNEYS JLT 25.00 9,745.00',
+    '06/07/2026 CARREFOUR MARKET 45.00 9,700.00',
+    '07/07/2026 AMAZON AE USD 45.00 9,655.00',
+    '08/07/2026 TALABAT ORDER 55.00 9,600.00',
+  ].join('\n'), 'AED');
+  ok('descriptions ending LLC, FZE or LTD are read, and a real currency code is still skipped',
+    suffixes.rows.some((row) => row.merchant === 'GULF TRADING FZ LLC' && row.amountFils === 4000) &&
+      suffixes.rows.some((row) => row.merchant === 'SOME SUPPLIER FZE' && row.amountFils === 6000) &&
+      suffixes.rows.some((row) => row.merchant === 'ANOTHER ONE LTD' && row.amountFils === 3000) &&
+      !suffixes.rows.some((row) => /AMAZON/.test(row.merchant)),
+    JSON.stringify(suffixes.rows.map((row) => [row.merchant, row.type, row.amountFils])));
   const proseOrder = parseStatementLines([
     'Credits are listed before debits for each transaction date in this statement',
     '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
