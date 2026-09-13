@@ -120,7 +120,11 @@ jobs:
           BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
           test -n "$BEST"
           sudo xcode-select -s "$BEST/Contents/Developer"
-          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          # Capture the whole output before slicing it. Piping xcodebuild into
+          # `head -1` closed the pipe while it was still writing, and it aborted
+          # with NSFileHandleOperationException (exit 134) before any test ran.
+          XCODE_VERSION_OUTPUT=$(xcodebuild -version)
+          VER=$(printf '%s\n' "$XCODE_VERSION_OUTPUT" | head -1 | awk '{print $2}')
           MAJOR=${VER%%.*}
           MINOR=$(printf '%s' "$VER" | cut -d. -f2)
           if [ "$MAJOR" -lt 26 ] || { [ "$MAJOR" -eq 26 ] && [ "$MINOR" -lt 2 ]; }; then
