@@ -263,10 +263,10 @@ public final class WafraPagedHistoryStore {
         return try response(head, token: authorizationSecret)
       }
       guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
-      let records = try Self.frameRecords(frame, found: found)
+      let framedRecords = try Self.frameRecords(frame, found: found)
       var prepared: [PreparedRow] = []
-      for record in records {
-        prepared.append(try preparedRow(Substring(record)))
+      for framedRecord in framedRecords {
+        prepared.append(try preparedRow(Substring(framedRecord)))
       }
       let decision = try WafraHistoryCursor.advance(head.checkpoint,
         records: prepared.map(\.reference))
