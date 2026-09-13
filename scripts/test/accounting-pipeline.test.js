@@ -180,6 +180,20 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   ok('one ledger batch applies page rows and the next history cursor atomically',
     isDeepStrictEqual(afterPage.historyImport, pageProgress),
     JSON.stringify(afterPage.historyImport));
+
+  const cursorOnly = materializeImportBatch({
+    transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [],
+    snapshots: {}, bankNames: {}, cardTypes: {}, parserRereadComplete: false,
+    historyImport: pageProgress, lastScanTs: restoredState.lastScanTs, updates: [],
+  }, restoredState, (prefix) => `cursor-only-${prefix}-${++rereadId}`);
+  const afterCursorOnly = applyMaterializedImportBatch(restoredState, cursorOnly);
+  ok('a duplicate-only history page preserves the transaction array by reference',
+    afterCursorOnly.transactions === restoredState.transactions);
+  ok('a duplicate-only history page advances only durable progress metadata',
+    isDeepStrictEqual(afterCursorOnly.historyImport, pageProgress) &&
+      afterCursorOnly.accounts === restoredState.accounts &&
+      afterCursorOnly.cardDues === restoredState.cardDues &&
+      afterCursorOnly.bills === restoredState.bills);
 }
 {
   let proofId = 0;

@@ -132,11 +132,36 @@ export const assertImportBatchMoney = (
   }
 };
 
+const isMetadataOnlyImportBatch = (batch: MaterializedImportBatch): boolean =>
+  batch.transactions.length === 0 &&
+  batch.newAccounts.length === 0 &&
+  Object.keys(batch.newHints).length === 0 &&
+  batch.newDues.length === 0 &&
+  batch.newBills.length === 0 &&
+  Object.keys(batch.snapshots).length === 0 &&
+  Object.keys(batch.bankNames).length === 0 &&
+  Object.keys(batch.cardTypes).length === 0 &&
+  batch.updates.length === 0;
+
 export const applyMaterializedImportBatch = (
   state: AppState,
   batch: MaterializedImportBatch,
 ): AppState => {
   assertImportBatchMoney(state, batch);
+  // A history page containing only already-known rows still has useful cursor
+  // and parser progress, but it does not justify running every account,
+  // duplicate, payment, and transfer reconciliation over the complete ledger.
+  // Preserve the collection references so persistence can write metadata only.
+  if (isMetadataOnlyImportBatch(batch)) {
+    return {
+      ...state,
+      onboardingCurrencyEvidence:
+        batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
+      lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
+      historyImport: batch.historyImport ?? state.historyImport,
+      parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
+    };
+  }
   const accounts = [...state.accounts, ...batch.newAccounts].map((account) => {
     const snapshot = batch.snapshots[account.id];
     const bankName = !account.bankName ? batch.bankNames[account.id] : undefined;
