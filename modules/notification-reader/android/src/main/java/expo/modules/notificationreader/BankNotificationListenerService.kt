@@ -221,7 +221,7 @@ class BankNotificationListenerService : NotificationListenerService() {
     // before anything downstream could see it.
     val MONEY_RE = Regex(
       // Bank apps commonly concatenate the ISO currency and amount (for
-      // example ADCB posts "AED181.00"). \s* already permits that; keep the
+      // example ADCB posts AED181.00). \s* already permits that; keep the
       // currency alternatives explicit so this remains only a cheap native
       // admission gate rather than a second transaction parser.
       "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
