@@ -26,11 +26,16 @@ const native = Platform.OS === 'ios' || Platform.OS === 'android';
 export function tapped(): void {
   if (!native) return;
   if (Platform.OS === 'android') {
-    // Use Android's native click haptic rather than the simulated vibrator
-    // effect. It is intentionally short: enough to make tabs/buttons/toggles
-    // feel registered without the long buzz that previously made navigation
-    // feel delayed.
-    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click).catch(() => {});
+    // Routine Android tap haptics fire on nearly every navigation/control action.
+    // On OEM builds where the haptics service is slow, dozens of bridge calls
+    // can overlap the JS navigation turn and make a registered tap feel late.
+    // Keep commitment/error haptics below, but ordinary Android taps use the
+    // platform ripple only.
+    //
+    // Re-added once, with the guard below rewritten to allow it, on the
+    // reasoning that Context_Click is short. Short is not the problem: the
+    // bridge call on every one of ~39 tap sites is, and the app was reported
+    // slow and laggy on exactly the navigation this covers.
     return;
   }
   Haptics.selectionAsync().catch(() => {});
