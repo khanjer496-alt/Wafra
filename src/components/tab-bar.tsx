@@ -11,6 +11,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
 import { useTheme } from '@/hooks/use-theme';
+import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
 
 const TAB_ICONS: Record<string, IconName> = {
   index: 'home',
@@ -31,7 +32,9 @@ const LedgerTabButton = ({ focused, icon, label, onPress, testID }: {
 }) => {
   const theme = useTheme();
   return <Pressable testID={testID} role="tab" aria-selected={focused} accessibilityRole="tab"
-    accessibilityLabel={label} accessibilityState={{ selected: focused }} onPress={onPress}
+    accessibilityLabel={label} accessibilityState={{ selected: focused }}
+    onPressIn={() => prioritizeForegroundNavigation()}
+    onPress={onPress}
     android_ripple={{ color: theme.backgroundSelected, borderless: false }}
     style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
     <Icon name={icon} size={21} color={focused ? theme.primary : theme.textTertiary} strokeWidth={focused ? 2.1 : 1.8} />

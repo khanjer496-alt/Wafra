@@ -16,6 +16,9 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     address: 'SYNTHETIC', body: `Synthetic record ${i}` }));
   const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
     '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
+    '@/lib/foreground-history-priority': {
+      waitForForegroundHistoryIdle: async () => { yields++; sliceEnds.push(parsed); },
+    },
     'react-native': { Platform: { OS: 'android' }, AppState: appState },
     'expo-crypto': {}, 'expo-secure-store': {},
     '../../modules/notification-reader': { __esModule: true, default: null },

@@ -75,6 +75,7 @@ function createHarness(options = {}) {
     '@/hooks/use-ledger-money':{useLedgerMoney:()=>null},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
     '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
+    '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
     '@/lib/i18n':i18n,
     '@/lib/format':format,'@/lib/markets':{ledgerCurrencyCode:()=> 'AED',ledgerCurrencyDisplay:()=>lang==='ar'?'د.إ':'AED'},
     '@/lib/period':periodModule,'@/lib/period-context':{usePeriod:()=>({period,setPeriod:p=>events.push(['period',p])})},

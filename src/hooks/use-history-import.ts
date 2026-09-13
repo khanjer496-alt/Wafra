@@ -18,6 +18,7 @@ import {
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 // Every page costs one provider query (the SMS provider sorts the whole
@@ -74,8 +75,11 @@ export function useHistoryImport(): void {
       // Keep pages small and leave a real idle window between them so Hermes
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -118,7 +122,11 @@ export function useHistoryImport(): void {
       // Resolving promises does not give pending UI/input work a macrotask.
       // Separate parsing/review from the synchronous planning/reducer work.
       // This is cooperative scheduling, not a claim of off-thread parsing.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle();
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
