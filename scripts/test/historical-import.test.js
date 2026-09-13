@@ -1113,6 +1113,10 @@ async function importHistoryHandoffTests() {
       setHistorySetup: (update) => { progress = update(progress); },
       setHistoryHandoffExpired: () => {},
       historyShortcutRunUrl: () => runShortcutUrl,
+      // The legacy two-ended graph would start a second import if re-run, so
+      // Continue only reopens Shortcuts for it; a paged record resolves to the
+      // run URL instead (pinned in ios-setup-ux.test.js).
+      historyShortcutContinueUrl: () => 'shortcuts://',
       clearIosHistoryHandoff: async () => { events.push(['clear-handoff']); },
       clearIosHistoryReturnOrigin: async () => { events.push(['clear-origin']); },
       Linking: { openURL: async (url) => {

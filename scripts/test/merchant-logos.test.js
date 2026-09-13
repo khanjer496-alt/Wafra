@@ -113,12 +113,13 @@ function loadAvatar(identities) {
   return compile('src/components/ui/merchant-avatar.tsx', (id) => {
     switch (id) {
       case 'react/jsx-runtime': return { jsx, jsxs: jsx };
-      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined };
+      // The avatar is a React.memo component; the harness calls it directly.
+      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined, memo: (component) => component };
       case 'react-native': return { StyleSheet: { create: (value) => value }, View: 'view' };
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
-      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }) };
+      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), usePrivateMode: () => false };
       case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
       case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
       case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
