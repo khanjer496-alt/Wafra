@@ -1,10 +1,11 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
-const path = require('node:path');
-const load = require('./load-typescript.cjs');
 const reference = require('./ledger-reference.cjs');
-const { internalTransferIds } = load(path.resolve(__dirname, '../../../src/lib/ledger.ts'));
+// ledger.ts now reads transfer ownership from transfer-reconciliation; load the
+// same actual-source graph the other repair suites use rather than the bare
+// module, which stops with an unstubbed dependency before any row is timed.
+const { internalTransferIds } = require('./load-transfer-ledger.cjs').ledger;
 const accounts = [{ id: 'checking' }, { id: 'savings', archived: true }];
 function fixture(count) {
   const rows = [];
