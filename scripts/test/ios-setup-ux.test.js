@@ -133,17 +133,19 @@ const futureGuideKeys = [
   'iosMessageGuideImmediate',
   'iosMessageGuideRunShortcut',
 ];
-eq('iOS message setup: Future guide does not pretend bank sender IDs are always selectable',
+eq('iOS message setup: Future guide tells the user to leave Sender empty because bank SMS IDs are not Contacts',
   futureGuideKeys.map((key) => translated(key, 'en')), [
     'Message',
-    'Sender is optional — Apple may show Contacts only',
+    'Sender: leave empty — bank SMS IDs are not Contacts',
     'Run Immediately',
     'Run {shortcut} · full Received Message',
   ]);
-ok('iOS message setup: sender limitation offers a non-blocking path instead of fake-contact instructions',
-  translated('iosMessageGuideNoFilter', 'en').includes('skip this setup') &&
+ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
+  translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('empty') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
     translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
-    !translated('iosMessageGuideNoFilter', 'en').includes('leave empty'));
+    !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(
     [screen, detailsSheet, read('src/lib/i18n.ts')].join('\n'),
@@ -167,11 +169,10 @@ ok('iOS message setup: completion copy never calls the automation verified',
   !/verified|trigger worked|automation worked/i.test(
     [translated('iosLocalWaitingTitle', 'en'), translated('iosLocalWaitingBody', 'en')].join(' '),
   ));
-ok('iOS message setup: Help explains unavailable bank senders',
+ok('iOS message setup: Help explains why no Contact is picked as Sender',
   /iosMessageSenderUnavailable/.test(detailsSheet) &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes(
-      'Apple cannot automate this sender.',
-    ));
+    translated('iosMessageSenderUnavailable', 'en')?.includes('Do not pick a Contact as Sender') &&
+    translated('iosMessageSenderUnavailable', 'en')?.includes('bank SMS IDs are not Contacts'));
 
 eq('iOS message setup: Past row keeps only the compact inline disclosures', [
   translated('iosMessagePastDetail', 'en'),
@@ -295,11 +296,12 @@ ok('iOS local setup: large Dynamic Type changes layout instead of clipping',
   /useLargeTextLayout/.test(screen) &&
     /const largeText = useLargeTextLayout\(\)/.test(screen) &&
     /largeText \? styles\.[A-Za-z]+ : undefined/.test(screen));
-ok('iOS message setup: sender guide is explicit that Apple may not expose a bank sender',
+ok('iOS message setup: sender guide is explicit that Sender stays empty in both languages',
   /iosMessageGuideNoFilter/.test(read('src/components/ios-message-setup/automation-guide.tsx')) &&
-    translated('iosMessageGuideSender', 'en').includes('Contacts only') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('skip') &&
-    translated('iosMessageGuideNoFilter', 'ar').includes('تخط'));
+    translated('iosMessageGuideSender', 'en').includes('leave empty') &&
+    translated('iosMessageGuideSender', 'ar').includes('فارغاً') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('empty') &&
+    translated('iosMessageGuideNoFilter', 'ar').includes('فارغاً'));
 ok('iOS local setup: readiness and failures are announced to VoiceOver',
   /previousReadiness\.current !== setup\.readiness/.test(screen) &&
     /AccessibilityInfo\.announceForAccessibility\(futureReadyLabel\)/.test(screen) &&
@@ -328,7 +330,7 @@ eq('iOS local setup: milestone copy covers every durable qualifying outcome',
 eq(
   'iOS local setup: privacy copy states queue retention and no upload precisely',
   translated('iosLocalPrivacyBody', 'en'),
-  'Apple does not give Wafra access to your Messages inbox. If Apple exposes a Message automation trigger that works for your bank, that automation can pass a new Message to Wafra’s protected queue on this iPhone. Some bank SMS IDs are not selectable in Apple’s sender picker, so automatic capture is optional and is not promised during onboarding. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
+  'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
 );
 eq('iOS local setup: migration copy discloses the old upload until retirement',
   translated('iosLocalMigrationBody', 'en'),
@@ -336,8 +338,8 @@ eq('iOS local setup: migration copy discloses the old upload until retirement',
 ok(
   'iOS local setup: Arabic privacy copy includes local processing, 30 days, and migration',
   /الآيفون/.test(translated('iosLocalPrivacyBody', 'ar')) &&
-    /بعض معرّفات رسائل البنوك لا تظهر/.test(translated('iosLocalPrivacyBody', 'ar')) &&
-    /الالتقاط التلقائي اختياري/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /معرّفات رسائل البنوك ليست جهات اتصال/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /بمرسل فارغ لكل رسالة جديدة/.test(translated('iosLocalPrivacyBody', 'ar')) &&
     /بعد حفظ نتيجة محلية بشكل دائم/.test(
       translated('iosLocalPrivacyBody', 'ar'),
     ) &&

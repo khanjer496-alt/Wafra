@@ -25,6 +25,20 @@ public final class WafraPagedHistoryStore {
     /// A column-framed page whose per-field item counts disagree with the
     /// page count. The producer falls back to per-message framing for it.
     case columnMismatch = "frame-columns"
+    /// Row-frame refusals that name the failing check. The Shortcut shows the
+    /// raw value in its "History paused safely" alert, so a real-device
+    /// failure can be attributed without a rebuild: the frame's line count
+    /// disagreed with the page count, a field was not canonical Base64/UTF-8,
+    /// or a date was not the producer's exact instant format.
+    case fieldEncoding = "invalid-input-field"
+    case fieldDate = "invalid-input-date"
+  }
+  /// A frame whose record structure could not be reconciled with the page
+  /// count. Carries the observed shape (counts only, never Message text) so
+  /// the Shortcut's "History paused safely" alert names it.
+  public struct FrameRefusal: Error, CustomStringConvertible {
+    public let reason: String
+    public var description: String { reason }
   }
   /// Joins one column of a page in the Shortcut's list-wide Combine Text.
   /// Printable and absent from real SMS; disagreement is refused, not guessed.
@@ -59,33 +73,43 @@ public final class WafraPagedHistoryStore {
     let record: String?
   }
 
-  private func decodeBase64Field(_ value: Substring, maximum: Int) throws -> String {
+  /// `nil` means the field decoded but is longer than `maximum`; the caller
+  /// decides whether that skips the row or refuses it. Malformed transport
+  /// (non-canonical Base64, invalid UTF-8) always throws.
+  private func decodeBase64Field(_ value: Substring, maximum: Int) throws -> String? {
     // Shortcuts can hand an App Intent text scalar a trailing CR/space even
     // when Base64 Encode itself is configured with no line breaks. Treat only
     // surrounding ASCII whitespace as transport noise; never ignore characters
-    // inside the encoded value.
+    // inside the encoded value. The frame is already bounded to 8 MiB, so no
+    // field can be inflated beyond it before this check runs.
     let encoded = String(value).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard encoded.utf8.count <= ((maximum + 2) / 3) * 4 + 8,
-          let data = Data(base64Encoded: encoded),
+    guard let data = Data(base64Encoded: encoded),
           data.base64EncodedString() == encoded,
-          data.count <= maximum,
           let text = String(data: data, encoding: .utf8) else {
-      throw Failure.invalidInput
+      throw Failure.fieldEncoding
     }
-    return text
+    return data.count <= maximum ? text : nil
   }
 
   private func preparedRow(_ line: Substring) throws -> PreparedRow {
     let guid: String
-    let body: String
+    /// `nil` is a Message whose body exceeds the record bound. Bank alerts
+    /// are short, so the parser could never use it; keep the row's identity
+    /// and date so the cursor stays exact, and stage it as skipped instead of
+    /// refusing the whole page and every page behind it.
+    let body: String?
     let sender: String
     let dateText: String
     let fields = line.split(separator: "|", omittingEmptySubsequences: false)
     if fields.count == 4 {
-      guid = try decodeBase64Field(fields[0], maximum: 1_024)
+      guard let decodedGuid = try decodeBase64Field(fields[0], maximum: 1_024),
+            let decodedDate = try decodeBase64Field(fields[3], maximum: 64) else {
+        throw Failure.fieldEncoding
+      }
+      guid = decodedGuid
+      dateText = decodedDate
       body = try decodeBase64Field(fields[1], maximum: 16 * 1_024)
-      sender = try decodeBase64Field(fields[2], maximum: 1_024)
-      dateText = try decodeBase64Field(fields[3], maximum: 64)
+      sender = try decodeBase64Field(fields[2], maximum: 1_024) ?? ""
     } else {
       // Backward-compatible reader for the first beta graph. New graphs never
       // depend on Shortcuts' Dictionary-to-Text representation.
@@ -108,10 +132,14 @@ public final class WafraPagedHistoryStore {
     // the whole page for that Apple metadata gap. Build a local, deterministic
     // identifier from the other immutable row fields; only its hash is ever
     // persisted. The normal GUID remains preferred whenever Apple supplies it.
+    // An oversized body contributes its transport form so the identity stays
+    // deterministic without holding the decoded text.
+    let bodyIdentity = body ?? (fields.count == 4 ? String(fields[1]) : "")
     let stableGuid = guid.isEmpty
-      ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(sender)\u{0}\(body)".utf8)))"
+      ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(sender)\u{0}\(bodyIdentity)".utf8)))"
       : guid
     let ref = try reference(guid: stableGuid, dateText: dateText)
+    guard let body else { return PreparedRow(reference: ref, record: nil) }
     let record = WafraMessageHistoryImporter.preparedRecord(guid: stableGuid, body: body,
       sender: sender, date: try date(dateText), now: now())
     return PreparedRow(reference: ref, record: record == "{\"v\":0}" ? nil : record)
@@ -155,10 +183,10 @@ public final class WafraPagedHistoryStore {
   }
   private func date(_ value: String) throws -> Date {
     guard let normalized = WafraMessageHistoryStore.normalizeShortcutInstant(value, now: now()) else {
-      throw Failure.invalidInput
+      throw Failure.fieldDate
     }
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let result = f.date(from: normalized) else { throw Failure.invalidInput }
+    guard let result = f.date(from: normalized) else { throw Failure.fieldDate }
     return result
   }
   private func reference(guid: String, dateText: String) throws -> WafraHistoryCursor.Reference {
@@ -235,24 +263,10 @@ public final class WafraPagedHistoryStore {
         return try response(head, token: authorizationSecret)
       }
       guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
-      // Combine Text normally returns no trailing newline, but real Shortcuts
-      // builds have produced CRLF/trailing-newline variants when crossing the
-      // App Intent boundary. Empty records are impossible (every record has
-      // three `|` separators), so dropping transport-only empty lines is safe
-      // and prevents an otherwise valid page from becoming `invalid-input`.
-      // Swift treats CRLF as a single extended grapheme cluster in Character
-      // iteration, so splitting the original String on the `"\n"` Character
-      // can leave an entire CRLF-delimited Shortcut page unsplit. Normalize the
-      // transport delimiters first. Raw newlines cannot occur inside these
-      // Base64 fields, so this does not change record content.
-      let normalizedFrame = frame
-        .replacingOccurrences(of: "\r\n", with: "\n")
-        .replacingOccurrences(of: "\r", with: "\n")
-      let lines = normalizedFrame.split(separator: "\n", omittingEmptySubsequences: true)
-      guard lines.count == found else { throw Failure.invalidInput }
+      let records = try Self.frameRecords(frame, found: found)
       var prepared: [PreparedRow] = []
-      for line in lines {
-        prepared.append(try preparedRow(line))
+      for record in records {
+        prepared.append(try preparedRow(Substring(record)))
       }
       let decision = try WafraHistoryCursor.advance(head.checkpoint,
         records: prepared.map(\.reference))
@@ -277,6 +291,47 @@ public final class WafraPagedHistoryStore {
       try write(Self.encoded(head), to: directory.appendingPathComponent("head.json"))
       return try response(head, token: authorizationSecret)
     }
+  }
+
+  /// Splits the transported frame into one record per Message.
+  ///
+  /// The producer joins records with newlines, but the transport has shown
+  /// CRLF, trailing newlines and, on a real iPhone, Base64 fields wrapped
+  /// onto several lines even with Base64 Encode's line breaks set to none
+  /// (build 135 refused its first page with a line count that disagreed with
+  /// the 51 Messages found). Base64 and the producer's `|` separators contain
+  /// no whitespace, so whitespace can only ever split a record into
+  /// fragments: a record is complete exactly when its three separators have
+  /// been seen. Records that run together without any separator, or a
+  /// dangling partial record, are refused with the observed counts.
+  static func frameRecords(_ frame: String, found: Int) throws -> [String] {
+    let fragments = frame.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace || $0.isNewline })
+    // The first beta graph carried one Base64 JSON object per line and no
+    // separators; its reader is kept only for that exact shape.
+    if fragments.count == found, fragments.allSatisfy({ !$0.contains("|" as Character) }) {
+      return fragments.map(String.init)
+    }
+    var records: [String] = []
+    var current = ""
+    var pipes = 0
+    var separators = 0
+    for fragment in fragments {
+      let count = fragment.reduce(0) { $1 == "|" ? $0 + 1 : $0 }
+      separators += count
+      current += fragment
+      pipes += count
+      if pipes == 3 {
+        records.append(current)
+        current = ""
+        pipes = 0
+      } else if pipes > 3 {
+        throw FrameRefusal(reason: "invalid-input-lines merged fragments=\(fragments.count) separators=\(separators) found=\(found)")
+      }
+    }
+    guard current.isEmpty, records.count == found else {
+      throw FrameRefusal(reason: "invalid-input-lines fragments=\(fragments.count) separators=\(separators) records=\(records.count) partial=\(current.isEmpty ? 0 : 1) found=\(found)")
+    }
+    return records
   }
 
   /// Column framing: the Shortcut builds one string per field for the whole

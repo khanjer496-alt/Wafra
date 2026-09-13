@@ -99,7 +99,12 @@ function PagedHistoryScreen() {
   };
   const leave = () => void run(async () => {
     const setup = await loadIosMessageSetupProgress();
-    router.replace({ pathname: '/ios-setup', params: { section: 'history', ...(origin === 'onboarding' || setup.returnToOnboarding ? { fromOnboarding: '1' } : {}) } });
+    const destination = { pathname: '/ios-setup', params: { section: 'history', ...(origin === 'onboarding' || setup.returnToOnboarding ? { fromOnboarding: '1' } : {}) } } as const;
+    // This screen sits above the setup route it came from. Replacing would
+    // mount a second setup screen under it; dismiss to the existing one and
+    // only replace on a cold deep-link launch with nothing beneath.
+    if (router.canGoBack()) router.dismissTo(destination);
+    else router.replace(destination);
   });
   const canRunShortcut = installed || adding;
   const label = progress?.status === 'complete' ? w.review

@@ -22,7 +22,7 @@ const deferred = () => {
 async function screen(t, options = {}) {
   const slots = [], effects = [], listeners = new Set(), receipts = [], routes = [];
   const urls = [], discards = [], storageEvents = [], growth = [], announcements = [];
-  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0;
+  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0, dismissals = 0;
   const params = { fromOnboarding: '1', ...options.params };
   const slot = initial => slots[cursor++] ?? (slots[cursor - 1] = initial());
   const react = {
@@ -112,6 +112,9 @@ async function screen(t, options = {}) {
   });
   const router = {
     push: value => routes.push(['push', value]), replace: value => routes.push(['replace', value]),
+    navigate: value => routes.push(['navigate', value]),
+    // Pops to the existing root; not a destination. The navigate after it is.
+    dismissAll: () => { dismissals++; },
     back: () => routes.push(['back']), canGoBack: () => options.canGoBack !== false,
     setParams: patch => Object.assign(params, patch),
   };
@@ -187,6 +190,7 @@ async function screen(t, options = {}) {
   await flush();
   return {
     all, button, press, flush, values, controls, nativeStatus, receipts, routes, urls, discards, storageEvents,
+    get dismissals() { return dismissals; },
     growth, announcements, store, copy, dispose, history, progress,
     saved: () => JSON.parse(values.get(PROGRESS)),
     get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },

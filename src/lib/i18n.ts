@@ -1761,8 +1761,8 @@ const S = {
   onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
   onboardCaptureLearnMoreTitle: { en: 'About bank alerts', ar: 'حول تنبيهات البنك' },
   onboardCaptureLearnMorePrivacy: {
-    en: 'Wafra does not access your Messages inbox. Apple automation passes alerts only from bank senders you select, and Wafra processes them on this iPhone.',
-    ar: 'لا يصل وفرة إلى صندوق الرسائل. تمرّر أتمتة Apple تنبيهات من مرسلي البنوك الذين تختارهم فقط، ويعالجها وفرة على هذا الآيفون.',
+    en: 'Wafra does not access your Messages inbox. An Apple automation you create passes new messages to Wafra, which keeps bank alerts and discards the rest on this iPhone.',
+    ar: 'لا يصل وفرة إلى صندوق الرسائل. تمرّر أتمتة Apple التي تنشئها الرسائل الجديدة إلى وفرة، الذي يحتفظ بتنبيهات البنك ويتجاهل البقية على هذا الآيفون.',
   },
   onboardCaptureLearnMoreRetention: {
     en: 'Raw Message Content and Sender expire logically after 30 days. Physical deletion happens on the next capture or queue check, so protected bytes can remain longer.',
@@ -1773,8 +1773,8 @@ const S = {
     ar: 'قد تستمر أتمتة Wafra Capture الأقدم في رفع التنبيهات المحددة حتى تزيلها أو توقفها نهائياً.',
   },
   onboardCaptureLearnMoreLimits: {
-    en: 'Apple requires a bank sender you select for future alerts. Past-alert import is separate and checks retained Messages only when you start it.',
-    ar: 'تتطلب Apple مرسل بنك تختاره للتنبيهات القادمة. استيراد التنبيهات السابقة منفصل ويفحص الرسائل المحتفظ بها فقط عندما تبدأه.',
+    en: 'Apple’s automation cannot select bank SMS IDs as senders, so it runs for every new message and Wafra filters on this iPhone. Past-alert import is separate and checks retained Messages only when you start it.',
+    ar: 'لا تستطيع أتمتة Apple تحديد معرّفات رسائل البنوك كمرسلين، لذلك تعمل لكل رسالة جديدة ويقوم وفرة بالتصفية على هذا الآيفون. استيراد التنبيهات السابقة منفصل ويفحص الرسائل المحتفظ بها فقط عندما تبدأه.',
   },
   onboardSmsDenied: {
     en: 'SMS access was not granted. You can continue and enable capture later.',
@@ -2442,8 +2442,8 @@ const S = {
   iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
   iosMessageHistoryKeepOpen: { en: 'Keep Shortcuts open and iPhone unlocked.', ar: 'أبقِ الاختصارات مفتوحاً والآيفون دون قفل.' },
   iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
-  iosMessageGuideSender: { en: 'Sender is optional — Apple may show Contacts only', ar: 'المرسل اختياري — قد تعرض Apple جهات الاتصال فقط' },
-  iosMessageGuideNoFilter: { en: 'If the bank sender is missing, skip this setup for now', ar: 'إذا لم يظهر مرسل البنك فتخطَّ هذا الإعداد حالياً' },
+  iosMessageGuideSender: { en: 'Sender: leave empty — bank SMS IDs are not Contacts', ar: 'المرسل: اتركه فارغاً — معرّفات رسائل البنوك ليست جهات اتصال' },
+  iosMessageGuideNoFilter: { en: 'Leave “Message Contains” empty too. Wafra keeps bank alerts and discards other messages on this iPhone.', ar: 'اترك «تحتوي الرسالة على» فارغاً أيضاً. يحتفظ وفرة بتنبيهات البنك ويتجاهل بقية الرسائل على هذا الآيفون.' },
   iosMessageFutureInstallHelp: { en: 'Step 1 of 2 · Add {shortcut} in Apple Shortcuts.', ar: 'الخطوة ١ من ٢ · أضف {shortcut} في اختصارات Apple.' },
   iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
   iosMessageFutureReadyChoice: { en: 'New-alert setup is checked. You can import past messages later or choose history now.', ar: 'تم فحص إعداد التنبيهات الجديدة. يمكنك استيراد الرسائل السابقة لاحقاً أو اختيار السجل الآن.' },
@@ -2498,7 +2498,7 @@ const S = {
     en: 'Past alerts',
     ar: 'التنبيهات السابقة',
   },
-  iosMessageSenderUnavailable: { en: 'Sender missing? Apple cannot automate this sender.', ar: 'المرسل غير ظاهر؟ لا يمكن أتمتته عبر Apple.' },
+  iosMessageSenderUnavailable: { en: 'Do not pick a Contact as Sender. Apple lists Contacts only, and bank SMS IDs are not Contacts; an empty Sender runs for every new message.', ar: 'لا تختر جهة اتصال كمرسل. تعرض Apple جهات الاتصال فقط، ومعرّفات رسائل البنوك ليست جهات اتصال؛ المرسل الفارغ يشغّل الأتمتة لكل رسالة جديدة.' },
   iosStepConnect: { en: 'Connect', ar: 'الربط' },
   iosStepBanks: { en: 'Banks', ar: 'البنوك' },
   iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
@@ -2527,8 +2527,8 @@ const S = {
     ar: 'تُعالج على هذا الآيفون',
   },
   iosLocalPrivacyBody: {
-    en: 'Apple does not give Wafra access to your Messages inbox. If Apple exposes a Message automation trigger that works for your bank, that automation can pass a new Message to Wafra’s protected queue on this iPhone. Some bank SMS IDs are not selectable in Apple’s sender picker, so automatic capture is optional and is not promised during onboarding. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
-    ar: 'لا تمنح Apple وفرة وصولاً إلى صندوق رسائلك. إذا أتاحت Apple مشغّل أتمتة للرسائل يعمل مع بنكك، فيمكن لهذه الأتمتة تمرير الرسالة الجديدة إلى صف وفرة المحمي على هذا الآيفون. بعض معرّفات رسائل البنوك لا تظهر في قائمة المرسلين لدى Apple، لذلك الالتقاط التلقائي اختياري ولا يُعد مضموناً أثناء الإعداد. يفحص وفرة المحتوى واسم المرسل محلياً، ويحتفظ فقط بالنتائج المالية المنظمة والمدعومة، ولا يرفع بيانات الرسائل. بعد حفظ نتيجة محلية بشكل دائم، يحذف وفرة الرسالة الخام. وإذا تعذرت المعالجة، يبقى المحتوى الخام واسم المرسل محمياً لمدة تصل إلى ٣٠ يوماً ثم يُحذف عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
+    en: 'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
+    ar: 'لا تمنح Apple وفرة وصولاً إلى صندوق رسائلك. تمرّر أتمتة الرسائل التي تنشئها في الاختصارات كل رسالة جديدة إلى صف وفرة المحمي على هذا الآيفون. تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط ومعرّفات رسائل البنوك ليست جهات اتصال، لذلك تعمل الأتمتة بمرسل فارغ لكل رسالة جديدة. يفحص وفرة المحتوى واسم المرسل محلياً، ويحتفظ فقط بالنتائج المالية المنظمة والمدعومة، ولا يرفع بيانات الرسائل. بعد حفظ نتيجة محلية بشكل دائم، يحذف وفرة الرسالة الخام. وإذا تعذرت المعالجة، يبقى المحتوى الخام واسم المرسل محمياً لمدة تصل إلى ٣٠ يوماً ثم يُحذف عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
   },
   iosLocalMigrationTitle: {
     en: 'Using the older automation?',
@@ -2543,8 +2543,8 @@ const S = {
     ar: 'فعّل الالتقاط التلقائي',
   },
   iosLocalAutomationBody: {
-    en: 'Optional: Apple does not expose every bank SMS sender to Automations. If your bank is not selectable, continue without automatic capture and set it up later.',
-    ar: 'اختياري: لا تعرض Apple كل مرسلي رسائل البنوك في «الأتمتة». إذا لم يظهر بنكك فتابع دون الالتقاط التلقائي وأعد الإعداد لاحقاً.',
+    en: 'Apple’s Sender picker shows Contacts only, so leave Sender empty. The automation then passes each new message to Wafra, which keeps bank alerts and discards the rest on this iPhone.',
+    ar: 'تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط، لذلك اترك المرسل فارغاً. تمرّر الأتمتة عندها كل رسالة جديدة إلى وفرة، الذي يحتفظ بتنبيهات البنك ويتجاهل البقية على هذا الآيفون.',
   },
   iosMessageContinueManual: { en: 'Continue to Wafra without automatic capture', ar: 'متابعة إلى وفرة دون التقاط تلقائي' },
   iosLocalOpenAutomation: { en: 'Open Shortcuts', ar: 'فتح الاختصارات' },

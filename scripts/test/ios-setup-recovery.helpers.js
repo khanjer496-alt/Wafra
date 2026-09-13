@@ -92,7 +92,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/lib/capture': { getIosCaptureNativeModule: () => native, subscribeIosCaptureStatusRefresh: () => () => {} },
       '@/lib/ios-local-capture-protocol': protocol,
     });
-    const router = { replace: (route) => routes.push(route), push: (route) => routes.push(route), back() {}, canGoBack: () => true, setParams() {} };
+    // dismissAll pops to the existing root and is not a destination; the
+    // navigate that follows it is the route the user lands on.
+    const router = { replace: (route) => routes.push(route), push: (route) => routes.push(route), navigate: (route) => routes.push(route), dismissAll() {}, back() {}, canGoBack: () => true, setParams() {} };
     const store = {
       state: { accounts: [], transactions: [], language: 'en', onboardingProfile: null },
       ensureDurable: async () => {},

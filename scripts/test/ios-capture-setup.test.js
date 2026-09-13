@@ -4114,14 +4114,19 @@ struct WafraBankSenderRegistryTests {
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
 
-  eq('setup trigger guard: one explicitly selected bank sender is supported',
+  eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
+    setupModule.isSupportedIosMessageAutomationTrigger({
+      selectedSenderCount: 0,
+      messageContains: null,
+    }), true);
+  eq('setup trigger guard: explicitly selected Contacts remain supported',
     setupModule.isSupportedIosMessageAutomationTrigger({
       selectedSenderCount: 1,
       messageContains: null,
     }), true);
   for (const [name, trigger] of [
-    ['Any Sender', { selectedSenderCount: 'any', messageContains: null }],
-    ['blank universal trigger', { selectedSenderCount: 0, messageContains: null }],
+    ['non-numeric sender count', { selectedSenderCount: 'any', messageContains: null }],
+    ['negative sender count', { selectedSenderCount: -1, messageContains: null }],
     ['space trigger', { selectedSenderCount: 0, messageContains: ' ' }],
     ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
     ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
