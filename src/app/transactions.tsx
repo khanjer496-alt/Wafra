@@ -18,7 +18,7 @@ import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
 import { Icon } from '@/components/ui/icon';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -248,7 +248,7 @@ export default function TransactionsScreen() {
                       accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                       onPress={() => setMerchantFilter(null)}
                       style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                         {merchantFilter}
                       </ThemedText>
                       <Icon name="close" size={13} color={theme.primary} />
@@ -260,7 +260,7 @@ export default function TransactionsScreen() {
                       accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
                       onPress={() => setSmsOnly(false)}
                       style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                         {tr('smsImportsOnly')}
                       </ThemedText>
                       <Icon name="close" size={13} color={theme.primary} />
@@ -311,7 +311,7 @@ export default function TransactionsScreen() {
                   accessibilityLabel={tr('clearAllFilters')}
                   hitSlop={8}
                   onPress={clearFilters}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                     {tr('clearFilter')}
                   </ThemedText>
                 </Pressable>

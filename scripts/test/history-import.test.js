@@ -77,10 +77,14 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     /scanned: page\.scannedCount/.test(historyHookSource) &&
       /found: page\.parsed\.length \+ page\.reviewCandidates\.length/.test(historyHookSource),
   );
+  // Each page is one provider sort, one whole-app render and one forced
+  // encrypted write, so the page size multiplies all three; 100-row pages made
+  // a 20k inbox hundreds of full-ledger commits. The gap is one idle window,
+  // not a throttle on the parser, which already yields per frame-sized slice.
   ok(
-    'foreground history uses small bounded pages and real UI gaps',
-    /HISTORY_IMPORT_PAGE_SIZE = 100/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGE_GAP_MS = 500/.test(historyHookSource) &&
+    'foreground history uses bounded pages and a real UI gap between them',
+    /HISTORY_IMPORT_PAGE_SIZE = 500/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
       /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );

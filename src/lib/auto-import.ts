@@ -54,15 +54,24 @@ const MAX_REVIEW_CANDIDATES = 50;
  * time budget, with a row-count ceiling for fast clocks/devices. This keeps
  * the exact ordered result while avoiding 40+ timer turns per 1,000 simple
  * alerts on a fast phone.
+ *
+ * The budget was briefly 1ms with a 2-row ceiling. That made the timer turn,
+ * not the parser, the dominant cost: ~50 yields per 100-row page at 40ms each
+ * is two seconds of wall clock per page for a few milliseconds of parsing, and
+ * a 20,000-message inbox became twenty minutes of sustained low-grade jank.
+ * The contract test pins this band (4-12ms, 33-96 rows) and the scheduling
+ * test counts the exact yields a 950-row page makes; stay inside both.
  */
-const PARSE_TIME_BUDGET_MS = 1;
-const MAX_PARSE_SLICE_SIZE = 2;
+const PARSE_TIME_BUDGET_MS = 4;
+const MAX_PARSE_SLICE_SIZE = 64;
 // A zero-delay timer yields the call stack but immediately competes for the
 // next JS turn again. Real-phone profiling on CPH2653 showed mqt_v_js pinned
 // at ~100% for roughly 50 seconds during parser migration. Foreground history
-// is maintenance work: cap each JS slice tightly and give input/render work a
-// meaningful scheduling window. Background history keeps the fast path.
-const FOREGROUND_PARSE_YIELD_MS = 40;
+// is maintenance work: after each frame-sized slice, leave one frame for
+// input/render work before the next. Background history keeps the fast path.
+// This is a scheduling window, not a measured phone constant; confirm with
+// EXPO_PUBLIC_WAFRA_CAPTURE_TRACE=1 page timings on the target device.
+const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;

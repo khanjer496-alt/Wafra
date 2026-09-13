@@ -136,7 +136,11 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   assert.ok(updated.props.sections.flatMap(section => section.data).every(row => row.type === 'income'));
 });
 
-test('entry reconciliation reuses unchanged inputs but refreshes after financial state changes', () => {
+// The sheet used to reconcile the complete ledger once per selected entry and
+// again on every financial state change; the interaction-stall fix replaced
+// that with per-row transfer ownership, so opening an entry never walks the
+// ledger's transfer graph at all. Pin the absence rather than the old cache.
+test('opening an entry never reconciles the complete ledger, before or after financial state changes', () => {
   const h = createHarness(), react = hooks();
   Object.assign(h.deps.react, react);
   h.deps['react/jsx-runtime'] = { jsx, jsxs: jsx, Fragment: 'Fragment' };
@@ -144,9 +148,9 @@ test('entry reconciliation reuses unchanged inputs but refreshes after financial
   let calls = 0;
   h.deps['@/lib/transfer-reconciliation'].reconcileTransfers = (...args) => { calls++; return original(...args); };
   const render = () => { react.begin(); return h.renderDetail(); };
-  render(); assert.equal(calls, 1);
+  render(); assert.equal(calls, 0);
   for (let i = 0; i < 20; i++) render();
-  assert.equal(calls, 1, 'form/parent rerenders must not reconcile the complete ledger again');
-  h.state.transactions = [...h.state.transactions]; render(); assert.equal(calls, 2);
-  h.state.accounts = [...h.state.accounts]; render(); assert.equal(calls, 3);
+  assert.equal(calls, 0, 'form/parent rerenders must not reconcile the complete ledger');
+  h.state.transactions = [...h.state.transactions]; render(); assert.equal(calls, 0);
+  h.state.accounts = [...h.state.accounts]; render(); assert.equal(calls, 0);
 });

@@ -24,7 +24,7 @@ import { SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
@@ -1033,7 +1033,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
   },
   kindRow: {
     flexDirection: 'row',
@@ -1069,7 +1069,7 @@ const styles = StyleSheet.create({
   amountInput: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
     paddingVertical: Spacing.three,
   },
   colorRow: {
