@@ -93,10 +93,32 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
   let memoCursor = 0;
   const stateSlots = [];
   let stateCursor = 0;
-  const readStateSlot = h.deps.react.useState;
+  // Real useState and useEffect, because Home now defers the insight
+  // projection off first paint: the card is what the deferral is for, so a
+  // harness that cannot carry state across renders or run an effect would
+  // report the projection as never happening rather than as happening once.
+  const effectSlots = [];
+  let effectCursor = 0;
+  const pendingEffects = [];
   h.deps.react.useState = initial => {
     const index = stateCursor++;
-    return stateSlots[index] ?? (stateSlots[index] = readStateSlot(initial));
+    if (!Object.hasOwn(stateSlots, index)) {
+      stateSlots[index] = typeof initial === 'function' ? initial() : initial;
+    }
+    return [stateSlots[index], next => {
+      stateSlots[index] = typeof next === 'function' ? next(stateSlots[index]) : next;
+    }];
+  };
+  h.deps.react.useEffect = (effect, dependencies) => {
+    const index = effectCursor++;
+    const previous = effectSlots[index];
+    if (previous && dependencies && previous.dependencies &&
+      dependencies.length === previous.dependencies.length &&
+      dependencies.every((value, i) => Object.is(value, previous.dependencies[i]))) {
+      return;
+    }
+    effectSlots[index] = { dependencies };
+    pendingEffects.push(() => effect());
   };
   h.deps.react.useMemo = (factory, deps) => {
     const index = memoCursor++;
@@ -116,7 +138,12 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
     const projected = project();
     return { ...projected, unreadFormats: request.state.reviewTray.pending.length ? null : { count: 3, shouldPrompt: true } };
   };
-  const render = () => { memoCursor = 0; stateCursor = 0; return h.render('home'); };
+  const render = () => {
+    memoCursor = 0; stateCursor = 0; effectCursor = 0;
+    const tree = h.render('home');
+    while (pendingEffects.length) pendingEffects.shift()();
+    return tree;
+  };
   render();
   const sameTransactions = h.state.transactions;
   h.state.reviewTray = { pending: [] };
