@@ -2,6 +2,10 @@ name: Finish Wafra iOS build 127 public TestFlight
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-build127-finish-public.yml'
 
 permissions:
   contents: read
