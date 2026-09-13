@@ -24,8 +24,8 @@ jobs:
           node-version: 22.22.3
       - name: Inspect Apple build compliance state
         run: |
-          node <<'NODE'
-          const { createPrivateKey, sign } = require('node:crypto');
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
           const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
           const pem = raw.includes('BEGIN PRIVATE KEY') ? raw : Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
           const key = createPrivateKey(pem);
