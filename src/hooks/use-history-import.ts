@@ -20,7 +20,8 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 2_000;
+const HISTORY_IMPORT_PAGE_SIZE = 500;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 180;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -59,11 +60,12 @@ export function useHistoryImport(): void {
     },
     now: Date.now,
     scanPage: async (cursor: HistoryImportCursor | null) => {
-      // Leave a real frame between durable 1,000-row pages while the app is
-      // visible so taps/navigation are never queued behind back-to-back parse
-      // and commit work. Background execution keeps the fast path.
+      // Foreground history repair is maintenance work, never interaction-critical.
+      // Keep pages small and leave a real idle window between them so Hermes
+      // cannot monopolize a CPU core while the user is navigating. Background
+      // execution retains the zero-delay fast path.
       await new Promise<void>((resolve) =>
-        setTimeout(resolve, RNAppState.currentState === 'active' ? 16 : 0));
+        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,

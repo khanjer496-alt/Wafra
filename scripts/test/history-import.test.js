@@ -79,7 +79,7 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   );
   ok(
     'resumable history uses a larger bounded page to reduce encrypted-ledger checkpoints',
-    /HISTORY_IMPORT_PAGE_SIZE = 2_000/.test(historyHookSource) &&
+    /HISTORY_IMPORT_PAGE_SIZE = 500/.test(historyHookSource) &&
       /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );
