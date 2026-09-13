@@ -28,6 +28,18 @@ struct PagedHistoryTests {
         .map { Data($0.utf8).base64EncodedString() }
         .joined(separator: "|")
     }
+    /// The build 135 device shape: every Base64 field wrapped at 76 columns
+    /// with CRLF, so a long body spans several transport lines.
+    var wrappedFramed: String {
+      func wrap(_ value: String) -> String {
+        var pieces: [String] = []; var rest = Substring(value)
+        while !rest.isEmpty { let end = rest.index(rest.startIndex, offsetBy: min(76, rest.count)); pieces.append(String(rest[..<end])); rest = rest[end...] }
+        return pieces.joined(separator: "\r\n")
+      }
+      return [guid, body, "TEST", stamp(date)]
+        .map { wrap(Data($0.utf8).base64EncodedString()) }
+        .joined(separator: "|")
+    }
   }
   static func rows(_ count: Int) -> [Row] {
     (0..<count).map { Row(guid: "synthetic-\($0)",
@@ -201,28 +213,55 @@ struct PagedHistoryTests {
     } catch { fatalError("oversize-body failed: \(error)") }
     try check("a body over 16 KiB is staged as skipped instead of refusing the page",
       oversizeResult["checked"] as! Int == missingResult["checked"] as! Int && oversizeResult["skipped"] as! Int == 1)
-    func refusal(_ name: String, expected: WafraPagedHistoryStore.Failure, found: Int, frame: String) throws {
+    func refusal(_ name: String, found: Int, frame: String, matches: (Error) -> Bool) throws {
       do {
         _ = try oversize.stage(sessionId: oversizeResult["sessionId"] as! String,
           authorizationSecret: oversizeResult["authorizationSecret"] as! String,
           revision: oversizeResult["revision"] as! Int, found: found, frame: frame)
         fatalError("FAILED: \(name) was accepted")
-      } catch let failure as WafraPagedHistoryStore.Failure {
-        try check(name, failure == expected)
+      } catch {
+        try check(name, matches(error))
       }
     }
+    let lineShape: (Error) -> Bool = { ($0 as? WafraPagedHistoryStore.FrameRefusal)?.reason.hasPrefix("invalid-input-lines") == true }
     let nextRows = page(oversizeRows, oversizeResult)
-    try refusal("a frame whose line count disagrees with the page count names that check",
-      expected: .frameLineCount, found: nextRows.count, frame: nextRows.dropLast().map(\.framed).joined(separator: "\n"))
+    try refusal("a frame with fewer records than the page count names the observed shape",
+      found: nextRows.count, frame: nextRows.dropLast().map(\.framed).joined(separator: "\n"), matches: lineShape)
+    try refusal("records that run together without any separator are refused, never re-split",
+      found: nextRows.count, frame: nextRows.map(\.framed).joined(separator: ""), matches: lineShape)
     var badField = nextRows.map(\.framed); badField[0] = "not*base64|" + badField[0].split(separator: "|").dropFirst().joined(separator: "|")
     try refusal("a field that is not canonical Base64 names that check",
-      expected: .fieldEncoding, found: nextRows.count, frame: badField.joined(separator: "\n"))
+      found: nextRows.count, frame: badField.joined(separator: "\n"), matches: { ($0 as? WafraPagedHistoryStore.Failure) == WafraPagedHistoryStore.Failure.fieldEncoding })
     var badDate = nextRows.map(\.framed)
     badDate[0] = badDate[0].split(separator: "|").dropLast().joined(separator: "|") + "|" + Data("13/09/2026 10:00".utf8).base64EncodedString()
     try refusal("a date outside the producer's instant format names that check",
-      expected: .fieldDate, found: nextRows.count, frame: badDate.joined(separator: "\n"))
+      found: nextRows.count, frame: badDate.joined(separator: "\n"), matches: { ($0 as? WafraPagedHistoryStore.Failure) == WafraPagedHistoryStore.Failure.fieldDate })
     try check("named refusals leave the cursor untouched",
       try json(oversize.status()!)["checked"] as! Int == oversizeResult["checked"] as! Int)
+
+    // Build 135 on an iPhone 16 Pro: the first page's Base64 fields arrived
+    // wrapped onto several lines, so the line count disagreed with the 51
+    // Messages found. Long bodies make every record span lines; the reader
+    // must reassemble them by their three separators and reach exactly the
+    // cursor the unwrapped frame reaches.
+    let longRows = (0..<100).map { Row(guid: "long-\($0)", date: fixedNow.addingTimeInterval(-100 - Double($0) * 0.333),
+      body: "Dear Customer, your card ending 1234 was used for AED 1,234.56 at MERCHANT NAME LLC DUBAI on 12/09/2026 21:22. Available limit AED 9,876.54. Call us if this was not you. Ref \($0)") }
+    let wrapped = make("wrapped"); let wrappedState = try begin(wrapped, longRows)
+    let wrappedPage = page(longRows, wrappedState)
+    let wrappedResult: [String: Any]
+    do {
+      wrappedResult = try json(wrapped.stage(sessionId: wrappedState["sessionId"] as! String,
+        authorizationSecret: wrappedState["authorizationSecret"] as! String,
+        revision: wrappedState["revision"] as! Int, found: wrappedPage.count,
+        frame: wrappedPage.map(\.wrappedFramed).joined(separator: "\r\n") + "\r\n"))
+    } catch { fatalError("wrapped-frame failed: \(error)") }
+    let flat = make("flat"); let flatState = try begin(flat, longRows)
+    let flatResult = try json(flat.stage(sessionId: flatState["sessionId"] as! String,
+      authorizationSecret: flatState["authorizationSecret"] as! String,
+      revision: flatState["revision"] as! Int, found: wrappedPage.count,
+      frame: wrappedPage.map(\.framed).joined(separator: "\n")))
+    try check("Base64 fields wrapped across transport lines reassemble to the exact unwrapped cursor",
+      wrappedResult["checked"] as! Int == flatResult["checked"] as! Int && wrappedResult["accepted"] as! Int == flatResult["accepted"] as! Int && (wrappedResult["accepted"] as! Int) > 0)
 
     // Column framing rebuilds the same line frame, so a page staged from
     // joined columns must land on exactly the cursor the row frame reaches.

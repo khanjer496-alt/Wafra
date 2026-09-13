@@ -102,6 +102,7 @@ struct StageWafraPagedImportIntent: AppIntent {
       let reason: String
       if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
       else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
+      else if let error = error as? WafraPagedHistoryStore.FrameRefusal { reason = error.reason }
       else { reason = "storage-or-device-interruption" }
       let result = try JSONSerialization.data(withJSONObject: ["status": "blocked", "reason": reason], options: [.sortedKeys])
       return .result(value: String(decoding: result, as: UTF8.self))
@@ -141,6 +142,7 @@ struct StageWafraPagedColumnsIntent: AppIntent {
       let reason: String
       if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
       else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
+      else if let error = error as? WafraPagedHistoryStore.FrameRefusal { reason = error.reason }
       else { reason = "storage-or-device-interruption" }
       let result = try JSONSerialization.data(withJSONObject: ["status": "blocked", "reason": reason], options: [.sortedKeys])
       return .result(value: String(decoding: result, as: UTF8.self))

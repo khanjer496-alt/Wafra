@@ -103,6 +103,24 @@ root (`dismissAll`) and switch tabs there; a cold deep-link launch with no root
 beneath keeps the replace. The paging screen's Back uses `dismissTo` for the
 same reason.
 
+## Build 135 device result (same day)
+
+Build 135 shipped the named refusals. On the owner's iPhone the History
+Shortcut's first page (51 Messages, plus the two boundary rows) was refused
+with `invalid-input-lines`: the frame's newline-separated line count did not
+equal the 51 Messages found. Bank alert bodies are long, so the Base64 body
+field was arriving wrapped onto several transport lines even though the
+graph configures Base64 Encode with no line breaks; short OTP rows were fine.
+
+The store no longer trusts line breaks. `frameRecords` splits the frame on
+any whitespace and reassembles records by their three `|` separators, which
+Base64 can never contain, so a wrapped field is rejoined exactly and a
+record ends precisely at its date field. Records that run together with no
+separator, or a dangling partial record, are still refused, and the reason
+now carries the observed counts (`fragments`, `separators`, `records`,
+`found`) so the next alert, if any, identifies the shape directly. The
+Shortcut graph is unchanged; only the app build changes.
+
 ## Verification
 
 | Check | Result |
