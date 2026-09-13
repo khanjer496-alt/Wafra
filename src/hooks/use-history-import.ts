@@ -20,8 +20,8 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 500;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 180;
+const HISTORY_IMPORT_PAGE_SIZE = 100;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.

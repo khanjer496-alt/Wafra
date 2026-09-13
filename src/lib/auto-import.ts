@@ -55,14 +55,14 @@ const MAX_REVIEW_CANDIDATES = 50;
  * the exact ordered result while avoiding 40+ timer turns per 1,000 simple
  * alerts on a fast phone.
  */
-const PARSE_TIME_BUDGET_MS = 3;
-const MAX_PARSE_SLICE_SIZE = 16;
+const PARSE_TIME_BUDGET_MS = 1;
+const MAX_PARSE_SLICE_SIZE = 2;
 // A zero-delay timer yields the call stack but immediately competes for the
 // next JS turn again. Real-phone profiling on CPH2653 showed mqt_v_js pinned
 // at ~100% for roughly 50 seconds during parser migration. Foreground history
 // is maintenance work: cap each JS slice tightly and give input/render work a
 // meaningful scheduling window. Background history keeps the fast path.
-const FOREGROUND_PARSE_YIELD_MS = 28;
+const FOREGROUND_PARSE_YIELD_MS = 40;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
