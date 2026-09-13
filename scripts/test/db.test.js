@@ -1229,6 +1229,21 @@ const tx = (id, extra = {}) => ({
     genuine.length === 2 && genuine.some((row) => row.id === first.id) &&
       genuine.some((row) => row.id === second.id));
 
+  const genuineInput = [first, second];
+  const genuineIdentity = hydration.finalizeHydrationTransactions(genuineInput);
+  ok('unchanged hydration preserves the transaction array identity',
+    genuineIdentity === genuineInput);
+
+  const editedIdentityRow = tx('edited-identity', {
+    title: 'User corrected merchant',
+    note: 'keep exactly',
+    userEdited: true,
+  });
+  const editedIdentityInput = [editedIdentityRow, first];
+  const editedIdentity = hydration.finalizeHydrationTransactions(editedIdentityInput);
+  ok('unchanged hydration with a userEdited row preserves the transaction array identity',
+    editedIdentity === editedIdentityInput);
+
   const edited = tx('edited-capture', {
     title: 'My coffee correction',
     note: 'keep exactly',

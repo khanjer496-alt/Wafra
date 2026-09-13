@@ -260,16 +260,23 @@ export function preserveUserEditedTransactions(
   if (pinned.size === 0) return migrated;
 
   const restoredIds = new Set<string>();
+  let changed = false;
   const restored = migrated.map((t) => {
     const exact = pinned.get(t.id);
     if (!exact) return t;
     restoredIds.add(t.id);
+    if (exact !== t) changed = true;
     return exact;
   });
   for (const [id, exact] of pinned) {
-    if (!restoredIds.has(id)) restored.push(exact);
+    if (restoredIds.has(id)) continue;
+    restored.push(exact);
+    changed = true;
   }
-  return restored;
+  // Persistence uses transaction-array identity as its cheap "did rows change?"
+  // signal. A ledger containing any user-edited row must not manufacture a new
+  // array on every hydrate when the exact edited objects are already present.
+  return changed ? restored : migrated;
 }
 
 /** Conservative persisted-capture cleanup shared by every hydration path. */
