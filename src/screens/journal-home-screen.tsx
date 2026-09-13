@@ -142,10 +142,20 @@ export default function JournalHomeScreen() {
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
   const payments = dashboard.upcoming.items;
-  const homeInsight = useMemo(() => projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight,
+  // A SECOND whole-ledger projection, and the most expensive thing this screen
+  // does: `includeInsights` runs the historical analysis the cheap `home`
+  // surface above deliberately skips, and everything but `.insight` is thrown
+  // away. It feeds one optional card, so skip it outright when that card is
+  // switched off — which every user who had hidden it was paying for on every
+  // render of Home.
+  const insightVisible = homeWidgetVisible(homeWidgets, 'insight');
+  const homeInsight = useMemo(() => (insightVisible
+    ? projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight
+    : null),
     // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
+    [insightVisible,
+      state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
       state.merchantOverrides, state.ledgerMoney, state.marketId, period, now]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
