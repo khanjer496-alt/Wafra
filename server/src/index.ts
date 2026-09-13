@@ -241,6 +241,44 @@ function validMarket(id: unknown): string | null {
   return MARKETS.some((market) => market.id === up) ? up : null;
 }
 
+function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): {
+  sourceKey: string; label: string; startDate: string; endDate: string;
+} | null {
+  const dates = rows.map((row) => row.date).filter((date): date is string =>
+    typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (dates.length === 0) return null;
+  dates.sort();
+  const instruments = new Map<string, { key: string; label: string }>();
+  for (const row of rows) {
+    if (!row.card || !/^\d{4}$/.test(row.card.last4)) continue;
+    const kind = row.card.kind === 'account' ? 'account' : 'card';
+    const key = `${kind}:${row.card.kind}:${row.card.last4}`;
+    instruments.set(key, { key, label: `${kind === 'account' ? 'Account' : 'Card'} •${row.card.last4}` });
+  }
+  const banks = [...new Set(rows.map((row) => row.bankHint?.trim()).filter((value): value is string => !!value))];
+  const source = instruments.size === 1
+    ? [...instruments.values()][0]
+    : banks.length === 1
+      ? { key: `bank:${banks[0].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48)}`, label: banks[0].slice(0, 60) }
+      : { key: 'bank-statements', label: 'Bank statements' };
+  return { sourceKey: source.key, label: source.label, startDate: dates[0], endDate: dates[dates.length - 1] };
+}
+
+function pdfPassword(req: Request): string | undefined {
+  const value = req.headers.get('x-wafra-pdf-password');
+  if (!value) return undefined;
+  if (value.length > 128 || /[\r\n\0]/.test(value)) return undefined;
+  return value;
+}
+
+function pdfPasswordFailure(error: unknown): 'pdf_password_required' | 'pdf_password_incorrect' | null {
+  if (!error || typeof error !== 'object') return null;
+  const row = error as { name?: unknown; code?: unknown; message?: unknown };
+  if (row.name !== 'PasswordException') return null;
+  if (row.code === 1 || /password.*required|no password/i.test(String(row.message ?? ''))) return 'pdf_password_required';
+  return 'pdf_password_incorrect';
+}
+
 function statementCurrencyForMarket(market: string): 'AED' | 'SAR' {
   return market === 'SA' ? 'SAR' : 'AED';
 }
@@ -1645,8 +1683,11 @@ export default {
         extracted = await extractPdfStatementRows(
           incoming.bytes,
           statementCurrencyForMarket(device.market),
+          pdfPassword(req),
         );
-      } catch {
+      } catch (error) {
+        const passwordError = pdfPasswordFailure(error);
+        if (passwordError) return json({ error: passwordError }, 422);
         return json({ error: 'unreadable_pdf' }, 422);
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
@@ -1673,7 +1714,11 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
-      return json({ acceptedRows: extracted.rows.length, pages: extracted.pages }, 202);
+      return json({
+        acceptedRows: extracted.rows.length,
+        pages: extracted.pages,
+        coverage: statementCoverage(extracted.rows),
+      }, 202);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/import/csv') {
@@ -1725,6 +1770,7 @@ export default {
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
+        coverage: statementCoverage(parsed.rows),
       }, 202);
     }
 

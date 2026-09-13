@@ -139,7 +139,7 @@ ok('email and PDF rows cross the same raw-discard boundary',
   /\.\.\.withoutRaw\(parsedRows\[index\]\)[\s\S]{0,160}captureSource: 'email'/.test(worker) &&
     /\.\.\.withoutRaw\(extracted\.rows\[index\]\)/.test(worker));
 ok('PDF endpoint never returns extracted rows or text',
-  /return json\(\{ acceptedRows: extracted\.rows\.length, pages: extracted\.pages \}, 202\)/.test(worker));
+  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*pages: extracted\.pages,\s*coverage: statementCoverage\(extracted\.rows\),\s*\}, 202\)/.test(worker));
 ok('import module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(imports));
 ok('email HTTP ingestion requires the email-only bearer scope',
@@ -147,6 +147,12 @@ ok('email HTTP ingestion requires the email-only bearer scope',
 ok('PDF upload and capability discovery require admin scope',
   /url\.pathname === '\/v1\/import\/pdf'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
     /url\.pathname === '\/v1\/import\/capabilities'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker));
+ok('protected PDFs use a bounded one-request password without persistence',
+  /x-wafra-pdf-password/.test(worker) &&
+    /value\.length > 128/.test(worker) &&
+    /extractPdfStatementRows\([\s\S]{0,180}pdfPassword\(req\)/.test(worker) &&
+    /pdf_password_required/.test(worker) && /pdf_password_incorrect/.test(worker) &&
+    !/console\./.test(worker) && !/password[^\n]{0,80}(?:INSERT INTO|UPDATE |put\()/.test(worker));
 ok('direct PDF upload enforces media type, byte cap and PDF magic',
   /content-type[\s\S]{0,180}application\/pdf/.test(worker) &&
     /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) && /!== '%PDF-'/.test(worker));

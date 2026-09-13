@@ -568,6 +568,19 @@ export function mergeLocalCaptureQualifications(
   return result;
 }
 
+
+export interface StatementCoverageEntry {
+  id: string;
+  /** Stable, privacy-safe source bucket, e.g. card:credit:1234. */
+  sourceKey: string;
+  /** Human label derived only from masked instrument evidence. */
+  label: string;
+  startDate: string;
+  endDate: string;
+  importedAt: number;
+  format: 'pdf' | 'csv';
+}
+
 export interface AppState {
   hydrated: boolean;
   /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
@@ -583,6 +596,8 @@ export interface AppState {
   budgets: Budget[];
   bills: Bill[];
   cardDues: CardDue[];
+  /** Structured statement date ranges already imported; files/passwords are never retained. */
+  statementCoverage: StatementCoverageEntry[];
   goals: Goal[];
   /** First-run plan waiting for a real ledger currency before activation. */
   onboardingPlan: OnboardingPlanPreferences | null;

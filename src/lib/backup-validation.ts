@@ -88,6 +88,10 @@ const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
 }) && optional(value, { minDueEstimated: boolean, settledAt: isoDate });
+const statementCoverageEntry: Check = (value) => record(value) && required(value, {
+  id, sourceKey: id, label: text, startDate: isoDate, endDate: isoDate, importedAt: nonnegative,
+  format: oneOf('pdf', 'csv'),
+}) && (value.startDate as string) <= (value.endDate as string);
 const goal: Check = (value) => record(value) && required(value, {
   id, title: text, emoji: text, targetFils: positive, savedFils: nonnegative,
 });
@@ -118,6 +122,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
   }
   return optional(value, {
     merchantOverrides: dictionary(category), billAliases: dictionary(billAlias), accountHints: dictionary(id),
+    statementCoverage: arrayOf(statementCoverageEntry),
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
     notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,

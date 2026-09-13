@@ -592,11 +592,12 @@ export function parseStatementText(
 export async function extractPdfStatementRows(
   bytes: Uint8Array,
   currency: StatementCurrency = 'AED',
+  password?: string,
 ): Promise<{
   pages: number;
   rows: ParsedSms[];
 }> {
-  const document = await getDocumentProxy(bytes);
+  const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
     const extracted = await extractText(document, { mergePages: true });
     if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('PDF text exceeds limit');

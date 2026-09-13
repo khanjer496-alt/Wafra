@@ -128,6 +128,7 @@ import {
   type OnboardingProfile,
   type Transaction,
   type TransactionType,
+  type StatementCoverageEntry,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -177,6 +178,7 @@ const EMPTY_STATE: AppState = {
   budgets: [],
   bills: [],
   cardDues: [],
+  statementCoverage: [],
   goals: [],
   onboardingPlan: null,
   onboardingProfile: null,
@@ -711,6 +713,7 @@ type Action =
   | { type: 'recordIosCaptureWarning'; warning: IosCaptureWarningState }
   | { type: 'clearIosCaptureWarning'; expectedWarningId: string | null }
   | { type: 'setHistoryImport'; progress: HistoryImportProgress }
+  | { type: 'recordStatementCoverage'; entry: StatementCoverageEntry }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
@@ -1227,6 +1230,17 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
+    case 'recordStatementCoverage': {
+      const duplicate = state.statementCoverage.find((item) =>
+        item.sourceKey === action.entry.sourceKey && item.startDate === action.entry.startDate &&
+        item.endDate === action.entry.endDate && item.format === action.entry.format);
+      const nextEntry = duplicate ? { ...duplicate, importedAt: action.entry.importedAt } : action.entry;
+      const without = duplicate
+        ? state.statementCoverage.filter((item) => item.id !== duplicate.id)
+        : state.statementCoverage;
+      return { ...state, statementCoverage: [...without, nextEntry]
+        .sort((a, b) => b.importedAt - a.importedAt).slice(0, 80) };
+    }
     case 'setHistoryImport':
       return { ...state, historyImport: action.progress };
     case 'applyFxUpdates': {
@@ -1375,6 +1389,7 @@ interface StoreValue {
   ) => { cleared: boolean; durable: Promise<void> };
   setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
   beginHistoryImport: () => Promise<void>;
+  recordStatementCoverage: (entry: Omit<StatementCoverageEntry, 'id'>) => Promise<void>;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -1393,6 +1408,7 @@ interface StoreValue {
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+const PrivateModeContext = createContext(false);
 
 export interface ImportReceipt {
   ids: string[];
@@ -2323,6 +2339,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     requestHistoryImportRun();
   }, [setHistoryImportProgress]);
 
+  const recordStatementCoverage = useCallback(async (entry: Omit<StatementCoverageEntry, 'id'>) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'recordStatementCoverage', entry: { ...entry, id: makeId('statement') } });
+    const written = await persist(next);
+    if (!written) throw new Error('Statement coverage could not be saved');
+  }, [dispatch, persist]);
+
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
   }, [dispatch]);
@@ -2573,6 +2599,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
+      recordStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -2635,6 +2662,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
+      recordStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -2651,7 +2679,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return (
+    <PrivateModeContext.Provider value={state.privateMode}>
+      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+    </PrivateModeContext.Provider>
+  );
 }
 
 export function useStore(): StoreValue {
@@ -2659,6 +2691,12 @@ export function useStore(): StoreValue {
   if (!ctx) throw new Error('useStore must be used within StoreProvider');
   return ctx;
 }
+
+/** Narrow subscription for list-row artwork; unrelated ledger updates do not rerender every avatar. */
+export function usePrivateMode(): boolean {
+  return useContext(PrivateModeContext);
+}
+
 
 // Pure balance math lives in balances.ts so the unit-test harness can load
 // it without React; re-exported here so screens keep one import path.

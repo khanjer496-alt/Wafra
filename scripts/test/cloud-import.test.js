@@ -90,12 +90,12 @@ ok('CSV and TSV use a distinct authenticated statement endpoint',
     /text\/tab-separated-values/.test(transport));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
-  /pickedFile\.delete\(\)/.test(surface));
-ok('forwarding credential is compare-and-cleared on timeout and screen exit',
-  /const current = await Clipboard\.getStringAsync\(\)/.test(surface) &&
-  /if \(current === address\) await Clipboard\.setStringAsync\(''\)/.test(surface) &&
-  /if \(address\) void clearCopiedAddress\(address\)/.test(surface) &&
-  /if \(disposed\.current\)[\s\S]{0,120}?clearCopiedAddress\(address\)/.test(surface));
+  /file\.delete\(\)/.test(surface));
+ok('statement screen no longer exposes forwarded-email setup',
+  !/createEmailForwardingAddress|revokeEmailForwardingAddress|forwardingAddress|Create private address/.test(surface));
+ok('protected PDF retry keeps the picker copy only until password retry or cancel',
+  /pdf_password_required/.test(surface) && /secureTextEntry/.test(surface) &&
+  /retryProtectedPdf/.test(surface) && /pendingPdf\.file\.delete\(\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <

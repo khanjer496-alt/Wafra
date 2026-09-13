@@ -100,6 +100,7 @@ export async function uploadPdfStatement(
   cfg: RelayConfig,
   picked: PickedStatement,
   capabilities: ImportCapabilities,
+  password?: string,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
     throw new CloudImportError('service');
@@ -112,7 +113,10 @@ export async function uploadPdfStatement(
 
   const response = await relayFetch(`${cfg.baseUrl}/v1/import/pdf`, cfg.adminToken, {
     method: 'POST',
-    headers: { 'content-type': 'application/pdf' },
+    headers: {
+      'content-type': 'application/pdf',
+      ...(password ? { 'x-wafra-pdf-password': password } : {}),
+    },
     body: file,
   });
   const body = await safeJson(response);
