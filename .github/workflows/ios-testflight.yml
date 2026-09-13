@@ -108,6 +108,8 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Require the approved Claude design baseline
         run: node scripts/check-design-baseline.mjs
@@ -868,7 +870,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_commit || github.sha }}
+          ref: ${{ inputs.source_commit || 'main' }}
           fetch-depth: 0
 
       - name: Pin and verify main-line build source

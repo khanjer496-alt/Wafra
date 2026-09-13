@@ -74,6 +74,8 @@ jobs:
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Refuse diagnostic tracing in a Play bundle
         if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'
