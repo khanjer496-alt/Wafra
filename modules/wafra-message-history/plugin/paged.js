@@ -7,12 +7,14 @@ internal import WafraMessageHistory
 
 @available(iOS 26.0, *)
 private enum WafraPagedIntentError: Error, CustomLocalizedStringResourceConvertible {
-  case begin
+  /// Carries the store's source-free reason code so the Shortcuts error names
+  /// the failing check (a blank boundary GUID, an unparseable boundary date).
+  case begin(String)
   case cursor
   var localizedStringResource: LocalizedStringResource {
     switch self {
-    case .begin:
-      "Wafra could not start or resume this history import. Open the history beta screen to check saved progress."
+    case .begin(let reason):
+      "Wafra could not start or resume this history import (\(reason)). Open Wafra to check saved progress."
     case .cursor:
       "Wafra could not read the saved history cursor. Open Wafra to check saved progress."
     }
@@ -34,7 +36,13 @@ struct BeginWafraPagedImportIntent: AppIntent {
       return .result(value: try WafraPagedHistoryStore.shared.begin(
         oldestGUID: oldestGUID, oldestDate: oldestDate,
         newestGUID: newestGUID, newestDate: newestDate))
-    } catch { throw WafraPagedIntentError.begin }
+    } catch let error as WafraPagedHistoryStore.Failure {
+      throw WafraPagedIntentError.begin(error.rawValue)
+    } catch let error as WafraHistoryCursor.Failure {
+      throw WafraPagedIntentError.begin(error.rawValue)
+    } catch {
+      throw WafraPagedIntentError.begin("storage-or-device-interruption")
+    }
   }
 }
 

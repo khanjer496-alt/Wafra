@@ -186,6 +186,44 @@ struct PagedHistoryTests {
     try check("a row whose MessageEntity GUID is blank does not reject the whole page",
       missingResult["checked"] as! Int > 0)
 
+    // One Message the parser could never use must not block every page behind it.
+    let oversizeRows = rows(100).enumerated().map { index, row in
+      index == 3 ? Row(guid: row.guid, date: row.date, body: String(repeating: "x", count: 16 * 1_024 + 1)) : row
+    }
+    let oversize = make("oversize-body"); let oversizeState = try begin(oversize, oversizeRows)
+    let oversizePage = page(oversizeRows, oversizeState)
+    let oversizeResult: [String: Any]
+    do {
+      oversizeResult = try json(oversize.stage(sessionId: oversizeState["sessionId"] as! String,
+        authorizationSecret: oversizeState["authorizationSecret"] as! String,
+        revision: oversizeState["revision"] as! Int, found: oversizePage.count,
+        frame: oversizePage.map(\.framed).joined(separator: "\n")))
+    } catch { fatalError("oversize-body failed: \(error)") }
+    try check("a body over 16 KiB is staged as skipped instead of refusing the page",
+      oversizeResult["checked"] as! Int == missingResult["checked"] as! Int && oversizeResult["skipped"] as! Int == 1)
+    func refusal(_ name: String, expected: WafraPagedHistoryStore.Failure, found: Int, frame: String) throws {
+      do {
+        _ = try oversize.stage(sessionId: oversizeResult["sessionId"] as! String,
+          authorizationSecret: oversizeResult["authorizationSecret"] as! String,
+          revision: oversizeResult["revision"] as! Int, found: found, frame: frame)
+        fatalError("FAILED: \(name) was accepted")
+      } catch let failure as WafraPagedHistoryStore.Failure {
+        try check(name, failure == expected)
+      }
+    }
+    let nextRows = page(oversizeRows, oversizeResult)
+    try refusal("a frame whose line count disagrees with the page count names that check",
+      expected: .frameLineCount, found: nextRows.count, frame: nextRows.dropLast().map(\.framed).joined(separator: "\n"))
+    var badField = nextRows.map(\.framed); badField[0] = "not*base64|" + badField[0].split(separator: "|").dropFirst().joined(separator: "|")
+    try refusal("a field that is not canonical Base64 names that check",
+      expected: .fieldEncoding, found: nextRows.count, frame: badField.joined(separator: "\n"))
+    var badDate = nextRows.map(\.framed)
+    badDate[0] = badDate[0].split(separator: "|").dropLast().joined(separator: "|") + "|" + Data("13/09/2026 10:00".utf8).base64EncodedString()
+    try refusal("a date outside the producer's instant format names that check",
+      expected: .fieldDate, found: nextRows.count, frame: badDate.joined(separator: "\n"))
+    try check("named refusals leave the cursor untouched",
+      try json(oversize.status()!)["checked"] as! Int == oversizeResult["checked"] as! Int)
+
     // Column framing rebuilds the same line frame, so a page staged from
     // joined columns must land on exactly the cursor the row frame reaches.
     let sep = String(WafraPagedHistoryStore.columnSeparator)

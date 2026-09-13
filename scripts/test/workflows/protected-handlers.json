@@ -116,7 +116,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "refreshSetup",
-      "sha256": "f08c77395f94446714851721bebcfa58d8b11fb06c209e62e6033d0399c2aaab"
+      "sha256": "747b9dae02a3fa5a3e1b1580c0303b6af57c9463f76a66c084190a95fe99e15d",
+      "reviewedChange": "2026-09-13: When the installed History record is paged, refresh also reads the source-free native paged status (checked/accepted/skipped counts) so the setup screen can show progress after the Shortcut pauses. Recovery, reconciliation and error handling are unchanged. Covered by ios-setup-ux.test.js and ios-journey tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -164,14 +165,14 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "38859b1a6518a2b1f23bb7f9d68e1fd34c57615a24ccfcce674c6b5724aaa706",
-      "reviewedChange": "2026-09-10: Durable iOS onboarding completion now preserves the source-free onboarding focus, records the provider-neutral completion event, and opens the selected first view."
+      "sha256": "db6668e06aeb64c6d6e77b5441b9514bc370b8ac184fbd752117f5fb46c1c8b3",
+      "reviewedChange": "2026-09-13: Onboarding completion exits through dismissAll + navigate instead of router.replace, because replacing the pushed setup screen mounted a second tabs navigator (two Home screens). Durable completion order is unchanged. Covered by onboarding-extreme-setup.test.cjs and setup UX tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "leave",
-      "sha256": "1872e5de16c136abe2a2a5bf71f3d98ecfd5dce4e0a571bd507b18c50b11f9d9",
-      "reviewedChange": "2026-09-13: During guided onboarding, Back clears the return marker and replaces the route once instead of walking backward through Shortcut/iCloud handoffs. Settings behavior remains ordinary back navigation. Covered by iOS setup UX/navigation tests."
+      "sha256": "113e005b6ade8fdcac0abee61069f3b4f3f402e01ca1da4525cc25652cab5ad0",
+      "reviewedChange": "2026-09-13: Guided Back returns to the existing root with dismissAll + navigate instead of router.replace (same duplicate-tabs cause as finish). Return-marker clearing is unchanged. Covered by ios-setup-ux.test.js and onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/feedback.tsx",
