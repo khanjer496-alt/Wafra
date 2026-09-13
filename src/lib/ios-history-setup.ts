@@ -12,7 +12,7 @@ export type IosHistoryCardState =
 
 export const IOS_HISTORY_HANDOFF_TTL_MS = 60 * 60_000;
 export const IOS_HISTORY_SHORTCUT_NAME = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1'
-  ? 'Wafra History v2'
+  ? 'Wafra-History-v2-typed-date.signed'
   : 'Wafra History Import';
 export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v1';
 export const IOS_HISTORY_HANDOFF_MARKER = 'wafra/ios-history-handoff-started-at/v1';
@@ -40,6 +40,10 @@ const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   'cc85a21db99a4e4698c1a498de670199',
   // Build 99 legacy per-message graph. The next release uses bounded paging.
   '2869584d40ed454691cf3f916cbee158',
+  // Superseded paged-history artifacts. Both retained the old cursor/date path
+  // and must never be accepted as current again.
+  'a0e52d2ffabc43a9ad539798b4f17f17',
+  'b02fdd70b9b84805a8d8e9684dd684d5',
 ]);
 
 export interface IosHistorySetupStorage {

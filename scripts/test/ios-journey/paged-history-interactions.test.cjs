@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('../repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
-const historyInstallUrl = 'https://www.icloud.com/shortcuts/a0e52d2ffabc43a9ad539798b4f17f17';
+const historyInstallUrl = 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa';
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
@@ -93,7 +93,7 @@ test('an older confirmed shortcut cannot bypass the new installation even with s
   assert.deepEqual(s.handoffs, []);
   assert.deepEqual(s.discards, []);
   s.button('I added it — start import').onPress(); await s.flush();
-  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra History v2');
+  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra-History-v2-typed-date.signed');
   assert.equal(s.handoffs[0][1], Math.floor(pending.createdAtMs));
 });
 test('resume retains original session timing; completion opens review rather than claiming ledger save', async () => {

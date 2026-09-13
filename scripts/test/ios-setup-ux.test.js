@@ -392,7 +392,7 @@ async function historyCardTests() {
       'iOS history: runtime accepts only trusted signed Shortcut install URLs',
       [
         setup.normalizeIosHistoryShortcutUrl(
-          'https://www.icloud.com/shortcuts/E0BA137DF950416E8C8CBA8528287D95',
+          'https://www.icloud.com/shortcuts/5A0DA9B5D3A641D9958F3DFA37851AFA',
         ),
         setup.normalizeIosHistoryShortcutUrl(
           'https://www.icloud.com/shortcuts/cc85a21db99a4e4698c1a498de670199',
@@ -411,7 +411,7 @@ async function historyCardTests() {
         ),
       ],
       [
-        'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95',
+        'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa',
         null,
         null,
         null,

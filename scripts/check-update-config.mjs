@@ -9,6 +9,8 @@ const failures = [];
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
   'cc85a21db99a4e4698c1a498de670199',
   '2869584d40ed454691cf3f916cbee158',
+  'a0e52d2ffabc43a9ad539798b4f17f17',
+  'b02fdd70b9b84805a8d8e9684dd684d5',
 ]);
 
 const readJson = async (relative) => JSON.parse(
