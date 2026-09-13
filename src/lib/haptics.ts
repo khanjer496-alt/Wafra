@@ -26,10 +26,11 @@ const native = Platform.OS === 'ios' || Platform.OS === 'android';
 export function tapped(): void {
   if (!native) return;
   if (Platform.OS === 'android') {
-    // Expo SDK 55 recommends Android's haptics engine over a simulated
-    // Vibrator impact. Segment_Tick is the native semantic for a discrete
-    // choice and does not require the VIBRATE permission.
-    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Segment_Tick).catch(() => {});
+    // Routine Android tap haptics fire on nearly every navigation/control action.
+    // On OEM builds where the haptics service is slow, dozens of bridge calls
+    // can overlap the JS navigation turn and make a registered tap feel late.
+    // Keep commitment/error haptics below, but ordinary Android taps use the
+    // platform ripple only.
     return;
   }
   Haptics.selectionAsync().catch(() => {});

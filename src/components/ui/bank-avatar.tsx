@@ -7,12 +7,12 @@ import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
-import { useStore } from '@/lib/store';
+import { usePrivateMode } from '@/lib/store';
 
-export function BankAvatar({ account, size = 36 }: { account: Account; size?: number }) {
+function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
-  const { state } = useStore();
-  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
+  const privateMode = usePrivateMode();
+  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -64,6 +64,8 @@ export function BankAvatar({ account, size = 36 }: { account: Account; size?: nu
     />
   </View>;
 }
+
+export const BankAvatar = React.memo(BankAvatarInner);
 
 const styles = StyleSheet.create({
   tile: {

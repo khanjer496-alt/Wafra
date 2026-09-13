@@ -622,6 +622,35 @@ function fastest(fn, runs = 7) {
 }
 
 // ---------------------------------------------------------------------------
+// Interaction hot paths: visible rows and entry opening must stay O(visible).
+// ---------------------------------------------------------------------------
+
+{
+  const merchantAvatar = read('src/components/ui/merchant-avatar.tsx');
+  const bankAvatar = read('src/components/ui/bank-avatar.tsx');
+  const detail = read('src/components/entry-detail-sheet.tsx');
+  const haptics = read('src/lib/haptics.ts');
+
+  ok('merchant avatars subscribe only to Private Mode, not the whole ledger',
+    /usePrivateMode/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
+    'a transaction list can have hundreds of avatars; a full StoreContext subscription rerenders all of them on every unrelated ledger update');
+
+  ok('bank avatars subscribe only to Private Mode, not the whole ledger',
+    /usePrivateMode/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
+    'account artwork should not rebuild when transactions, budgets, or import progress change');
+
+  ok('opening an entry does not reconcile the full transfer graph',
+    !/reconcileTransfers\s*\(/.test(detail) && /transferOwnership\(transaction\)/.test(detail),
+    'the selected row already carries normalized transfer evidence; rebuilding the whole ledger graph on every tap blocks the JS thread');
+
+  const tapped = bodyOf(haptics, 'export function tapped');
+  ok('routine Android taps do not schedule haptic bridge work',
+    !!tapped && tapped.includes("Platform.OS === 'android'") && tapped.includes('return;') &&
+      !tapped.includes('performAndroidHapticsAsync'),
+    'Android ripple is immediate feedback; a haptics bridge call on every navigation tap can overlap the navigation turn on OEM devices');
+}
+
+// ---------------------------------------------------------------------------
 // Storage chunking: a new transaction must not rewrite the whole ledger.
 // ---------------------------------------------------------------------------
 

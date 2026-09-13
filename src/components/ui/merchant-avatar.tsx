@@ -9,7 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
-import { useStore } from '@/lib/store';
+import { usePrivateMode } from '@/lib/store';
 
 interface MerchantAvatarProps {
   title: string;
@@ -18,9 +18,9 @@ interface MerchantAvatarProps {
 }
 
 /** Bundled artwork first; only locally verified identities may use CDN artwork. */
-export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
-  const { state } = useStore();
-  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
+function MerchantAvatarInner({ title, category, size = 34 }: MerchantAvatarProps) {
+  const privateMode = usePrivateMode();
+  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
 
@@ -53,6 +53,8 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
   }
   return <CategoryAvatar category={category} size={size} />;
 }
+
+export const MerchantAvatar = React.memo(MerchantAvatarInner);
 
 function LogoTile({ id, source, tint, category, size }: {
   id: string;
