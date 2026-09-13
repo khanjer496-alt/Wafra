@@ -19,6 +19,7 @@ const {
 } = require('./build/ledger-import.js');
 const { setActiveMarket, setLedgerCurrency } = require('./build/markets.js');
 const { parseSms, PARSER_VERSION } = require('./build/sms-parser.js');
+const { TRANSFER_NORMALIZATION_VERSION } = require('./build/transfer-reconciliation.js');
 
 let pass = 0;
 const ok = (name, condition, detail) => {
@@ -150,6 +151,9 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   ok('an incremental import cannot claim an older restored ledger was fully reread',
     afterIncremental.parserVersion === 18,
     afterIncremental.parserVersion);
+  ok('a real import stamps the current transfer-normalization receipt',
+    afterIncremental.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
+    afterIncremental.transferNormalizationVersion);
 
   let rereadId = 0;
   const reread = materializeImportBatch(
@@ -194,6 +198,16 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
       afterCursorOnly.accounts === restoredState.accounts &&
       afterCursorOnly.cardDues === restoredState.cardDues &&
       afterCursorOnly.bills === restoredState.bills);
+
+  const normalizedRestored = {
+    ...restoredState,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+  };
+  const normalizedCursorOnly = applyMaterializedImportBatch(normalizedRestored, cursorOnly);
+  ok('a metadata-only refresh preserves an existing transfer-normalization receipt',
+    normalizedCursorOnly.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+      normalizedCursorOnly.transactions === normalizedRestored.transactions &&
+      normalizedCursorOnly.accounts === normalizedRestored.accounts);
 }
 {
   let proofId = 0;

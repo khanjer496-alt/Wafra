@@ -33,6 +33,7 @@ import { formatAED, formatAmount, shortDate } from '@/lib/format';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { tapped } from '@/lib/haptics';
 import { syncPaymentReminders } from '@/lib/notifications';
+import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { periodLabel } from '@/lib/period';
 import type { PeriodComparison } from '@/lib/analytics';
 import { usePeriod } from '@/lib/period-context';
@@ -606,7 +607,13 @@ export default function LedgerHomeScreen() {
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
-  const { state, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
+  const {
+    state,
+    applyFxUpdates,
+    setCaptureOptOut,
+    beginHistoryImport,
+    getStateSnapshot,
+  } = useStore();
   const { period } = usePeriod();
   // The tabs shell owns launch/foreground scanning so a restored Bills, Flow
   // or Wallet tab still runs parser migrations. Home owns only this visible
@@ -724,14 +731,24 @@ export default function LedgerHomeScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
+      const before = getStateSnapshot();
       await runAutoImport(true);
-      await syncPaymentReminders(state);
+      // Pull-to-refresh used to rebuild every scheduled reminder even when
+      // capture found nothing. On Android that means cancel-all + up to ~30 OS
+      // schedule calls for an otherwise empty refresh, which is both slow and
+      // wasteful. Only reschedule when the ledger actually changed, and use
+      // the authoritative post-import snapshot rather than this render's stale
+      // `state` closure.
+      const after = getStateSnapshot();
+      if (reminderScheduleInputsChanged(before, after)) {
+        await syncPaymentReminders(after);
+      }
     } catch {
       toast.show(t('captureRefreshFailed'), { tone: 'error' });
     } finally {
       setRefreshing(false);
     }
-  }, [runAutoImport, state, toast]);
+  }, [getStateSnapshot, runAutoImport, toast]);
 
   const homeHeader: ScreenHeaderProps = {
     title: t('tabHome'),

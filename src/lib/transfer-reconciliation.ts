@@ -1045,6 +1045,13 @@ export function reconcileTransfers(transactions: Transaction[], accounts: Accoun
   return memoizedReconcile(transactions, accounts);
 }
 
+/**
+ * Durable receipt for persisted ledgers already normalized by the current
+ * transfer-link semantics. Increment when matching/link semantics change and
+ * existing saved ledgers require one fresh full pass.
+ */
+export const TRANSFER_NORMALIZATION_VERSION = 1;
+
 /** Never changes amounts, routing, type, IDs or legacy transfer flags. */
 export function normalizeTransferLinks(transactions: Transaction[], accounts: Account[]): Transaction[] {
   const ctx = context(transactions, accounts);

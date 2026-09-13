@@ -46,6 +46,26 @@ export interface PaymentReminder {
 /** iOS caps pending local notifications at 64; this stays well inside it. */
 export const MAX_REMINDERS = 24;
 
+/**
+ * Whether rebuilding the native reminder schedule can produce a different
+ * result. Keep this source-free and reference-based so an empty capture refresh
+ * can skip dozens of Android cancel/schedule calls without rescanning the
+ * ledger just to prove nothing changed.
+ */
+export function reminderScheduleInputsChanged(before: AppState, after: AppState): boolean {
+  return before.transactions !== after.transactions ||
+    before.accounts !== after.accounts ||
+    before.bills !== after.bills ||
+    before.cardDues !== after.cardDues ||
+    before.budgets !== after.budgets ||
+    before.notSubscriptions !== after.notSubscriptions ||
+    before.dailySummary !== after.dailySummary ||
+    before.monthStartDay !== after.monthStartDay ||
+    before.language !== after.language ||
+    before.marketId !== after.marketId ||
+    before.ledgerMoney !== after.ledgerMoney;
+}
+
 /** The reminder day at 09:00 local. Nobody wants a bill at midnight. */
 function at9(dateISO: string): Date {
   return new Date(`${dateISO}T09:00:00`);

@@ -23,7 +23,7 @@ import {
   migrateLegacyLedgerMoney,
 } from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
-import { normalizeTransferLinks } from '@/lib/transfer-reconciliation';
+import { normalizeTransferLinks, TRANSFER_NORMALIZATION_VERSION } from '@/lib/transfer-reconciliation';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type {
   Account,
@@ -221,5 +221,6 @@ export const applyMaterializedImportBatch = (
     transactions: sortTransactions(
       normalizeTransferLinks(retained, repaired.accounts),
     ),
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
   };
 };

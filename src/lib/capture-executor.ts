@@ -418,19 +418,31 @@ export const createCaptureExecutor = ({
     );
     if (queued.parsed.length > 0) await yieldForegroundTurn();
     if (captureStopped(activeLedger, 'relay')) return stopped();
+    const supplementalTracing = captureTraceEnabled();
+    const planStarted = supplementalTracing ? Date.now() : 0;
+    captureTrace('plan:start', queued.parsed.length);
     const plan = dependencies.planRows(queued.parsed, state, newestTs);
+    captureTrace('plan:done', plan.txCount + plan.healedCount,
+      supplementalTracing ? Date.now() - planStarted : 0);
     let transactionIds: string[] = [];
     if (queued.parsed.length > 0 && hasChanges(plan)) {
       if (captureStopped(activeLedger, 'relay')) return stopped();
       await yieldForegroundTurn();
       if (captureStopped(activeLedger, 'relay')) return stopped();
+      const saveStarted = supplementalTracing ? Date.now() : 0;
+      captureTrace('save:start', plan.txCount + plan.healedCount);
       const receipt = activeLedger.importBatch(plan.batch);
       transactionIds = receipt.ids;
       await receipt.durable;
+      captureTrace('save:done', receipt.ids.length,
+        supplementalTracing ? Date.now() - saveStarted : 0);
       if (captureStopped(activeLedger, 'relay')) return stopped();
     } else if (reviewCandidates.length === 0) {
       if (captureStopped(activeLedger, 'relay')) return stopped();
+      const saveStarted = supplementalTracing ? Date.now() : 0;
+      captureTrace('save:start');
       await activeLedger.ensureDurable();
+      captureTrace('save:done', 0, supplementalTracing ? Date.now() - saveStarted : 0);
       if (captureStopped(activeLedger, 'relay')) return stopped();
     }
 
