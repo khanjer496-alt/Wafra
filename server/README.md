@@ -198,7 +198,7 @@ If you would rather do it by hand:
 npx wrangler d1 create wafra          # copy the printed uuid
 # paste it into wrangler.toml -> [[d1_databases]] database_id
 npx wrangler d1 execute wafra --remote --file=./schema.sql --yes
-npx wrangler d1 migrations apply wafra --remote --yes
+npx wrangler d1 migrations apply wafra --remote
 npx wrangler deploy
 ```
 
@@ -213,7 +213,7 @@ npx wrangler d1 execute wafra --remote \
   --command "ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE'"
 npx wrangler d1 execute wafra --remote \
   --command "PRAGMA table_info(devices)"
-npx wrangler d1 migrations apply wafra --remote --yes
+npx wrangler d1 migrations apply wafra --remote
 npx wrangler d1 execute wafra --remote \
   --command "PRAGMA table_info(devices)"
 npx wrangler d1 execute wafra --remote \
