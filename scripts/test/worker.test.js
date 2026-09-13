@@ -1832,9 +1832,12 @@ const CARD_PAYMENT_DEBIT =
         csvAccepted.rejectedRows === 1 && csvAccepted.totalRows === 3,
       JSON.stringify(csvAccepted));
     const csvRows = (await drainOpened(env, me)).filter((row) => row.captureSource === 'csv');
+    // Both rows are inserted in the same second and the queue orders by
+    // created_at, so their drain order is not part of the contract.
+    const carrefour = csvRows.find((row) => row.merchant === 'Carrefour, Market');
     ok('csv: structured rows reach the encrypted queue without raw statement text',
-      csvRows.length === 2 && csvRows[0].merchant === 'Carrefour, Market' &&
-        csvRows[0].amountFils === 4000 && csvRows.every((row) => row.raw === undefined),
+      csvRows.length === 2 && carrefour !== undefined &&
+        carrefour.amountFils === 4000 && csvRows.every((row) => row.raw === undefined),
       JSON.stringify(csvRows));
     ok('csv: unsigned amount-only exports are rejected rather than guessed',
       (await call(env, 'POST', '/v1/import/csv', {

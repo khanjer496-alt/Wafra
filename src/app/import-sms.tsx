@@ -85,9 +85,11 @@ import {
   createIosHistoryActionGuard,
   createIosHistoryOperationController,
   createIosHistorySnapshotGate,
+  historyShortcutContinueUrl,
   historyShortcutInstallUrl,
   historyShortcutRunUrl,
   IOS_HISTORY_HANDOFF_TTL_MS,
+  IOS_HISTORY_SHORTCUT_NAME,
   consumeIosHistoryReturnOrigin,
   iosHistoryCleanupStateAfterFailure,
   iosHistoryLoadFailureDisposition,
@@ -454,7 +456,7 @@ export default function ImportSmsScreen() {
       try {
         // Continue returns to the pending Shortcuts run; invoking run-shortcut
         // again would start a second retained-message import.
-        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : 'shortcuts://');
+        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : historyShortcutContinueUrl());
       } catch (error) {
         if (newHandoff) {
           await iosHistorySetupStorageCoordinator.run(
@@ -1047,7 +1049,7 @@ export default function ImportSmsScreen() {
         if (!validIosHistorySessionId(history)) {
           setNotice({
             title: t('historyImportInvalid'),
-            body: t('historyImportInvalidBody'),
+            body: tf('historyImportInvalidBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME }),
           });
           return;
         }
@@ -1102,7 +1104,7 @@ export default function ImportSmsScreen() {
                   : t('upToDate'),
             body:
               result.summary.found === 0
-                ? t('historyImportMissingBody')
+                ? tf('historyImportMissingBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME })
                 : result.summary.parsed + result.summary.reviewed + result.summary.declined === 0
                   ? t('historyNoSupportedCompact')
                   : result.summary.reviewed > 0

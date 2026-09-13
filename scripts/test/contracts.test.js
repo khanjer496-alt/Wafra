@@ -1113,7 +1113,7 @@ function ktSources(dir) {
   // The other half of the same contract, in capture.ts: a zero watermark is
   // what turns the next scan into a full-history re-read.
   ok('a zero watermark reads the whole inbox, not just what is new',
-    /state\.lastScanTs <= 0 \? 0 : state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
+    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
     /if \(!state\.hydrated\) return;/.test(hook) &&
       /Platform\.OS !== 'ios' && !state\.onboarded/.test(hook) &&
@@ -1776,7 +1776,9 @@ ok('the spoken label agrees with the sign on screen',
 {
   const types = read('src/lib/types.ts');
   const store = read('src/lib/store.tsx');
-  const branch = store.match(/case 'editTransaction': \{[\s\S]*?\n    \}/)[0];
+  // The reducer branch, not the earlier transfer-normalization switch that
+  // shares the case label.
+  const branch = store.match(/case 'editTransaction': \{\s*const transactions = sortTxs\([\s\S]*?\n    \}/)[0];
   const override = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
 
   ok('titleEdited is an optional, additive field on Transaction',

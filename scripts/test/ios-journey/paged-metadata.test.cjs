@@ -11,6 +11,7 @@ function fixture() {
   return { actions: {
     BeginWafraPagedImportIntent: action(2, { oldestGUID: 0, oldestDate: 0, newestGUID: 0, newestDate: 0 }),
     StageWafraPagedImportIntent: action(0, { request: 0, found: 2, frame: 0 }),
+    StageWafraPagedColumnsIntent: action(0, { request: 0, found: 2, guids: 0, bodies: 0, senders: 0, dates: 0 }),
   } };
 }
 test('built metadata verifier demands both paged receiver contracts and fails weakened/missing bindings', async () => {
@@ -20,7 +21,9 @@ test('built metadata verifier demands both paged receiver contracts and fails we
     m => { m.actions.BeginWafraPagedImportIntent.authenticationPolicy = 0; },
     m => { m.actions.StageWafraPagedImportIntent.parameters[1].valueType.primitive.wrapper.typeIdentifier = 0; },
     m => { m.actions.StageWafraPagedImportIntent.parameters[2].isOptional = true; },
-    m => { m.actions.StageWafraPagedImportIntent.openAppWhenRun = true; }]) {
+    m => { m.actions.StageWafraPagedImportIntent.openAppWhenRun = true; },
+    m => { delete m.actions.StageWafraPagedColumnsIntent; },
+    m => { m.actions.StageWafraPagedColumnsIntent.parameters[3].valueType.primitive.wrapper.typeIdentifier = 2; }]) {
     const data = fixture(); mutate(data); assert.throws(() => verifyPagedIntentMetadata(data));
   }
 });

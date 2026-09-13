@@ -5,6 +5,7 @@ const {
   normalizeEmailContent,
   parseRawEmail,
   parseStatementCsv,
+  parseStatementLines,
   parseStatementText,
 } = require('../.test-build/imports.cjs');
 
@@ -27,6 +28,36 @@ function tinyPdf(line) {
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(pdf, 'binary'));
+}
+
+/**
+ * A single page at PDF's maximum box holding many full-width lines. pdf.js only
+ * extracts glyphs that land inside the page box, so tinyPdf's letter-size page
+ * can never carry enough text to trip the extraction budget; this one can.
+ */
+function wideTextPdf(lines) {
+  const escape = (line) => line.replace(/([()\\])/g, '\\$1');
+  const stream = `BT /F1 12 Tf 50 14300 Td ${
+    lines.map((line, i) => `${i ? '0 -20 Td ' : ''}(${escape(line)}) Tj `).join('')
+  }ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 14400 14400] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
   ];
@@ -264,13 +295,47 @@ function tinyPdf(line) {
   }
   ok('CSV row limits are enforced before any row can be queued', oversizedCsv === 'too_many_rows');
 
-  let invalidUtf8 = '';
+  // Formerly `invalid_csv`: a portal export in Windows-1252 is a real
+  // statement, so undecodable UTF-8 now falls back to that single-byte table.
+  // What must never happen is replacement-decoding — no U+FFFD, ever.
+  const latinFallback = decodeCsv(Uint8Array.from([0xc3, 0x28]));
+  ok('invalid UTF-8 is windows-1252 decoded instead of replacement-decoded',
+    latinFallback === '\u00c3(' && !latinFallback.includes('\ufffd'), JSON.stringify(latinFallback));
+  const cp1252Csv = parseStatementCsv(decodeCsv(Uint8Array.from([
+    ...Buffer.from('Date,Description,Debit,Credit\n01/07/2026,Caf'), 0xe9, ...Buffer.from(' Nero,12.00,'),
+  ])), 'AED');
+  ok('a windows-1252 export keeps its accented merchant text',
+    cp1252Csv.rows.length === 1 && cp1252Csv.rows[0].merchant === 'Caf\u00e9 Nero',
+    JSON.stringify(cp1252Csv.rows.map((row) => row.merchant)));
+  const utf16Csv = parseStatementCsv(decodeCsv(Uint8Array.from([
+    0xff, 0xfe, ...Buffer.from('Date,Description,Debit,Credit\n01/07/2026,Carrefour,40.00,', 'utf16le'),
+  ])), 'AED');
+  ok('a UTF-16LE export with a BOM decodes and parses',
+    utf16Csv.rows.length === 1 && utf16Csv.rows[0].amountFils === 4000);
+  const utf16BeCsv = parseStatementCsv(decodeCsv(Uint8Array.from([
+    0xfe, 0xff, ...Buffer.from('Date,Description,Debit,Credit\n01/07/2026,Carrefour,40.00,', 'utf16le')
+      .swap16(),
+  ])), 'AED');
+  ok('a UTF-16BE export with a BOM decodes and parses',
+    utf16BeCsv.rows.length === 1 && utf16BeCsv.rows[0].merchant === 'Carrefour');
+  const utf8BomText = decodeCsv(Uint8Array.from([
+    0xef, 0xbb, 0xbf, ...Buffer.from('Date,Description,Debit,Credit\n01/07/2026,Carrefour,40.00,'),
+  ]));
+  ok('a UTF-8 BOM is stripped before the header is read',
+    !utf8BomText.startsWith('\ufeff') && parseStatementCsv(utf8BomText, 'AED').rows.length === 1);
+  let binaryCsv = '';
   try {
-    decodeCsv(Uint8Array.from([0xc3, 0x28]));
+    decodeCsv(Uint8Array.from([0x44, 0x00, 0x61, 0x00, 0x74, 0x00, 0x65, 0x00]));
   } catch (error) {
-    invalidUtf8 = error instanceof Error ? error.message : '';
+    binaryCsv = error instanceof Error ? error.message : '';
   }
-  ok('invalid UTF-8 is rejected instead of replacement-decoded', invalidUtf8 === 'invalid_csv');
+  ok('BOM-less UTF-16 (or any NUL-bearing bytes) is refused rather than read as Latin text',
+    binaryCsv === 'invalid_csv');
+  const bidiCsv = parseStatementCsv(decodeCsv(Uint8Array.from([
+    ...Buffer.from('Date,Description,Debit,Credit\n01/07/2026,Safe'), 0xe2, 0x80, 0xae, ...Buffer.from('evil,10.00,'),
+  ])), 'AED');
+  ok('the bidi/control-character rejection survives the decoder change',
+    bidiCsv.rows.length === 0 && bidiCsv.rejectedRows === 1);
 
   const rows = parseStatementText([
     '01/07/2026 CARREFOUR MARKET AED 40.00 DR',
@@ -348,6 +413,262 @@ function tinyPdf(line) {
       atmPdfAe.rows[0]?.categoryGuess === 'cash-withdrawal' &&
       atmPdfSa.rows[0]?.merchant === 'ATM withdrawal' &&
       atmPdfSa.rows[0]?.categoryGuess === 'cash-withdrawal');
+
+  // ── CSV header detection: preamble, blank and duplicate header cells ──
+  const preambleCsv = parseStatementCsv([
+    'Account Statement',
+    'Account Number:,XXXX1234',
+    'Period:,01/07/2026 - 31/07/2026',
+    '',
+    'Date,Description,,Debit,Credit,Description',
+    '01/07/2026,Carrefour,ignored,40.00,,dup',
+    '02/07/2026,Salary,ignored,,18500.00,dup',
+  ].join('\n'), 'AED');
+  ok('CSV header is found below a bank preamble; blank cells are ignored and the first duplicate wins',
+    preambleCsv.rows.length === 2 && preambleCsv.totalRows === 2 && preambleCsv.rejectedRows === 0 &&
+      preambleCsv.rows[0].merchant === 'Carrefour' && preambleCsv.rows[1].type === 'income',
+    JSON.stringify(preambleCsv));
+  const strayDelimiterCsv = parseStatementCsv([
+    'Customer; Name; City',
+    'Date,Description,Debit,Credit',
+    '01/07/2026,Carrefour,40.00,',
+    '02/07/2026,"Ref; a; b; c; d",12.00,',
+  ].join('\n'), 'AED');
+  ok('a semicolon-rich preamble or description does not outvote the comma table',
+    strayDelimiterCsv.rows.length === 2 && strayDelimiterCsv.rows[1].merchant === 'Ref; a; b; c; d',
+    JSON.stringify(strayDelimiterCsv.rows.map((row) => row.merchant)));
+  let noHeaderCsv = '';
+  try {
+    parseStatementCsv([
+      'Account Statement,x,y',
+      'Notes,x,y',
+      '01/07/2026,Carrefour,40.00',
+    ].join('\n'), 'AED');
+  } catch (error) {
+    noHeaderCsv = error instanceof Error ? error.message : '';
+  }
+  ok('a file with no recognizable header row is still unsupported, not guessed',
+    noHeaderCsv === 'unsupported_statement_format');
+  let deepPreambleCsv = '';
+  try {
+    parseStatementCsv([
+      ...Array.from({ length: 11 }, (_, index) => `Preamble line ${index},x,y`),
+      'Date,Description,Debit,Credit',
+      '01/07/2026,Carrefour,40.00,',
+    ].join('\n'), 'AED');
+  } catch (error) {
+    deepPreambleCsv = error instanceof Error ? error.message : '';
+  }
+  ok('the header search stops after the leading records', deepPreambleCsv === 'unsupported_statement_format');
+  let preambleLimitCsv = '';
+  try {
+    parseStatementCsv([
+      'Account Statement',
+      'Date,Description,Debit,Credit',
+      ...Array.from({ length: 201 }, (_, index) => `01/07/2026,Row ${index},1.00,`),
+    ].join('\n'), 'AED');
+  } catch (error) {
+    preambleLimitCsv = error instanceof Error ? error.message : '';
+  }
+  ok('the row limit counts data rows below the header, preamble excluded', preambleLimitCsv === 'too_many_rows');
+
+  // ── A channel `Type` column no longer defeats signed amounts ──
+  const channelTypeCsv = parseStatementCsv([
+    'Date,Description,Amount,Type',
+    '01/07/2026,Carrefour,-40.00,POS',
+    '02/07/2026,ATM Cash,-500.00,ATM',
+    '03/07/2026,Salary,+18500.00,TRF',
+    '04/07/2026,Unsigned,20.00,POS',
+    '05/07/2026,Refund,12.00,CR',
+    '06/07/2026,Contradiction,-12.00,CR',
+  ].join('\n'), 'AED');
+  ok('signed amounts carry direction when the Type column names a channel, not a direction',
+    channelTypeCsv.rows.length === 4 && channelTypeCsv.rejectedRows === 2 &&
+      channelTypeCsv.rows[0].type === 'expense' && channelTypeCsv.rows[0].amountFils === 4000 &&
+      channelTypeCsv.rows[1].type === 'expense' && channelTypeCsv.rows[1].amountFils === 50000 &&
+      channelTypeCsv.rows[2].type === 'income' && channelTypeCsv.rows[2].amountFils === 1850000 &&
+      channelTypeCsv.rows[3].type === 'income' && channelTypeCsv.rows[3].amountFils === 1200,
+    JSON.stringify(channelTypeCsv.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  ok('an unsigned amount with a channel-only Type stays rejected, and a sign that contradicts the label is not trusted',
+    !channelTypeCsv.rows.some((row) => row.merchant === 'Unsigned' || row.merchant === 'Contradiction'));
+
+  // ── Date order is inferred per file ──
+  const monthFirstCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '07/01/2026,Early,10.00,',
+    '07/25/2026,Late,11.00,',
+  ].join('\n'), 'AED');
+  ok('a file with a second field above 12 reads as MM/DD',
+    monthFirstCsv.rows.length === 2 && monthFirstCsv.rows[0].date === '2026-07-01' &&
+      monthFirstCsv.rows[1].date === '2026-07-25', JSON.stringify(monthFirstCsv.rows.map((row) => row.date)));
+  const dayFirstCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '25/07/2026,Late,11.00,',
+    '07/01/2026,Early,10.00,',
+  ].join('\n'), 'AED');
+  ok('a file with a first field above 12 reads as DD/MM',
+    dayFirstCsv.rows.length === 2 && dayFirstCsv.rows[0].date === '2026-07-25' &&
+      dayFirstCsv.rows[1].date === '2026-01-07');
+  const ambiguousCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '07/01/2026,Ambiguous,10.00,',
+  ].join('\n'), 'AED');
+  ok('an ambiguous file keeps the UAE/KSA DD/MM default', ambiguousCsv.rows[0]?.date === '2026-01-07');
+  const contradictoryCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '25/07/2026,Day first,11.00,',
+    '07/25/2026,Month first,10.00,',
+  ].join('\n'), 'AED');
+  ok('contradictory evidence keeps DD/MM and rejects the row that cannot be read that way',
+    contradictoryCsv.rows.length === 1 && contradictoryCsv.rows[0].date === '2026-07-25' &&
+      contradictoryCsv.rejectedRows === 1);
+  const namedMonthCsv = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '03-Apr-2026,Dashed,10.00,',
+    '3 Apr 2026,Spaced,11.00,',
+    '3 April 2026,Long,12.00,',
+    '2026-04-03,ISO,13.00,',
+    '03-Foo-2026,Nonsense,14.00,',
+  ].join('\n'), 'AED');
+  ok('DD-MMM-YYYY, DD MMM YYYY, and ISO dates all resolve; an unknown month name is rejected',
+    namedMonthCsv.rows.length === 4 && namedMonthCsv.rejectedRows === 1 &&
+      namedMonthCsv.rows.every((row) => row.date === '2026-04-03'),
+    JSON.stringify(namedMonthCsv.rows.map((row) => row.date)));
+
+  // ── PDF rows: debit/credit columns and signed amounts ──
+  const columnRows = parseStatementLines([
+    'Statement of Account',
+    'Date Description Debit Credit Balance',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+    '02/07/2026 SALARY JULY - 18,500.00 28,460.00',
+    '03/07/2026 DEWA BILL 350.00 0.00 28,110.00',
+    '04/07/2026 REFUND NOON 0.00 25.50 28,135.50',
+    '05/07/2026 BOTH POPULATED 10.00 20.00 28,145.50',
+    '06/07/2026 LONE AMOUNT 22.00',
+    '07/07/2026 TWO POSITIVES 22.00 28,167.50',
+    '08/07/2026 CHEQUE 000123 - 500.00',
+    '09/07/2026 NO BALANCE 15.00 -',
+    '10/07/2026 to 31/07/2026 closing period',
+  ].join('\n'), 'AED');
+  ok('debit/credit column rows with an empty-cell placeholder are read, with balance or without',
+    columnRows.rows.length === 6 &&
+      columnRows.rows[0].type === 'expense' && columnRows.rows[0].amountFils === 4000 &&
+      columnRows.rows[0].merchant === 'CARREFOUR MARKET' &&
+      columnRows.rows[1].type === 'income' && columnRows.rows[1].amountFils === 1850000 &&
+      columnRows.rows[2].type === 'expense' && columnRows.rows[2].amountFils === 35000 &&
+      columnRows.rows[3].type === 'income' && columnRows.rows[3].amountFils === 2550 &&
+      columnRows.rows[4].type === 'income' && columnRows.rows[4].amountFils === 50000 &&
+      columnRows.rows[4].merchant === 'CHEQUE 000123' &&
+      columnRows.rows[5].type === 'expense' && columnRows.rows[5].amountFils === 1500,
+    JSON.stringify(columnRows.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  ok('both columns populated, a lone amount, and two positives are skipped and counted',
+    columnRows.rejectedRows === 3, String(columnRows.rejectedRows));
+  const signedRows = parseStatementLines([
+    '01/07/2026 CARREFOUR MARKET -40.00',
+    '02/07/2026 SALARY JULY +18,500.00 28,460.00',
+    '03/07/2026 DEWA BILL 350.00- 28,110.00',
+    '04/07/2026 NOON (25.50) 28,084.50',
+    '05/07/2026 AED PREFIX AED -12.00',
+    '06/07/2026 SIGN ON BALANCE ONLY 22.00 -1,000.00',
+    '07/07/2026 WRONG MARKET SAR -9.00',
+  ].join('\n'), 'AED');
+  ok('leading, trailing, and parenthesised signs give direction, with or without a balance',
+    signedRows.rows.length === 5 &&
+      signedRows.rows[0].type === 'expense' && signedRows.rows[0].amountFils === 4000 &&
+      signedRows.rows[1].type === 'income' && signedRows.rows[1].amountFils === 1850000 &&
+      signedRows.rows[2].type === 'expense' && signedRows.rows[2].amountFils === 35000 &&
+      signedRows.rows[3].type === 'expense' && signedRows.rows[3].amountFils === 2550 &&
+      signedRows.rows[4].type === 'expense' && signedRows.rows[4].amountFils === 1200 &&
+      signedRows.rows[4].merchant === 'AED PREFIX',
+    JSON.stringify(signedRows.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  ok('a sign only on the balance, or another market\'s currency, is skipped and counted',
+    signedRows.rejectedRows === 2 && !signedRows.rows.some((row) => /BALANCE ONLY|WRONG MARKET/.test(row.merchant)));
+  const creditFirstRows = parseStatementLines([
+    'Date Details Credit Debit Balance',
+    '01/07/2026 CARREFOUR MARKET - 40.00 9,960.00',
+  ].join('\n'), 'AED');
+  ok('a Credit | Debit header flips the column reading',
+    creditFirstRows.rows.length === 1 && creditFirstRows.rows[0].type === 'expense');
+  const proseRows = parseStatementLines([
+    'Credit card statement date 31/07/2026 — direct debit is set up for this card',
+    'Transaction date Details Debit Credit Balance',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+  ].join('\n'), 'AED');
+  ok('preamble prose about credit cards and direct debits does not flip the column order',
+    proseRows.rows.length === 1 && proseRows.rows[0].type === 'expense');
+  const balanceLabelled = parseStatementLines([
+    '01/07/2026 CARREFOUR MARKET 40.00 1,234.00 CR',
+    '02/07/2026 REF 000123 40.00 CR',
+    '03/07/2026 AMAZON AE USD 45.00 165.30 DR',
+  ].join('\n'), 'AED');
+  ok('a DR/CR label after two money figures is a running balance, not a credit, and is counted',
+    balanceLabelled.rows.length === 2 && balanceLabelled.rows[0].merchant === 'REF 000123' &&
+      balanceLabelled.rows[0].amountFils === 4000 && balanceLabelled.rejectedRows === 1,
+    JSON.stringify(balanceLabelled));
+  ok('a foreign-currency amount inside the description is not mistaken for a running balance',
+    /amazon/i.test(balanceLabelled.rows[1].merchant) && balanceLabelled.rows[1].type === 'expense' &&
+      balanceLabelled.rows[1].amountFils === 16530,
+    JSON.stringify(balanceLabelled.rows[1]));
+  const proseOrder = parseStatementLines([
+    'Credits are listed before debits for each transaction date in this statement',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+  ].join('\n'), 'AED');
+  ok('sentence-length prose naming credits, debits and date does not become the column header',
+    proseOrder.rows.length === 1 && proseOrder.rows[0].type === 'expense',
+    JSON.stringify(proseOrder.rows));
+  const shortHeaderless = parseStatementLines([
+    'Date Credit Debit',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+  ].join('\n'), 'AED');
+  ok('a three-word line without a fourth column name is not trusted to flip the order',
+    shortHeaderless.rows.length === 1 && shortHeaderless.rows[0].type === 'expense');
+  const summaryLines = parseStatementLines([
+    '01/07/2026 Opening Balance 10,000.00',
+    '01/07/2026 Balance B/F 1,000.00 CR',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+    '02/07/2026 TOTAL ENERGIES FUEL 120.00 - 9,840.00',
+    '31/07/2026 Closing Balance 9,960.00',
+    '31/07/2026 Total 40.00 0.00',
+  ].join('\n'), 'AED');
+  ok('opening/closing balance, brought-forward and total lines are neither filed nor counted as rejected',
+    summaryLines.rows.length === 2 && summaryLines.rejectedRows === 0 &&
+      summaryLines.rows.every((row) => row.type === 'expense') &&
+      summaryLines.rows.some((row) => row.amountFils === 12000),
+    JSON.stringify(summaryLines));
+  const drCrFirst = parseStatementLines('01/07/2026 CARREFOUR MARKET 40.00 DR', 'AED');
+  ok('the explicit DR/CR branch still wins and counts nothing',
+    drCrFirst.rows.length === 1 && drCrFirst.rows[0].type === 'expense' && drCrFirst.rejectedRows === 0);
+  const namedDateRows = parseStatementLines([
+    '03-Apr-2026 CARREFOUR MARKET AED 40.00 DR',
+    '3 Apr 2026 SALARY - 18,500.00 20,000.00',
+    '04/15/2026 MONTH FIRST FILE -10.00',
+  ].join('\n'), 'AED');
+  ok('PDF rows accept DD-MMM-YYYY and DD MMM YYYY dates and infer MM/DD per file',
+    namedDateRows.rows.length === 3 && namedDateRows.rows[0].date === '2026-04-03' &&
+      namedDateRows.rows[1].date === '2026-04-03' && namedDateRows.rows[2].date === '2026-04-15',
+    JSON.stringify(namedDateRows.rows.map((row) => row.date)));
+  ok('parseStatementText keeps returning the row array for callers that never counted',
+    parseStatementText('01/07/2026 CARREFOUR MARKET -40.00').length === 1);
+
+  const partialPdf = await extractPdfStatementRows(tinyPdf('01/07/2026 CARREFOUR MARKET 40.00 DR'));
+  ok('a fully read PDF reports zero rejected rows', partialPdf.rejectedRows === 0);
+  const rejectedPdf = parseStatementLines([
+    '01/07/2026 CARREFOUR MARKET 40.00 DR',
+    '02/07/2026 AMBIGUOUS VISUAL COLUMN 22.00',
+    '32/07/2026 IMPOSSIBLE AED 9.00 DR',
+  ].join('\n'));
+  ok('PDF text reports date-led money lines it could not read as rejected',
+    rejectedPdf.rows.length === 1 && rejectedPdf.rejectedRows === 2);
+
+  let tooLong = '';
+  try {
+    await extractPdfStatementRows(wideTextPdf(
+      Array.from({ length: 80 }, (_, index) => `01/07/2026 ROW ${index} ${'LONG '.repeat(380)}40.00 DR`),
+    ));
+  } catch (error) {
+    tooLong = error instanceof Error ? error.message : '';
+  }
+  ok('an oversized text PDF is a distinct limit error, not a scanned-PDF error', tooLong === 'pdf_too_long');
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

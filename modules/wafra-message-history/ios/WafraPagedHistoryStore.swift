@@ -22,7 +22,13 @@ public final class WafraPagedHistoryStore {
     case corrupt = "corrupt-staging"
     case expired = "expired"
     case cleanup = "cleanup-failed"
+    /// A column-framed page whose per-field item counts disagree with the
+    /// page count. The producer falls back to per-message framing for it.
+    case columnMismatch = "frame-columns"
   }
+  /// Joins one column of a page in the Shortcut's list-wide Combine Text.
+  /// Printable and absent from real SMS; disagreement is refused, not guessed.
+  public static let columnSeparator: Character = "\u{241E}"
   private struct PageInfo: Codable {
     let digest: String
     let chunks: Int
@@ -245,6 +251,48 @@ public final class WafraPagedHistoryStore {
       try write(Self.encoded(head), to: directory.appendingPathComponent("head.json"))
       return try response(head, token: authorizationSecret)
     }
+  }
+
+  /// Column framing: the Shortcut builds one string per field for the whole
+  /// page with list-wide Apple actions instead of a per-message loop. The
+  /// columns are rebuilt into the line frame that `stage` already validates,
+  /// so every cursor, journal, retry and record rule applies unchanged. All
+  /// four columns must line up exactly with the page count; a body containing
+  /// the sentinel or a dropped nil property therefore refuses the page as
+  /// `frame-columns` rather than committing misaligned records. That includes
+  /// the sender column: the sender is the bank identity downstream, and a page
+  /// of alerts with no sender would import "successfully" as unattributable
+  /// rows, so the producer's per-message fallback handles such a page instead.
+  public func stageColumns(sessionId: String, authorizationSecret: String, revision: Int, found: Int,
+                           guids: String, bodies: String, senders: String, dates: String) throws -> String {
+    // Bound each column by what `found` records may legitimately carry before
+    // anything is split or Base64-inflated; `stage` re-checks the frame.
+    let separators = max(found - 1, 0)
+    guard found > 0, found <= WafraHistoryCursor.maximumLimit,
+          guids.utf8.count <= found * 1_024 + separators * 3,
+          bodies.utf8.count <= found * 16 * 1_024 + separators * 3,
+          senders.utf8.count <= found * 1_024 + separators * 3,
+          dates.utf8.count <= found * 64 + separators * 3 else {
+      throw Failure.invalidInput
+    }
+    func column(_ value: String) -> [Substring] {
+      value.split(separator: Self.columnSeparator, omittingEmptySubsequences: false)
+    }
+    let guidColumn = column(guids)
+    let bodyColumn = column(bodies)
+    let senderColumn = column(senders)
+    let dateColumn = column(dates)
+    guard guidColumn.count == found, bodyColumn.count == found,
+          senderColumn.count == found, dateColumn.count == found else {
+      throw Failure.columnMismatch
+    }
+    let lines = (0..<found).map { index in
+      [guidColumn[index], bodyColumn[index], senderColumn[index], dateColumn[index]]
+        .map { Data($0.utf8).base64EncodedString() }
+        .joined(separator: "|")
+    }
+    return try stage(sessionId: sessionId, authorizationSecret: authorizationSecret,
+                     revision: revision, found: found, frame: lines.joined(separator: "\n"))
   }
 
   public func status() throws -> String? {

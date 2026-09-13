@@ -8,7 +8,22 @@ import { buildHistoryShortcut } from './build-ios-history-shortcut.mjs';
 // Shipping paged history artifact. One native handoff per bounded page replaces
 // the old per-message native call loop.
 export const PAGED_SHORTCUT_NAME = 'Wafra History v2';
-export function buildPagedHistoryShortcut() {
+// Column-framed candidate. The v2 graph still runs ~10 Shortcuts actions per
+// message inside Repeat With Each (four field reads, four Base64 encodes, one
+// Text, one Append), so a 10,000-message inbox is ~100,000 interpreted actions.
+// v3 builds each field for the whole page with one list-wide Combine Text and
+// hands the four columns to Wafra in one call, so a page costs the same handful
+// of actions whether it holds 51 or 408 messages. If Wafra cannot reconcile any
+// of a page's four columns (a body containing the sentinel, a dropped nil
+// property), the graph falls back to the exact v2 per-message framing for that
+// page only.
+export const COLUMNAR_SHORTCUT_NAME = 'Wafra History v3';
+// Printable and absent from real SMS; the native side counts items per column
+// against the page count and refuses any page where they disagree.
+export const COLUMN_SEPARATOR = '\u241E';
+export function buildPagedHistoryShortcut() { return buildPagedGraph({ columnar: false }); }
+export function buildColumnarHistoryShortcut() { return buildPagedGraph({ columnar: true }); }
+function buildPagedGraph({ columnar }) {
   let serial = 0;
   const actions = [];
   const uuid = () => `C17B0000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -32,7 +47,7 @@ export function buildPagedHistoryShortcut() {
     // Dictionary Value outputs are untyped. Shortcuts leaves the comparison
     // parameter unresolved on-device unless the conditional subject is
     // explicitly coerced to the type of the literal being compared.
-    const typedValue = value?.Type === 'ActionOutput'
+    const typedValue = value?.Type === 'ActionOutput' || value?.Type === 'Variable'
       ? { ...value, Aggrandizements: [...(value.Aggrandizements ?? []), {
           Type: 'WFCoercionVariableAggrandizement',
           CoercionItemClass: typeof comparison === 'number' ? 'WFNumberContentItem' : 'WFStringContentItem',
@@ -114,6 +129,49 @@ export function buildPagedHistoryShortcut() {
     alert('History paused safely', 'No page was returned at the saved position. This is not proof that history is complete. Your saved progress is retained.');
     open('wafra://ios-setup?section=history'); stop();
   });
+  // Column framing first. Every list-wide action here is Apple's own: the
+  // property aggrandizement maps over each Message and Combine Text joins the
+  // results, so no per-message action runs and no App Intent array parameter
+  // is bound (the binding path that failed on-device for the bulk intent).
+  const literal = value => output(emit('is.workflow.actions.gettext', { WFTextActionText: text(value) }), 'Text');
+  if (columnar) {
+    set('Frame Mode', literal('columns'));
+    const column = name => ({ ...variable('Page'), Aggrandizements: [property(name),
+      { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] });
+    const combine = value => output(emit('is.workflow.actions.text.combine', {
+      WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, WFInput: attachment(value),
+    }), 'Combined Text');
+    const formatted = emit('is.workflow.actions.format.date', {
+      WFDate: scalar({ ...variable('Page'), Aggrandizements: [property('date')] }),
+      WFDateFormatStyle: 'Custom', WFTimeFormatStyle: 'None', WFDateFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+    });
+    const guids = combine(column('GUID'));
+    const bodies = combine(column('Body'));
+    const senders = combine(column('Sender'));
+    const dates = combine(output(formatted, 'Formatted Date'));
+    set('Columns Result', output(native('StageWafraPagedColumnsIntent', {
+      request: scalar(variable('Request')), found: attachment(output(found, 'Count')),
+      guids: scalar(guids), bodies: scalar(bodies), senders: scalar(senders), dates: scalar(dates),
+    })));
+    const columnsDictionary = emit('is.workflow.actions.detect.dictionary', { WFInput: attachment(variable('Columns Result')) });
+    const columnsStatus = get('status', output(columnsDictionary, 'Dictionary'));
+    condition(output(columnsStatus), 'blocked', () => {
+      const columnsReason = get('reason', output(columnsDictionary, 'Dictionary'));
+      // Only a framing refusal falls back. Authorization, cursor, capacity
+      // and storage refusals surface through the ordinary blocked path.
+      for (const reason of ['frame-columns', 'invalid-input']) {
+        condition(output(columnsReason), reason, () => { set('Frame Mode', literal('rows')); });
+      }
+    });
+    condition(variable('Frame Mode'), 'columns', () => { set('Request', variable('Columns Result')); });
+  }
+  const rowsGroup = columnar ? uuid() : null;
+  if (columnar) {
+    emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 0,
+      WFInput: { Type: 'Variable', Variable: attachment({ ...variable('Frame Mode'), Aggrandizements: [
+        { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] }) },
+      WFCondition: 4, WFConditionalActionString: 'rows' });
+  }
   const empty = emit('is.workflow.actions.list', { WFItems: [] });
   set('Encoded Page', output(empty, 'List'));
   const each = uuid();
@@ -141,28 +199,41 @@ export function buildPagedHistoryShortcut() {
   const frame = emit('is.workflow.actions.text.combine', { WFTextSeparator: 'New Lines', WFInput: attachment(variable('Encoded Page')) });
   const response = native('StageWafraPagedImportIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')), frame: scalar(output(frame, 'Combined Text')) });
   set('Request', output(response));
+  if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });
   const released = emit('is.workflow.actions.list', { WFItems: [] });
-  set('Page', output(released, 'List')); set('Encoded Page', output(released, 'List')); nothing();
+  set('Page', output(released, 'List')); set('Encoded Page', output(released, 'List'));
+  if (columnar) set('Columns Result', output(released, 'List'));
+  nothing();
   emit('is.workflow.actions.repeat.count', { GroupingIdentifier: loop, WFControlFlowMode: 2 });
   alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
   open('wafra://ios-setup?section=history'); stop();
 
   const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
-  workflow.WFWorkflowName = PAGED_SHORTCUT_NAME; workflow.WFWorkflowActions = actions;
+  workflow.WFWorkflowName = columnar ? COLUMNAR_SHORTCUT_NAME : PAGED_SHORTCUT_NAME;
+  workflow.WFWorkflowActions = actions;
   workflow.WFWorkflowImportQuestions = [];
   return workflow;
 }
 
-export function verifyPagedHistoryShortcut(workflow) {
-  if (!isDeepStrictEqual(workflow, buildPagedHistoryShortcut())) throw new Error('Paged graph differs from the audited generator');
+function verifyBoundedSourceFreeGraph(workflow, expected, label) {
+  if (!isDeepStrictEqual(workflow, expected)) throw new Error(`${label} graph differs from the audited generator`);
   const text = JSON.stringify(workflow);
   if (/https?:|downloadurl|clipboard|savefile|appendfile|sendmessage|sendemail/.test(text)) throw new Error('Forbidden external/source-output action');
   const queries = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity');
   if (queries.length !== 6 || queries.some(a => ![1, 51, 102, 204, 408].includes(a.WFWorkflowActionParameters.WFContentItemLimitNumber))) throw new Error('Unbounded query');
   return true;
 }
+export function verifyPagedHistoryShortcut(workflow) {
+  return verifyBoundedSourceFreeGraph(workflow, buildPagedHistoryShortcut(), 'Paged');
+}
+export function verifyColumnarHistoryShortcut(workflow) {
+  return verifyBoundedSourceFreeGraph(workflow, buildColumnarHistoryShortcut(), 'Columnar');
+}
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const target = resolve(process.argv[2] ?? '/tmp/WafraHistoryImport.json');
-  const workflow = buildPagedHistoryShortcut(); verifyPagedHistoryShortcut(workflow);
+  const columnar = process.argv.includes('--columnar');
+  const target = resolve(process.argv.filter(arg => !arg.startsWith('--'))[2]
+    ?? (columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
+  const workflow = columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
+  (columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

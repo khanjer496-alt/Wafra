@@ -152,8 +152,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openHistoryRun",
-      "sha256": "2e4af6e5fae2b1f82cfb731229940df3d0da9a7e3a17d20d98ffa59c12b8c6b7",
-      "reviewedChange": "2026-09-12: Report Shortcut run failure with the run-specific message while preserving explicit confirmation, existing-handoff behavior and failed-handoff cleanup. Covered by onboarding-extreme-setup.test.cjs."
+      "sha256": "0f74d9a125c47051b967a4f0080984ba2ea408a7e8c1c914714aeab372cc60c6",
+      "reviewedChange": "2026-09-13: Continue on an already-running handoff opens historyShortcutContinueUrl() — the paged graph is re-run by its installed name because it resumes its saved cursor and fences the earlier runner; the legacy graph still only reopens Shortcuts. New handoffs, confirmation, and failed-handoff cleanup are unchanged. Covered by ios-setup-ux.test.js."
     },
     {
       "file": "src/app/ios-setup.tsx",

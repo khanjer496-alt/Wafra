@@ -93,6 +93,14 @@ function stripComments(text) {
 const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
   'src/app/(tabs)/bills.tsx',
 ];
+// The shipping Home: `src/app/(tabs)/index.tsx` re-exports it. The
+// ledger-home-screen list further down keeps its persistent-reveal contract
+// for the day that screen is rendered again; today nothing imports it, so a
+// stall there is not a stall the user can hit, and this list guards the Home
+// that is.
+const SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION = [
+  'src/screens/journal-home-screen.tsx',
+];
 
 // New Spending components do not run a delayed entering sequence.
 for (const rel of ['src/app/(tabs)/flow.tsx', 'src/components/spending/spending-overview.tsx', 'src/components/spending/spending-trends.tsx']) {
@@ -190,6 +198,17 @@ for (const rel of PERSISTENT_REVEAL_TAB_SCREENS) {
     !/\bentering=\{/.test(src) && !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
     'entering/exiting/layout animations can replay when react-native-screens reattaches a tab');
 
+  ok(`${rel}: does not use Section, which carries its own entrance`,
+    !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
+      !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
+    'Section registers a layout entrance and does not know it is on a detachable tab');
+}
+
+for (const rel of SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION) {
+  const src = stripComments(read(rel));
+  ok(`${rel}: has no detachable-screen layout animation`,
+    !/\bentering=\{/.test(src) && !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
+    'entering/exiting/layout animations can replay when react-native-screens reattaches a tab');
   ok(`${rel}: does not use Section, which carries its own entrance`,
     !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
       !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),

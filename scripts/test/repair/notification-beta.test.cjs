@@ -39,7 +39,9 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(native, /SOURCE_FINANCIAL_CANDIDATE/);
   assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
   assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
-  assert.match(listener, /MONEY_RE\.containsMatchIn\(body\)/);
+  // The money gate now runs over the chosen text candidate and the joined
+  // title/text rather than one `body` binding; the gate itself must remain.
+  assert.match(listener, /MONEY_RE\.containsMatchIn\(/);
   assert.match(listener, /Notification\.EXTRA_TEXT_LINES/);
   assert.match(listener, /Notification\.EXTRA_SUB_TEXT/);
 });

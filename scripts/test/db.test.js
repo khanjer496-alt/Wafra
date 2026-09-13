@@ -356,8 +356,15 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
   const identityState = (state) => state;
   const modules = {
     'react/jsx-runtime': {
-      jsx: (_type, props) => captureProvider ? props.value : {},
-      jsxs: (_type, props) => captureProvider ? props.value : {},
+      // StoreProvider now wraps StoreContext.Provider in PrivateModeContext.Provider,
+      // whose value is the private-mode boolean; the store value is the inner
+      // element, already captured as this element's child.
+      jsx: (_type, props) => captureProvider
+        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        : {},
+      jsxs: (_type, props) => captureProvider
+        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        : {},
       Fragment: Symbol('Fragment'),
     },
     react,

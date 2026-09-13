@@ -65,6 +65,13 @@ ok('csv response: accepted and explicitly rejected rows must reconcile to total'
 ok('pdf response: unsupported format remains a distinct user-facing error',
   pdfImportError(422, { error: 'unsupported_statement_format' }).code ===
     'unsupported_statement_format');
+ok('pdf response: skipped rows are read when sent, default to zero from an older relay, and are refused when malformed',
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 3 })?.rejectedRows === 3 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.rejectedRows === 0 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: -1 }) === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: '3' }) === null);
+ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
+  pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',
   parseEmailForwardingCredential({
     emailToken: 't'.repeat(43),
@@ -96,6 +103,20 @@ ok('statement screen no longer exposes forwarded-email setup',
 ok('protected PDF retry keeps the picker copy only until password retry or cancel',
   /pdf_password_required/.test(surface) && /secureTextEntry/.test(surface) &&
   /retryProtectedPdf/.test(surface) && /pendingPdf\.file\.delete\(\)/.test(surface));
+// Coverage is persisted once the whole batch has uploaded. Awaiting a full
+// ledger persist inside the per-file loop was the "laggy import" report.
+const uploadLoop = surface.slice(
+  surface.indexOf('for (let index = 0; index < picked.assets.length'),
+  surface.indexOf('await rememberCoverage(coverage)'),
+);
+ok('statement coverage is recorded after the upload loop, not per file',
+  uploadLoop.length > 0 && !/rememberCoverage\(/.test(uploadLoop) &&
+  !/recordStatementCoverage\(/.test(uploadLoop));
+ok('a password-protected PDF is deferred and the rest of the batch still uploads',
+  /protectedPdf = \{ asset, file \};[\s\S]{0,40}continue;/.test(uploadLoop) &&
+  !/return;/.test(uploadLoop));
+ok('a failed post-upload sync is reported, not folded into the pending status',
+  /copy\.syncFailed/.test(surface) && /syncFailureReason/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <

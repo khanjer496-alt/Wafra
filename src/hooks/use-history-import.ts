@@ -20,8 +20,18 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 100;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
+// Every page costs one provider query (the SMS provider sorts the whole
+// matching inbox per call — there is no SQL LIMIT), one store dispatch that
+// re-renders every mounted screen, and one forced encrypted ledger write. The
+// page size is the multiplier on all three. 100-row pages paid that overhead
+// twenty times more often than 2,000-row pages did while the parse loop was
+// already yielding per frame-sized slice; 500 keeps each page's JS work short
+// without turning a large inbox into hundreds of full-ledger commits.
+const HISTORY_IMPORT_PAGE_SIZE = 500;
+// One idle window between pages so a page commit never lands back-to-back
+// with the next provider read. Not a measured phone constant; see the parse
+// yield notes in auto-import.ts for the trace flag that verifies it.
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.

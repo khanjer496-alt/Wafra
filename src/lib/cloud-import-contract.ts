@@ -39,6 +39,8 @@ export interface StatementImportCoverage {
 
 export interface PdfImportAccepted {
   acceptedRows: number;
+  /** Date-led money lines the relay would not read; 0 from a relay that predates the field. */
+  rejectedRows: number;
   pages: number;
   coverage: StatementImportCoverage | null;
 }
@@ -65,6 +67,7 @@ export type CloudImportErrorCode =
   | 'too_large'
   | 'too_many_pages'
   | 'too_many_rows'
+  | 'pdf_too_long'
   | 'unreadable_pdf'
   | 'pdf_password_required'
   | 'pdf_password_incorrect'
@@ -181,9 +184,13 @@ function parseStatementCoverage(value: unknown): StatementImportCoverage | null 
 export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null {
   const body = object(value);
   if (!positiveInt(body?.acceptedRows) || !positiveInt(body.pages)) return null;
+  // Optional so an older relay's response still parses; present but malformed
+  // is a different relay contract and is refused like any other field.
+  const rejectedRows = body.rejectedRows === undefined ? 0 : body.rejectedRows;
+  if (!nonNegativeInt(rejectedRows)) return null;
   const coverage = parseStatementCoverage(body.coverage);
   if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
-  return { acceptedRows: body.acceptedRows, pages: body.pages, coverage };
+  return { acceptedRows: body.acceptedRows, rejectedRows, pages: body.pages, coverage };
 }
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
@@ -228,6 +235,7 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'too_large',
   'too_many_pages',
   'too_many_rows',
+  'pdf_too_long',
   'unreadable_pdf',
   'pdf_password_required',
   'pdf_password_incorrect',
