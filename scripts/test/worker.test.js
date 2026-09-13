@@ -1983,11 +1983,13 @@ const CARD_PAYMENT_DEBIT =
     ok('statement: a DIFFERENT statement is not suppressed by the first one\'s receipts',
       different.status === 202 && differentRows.length === 2,
       JSON.stringify(differentRows.map((row) => row.merchant)));
+    const spinneys = differentRows.find((row) => row.merchant === 'SPINNEYS MARINA');
+    const salary = differentRows.find((row) => row.merchant === 'SALARY CREDIT');
     ok('statement: structured rows carry the shared merchant categorizer',
-      differentRows[0]?.categoryGuess === 'groceries' &&
-        differentRows[0]?.categoryDeliberate === true &&
-        differentRows[1]?.categoryGuess === 'salary' &&
-        differentRows[1]?.categoryDeliberate === true,
+      spinneys?.categoryGuess === 'groceries' &&
+        spinneys?.categoryDeliberate === true &&
+        salary?.categoryGuess === 'salary' &&
+        salary?.categoryDeliberate === true,
       JSON.stringify(differentRows.map((row) => ({
         merchant: row.merchant,
         category: row.categoryGuess,
