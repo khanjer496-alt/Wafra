@@ -8,7 +8,13 @@ import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 
 const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
-const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})`;
+/** How many leading CSV records may precede the header row (bank preambles). */
+const MAX_CSV_PREAMBLE_RECORDS = 10;
+const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
+// ISO, numeric day/month (order inferred per file, see inferDateOrder), and the
+// `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
+const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
+const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
 const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{2})?)`;
 const ROW_END_DIRECTION = new RegExp(
   `^(${DATE_TOKEN})\\s+(.{2,180}?)\\s+${AMOUNT_TOKEN}\\s+(DR|CR|DEBIT|CREDIT)$`,
@@ -18,6 +24,19 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   `^(${DATE_TOKEN})\\s+(.{2,180}?)\\s+(DR|CR|DEBIT|CREDIT)\\s+${AMOUNT_TOKEN}$`,
   'i',
 );
+const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
+// The column branch (parseColumnTail) insists on cents: a bare integer at the
+// end of a flattened PDF row is as likely a cheque or reference number as money.
+const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}`;
+const CURRENCY_WORD = String.raw`(?:AED|SAR)`;
+const MONEY_UNSIGNED = new RegExp(`^${CURRENCY_WORD}?(${CENTS_MONEY})$`, 'i');
+const MONEY_SIGNED = new RegExp(
+  `^(?:([+-])${CURRENCY_WORD}?(${CENTS_MONEY})|${CURRENCY_WORD}?([+-])(${CENTS_MONEY})|${CURRENCY_WORD}?(${CENTS_MONEY})([+-])|\\(${CURRENCY_WORD}?(${CENTS_MONEY})\\))$`,
+  'i',
+);
+// What an empty debit or credit cell becomes once a PDF table is flattened.
+const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.00)$/;
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
 
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
@@ -175,11 +194,26 @@ function delimiterCount(line: string, delimiter: string): number {
   return count;
 }
 
+/**
+ * Pick the delimiter from the leading lines rather than the first one alone:
+ * bank exports often open with a preamble ("Account statement",
+ * "Account: XXXX1234") that has no delimiter at all. The delimiter that
+ * appears on the most lines wins — the table's own separator recurs on every
+ * row, while a stray `;` inside one description or one preamble line does
+ * not — and the widest line breaks a tie.
+ */
 function csvDelimiter(text: string): string | null {
-  const header = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] ?? '';
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/, MAX_CSV_PREAMBLE_RECORDS + 1);
   const candidates = [',', '\t', ';']
-    .map((delimiter) => ({ delimiter, count: delimiterCount(header, delimiter) }))
-    .sort((left, right) => right.count - left.count);
+    .map((delimiter) => {
+      const counts = lines.map((line) => delimiterCount(line, delimiter));
+      return {
+        delimiter,
+        lines: counts.filter((count) => count > 0).length,
+        count: Math.max(...counts),
+      };
+    })
+    .sort((left, right) => right.lines - left.lines || right.count - left.count);
   return candidates[0].count > 0 ? candidates[0].delimiter : null;
 }
 
@@ -314,7 +348,7 @@ function uniqueColumnInstrument(
 ): ParsedSms['card'] {
   if (index < 0) return null;
   const tails = new Set(
-    records.slice(1)
+    records
       .map((record) => maskedTail(record[index] ?? ''))
       .filter((tail): tail is string => tail !== null),
   );
@@ -371,12 +405,34 @@ function rowDirection(value: string): 'expense' | 'income' | null {
   return null;
 }
 
+/**
+ * Decode an exported statement without guessing past what the bytes say.
+ * A UTF-16 BOM names its encoding outright (Excel "Unicode text" exports);
+ * otherwise the file is UTF-8, or — when it is not valid UTF-8 — the single-byte
+ * Windows encoding older bank portals still emit. Replacement characters are
+ * never produced: a byte sequence that decodes to NUL is binary, not a table.
+ */
 export function decodeCsv(bytes: Uint8Array): string {
+  let text: string;
   try {
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+      text = new TextDecoder('utf-16le', { fatal: true, ignoreBOM: false }).decode(bytes);
+    } else if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+      text = new TextDecoder('utf-16be', { fatal: true, ignoreBOM: false }).decode(bytes);
+    } else {
+      try {
+        text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+      } catch {
+        text = new TextDecoder('windows-1252', { fatal: true, ignoreBOM: false }).decode(bytes);
+      }
+    }
   } catch {
     throw new Error('invalid_csv');
   }
+  // Both decoders strip their own BOM; a stray one inside the body is not text.
+  text = text.replace(/^\uFEFF/, '');
+  if (text.includes('\u0000')) throw new Error('invalid_csv');
+  return text;
 }
 
 /**
@@ -404,15 +460,26 @@ export function parseStatementCsv(
   } catch {
     throw new Error('invalid_csv');
   }
-  if (records.length < 2 || records[0].length < 3 || records[0].length > 64) {
+  // The header is the first leading record that names a date column AND a money
+  // column, not necessarily the first record: bank exports open with account
+  // preambles, and a blank or repeated header cell is a column to ignore (first
+  // occurrence wins), not grounds to refuse the whole file.
+  const headerRow = records.slice(0, MAX_CSV_PREAMBLE_RECORDS).findIndex((record) => {
+    const candidate = record.map(normalizedHeader);
+    return candidate.length >= 3 && candidate.length <= 64 &&
+      headerIndex(candidate, HEADER_ALIASES.date) >= 0 && (
+        headerIndex(candidate, HEADER_ALIASES.amount) >= 0 ||
+        headerIndex(candidate, HEADER_ALIASES.debit) >= 0 ||
+        headerIndex(candidate, HEADER_ALIASES.credit) >= 0
+      );
+  });
+  if (headerRow < 0 || records.length < headerRow + 2) {
     throw new Error('unsupported_statement_format');
   }
-  const totalRows = records.length - 1;
+  const dataRecords = records.slice(headerRow + 1);
+  const totalRows = dataRecords.length;
   if (totalRows > maxRows) throw new Error('too_many_rows');
-  const headers = records[0].map(normalizedHeader);
-  if (new Set(headers).size !== headers.length || headers.some((header) => !header)) {
-    throw new Error('invalid_csv');
-  }
+  const headers = records[headerRow].map(normalizedHeader);
   const dateIndex = headerIndex(headers, HEADER_ALIASES.date);
   const descriptionIndex = headerIndex(headers, HEADER_ALIASES.description);
   const debitIndex = headerIndex(headers, HEADER_ALIASES.debit);
@@ -435,17 +502,18 @@ export function parseStatementCsv(
   const sourceInstrument = sourceAccountIndex >= 0 && sourceCardIndex >= 0
     ? null
     : sourceAccountIndex >= 0
-      ? uniqueColumnInstrument(records, sourceAccountIndex, 'account')
-      : uniqueColumnInstrument(records, sourceCardIndex, 'unknown');
+      ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
+      : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
+  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''));
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
-  for (const record of records.slice(1)) {
+  for (const record of dataRecords) {
     if (record.length !== headers.length) {
       rejectedRows += 1;
       continue;
     }
-    const date = isoDate(record[dateIndex] ?? '');
+    const date = isoDate(record[dateIndex] ?? '', dateOrder);
     const description = record[descriptionIndex] ?? '';
     const unsafeDescription = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(description);
     const merchant = description.normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -462,8 +530,22 @@ export function parseStatementCsv(
         minor = debit ?? credit;
       }
     } else if (currency === defaultCurrency && directedAmount) {
-      type = rowDirection(record[directionIndex] ?? '');
-      minor = amountMinor(record[amountIndex] ?? '', currency, false);
+      // A `Type` column often carries the channel (POS, ATM, TRF) rather than
+      // the direction. When the cell says nothing about direction but the
+      // amount carries a sign, the sign is the explicit marker; when both
+      // speak and disagree, neither is trusted.
+      const labelled = rowDirection(record[directionIndex] ?? '');
+      const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false);
+      const signedMinor = unsignedMinor === null
+        ? amountMinor(record[amountIndex] ?? '', currency, true)
+        : null;
+      const signedType = signedMinor === null ? null : signedMinor < 0 ? 'expense' : 'income';
+      if (labelled && signedType && labelled !== signedType) {
+        type = null;
+      } else {
+        type = labelled ?? signedType;
+        minor = unsignedMinor ?? (signedMinor === null ? null : Math.abs(signedMinor));
+      }
     } else if (currency === defaultCurrency && signedAmount) {
       const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true);
       if (signedMinor !== null) {
@@ -515,18 +597,51 @@ export function parseStatementCsv(
   return { rows, totalRows, rejectedRows };
 }
 
-function isoDate(value: string): string | null {
-  value = normalizeDigits(value).trim();
+type DateOrder = 'day-first' | 'month-first';
+
+/**
+ * Decide how a file's numeric dates read. A first field above 12 can only be
+ * a day; a second field above 12 can only be a month-first export. With no
+ * evidence, or with contradictory evidence, keep the launch-tested UAE/KSA
+ * DD/MM reading — the ambiguous rows then parse exactly as they did before.
+ */
+function inferDateOrder(values: Iterable<string>): DateOrder {
+  let dayFirst = false;
+  let monthFirst = false;
+  for (const value of values) {
+    const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).trim());
+    if (!local) continue;
+    if (Number(local[1]) > 12) dayFirst = true;
+    if (Number(local[2]) > 12) monthFirst = true;
+  }
+  return monthFirst && !dayFirst ? 'month-first' : 'day-first';
+}
+
+const MONTH_INDEX: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
+  value = normalizeDigits(value).replace(/\s+/g, ' ').trim();
   let year: number;
   let month: number;
   let day: number;
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const named = new RegExp(`^(\\d{1,2})[\\s-](${MONTH_NAME})[\\s-](\\d{2,4})$`, 'i').exec(value);
   if (iso) {
     year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
+  } else if (named) {
+    day = Number(named[1]); month = MONTH_INDEX[named[2].slice(0, 3).toLowerCase()]; year = Number(named[3]);
+    if (year < 100) year += 2000;
   } else {
     const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/.exec(value);
     if (!local) return null;
-    day = Number(local[1]); month = Number(local[2]); year = Number(local[3]);
+    if (order === 'month-first') {
+      month = Number(local[1]); day = Number(local[2]);
+    } else {
+      day = Number(local[1]); month = Number(local[2]);
+    }
+    year = Number(local[3]);
     if (year < 100) year += 2000;
   }
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -537,35 +652,137 @@ function isoDate(value: string): string | null {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+type ColumnOrder = 'debit-first' | 'credit-first';
+
 /**
- * Conservative statement-row parser. It accepts only rows that explicitly
- * label debit/credit direction; a bare amount in a visual column is rejected
- * rather than guessed after PDF layout has been flattened to text.
+ * Which of the two money columns comes first in this statement's table. Gulf
+ * statements print Debit before Credit almost without exception; the header
+ * line is checked anyway so the rare Credit | Debit layout is not read inverted.
  */
-export function parseStatementText(
+function statementColumnOrder(text: string): ColumnOrder {
+  for (const original of text.split(/\n+/).slice(0, 120)) {
+    const line = original.replace(/\s+/g, ' ').trim();
+    // Only a table header counts: it names the date column too, and it is not
+    // a sentence about a "credit card" or a "direct debit" in the preamble.
+    if (!line || line.length > 160 || DATE_LED_LINE.test(line)) continue;
+    if (!/\bdate\b|تاريخ/iu.test(line) || /\b(?:credit|debit)\s+card\b|\bdirect\s+debit\b/i.test(line)) continue;
+    const debit = line.search(/\b(?:debits?|withdrawals?|paid out)\b|مدين|سحب/iu);
+    const credit = line.search(/\b(?:credits?|deposits?|paid in)\b|دائن|إيداع/iu);
+    if (debit < 0 || credit < 0) continue;
+    return credit < debit ? 'credit-first' : 'debit-first';
+  }
+  return 'debit-first';
+}
+
+type MoneyToken =
+  | { kind: 'placeholder' }
+  | { kind: 'unsigned'; minor: number }
+  | { kind: 'signed'; minor: number; type: 'expense' | 'income' };
+
+function moneyMinor(text: string): number | null {
+  const minor = Math.round(Number(text.replace(/,/g, '')) * 100);
+  return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
+}
+
+function classifyMoneyToken(token: string): MoneyToken | null {
+  if (MONEY_PLACEHOLDER.test(token)) return { kind: 'placeholder' };
+  const unsigned = MONEY_UNSIGNED.exec(token);
+  if (unsigned) {
+    const minor = moneyMinor(unsigned[1]);
+    return minor === null ? null : { kind: 'unsigned', minor };
+  }
+  const signed = MONEY_SIGNED.exec(token);
+  if (!signed) return null;
+  const amount = signed[2] ?? signed[4] ?? signed[5] ?? signed[7];
+  const negative = signed[7] !== undefined || (signed[1] ?? signed[3] ?? signed[6]) === '-';
+  const minor = moneyMinor(amount);
+  return minor === null ? null : { kind: 'signed', minor, type: negative ? 'expense' : 'income' };
+}
+
+/**
+ * Read the money columns off the end of a flattened statement row without
+ * guessing. Accepted shapes, after the description:
+ *   signed [balance]             — `-125.00`, `125.00-`, `(125.00)`, `+125.00`
+ *   debit credit [balance]       — one of the two populated, the other an
+ *                                  empty-cell placeholder (`-`, `0.00`)
+ * Anything else — a lone unsigned amount, both columns populated, a sign that
+ * is not on the first money token, a currency that is not the statement's —
+ * is left for the caller to count as rejected rather than read a direction in.
+ */
+function parseColumnTail(
+  rest: string,
+  currency: StatementCurrency,
+  order: ColumnOrder,
+): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  const words = rest.split(' ');
+  const tail: MoneyToken[] = [];
+  let cut = words.length;
+  while (cut > 0 && tail.length < 4) {
+    const word = words[cut - 1];
+    const upper = word.toUpperCase();
+    if (upper === 'AED' || upper === 'SAR') {
+      // A currency word only qualifies the money token after it; one that
+      // names another market's currency means this row is not ours.
+      if (tail.length === 0 || upper !== currency) return null;
+      cut -= 1;
+      continue;
+    }
+    const explicit = /^(AED|SAR)/i.exec(word)?.[1]?.toUpperCase();
+    if (explicit && explicit !== currency) return null;
+    const token = classifyMoneyToken(word);
+    if (!token) break;
+    tail.unshift(token);
+    cut -= 1;
+  }
+  const merchant = words.slice(0, cut).join(' ').trim();
+  if (merchant.length < 2 || merchant.length > 180 || tail.length === 0 || tail.length > 3) return null;
+  const [first, second] = tail;
+  if (first.kind === 'signed') {
+    return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
+  }
+  if (tail.length < 2 || second.kind === 'signed') return null;
+  const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
+  if (debit.kind === 'unsigned' && credit.kind === 'placeholder') {
+    return { merchant, amountFils: debit.minor, type: 'expense' };
+  }
+  if (credit.kind === 'unsigned' && debit.kind === 'placeholder') {
+    return { merchant, amountFils: credit.minor, type: 'income' };
+  }
+  return null;
+}
+
+export interface StatementTextResult {
+  rows: StatementParsedRow[];
+  /** Date-led lines that carried money but could not be read as a transaction. */
+  rejectedRows: number;
+}
+
+/**
+ * Conservative statement-row parser. A row is accepted only when its direction
+ * is explicit: a DR/CR label (tried first, unchanged), a signed amount, or a
+ * debit/credit column pair with exactly one side populated. A bare amount in a
+ * visual column is rejected rather than guessed after PDF layout has been
+ * flattened to text — and, so that a partial import is not reported as a
+ * complete one, every date-led line carrying money that fails is counted.
+ */
+export function parseStatementLines(
   text: string,
   currency: StatementCurrency = 'AED',
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
-): StatementParsedRow[] {
+): StatementTextResult {
   const rows: StatementParsedRow[] = [];
+  let rejectedRows = 0;
   const sourceInstrument = identity.card ?? statementHeaderInstrument(text);
-  for (const original of text.split(/\n+/)) {
-    const line = original.replace(/\s+/g, ' ').trim();
-    if (!line || line.length > 400) continue;
-    const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
-    if (!match) continue;
-    const explicitCurrency = /\s(AED|SAR)\s+[\d,]+(?:\.\d{2})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
-      .exec(line)?.[1]?.toUpperCase();
-    if (explicitCurrency && explicitCurrency !== currency) continue;
-    const date = isoDate(match[1]);
-    if (!date) continue;
-    const merchant = match[2].replace(/\s+/g, ' ').trim();
-    const endDirection = /^(?:DR|CR|DEBIT|CREDIT)$/i.test(match[4] ?? '');
-    const amountText = endDirection ? match[3] : match[4];
-    const direction = (endDirection ? match[4] : match[3]).toUpperCase();
-    const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
-    if (!Number.isSafeInteger(amountFils) || amountFils <= 0 || !merchant) continue;
-    const type = direction === 'CR' || direction === 'CREDIT' ? 'income' : 'expense';
+  const lines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
+  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
+  const columnOrder = statementColumnOrder(text);
+  const push = (
+    date: string,
+    merchant: string,
+    amountFils: number,
+    type: 'expense' | 'income',
+    line: string,
+  ) => {
     const classification = classifyMerchantDescription(
       merchant,
       type,
@@ -585,8 +802,49 @@ export function parseStatementText(
       ...(transfer?.transferEvidence ? { transferEvidence: transfer.transferEvidence } : {}),
       raw: line,
     });
+  };
+  for (const line of lines) {
+    if (!line || line.length > 400) continue;
+    const countable = DATE_LED_LINE.test(line) && LOOKS_LIKE_MONEY_LINE.test(line);
+    const accepted = rows.length;
+    const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
+    if (match) {
+      const explicitCurrency = /\s(AED|SAR)\s+[\d,]+(?:\.\d{2})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
+        .exec(line)?.[1]?.toUpperCase();
+      const date = isoDate(match[1], dateOrder);
+      const merchant = match[2].replace(/\s+/g, ' ').trim();
+      const endDirection = /^(?:DR|CR|DEBIT|CREDIT)$/i.test(match[4] ?? '');
+      const amountText = endDirection ? match[3] : match[4];
+      const direction = (endDirection ? match[4] : match[3]).toUpperCase();
+      const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
+      // `CARREFOUR 40.00 1,234.00 CR`: the labelled figure is the running
+      // balance and the purchase sits at the end of the description. Two
+      // money figures before one DR/CR label are ambiguous, so the line is
+      // left for the rejected count rather than filed as a 1,234.00 credit.
+      const balanceLabelled = classifyMoneyToken(merchant.split(' ').at(-1) ?? '')?.kind === 'unsigned';
+      if (
+        (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
+        Number.isSafeInteger(amountFils) && amountFils > 0 && merchant
+      ) {
+        push(date, merchant, amountFils, direction === 'CR' || direction === 'CREDIT' ? 'income' : 'expense', line);
+      }
+    } else {
+      const prefixed = ROW_DATE_PREFIX.exec(line);
+      const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
+      const column = prefixed && date ? parseColumnTail(prefixed[2], currency, columnOrder) : null;
+      if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
+    }
+    if (countable && rows.length === accepted) rejectedRows += 1;
   }
-  return rows;
+  return { rows, rejectedRows };
+}
+
+export function parseStatementText(
+  text: string,
+  currency: StatementCurrency = 'AED',
+  identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
+): StatementParsedRow[] {
+  return parseStatementLines(text, currency, identity).rows;
 }
 
 export async function extractPdfStatementRows(
@@ -596,12 +854,16 @@ export async function extractPdfStatementRows(
 ): Promise<{
   pages: number;
   rows: ParsedSms[];
+  rejectedRows: number;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
     const extracted = await extractText(document, { mergePages: true });
-    if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('PDF text exceeds limit');
-    return { pages: extracted.totalPages, rows: parseStatementText(extracted.text, currency) };
+    // Its own code, not the generic unreadable one: a long text statement is
+    // not a scan, and telling the user it is sends them the wrong way.
+    if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
+    const parsed = parseStatementLines(extracted.text, currency);
+    return { pages: extracted.totalPages, rows: parsed.rows, rejectedRows: parsed.rejectedRows };
   } finally {
     const disposable = document as unknown as {
       destroy?: () => Promise<void> | void;

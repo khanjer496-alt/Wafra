@@ -28,6 +28,7 @@ import {
   DEFAULT_RELAY_URL,
   getRelayConfig,
   pairDevice,
+  RelayError,
   type RelayConfig,
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
@@ -194,6 +195,7 @@ export function SupplementImports() {
     ) return copy.errInvalid;
     if (value.code === 'too_large' || value.code === 'too_many_pages' || value.code === 'too_many_rows') return copy.errLarge;
     if (value.code === 'unreadable_pdf') return copy.errUnreadable;
+    if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
     if (value.code === 'pdf_password_incorrect') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'rate_limited' || value.code === 'queue_full') return copy.errRate;
@@ -265,20 +267,43 @@ export function SupplementImports() {
       : 0;
   }, [captureExecutor, copy.notHydrated, copy.unavailable]);
 
+  // Coverage is written after the whole batch has uploaded, not between files.
+  // recordStatementCoverage persists the full encrypted ledger on every call,
+  // and awaiting it inside the per-file loop stalled the picker once per
+  // statement — the "laggy import" report. Duplicate ranges (the same account
+  // exported twice) collapse to one write here rather than one persist each.
   const rememberCoverage = useCallback(async (
-    item: StatementImportCoverage | null,
-    format: 'pdf' | 'csv',
+    items: readonly { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[],
   ) => {
-    if (!item) return;
-    await recordStatementCoverage({ ...item, format, importedAt: Date.now() });
+    const importedAt = Date.now();
+    const seen = new Set<string>();
+    for (const { item, format } of items) {
+      if (!item) continue;
+      const key = `${format}:${item.sourceKey}:${item.startDate}:${item.endDate}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      await recordStatementCoverage({ ...item, format, importedAt });
+    }
   }, [recordStatementCoverage]);
+
+  // Why the sync failed, in words that carry no statement content. Relay and
+  // import errors are already user copy; anything else is named generically
+  // rather than echoing an internal message onto the screen.
+  const syncFailureReason = useCallback((value: unknown): string => {
+    if (value instanceof CloudImportError) return errorText(value);
+    if (value instanceof RelayError) return value.message;
+    if (value instanceof Error && (value.message === copy.notHydrated || value.message === copy.unavailable)) {
+      return value.message;
+    }
+    return copy.syncFailedUnknown;
+  }, [copy, errorText]);
 
   const finishQueuedImport = useCallback(async (
     files: number,
     accepted: number,
     rejected: number,
     pages: number,
-  ) => {
+  ): Promise<boolean> => {
     setStatus(interpolate(copy.acceptedPending, { accepted }));
     try {
       // Paint the accepted state before planning/reconciling a potentially large ledger.
@@ -288,10 +313,16 @@ export function SupplementImports() {
         files, accepted, rejected, pages, imported,
       }));
       committed();
-    } catch {
+      return true;
+    } catch (e) {
+      // The rows stay queued on the relay; say what stopped them landing here
+      // instead of folding every failure into the "not synced yet" status.
       setStatus(interpolate(copy.acceptedPending, { accepted }));
+      setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
+      failed();
+      return false;
     }
-  }, [copy, syncQueued]);
+  }, [copy, syncFailureReason, syncQueued]);
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities || pendingPdf) return;
@@ -299,6 +330,9 @@ export function SupplementImports() {
     setStatus(null);
     const pickedFiles: File[] = [];
     let retainedUri: string | null = null;
+    // Declared outside the try so a failure later in the batch still hands the
+    // deferred locked PDF to the password prompt instead of leaking its copy.
+    let protectedPdf: PendingProtectedPdf | null = null;
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
@@ -311,6 +345,8 @@ export function SupplementImports() {
       let rejectedRows = 0;
       let pages = 0;
       let uploadedFiles = 0;
+      const coverage: { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[] = [];
+      let skippedProtected = 0;
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
         const file = new File(asset.uri);
@@ -322,22 +358,24 @@ export function SupplementImports() {
             ? await uploadCsvStatement(cfg, asset, capabilities)
             : await uploadPdfStatement(cfg, asset, capabilities);
           acceptedRows += accepted.acceptedRows;
+          rejectedRows += accepted.rejectedRows;
           uploadedFiles += 1;
           if ('pages' in accepted) pages += accepted.pages;
-          else rejectedRows += accepted.rejectedRows;
-          await rememberCoverage(accepted.coverage, csv ? 'csv' : 'pdf');
+          coverage.push({ item: accepted.coverage, format: csv ? 'csv' : 'pdf' });
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
-            // Keep only this picker cache copy until the user supplies the password.
-            retainedUri = asset.uri;
-            setPendingPdf({ asset, file });
-            setPdfPassword('');
-            setError(null);
-            if (acceptedRows > 0) {
-              await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
+            // Keep only this picker cache copy until the user supplies the
+            // password, and carry on with the rest of the batch: one locked
+            // statement used to abandon every file picked after it. The
+            // prompt holds one file; further locked PDFs are reported, not lost.
+            if (protectedPdf) {
+              skippedProtected += 1;
+            } else {
+              retainedUri = asset.uri;
+              protectedPdf = { asset, file };
             }
-            return;
+            continue;
           }
           throw e;
         }
@@ -345,8 +383,23 @@ export function SupplementImports() {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
-      await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
+      await rememberCoverage(coverage);
+      if (protectedPdf) {
+        setPendingPdf(protectedPdf);
+        setPdfPassword('');
+        setError(null);
+      }
+      const synced = uploadedFiles > 0
+        ? await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages)
+        : true;
+      if (synced && skippedProtected > 0) {
+        setError(interpolate(copy.passwordSkipped, { count: skippedProtected }));
+      }
     } catch (e) {
+      if (protectedPdf) {
+        setPendingPdf(protectedPdf);
+        setPdfPassword('');
+      }
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
       failed();
     } finally {
@@ -368,8 +421,8 @@ export function SupplementImports() {
     setError(null);
     try {
       const accepted = await uploadPdfStatement(cfg, pendingPdf.asset, capabilities, pdfPassword);
-      await rememberCoverage(accepted.coverage, 'pdf');
-      await finishQueuedImport(1, accepted.acceptedRows, 0, accepted.pages);
+      await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
+      await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
       try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
       setPendingPdf(null);
       setPdfPassword('');

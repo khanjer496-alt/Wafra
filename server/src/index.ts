@@ -1688,6 +1688,11 @@ export default {
       } catch (error) {
         const passwordError = pdfPasswordFailure(error);
         if (passwordError) return json({ error: passwordError }, 422);
+        // A text PDF past the extraction budget is a limit, not a scan; the
+        // generic code below carries the "scanned PDF" copy on the phone.
+        if (error instanceof Error && error.message === 'pdf_too_long') {
+          return json({ error: 'pdf_too_long' }, 413);
+        }
         return json({ error: 'unreadable_pdf' }, 422);
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
@@ -1716,6 +1721,10 @@ export default {
       }
       return json({
         acceptedRows: extracted.rows.length,
+        // Date-led money lines the parser would not read: without this a
+        // statement that half-imported looked, on the phone, like it had
+        // imported completely.
+        rejectedRows: extracted.rejectedRows,
         pages: extracted.pages,
         coverage: statementCoverage(extracted.rows),
       }, 202);
