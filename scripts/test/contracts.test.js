@@ -932,8 +932,8 @@ function ktSources(dir) {
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'شغّل \{shortcut\} · الرسالة المستلمة كاملة'/.test(copy) &&
       /أكملت الإعداد/.test(copy) &&
-      /اختر مرسلي البنوك/.test(copy) &&
-      /مرسل بنك تختاره/.test(copy) &&
+      /قد تعرض Apple جهات الاتصال فقط/.test(copy) &&
+      /بعض معرّفات رسائل البنوك لا تظهر/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
       /يحذف وفرة الرسالة الخام/.test(copy));
   ok('the next production build rejects every exact retired Capture Shortcut snapshot',
