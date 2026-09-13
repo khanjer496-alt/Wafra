@@ -8,7 +8,7 @@ on:
       - '.github/workflows/ios-build127-finish-public.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -26,6 +26,19 @@ jobs:
 
       - name: Publish build 127 to existing public TestFlight group
         run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Commit publication evidence for diagnosis
+        if: always()
+        run: |
+          if [ -f ios-release-evidence/public-beta.json ]; then
+            mkdir -p docs/release-evidence
+            cp ios-release-evidence/public-beta.json docs/release-evidence/ios-build127-public.json
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add docs/release-evidence/ios-build127-public.json
+            git commit -m 'chore: record iOS build 127 public beta evidence' || true
+            git push origin HEAD:main
+          fi
 
       - name: Preserve publication evidence
         uses: actions/upload-artifact@v4
