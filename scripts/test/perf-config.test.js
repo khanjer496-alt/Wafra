@@ -663,10 +663,11 @@ function fastest(fn, runs = 7) {
     'the selected row already carries normalized transfer evidence; rebuilding the whole ledger graph on every tap blocks the JS thread');
 
   const tapped = bodyOf(haptics, 'export function tapped');
-  ok('routine Android taps do not schedule haptic bridge work',
-    !!tapped && tapped.includes("Platform.OS === 'android'") && tapped.includes('return;') &&
-      !tapped.includes('performAndroidHapticsAsync'),
-    'Android ripple is immediate feedback; a haptics bridge call on every navigation tap can overlap the navigation turn on OEM devices');
+  ok('routine Android taps use the short native click haptic, not a long vibrator pattern',
+    !!tapped && tapped.includes("Platform.OS === 'android'") &&
+      tapped.includes('performAndroidHapticsAsync') && tapped.includes('Context_Click') &&
+      !tapped.includes('notificationAsync'),
+    'Android controls should feel registered immediately without using a long success/error vibration pattern');
 }
 
 // ---------------------------------------------------------------------------

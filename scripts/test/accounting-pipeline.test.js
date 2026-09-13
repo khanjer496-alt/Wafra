@@ -19,7 +19,7 @@ const {
 } = require('./build/ledger-import.js');
 const { setActiveMarket, setLedgerCurrency } = require('./build/markets.js');
 const { parseSms, PARSER_VERSION } = require('./build/sms-parser.js');
-const { TRANSFER_NORMALIZATION_VERSION } = require('./build/transfer-reconciliation.js');
+const { reconcileTransfers, reconciliationInternalIds, TRANSFER_NORMALIZATION_VERSION } = require('./build/transfer-reconciliation.js');
 
 let pass = 0;
 const ok = (name, condition, detail) => {
@@ -154,6 +154,12 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   ok('a real import stamps the current transfer-normalization receipt',
     afterIncremental.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
     afterIncremental.transferNormalizationVersion);
+  const expectedInternalIds = [...reconciliationInternalIds(
+    reconcileTransfers(afterIncremental.transactions, afterIncremental.accounts),
+  )].sort();
+  ok('a real import persists the exact reconciled internal-transfer id receipt',
+    isDeepStrictEqual([...(afterIncremental.transferInternalIds ?? [])].sort(), expectedInternalIds),
+    JSON.stringify(afterIncremental.transferInternalIds));
 
   let rereadId = 0;
   const reread = materializeImportBatch(
@@ -202,10 +208,12 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   const normalizedRestored = {
     ...restoredState,
     transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: ['existing-internal-id'],
   };
   const normalizedCursorOnly = applyMaterializedImportBatch(normalizedRestored, cursorOnly);
   ok('a metadata-only refresh preserves an existing transfer-normalization receipt',
     normalizedCursorOnly.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+      normalizedCursorOnly.transferInternalIds === normalizedRestored.transferInternalIds &&
       normalizedCursorOnly.transactions === normalizedRestored.transactions &&
       normalizedCursorOnly.accounts === normalizedRestored.accounts);
 }

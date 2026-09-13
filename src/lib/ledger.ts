@@ -1,5 +1,5 @@
 import type { Account, Transaction } from '@/lib/types';
-import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, reconciliationInternalIds, transferOwnership } from '@/lib/transfer-reconciliation';
 
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
@@ -114,10 +114,30 @@ export function isInboundTransfer(transaction: Transaction): boolean {
  * Legacy Set callers can still exclude explicit/user-owned rows, but cannot
  * establish a bank identity. New callers should supply the full account list.
  */
+let internalIdsCache: { transactions: Transaction[]; accounts: Account[]; value: Set<string> } | null = null;
+
+/**
+ * Seed the analytics cache from the exact durable reconciliation receipt.
+ * Store snapshots are immutable, so matching array identities make this cache
+ * authoritative until a transaction/account mutation replaces either array.
+ */
+export function primeInternalTransferIds(
+  transactions: Transaction[],
+  accounts: Account[],
+  ids: readonly string[],
+): void {
+  internalIdsCache = { transactions, accounts, value: new Set(ids) };
+}
+
 export function internalTransferIds(
   transactions: Transaction[], accounts: Set<string> | Account[],
 ): Set<string> {
-  const result = reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []);
-  if (!result.corroboratingIds.size && !result.cardRepaymentPairs.size && !result.knownCardRepayments.size) return result.internalIds;
-  return new Set([...result.internalIds, ...result.corroboratingIds, ...result.cardRepaymentPairs.keys(), ...result.knownCardRepayments.keys()]);
+  if (Array.isArray(accounts) &&
+      internalIdsCache?.transactions === transactions && internalIdsCache.accounts === accounts) {
+    return internalIdsCache.value;
+  }
+  const accountRows = Array.isArray(accounts) ? accounts : [];
+  const value = reconciliationInternalIds(reconcileTransfers(transactions, accountRows));
+  if (Array.isArray(accounts)) internalIdsCache = { transactions, accounts, value };
+  return value;
 }
