@@ -55,8 +55,14 @@ const MAX_REVIEW_CANDIDATES = 50;
  * the exact ordered result while avoiding 40+ timer turns per 1,000 simple
  * alerts on a fast phone.
  */
-const PARSE_TIME_BUDGET_MS = 8;
-const MAX_PARSE_SLICE_SIZE = 64;
+const PARSE_TIME_BUDGET_MS = 4;
+const MAX_PARSE_SLICE_SIZE = 32;
+// A zero-delay timer yields the call stack but immediately competes for the
+// next JS turn again. During a large first-history scan that kept Hermes near
+// 100% CPU and made taps/navigation wait behind parser work. Give the UI a
+// real frame window while the app is visible; background history work can use
+// zero-delay turns because there is no interactive surface to protect.
+const FOREGROUND_PARSE_YIELD_MS = 12;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
@@ -67,7 +73,8 @@ interface ParseYieldState {
 }
 
 function yieldToUi(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  const delay = RNAppState?.currentState === 'active' ? FOREGROUND_PARSE_YIELD_MS : 0;
+  return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 const createParseYieldState = (): ParseYieldState => ({ startedAt: Date.now(), parsed: 0 });
@@ -76,7 +83,7 @@ function parseYieldDue(state: ParseYieldState, hasMore: boolean): boolean {
   state.parsed += 1;
   if (!hasMore) return false;
   // With a headless execution lease there is no visible frame to render.
-  // Reduce timer/bridge turns off-screen, but immediately restore the 8ms
+  // Reduce timer/bridge turns off-screen, but immediately restore the 4ms
   // interactive budget when the user returns. Parsing and order do not change.
   const background = RNAppState?.currentState === 'background';
   const withinCount = state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE);

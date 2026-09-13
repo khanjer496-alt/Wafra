@@ -260,7 +260,7 @@ export function buildImportPlan(
   const staleDueCutoff = toISODate(new Date(today.getTime() - 45 * 86400000));
   // Three fingerprints, because the same transaction can reach us through
   // three capture channels. See dedupe.ts for why one is not enough.
-  const guard = duplicateGuard(matchableTransactions);
+  const guard = duplicateGuard(matchableTransactions, true);
   const captureInstrumentOf = (p: ScannedSms): CaptureInstrument | undefined => {
     if (!p.card) return undefined;
     const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
@@ -275,6 +275,9 @@ export function buildImportPlan(
   const priorBySmsKey = new Map<string, Transaction>();
   const priorsBySmsKey = new Map<string, Transaction[]>();
   const priorById = new Map<string, Transaction>();
+  const transferRepairCandidates = new Map<string, Transaction[]>();
+  const transferRepairKey = (accountId: string, type: Transaction['type'], amountFils: number, date: string) =>
+    `${accountId}|${type}|${amountFils}|${date}`;
   for (const t of matchableTransactions) {
     priorById.set(t.id, t);
     if (t.smsKey && t.source === 'sms') {
@@ -285,6 +288,16 @@ export function buildImportPlan(
       rows.push(t);
       priorsBySmsKey.set(sourceKey, rows);
     }
+  }
+  // Statement healing must still consider legacy SMS rows that predate
+  // portable source identity, but index them once instead of filtering the
+  // entire ledger for every incoming statement row.
+  for (const t of state.transactions) {
+    if (t.source !== 'sms' || t.userEdited || t.transferDecision || t.splits) continue;
+    const key = transferRepairKey(t.accountId, t.type, t.amountFils, t.date);
+    const rows = transferRepairCandidates.get(key);
+    if (rows) rows.push(t);
+    else transferRepairCandidates.set(key, [t]);
   }
   const compatiblePrior = (key: string, p: ScannedSms): Transaction | undefined => {
     const candidates = priorsBySmsKey.get(key) ?? [];
@@ -309,13 +322,19 @@ export function buildImportPlan(
     return match ? Number(match[1]) : undefined;
   };
   const rowsByTimestamp = new Map<number, Transaction[]>();
-  for (const t of matchableTransactions) {
-    if (t.source !== 'sms') continue;
-    const ts = rowTimestamp(t);
-    if (ts === undefined) continue;
-    const bucket = rowsByTimestamp.get(ts);
-    if (bucket) bucket.push(t);
-    else rowsByTimestamp.set(ts, [t]);
+  // Relay/PDF/CSV rows deliberately carry no raw source text, so they cannot
+  // use Android timestamp recovery. Skip building this full-ledger index for
+  // statement imports.
+  const hasLocalSourceEvidence = parsed.some((row) => row.raw !== undefined);
+  if (hasLocalSourceEvidence) {
+    for (const t of matchableTransactions) {
+      if (t.source !== 'sms') continue;
+      const ts = rowTimestamp(t);
+      if (ts === undefined) continue;
+      const bucket = rowsByTimestamp.get(ts);
+      if (bucket) bucket.push(t);
+      else rowsByTimestamp.set(ts, [t]);
+    }
   }
   const parsedTimestampCounts = new Map<number, number>();
   const androidTimestampCounts = new Map<number, number>();
@@ -354,10 +373,9 @@ export function buildImportPlan(
       ? value.replace(/[\s/-]/g, '').toUpperCase() || undefined
       : undefined;
     const incomingRef = normalizedRef(evidence.reference);
-    const candidates = state.transactions.filter((candidate) => {
-      if (candidate.source !== 'sms' || candidate.userEdited || candidate.transferDecision || candidate.splits ||
-          candidate.accountId !== accountId || candidate.type !== p.type || candidate.amountFils !== p.amountFils ||
-          candidate.date !== p.date) return false;
+    const candidates = (transferRepairCandidates.get(
+      transferRepairKey(accountId, p.type, p.amountFils, p.date),
+    ) ?? []).filter((candidate) => {
       const priorRef = normalizedRef(candidate.transferEvidence?.reference);
       const sameReference = !!incomingRef && !!priorRef && incomingRef === priorRef;
       const structurallyTransferLike = candidate.isTransfer === true || STRUCTURAL_TITLES.has(candidate.title.trim()) ||
@@ -508,6 +526,9 @@ export function buildImportPlan(
   const newBills: Omit<Bill, 'id' | 'paidMonths'>[] = [];
   const billDues: ScannedSms[] = [];
   const fallbackAccountId = state.accounts[0]?.id ?? '';
+  const existingAccountById = new Map(state.accounts.map((account) => [account.id, account] as const));
+  const accountCandidates: Array<{ ref: string; account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> }> =
+    state.accounts.map((account) => ({ ref: account.id, account }));
 
   // Bank identity per account, learned from SMS sender IDs (existing accounts
   // that predate this get theirs backfilled).
@@ -531,7 +552,7 @@ export function buildImportPlan(
     ref: string,
   ): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> | undefined => {
     if (/^\d+$/.test(ref)) return newAccounts[Number(ref)];
-    return state.accounts.find((a) => a.id === ref);
+    return existingAccountById.get(ref);
   };
   const effectiveCardType = (
     ref: string,
@@ -562,10 +583,6 @@ export function buildImportPlan(
       bankIdentityForName(account.bankName) === bankIdentityForName(bankName)
     );
   };
-  const accountCandidates = () => [
-    ...state.accounts.map((account) => ({ ref: account.id, account })),
-    ...newAccounts.map((account, index) => ({ ref: String(index), account })),
-  ];
   const isGeneratedUnknownHolding = (
     ref: string,
     account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'>,
@@ -616,6 +633,7 @@ export function buildImportPlan(
             color: bank?.color ?? colorForHint(evidence.sourceAccountKey.slice(-4)),
           });
           const ref = String(idx);
+          accountCandidates.push({ ref, account: newAccounts[idx] });
           hints[sourceHint] = ref;
           newHints[sourceHint] = ref;
           bankNames[ref] = bankName;
@@ -692,7 +710,7 @@ export function buildImportPlan(
       noteType(ref);
       return { accountId: ref, confident };
     };
-    const compatible = accountCandidates().filter(({ ref, account }) =>
+    const compatible = accountCandidates.filter(({ ref, account }) =>
       matchesCard(ref, account, last4, kind, bank?.name) ||
       (sourceKindAmbiguous && matchesCard(ref, account, last4, 'account', bank?.name)));
     // Explicit type evidence may safely choose the sole account already known
@@ -774,6 +792,7 @@ export function buildImportPlan(
       color: bank?.color ?? colorForHint(last4),
     });
     const ref = String(idx);
+    accountCandidates.push({ ref, account: newAccounts[idx] });
     const confident = eligible.length === 0;
     if (confident) {
       hints[last4] = ref;
@@ -923,7 +942,7 @@ export function buildImportPlan(
       if (p.date < staleDueCutoff) continue;
       const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
-        ? accountCandidates().filter(
+        ? accountCandidates.filter(
             ({ ref, account }) =>
               account.kind === 'card' &&
               effectiveCardType(ref, account) === 'credit' &&
@@ -1455,7 +1474,7 @@ export function buildImportPlan(
   // its resolver still has to prove a unique compatible account. Without this
   // check the first scan and its replay alternated the same tail between banks.
   const tailCounts = new Map<string, number>();
-  for (const { account } of accountCandidates()) {
+  for (const { account } of accountCandidates) {
     if (account.last4) tailCounts.set(account.last4, (tailCounts.get(account.last4) ?? 0) + 1);
   }
   for (const key of Object.keys(newHints)) {

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import {
+  Platform,
   Pressable,
   type GestureResponderEvent,
   type PressableProps,
@@ -48,6 +49,36 @@ interface SpringPressableProps extends Omit<PressableProps, 'style'> {
  * Reduce Motion retains an immediate opacity cue without moving the surface.
  */
 export const SpringPressable = ({
+  ...props
+}: SpringPressableProps) => {
+  if (Platform.OS === 'android') {
+    return <AndroidPressable {...props} />;
+  }
+  return <AnimatedSpringPressable {...props} />;
+};
+
+const AndroidPressable = ({
+  disabled,
+  onPressIn,
+  onPressOut,
+  opacityTo = 0.88,
+  scaleTo: _scaleTo,
+  style,
+  ...props
+}: SpringPressableProps) => (
+  <Pressable
+    {...props}
+    disabled={disabled}
+    onPressIn={onPressIn}
+    onPressOut={onPressOut}
+    style={({ pressed }) => [
+      style,
+      { opacity: pressed && !disabled ? opacityTo : 1 },
+    ]}
+  />
+);
+
+const AnimatedSpringPressable = ({
   disabled,
   onPressIn,
   onPressOut,

@@ -202,6 +202,14 @@ export default function WalletScreen() {
     () => totalAsShown(dues.map((d) => d.remainingFils)),
     [dues],
   );
+  const dueByAccountId = useMemo(
+    () => new Map(dues.map((item) => [item.due.accountId, item] as const)),
+    [dues],
+  );
+  const dueAccountIds = useMemo(
+    () => new Set(state.cardDues.map((statement) => statement.accountId)),
+    [state.cardDues],
+  );
 
   // Active accounts and cards share one institution-grouped source list.
   // Expired/unused ones (silent 90+ days, or hidden) live in a drawer below.
@@ -260,9 +268,9 @@ export default function WalletScreen() {
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
     const figure = cardFigure(state, account, now);
-    const due = dues.find((item) => item.due.accountId === account.id);
+    const due = dueByAccountId.get(account.id);
     const debtObserved = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
-      || state.cardDues.some((statement) => statement.accountId === account.id);
+      || dueAccountIds.has(account.id);
     const figureFils = account.cardType === 'credit' && !debtObserved ? null
       : figure.fils === null ? null : figure.kind === 'owed' ? Math.abs(figure.fils) : figure.fils;
     const caption = figureFils === null ? t('noBalanceYet')
@@ -273,7 +281,7 @@ export default function WalletScreen() {
     return { account, figureFils, caption, freshness };
   // Captions also follow language; unrelated store metadata must not rescan rows.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dues, language]);
+  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dueByAccountId, dueAccountIds, language]);
 
   const openingFils = openingText.trim() === ''
     ? 0

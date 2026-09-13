@@ -31,10 +31,18 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
     // merchants. Keep the local category fallback unless reviewed bundled
     // artwork already established an identity above this guard.
     if (!allowRemote || bundled || category === 'other') return () => { alive = false; };
-    void resolveRemoteMerchantLogo(title).then(value => {
-      if (alive) setRemote(value);
+    // Remote logo enrichment is presentation-only. Defer cache/network work
+    // until the JS thread is idle so virtualized rows never compete with
+    // scrolling, navigation, or opening a transaction.
+    const idle = requestIdleCallback(() => {
+      void resolveRemoteMerchantLogo(title).then(value => {
+        if (alive) setRemote(value);
+      });
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      cancelIdleCallback(idle);
+    };
   }, [title, category, bundled, allowRemote]);
 
   if (bundled) {

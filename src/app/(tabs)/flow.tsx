@@ -71,8 +71,9 @@ export default function FlowScreen() {
 
   // Detailed analysis and activity sorting run only in the view that needs them.
   const sortedActivity = useMemo(() => view !== 'activity' ? [] : state.transactions
-    .filter((tx) => isSpending(tx, live, internal) && inPeriod(tx.date, period))
-    .sort((a, b) => b.date.localeCompare(a.date)), [view, state.transactions, live, internal, period]);
+    // Store order is already newest-first; filtering preserves that order.
+    .filter((tx) => isSpending(tx, live, internal) && inPeriod(tx.date, period)),
+    [view, state.transactions, live, internal, period]);
   const activity = useMemo(() => {
     const needle = appliedQuery.trim().toLocaleLowerCase();
     return !needle ? sortedActivity : sortedActivity.filter((tx) =>

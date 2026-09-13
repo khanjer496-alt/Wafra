@@ -286,8 +286,13 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
   );
 }
 
-export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
-  existing = existing.filter((row) => isUsableCaptureSourceIdentity(row.smsKey, row.ts));
+export function duplicateGuard(
+  existing: Transaction[],
+  sourceIdentityAlreadyValidated = false,
+): DuplicateGuard {
+  if (!sourceIdentityAlreadyValidated) {
+    existing = existing.filter((row) => isUsableCaptureSourceIdentity(row.smsKey, row.ts));
+  }
   let lastMatchedId: string | null = null;
   /** dedupeKey → the capture times filed under it. */
   const seen = new Map<string, SeenOccurrence[]>();

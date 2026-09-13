@@ -20,7 +20,7 @@ import {
 } from '@/lib/accounts';
 import { cleanupGeneratedExports } from '@/lib/share-text';
 import { isValidBackupState } from '@/lib/backup-validation';
-import { applyTransferDecision, normalizeTransferLinks, transferFingerprint } from '@/lib/transfer-reconciliation';
+import { applyTransferDecision, isTransferCandidate, normalizeTransferLinks, transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { TransferDecisionRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
@@ -788,9 +788,14 @@ function reducer(state: AppState, action: Action): AppState {
   try {
     const reduced = reduceState(state, action);
     if (action.type === 'hydrate') markLaunchPhase('ledger-reducer-normalize-start');
-    // Every path that changes identity or rows passes through the same atomic
-    // link cleanup, including restore, account remaps and deletion/undo.
-    const transactions = reduced.transactions !== state.transactions || reduced.accounts !== state.accounts
+    // Transfer reconciliation is synchronous ledger work. Avoid a complete
+    // transfer-graph walk when the action cannot change transfer identity.
+    const transactionsChanged = reduced.transactions !== state.transactions;
+    const accountsChanged = reduced.accounts !== state.accounts;
+    const needsTransferNormalization = accountsChanged || (
+      transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
+    );
+    const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;
     return syncLedgerCurrency(transactions === reduced.transactions ? reduced : { ...reduced, transactions });
@@ -800,6 +805,42 @@ function reducer(state: AppState, action: Action): AppState {
     applyThemePreference(theme);
     setLanguage(language);
     throw error;
+  }
+}
+
+function transactionNeedsTransferNormalization(transaction: Transaction | undefined): boolean {
+  return Boolean(
+    transaction &&
+      (isTransferCandidate(transaction) ||
+        transaction.isTransfer ||
+        transaction.transferMatch ||
+        transaction.transferDecision ||
+        transaction.transferEvidence),
+  );
+}
+
+function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action: Action): boolean {
+  switch (action.type) {
+    case 'importBatch':
+      // applyMaterializedImportBatch already performs canonical normalization.
+      return false;
+    case 'addTransaction':
+    case 'markBillPaid':
+      return true;
+    case 'payCardDue':
+      return action.transaction !== null;
+    case 'editTransaction': {
+      const before = state.transactions.find((transaction) => transaction.id === action.id);
+      const after = reduced.transactions.find((transaction) => transaction.id === action.id);
+      return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
+    }
+    case 'deleteTransaction':
+      return true;
+    case 'setPrivateMode':
+    case 'setMonthStartDay':
+      return false;
+    default:
+      return true;
   }
 }
 
@@ -813,6 +854,16 @@ function reduceState(state: AppState, action: Action): AppState {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
       next.historyImport = normalizeHistoryImportProgress(next.historyImport);
+      // Parser migrations use the resumable paged history coordinator rather
+      // than monopolising the foreground JS thread with a whole-inbox reread.
+      if (
+        Platform.OS === 'android' &&
+        next.onboarded &&
+        next.parserVersion !== PARSER_VERSION &&
+        (!next.historyImport || next.historyImport.status === 'complete')
+      ) {
+        next.historyImport = createHistoryImportProgress(Date.now());
+      }
       next.localCaptureQualifications = normalizeLocalCaptureQualifications(
         next.localCaptureQualifications,
         Date.now(),
@@ -1909,13 +1960,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ids: [], qualificationIds: [], durable: Promise.reject(error) };
     }
     const materialized = materializeImportBatch(input, base, makeId);
-    const postImportState = applyMaterializedImportBatch(base, materialized);
-    const qualificationCandidates = attestDeclineQualifications(
-      base,
-      materialized,
-      postImportState,
-      qualifications,
-    );
+    // Ordinary statement/SMS imports carry no decline qualifications. Avoid
+    // fully applying the batch once here and then a second time in dispatch.
+    const qualificationCandidates = qualifications.length > 0
+      ? attestDeclineQualifications(
+          base,
+          materialized,
+          applyMaterializedImportBatch(base, materialized),
+          qualifications,
+        )
+      : [];
     const localCaptureQualifications = qualificationCandidates.length > 0
       ? mergeLocalCaptureQualifications(
           base.localCaptureQualifications,

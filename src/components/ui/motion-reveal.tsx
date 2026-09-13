@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   Extrapolation,
   ReduceMotion,
@@ -36,7 +36,7 @@ interface MotionRevealProps {
  * value survives it, so the reveal is visible once and every later tab switch
  * is immediate.
  */
-export const MotionReveal = ({
+const AnimatedMotionReveal = ({
   children,
   delay = 0,
   distance = 18,
@@ -78,4 +78,14 @@ export const MotionReveal = ({
   });
 
   return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
+};
+
+export const MotionReveal = (props: MotionRevealProps) => {
+  // On Android render the final state directly. This removes Reanimated shared
+  // values and accessibility subscriptions from every Home reveal section on
+  // the same path where device traces showed delayed taps.
+  if (Platform.OS === 'android') {
+    return <View style={props.style}>{props.children}</View>;
+  }
+  return <AnimatedMotionReveal {...props} />;
 };

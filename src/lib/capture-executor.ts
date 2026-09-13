@@ -123,7 +123,14 @@ const EMPTY_SUMMARY: CaptureImportSummary = {
 
 const hasChanges = (plan: ImportPlan): boolean =>
   plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0 ||
-  (plan.batch.newBills?.length ?? 0) > 0;
+  plan.newAccountCount > 0 ||
+  (plan.batch.newBills?.length ?? 0) > 0 ||
+  Object.keys(plan.batch.snapshots).length > 0 ||
+  Object.keys(plan.batch.bankNames ?? {}).length > 0 ||
+  Object.keys(plan.batch.cardTypes ?? {}).length > 0;
+
+const yieldForegroundTurn = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
 
 const summary = (
   plan: ImportPlan,
@@ -409,9 +416,13 @@ export const createCaptureExecutor = ({
       (max, row) => Math.max(max, row.smsTs ?? 0),
       state.lastScanTs,
     );
+    if (queued.parsed.length > 0) await yieldForegroundTurn();
+    if (captureStopped(activeLedger, 'relay')) return stopped();
     const plan = dependencies.planRows(queued.parsed, state, newestTs);
     let transactionIds: string[] = [];
-    if (queued.parsed.length > 0) {
+    if (queued.parsed.length > 0 && hasChanges(plan)) {
+      if (captureStopped(activeLedger, 'relay')) return stopped();
+      await yieldForegroundTurn();
       if (captureStopped(activeLedger, 'relay')) return stopped();
       const receipt = activeLedger.importBatch(plan.batch);
       transactionIds = receipt.ids;

@@ -59,6 +59,11 @@ export function useHistoryImport(): void {
     },
     now: Date.now,
     scanPage: async (cursor: HistoryImportCursor | null) => {
+      // Leave a real frame between durable 1,000-row pages while the app is
+      // visible so taps/navigation are never queued behind back-to-back parse
+      // and commit work. Background execution keeps the fast path.
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, RNAppState.currentState === 'active' ? 16 : 0));
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,

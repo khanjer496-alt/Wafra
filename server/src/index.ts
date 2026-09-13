@@ -689,6 +689,18 @@ type QueueStructuredRowOptions =
     targetDeviceId?: string | null;
   };
 
+interface QueueTarget {
+  id: string;
+  public_key: string;
+}
+
+async function supplementalQueueTargets(env: Env, device: Device): Promise<QueueTarget[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT d.id, d.public_key FROM devices d WHERE d.vault_id = ?1`,
+  ).bind(device.vault_id).all<QueueTarget>();
+  return results ?? [];
+}
+
 async function queueStructuredRow(
   env: Env,
   device: Device,
@@ -696,18 +708,18 @@ async function queueStructuredRow(
   replayKey: string,
   receiptTtlSeconds: number,
   options: QueueStructuredRowOptions,
+  knownTargets?: readonly QueueTarget[],
 ): Promise<string[]> {
   const targetDeviceId = options.targetDeviceId ?? null;
-  const { results: vaultDevices } = await env.DB.prepare(
-    `SELECT d.id, d.public_key
-       FROM devices d
-      WHERE d.vault_id = ?1
-        AND (?3 IS NULL OR d.id = ?3)
-        AND (SELECT COUNT(*) FROM queue q WHERE q.device_id = d.id) < ?2`,
-  )
-    .bind(device.vault_id, MAX_QUEUED_ROWS, targetDeviceId)
-    .all<{ id: string; public_key: string }>();
-  const targets = vaultDevices ?? [];
+  const targets = knownTargets
+    ? knownTargets.filter((target) => targetDeviceId === null || target.id === targetDeviceId)
+    : (await env.DB.prepare(
+      `SELECT d.id, d.public_key
+         FROM devices d
+        WHERE d.vault_id = ?1
+          AND (?3 IS NULL OR d.id = ?3)
+          AND (SELECT COUNT(*) FROM queue q WHERE q.device_id = d.id) < ?2`,
+    ).bind(device.vault_id, MAX_QUEUED_ROWS, targetDeviceId).all<QueueTarget>()).results ?? [];
   if (targets.length === 0) return [];
   const sealedTargets = await Promise.all(targets.map(async (target) => ({
     id: target.id,
@@ -742,10 +754,12 @@ async function queueStructuredRow(
       env.DB.prepare(
         `INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
          SELECT ?1, ?2, ?3, ?4, ?5, unixepoch()
-          WHERE NOT EXISTS (
-            SELECT 1 FROM ingest_receipts
-             WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
-          )`,
+          WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?2 AND vault_id = ?9)
+            AND (SELECT COUNT(*) FROM queue WHERE device_id = ?2) < ?8
+            AND NOT EXISTS (
+              SELECT 1 FROM ingest_receipts
+               WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
+            )`,
       ).bind(
         target.queueId,
         target.id,
@@ -754,6 +768,8 @@ async function queueStructuredRow(
         target.sealed.ct,
         device.id,
         `${replayKey}:${target.id}`,
+        MAX_QUEUED_ROWS,
+        device.vault_id,
       ));
   // A replay receipt belongs to one source event AND one target. A shared
   // receipt lets one full phone suppress delivery to itself after a peer
@@ -799,6 +815,24 @@ async function queueStructuredRow(
     .map((target) => target.id);
 }
 
+async function queueSupplementalRows(
+  env: Env,
+  device: Device,
+  rows: readonly { row: Record<string, unknown>; replayKey: string; receiptTtlSeconds: number }[],
+  targets: readonly QueueTarget[],
+): Promise<Set<string>> {
+  const wake = new Set<string>();
+  const CONCURRENCY = 8;
+  for (let start = 0; start < rows.length; start += CONCURRENCY) {
+    const inserted = await Promise.all(rows.slice(start, start + CONCURRENCY).map((item) =>
+      queueStructuredRow(env, device, item.row, item.replayKey, item.receiptTtlSeconds,
+        { sourceScope: 'supplemental' }, targets),
+    ));
+    for (const ids of inserted) for (const id of ids) wake.add(id);
+  }
+  return wake;
+}
+
 const opaqueFingerprint = (value: string): string => value
   .replace(/\+/g, '-')
   .replace(/\//g, '_')
@@ -840,23 +874,15 @@ async function queueEmailRows(
   const receivedAt = alert
     ? [new Date().toISOString()]
     : rowReceiptTimes(parsedRows, Date.now());
-  const wake = new Set<string>();
-  for (let index = 0; index < parsedRows.length; index++) {
-    const inserted = await queueStructuredRow(
-      env,
-      device,
-      {
-        ...withoutRaw(parsedRows[index]),
-        captureSource: 'email',
-        market: alert ? alertMarket : device.market,
-        receivedAt: receivedAt[index],
-      },
-      `${baseKey}:${index}`,
-      REPLAY_WINDOW_SECONDS,
-      { sourceScope: 'supplemental' },
-    );
-    for (const targetId of inserted) wake.add(targetId);
-  }
+  const targets = await supplementalQueueTargets(env, device);
+  const wake = await queueSupplementalRows(
+    env, device,
+    parsedRows.map((_, index) => ({
+      row: { ...withoutRaw(parsedRows[index]), captureSource: 'email', market: alert ? alertMarket : device.market, receivedAt: receivedAt[index] },
+      replayKey: `${baseKey}:${index}`, receiptTtlSeconds: REPLAY_WINDOW_SECONDS,
+    })),
+    targets,
+  );
   return { acceptedRows: parsedRows.length, wake };
 }
 
@@ -1634,22 +1660,15 @@ export default {
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
-      const wake = new Set<string>();
-      for (let index = 0; index < extracted.rows.length; index++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(extracted.rows[index]),
-            captureSource: 'pdf',
-            receivedAt: receivedAt[index],
-          },
-          `${baseKey}:${index}`,
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-        );
-        for (const targetId of inserted) wake.add(targetId);
-      }
+      const targets = await supplementalQueueTargets(env, device);
+      const wake = await queueSupplementalRows(
+        env, device,
+        extracted.rows.map((_, index) => ({
+          row: { ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index] },
+          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+        })),
+        targets,
+      );
       if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
@@ -1689,22 +1708,15 @@ export default {
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
-      const wake = new Set<string>();
-      for (let index = 0; index < parsed.rows.length; index++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(parsed.rows[index]),
-            captureSource: 'csv',
-            receivedAt: receivedAt[index],
-          },
-          `${baseKey}:${index}`,
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-        );
-        for (const targetId of inserted) wake.add(targetId);
-      }
+      const targets = await supplementalQueueTargets(env, device);
+      const wake = await queueSupplementalRows(
+        env, device,
+        parsed.rows.map((row, index) => ({
+          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index] },
+          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+        })),
+        targets,
+      );
       if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);

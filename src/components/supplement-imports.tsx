@@ -1,7 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -36,6 +35,7 @@ import {
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { committed, failed, tapped } from '@/lib/haptics';
 
 
 type Busy = 'connect' | 'capabilities' | 'statement' | 'email-create' | 'email-check' | 'email-revoke' | null;
@@ -169,7 +169,7 @@ export function SupplementImports() {
       const connected = await pairDevice(DEFAULT_RELAY_URL);
       setCfg(connected);
       await loadCapabilities(connected);
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      committed();
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -219,6 +219,7 @@ export function SupplementImports() {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
+      setStatus(interpolate(copy.acceptedPending, { accepted: acceptedRows }));
       try {
         const imported = await syncQueued();
         setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
@@ -228,13 +229,13 @@ export function SupplementImports() {
           pages,
           imported,
         }));
-        if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        committed();
       } catch {
         setStatus(interpolate(copy.acceptedPending, { accepted: acceptedRows }));
       }
     } catch (e) {
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      failed();
     } finally {
       try {
         for (const pickedFile of pickedFiles) {
@@ -255,7 +256,7 @@ export function SupplementImports() {
       const issued = await createEmailForwardingAddress(cfg);
       const next = await saveRelayEmailCredential(cfg, issued.emailToken, issued.forwardingAddress);
       setCfg(next);
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      committed();
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -273,7 +274,7 @@ export function SupplementImports() {
       return;
     }
     setCopied(true);
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    tapped();
     if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
     clipboardTimer.current = setTimeout(() => {
       void clearCopiedAddress(address);

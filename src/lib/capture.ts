@@ -331,7 +331,13 @@ export async function collectNewMessages(
     // re-read everything — existing rows are recognized by fingerprint and
     // healed in place, not duplicated.
     const reread = !notificationOnly && state.parserVersion !== PARSER_VERSION;
-    const sinceMs = notificationOnly || reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
+    // Parser-version migrations are handled by the resumable history job when
+    // one is present. Keep routine foreground capture incremental so it does
+    // not race the history coordinator through the same inbox.
+    const fullHistoricalReread = reread && state.historyImport === null;
+    const sinceMs = notificationOnly || fullHistoricalReread || state.lastScanTs <= 0
+      ? 0
+      : state.lastScanTs + 1;
     // `declined` is the other half of that re-read. A decline the old parser
     // booked as an expense cannot be healed into anything — the money never
     // moved — so the row has to be retired, and the proof is the message
@@ -356,7 +362,7 @@ export async function collectNewMessages(
       undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
-        maxInboxPages: reread ? 1 : undefined,
+        maxInboxPages: fullHistoricalReread ? 1 : undefined,
         notificationOnly,
         learnedNotificationPackages: state.trustedNotificationPackages },
     );
@@ -369,10 +375,10 @@ export async function collectNewMessages(
     const hasStoredInboxHistory = state.transactions.some(
       (row) => row.source === 'sms' && row.viaPush !== true,
     );
-    if (reread && inboxScannedCount === 0 && hasStoredInboxHistory) {
+    if (fullHistoricalReread && inboxScannedCount === 0 && hasStoredInboxHistory) {
       throw new SmsHistoryUnavailableError();
     }
-    if (reread && !inboxHistoryComplete && !nextCursor) {
+    if (fullHistoricalReread && !inboxHistoryComplete && !nextCursor) {
       throw new SmsHistoryUnavailableError();
     }
     const migrationTime = Date.now();
@@ -394,8 +400,8 @@ export async function collectNewMessages(
       newestTs: notificationOnly || emptyScan ? state.lastScanTs : newestTs,
       inboxScannedCount,
       scannedCount,
-      historicalReread: reread && inboxHistoryComplete,
-      ...(reread && !inboxHistoryComplete && nextCursor ? { historyImport: {
+      historicalReread: fullHistoricalReread && inboxHistoryComplete,
+      ...(fullHistoricalReread && !inboxHistoryComplete && nextCursor ? { historyImport: {
         status: 'paused' as const, cursor: nextCursor, scanned: scannedCount,
         found: parsed.length + reviewCandidates.length, startedAt: migrationTime,
         updatedAt: migrationTime, error: null,
