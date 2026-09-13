@@ -2321,8 +2321,8 @@ const S = {
   retryHistoryRead: { en: 'Try reading again', ar: 'إعادة محاولة القراءة' },
   historyShortcutMissing: { en: 'History Shortcut not installed', ar: 'اختصار السجل غير مثبت' },
   historyShortcutMissingBody: {
-    en: 'Install “Wafra History Import” in Apple Shortcuts, then try again.',
-    ar: 'ثبّت «استيراد سجل وفرة» في تطبيق اختصارات Apple ثم أعد المحاولة.',
+    en: 'Install “{shortcut}” in Apple Shortcuts, then try again.',
+    ar: 'ثبّت «{shortcut}» في تطبيق اختصارات Apple ثم أعد المحاولة.',
   },
   historyImportReviewReady: { en: 'Ready for review', ar: 'جاهز للمراجعة' },
   historyImportNoneFound: {
@@ -2335,13 +2335,13 @@ const S = {
   },
   historyImportMissing: { en: 'No staged messages found', ar: 'لم تُوجد رسائل مؤقتة' },
   historyImportMissingBody: {
-    en: 'Run Wafra History Import again and keep Wafra installed while the Shortcut finishes.',
-    ar: 'شغّل «استيراد سجل وفرة» مجدداً واترك وفرة مثبتاً حتى ينتهي الاختصار.',
+    en: 'Run {shortcut} again and keep Wafra installed while the Shortcut finishes.',
+    ar: 'شغّل «{shortcut}» مجدداً واترك وفرة مثبتاً حتى ينتهي الاختصار.',
   },
   historyImportInvalid: { en: 'This import link is invalid', ar: 'رابط الاستيراد غير صالح' },
   historyImportInvalidBody: {
-    en: 'Nothing was read. Leave this screen and run Wafra History Import again from Apple Shortcuts.',
-    ar: 'لم تتم قراءة أي شيء. غادر هذه الشاشة وشغّل «استيراد سجل وفرة» مجدداً من اختصارات Apple.',
+    en: 'Nothing was read. Leave this screen and run {shortcut} again from Apple Shortcuts.',
+    ar: 'لم تتم قراءة أي شيء. غادر هذه الشاشة وشغّل «{shortcut}» مجدداً من اختصارات Apple.',
   },
   historyImportFailed: { en: 'Could not finish the import', ar: 'تعذّر إكمال الاستيراد' },
   historyLeaveReviewTitle: { en: 'Discard this import?', ar: 'حذف هذا الاستيراد؟' },
@@ -2453,7 +2453,7 @@ const S = {
   iosMessageHistoryDone: { en: 'History imported', ar: 'تم استيراد السجل' },
   iosMessageContinue: { en: 'Finish setup', ar: 'إنهاء الإعداد' },
   iosMessageHistoryInstallHelp: { en: 'Add the Shortcut to import history.', ar: 'أضف الاختصار لاستيراد السجل.' },
-  iosMessageHistoryReturnHelp: { en: 'Added Wafra History Import?', ar: 'أضفت Wafra History Import؟' },
+  iosMessageHistoryReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
   iosMessageHistoryStartHelp: { en: 'Shortcuts brings messages into Wafra in batches. Wafra processes them after transfer.', ar: 'يجلب تطبيق الاختصارات الرسائل إلى وفرة على دفعات، ثم يعالجها وفرة بعد النقل.' },
   iosMessageHistoryStartAfterAdding: { en: 'I added it · import', ar: 'أضفته · استيراد' },
   iosMessageHistoryUnavailableOnboarding: { en: 'No history to import? Set up future alerts, then skip past messages for now.', ar: 'لا يوجد سجل لاستيراده؟ أعدّ التنبيهات الجديدة، ثم تخطَّ الرسائل السابقة حالياً.' },

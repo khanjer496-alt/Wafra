@@ -225,7 +225,7 @@ ok('iOS message setup: every Shortcuts handoff persists progress before opening'
     historyRunFlow.indexOf("type: 'history-status-changed'") <
       historyRunFlow.indexOf('beginIosHistoryHandoff') &&
     historyRunFlow.indexOf('beginIosHistoryHandoff') <
-      historyRunFlow.indexOf('Linking.openURL(newHandoff ? historyShortcutRunUrl()'));
+      historyRunFlow.indexOf('Linking.openURL(newHandoff ? historyShortcutRunUrl() : historyShortcutContinueUrl())'));
 
 ok('iOS message setup: onboarding lifecycle is explicit and Settings never starts it',
   /if \(fromOnboarding\)[\s\S]{0,180}type: 'onboarding-started'/.test(screen) &&
@@ -381,6 +381,53 @@ async function historyCardTests() {
     setup.historyShortcutRunUrl(),
     'shortcuts://x-callback-url/run-shortcut?name=Wafra%20History%20Import&x-cancel=wafra%3A%2F%2Fimport-sms&x-error=wafra%3A%2F%2Fimport-sms',
   );
+  eq(
+    'iOS history: Continue on the legacy graph only reopens Shortcuts',
+    [setup.iosHistoryShortcutResumesOnRerun(), setup.historyShortcutContinueUrl()],
+    [false, 'shortcuts://'],
+  );
+  // The production profile installs the paged record without setting the
+  // paging-beta flag. The run name must follow the install URL, not the flag:
+  // Apple installs that record as its signed file basename, and Shortcuts'
+  // run URL resolves by installed name.
+  const savedHistoryUrl = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+  const savedPagedFlag = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa';
+  delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
+  try {
+    const production = execute('src/lib/ios-history-setup.ts', {
+      '@react-native-async-storage/async-storage': storage,
+    });
+    eq(
+      'iOS history: a production build runs the name Apple installs for its configured record',
+      [production.IOS_HISTORY_SHORTCUT_NAME, new URL(production.historyShortcutRunUrl()).searchParams.get('name')],
+      ['Wafra-History-v2-typed-date.signed', 'Wafra-History-v2-typed-date.signed'],
+    );
+    eq(
+      'iOS history: Continue re-runs a paged graph because it resumes its saved cursor',
+      [production.iosHistoryShortcutResumesOnRerun(), production.historyShortcutContinueUrl()],
+      [true, production.historyShortcutRunUrl()],
+    );
+    const pagedSetup = read('src/lib/ios-paged-setup.ts');
+    const releaseCheck = read('scripts/release/ios-public-shortcut-check.mjs');
+    eq(
+      'iOS history: the paged module and the public-record check name the same installed Shortcut',
+      [
+        /PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date\.signed'/.test(pagedSetup),
+        /id: '5a0da9b5d3a641d9958f3dfa37851afa', installedName: 'Wafra-History-v2-typed-date\.signed'/.test(releaseCheck),
+      ],
+      [true, true],
+    );
+    eq(
+      'iOS history: an unknown record falls back to the generator name',
+      production.installedIosHistoryShortcutName('https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789'),
+      'Wafra History Import',
+    );
+  } finally {
+    if (savedHistoryUrl === undefined) delete process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+    else process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = savedHistoryUrl;
+    if (savedPagedFlag !== undefined) process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA = savedPagedFlag;
+  }
   if (typeof setup.normalizeIosHistoryShortcutUrl !== 'function') {
     ok(
       'iOS history: runtime accepts only trusted signed Shortcut install URLs',

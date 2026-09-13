@@ -100,6 +100,45 @@ struct StageWafraPagedImportIntent: AppIntent {
     }
   }
 }
+
+@available(iOS 26.0, *)
+struct StageWafraPagedColumnsIntent: AppIntent {
+  static let title: LocalizedStringResource = "Save Wafra history page columns"
+  static let description = IntentDescription("Checks a bounded page delivered as one joined column per field and saves it with its next cursor. Never reads Messages directly.")
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let supportedModes: IntentModes = .background
+  @Parameter(title: "Import request") var request: String
+  @Parameter(title: "Messages found") var found: Int
+  @Parameter(title: "Joined message IDs") var guids: String
+  @Parameter(title: "Joined message texts") var bodies: String
+  @Parameter(title: "Joined senders") var senders: String
+  @Parameter(title: "Joined dates") var dates: String
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    do {
+      guard request.utf8.count <= 16_384,
+            WafraMessageHistoryStore.hasUniqueJSONMemberNames(Data(request.utf8)),
+            let object = try JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any],
+            let sessionId = object["sessionId"] as? String,
+            let token = object["authorizationSecret"] as? String,
+            let revision = object["revision"] as? Int,
+            let number = object["revision"] as? NSNumber,
+            String(cString: number.objCType) != "c",
+            number.doubleValue == Double(revision), revision >= 0 else {
+        throw WafraPagedHistoryStore.Failure.invalidInput
+      }
+      return .result(value: try WafraPagedHistoryStore.shared.stageColumns(sessionId: sessionId,
+        authorizationSecret: token, revision: revision, found: found,
+        guids: guids, bodies: bodies, senders: senders, dates: dates))
+    } catch {
+      let reason: String
+      if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
+      else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
+      else { reason = "storage-or-device-interruption" }
+      let result = try JSONSerialization.data(withJSONObject: ["status": "blocked", "reason": reason], options: [.sortedKeys])
+      return .result(value: String(decoding: result, as: UTF8.self))
+    }
+  }
+}
 `;
 
 function withWafraPagedImport(config) {

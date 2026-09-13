@@ -517,7 +517,7 @@ ok(
   /const historyInstallUrl = historyShortcutInstallUrl\(\)/.test(iosSource) &&
     /await confirmIosHistoryShortcutInstalled\(\)/.test(iosSource) &&
     /await beginIosHistoryHandoffForOrigin\(historyReturnOrigin, startedAt\)/.test(iosSource) &&
-    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : 'shortcuts:\/\/'\)/.test(iosSource) &&
+    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : historyShortcutContinueUrl\(\)\)/.test(iosSource) &&
     !iosSource.includes('setCaptureOptOut(true)'),
 );
 ok(

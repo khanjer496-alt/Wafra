@@ -281,7 +281,11 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   const wordyHistory = await makeScreen({ params: { section: 'history' }, progress: { historyStatus: 'in-progress' } });
   ok('iOS setup: the first history-start action explains extraction before review and keeping Shortcuts open',
     wordyHistory.all().some((node) => node.type === 'ThemedText' && node.props.children === translated('iosMessageHistoryStartHelp', 'en')) &&
-      wordyHistory.all().some((node) => node.type === 'ThemedText' && node.props.children === translated('iosMessageHistoryKeepOpen', 'en')));
+      // The keep-open hint shares one line with the resume hint rather than
+      // standing as its own grey paragraph above the button.
+      wordyHistory.all().some((node) => node.type === 'ThemedText' && typeof node.props.children === 'string' &&
+        node.props.children.includes(translated('iosMessageHistoryKeepOpen', 'en')) &&
+        node.props.children.includes(translated('iosMessagePastTiming', 'en'))));
   const words = wordyHistory.all().flatMap((node) => {
     if (node.type === 'ChecklistRow' && !node.props.expanded) return [node.props.title, node.props.detail];
     if (node.type === 'ScreenHeader') return [node.props.title, node.props.subtitle, ...(node.props.actions ?? []).map((action) => action.label)];

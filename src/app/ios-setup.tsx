@@ -39,11 +39,13 @@ import {
   clearIosHistoryHandoff,
   clearIosHistoryReturnOrigin,
   confirmIosHistoryShortcutInstalled,
+  historyShortcutContinueUrl,
   historyShortcutInstallUrl,
   historyShortcutRunUrl,
   iosSupportsMessageHistory,
   iosHistorySetupStorageCoordinator,
   IOS_HISTORY_HANDOFF_MARKER,
+  IOS_HISTORY_SHORTCUT_NAME,
   IOS_HISTORY_HANDOFF_TTL_MS,
   loadIosHistorySetup,
   reconcileIosHistorySetup,
@@ -427,7 +429,7 @@ export default function IosSetupScreen() {
       try {
         // A handoff already in progress owns its native session and timestamp.
         // Reopening its run URL would start a second import, not resume Apple.
-        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : 'shortcuts://');
+        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : historyShortcutContinueUrl());
         if (newHandoff && screenActive.current) {
           setHistorySetup((current) => ({
             ...current,
@@ -826,19 +828,21 @@ export default function IosSetupScreen() {
                 ) : !historyComplete ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {t(historyRunning ? 'iosMessageHistoryRunningHelp'
+                      {tf(historyRunning ? 'iosMessageHistoryRunningHelp'
                         : historyConfirmed ? 'iosMessageHistoryStartHelp'
-                          : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp')}
+                          : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp',
+                      { shortcut: IOS_HISTORY_SHORTCUT_NAME })}
                     </ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary">
                       {!historyRunning && !historyConfirmed
                         ? t('iosMessageHistoryStartHelp') : journeyCopy.historyRequest}
                     </ThemedText>
                     {!historyRunning && (
-                      <View style={styles.hints}>
-                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
-                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryKeepOpen')}</ThemedText>
-                      </View>
+                      // One hint line, not a third and fourth grey paragraph
+                      // above the button; both facts read as one instruction.
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.hints}>
+                        {`${t('iosMessageHistoryKeepOpen')} · ${t('iosMessagePastTiming')}`}
+                      </ThemedText>
                     )}
                     <Button
                       label={t(historyRunning ? 'historyContinueAction'
@@ -949,7 +953,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
-  hints: { gap: Spacing.one },
+  hints: { marginTop: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
     paddingHorizontal: ScreenPadding, paddingVertical: 12,

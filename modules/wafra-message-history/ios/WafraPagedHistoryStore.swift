@@ -22,7 +22,13 @@ public final class WafraPagedHistoryStore {
     case corrupt = "corrupt-staging"
     case expired = "expired"
     case cleanup = "cleanup-failed"
+    /// A column-framed page whose per-field item counts disagree with the
+    /// page count. The producer falls back to per-message framing for it.
+    case columnMismatch = "frame-columns"
   }
+  /// Joins one column of a page in the Shortcut's list-wide Combine Text.
+  /// Printable and absent from real SMS; disagreement is refused, not guessed.
+  public static let columnSeparator: Character = "\u{241E}"
   private struct PageInfo: Codable {
     let digest: String
     let chunks: Int
@@ -245,6 +251,42 @@ public final class WafraPagedHistoryStore {
       try write(Self.encoded(head), to: directory.appendingPathComponent("head.json"))
       return try response(head, token: authorizationSecret)
     }
+  }
+
+  /// Column framing: the Shortcut builds one string per field for the whole
+  /// page with list-wide Apple actions instead of a per-message loop. The
+  /// columns are rebuilt into the line frame that `stage` already validates,
+  /// so every cursor, journal, retry and record rule applies unchanged. GUID,
+  /// body and date columns must line up exactly with the page count; a body
+  /// containing the sentinel or a dropped nil property therefore refuses the
+  /// page as `frame-columns` rather than committing misaligned records. Sender
+  /// is optional in the stored record, so a sender column that does not line
+  /// up is dropped as a whole rather than misattributed across rows.
+  public func stageColumns(sessionId: String, authorizationSecret: String, revision: Int, found: Int,
+                           guids: String, bodies: String, senders: String, dates: String) throws -> String {
+    guard found > 0, found <= WafraHistoryCursor.maximumLimit,
+          [guids, bodies, senders, dates].allSatisfy({ $0.utf8.count <= 8 * 1024 * 1024 }) else {
+      throw Failure.invalidInput
+    }
+    func column(_ value: String) -> [Substring] {
+      value.split(separator: Self.columnSeparator, omittingEmptySubsequences: false)
+    }
+    let guidColumn = column(guids)
+    let bodyColumn = column(bodies)
+    let dateColumn = column(dates)
+    guard guidColumn.count == found, bodyColumn.count == found, dateColumn.count == found else {
+      throw Failure.columnMismatch
+    }
+    let senderColumn = column(senders)
+    let alignedSenders: [Substring] = senderColumn.count == found
+      ? senderColumn : Array(repeating: Substring(""), count: found)
+    let lines = (0..<found).map { index in
+      [guidColumn[index], bodyColumn[index], alignedSenders[index], dateColumn[index]]
+        .map { Data($0.utf8).base64EncodedString() }
+        .joined(separator: "|")
+    }
+    return try stage(sessionId: sessionId, authorizationSecret: authorizationSecret,
+                     revision: revision, found: found, frame: lines.joined(separator: "\n"))
   }
 
   public func status() throws -> String? {
