@@ -139,7 +139,7 @@ ok('email and PDF rows cross the same raw-discard boundary',
   /\.\.\.withoutRaw\(parsedRows\[index\]\)[\s\S]{0,160}captureSource: 'email'/.test(worker) &&
     /\.\.\.withoutRaw\(extracted\.rows\[index\]\)/.test(worker));
 ok('PDF endpoint never returns extracted rows or text',
-  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*pages: extracted\.pages,\s*coverage: statementCoverage\(extracted\.rows\),\s*\}, 202\)/.test(worker));
+  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*rejectedRows: extracted\.rejectedRows,\s*pages: extracted\.pages,\s*coverage: statementCoverage\(extracted\.rows\),\s*\}, 202\)/.test(worker));
 ok('import module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(imports));
 ok('email HTTP ingestion requires the email-only bearer scope',

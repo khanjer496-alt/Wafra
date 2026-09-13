@@ -1719,11 +1719,11 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
+      // rejectedRows is a count of date-led money lines the parser would not
+      // read: without it a statement that half-imported looked, on the phone,
+      // like it had imported completely. Counts and coverage only, never rows.
       return json({
         acceptedRows: extracted.rows.length,
-        // Date-led money lines the parser would not read: without this a
-        // statement that half-imported looked, on the phone, like it had
-        // imported completely.
         rejectedRows: extracted.rejectedRows,
         pages: extracted.pages,
         coverage: statementCoverage(extracted.rows),
