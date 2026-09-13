@@ -29,6 +29,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { syncPaymentReminders } from '@/lib/notifications';
+import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
@@ -201,6 +202,7 @@ export default function JournalHomeScreen() {
       getStateGeneration() === generation;
     refreshInFlight.current = epoch;
     setRefreshing(true);
+    const before = getStateSnapshot();
     try {
       await runAutoImport(true);
       if (!isCurrent()) return;
@@ -214,8 +216,8 @@ export default function JournalHomeScreen() {
         if (sync.alive && sync.epoch === epoch) setRefreshing(false);
       }
     }
-    requestReminderSync();
-  }, [getStateGeneration, requestReminderSync, runAutoImport, toast]);
+    if (reminderScheduleInputsChanged(before, getStateSnapshot())) requestReminderSync();
+  }, [getStateGeneration, getStateSnapshot, requestReminderSync, runAutoImport, toast]);
 
   const openCapture = () => {
     if (status === 'paused') { router.push('/pro'); return; }

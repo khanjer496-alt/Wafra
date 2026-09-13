@@ -20,7 +20,13 @@ import {
 } from '@/lib/accounts';
 import { cleanupGeneratedExports } from '@/lib/share-text';
 import { isValidBackupState } from '@/lib/backup-validation';
-import { applyTransferDecision, isTransferCandidate, normalizeTransferLinks, transferFingerprint } from '@/lib/transfer-reconciliation';
+import {
+  applyTransferDecision,
+  isTransferCandidate,
+  normalizeTransferLinks,
+  transferFingerprint,
+  TRANSFER_NORMALIZATION_VERSION,
+} from '@/lib/transfer-reconciliation';
 import type { TransferDecisionRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
@@ -795,13 +801,23 @@ function reducer(state: AppState, action: Action): AppState {
     // transfer-graph walk when the action cannot change transfer identity.
     const transactionsChanged = reduced.transactions !== state.transactions;
     const accountsChanged = reduced.accounts !== state.accounts;
-    const needsTransferNormalization = accountsChanged || (
+    // A persisted ledger carrying the current receipt was already normalized
+    // before its encrypted write. Re-running the same graph walk on every
+    // launch dominated startup on real ledgers, so hydrate trusts that receipt
+    // and missing/older receipts fail safe by doing one full pass.
+    const persistedTransferGraphIsCurrent = action.type === 'hydrate' &&
+      reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION;
+    const needsTransferNormalization = !persistedTransferGraphIsCurrent && (accountsChanged || (
       transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
-    );
+    ));
     const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;
-    return syncLedgerCurrency(transactions === reduced.transactions ? reduced : { ...reduced, transactions });
+    const normalized = transactions === reduced.transactions ? reduced : { ...reduced, transactions };
+    const stamped = needsTransferNormalization
+      ? { ...normalized, transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION }
+      : normalized;
+    return syncLedgerCurrency(stamped);
   } catch (error) {
     restoreMarket();
     applyMonthStartDay(month);
@@ -1390,6 +1406,7 @@ interface StoreValue {
   setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
   beginHistoryImport: () => Promise<void>;
   recordStatementCoverage: (entry: Omit<StatementCoverageEntry, 'id'>) => Promise<void>;
+  stageStatementCoverage: (entry: Omit<StatementCoverageEntry, 'id'>) => void;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -2339,6 +2356,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     requestHistoryImportRun();
   }, [setHistoryImportProgress]);
 
+  const stageStatementCoverage = useCallback((entry: Omit<StatementCoverageEntry, 'id'>) => {
+    dispatch({ type: 'recordStatementCoverage', entry: { ...entry, id: makeId('statement') } });
+  }, [dispatch]);
+
   const recordStatementCoverage = useCallback(async (entry: Omit<StatementCoverageEntry, 'id'>) => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -2600,6 +2621,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setHistoryImportProgress,
       beginHistoryImport,
       recordStatementCoverage,
+      stageStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -2663,6 +2685,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setHistoryImportProgress,
       beginHistoryImport,
       recordStatementCoverage,
+      stageStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,

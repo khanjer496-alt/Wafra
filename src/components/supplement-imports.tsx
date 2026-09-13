@@ -137,25 +137,24 @@ export function SupplementImports() {
   const theme = useTheme();
   const {
     state,
+    getStateSnapshot,
     importBatch,
     stageReviewAlerts,
     ensureDurable,
     setMarket,
-    recordStatementCoverage,
+    stageStatementCoverage,
   } = useStore();
-  const stateRef = useRef(state);
-  stateRef.current = state;
   const captureExecutor = useMemo(
     () => createCaptureExecutor({
       ledger: {
-        getState: () => stateRef.current,
+        getState: getStateSnapshot,
         importBatch,
         stageReviewAlerts,
         ensureDurable,
         setMarket: (market) => setMarket(market),
       },
     }),
-    [ensureDurable, importBatch, setMarket, stageReviewAlerts],
+    [ensureDurable, getStateSnapshot, importBatch, setMarket, stageReviewAlerts],
   );
 
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
@@ -204,7 +203,7 @@ export function SupplementImports() {
   }, [copy]);
 
   const loadCapabilities = useCallback(async (active: RelayConfig) => {
-    if (stateRef.current.privateMode) return;
+    if (getStateSnapshot().privateMode) return;
     setBusy('capabilities');
     setError(null);
     try {
@@ -215,7 +214,7 @@ export function SupplementImports() {
     } finally {
       setBusy(null);
     }
-  }, [errorText]);
+  }, [errorText, getStateSnapshot]);
 
   useEffect(() => {
     let live = true;
@@ -223,13 +222,13 @@ export function SupplementImports() {
       .then((existing) => {
         if (!live) return;
         setCfg(existing);
-        if (existing && !stateRef.current.privateMode) void loadCapabilities(existing);
+        if (existing && !getStateSnapshot().privateMode) void loadCapabilities(existing);
       })
       .finally(() => {
         if (live) setLoadingConfig(false);
       });
     return () => { live = false; };
-  }, [loadCapabilities]);
+  }, [getStateSnapshot, loadCapabilities]);
 
   const connect = async () => {
     if (loadingConfig || busy !== null) return;
@@ -282,9 +281,9 @@ export function SupplementImports() {
       const key = `${format}:${item.sourceKey}:${item.startDate}:${item.endDate}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      await recordStatementCoverage({ ...item, format, importedAt });
+      stageStatementCoverage({ ...item, format, importedAt });
     }
-  }, [recordStatementCoverage]);
+  }, [stageStatementCoverage]);
 
   // Why the sync failed, in words that carry no statement content. Import
   // errors are already user copy; a relay error is classified rather than

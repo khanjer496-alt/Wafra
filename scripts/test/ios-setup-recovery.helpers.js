@@ -256,10 +256,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   ok('iOS setup: local proof still requires the explicit automation confirmation action',
     await fresh.press('iosLocalAutomationAdded'));
   await fresh.foreground();
-  eq('iOS setup: confirmation leaves Future selected and makes guarded deferral the primary action',
+  eq('iOS setup: confirmation leaves Future selected and keeps the direct manual exit visible',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.all().filter((node) => node.type === 'Button').at(-1)?.props.label],
-    ['future', true, 'not-started', translated('iosMessageSkipHistory', 'en')]);
+    ['future', true, 'not-started', translated('iosMessageContinueManual', 'en')]);
   ok('iOS setup: History remains a secondary deliberate choice after Future confirmation',
     !!fresh.button('iosMessageNextHistory'));
   ok('iOS setup: Future-first primary action opens the existing explicit history-deferral confirmation',

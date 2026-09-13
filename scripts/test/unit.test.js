@@ -4956,6 +4956,15 @@ eq('analytics: the category trend follows the split too',
     });
     const febNow = new Date(2026, 1, 20); // 20 Feb 2026 — February has 28 days
 
+    const unchanged = remState();
+    ok('reminders: unchanged ledger references need no native schedule rebuild',
+      remind.reminderScheduleInputsChanged(unchanged, { ...unchanged }) === false);
+    ok('reminders: a transaction-array change requires a native schedule rebuild',
+      remind.reminderScheduleInputsChanged(
+        unchanged,
+        { ...unchanged, transactions: [...unchanged.transactions] },
+      ) === true);
+
     eq('billDueISO clamps day 31 into February', bills.billDueISO(31, '2026-02'), '2026-02-28');
     eq('billDueISO clamps day 31 into a leap February', bills.billDueISO(31, '2028-02'), '2028-02-29');
     eq('billDueISO leaves a day that fits alone', bills.billDueISO(15, '2026-07'), '2026-07-15');

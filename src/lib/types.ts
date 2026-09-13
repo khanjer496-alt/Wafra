@@ -632,6 +632,12 @@ export interface AppState {
   parserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
+  /**
+   * Receipt proving the persisted transaction/account graph was normalized by
+   * the current transfer matcher before it was saved. Missing/older values
+   * fail safe by rebuilding once on hydration.
+   */
+  transferNormalizationVersion?: number;
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;

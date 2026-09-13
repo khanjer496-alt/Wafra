@@ -133,13 +133,17 @@ const futureGuideKeys = [
   'iosMessageGuideImmediate',
   'iosMessageGuideRunShortcut',
 ];
-eq('iOS message setup: Future guide has the four exact sender-scoped choices',
+eq('iOS message setup: Future guide does not pretend bank sender IDs are always selectable',
   futureGuideKeys.map((key) => translated(key, 'en')), [
     'Message',
-    'Choose bank senders',
+    'Sender is optional — Apple may show Contacts only',
     'Run Immediately',
     'Run {shortcut} · full Received Message',
   ]);
+ok('iOS message setup: sender limitation offers a non-blocking path instead of fake-contact instructions',
+  translated('iosMessageGuideNoFilter', 'en').includes('skip this setup') &&
+    translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
+    !translated('iosMessageGuideNoFilter', 'en').includes('leave empty'));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(
     [screen, detailsSheet, read('src/lib/i18n.ts')].join('\n'),
@@ -242,11 +246,13 @@ ok('iOS message setup: guided back clears its return marker and cannot bypass cl
     screen,
   ) &&
     /gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired/.test(screen));
-ok('iOS message setup: only the guarded Finish action can complete onboarding',
+ok('iOS message setup: guarded automatic and manual completion paths can finish onboarding',
   !/setOnboarded\(\)/.test(screen) &&
     /completeIosMessageOnboardingAttempt\(\{[\s\S]{0,500}\n\s+setOnboarded,/.test(screen) &&
     /const finish = useCallback/.test(screen) &&
-    !/finishLater|skipIncomplete/.test(screen) &&
+    /const continueWithoutAutomaticCapture = useCallback/.test(screen) &&
+    /setCaptureOptOut\(true\)/.test(screen) &&
+    /iosMessageContinueManual/.test(screen) &&
     !/openHistory[\s\S]{0,500}setOnboarded/.test(screen));
 
 ok('iOS message setup: long privacy, retention, migration, and coverage copy lives in Learn more',
@@ -289,11 +295,11 @@ ok('iOS local setup: large Dynamic Type changes layout instead of clipping',
   /useLargeTextLayout/.test(screen) &&
     /const largeText = useLargeTextLayout\(\)/.test(screen) &&
     /largeText \? styles\.[A-Za-z]+ : undefined/.test(screen));
-ok('iOS message setup: sender-scoped guide preserves statement and payment coverage',
+ok('iOS message setup: sender guide is explicit that Apple may not expose a bank sender',
   /iosMessageGuideNoFilter/.test(read('src/components/ios-message-setup/automation-guide.tsx')) &&
-    translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('leave empty') &&
-    translated('iosMessageGuideNoFilter', 'ar').includes('فارغاً'));
+    translated('iosMessageGuideSender', 'en').includes('Contacts only') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('skip') &&
+    translated('iosMessageGuideNoFilter', 'ar').includes('تخط'));
 ok('iOS local setup: readiness and failures are announced to VoiceOver',
   /previousReadiness\.current !== setup\.readiness/.test(screen) &&
     /AccessibilityInfo\.announceForAccessibility\(futureReadyLabel\)/.test(screen) &&
@@ -322,7 +328,7 @@ eq('iOS local setup: milestone copy covers every durable qualifying outcome',
 eq(
   'iOS local setup: privacy copy states queue retention and no upload precisely',
   translated('iosLocalPrivacyBody', 'en'),
-  'Apple does not give Wafra access to your Messages inbox. A personal automation can pass new Messages from a bank sender you select to Wafra’s protected queue on this iPhone. Wafra checks the complete Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
+  'Apple does not give Wafra access to your Messages inbox. If Apple exposes a Message automation trigger that works for your bank, that automation can pass a new Message to Wafra’s protected queue on this iPhone. Some bank SMS IDs are not selectable in Apple’s sender picker, so automatic capture is optional and is not promised during onboarding. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
 );
 eq('iOS local setup: migration copy discloses the old upload until retirement',
   translated('iosLocalMigrationBody', 'en'),
@@ -330,7 +336,8 @@ eq('iOS local setup: migration copy discloses the old upload until retirement',
 ok(
   'iOS local setup: Arabic privacy copy includes local processing, 30 days, and migration',
   /الآيفون/.test(translated('iosLocalPrivacyBody', 'ar')) &&
-    /مرسل بنك تختاره/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /بعض معرّفات رسائل البنوك لا تظهر/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /الالتقاط التلقائي اختياري/.test(translated('iosLocalPrivacyBody', 'ar')) &&
     /بعد حفظ نتيجة محلية بشكل دائم/.test(
       translated('iosLocalPrivacyBody', 'ar'),
     ) &&

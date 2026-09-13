@@ -637,11 +637,80 @@ export default function IosSetupScreen() {
     updateProgress,
   ]);
 
+  const continueWithoutAutomaticCapture = useCallback(() => {
+    if (!fromOnboarding || busy || finishRetryRequired) return;
+    void runOperation(async () => {
+      // Manual entry is a valid product path, not a failure/recovery path.
+      // Persist the opt-out first so no mounted capture worker can race the
+      // navigation. Native disable is best-effort; the durable store flag is
+      // the authority used by the app after this point.
+      await setCaptureOptOut(true);
+      try { await send({ type: 'manual-only' }); } catch { /* durable opt-out already wins */ }
+      await iosHistorySetupStorageCoordinator.run(async () => {
+        // Do not delete a partially staged history import here. Just stop the
+        // onboarding redirect from owning it; the 24h native staging expiry or
+        // an explicit later review/discard will clean it up safely.
+        await Promise.all([clearIosHistoryHandoff(), clearIosHistoryReturnOrigin()]);
+      });
+
+      const onboardingFocus = state.onboardingProfile?.focus ?? null;
+      const onboardingTracking = state.onboardingProfile?.tracking ?? null;
+      setOnboardingProfile({
+        v: 1,
+        stage: 'complete',
+        focus: onboardingFocus,
+        tracking: onboardingTracking,
+        startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
+      });
+      const outcome = await completeIosMessageOnboardingAttempt({
+        retryRequired: finishRetryRequired,
+        ensureDurable,
+        markFinished: async () => {
+          await updateProgress({ type: 'onboarding-finished' });
+        },
+        markStarted: async () => {
+          await updateProgress({ type: 'onboarding-started' });
+        },
+        setOnboarded,
+      });
+      if (outcome === 'retry-required') {
+        if (screenActive.current) setFinishRetryRequired(true);
+        throw new Error('ios_message_onboarding_manual_finish_failed');
+      }
+      if (screenActive.current) setFinishRetryRequired(false);
+      trackGrowthEvent('onboarding_completed', {
+        focus: onboardingFocus,
+        tracking: onboardingTracking,
+        outcome: 'manual',
+        placement: GROWTH_PLACEMENTS.onboarding,
+      });
+      router.replace(onboardingLandingPath(onboardingFocus));
+    }, t('iosMessageFinishFailed'));
+  }, [
+    busy,
+    ensureDurable,
+    finishRetryRequired,
+    fromOnboarding,
+    router,
+    runOperation,
+    send,
+    setCaptureOptOut,
+    setOnboarded,
+    setOnboardingProfile,
+    state.onboardingProfile,
+    updateProgress,
+  ]);
+
   const leave = useCallback(async () => {
     if (busy || finishRetryRequired) return;
     await runOperation(async () => {
       if (fromOnboarding) {
         await updateProgress({ type: 'onboarding-return-cleared' });
+        // Do not walk back through every Shortcut/iCloud handoff that happened
+        // during setup. Replace the route once and let the onboarding gate show
+        // the previous product step exactly once.
+        router.replace('/');
+        return;
       }
       if (router.canGoBack()) {
         router.back();
@@ -817,8 +886,10 @@ export default function IosSetupScreen() {
                 ) : pagedEnabled ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{pagingCopy.intro}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">{pagingCopy.runningHelp}</ThemedText>
-                    <Button label={pagingCopy.start} variant="ghost" onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } })} disabled={busy} wrapLabel />
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {historyRunning ? pagingCopy.paused : pagingCopy.runningHelp}
+                    </ThemedText>
+                    <Button label={historyRunning ? pagingCopy.resume : pagingCopy.start} variant="ghost" onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } })} disabled={busy} wrapLabel />
                   </>
                 ) : !historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">
@@ -912,6 +983,26 @@ export default function IosSetupScreen() {
         {showFooterAction && (
           <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
             <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
+            {fromOnboarding && !setupComplete && (
+              <Button
+                label={t('iosMessageContinueManual')}
+                variant="ghost"
+                onPress={continueWithoutAutomaticCapture}
+                disabled={busy || !progressLoaded}
+                wrapLabel
+              />
+            )}
+          </View>
+        )}
+        {fromOnboarding && !showFooterAction && progressLoaded && (
+          <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
+            <Button
+              label={t('iosMessageContinueManual')}
+              variant="ghost"
+              onPress={continueWithoutAutomaticCapture}
+              disabled={busy}
+              wrapLabel
+            />
           </View>
         )}
         <ConfirmSheet
