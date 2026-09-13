@@ -16,7 +16,10 @@ module.exports = function reference(transactions, accounts) {
   }
   const DAY = 86400000;
   for (const t of transactions) {
-    if (t.type !== 'income' || t.isTransfer || !accountIds.has(t.accountId) || t.category === 'salary' ||
+    // Build 131 never saw a flagged incoming row; since ownership moved to
+    // transfer-reconciliation the explicit flag marks both sides of an own
+    // transfer, so the reference pairs a flagged income like a titled one.
+    if (t.type !== 'income' || !accountIds.has(t.accountId) || t.category === 'salary' ||
       !/^(?:(?:incoming|bank|own account|self) transfer|inward remittance)$/i.test(t.title.trim())) continue;
     const candidates = outgoing.get(t.amountFils);
     if (!candidates) continue;
