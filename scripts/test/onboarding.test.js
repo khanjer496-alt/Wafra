@@ -505,20 +505,22 @@ ok(
     /setOnboardingProfile\(\{[\s\S]*?stage: 'complete'/.test(iosSource),
 );
 ok(
-  'manual exit remains gate-owned while automated setup requires both outcomes',
+  'manual exit durably opts out while automated completion still requires both outcomes',
   /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    /const continueWithoutAutomaticCapture = useCallback/.test(iosSource) &&
+    /await setCaptureOptOut\(true\)[\s\S]*?type: 'manual-only'[\s\S]*?completeIosMessageOnboardingAttempt/.test(iosSource) &&
     /if \(!setupComplete\) return/.test(iosSource) &&
     /progress\.historyStatus === 'complete'/.test(iosSource) &&
-    !/skipIncomplete|const finishLater/.test(iosSource) &&
-    !iosSource.includes("type: 'manual-only'"),
+    !/skipIncomplete|const finishLater/.test(iosSource),
 );
 ok(
-  'iOS checklist embeds history handoff without opting out of capture',
+  'iOS checklist keeps automatic history handoff separate from the explicit manual opt-out',
   /const historyInstallUrl = historyShortcutInstallUrl\(\)/.test(iosSource) &&
     /await confirmIosHistoryShortcutInstalled\(\)/.test(iosSource) &&
     /await beginIosHistoryHandoffForOrigin\(historyReturnOrigin, startedAt\)/.test(iosSource) &&
     /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : historyShortcutContinueUrl\(\)\)/.test(iosSource) &&
-    !iosSource.includes('setCaptureOptOut(true)'),
+    /const continueWithoutAutomaticCapture = useCallback/.test(iosSource) &&
+    /await setCaptureOptOut\(true\)[\s\S]*?type: 'manual-only'/.test(iosSource),
 );
 ok(
   'first run cannot silently pin a worldwide user to the AED sample ledger',
