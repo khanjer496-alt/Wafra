@@ -2017,7 +2017,7 @@ async function queueItem(id, row, publicKey) {
         getState: () => hydrated,
         importBatch: () => {
           events.push('persist');
-          return { ids: ['tx_1'], durable };
+          return { ids: ['tx_1'], durable: typeof durable === 'function' ? durable() : durable };
         },
         ensureDurable: async () => void events.push('flush'),
         markParserVersion: () => void events.push('parser'),
@@ -2982,7 +2982,7 @@ async function queueItem(id, row, publicKey) {
       {
         const events = [];
         const executor = executorModule.createCaptureExecutor({
-          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          ledger: ledger(() => Promise.reject(new Error('SQLCipher write failed')), events),
           dependencies: {
             getRelay: async () => ({
               baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
@@ -3076,7 +3076,7 @@ async function queueItem(id, row, publicKey) {
       {
         const events = [];
         const executor = executorModule.createCaptureExecutor({
-          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          ledger: ledger(() => Promise.reject(new Error('SQLCipher write failed')), events),
           dependencies: {
             getRelay: async () => ({
               baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',

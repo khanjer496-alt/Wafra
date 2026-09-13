@@ -334,7 +334,7 @@ export async function collectNewMessages(
     // Parser-version migrations are handled by the resumable history job when
     // one is present. Keep routine foreground capture incremental so it does
     // not race the history coordinator through the same inbox.
-    const fullHistoricalReread = reread && state.historyImport === null;
+    const fullHistoricalReread = reread && state.historyImport == null;
     const sinceMs = notificationOnly || fullHistoricalReread || state.lastScanTs <= 0
       ? 0
       : state.lastScanTs + 1;

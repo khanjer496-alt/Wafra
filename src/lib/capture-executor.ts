@@ -124,10 +124,10 @@ const EMPTY_SUMMARY: CaptureImportSummary = {
 const hasChanges = (plan: ImportPlan): boolean =>
   plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0 ||
   plan.newAccountCount > 0 ||
-  (plan.batch.newBills?.length ?? 0) > 0 ||
-  Object.keys(plan.batch.snapshots).length > 0 ||
-  Object.keys(plan.batch.bankNames ?? {}).length > 0 ||
-  Object.keys(plan.batch.cardTypes ?? {}).length > 0;
+  (plan.batch?.newBills?.length ?? 0) > 0 ||
+  Object.keys(plan.batch?.snapshots ?? {}).length > 0 ||
+  Object.keys(plan.batch?.bankNames ?? {}).length > 0 ||
+  Object.keys(plan.batch?.cardTypes ?? {}).length > 0;
 
 const yieldForegroundTurn = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
