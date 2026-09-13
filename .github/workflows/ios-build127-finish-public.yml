@@ -1,0 +1,33 @@
+name: Finish Wafra iOS build 127 public TestFlight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: '127'
+      WAFRA_BETA_SOURCE_SHA: 9979ef1a1b52711e2c150e2ce9f16de412669c8d
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish build 127 to existing public TestFlight group
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Preserve publication evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build127-final-public-${{ github.run_id }}
+          path: ios-release-evidence/public-beta.json
+          if-no-files-found: ignore
+          retention-days: 14
