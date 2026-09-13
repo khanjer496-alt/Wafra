@@ -15,7 +15,7 @@ const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)
 // `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
 const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
 const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
-const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{2})?)`;
+const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{1,2})?)`;
 const ROW_END_DIRECTION = new RegExp(
   `^(${DATE_TOKEN})\\s+(.{2,180}?)\\s+${AMOUNT_TOKEN}\\s+(DR|CR|DEBIT|CREDIT)$`,
   'i',
@@ -25,9 +25,11 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   'i',
 );
 const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
-// The column branch (parseColumnTail) insists on cents: a bare integer at the
-// end of a flattened PDF row is as likely a cheque or reference number as money.
-const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}`;
+// The column branch (parseColumnTail) insists on a decimal point: a bare
+// integer at the end of a flattened PDF row is as likely a cheque or reference
+// number as money. One decimal place is still money — real statements print
+// `32.8` and `715.0`, and requiring two rejected every such row.
+const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2}`;
 const CURRENCY_WORD = String.raw`(?:AED|SAR)`;
 const MONEY_UNSIGNED = new RegExp(`^${CURRENCY_WORD}?(${CENTS_MONEY})$`, 'i');
 const MONEY_SIGNED = new RegExp(
@@ -35,8 +37,8 @@ const MONEY_SIGNED = new RegExp(
   'i',
 );
 // What an empty debit or credit cell becomes once a PDF table is flattened.
-const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.00)$/;
-const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
+const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00)$/;
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
 // Opening/closing balance, brought/carried forward and total lines carry money
 // but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
 // as income and a "Total 40.00 0.00" as a second expense, and counting them as
@@ -44,7 +46,7 @@ const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBI
 // the description so a merchant merely containing the word is untouched.
 // "Total" only counts when a figure, a colon or a totals word follows it;
 // "TOTAL ENERGIES FUEL 120.00" is a merchant.
-const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
 // The codes that actually appear as foreign originals on UAE and Saudi
 // statements: the Gulf, the majors, and the remittance corridors this app's
 // users send money down. Deliberately a list and not `[A-Z]{3}`, which also
@@ -734,10 +736,36 @@ function classifyMoneyToken(token: string): MoneyToken | null {
  * is not on the first money token, a currency that is not the statement's —
  * is left for the caller to count as rejected rather than read a direction in.
  */
+/**
+ * Whether this is a credit-card statement rather than an account statement.
+ *
+ * It matters because the two have opposite defaults. On an account statement an
+ * unlabelled figure could be either direction, so `parseColumnTail` is right to
+ * refuse it. A card statement lists charges and marks the exceptions: every
+ * payment, refund and cashback carries CR, so an unlabelled row is a purchase,
+ * and reading it as one is the convention rather than a guess.
+ *
+ * Two independent markers are required so that an account statement mentioning
+ * a credit-card payment is not mistaken for one.
+ */
+function isCardStatement(text: string): boolean {
+  const header = text.split(/\n+/).slice(0, 60).join('\n');
+  const markers = [
+    /\bcredit\s+card\s+statement\b/i,
+    /\bminimum\s+(?:amount|payment)\s+due\b/i,
+    /\b(?:available\s+)?credit\s+limit\b/i,
+    /\bcard\s*(?:no\.?|number)\b/i,
+    /\bbalance\s+outstanding\b/i,
+    /\bstatement\s+(?:period|date)\b/i,
+  ];
+  return markers.filter((marker) => marker.test(header)).length >= 2;
+}
+
 function parseColumnTail(
   rest: string,
   currency: StatementCurrency,
   order: ColumnOrder,
+  loneAmountIsCharge = false,
 ): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
@@ -764,6 +792,12 @@ function parseColumnTail(
   const [first, second] = tail;
   if (first.kind === 'signed') {
     return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
+  }
+  // `03/08/2026 NOON.COM DUBAI ARE 68.93` — the whole body of a card
+  // statement. One figure, no label, no second column, because a charge is
+  // what the statement is for; the CR rows are handled by the branch above.
+  if (loneAmountIsCharge && tail.length === 1 && first.kind === 'unsigned') {
+    return { merchant, amountFils: first.minor, type: 'expense' };
   }
   if (tail.length < 2 || second.kind === 'signed') return null;
   const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
@@ -885,6 +919,7 @@ export function parseStatementLines(
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
   const balanceTrailing = trailingBalanceRuns(lines);
+  const cardStatement = isCardStatement(text);
   let previousBalance: number | null = null;
   const push = (
     date: string,
@@ -967,7 +1002,9 @@ export function parseStatementLines(
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      const column = prefixed && date ? parseColumnTail(prefixed[2], currency, columnOrder) : null;
+      const column = prefixed && date
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+        : null;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
         // No label and no placeholder to say which column is populated: the
