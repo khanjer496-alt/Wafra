@@ -286,12 +286,13 @@ export function SupplementImports() {
     }
   }, [recordStatementCoverage]);
 
-  // Why the sync failed, in words that carry no statement content. Relay and
-  // import errors are already user copy; anything else is named generically
-  // rather than echoing an internal message onto the screen.
+  // Why the sync failed, in words that carry no statement content. Import
+  // errors are already user copy; a relay error is classified rather than
+  // echoed, because its message is an English sentence from the transport
+  // layer; anything else is named generically.
   const syncFailureReason = useCallback((value: unknown): string => {
     if (value instanceof CloudImportError) return errorText(value);
-    if (value instanceof RelayError) return value.message;
+    if (value instanceof RelayError) return value.retryable ? copy.syncFailedOffline : copy.syncFailedUnknown;
     if (value instanceof Error && (value.message === copy.notHydrated || value.message === copy.unavailable)) {
       return value.message;
     }
@@ -403,13 +404,14 @@ export function SupplementImports() {
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
       failed();
     } finally {
-      try {
-        for (const file of pickedFiles) {
-          if (file.uri === retainedUri) continue;
+      for (const file of pickedFiles) {
+        if (file.uri === retainedUri) continue;
+        try {
           if (file.exists) file.delete();
+        } catch {
+          // The OS may already have reclaimed this picker cache copy; the
+          // remaining copies in the batch still get their turn.
         }
-      } catch {
-        // The OS may already have reclaimed its picker cache copy.
       }
       setBusy(null);
     }

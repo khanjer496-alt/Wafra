@@ -599,11 +599,42 @@ function wideTextPdf(lines) {
   const balanceLabelled = parseStatementLines([
     '01/07/2026 CARREFOUR MARKET 40.00 1,234.00 CR',
     '02/07/2026 REF 000123 40.00 CR',
+    '03/07/2026 AMAZON AE USD 45.00 165.30 DR',
   ].join('\n'), 'AED');
   ok('a DR/CR label after two money figures is a running balance, not a credit, and is counted',
-    balanceLabelled.rows.length === 1 && balanceLabelled.rows[0].merchant === 'REF 000123' &&
+    balanceLabelled.rows.length === 2 && balanceLabelled.rows[0].merchant === 'REF 000123' &&
       balanceLabelled.rows[0].amountFils === 4000 && balanceLabelled.rejectedRows === 1,
     JSON.stringify(balanceLabelled));
+  ok('a foreign-currency amount inside the description is not mistaken for a running balance',
+    /amazon/i.test(balanceLabelled.rows[1].merchant) && balanceLabelled.rows[1].type === 'expense' &&
+      balanceLabelled.rows[1].amountFils === 16530,
+    JSON.stringify(balanceLabelled.rows[1]));
+  const proseOrder = parseStatementLines([
+    'Credits are listed before debits for each transaction date in this statement',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+  ].join('\n'), 'AED');
+  ok('sentence-length prose naming credits, debits and date does not become the column header',
+    proseOrder.rows.length === 1 && proseOrder.rows[0].type === 'expense',
+    JSON.stringify(proseOrder.rows));
+  const shortHeaderless = parseStatementLines([
+    'Date Credit Debit',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+  ].join('\n'), 'AED');
+  ok('a three-word line without a fourth column name is not trusted to flip the order',
+    shortHeaderless.rows.length === 1 && shortHeaderless.rows[0].type === 'expense');
+  const summaryLines = parseStatementLines([
+    '01/07/2026 Opening Balance 10,000.00',
+    '01/07/2026 Balance B/F 1,000.00 CR',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+    '02/07/2026 TOTAL ENERGIES FUEL 120.00 - 9,840.00',
+    '31/07/2026 Closing Balance 9,960.00',
+    '31/07/2026 Total 40.00 0.00',
+  ].join('\n'), 'AED');
+  ok('opening/closing balance, brought-forward and total lines are neither filed nor counted as rejected',
+    summaryLines.rows.length === 2 && summaryLines.rejectedRows === 0 &&
+      summaryLines.rows.every((row) => row.type === 'expense') &&
+      summaryLines.rows.some((row) => row.amountFils === 12000),
+    JSON.stringify(summaryLines));
   const drCrFirst = parseStatementLines('01/07/2026 CARREFOUR MARKET 40.00 DR', 'AED');
   ok('the explicit DR/CR branch still wins and counts nothing',
     drCrFirst.rows.length === 1 && drCrFirst.rows[0].type === 'expense' && drCrFirst.rejectedRows === 0);

@@ -55,6 +55,7 @@ export const SUPPLEMENT_COPY = {
     acceptedPending: '{accepted} rows reached Wafra but could not sync to this phone yet. Try again in a moment.',
     syncFailed: 'The rows are safe in your import queue, but filing them on this phone failed: {reason}',
     syncFailedUnknown: 'the ledger update did not complete',
+    syncFailedOffline: 'Wafra could not be reached; they will file on the next sync',
   },
   ar: {
     header: 'الكشوف',
@@ -112,5 +113,6 @@ export const SUPPLEMENT_COPY = {
     acceptedPending: 'وصل {accepted} صفاً إلى وفرة لكن لم تتزامن مع الهاتف بعد. حاول مرة أخرى بعد لحظة.',
     syncFailed: 'الصفوف محفوظة في قائمة الاستيراد، لكن تسجيلها على هذا الهاتف فشل: {reason}',
     syncFailedUnknown: 'لم يكتمل تحديث السجل',
+    syncFailedOffline: 'تعذّر الوصول إلى وفرة؛ ستُسجّل عند المزامنة القادمة',
   },
 } as const;

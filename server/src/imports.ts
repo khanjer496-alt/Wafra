@@ -37,6 +37,17 @@ const MONEY_SIGNED = new RegExp(
 // What an empty debit or credit cell becomes once a PDF table is flattened.
 const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.00)$/;
 const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
+// Opening/closing balance, brought/carried forward and total lines carry money
+// but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
+// as income and a "Total 40.00 0.00" as a second expense, and counting them as
+// rejected would overstate what the user is missing. Anchored to the start of
+// the description so a merchant merely containing the word is untouched.
+// "Total" only counts when a figure, a colon or a totals word follows it;
+// "TOTAL ENERGIES FUEL 120.00" is a merchant.
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
+// A three-letter currency code right before a figure marks an original
+// foreign-currency amount inside the description, not a running balance.
+const CURRENCY_CODE_WORD = /^[A-Z]{3}$/;
 
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
@@ -662,10 +673,16 @@ type ColumnOrder = 'debit-first' | 'credit-first';
 function statementColumnOrder(text: string): ColumnOrder {
   for (const original of text.split(/\n+/).slice(0, 120)) {
     const line = original.replace(/\s+/g, ' ').trim();
-    // Only a table header counts: it names the date column too, and it is not
-    // a sentence about a "credit card" or a "direct debit" in the preamble.
-    if (!line || line.length > 160 || DATE_LED_LINE.test(line)) continue;
+    // Only a table header counts. A header is a short run of column names —
+    // date, a debit word, a credit word and at least one more column such as
+    // balance or description — not a sentence. Prose in the preamble
+    // ("Credits are listed before debits for each transaction date …") names
+    // all three words too, and reading it as the header would invert every
+    // sign in the file, so anything sentence-length or missing a fourth
+    // column name is skipped and the Gulf default stands.
+    if (!line || line.length > 120 || line.split(' ').length > 12 || DATE_LED_LINE.test(line)) continue;
     if (!/\bdate\b|تاريخ/iu.test(line) || /\b(?:credit|debit)\s+card\b|\bdirect\s+debit\b/i.test(line)) continue;
+    if (!/\b(?:balance|description|details|particulars|narration|narrative|amount|reference)\b|الرصيد|البيان|التفاصيل|الوصف/iu.test(line)) continue;
     const debit = line.search(/\b(?:debits?|withdrawals?|paid out)\b|مدين|سحب/iu);
     const credit = line.search(/\b(?:credits?|deposits?|paid in)\b|دائن|إيداع/iu);
     if (debit < 0 || credit < 0) continue;
@@ -805,7 +822,9 @@ export function parseStatementLines(
   };
   for (const line of lines) {
     if (!line || line.length > 400) continue;
-    const countable = DATE_LED_LINE.test(line) && LOOKS_LIKE_MONEY_LINE.test(line);
+    const prefixed = ROW_DATE_PREFIX.exec(line);
+    if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
+    const countable = prefixed !== null && LOOKS_LIKE_MONEY_LINE.test(line);
     const accepted = rows.length;
     const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
     if (match) {
@@ -821,7 +840,12 @@ export function parseStatementLines(
       // balance and the purchase sits at the end of the description. Two
       // money figures before one DR/CR label are ambiguous, so the line is
       // left for the rejected count rather than filed as a 1,234.00 credit.
-      const balanceLabelled = classifyMoneyToken(merchant.split(' ').at(-1) ?? '')?.kind === 'unsigned';
+      // `AMAZON AE USD 45.00 165.30 DR` is not that case: a currency code
+      // before the figure marks the original foreign amount Gulf statements
+      // print inside the description, and 165.30 DR is the real charge.
+      const descriptionWords = merchant.split(' ');
+      const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '')?.kind === 'unsigned' &&
+        !CURRENCY_CODE_WORD.test(descriptionWords.at(-2) ?? '');
       if (
         (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
         Number.isSafeInteger(amountFils) && amountFils > 0 && merchant
@@ -829,7 +853,6 @@ export function parseStatementLines(
         push(date, merchant, amountFils, direction === 'CR' || direction === 'CREDIT' ? 'income' : 'expense', line);
       }
     } else {
-      const prefixed = ROW_DATE_PREFIX.exec(line);
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
       const column = prefixed && date ? parseColumnTail(prefixed[2], currency, columnOrder) : null;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
