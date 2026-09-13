@@ -263,9 +263,12 @@ public final class WafraPagedHistoryStore {
         return try response(head, token: authorizationSecret)
       }
       guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
-      let records = try Self.frameRecords(frame, found: found)
+      // Named apart from the `records` below: this is what the frame CONTAINS,
+      // that one is what the page COMMITS. Sharing the name made the file stop
+      // compiling when separator reassembly landed beside it.
+      let framed = try Self.frameRecords(frame, found: found)
       var prepared: [PreparedRow] = []
-      for record in records {
+      for record in framed {
         prepared.append(try preparedRow(Substring(record)))
       }
       let decision = try WafraHistoryCursor.advance(head.checkpoint,
