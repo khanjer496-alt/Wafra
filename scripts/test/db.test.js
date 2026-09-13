@@ -404,7 +404,10 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
-    '@/lib/ledger': { internalTransferIds: () => new Set() },
+    '@/lib/ledger': {
+      internalTransferIds: () => new Set(),
+      primeInternalTransferIds() {},
+    },
     '@/lib/categories': require('./build/categories'),
     '@/lib/review-source-bindings': require('./build/review-source-bindings'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
@@ -1225,6 +1228,21 @@ const tx = (id, extra = {}) => ({
   ok('hydration preserves two genuine same-day equal purchases',
     genuine.length === 2 && genuine.some((row) => row.id === first.id) &&
       genuine.some((row) => row.id === second.id));
+
+  const genuineInput = [first, second];
+  const genuineIdentity = hydration.finalizeHydrationTransactions(genuineInput);
+  ok('unchanged hydration preserves the transaction array identity',
+    genuineIdentity === genuineInput);
+
+  const editedIdentityRow = tx('edited-identity', {
+    title: 'User corrected merchant',
+    note: 'keep exactly',
+    userEdited: true,
+  });
+  const editedIdentityInput = [editedIdentityRow, first];
+  const editedIdentity = hydration.finalizeHydrationTransactions(editedIdentityInput);
+  ok('unchanged hydration with a userEdited row preserves the transaction array identity',
+    editedIdentity === editedIdentityInput);
 
   const edited = tx('edited-capture', {
     title: 'My coffee correction',

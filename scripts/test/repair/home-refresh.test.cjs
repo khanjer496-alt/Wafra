@@ -88,6 +88,11 @@ function refreshHarness({ platform = 'android', empty = false, scan, reminders }
     if (typeof reminders === 'function') await reminders(state, calls.reminders);
     else if (reminders) await reminders;
   } };
+  // This harness mutates one synthetic store object in place instead of
+  // replacing immutable AppState snapshots like the real store does. Treat a
+  // successful capture as reminder-relevant here so these tests exercise the
+  // Home reminder queue rather than the snapshot identity optimisation.
+  h.deps['@/lib/reminders'] = { reminderScheduleInputsChanged: () => true };
   const store = h.deps['@/lib/store'].useStore();
   store.getStateGeneration = () => generation;
   const Home = h.local('@/screens/journal-home-screen').default;
