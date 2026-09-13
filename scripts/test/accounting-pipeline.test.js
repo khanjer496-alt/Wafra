@@ -62,6 +62,55 @@ const BASE = {
   captureOptOut: false,
 };
 
+{
+  const provisional = applyMaterializedImportBatch({
+    ...BASE,
+    ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: ['already-internal'],
+  }, {
+    importMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
+    transactions: [{
+      id: 'history-page-transfer', type: 'expense', amountFils: 5000, category: 'other',
+      accountId: 'liv-bank', title: 'Outgoing transfer', date: '2026-08-01', source: 'sms',
+      isTransfer: true,
+    }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {},
+    bankNames: {}, cardTypes: {}, parserRereadComplete: false,
+    historyImport: {
+      status: 'running', cursor: { beforeDateMs: 1, beforeId: 1 }, scanned: 500, found: 1,
+      startedAt: 1, updatedAt: 2, error: null,
+    },
+    lastScanTs: 1, updates: [],
+  });
+  ok('intermediate history pages do not claim exact transfer normalization',
+    provisional.transferNormalizationVersion === undefined);
+  ok('intermediate history pages retain the prior provisional internal-id snapshot',
+    JSON.stringify(provisional.transferInternalIds) === JSON.stringify(['already-internal']));
+
+  const completed = applyMaterializedImportBatch({
+    ...BASE,
+    ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
+  }, {
+    importMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
+    transactions: [{
+      id: 'history-final-transfer', type: 'expense', amountFils: 5000, category: 'other',
+      accountId: 'liv-bank', title: 'Outgoing transfer', date: '2026-08-01', source: 'sms',
+      isTransfer: true,
+    }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {},
+    bankNames: {}, cardTypes: {}, parserRereadComplete: true,
+    historyImport: {
+      status: 'complete', cursor: null, scanned: 500, found: 1,
+      startedAt: 1, updatedAt: 2, error: null,
+    },
+    lastScanTs: 1, updates: [],
+  });
+  ok('final history page restores the exact transfer-normalization receipt',
+    completed.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+      Array.isArray(completed.transferInternalIds));
+}
+
 const NOW = new Date('2026-08-12T12:00:00Z');
 const messages = [
   {

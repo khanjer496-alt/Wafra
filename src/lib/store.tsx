@@ -1700,8 +1700,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       stateGeneration.current += 1;
     }
     authoritativeState.current = next;
-    if (next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
-        Array.isArray(next.transferInternalIds)) {
+    if (Array.isArray(next.transferInternalIds) && (
+      next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+      next.historyImport?.status === 'running'
+    )) {
+      // During an unfinished first-history import the ids are a provisional UI
+      // snapshot only. The persisted normalization VERSION is intentionally
+      // absent, so a restart or the final page still forces exact reconciliation.
+      // Priming the cache here prevents Home/Flow/Bills/Wallet from rebuilding
+      // the entire transfer graph merely because this page replaced the arrays.
       primeInternalTransferIds(next.transactions, next.accounts, next.transferInternalIds);
     }
     authoritativeRevision.current += 1;

@@ -88,6 +88,13 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );
+  ok(
+    'intermediate history pages defer exact transfer reconciliation until completion',
+    /historyStillRunning[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
+      fs.readFileSync(path.join(__dirname, '../../src/lib/ledger-import.ts'), 'utf8'),
+    ) &&
+      /next\.historyImport\?\.status === 'running'/.test(storeSource),
+  );
 
   eq('a new import starts paused with no provider cursor',
     history.createHistoryImportProgress(100), {
