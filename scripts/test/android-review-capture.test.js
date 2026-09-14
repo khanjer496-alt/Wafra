@@ -269,6 +269,22 @@ const { scanInbox } = require('./build/auto-import.js');
     JSON.stringify(learnedBank));
   await learnedBank.commit();
 
+  const ackBeforeUnrecognized = acknowledgedNotifications.length;
+  notificationRows = [{
+    id: 'trusted-unrecognized-0001',
+    pkg: 'ae.hsbc.hsbcuae',
+    title: 'HSBC UAE',
+    text: 'AED 42.00 reference updated',
+    ts: NOW + 5_950,
+  }];
+  const unresolvedTrusted = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  await unresolvedTrusted.commit();
+  ok('an unresolved money-bearing trusted-bank notification stays queued instead of disappearing',
+    unresolvedTrusted.parsed.length === 0 && unresolvedTrusted.reviewCandidates.length === 0 &&
+      acknowledgedNotifications.length === ackBeforeUnrecognized &&
+      !acknowledgedNotifications.includes('trusted-unrecognized-0001'),
+    JSON.stringify({ unresolvedTrusted, acknowledgedNotifications }));
+
   const hsbcTitle = 'Your credit card transaction is approved';
   const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';
   notificationRows = [

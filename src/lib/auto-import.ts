@@ -392,7 +392,7 @@ export interface SourceFreeReviewIdentity {
 export type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
-  | { kind: 'ignored' };
+  | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
 
 /**
  * One source-free refusal policy shared by Android inbox capture and iOS local
@@ -415,10 +415,12 @@ export function inspectSourceFreeRefusedAlert(input: {
   if (input.channel === 'push' &&
     /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(input.source) &&
     !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(input.source)) {
-    return { kind: 'ignored' };
+    return { kind: 'ignored', reason: 'promotion' };
   }
   if (!hasBankAlertMoneyHint(input.source) &&
-    !hasGenericBankAlertContext(input.source, input.sender)) return { kind: 'ignored' };
+    !hasGenericBankAlertContext(input.source, input.sender)) {
+    return { kind: 'ignored', reason: 'non-financial' };
+  }
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
@@ -453,7 +455,7 @@ export function inspectSourceFreeRefusedAlert(input: {
       channel: input.channel,
       event,
     }) : null;
-    if (!universal) return { kind: 'ignored' };
+    if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
     return { kind: 'review', candidate };
   }
@@ -575,7 +577,7 @@ export async function scanInbox(
       packageName: string;
       sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
     },
-  ): Promise<boolean> => {
+  ): Promise<SourceFreeRefusedAlertDecision> => {
     const decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
@@ -592,9 +594,9 @@ export async function scanInbox(
         reason: decision.reason,
         sourceEventId,
       });
-      return false;
+      return decision;
     }
-    if (decision.kind === 'ignored') return false;
+    if (decision.kind === 'ignored') return decision;
     const legacyIdentity = await identifyCapture(body, sender, ts, channel);
     if (!legacyIdentity) throw new ReviewIdentityError('Encrypted review identity is invalid');
     // Keep exact old/new tuples only when the ledger requested that old hash.
@@ -617,7 +619,7 @@ export async function scanInbox(
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
     };
-    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return true;
+    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return decision;
     reviewSourceKeys.add(sourceIdentity.sourceKey);
     // Keep the explicit encrypted-identity merge visible to the repository's
     // static safety contract even though the shared helper validated it too.
@@ -630,7 +632,7 @@ export async function scanInbox(
     if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
       reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
     }
-    return true;
+    return decision;
   };
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
@@ -721,11 +723,12 @@ export async function scanInbox(
       // foreign-card purchase merely because that launch pack is active. The
       // routed alert remains review-only until its own bank/template gates pass.
       const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-      const reviewed = p && shouldReviewParsedIncome(p)
+      const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
           )
-        : false;
+        : null;
+      const reviewed = reviewDecision?.kind === 'review';
       if (p && !reviewed) {
         // A parser improvement can turn an old review into a normal parsed
         // row. Attest its old identity before planning, but do no extra source
@@ -811,9 +814,10 @@ export async function scanInbox(
         if (!inboxBodies.has(bodyPrint(sms.body))) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-          const reviewed = p && shouldReviewParsedIncome(p)
+          const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
-            : false;
+            : null;
+          const reviewed = reviewDecision?.kind === 'review';
           if (p && !reviewed) {
             parsed.push({
               ...p,
@@ -887,9 +891,11 @@ export async function scanInbox(
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : parseLaunchAlert(source, sender, worldwide);
         const pushSource = { packageName: n.pkg, sourceClass } as const;
-        const reviewed = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
+        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(source, n.ts, sender, 'push', worldwide, undefined, pushSource)
-          : false;
+          : null;
+        const reviewed = refusal?.kind === 'review';
+        let handled = false;
         if (p && autoAuthorized && !reviewed) {
           parsed.push({
             ...p,
@@ -898,8 +904,9 @@ export async function scanInbox(
             sender,
             channel: 'push',
           });
+          handled = true;
         } else if (!p) {
-          await inspectRefused(
+          refusal = await inspectRefused(
             source,
             n.ts,
             sender,
@@ -909,9 +916,14 @@ export async function scanInbox(
             pushSource,
           );
         }
-        // Claim the row only after all parser/review work for it completed.
-        // If anything above throws, this ciphertext remains for the next run.
-        notificationIds.add(n.id);
+        if (refusal?.kind === 'review' || refusal?.kind === 'declined') handled = true;
+        if (refusal?.kind === 'ignored' && refusal.reason !== 'unrecognized') handled = true;
+        // Claim the row only when Wafra has a durable/safe outcome. An
+        // unresolved money-bearing bank notification used to be ACKed here even
+        // though neither the ledger nor Review contained it, making the evidence
+        // vanish and leaving diagnostics at queued=0. Keep unrecognized rows in
+        // the encrypted queue so parser fixes/diagnostics can retry them.
+        if (handled) notificationIds.add(n.id);
         if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
           await yieldToUi();
           resetParseYieldState(notificationYield);
