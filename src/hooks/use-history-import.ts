@@ -17,11 +17,13 @@ import {
 } from '@/lib/history-import';
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const HISTORY_IMPORT_PAGE_SIZE = 100;
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
+const FOREGROUND_HISTORY_COMMIT_GAP_MS = 120;
 // Resuming the window is not idle time. Give Android a usable frame/input
 // window before parser-migration maintenance restarts; subsequent pages retain
 // the normal 500ms cooperative gap.
@@ -109,15 +111,26 @@ export function useHistoryImport(): void {
         await reviewReceipt.durable;
       }
 
-      // Resolving promises does not give pending UI/input work a macrotask.
-      // Separate parsing/review from the synchronous planning/reducer work.
-      // This is cooperative scheduling, not a claim of off-thread parsing.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // Parsing already yields, but planning + reducer reconciliation below are
+      // synchronous JS too. Starting that work in the same turn as a user's tap
+      // can still freeze a tab/button even when the parser itself is perfectly
+      // chunked. Honour the shared navigation lease before BOTH planning and
+      // the ledger mutation. A tap extends the lease; background history keeps
+      // the immediate path because there is no visible interaction to protect.
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_COMMIT_GAP_MS);
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
         : getStateSnapshot();
       const plan = buildImportPlan(page.parsed, ledger, page.newestTs, undefined, page.declined);
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_COMMIT_GAP_MS);
+      }
+      if (!canCommit()) return false;
       await importBatch({
         ...plan.batch,
         parserRereadComplete: page.inboxHistoryComplete,
