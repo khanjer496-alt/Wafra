@@ -17,7 +17,7 @@
       "fallbackToCacheTimeout": 1500
     },
     "ios": {
-      "icon": "./assets/images/icon.png",
+      "icon": "./assets/wafra.icon",
       "bundleIdentifier": "app.wafra.ios",
       "buildNumber": "1",
       "supportsTablet": false,

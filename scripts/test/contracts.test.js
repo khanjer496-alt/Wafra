@@ -1049,6 +1049,30 @@ function ktSources(dir) {
     /runAutoImport\(true\)\s*\.catch\(/.test(refresh) &&
       refresh.indexOf('.catch(') < refresh.indexOf('.finally(') &&
       /toast\.show\(t\('captureRefreshFailed'\),\s*\{\s*tone:\s*'error'\s*\}\)/.test(refresh));
+  // iOS swaps the hand-built bar for the system tab bar (Liquid Glass, SF
+  // Symbols, system label font). The shell contract is the same: capture is
+  // owned by the shell, every destination is present, and content insets stay
+  // with ScreenScaffold so the two inset systems cannot stack.
+  const iosTabsLayout = read('src/components/app-tabs-layout.ios.tsx');
+  ok('the iOS tabs shell also owns parser migrations',
+    /function CaptureOwner/.test(iosTabsLayout) &&
+      /useAutoImport\(true, false\)/.test(iosTabsLayout) &&
+      /<CaptureOwner \/>/.test(iosTabsLayout));
+  ok('the iOS tabs shell uses native tabs with the same four destinations',
+    /from 'expo-router\/unstable-native-tabs'/.test(iosTabsLayout) &&
+      ['index', 'flow', 'bills', 'wallet'].every((name) => iosTabsLayout.includes(`name: '${name}'`)));
+  ok('iOS native tabs leave content insets to ScreenScaffold',
+    /disableAutomaticContentInsets/.test(code(iosTabsLayout)));
+  const tabClearance = read('src/hooks/use-tab-bar-clearance.ts');
+  ok('the iOS shell declares native chrome so clearance reads the inset, not the custom bar height',
+    /<TabBarMetricsProvider nativeChrome>/.test(iosTabsLayout) &&
+      /if \(nativeChrome\) \{[\s\S]*?return Math\.max\(insets\.bottom, NATIVE_TAB_BAR_FLOOR\) \+ Spacing\.three;/.test(code(tabClearance)) &&
+      !/nativeChrome[\s\S]*?TAB_BAR_HEIGHT \+[\s\S]*?\}\n  const fallbackHeight/.test(code(tabClearance)));
+  const sheet = read('src/components/ui/bottom-sheet.tsx');
+  ok('bottom sheets pad for the window inset, not the per-tab inset that includes the iOS tab bar',
+    /Math\.min\(insets\.bottom, initialWindowMetrics\?\.insets\.bottom \?\? insets\.bottom\)/.test(sheet));
+  ok('iOS native tab icons come from the shared SF Symbol vocabulary',
+    ['house', 'chart.bar.xaxis', 'doc.text', 'wallet.pass'].every((sf) => iosTabsLayout.includes(`'${sf}'`)));
   ok('permission denial does not mark the inbox fresh and offers Android settings',
     hook.indexOf("return 'no-permission'") < hook.indexOf('lastScanAt = Date.now()') &&
       /toast\.show\(t\('smsAccessOff'\)[\s\S]*openSmsPermissionSettings/.test(hook));
