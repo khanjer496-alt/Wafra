@@ -100,6 +100,16 @@ jobs:
       GATE_PORT: "3199"
       PREVIEW_PORT: "3200"
       AGENT_PORT: "4310"
+      # Same build settings as the eas.json `preview-simulator` profile and
+      # build-apk.yml. relay.ts has no fallback URL on purpose: without this the
+      # simulator app's capture setup fails visibly, which is not what a live
+      # review session wants. Public URL, not a secret; the repository variable
+      # overrides the eas.json value.
+      EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "1"
+      EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "1"
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
+      WAFRA_SMS_CORPUS_EXPORT: "0"
 
     steps:
       - uses: actions/checkout@v4
