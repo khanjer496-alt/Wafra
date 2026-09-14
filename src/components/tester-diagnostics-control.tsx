@@ -12,6 +12,7 @@ export function TesterDiagnosticsControl() {
   const language = state.language === 'ar' ? 'ar' : 'en';
   const copy = TESTER_DIAGNOSTICS_COPY[language];
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
   const running = useRef(false);
 
   if (Platform.OS !== 'android') return null;
@@ -20,21 +21,29 @@ export function TesterDiagnosticsControl() {
     if (running.current) return;
     running.current = true;
     setBusy(true);
+    setProgress('');
     try {
-      const receipt = await sendAndroidTesterDiagnostic(getStateSnapshot());
+      // The inbox read covers every readable bank message, which takes a while
+      // on a large inbox. Naming the count as it climbs is what separates
+      // "working" from "hung" — without it this button looked frozen.
+      const receipt = await sendAndroidTesterDiagnostic(
+        getStateSnapshot(),
+        (checked) => setProgress(`${checked} ${copy.read}`),
+      );
       Alert.alert(copy.sentTitle, copy.sentBody(receipt.id));
     } catch {
       Alert.alert(copy.failedTitle, copy.failedBody);
     } finally {
       running.current = false;
       setBusy(false);
+      setProgress('');
     }
   };
 
   return (
     <View style={{ gap: 8 }}>
       <Button
-        label={busy ? copy.busy : copy.button}
+        label={busy ? `${copy.busy}${progress ? ` ${progress}` : ''}` : copy.button}
         icon="upload"
         variant="outline"
         disabled={busy}

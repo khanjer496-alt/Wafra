@@ -17,30 +17,13 @@ export const isDiagnosticBankSender = (sender: string): boolean =>
   sender.length <= 80 && !/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/u.test(sender) &&
   BANK_SENDERS.some(pattern => pattern.test(sender.normalize('NFKC').trim()));
 
-/**
- * Stop after this many inbox rows when the caller asks for a bounded read.
- *
- * Unbounded is right for the export control: the user asked for their whole
- * readable history and watches a progress count while it runs. It is wrong for
- * the one-tap tester button, which reports aggregate parser ratios — every page
- * costs a native query that sorts the entire inbox (the provider takes no SQL
- * LIMIT) plus a parse on every bank hit, so a 15,000-message inbox spent
- * minutes behind a spinner that named no end. A recent slice answers the
- * question that report actually asks, and the coverage block below says
- * plainly that it stopped early rather than implying a complete read.
- */
-const DEFAULT_MAX_CHECKED = 2_000;
-
 /** Explicit optional bank-message read; not the unfiltered corpus-export API.
  * Never commits a scan cursor, imports a transaction or acknowledges a queue.
  * Unknown/personal senders and security challenges cannot enter the file. */
 export async function collectDiagnosticBankMessages(readPage: DiagnosticPageReader, options: {
   currency: string | null; market: string; overrides: Record<string, CategoryId>;
   shouldContinue: () => boolean; onProgress?: (checked: number, included: number) => void;
-  /** Omit for a complete read; `true` stops at DEFAULT_MAX_CHECKED rows. */
-  bounded?: boolean;
 }) {
-  const maxChecked = options.bounded === true ? DEFAULT_MAX_CHECKED : Infinity;
   let beforeDate = Number.MAX_SAFE_INTEGER; let beforeId = Number.MAX_SAFE_INTEGER;
   let checked = 0; let excluded = 0; let totalChars = 0;
   const messages = [];
@@ -77,15 +60,8 @@ export async function collectDiagnosticBankMessages(readPage: DiagnosticPageRead
     }
     options.onProgress?.(checked, messages.length);
     assertDiagnosticContinues(options.shouldContinue);
-    // A short page means the provider is exhausted; the row cap means we chose
-    // to stop. Only the first is a complete read, and the flag must say so:
-    // a bounded sample reported as complete would understate real inbox size
-    // and make a parser-coverage ratio look like a whole-history audit.
-    const exhausted = page.length < 250;
-    if (exhausted || checked >= maxChecked) return { messages, coverage: {
-      nativeFilteredInboxReadComplete: exhausted,
-      stoppedAtCheckedLimit: !exhausted,
-      checked, included: messages.length, excluded,
+    if (page.length < 250) return { messages, coverage: {
+      nativeFilteredInboxReadComplete: true, checked, included: messages.length, excluded,
       emptyProviderDoesNotProveNoMessages: checked === 0,
       personalAndUnknownSendersExcluded: true, securityMessagesExcluded: true,
       scope: 'Currently readable bank-money SMS only. The native reader omits credential messages. Deleted SMS and bank-app notification history are not included.',

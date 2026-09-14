@@ -11,6 +11,7 @@ export const TESTER_DIAGNOSTICS_COPY = {
   en: {
     button: 'Send test diagnostics',
     busy: 'Collecting diagnostics…',
+    read: 'messages read',
     detail: 'Sends one privacy-safe report to Wafra Cloudflare with performance, parser/category, SMS import and bank-notification health. Raw SMS, names, card/account numbers and exact amounts are not uploaded.',
     sentTitle: 'Diagnostics sent',
     sentBody: (id: string) => `Report ID: ${id}\n\nKeep this ID so the report can be retrieved from Cloudflare.`,
@@ -20,6 +21,7 @@ export const TESTER_DIAGNOSTICS_COPY = {
   ar: {
     button: 'إرسال تشخيص الاختبار',
     busy: 'جارٍ جمع التشخيص…',
+    read: 'رسالة تمت قراءتها',
     detail: 'يرسل تقريراً واحداً آمناً للخصوصية إلى Cloudflare يتضمن الأداء والمحلل والتصنيفات واستيراد SMS وحالة إشعارات البنوك. لا يتم رفع نص الرسائل أو الأسماء أو أرقام البطاقات/الحسابات أو المبالغ الدقيقة.',
     sentTitle: 'تم إرسال التشخيص',
     sentBody: (id: string) => `معرّف التقرير: ${id}\n\nاحتفظ بهذا المعرّف لاسترجاع التقرير من Cloudflare.`,

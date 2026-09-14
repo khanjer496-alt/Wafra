@@ -157,7 +157,12 @@ function fitDiagnostic(report: Record<string, unknown>): Record<string, unknown>
   return report;
 }
 
-export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Record<string, unknown>> {
+export type TesterDiagnosticProgress = (checked: number, included: number) => void;
+
+export async function buildAndroidTesterDiagnostic(
+  state: AppState,
+  onProgress?: TesterDiagnosticProgress,
+): Promise<Record<string, unknown>> {
   if (Platform.OS !== 'android') throw new Error('tester_diagnostic_android_only');
   const now = Date.now();
   const buildVersion = Constants.expoConfig?.version ?? '1.0.0';
@@ -220,9 +225,11 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
           market: state.marketId,
           overrides: state.merchantOverrides,
           shouldContinue: () => true,
-          // One tap, no progress UI, no cancel. This report wants parser
-          // ratios, not a whole-inbox audit; the export control keeps that.
-          bounded: true,
+          // The whole readable inbox, which is the point of the report. It is
+          // long on a large inbox, so the caller is told how far it has got:
+          // a button that names its progress is working, one that does not is
+          // indistinguishable from hung.
+          onProgress,
         },
       );
       let parsedExpectedLedger = 0;
@@ -259,8 +266,6 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
         scanPerformed: true,
         skippedReason: null,
         checked: collected.coverage.checked,
-        inboxReadComplete: collected.coverage.nativeFilteredInboxReadComplete,
-        stoppedAtCheckedLimit: collected.coverage.stoppedAtCheckedLimit === true,
         bankMoneyMessages: collected.coverage.included,
         excluded: collected.coverage.excluded,
         parserRejected,
@@ -347,8 +352,11 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
   return fitDiagnostic(report);
 }
 
-export async function sendAndroidTesterDiagnostic(state: AppState) {
-  const diagnostic = await buildAndroidTesterDiagnostic(state);
+export async function sendAndroidTesterDiagnostic(
+  state: AppState,
+  onProgress?: TesterDiagnosticProgress,
+) {
+  const diagnostic = await buildAndroidTesterDiagnostic(state, onProgress);
   const wire: TesterDiagnosticWirePayload = {
     schema: 1,
     text: DIAGNOSTIC_TEXT,
