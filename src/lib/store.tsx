@@ -490,7 +490,53 @@ export function migratePersistedState(
 
   markLaunchPhase('ledger-overrides-complete');
   if (parsed.transactions) {
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
+    const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
+    const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
+    // Revision 1 stored [1, PARSER_VERSION, marketId, overrideEntries]. Revision
+    // 2 removed only the override entries, on the grounds that overrides never
+    // changed what `healPatch` did to an existing row — and that same fact
+    // makes a revision-1 receipt naming THIS grammar proof that this ledger was
+    // already healed under it. Accept and restamp such a receipt rather than
+    // charging every existing install one full re-read for a pure key-format
+    // change: a receipt that records the right answer is still the right
+    // answer, whatever shape it was written in.
+    const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
+      if (receipt === reparseKey) return true;
+      if (typeof receipt !== 'string') return false;
+      let prior: unknown;
+      try {
+        prior = JSON.parse(receipt);
+      } catch {
+        // Not a receipt this build wrote; repair rather than trust it.
+        return false;
+      }
+      return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
+        prior[1] === PARSER_VERSION && prior[2] === grammarMarketId;
+    };
+    /**
+     * The row repairs below and the re-parse further down answer the same
+     * question — "has this ledger been brought up to THIS grammar yet?" — so
+     * they share one receipt instead of the repairs re-scanning every launch.
+     *
+     * Each pass is an idempotent fix for rows an OLDER parser wrote: a second
+     * run finds its own output and returns the row untouched. The current
+     * parser already canonicalises titles and files categories itself, so rows
+     * imported after the receipt was stamped never needed them. Keying on
+     * PARSER_VERSION preserves the one pass that is meant to recur — the
+     * `other` re-file, which exists to give old rows another chance whenever a
+     * release widens the merchant vocabulary — because a widened vocabulary
+     * IS a new PARSER_VERSION.
+     *
+     * Measured on a 15,000-row ledger these passes cost 180ms in V8; the phase
+     * markers on a real 8,219-row Android ledger put the same block at 1,081ms,
+     * paid on every single launch before this gate existed.
+     */
+    const grammarAlreadyApplied = options?.reuseCompletedReparse === true &&
+      healedUnderThisGrammar(parsed.hydrationReparseKey);
+    const repairRows = grammarAlreadyApplied
+      ? (transactions: Transaction[]) => transactions
+      : mapTransactionsPreservingIdentity;
+    parsed.transactions = repairRows(parsed.transactions, (t) =>
       t.userEdited
         ? t
         : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
@@ -499,7 +545,7 @@ export function migratePersistedState(
     );
     // Income mis-filed into spending categories (a Talabat payout is
     // revenue, not dining): re-file as business/salary.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
+    parsed.transactions = repairRows(parsed.transactions, (t) =>
       t.userEdited
         ? t
         : t.source === 'sms' &&
@@ -510,7 +556,7 @@ export function migratePersistedState(
     );
     // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
     // clearly and group as one subscription.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+    parsed.transactions = repairRows(parsed.transactions, (t) => {
       if (t.userEdited || t.source !== 'sms') return t;
       const canonical = normalizeServiceName(t.title);
       return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
@@ -518,7 +564,7 @@ export function migratePersistedState(
     // Parser versions before T215 filed anonymous incoming money as
     // Business (or even retained a spending category). Structural titles mean
     // no payer was identified. Refile only those exact SMS rows.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+    parsed.transactions = repairRows(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -534,7 +580,7 @@ export function migratePersistedState(
     });
     // Older imports marked every inward remittance as a transfer. An unpaired
     // arrival is real income; only ledger pairing can prove own-account motion.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+    parsed.transactions = repairRows(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -552,7 +598,7 @@ export function migratePersistedState(
     // before parser v17 could file the machine's mall/street address under a
     // merchant category, so repair every parser-owned expense rather than
     // only rows currently in Other. Hand edits remain authoritative.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+    parsed.transactions = repairRows(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -575,7 +621,7 @@ export function migratePersistedState(
     // Re-file rows stuck in Other: each parser release widens the merchant
     // vocabulary, so imported-as-Other rows get another chance without
     // needing a rescan. User overrides still win.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+    parsed.transactions = repairRows(parsed.transactions, (t) => {
       if (
         t.userEdited ||
         t.source !== 'sms' ||
@@ -619,30 +665,7 @@ export function migratePersistedState(
     // only the trigger is narrowed. The one outcome this defers is the pinned
     // direction-incompatible repair (`patch.category = 'other'`), which
     // repairs an already-corrupt row and still lands on the next parser bump.
-    const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
-    const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
-    // Revision 1 stored [1, PARSER_VERSION, marketId, overrideEntries]. Revision
-    // 2 removed only the override entries, on the grounds that overrides never
-    // changed what `healPatch` did to an existing row — and that same fact
-    // makes a revision-1 receipt naming THIS grammar proof that this ledger was
-    // already healed under it. Accept and restamp such a receipt rather than
-    // charging every existing install one full re-read for a pure key-format
-    // change: a receipt that records the right answer is still the right
-    // answer, whatever shape it was written in.
-    const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
-      if (receipt === reparseKey) return true;
-      if (typeof receipt !== 'string') return false;
-      let prior: unknown;
-      try {
-        prior = JSON.parse(receipt);
-      } catch {
-        // Not a receipt this build wrote; repair rather than trust it.
-        return false;
-      }
-      return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
-        prior[1] === PARSER_VERSION && prior[2] === grammarMarketId;
-    };
-    if (!options?.reuseCompletedReparse || !healedUnderThisGrammar(parsed.hydrationReparseKey)) {
+    if (!grammarAlreadyApplied) {
       parsed.transactions = parsed.transactions.flatMap((t) => {
         if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
         const p = parseSms(t.raw, parsed.merchantOverrides);

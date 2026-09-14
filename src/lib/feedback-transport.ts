@@ -30,6 +30,35 @@ import { DEFAULT_RELAY_URL } from '@/lib/relay';
 /** Matches the Worker's cap; rejected there too, but a 32 KB round trip to be told so is waste. */
 const MAX_BODY_BYTES = 32768;
 
+/**
+ * React Native's `fetch` has no default timeout, so a relay that accepts the
+ * connection and then never answers leaves the caller awaiting forever. The
+ * feedback and diagnostics controls show a spinner for the duration of that
+ * promise, so the visible symptom was a button that span until the app was
+ * killed rather than an error the tester could report or retry.
+ *
+ * A diagnostic body is capped at 32 KB above, so this is a small request on any
+ * working connection; relay.ts uses the same 15s for its own bounded calls.
+ * Aborting surfaces as the ordinary 'network' failure each caller already
+ * handles, which is the truthful answer: the report did not get through.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+const postFeedbackBody = async (body: string): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** What the Worker answers with on success. */
 interface FeedbackResponse {
   id?: unknown;
@@ -92,14 +121,11 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
 
   let response: Response;
   try {
-    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: serialized.body,
-    });
+    response = await postFeedbackBody(serialized.body);
   } catch {
-    // Offline, DNS, TLS. Nothing here is worth showing a user verbatim, and
-    // the message is deliberately about what to do rather than what broke.
+    // Offline, DNS, TLS, or the 15s timeout above. Nothing here is worth
+    // showing a user verbatim, and the message is deliberately about what to
+    // do rather than what broke.
     throw new FeedbackSendError('Could not reach the server.', 'network');
   }
 
@@ -159,11 +185,7 @@ export async function submitParserResearchFeedback(
 
   let response: Response;
   try {
-    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
+    response = await postFeedbackBody(body);
   } catch {
     throw new FeedbackSendError('Could not reach the server.', 'network');
   }
@@ -219,11 +241,7 @@ export async function submitTesterDiagnostics(
 
   let response: Response;
   try {
-    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
+    response = await postFeedbackBody(body);
   } catch {
     throw new FeedbackSendError('Could not reach the server.', 'network');
   }

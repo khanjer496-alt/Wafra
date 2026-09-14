@@ -101,6 +101,24 @@ class BankNotificationListenerService : NotificationListenerService() {
       recordAdmission("securityPassed", adcb)
       if (!MONEY_RE.containsMatchIn("$title $text")) {
         recordAdmission("moneyRejected", adcb)
+        // A visible charge alert that fails this gate has exactly two shapes,
+        // and they need opposite fixes, so say which one happened. These are
+        // structural facts about text we already hold in memory — which
+        // standard fields the poster populated, and whether a currency word
+        // and a digit are present at all. No amount, merchant, account, title
+        // or message text is recorded, only counters, and they are cleared on
+        // every diagnostics read.
+        //
+        //   currency word present AND digit present -> the text reached us but
+        //     the two are not adjacent the way MONEY_RE requires (a separator
+        //     it does not accept, e.g. a non-breaking space, which Java's \s
+        //     does not match).
+        //   neither present -> the body never reached us: the poster drew it
+        //     with a custom RemoteViews layout, so the standard extras carry
+        //     only the title and no field list will find it.
+        if (MONEY_CURRENCY_WORD_RE.containsMatchIn(body)) recordAdmission("mrCurrencyWord", adcb)
+        if (DIGIT_RE.containsMatchIn(body)) recordAdmission("mrDigit", adcb)
+        if (nonBlankTextCandidates.isEmpty()) recordAdmission("mrNoTextField", adcb)
         return
       }
       recordAdmission("moneyPassed", adcb)
@@ -228,5 +246,23 @@ class BankNotificationListenerService : NotificationListenerService() {
         "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )
+
+    /**
+     * Diagnostics only. Neither of these ever admits or rejects a
+     * notification — they are read solely to describe a `moneyRejected`
+     * verdict, after MONEY_RE has already decided, so widening or narrowing
+     * them cannot change what the app captures.
+     *
+     * The currency list is deliberately a second copy rather than a shared
+     * constant: MONEY_RE's source string is compared byte-for-byte against
+     * the SMS gate by scripts/test/kotlin-regex.test.js, and factoring it out
+     * would replace that literal with a variable name and silently defeat the
+     * comparison that keeps the two gates from drifting apart.
+     */
+    private val MONEY_CURRENCY_WORD_RE = Regex(
+      "AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال",
+      RegexOption.IGNORE_CASE
+    )
+    private val DIGIT_RE = Regex("[0-9]")
   }
 }

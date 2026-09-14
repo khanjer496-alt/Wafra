@@ -803,11 +803,24 @@ function bodyOf(source, header) {
       !/\}, \[state, watchForeground\]\);/.test(autoImport),
     'history progress, settings changes, and other unrelated reducer updates must not reschedule the daily summary');
 
+  // This asserted a fixed 1_500ms setTimeout plus a freshness skip, which
+  // contradicted the behavioural contract entitlement-recheck.test.cjs states
+  // outright: "Android resume checks new messages even within 30 seconds of
+  // the previous read". Both could not hold, and the behavioural one guards
+  // the user-visible guarantee — a message arriving while the window is away
+  // is noticed on reopen, since the provider event is not guaranteed to
+  // survive the transition.
+  //
+  // The interaction concern behind the delay is real, so it is kept and made
+  // sharper: the navigation lease waits for the thread to actually be idle
+  // instead of guessing a duration, returns immediately when nothing has
+  // reserved it, and extends for as long as the user keeps interacting.
   ok('Android resume catch-up leaves the first reopened frames to UI/input',
-    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*1_500/.test(autoImport) &&
-      /shouldSkipFreshAndroidResumeScan\(\)/.test(autoImport) &&
-      /setTimeout\([\s\S]*?scheduler\.request\(\)[\s\S]*?ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport),
-    'a fresh source-free resume should do no inbox work, and a stale one must not start it while Android restores the window');
+    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*150/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport) &&
+      /scheduler\.request\(\)/.test(autoImport) &&
+      !/shouldSkipFreshAndroidResumeScan/.test(autoImport),
+    'resume must not start inbox work in the first reopened frames, and must not skip the read either');
 
   const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
   ok('Android history repair also waits past the resume interaction window',

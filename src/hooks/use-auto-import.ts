@@ -46,6 +46,7 @@ import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { isProActive } from '@/lib/purchases';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import {
@@ -110,16 +111,22 @@ const retireLegacyShortcutCapture = async (): Promise<'not-needed' | 'complete'>
  */
 const RESCAN_AFTER_MS = 30_000;
 let lastScanAt = 0;
-const shouldSkipFreshAndroidResumeScan = (now = Date.now()): boolean =>
-  lastScanAt > 0 && now - lastScanAt < RESCAN_AFTER_MS;
 // Foregrounding is an interaction-critical transition: Android is restoring
-// the window, navigation and input dispatch at the same time. Starting inbox
-// bridge/parsing work 250ms later still lands directly in that hot path and is
-// visible as the app freezing immediately after it reopens. Provider-change
-// signals remain fast; only the lifecycle-triggered catch-up gets a longer
-// grace period. A real new SMS received while backgrounded is still picked up
-// after this bounded delay (or immediately by a provider event/pull refresh).
-const ANDROID_RESUME_SCAN_GRACE_MS = 1_500;
+// the window, navigation and input dispatch at the same time, so starting
+// inbox bridge/parsing work in that frame is visible as the app freezing
+// immediately after it reopens.
+//
+// A fixed delay is the wrong instrument for that. Too short and it lands in
+// the hot path anyway; too long and it breaks the contract the entitlement
+// tests state outright — "Android resume checks new messages even within 30
+// seconds of the previous read" — because a message can arrive while the
+// window is away and the provider event is not guaranteed to survive it.
+//
+// So wait on the navigation lease instead. It returns straight away when
+// nothing has reserved the JS thread, and extends itself for as long as the
+// user keeps interacting, which is the actual condition worth waiting for.
+// The scan it eventually starts already yields per frame-sized slice.
+const ANDROID_RESUME_SCAN_GRACE_MS = 150;
 
 /**
  * Android provider access is a process-wide fact, not a screen-local one.
@@ -1123,36 +1130,30 @@ export function useAutoImport(
       if (ongoing) await ongoing.catch(() => {});
       if (canScan()) await latestScan.current(false);
     }, canScan);
-    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    let resumeGeneration = 0;
     // The native observer checks permission only when it starts. Recreate it
     // after a denied permission is restored; foreground checks stay available
     // while it is denied so returning from Settings can recover capture.
     const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => scheduler.request());
     const foreground = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') {
-        if (resumeTimer !== null) {
-          clearTimeout(resumeTimer);
-          resumeTimer = null;
-        }
+        resumeGeneration += 1;
         return;
       }
-      // A quick app switch after a completed scan has no new source evidence.
-      // Do not schedule an expensive safety reread just because Android emitted
-      // another lifecycle edge; the native inbox-change listener still fires
-      // immediately if a message actually arrived while Wafra was away.
-      if (shouldSkipFreshAndroidResumeScan()) return;
-      // Do not compete with Android's first resumed frames. The provider
-      // listener above still requests immediately when there is actual inbox
-      // evidence, so this delay applies only to the source-free safety catch-up.
-      if (resumeTimer !== null) clearTimeout(resumeTimer);
-      resumeTimer = setTimeout(() => {
-        resumeTimer = null;
+      // Do not compete with Android's first resumed frames, but do not skip the
+      // read either: resume is exactly when a message that arrived while the
+      // window was away has to be noticed.
+      resumeGeneration += 1;
+      const generation = resumeGeneration;
+      void waitForForegroundHistoryIdle(ANDROID_RESUME_SCAN_GRACE_MS).then(() => {
+        // Backgrounding again, or a newer resume, supersedes this one.
+        if (generation !== resumeGeneration) return;
         if (canScan()) scheduler.request();
-      }, ANDROID_RESUME_SCAN_GRACE_MS);
+      });
     });
     return () => {
       mounted = false;
-      if (resumeTimer !== null) clearTimeout(resumeTimer);
+      resumeGeneration += 1;
       unsubscribe();
       foreground.remove();
       scheduler.dispose();
