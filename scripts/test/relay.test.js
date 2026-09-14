@@ -2052,7 +2052,16 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
+        // Created here, but not awaited until the executor reaches its
+        // durability barrier several ticks later. Node's unhandled-rejection
+        // detector runs at the microtask checkpoint in between and killed the
+        // whole process — which aborted `check` before contracts,
+        // history-import or anything else in SUITES after `relay` could run.
+        // The no-op handler silences only that detector: the executor still
+        // awaits this exact promise and still sees the rejection the two
+        // assertions below depend on.
         const failed = Promise.reject(new Error('SQLCipher write failed'));
+        failed.catch(() => {});
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(failed, events),
           dependencies: {
@@ -2093,7 +2102,14 @@ async function queueItem(id, row, publicKey) {
           },
         });
         const running = executor.execute('routine');
-        await Promise.resolve();
+        // The executor yields a real macrotask between collection and planning
+        // (capture-executor.ts `yieldForegroundTurn`, a setTimeout(0), which
+        // perf-config.test.js pins). One microtask therefore no longer reaches
+        // the persist; wait for actual turns so this measures the durability
+        // barrier it is about rather than a tick count.
+        for (let i = 0; i < 10 && events.length === 0; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: routine acknowledgement waits while durability is pending',
           events, ['persist']);
         release();
@@ -2228,13 +2244,19 @@ async function queueItem(id, row, publicKey) {
         });
 
         const running = executor.execute('routine');
-        await Promise.resolve();
+        // Same macrotask yield as above: the swap below has to land after the
+        // executor has actually started, not merely after one microtask.
+        for (let i = 0; i < 10 && events.length === 0; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         current = {
           hydrated: true, lastScanTs: 1,
           ledgerId: 'changed-during-review', captureOptOut: false,
         };
         releaseReview();
-        for (let i = 0; i < 10 && events.length < 3; i += 1) await Promise.resolve();
+        for (let i = 0; i < 10 && events.length < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: a mixed review and deduplicated relay page flushes the current ledger',
           events, ['review-stage', 'plan:changed-during-review', 'flush:changed-during-review']);
         releaseLedger();
