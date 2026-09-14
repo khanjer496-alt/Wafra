@@ -18,13 +18,29 @@ import {
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 100;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
+// Every page costs one provider query (the SMS provider sorts the whole
+// matching inbox per call — there is no SQL LIMIT), one store dispatch that
+// re-renders every mounted screen, and one forced encrypted ledger write. The
+// page size is the multiplier on all three. 100-row pages paid that overhead
+// twenty times more often than 2,000-row pages did while the parse loop was
+// already yielding per frame-sized slice; 500 keeps each page's JS work short
+// without turning a large inbox into hundreds of full-ledger commits.
+//
+// A 15,000-message inbox is 30 pages at 500 and 150 at 100. At a 500ms gap the
+// smaller page also spends 75 seconds waiting rather than 3.6, so the import
+// stays unfinished far longer — and while it is unfinished `parserVersion` is
+// never stamped, so every launch also repeats the full-ledger migration pass.
+const HISTORY_IMPORT_PAGE_SIZE = 500;
+// One idle window between pages so a page commit never lands back-to-back
+// with the next provider read. Not a measured phone constant; see the parse
+// yield notes in auto-import.ts for the trace flag that verifies it.
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // Resuming the window is not idle time. Give Android a usable frame/input
 // window before parser-migration maintenance restarts; subsequent pages retain
-// the normal 500ms cooperative gap.
+// the ordinary FOREGROUND_HISTORY_PAGE_GAP_MS cooperative gap above.
 const FOREGROUND_HISTORY_RESUME_GRACE_MS = 2_000;
 
 /**
@@ -68,8 +84,11 @@ export function useHistoryImport(): void {
       // Keep pages small and leave a real idle window between them so Hermes
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -112,7 +131,11 @@ export function useHistoryImport(): void {
       // Resolving promises does not give pending UI/input work a macrotask.
       // Separate parsing/review from the synchronous planning/reducer work.
       // This is cooperative scheduling, not a claim of off-thread parsing.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle();
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
