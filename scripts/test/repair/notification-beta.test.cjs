@@ -46,6 +46,14 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(listener, /moneyHeuristicBypassed/);
   assert.match(listener, /Notification\.EXTRA_TEXT_LINES/);
   assert.match(listener, /Notification\.EXTRA_SUB_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_INFO_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_SUMMARY_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_TITLE_BIG/);
+  assert.match(listener, /Notification\.EXTRA_MESSAGES/);
+  assert.match(listener, /Notification\.EXTRA_HISTORIC_MESSAGES/);
+  assert.match(listener, /notification\.tickerText/);
+  assert.match(listener, /filter \{ key -> looksLikeTextExtraKey\(key\) \}/);
+  assert.match(listener, /extendedMoneySurface/);
 });
 
 test('known bank packages survive OEM/restore installer metadata while unknown apps still require Play provenance', () => {
@@ -82,10 +90,12 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
   assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
   assert.match(listener, /recordAdmission\("exception", adcb\)/);
-  assert.match(listener, /firstOrNull \{ MONEY_RE\.containsMatchIn\(it\) \}/);
+  assert.match(listener, /filter \{ MONEY_RE\.containsMatchIn\(it\) \}[\s\S]{0,80}maxByOrNull \{ it\.length \}/);
   assert.match(listener, /listOf\(title\) \+ nonBlankTextCandidates/);
   const store = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt');
   assert.match(store, /"cleared-through"/);
+  assert.match(store, /indexOfFirst \{ it\.pkg == pkg && it\.ts == ts \}/);
+  assert.match(store, /prior\.copy\(title = title, text = text\)/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
   assert.match(settings, /notifDiagnosticsTitle/);
   assert.doesNotMatch(settings, /notifDiagnostics[\s\S]{0,500}\.text/);

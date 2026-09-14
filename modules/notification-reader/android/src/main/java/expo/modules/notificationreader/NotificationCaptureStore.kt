@@ -49,7 +49,19 @@ object NotificationCaptureStore {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
-    if (current.any { it.pkg == pkg && it.text == text && it.ts == ts }) return
+    val samePostedNotification = current.indexOfFirst { it.pkg == pkg && it.ts == ts }
+    if (samePostedNotification >= 0) {
+      val prior = current[samePostedNotification]
+      if (prior.title == title && prior.text == text) return
+      // A newer app version may learn how an OEM actually exposes the visible
+      // body (for example ColorOS moved ADCB's amount out of EXTRA_TEXT). A
+      // shade re-sweep must HEAL the retained encrypted row rather than append
+      // a second copy while the broken one remains stuck for seven days.
+      val repaired = current.toMutableList()
+      repaired[samePostedNotification] = prior.copy(title = title, text = text)
+      writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
+      return
+    }
     val next = (current + CapturedBankNotification(
       id = UUID.randomUUID().toString(),
       pkg = pkg,
