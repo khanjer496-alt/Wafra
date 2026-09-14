@@ -149,5 +149,29 @@ ok('email forwarding has separate create and revoke actions',
   /method: 'POST'/.test(transport) && /method: 'DELETE'/.test(transport) &&
   /\/v1\/email-token/.test(transport));
 
+// A successful upload leaves the rows safe on the relay and then files them on
+// the phone, which on a large ledger takes a visible moment. That moment used
+// to be narrated with acceptedPending -- "could not sync to this phone yet. Try
+// again in a moment." -- so a working import read as a failure the user was
+// being asked to retry, right up until it replaced itself with the success
+// line. Progress and failure must not share copy.
+const copySource = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
+const filingStatus = surface.slice(
+  surface.indexOf('const finishQueuedImport'),
+  surface.indexOf('const imported = await syncQueued()'),
+);
+ok('the in-flight filing status does not reuse the failure copy',
+  /copy\.acceptedFiling/.test(filingStatus) && !/copy\.acceptedPending/.test(filingStatus),
+  'acceptedPending tells the user to retry; nothing has failed while the rows are still being filed');
+
+ok('acceptedPending is still what a real sync failure reports',
+  /setStatus\(interpolate\(copy\.acceptedPending/.test(
+    surface.slice(surface.indexOf('} catch (e) {', surface.indexOf('const finishQueuedImport')))),
+  'the failure branch must keep the wording that asks the user to try again');
+
+ok('both languages define the filing progress line',
+  (copySource.match(/acceptedFiling:/g) || []).length === 2,
+  'a missing Arabic string would fall through to an undefined status');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

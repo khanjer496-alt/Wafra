@@ -52,6 +52,12 @@ export const SUPPLEMENT_COPY = {
     errFormat: 'This statement lacks supported date, description, and explicit debit/credit fields, so Wafra will not guess.',
     errRate: 'Too many imports were requested. Wait a moment and retry.',
     errUnexpected: 'The import service returned an unexpected response. Nothing was filed.',
+    // Progress, not failure. The filing step below can take a moment on a
+    // large ledger, and this line is what the user reads while it runs, so it
+    // must not borrow acceptedPending's "could not sync / try again" wording:
+    // nothing has gone wrong at this point, the rows are safe on the relay and
+    // the phone is working through them.
+    acceptedFiling: '{accepted} rows received · filing them on this phone…',
     acceptedPending: '{accepted} rows reached Wafra but could not sync to this phone yet. Try again in a moment.',
     syncFailed: 'The rows are safe in your import queue, but filing them on this phone failed: {reason}',
     syncFailedUnknown: 'the ledger update did not complete',
@@ -110,6 +116,7 @@ export const SUPPLEMENT_COPY = {
     errFormat: 'يفتقد الكشف حقول التاريخ والوصف واتجاه مدين/دائن المدعومة، لذلك لن يخمن وفرة.',
     errRate: 'طُلبت واردات كثيرة. انتظر قليلاً ثم حاول مجدداً.',
     errUnexpected: 'أعادت خدمة الاستيراد استجابة غير متوقعة. لم تُسجّل أي عملية.',
+    acceptedFiling: 'تم استلام {accepted} صفاً · جارٍ حفظها على هذا الهاتف…',
     acceptedPending: 'وصل {accepted} صفاً إلى وفرة لكن لم تتزامن مع الهاتف بعد. حاول مرة أخرى بعد لحظة.',
     syncFailed: 'الصفوف محفوظة في قائمة الاستيراد، لكن تسجيلها على هذا الهاتف فشل: {reason}',
     syncFailedUnknown: 'لم يكتمل تحديث السجل',
