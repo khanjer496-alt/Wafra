@@ -312,6 +312,10 @@ export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
   options?: PersistedMigrationOptions,
 ): Partial<Omit<AppState, 'hydrated'>> {
+  // Captured before any transform runs; see the transfer-receipt check by the
+  // return, which uses it to tell "these are still the stored rows" from
+  // "these have been rewritten under a receipt that predates them".
+  const loadedTransactions = parsed.transactions;
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -598,13 +602,47 @@ export function migratePersistedState(
     // This receipt belongs to saved-row repair, never to the full-inbox scan
     // represented by parserVersion. Only local hydration may reuse it;
     // backup restore always repairs the incoming rows. Import paths already
-    // parse their new rows with this running grammar. Increment revision 1
+    // parse their new rows with this running grammar. Increment revision 2
     // below when heal semantics change without a PARSER_VERSION change.
-    const reparseKey = JSON.stringify([
-      1, PARSER_VERSION, parsed.marketId ?? getActiveMarket().id,
-      Object.entries(parsed.merchantOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)),
-    ]);
-    if (!options?.reuseCompletedReparse || parsed.hydrationReparseKey !== reparseKey) {
+    //
+    // Deliberately keyed on the GRAMMAR only. `merchantOverrides` used to be
+    // part of this key, which meant saving one merchant rule re-parsed every
+    // raw-bearing row in the ledger on the next launch — seconds of blocked
+    // UI on a large ledger, and it got worse with each rule, because
+    // `healPatch` keeps `raw` forever on precisely the rows a rule pinned
+    // (heal.ts: the `prior.raw && !p.categoryPinned` branch). So the cost grew
+    // with the number of rules while the benefit was already nil: a pinned
+    // category reaches `if (p.categoryPinned) … delete patch.category`, which
+    // exists so that "remember for future" stays a default for NEW rows and a
+    // rescan cannot widen it to history. Overrides are still passed to
+    // `parseSms` below, so a grammar re-parse applies them exactly as before;
+    // only the trigger is narrowed. The one outcome this defers is the pinned
+    // direction-incompatible repair (`patch.category = 'other'`), which
+    // repairs an already-corrupt row and still lands on the next parser bump.
+    const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
+    const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
+    // Revision 1 stored [1, PARSER_VERSION, marketId, overrideEntries]. Revision
+    // 2 removed only the override entries, on the grounds that overrides never
+    // changed what `healPatch` did to an existing row — and that same fact
+    // makes a revision-1 receipt naming THIS grammar proof that this ledger was
+    // already healed under it. Accept and restamp such a receipt rather than
+    // charging every existing install one full re-read for a pure key-format
+    // change: a receipt that records the right answer is still the right
+    // answer, whatever shape it was written in.
+    const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
+      if (receipt === reparseKey) return true;
+      if (typeof receipt !== 'string') return false;
+      let prior: unknown;
+      try {
+        prior = JSON.parse(receipt);
+      } catch {
+        // Not a receipt this build wrote; repair rather than trust it.
+        return false;
+      }
+      return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
+        prior[1] === PARSER_VERSION && prior[2] === grammarMarketId;
+    };
+    if (!options?.reuseCompletedReparse || !healedUnderThisGrammar(parsed.hydrationReparseKey)) {
       parsed.transactions = parsed.transactions.flatMap((t) => {
         if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
         const p = parseSms(t.raw, parsed.merchantOverrides);
@@ -625,6 +663,11 @@ export function migratePersistedState(
       });
       // Assigned only after the entire pass succeeds. The existing atomic
       // snapshot save persists repaired rows and their receipt together.
+      parsed.hydrationReparseKey = reparseKey;
+    } else {
+      // An accepted revision-1 receipt is upgraded in place, so the next launch
+      // settles this on one string comparison and the acceptance path above is
+      // walked exactly once per install rather than on every launch.
       parsed.hydrationReparseKey = reparseKey;
     }
   }
@@ -655,6 +698,17 @@ export function migratePersistedState(
         ...(account.snapshotKind === 'balance' ? { snapshotKind: 'limit' as const } : {}),
       };
     });
+  }
+
+  // The transfer receipt read off disk describes the rows that were on disk.
+  // Every transform above can rewrite or drop rows — the card-payment pass
+  // sets `isTransfer`, the inward-remittance pass clears it, and the heal can
+  // flip either — so once any of them has changed the array, the stored id set
+  // is a claim about a ledger that no longer exists. Drop it and let hydrate
+  // rebuild; the version alone cannot notice this, because none of these
+  // transforms is a change to link semantics.
+  if (loadedTransactions && parsed.transactions !== loadedTransactions) {
+    delete parsed.transferInternalIds;
   }
 
   return parsed;
@@ -825,18 +879,41 @@ function reducer(state: AppState, action: Action): AppState {
     // before its encrypted write. Re-running the same graph walk on every
     // launch dominated startup on real ledgers, so hydrate trusts that receipt
     // and missing/older receipts fail safe by doing one full pass.
+    // ...and only while the rows still are the rows it was written for. The
+    // version constant tracks link SEMANTICS, so it says nothing about this
+    // launch's repairs: `removeDeclinedTransactions` re-reads stored SMS under
+    // the live market pack and can DELETE a row, and the account repairs above
+    // can move one, all under an unchanged version. Trusting the receipt
+    // through that left the surviving leg of a broken pair marked internal
+    // forever — invisible to every total, and self-perpetuating, because the
+    // next save wrote the same receipt back. Identity settles it: the hydrate
+    // reducer preserves the transactions array when no row changed, so an
+    // array that came through untouched is one the receipt still describes.
     const persistedTransferGraphIsCurrent = action.type === 'hydrate' &&
       reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
-      Array.isArray(reduced.transferInternalIds);
+      Array.isArray(reduced.transferInternalIds) &&
+      reduced.transactions === action.state.transactions;
     const needsTransferNormalization = !persistedTransferGraphIsCurrent && (accountsChanged || (
       transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
     ));
-    const transferReconciliation = needsTransferNormalization
-      ? reconcileTransfers(reduced.transactions, reduced.accounts)
-      : null;
     const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;
+    // Reconcile the rows that are actually STORED, not the ones that went in.
+    // These two passes do not agree, by design: `transfer-reconciliation.ts`
+    // lets a row with explicit own-ownership seed the absorption step only
+    // while it has no written `transferMatch`, so a reciprocal pair can prove
+    // a third, unrelated row is internal on the way in and is correctly
+    // excluded from doing so once `normalizeTransferLinks` has written its
+    // match. Stamping the earlier answer persisted the wider set: an ordinary
+    // payment sharing an amount and a day with a genuine own-account pair was
+    // recorded as an internal transfer and dropped out of every total, and the
+    // receipt made that stick across relaunches. Reconciling the normalized
+    // array reproduces exactly what the screens computed for themselves before
+    // this receipt existed. The memo makes it free when nothing normalized.
+    const transferReconciliation = needsTransferNormalization
+      ? reconcileTransfers(transactions, reduced.accounts)
+      : null;
     const normalized = transactions === reduced.transactions ? reduced : { ...reduced, transactions };
     const stamped = needsTransferNormalization && transferReconciliation
       ? {

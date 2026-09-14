@@ -15,7 +15,7 @@ const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)
 // `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
 const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
 const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
-const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{2})?)`;
+const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{1,2})?)`;
 const ROW_END_DIRECTION = new RegExp(
   `^(${DATE_TOKEN})\\s+(.{2,180}?)\\s+${AMOUNT_TOKEN}\\s+(DR|CR|DEBIT|CREDIT)$`,
   'i',
@@ -25,9 +25,11 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   'i',
 );
 const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
-// The column branch (parseColumnTail) insists on cents: a bare integer at the
-// end of a flattened PDF row is as likely a cheque or reference number as money.
-const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}`;
+// The column branch (parseColumnTail) insists on a decimal point: a bare
+// integer at the end of a flattened PDF row is as likely a cheque or reference
+// number as money. One decimal place is still money — real statements print
+// `32.8` and `715.0`, and requiring two rejected every such row.
+const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2}`;
 const CURRENCY_WORD = String.raw`(?:AED|SAR)`;
 const MONEY_UNSIGNED = new RegExp(`^${CURRENCY_WORD}?(${CENTS_MONEY})$`, 'i');
 const MONEY_SIGNED = new RegExp(
@@ -35,8 +37,8 @@ const MONEY_SIGNED = new RegExp(
   'i',
 );
 // What an empty debit or credit cell becomes once a PDF table is flattened.
-const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.00)$/;
-const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
+const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00)$/;
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
 // Opening/closing balance, brought/carried forward and total lines carry money
 // but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
 // as income and a "Total 40.00 0.00" as a second expense, and counting them as
@@ -44,10 +46,18 @@ const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{2}(?:\\D|$)|\\b(?:DR|CR|DEBI
 // the description so a merchant merely containing the word is untouched.
 // "Total" only counts when a figure, a colon or a totals word follows it;
 // "TOTAL ENERGIES FUEL 120.00" is a merchant.
-const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
-// A three-letter currency code right before a figure marks an original
-// foreign-currency amount inside the description, not a running balance.
-const CURRENCY_CODE_WORD = /^[A-Z]{3}$/;
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
+// The codes that actually appear as foreign originals on UAE and Saudi
+// statements: the Gulf, the majors, and the remittance corridors this app's
+// users send money down. Deliberately a list and not `[A-Z]{3}`, which also
+// matches LLC, FZE, LTD and PSC.
+const FOREIGN_CURRENCY_CODE = new Set([
+  'AED', 'SAR', 'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'CNY', 'HKD', 'SGD', 'AUD', 'CAD', 'NZD',
+  'KWD', 'BHD', 'OMR', 'QAR', 'JOD', 'EGP', 'LBP', 'IQD', 'TRY', 'RUB', 'ZAR',
+  'INR', 'PKR', 'BDT', 'LKR', 'NPR', 'PHP', 'IDR', 'MYR', 'THB', 'VND', 'KRW',
+  'KES', 'NGN', 'GHS', 'ETB', 'UGX', 'TZS', 'MAD', 'TND', 'DZD', 'SDG', 'SOS', 'AFN', 'IRR',
+  'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RON', 'UAH', 'ILS', 'MXN', 'BRL', 'ARS',
+]);
 
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
@@ -726,10 +736,36 @@ function classifyMoneyToken(token: string): MoneyToken | null {
  * is not on the first money token, a currency that is not the statement's —
  * is left for the caller to count as rejected rather than read a direction in.
  */
+/**
+ * Whether this is a credit-card statement rather than an account statement.
+ *
+ * It matters because the two have opposite defaults. On an account statement an
+ * unlabelled figure could be either direction, so `parseColumnTail` is right to
+ * refuse it. A card statement lists charges and marks the exceptions: every
+ * payment, refund and cashback carries CR, so an unlabelled row is a purchase,
+ * and reading it as one is the convention rather than a guess.
+ *
+ * Two independent markers are required so that an account statement mentioning
+ * a credit-card payment is not mistaken for one.
+ */
+function isCardStatement(text: string): boolean {
+  const header = text.split(/\n+/).slice(0, 60).join('\n');
+  const markers = [
+    /\bcredit\s+card\s+statement\b/i,
+    /\bminimum\s+(?:amount|payment)\s+due\b/i,
+    /\b(?:available\s+)?credit\s+limit\b/i,
+    /\bcard\s*(?:no\.?|number)\b/i,
+    /\bbalance\s+outstanding\b/i,
+    /\bstatement\s+(?:period|date)\b/i,
+  ];
+  return markers.filter((marker) => marker.test(header)).length >= 2;
+}
+
 function parseColumnTail(
   rest: string,
   currency: StatementCurrency,
   order: ColumnOrder,
+  loneAmountIsCharge = false,
 ): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
@@ -757,6 +793,12 @@ function parseColumnTail(
   if (first.kind === 'signed') {
     return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
   }
+  // `03/08/2026 NOON.COM DUBAI ARE 68.93` — the whole body of a card
+  // statement. One figure, no label, no second column, because a charge is
+  // what the statement is for; the CR rows are handled by the branch above.
+  if (loneAmountIsCharge && tail.length === 1 && first.kind === 'unsigned') {
+    return { merchant, amountFils: first.minor, type: 'expense' };
+  }
   if (tail.length < 2 || second.kind === 'signed') return null;
   const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
   if (debit.kind === 'unsigned' && credit.kind === 'placeholder') {
@@ -766,6 +808,87 @@ function parseColumnTail(
     return { merchant, amountFils: credit.minor, type: 'income' };
   }
   return null;
+}
+
+/**
+ * The description and the last two money figures on a row, ignoring a trailing
+ * DR/CR label. Null unless the row really ends in two figures, so a reference
+ * number cannot stand in for one: `CENTS_MONEY` requires the cents.
+ */
+function rowBalanceFigures(
+  rest: string,
+): { merchant: string; amountMinor: number; balanceMinor: number } | null {
+  const words = rest.trim().split(' ');
+  if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(words.at(-1) ?? '')) words.pop();
+  const balance = classifyMoneyToken(words.at(-1) ?? '');
+  const amount = classifyMoneyToken(words.at(-2) ?? '');
+  // A currency code before the figure marks the foreign original Gulf
+  // statements print inside the description, not a column of its own. Tested
+  // against real codes rather than any three capitals, because company
+  // suffixes end descriptions constantly here — every `… FZ LLC 5.00 4,998.75`
+  // would otherwise be unreadable, and with it the row after it. A code this
+  // does not know costs nothing: the row then has to satisfy the exact balance
+  // step like any other, and simply breaks the chain when it cannot.
+  if (!balance || !amount || balance.kind === 'placeholder' || amount.kind === 'placeholder' ||
+    FOREIGN_CURRENCY_CODE.has((words.at(-3) ?? '').toUpperCase())) {
+    return null;
+  }
+  // A running balance goes negative — an overdraft, and every credit card that
+  // states what is owed. `-1,204.55` and `(1,204.55)` are balances like any
+  // other; refusing them stopped reading the statement at the row the account
+  // first went into the red.
+  const balanceMinor = balance.kind === 'unsigned' || balance.type === 'income'
+    ? balance.minor
+    : -balance.minor;
+  const merchant = words.slice(0, -2).join(' ').trim();
+  return merchant.length < 2 || merchant.length > 180
+    ? null
+    : { merchant, amountMinor: amount.minor, balanceMinor };
+}
+
+/**
+ * Whether the final figure on each row is a running balance.
+ *
+ * Two bare figures at the end of a row are ambiguous — `40.00 9,960.00` is a
+ * debit and a balance, or a debit and a credit — and `parseColumnTail` is
+ * right to refuse to guess between them. But a running balance is not a guess:
+ * it has to reconcile. When every row's final figure differs from the previous
+ * row's by exactly that row's other figure, the last column is a balance and
+ * the sign of each step is that row's direction.
+ *
+ * This is what makes the commonest PDF layout readable at all. A statement
+ * printing `Date Description Debit Credit Balance` marks the empty cell with a
+ * placeholder only sometimes; when the cell is merely blank, extraction emits
+ * spaces and the flattening at the top of `parseStatementLines` removes them,
+ * leaving two indistinguishable figures. Every such row was rejected.
+ *
+ * Deliberately strict: four comparisons at minimum and near-total agreement,
+ * so a file that merely happens to contain a few reconciling pairs does not
+ * license reading the rest of it.
+ */
+function trailingBalanceRuns(lines: string[]): boolean {
+  let previous: number | null = null;
+  let checked = 0;
+  let agreed = 0;
+  for (const line of lines) {
+    const prefixed = ROW_DATE_PREFIX.exec(line);
+    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
+    const figures = rowBalanceFigures(prefixed[2]);
+    // A row this cannot read is a hole in the chain, not a disagreement. Its
+    // successor must not be measured against a balance two rows back, or a
+    // statement whose descriptions merely happen to end in a three-letter word
+    // fails a test it never actually took.
+    if (!figures) {
+      previous = null;
+      continue;
+    }
+    if (previous !== null) {
+      checked += 1;
+      if (Math.abs(figures.balanceMinor - previous) === figures.amountMinor) agreed += 1;
+    }
+    previous = figures.balanceMinor;
+  }
+  return checked >= 4 && agreed >= Math.ceil(checked * 0.9);
 }
 
 export interface StatementTextResult {
@@ -793,6 +916,11 @@ export function parseStatementLines(
   const lines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
   const columnOrder = statementColumnOrder(text);
+  // Proven once for the whole file, then used to resolve rows the branches
+  // below would otherwise have to reject as ambiguous.
+  const balanceTrailing = trailingBalanceRuns(lines);
+  const cardStatement = isCardStatement(text);
+  let previousBalance: number | null = null;
   const push = (
     date: string,
     merchant: string,
@@ -826,6 +954,14 @@ export function parseStatementLines(
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
     const countable = prefixed !== null && LOOKS_LIKE_MONEY_LINE.test(line);
     const accepted = rows.length;
+    // Read before either branch and carried forward whether or not this row is
+    // accepted, so one unreadable row cannot break the chain for the next.
+    const figures = balanceTrailing && prefixed ? rowBalanceFigures(prefixed[2]) : null;
+    const priorBalance = previousBalance;
+    // Same hole rule as the proving pass, and here it is a correctness one:
+    // a delta measured across a row that was skipped could carry the wrong
+    // sign and file a credit as a debit.
+    if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) previousBalance = figures?.balanceMinor ?? null;
     const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
     if (match) {
       const explicitCurrency = /\s(AED|SAR)\s+[\d,]+(?:\.\d{2})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
@@ -844,18 +980,41 @@ export function parseStatementLines(
       // before the figure marks the original foreign amount Gulf statements
       // print inside the description, and 165.30 DR is the real charge.
       const descriptionWords = merchant.split(' ');
+      // Against real codes, not any three capitals: `ADCB ATM 200.00 5,300.00
+      // DR` and `SPINNEYS JLT 120.00 27,890.00 DR` read their SECOND figure as
+      // a currency marker under `[A-Z]{3}`, which switched this guard off and
+      // imported the running balance as the amount.
       const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '')?.kind === 'unsigned' &&
-        !CURRENCY_CODE_WORD.test(descriptionWords.at(-2) ?? '');
+        !FOREIGN_CURRENCY_CODE.has((descriptionWords.at(-2) ?? '').toUpperCase());
+      const credit = direction === 'CR' || direction === 'CREDIT';
       if (
         (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
         Number.isSafeInteger(amountFils) && amountFils > 0 && merchant
       ) {
-        push(date, merchant, amountFils, direction === 'CR' || direction === 'CREDIT' ? 'income' : 'expense', line);
+        push(date, merchant, amountFils, credit ? 'income' : 'expense', line);
+      } else if (
+        balanceLabelled && date && figures && (!explicitCurrency || explicitCurrency === currency)
+      ) {
+        // The label belongs to the balance; the charge is the figure before it,
+        // which is where this row's description was made to end. Only reachable
+        // once the file has proved its last column reconciles.
+        push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line);
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      const column = prefixed && date ? parseColumnTail(prefixed[2], currency, columnOrder) : null;
+      const column = prefixed && date
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+        : null;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
+      else if (date && figures && priorBalance !== null) {
+        // No label and no placeholder to say which column is populated: the
+        // step in the balance says it instead, and only when it matches this
+        // row's other figure exactly.
+        const delta = figures.balanceMinor - priorBalance;
+        if (delta !== 0 && Math.abs(delta) === figures.amountMinor) {
+          push(date, figures.merchant, figures.amountMinor, delta < 0 ? 'expense' : 'income', line);
+        }
+      }
     }
     if (countable && rows.length === accepted) rejectedRows += 1;
   }

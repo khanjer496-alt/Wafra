@@ -18,6 +18,7 @@ const {
   materializeImportBatch,
 } = require('./build/ledger-import.js');
 const { setActiveMarket, setLedgerCurrency } = require('./build/markets.js');
+const { ledgerMoneySpec } = require('./build/ledger-money.js');
 const { parseSms, PARSER_VERSION } = require('./build/sms-parser.js');
 const { reconcileTransfers, reconciliationInternalIds, TRANSFER_NORMALIZATION_VERSION } = require('./build/transfer-reconciliation.js');
 
@@ -652,6 +653,70 @@ ok('compact bank shorthand replay is idempotent',
     ok(`${channel}: Message receipt cannot create a fabricated card payment deadline`,
       result.cardDues.length === BASE.cardDues.length && plan.txCount === 0);
   }
+}
+
+
+// A reciprocal own-account pair must not drag an unrelated payment into the
+// internal-transfer set. `reconcileTransfers` deliberately answers differently
+// before and after `normalizeTransferLinks`: an explicit-own row may seed the
+// absorption step only while it carries no written `transferMatch`. Stamping
+// the pre-normalization answer persisted the wider set, and the receipt made
+// it stick — the payment stayed out of every total across relaunches.
+{
+  // Earlier scenarios in this file leave a non-AED pack active; this one is
+  // about the transfer graph, so pin the market back before importing.
+  setLedgerCurrency(null);
+  setActiveMarket('AE');
+  const accounts = [
+    { id: 'bank-a', name: 'Bank A', kind: 'bank', openingFils: 0, color: '#1', last4: '1111', bankName: 'ADCB' },
+    { id: 'bank-b', name: 'Bank B', kind: 'bank', openingFils: 0, color: '#2', last4: '2222', bankName: 'Emirates NBD' },
+  ];
+  const at = Date.parse('2026-03-02T10:00:00Z');
+  const evidence = (extra) => ({ version: 1, currency: 'AED', attribution: 'source', ...extra });
+  const pairOut = {
+    id: 'pair-out', type: 'expense', amountFils: 50000, category: 'other', accountId: 'bank-a',
+    title: 'Own transfer', date: '2026-03-02', ts: at, source: 'sms', isTransfer: true,
+    captureInstrument: { last4: '1111', kind: 'account', bankIdentity: 'ADCB' },
+    transferEvidence: evidence({ explicitOwn: true, counterparty: { last4: '2222', kind: 'account', bankIdentity: 'Emirates NBD' } }),
+  };
+  const pairIn = {
+    id: 'pair-in', type: 'income', amountFils: 50000, category: 'other', accountId: 'bank-b',
+    title: 'Incoming transfer', date: '2026-03-02', ts: at + 60000, source: 'sms',
+    captureInstrument: { last4: '2222', kind: 'account', bankIdentity: 'Emirates NBD' },
+    transferEvidence: evidence({ explicitOwn: true, counterparty: { last4: '1111', kind: 'account', bankIdentity: 'ADCB' } }),
+  };
+  // An ordinary incoming payment. No ownership evidence, no transfer flag; it
+  // shares only an amount and a day with the genuine pair.
+  const payment = {
+    id: 'ordinary-payment', type: 'income', amountFils: 50000, category: 'other', accountId: 'bank-b',
+    title: 'Incoming transfer', date: '2026-03-02', ts: at + 120000, source: 'sms',
+  };
+  const rows = [pairOut, pairIn, payment];
+  const preIds = [...reconciliationInternalIds(reconcileTransfers(rows, accounts))].sort();
+  ok('the pre-normalization graph really does absorb the unrelated payment',
+    isDeepStrictEqual(preIds, ['ordinary-payment', 'pair-in', 'pair-out']), JSON.stringify(preIds));
+
+  const state = { ...BASE, accounts, transactions: [], transferInternalIds: undefined };
+  let seq = 0;
+  const batch = materializeImportBatch(
+    { importMoney: ledgerMoneySpec('AED'), transactions: rows.map(({ id: _id, ...rest }) => rest),
+      newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {}, bankNames: {},
+      cardTypes: {}, lastScanTs: state.lastScanTs },
+    state,
+    (prefix) => `divergent-${prefix}-${++seq}`,
+  );
+  const stored = applyMaterializedImportBatch(state, batch);
+  const expected = [...reconciliationInternalIds(
+    reconcileTransfers(stored.transactions, stored.accounts),
+  )].sort();
+  ok('the persisted receipt describes the rows that were stored, not the rows that went in',
+    isDeepStrictEqual([...(stored.transferInternalIds ?? [])].sort(), expected),
+    JSON.stringify(stored.transferInternalIds));
+  const internal = new Set(stored.transferInternalIds ?? []);
+  const ordinary = stored.transactions.find((tx) => tx.title === 'Incoming transfer' &&
+    !tx.transferEvidence && !tx.isTransfer);
+  ok('an ordinary payment beside an own-account pair stays out of the internal set',
+    Boolean(ordinary) && !internal.has(ordinary.id), JSON.stringify([...internal]));
 }
 
 console.log(`\naccounting-pipeline: ${pass} passed, 0 failed`);

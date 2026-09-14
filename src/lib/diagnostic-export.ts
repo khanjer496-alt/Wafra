@@ -2,8 +2,10 @@
 import { normalizeAlertReviewTray } from '@/lib/alert-review-tray';
 import { categorySupportsType } from '@/lib/categories';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
+import { getLaunchMetrics } from '@/lib/launch-performance';
 import { countsInTotals, internalTransferIds, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_VERSION } from '@/lib/sms-parser';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
@@ -162,6 +164,13 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),
     issues,
+    // Only in an internal capture-trace build: launch phases and capture page
+    // timings as phase names, counts and milliseconds. No message content,
+    // identifier or date is recorded by either sink.
+    timings: captureTraceEnabled()
+      ? { launch: getLaunchMetrics().map(metric => ({ phase: metric.phase, elapsedMs: Math.round(metric.elapsedMs) })),
+        capture: captureTraceSnapshot() }
+      : null,
   };
 }
 

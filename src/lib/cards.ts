@@ -93,8 +93,13 @@ function sameInputs(a: CardInputs, b: CardInputs): boolean {
 }
 
 let openDuesCache: (CardInputs & { day: string; value: DueWithStatus[] }) | null = null;
-let paymentsCache: { transactions: Transaction[]; accounts: Account[]; byKey: Map<string, Transaction[]> } | null =
-  null;
+let paymentsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  byKey: Map<string, Transaction[]>;
+  /** Rows that could be a card payment for SOME card; see cardPaymentsOf. */
+  candidates: Transaction[];
+} | null = null;
 let activityCache: { transactions: Transaction[]; byAccount: Map<string, string> } | null = null;
 
 export function estimatedMinimumFils(totalFils: number): number {
@@ -263,6 +268,18 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
       transactions: state.transactions,
       accounts: state.accounts,
       byKey: new Map(),
+      // Narrow the ledger ONCE per ledger, not once per card. Both conditions
+      // below are `isCardPayment`'s own, and neither reads the id set, so a row
+      // failing them cannot be a payment toward any card — which makes this a
+      // superset of every per-card answer, and filtering a superset with the
+      // same predicate gives the same result. It matters because the walk it
+      // replaces is the whole ledger per card: on a real 14,816-row ledger with
+      // ten statements, `openDues` spent 65ms here, and only 1,662 of those rows
+      // were transfers at all.
+      candidates: state.transactions.filter((t) =>
+        t.isTransfer === true &&
+        !((t.source === 'sms' || t.smsKey || t.transferEvidence || t.transferDecision) &&
+          isTransferCandidate(t))),
     };
   }
   const hit = paymentsCache.byKey.get(key);
@@ -271,7 +288,7 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && ids.has(a.id)).map((a) => a.id),
   );
-  const matched = state.transactions.filter((t) => isCardPayment(t, ids, creditIds));
+  const matched = paymentsCache.candidates.filter((t) => isCardPayment(t, ids, creditIds));
 
   /**
    * One settlement, two rows, counted as two payments.

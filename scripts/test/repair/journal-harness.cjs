@@ -48,7 +48,10 @@ function harness(options = {}) {
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
-    Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) } };
+    Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) },
+    // Home defers its insight projection until interactions settle. Run it
+    // inline: these tests assert the settled screen, not the scheduling.
+    InteractionManager: { runAfterInteractions: (task) => { task(); return { cancel() {} }; } } };
   const dependencies = {
     react, 'react/jsx-runtime': runtime, 'react-native': native,
     'expo-linear-gradient': { LinearGradient: (props) => jsx('Gradient', props) },

@@ -234,7 +234,16 @@ export const applyMaterializedImportBatch = (
       transferInternalIds: state.transferInternalIds ?? [],
     };
   }
-  const transferReconciliation = reconcileTransfers(retained, repaired.accounts);
+  // Reconcile the rows this import actually STORES. Reconciling `retained`
+  // instead classified against the pre-normalization graph, where a row with
+  // explicit own-ownership may still seed the absorption step it is excluded
+  // from once `normalizeTransferLinks` has written its match — so an ordinary
+  // payment sharing an amount and a day with a genuine own-account pair could
+  // be persisted as an internal transfer and vanish from every total.
+  const transactions = sortTransactions(
+    normalizeTransferLinks(retained, repaired.accounts),
+  );
+  const transferReconciliation = reconcileTransfers(transactions, repaired.accounts);
 
   return {
     ...repaired,
@@ -242,9 +251,7 @@ export const applyMaterializedImportBatch = (
       repaired === merged
         ? merged.cardDues
         : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
-    transactions: sortTransactions(
-      normalizeTransferLinks(retained, repaired.accounts),
-    ),
+    transactions,
     transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
     transferInternalIds: [...reconciliationInternalIds(transferReconciliation)],
   };
