@@ -270,3 +270,18 @@ test('Settings and draining use the same availability gate while permission revo
   assert.match(copy.t('notifAccessFull', 'en'), /without SMS access/);
   assert.match(copy.t('notifAccessFull', 'ar'), /دون إذن الرسائل/);
 });
+
+
+test('foreground notification drain is independent of SMS freshness and Settings can recover it', () => {
+  const hook = read('src/hooks/use-auto-import.ts');
+  const settings = read('src/app/settings.tsx');
+  assert.match(hook, /const runAndroidNotificationDrain = useCallback/);
+  assert.match(hook, /captureExecutor\.execute\('notification-only'\)/);
+  assert.match(hook, /Android's NotificationListenerService can enqueue a bank alert/);
+  assert.match(hook, /setTimeout\([\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?, 350\)/);
+  const drainStart = hook.indexOf('const runAndroidNotificationDrain = useCallback');
+  const drainEnd = hook.indexOf(`/**\n   * The current scan`, drainStart);
+  const drainBody = hook.slice(drainStart, drainEnd);
+  assert.doesNotMatch(drainBody, /lastScanAt|RESCAN_AFTER_MS|hasSmsPermission|getInboxSms/);
+  assert.match(settings, /await runAndroidNotificationDrain\(\);[\s\S]*?setNotifDiagnostics\(await reader\.getDiagnostics\(\)\)/);
+});

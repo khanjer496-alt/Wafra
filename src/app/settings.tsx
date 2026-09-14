@@ -186,6 +186,7 @@ export default function SettingsScreen() {
   const iosCapturePreferenceInFlight = useRef<Promise<void> | null>(null);
   const {
     captureState,
+    runAndroidNotificationDrain,
     iosCaptureStatus,
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
@@ -612,10 +613,16 @@ export default function SettingsScreen() {
     const reader = NotificationReader;
     if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
     setNotifDiagnosticsBusy(true);
-    try { setNotifDiagnostics(await reader.getDiagnostics()); }
+    try {
+      // This recovery surface should do more than recount the queue: drain the
+      // encrypted bank-notification candidates through the normal parser and
+      // durable write path first. It never touches the SMS inbox.
+      await runAndroidNotificationDrain();
+      setNotifDiagnostics(await reader.getDiagnostics());
+    }
     catch { setNotifDiagnostics(null); }
     finally { setNotifDiagnosticsBusy(false); }
-  }, [notifAvailable]);
+  }, [notifAvailable, runAndroidNotificationDrain]);
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {

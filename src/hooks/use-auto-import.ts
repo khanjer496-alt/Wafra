@@ -506,6 +506,8 @@ let importInFlight: {
 export type AutoImport = {
   /** Scan now. `interactive` decides who owes the user feedback. */
   runAutoImport: (interactive: boolean) => Promise<void>;
+  /** Drain only the encrypted Android bank-notification queue; never reads SMS. */
+  runAndroidNotificationDrain: () => Promise<void>;
   /** Android has not granted READ_SMS. */
   needsPermission: boolean;
   /** What the capture surface should say on this platform right now. */
@@ -1080,6 +1082,65 @@ export function useAutoImport(
     [startAutoImport, toast],
   );
 
+  const runAndroidNotificationDrain = useCallback(async (): Promise<void> => {
+    if (Platform.OS !== 'android') return;
+
+    // Notification capture is independent from the SMS inbox. A recent SMS
+    // scan must never make the encrypted push queue look "fresh". Serialize
+    // behind any scan already mutating the ledger, then claim the same import
+    // lane for this lightweight notification-only pass.
+    const existing = importInFlight?.promise;
+    if (existing) await existing.catch(() => {});
+    if (importInFlight) return;
+
+    const current = getStateSnapshot();
+    if (!current.hydrated || !current.onboarded || current.captureOptOut ||
+      !isProActive(current) || !hasBankNotificationAccess()) return;
+
+    await syncAndroidNotificationAdmission(current).catch(() => {});
+    const operation = captureExecutor.execute('notification-only')
+      .then<AutoImportOutcome>((outcome) => {
+        if (outcome.kind === 'not-hydrated') return 'not-hydrated';
+        if (outcome.kind === 'needs-setup') return 'needs-setup';
+        return outcome.kind === 'imported' ? 'imported' : 'up-to-date';
+      })
+      .finally(() => {
+        if (importInFlight?.promise === operation) importInFlight = null;
+      });
+    importInFlight = { promise: operation, interactive: false };
+    await operation;
+  }, [captureExecutor, getStateSnapshot, syncAndroidNotificationAdmission]);
+
+  // Android's NotificationListenerService can enqueue a bank alert while the
+  // app is backgrounded without changing the SMS provider. Drain that source
+  // independently on first eligible foreground mount and every resume. This
+  // path never reads the SMS inbox, so it is cheap and bypasses SMS freshness.
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
+      !state.onboarded || state.captureOptOut || !entitlementActive) return;
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        if (!mounted || RNAppState.currentState !== 'active') return;
+        void runAndroidNotificationDrain().catch(() => {});
+      }, 350);
+    };
+    schedule();
+    const subscription = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') schedule();
+      else if (timer !== null) { clearTimeout(timer); timer = null; }
+    });
+    return () => {
+      mounted = false;
+      if (timer !== null) clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [entitlementActive, runAndroidNotificationDrain, state.captureOptOut,
+    state.hydrated, state.onboarded, watchForeground]);
+
   /**
    * The current scan, for the foreground listener to call.
    *
@@ -1312,6 +1373,7 @@ export function useAutoImport(
 
   return {
     runAutoImport,
+    runAndroidNotificationDrain,
     needsPermission: (needsPermission || sharedAccessUnavailable) &&
       !(Platform.OS === 'android' && hasBankNotificationAccess()),
     captureState: sharedAccessUnavailable &&

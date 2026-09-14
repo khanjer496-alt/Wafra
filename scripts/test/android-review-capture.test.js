@@ -218,6 +218,27 @@ const { scanInbox } = require('./build/auto-import.js');
   inboxRows = [];
   receivedRows = [];
   notificationRows = [{
+    id: 'adcb-notification-format-0001',
+    pkg: 'com.adcb.nexgen',
+    title: 'ADCBAlert',
+    text: 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT',
+    ts: NOW + 5_250,
+  }];
+  const adcbPush = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('the exact ADCB Android push format imports through the full notification parser path',
+    adcbPush.parsed.length === 1 && adcbPush.reviewCandidates.length === 0 &&
+      adcbPush.parsed[0]?.amountFils === 2590 && adcbPush.parsed[0]?.merchant === 'Test Merchant' &&
+      adcbPush.parsed[0]?.card?.last4 === '7720' && adcbPush.parsed[0]?.card?.kind === 'credit' &&
+      adcbPush.parsed[0]?.date === '2026-09-14',
+    JSON.stringify(adcbPush));
+  const ackBeforeAdcbPush = acknowledgedNotifications.length;
+  await adcbPush.commit();
+  ok('the ADCB push is acknowledged only after the parsed row commit boundary',
+    acknowledgedNotifications.length === ackBeforeAdcbPush + 1 &&
+      acknowledgedNotifications.includes('adcb-notification-format-0001'),
+    JSON.stringify(acknowledgedNotifications));
+
+  notificationRows = [{
     id: 'hostile-notification-0001',
     pkg: 'com.example.chat',
     title: 'Friends',
