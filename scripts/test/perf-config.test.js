@@ -802,6 +802,32 @@ function bodyOf(source, header) {
     /\[getStateSnapshot, state\.dailySummary, state\.hydrated, state\.onboarded, state\.transactions, watchForeground\]/.test(autoImport) &&
       !/\}, \[state, watchForeground\]\);/.test(autoImport),
     'history progress, settings changes, and other unrelated reducer updates must not reschedule the daily summary');
+
+  ok('Android resume catch-up leaves the first reopened frames to UI/input',
+    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*1_500/.test(autoImport) &&
+      /shouldSkipFreshAndroidResumeScan\(\)/.test(autoImport) &&
+      /setTimeout\([\s\S]*?scheduler\.request\(\)[\s\S]*?ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport),
+    'a fresh source-free resume should do no inbox work, and a stale one must not start it while Android restores the window');
+
+  const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
+  ok('Android history repair also waits past the resume interaction window',
+    /FOREGROUND_HISTORY_RESUME_GRACE_MS\s*=\s*2_000/.test(historyImport) &&
+      /const timer = setTimeout/.test(historyImport) &&
+      /setTimeout\([\s\S]*?void run\(\)[\s\S]*?FOREGROUND_HISTORY_RESUME_GRACE_MS\)/.test(historyImport),
+    'parser migration is maintenance work and must not start or restart in the first launch/resume frames');
+
+  const captureExecutor = stripComments(read('src/lib/capture-executor.ts'));
+  ok('routine capture yields between collection and synchronous import planning',
+    /collected\.parsed\.length > 0 \|\| collected\.declined\.length > 0/.test(captureExecutor) &&
+      /await yieldForegroundTurn\(\)/.test(captureExecutor),
+    'a completed native inbox read must give pending UI/input a turn before planning and reconciliation');
+
+  const home = stripComments(read('src/screens/journal-home-screen.tsx'));
+  ok('Home resume clock does not invalidate full-ledger projections within the same day',
+    /const projectionDay\s*=/.test(home) &&
+      /state\.marketId, period, projectionDay, hasPendingReview\]/.test(home) &&
+      /state\.marketId, period, projectionDay\]/.test(home),
+    'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

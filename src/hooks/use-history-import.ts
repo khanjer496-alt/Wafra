@@ -18,21 +18,14 @@ import {
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { useStore } from '@/lib/store';
-import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-// Every page costs one provider query (the SMS provider sorts the whole
-// matching inbox per call — there is no SQL LIMIT), one store dispatch that
-// re-renders every mounted screen, and one forced encrypted ledger write. The
-// page size is the multiplier on all three. 100-row pages paid that overhead
-// twenty times more often than 2,000-row pages did while the parse loop was
-// already yielding per frame-sized slice; 500 keeps each page's JS work short
-// without turning a large inbox into hundreds of full-ledger commits.
-const HISTORY_IMPORT_PAGE_SIZE = 500;
-// One idle window between pages so a page commit never lands back-to-back
-// with the next provider read. Not a measured phone constant; see the parse
-// yield notes in auto-import.ts for the trace flag that verifies it.
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
+const HISTORY_IMPORT_PAGE_SIZE = 100;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
+// Resuming the window is not idle time. Give Android a usable frame/input
+// window before parser-migration maintenance restarts; subsequent pages retain
+// the normal 500ms cooperative gap.
+const FOREGROUND_HISTORY_RESUME_GRACE_MS = 2_000;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -75,11 +68,8 @@ export function useHistoryImport(): void {
       // Keep pages small and leave a real idle window between them so Hermes
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
-      if (RNAppState.currentState === 'active') {
-        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
-      } else {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -122,11 +112,7 @@ export function useHistoryImport(): void {
       // Resolving promises does not give pending UI/input work a macrotask.
       // Separate parsing/review from the synchronous planning/reducer work.
       // This is cooperative scheduling, not a claim of off-thread parsing.
-      if (RNAppState.currentState === 'active') {
-        await waitForForegroundHistoryIdle();
-      } else {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
@@ -158,10 +144,17 @@ export function useHistoryImport(): void {
 
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
-    void run().catch(() => {
-      // The coordinator has persisted a body-free failure. Home and Settings
-      // own recovery; a failed cursor must not be marked complete to unblock UI.
-    });
+    // Hydration already does substantial ledger normalization. Starting parser
+    // migration in the same commit makes a cold/recreated launch look frozen
+    // even though the history job itself yields between pages. Give the first
+    // usable screen the same grace period as a foreground resume.
+    const timer = setTimeout(() => {
+      void run().catch(() => {
+        // The coordinator has persisted a body-free failure. Home and Settings
+        // own recovery; a failed cursor must not be marked complete to unblock UI.
+      });
+    }, FOREGROUND_HISTORY_RESUME_GRACE_MS);
+    return () => clearTimeout(timer);
   }, [run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
 
   useEffect(() => {
@@ -172,12 +165,29 @@ export function useHistoryImport(): void {
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
+      if (next !== 'active') {
+        if (resumeTimer !== null) {
+          clearTimeout(resumeTimer);
+          resumeTimer = null;
+        }
+        return;
+      }
       const progress = getStateSnapshot().historyImport;
       if (progress?.status !== 'paused' && progress?.status !== 'running') return;
-      void run().catch(() => {});
+      if (resumeTimer !== null) clearTimeout(resumeTimer);
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        const latest = getStateSnapshot().historyImport;
+        if (RNAppState.currentState !== 'active' ||
+          (latest?.status !== 'paused' && latest?.status !== 'running')) return;
+        void run().catch(() => {});
+      }, FOREGROUND_HISTORY_RESUME_GRACE_MS);
     });
-    return () => subscription.remove();
+    return () => {
+      if (resumeTimer !== null) clearTimeout(resumeTimer);
+      subscription.remove();
+    };
   }, [getStateSnapshot, run]);
 }

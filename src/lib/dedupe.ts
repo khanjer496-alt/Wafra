@@ -1,5 +1,5 @@
 import { canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
-import type { CaptureInstrument, Transaction, TransactionType } from '@/lib/types';
+import type { CaptureInstrument, CaptureSource, Transaction, TransactionType } from '@/lib/types';
 
 /**
  * Deciding whether a parsed message is one the ledger already has.
@@ -125,6 +125,8 @@ export interface DuplicateCandidate {
   /** Capture time, independent of the channel-specific SMS fingerprint. */
   ts?: number;
   channel?: CaptureChannel;
+  /** Structured ingest provenance; PDF/CSV are statement rows. */
+  captureSource?: CaptureSource;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
   accountId?: string;
   captureInstrument?: CaptureInstrument;
@@ -207,6 +209,21 @@ interface SeenEvent {
   userEdited?: boolean;
   /** One capture explains one event on the other channel, not every one. */
   consumed?: boolean;
+}
+
+interface SeenStatementPairEvent {
+  date: string;
+  amountFils: number;
+  type: TransactionType;
+  accountId?: string;
+  captureInstrument?: CaptureInstrument;
+  captureSource?: CaptureSource;
+  id?: string;
+  consumed: boolean;
+}
+
+function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
+  return source === 'pdf' || source === 'csv';
 }
 
 /**
@@ -338,6 +355,42 @@ export function duplicateGuard(
     else crossChannel.set(key, [event]);
     if (event.id) crossById.set(event.id, event);
   };
+  /**
+   * Statement ↔ live-capture overlap cannot use the push/SMS clock/title rule.
+   * Statements commonly provide a date-only timestamp and a card-network
+   * descriptor while the live alert provides a real time and friendly merchant.
+   * Match only when exactly one side is proven PDF/CSV and the resolved money
+   * facts agree. Every row is consumable once, preserving repeated equal charges.
+   */
+  const statementPairEvents: SeenStatementPairEvent[] = [];
+  const statementPairById = new Map<string, SeenStatementPairEvent>();
+  const noteStatementPair = (event: SeenStatementPairEvent) => {
+    statementPairEvents.push(event);
+    if (event.id) statementPairById.set(event.id, event);
+  };
+  const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
+    if (!c.accountId) return undefined;
+    const incomingStatement = isStatementCaptureSource(c.captureSource);
+    // Provenance is the permission to relax title/time. PDF/CSV on BOTH sides
+    // are two statement rows, and no statement on either side means this fuzzy
+    // matcher has no authority at all.
+    const matches = statementPairEvents.filter((row) =>
+      !row.consumed &&
+      !!row.accountId &&
+      row.accountId === c.accountId &&
+      row.type === c.type &&
+      isStatementCaptureSource(row.captureSource) !== incomingStatement &&
+      Math.abs(row.amountFils - c.amountFils) <= 1 &&
+      sameOrAdjacentDate(row.date, c.date) &&
+      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
+    if (!matches.length) return undefined;
+    matches.sort((a, b) => {
+      const score = (row: SeenStatementPairEvent) =>
+        (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
+      return score(a) - score(b);
+    });
+    return matches[0];
+  };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();
   const cardPaymentById = new Map<string, SeenCardPayment>();
@@ -362,6 +415,21 @@ export function duplicateGuard(
         title: t.title,
         captureInstrument: t.captureInstrument,
         userEdited: t.userEdited,
+      });
+    }
+    // Statement provenance is persisted on parser-owned rows, but older live
+    // SMS rows legitimately have no captureSource at all. Index both groups;
+    // the matcher itself requires exactly one side to be PDF/CSV.
+    if (t.source === 'sms' || isStatementCaptureSource(t.captureSource)) {
+      noteStatementPair({
+        date: t.date,
+        amountFils: t.amountFils,
+        type: t.type,
+        accountId: t.accountId,
+        captureInstrument: t.captureInstrument,
+        captureSource: t.captureSource,
+        id: t.id,
+        consumed: false,
       });
     }
     if (t.cardPaymentSide) {
@@ -502,6 +570,17 @@ export function duplicateGuard(
           }
         }
       }
+      const statementMatch = statementPairMatch(c);
+      if (statementMatch) {
+        statementMatch.consumed = true;
+        // Never let a later statement descriptor overwrite a richer live row.
+        // In the reverse direction the live capture may heal the stored row,
+        // which keeps its persisted statement provenance for future reimports.
+        if (!isStatementCaptureSource(c.captureSource)) {
+          lastMatchedId = statementMatch.id ?? null;
+        }
+        return true;
+      }
       // Deliberately asymmetric. Only a PUSH is dropped for merely matching
       // the money, the day and the direction — SMS has the fuller text and
       // the better parse, so it wins. When the SMS is the one arriving
@@ -560,6 +639,8 @@ export function duplicateGuard(
       if (occurrence) occurrence.consumed = true;
       const cardPayment = cardPaymentById.get(id);
       if (cardPayment) cardPayment.paired = true;
+      const statementPair = statementPairById.get(id);
+      if (statementPair) statementPair.consumed = true;
     },
     consumeCapture(id) {
       // Exact source identity has accounted for this row in the ordinary
@@ -570,6 +651,8 @@ export function duplicateGuard(
       if (row) row.consumed = true;
       const occurrence = seenById.get(id);
       if (occurrence) occurrence.consumed = true;
+      const statementPair = statementPairById.get(id);
+      if (statementPair) statementPair.consumed = true;
     },
     add(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
@@ -582,6 +665,16 @@ export function duplicateGuard(
         id: c.id,
         title: c.title,
         captureInstrument: c.captureInstrument,
+      });
+      noteStatementPair({
+        date: c.date,
+        amountFils: c.amountFils,
+        type: c.type,
+        accountId: c.accountId,
+        captureInstrument: c.captureInstrument,
+        captureSource: c.captureSource,
+        id: c.id,
+        consumed: false,
       });
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
         noteCardPayment(`${c.amountFils}|${c.accountId}`, {

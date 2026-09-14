@@ -110,6 +110,16 @@ const retireLegacyShortcutCapture = async (): Promise<'not-needed' | 'complete'>
  */
 const RESCAN_AFTER_MS = 30_000;
 let lastScanAt = 0;
+const shouldSkipFreshAndroidResumeScan = (now = Date.now()): boolean =>
+  lastScanAt > 0 && now - lastScanAt < RESCAN_AFTER_MS;
+// Foregrounding is an interaction-critical transition: Android is restoring
+// the window, navigation and input dispatch at the same time. Starting inbox
+// bridge/parsing work 250ms later still lands directly in that hot path and is
+// visible as the app freezing immediately after it reopens. Provider-change
+// signals remain fast; only the lifecycle-triggered catch-up gets a longer
+// grace period. A real new SMS received while backgrounded is still picked up
+// after this bounded delay (or immediately by a provider event/pull refresh).
+const ANDROID_RESUME_SCAN_GRACE_MS = 1_500;
 
 /**
  * Android provider access is a process-wide fact, not a screen-local one.
@@ -1113,15 +1123,36 @@ export function useAutoImport(
       if (ongoing) await ongoing.catch(() => {});
       if (canScan()) await latestScan.current(false);
     }, canScan);
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     // The native observer checks permission only when it starts. Recreate it
     // after a denied permission is restored; foreground checks stay available
     // while it is denied so returning from Settings can recover capture.
     const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => scheduler.request());
     const foreground = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') scheduler.request();
+      if (next !== 'active') {
+        if (resumeTimer !== null) {
+          clearTimeout(resumeTimer);
+          resumeTimer = null;
+        }
+        return;
+      }
+      // A quick app switch after a completed scan has no new source evidence.
+      // Do not schedule an expensive safety reread just because Android emitted
+      // another lifecycle edge; the native inbox-change listener still fires
+      // immediately if a message actually arrived while Wafra was away.
+      if (shouldSkipFreshAndroidResumeScan()) return;
+      // Do not compete with Android's first resumed frames. The provider
+      // listener above still requests immediately when there is actual inbox
+      // evidence, so this delay applies only to the source-free safety catch-up.
+      if (resumeTimer !== null) clearTimeout(resumeTimer);
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        if (canScan()) scheduler.request();
+      }, ANDROID_RESUME_SCAN_GRACE_MS);
     });
     return () => {
       mounted = false;
+      if (resumeTimer !== null) clearTimeout(resumeTimer);
       unsubscribe();
       foreground.remove();
       scheduler.dispose();

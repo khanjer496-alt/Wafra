@@ -28,7 +28,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
-import type { Account, AppState, Bill, CaptureInstrument, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
+import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
 /**
@@ -56,7 +56,7 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Structured settlement side survives server raw-body discard on iOS. */
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
-  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  captureSource?: CaptureSource;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -1037,6 +1037,7 @@ export function buildImportPlan(
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
         type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+        captureSource: p.captureSource,
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
         captureInstrument: captureInstrumentOf(p),
       };
@@ -1081,6 +1082,7 @@ export function buildImportPlan(
         ts: p.smsTs,
         source: 'sms',
         smsKey,
+        captureSource: p.captureSource,
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1097,6 +1099,7 @@ export function buildImportPlan(
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+      captureSource: p.captureSource,
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
@@ -1274,6 +1277,7 @@ export function buildImportPlan(
       captureInstrument: captureInstrumentOf(p),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,

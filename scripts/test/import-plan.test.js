@@ -1413,6 +1413,116 @@ const DECLINE_SMS = [{
   ok('two real same-amount charges on one day are two rows', plan.txCount === 2, plan.txCount);
 }
 
+/* ── statement rows reconcile with live captures by money facts, not title ──
+ *
+ * A statement names the acquirer descriptor and usually has only a posting
+ * date; the live alert names the friendly merchant and has the actual clock.
+ * Treating those strings/timestamps as identity produced two rows for one
+ * charge. The safe universal boundary is explicit PDF/CSV provenance + same
+ * resolved account + direction + amount/date, consumed one-for-one.
+ */
+{
+  const { duplicateGuard } = require('./build/dedupe.js');
+  const account = {
+    id: 'adcb-card', name: 'ADCB Credit •3215', kind: 'card', cardType: 'credit',
+    last4: '3215', bankName: 'ADCB', openingFils: 0, color: '#fff',
+  };
+  const liveTs = Date.parse('2026-09-13T11:08:00Z');
+  const midnight = Date.parse('2026-09-13T00:00:00Z');
+  const live = {
+    id: 'live-endurance', type: 'expense', amountFils: 3215, category: 'software',
+    accountId: account.id, title: 'Endurancein', date: '2026-09-13', source: 'sms',
+    ts: liveTs, smsKey: `s${liveTs}-3215`,
+    captureInstrument: { last4: '3215', kind: 'credit', bankIdentity: 'adcb' },
+  };
+
+  {
+    const guard = duplicateGuard([live]);
+    const statement = {
+      date: '2026-09-13', amountFils: 3215, title: 'PAYPAL *ENDURANCEIN', type: 'expense',
+      accountId: account.id, ts: midnight, smsKey: `s${midnight}-3215`, captureSource: 'csv',
+      captureInstrument: { last4: '3215', kind: 'unknown', bankIdentity: 'adcb' },
+    };
+    ok('statement dedupe: different statement descriptor and date-only clock still match the live charge',
+      guard.has(statement) && guard.takeMatchedId() === null);
+  }
+
+  {
+    const statementStored = {
+      ...live,
+      id: 'statement-endurance', title: 'PAYPAL *ENDURANCEIN', ts: midnight,
+      smsKey: `s${midnight}-3215`, captureSource: 'pdf',
+      captureInstrument: { last4: '3215', kind: 'unknown', bankIdentity: 'adcb' },
+    };
+    const guard = duplicateGuard([statementStored]);
+    const incomingLive = {
+      date: live.date, amountFils: live.amountFils, title: live.title, type: live.type,
+      accountId: live.accountId, ts: live.ts, smsKey: live.smsKey, channel: 'inbox',
+      captureInstrument: live.captureInstrument,
+    };
+    ok('statement dedupe: reverse arrival finds the stored statement row so the richer live capture can heal it',
+      guard.has(incomingLive) && guard.takeMatchedId() === 'statement-endurance');
+  }
+
+  {
+    const repeated = duplicateGuard([
+      live,
+      { ...live, id: 'live-endurance-2', title: 'Different friendly title', ts: liveTs + 3_600_000,
+        smsKey: `s${liveTs + 3_600_000}-3215` },
+    ]);
+    const firstStatement = {
+      date: '2026-09-13', amountFils: 3215, title: 'NETWORK DESCRIPTOR A', type: 'expense',
+      accountId: account.id, ts: midnight, smsKey: `s${midnight}-3215`, captureSource: 'pdf',
+    };
+    const secondStatement = {
+      ...firstStatement, title: 'NETWORK DESCRIPTOR B', ts: midnight + 1,
+      smsKey: `s${midnight + 1}-3215`,
+    };
+    ok('statement dedupe: two statement rows consume two equal live charges one-for-one',
+      repeated.has(firstStatement) && repeated.has(secondStatement));
+  }
+
+  {
+    const driftGuard = duplicateGuard([live]);
+    const postedNextDayRounded = {
+      date: '2026-09-14', amountFils: 3214, title: 'PAYPAL *ENDURANCEIN', type: 'expense',
+      accountId: account.id, ts: Date.parse('2026-09-14T00:00:00Z'),
+      smsKey: `s${Date.parse('2026-09-14T00:00:00Z')}-3214`, captureSource: 'pdf',
+    };
+    ok('statement dedupe: explicit statement provenance permits bounded adjacent-date/one-fil posting drift',
+      driftGuard.has(postedNextDayRounded));
+
+    const ordinaryGuard = duplicateGuard([live]);
+    ok('statement dedupe: the same fuzzy money match is forbidden for an ordinary capture',
+      !ordinaryGuard.has({ ...postedNextDayRounded, captureSource: undefined, channel: 'inbox' }));
+
+    const otherAccountGuard = duplicateGuard([live]);
+    ok('statement dedupe: same money on another account is never collapsed',
+      !otherAccountGuard.has({ ...postedNextDayRounded, accountId: 'other-card' }));
+  }
+
+  {
+    const statementRow = {
+      kind: 'transaction', type: 'expense', amountFils: 3215, currency: 'AED',
+      merchant: 'PAYPAL *ENDURANCEIN', date: '2026-09-13', dueDay: null, minDueFils: null,
+      card: { last4: '3215', kind: 'credit' }, reference: null, transferHint: false,
+      snapshotFils: null, snapshotKind: null, categoryGuess: 'software', categoryDeliberate: true,
+      captureSource: 'csv', smsTs: midnight, sender: 'ADCB', channel: 'inbox',
+    };
+    const state = { ...BASE, accounts: [account], accountHints: { 3215: account.id }, transactions: [live] };
+    const overlap = buildImportPlan([statementRow], state, midnight);
+    ok('statement dedupe: real import path does not append a second differently named row',
+      overlap.txCount === 0, overlap.batch.transactions);
+
+    const fresh = buildImportPlan([{ ...statementRow, amountFils: 9999, smsTs: midnight + 10 }], {
+      ...BASE, accounts: [account], accountHints: { 3215: account.id }, transactions: [],
+    }, midnight + 10);
+    ok('statement provenance: a newly imported statement row persists its PDF/CSV source',
+      fresh.txCount === 1 && fresh.batch.transactions[0]?.captureSource === 'csv',
+      fresh.batch.transactions[0]);
+  }
+}
+
 {
   const fresh = [{ body: 'Purchase of AED 42.00 with Debit Card ending 1234 at TALABAT, DUBAI.', ts: T0 + 600_000 }];
   const s = scan(fresh);

@@ -273,6 +273,16 @@ export const createCaptureExecutor = ({
     }
 
     alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
+    // Native inbox collection returns a whole page at once. Even though parsing
+    // itself yields cooperatively, its final promise can resolve in the same JS
+    // turn as planning/reconciliation. Give pending input/render work one turn
+    // before the synchronous money planner, matching the relay path below.
+    if (collected.parsed.length > 0 || collected.declined.length > 0) {
+      await yieldForegroundTurn();
+    }
+    if (captureStopped(activeLedger, collected.source)) {
+      return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+    }
     // This is deliberately after the final pre-import await. importBatch
     // dispatches synchronously below, so a stale plan can never stamp a
     // restored ledger as having completed a historical parser migration.

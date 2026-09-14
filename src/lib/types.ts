@@ -5,6 +5,9 @@ import type { TransferEvidence, TransferDecision, TransferMatch } from '@/lib/tr
 
 export type TransactionType = 'expense' | 'income';
 
+/** How an automatically captured bank event reached the parser. */
+export type CaptureSource = 'shortcut' | 'email' | 'pdf' | 'csv';
+
 export type CategoryId =
   | 'groceries'
   | 'dining'
@@ -152,6 +155,11 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /**
+   * Structured ingest provenance. PDF/CSV identify statement rows whose event
+   * time and merchant wording are intentionally coarser than a live capture.
+   */
+  captureSource?: CaptureSource;
   captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current

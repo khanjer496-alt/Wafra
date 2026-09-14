@@ -1,6 +1,6 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 
@@ -135,40 +135,24 @@ export default function JournalHomeScreen() {
 
   const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
   const hasPendingReview = reviewCount > 0;
+  // The clock is refreshed on every foreground resume for greeting/review
+  // freshness, but Home's money projections are day-based. Depending on the
+  // Date object itself made every reopen synchronously re-walk a large ledger
+  // twice before Android could feel responsive, even when no money changed.
+  // A review expiring still invalidates the Home projection explicitly below.
+  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
     // Status/progress changes must not recompute the financial projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
-      state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
+      state.ledgerMoney, state.marketId, period, projectionDay, hasPendingReview]);
   const payments = dashboard.upcoming.items;
-  // A SECOND whole-ledger projection, and the most expensive thing this screen
-  // does: `includeInsights` runs the historical analysis the cheap `home`
-  // surface above deliberately skips, and everything but `.insight` is thrown
-  // away. It feeds one optional card, so skip it outright when that card is
-  // switched off — which every user who had hidden it was paying for on every
-  // render of Home.
-  const insightVisible = homeWidgetVisible(homeWidgets, 'insight');
-  // ...and not on the way to first paint even when it is on. Profiled against
-  // a real 14,816-row, 43-account ledger: the `home` projection above costs
-  // 9ms and this one costs 97ms, so Home spends ten times longer on the card
-  // than on everything the screen actually opens with. Let the cheap
-  // projection paint, then compute this once the interactions that follow the
-  // mount have settled; the card fills in a moment later.
-  const [insightSettled, setInsightSettled] = useState(false);
-  useEffect(() => {
-    if (!insightVisible || !state.hydrated || insightSettled) return;
-    const task = InteractionManager.runAfterInteractions(() => setInsightSettled(true));
-    return () => task.cancel();
-  }, [insightVisible, state.hydrated, insightSettled]);
-  const homeInsight = useMemo(() => (insightVisible && insightSettled
-    ? projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight
-    : null),
+  const homeInsight = useMemo(() => projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight,
     // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [insightVisible, insightSettled,
-      state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
-      state.merchantOverrides, state.ledgerMoney, state.marketId, period, now]);
+    [state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
+      state.merchantOverrides, state.ledgerMoney, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
