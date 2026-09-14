@@ -663,10 +663,22 @@ function fastest(fn, runs = 7) {
     'the selected row already carries normalized transfer evidence; rebuilding the whole ledger graph on every tap blocks the JS thread');
 
   const tapped = bodyOf(haptics, 'export function tapped');
-  ok('routine Android taps do not schedule haptic bridge work',
-    !!tapped && tapped.includes("Platform.OS === 'android'") && tapped.includes('return;') &&
-      !tapped.includes('performAndroidHapticsAsync'),
-    'Android ripple is immediate feedback; a haptics bridge call on every navigation tap can overlap the navigation turn on OEM devices');
+  // This guard has been flipped twice in both directions, so it now pins the
+  // property its own rationale names -- "overlap the navigation turn" -- rather
+  // than the presence or absence of a call. A synchronous bridge hop in the tap
+  // handler is still banned. Deferring it to a later turn is what restores the
+  // feedback without the overlap, so that shape is required, not merely allowed.
+  const androidTap = tapped ? tapped.slice(tapped.indexOf("Platform.OS === 'android'")) : '';
+  const bridgeCall = androidTap.indexOf('performAndroidHapticsAsync');
+  const deferral = androidTap.indexOf('setTimeout(');
+  ok('routine Android taps never hop the haptics bridge on the navigation turn',
+    !!tapped && androidTap.includes('return;') &&
+      (bridgeCall === -1 || (deferral !== -1 && deferral < bridgeCall)),
+    'Android ripple is immediate feedback; a haptics bridge call on every navigation tap can overlap the navigation turn on OEM devices. Build 219 shipped with the call deleted and the lag persisted, so it is deferred rather than removed.');
+
+  ok('the deferred Android tap haptic uses an always-available constant',
+    bridgeCall === -1 || androidTap.includes('AndroidHaptics.Context_Click'),
+    'expo-haptics resolves these by reflection and throws when the field is absent: CONTEXT_CLICK predates minSdk 24, Segment_Tick is API 34+ and would silently no-op on older phones');
 }
 
 // ---------------------------------------------------------------------------
