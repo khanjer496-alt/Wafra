@@ -146,16 +146,23 @@ The repair is the key: `text: attachment(variable('Encoded Page'))`. The graph
 keeps its 98 actions and every other identifier and parameter. A test now
 fails any Combine or Split Text that binds `WFInput` or omits `text`.
 
-The published record `5a0da9b5…` still carries the broken key, and this host
-cannot sign or publish a Shortcut. `.github/workflows/ios-sign-history-shortcut.yml`
-generates the repaired graph from an exact main commit on a macOS runner,
-verifies it against the generator, converts it and signs it with
-`shortcuts sign --mode anyone`, and stores it as a workflow artifact and a
-prerelease asset under the file name `Wafra-History-v2-typed-date.signed.shortcut`.
-Apple installs a signed file under its basename, which is the name build 137
-already runs, so a phone can delete the installed Shortcut, open the signed
-file, and test the repaired graph without a new app build. Once a page imports
-on the phone, the Shortcut is published to iCloud from that phone, and the new
+The published record `5a0da9b5…` still carries the broken key. Neither this
+host nor a GitHub macOS runner can replace it: `shortcuts sign` refuses with
+"In order to do this, you must be signed into iCloud", which a CI runner never
+is (run 34852076884 recorded that refusal). Signing is therefore a Mac step:
+
+```bash
+bash scripts/sign-ios-paged-history-shortcut.sh
+```
+
+generates the repaired graph, runs the paging tests, verifies the graph
+against the generator (including the `text` key), converts it with `plutil`
+and signs it with `shortcuts sign --mode anyone` to
+`~/Desktop/Wafra-History-v2-typed-date.signed.shortcut`. Apple installs a
+signed file under its basename, which is the name build 137 already runs, so
+the phone can delete the installed Shortcut, open the signed file, and test
+the repaired graph without a new app build. Once a page imports on the phone,
+the Shortcut is published to iCloud (Share > Copy iCloud Link), and the new
 record ID replaces `5a0da9b5…` in `IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS`,
 `ios-paged-setup.ts`, `scripts/release/ios-public-shortcut-check.mjs` and
 `eas.json`, followed by an app build. Until then the public record check
