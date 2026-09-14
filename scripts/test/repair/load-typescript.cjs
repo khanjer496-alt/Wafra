@@ -29,6 +29,17 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
     exports, module,
     require: (name) => {
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // UI/parser repair harnesses isolate their own subject and intentionally
+      // do not execute foreground scheduling. The scheduling suite supplies an
+      // explicit counted stub; unrelated harnesses get an inert boundary so a
+      // new maintenance-priority import does not make dozens of UI tests model
+      // timers they do not own.
+      if (name === '@/lib/foreground-history-priority') {
+        return {
+          prioritizeForegroundNavigation() {},
+          waitForForegroundHistoryIdle: async () => {},
+        };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout, Date, Set, Map, Number, Math, Promise,

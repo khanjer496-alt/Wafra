@@ -14,7 +14,7 @@
       "url": "https://u.expo.dev/fa920e7b-c661-4517-917d-26e8b4878721",
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 1500
+      "fallbackToCacheTimeout": 0
     },
     "ios": {
       "icon": "./assets/images/icon.png",

@@ -38,6 +38,12 @@ function harness(options = {}) {
     '@/lib/android-history-background': { historyBackground: { canContinue: () => allowed, run: (job) => job(), cancel() {} } },
     '@/lib/purchases': { isProActive: () => true },
     '@/lib/launch-performance': { markLaunchPhase: () => events.push('mark') },
+    '@/lib/foreground-history-priority': {
+      waitForForegroundHistoryIdle: async () => {
+        events.push('yield');
+        if (options.pauseOnYield) allowed = false;
+      },
+    },
     '@/lib/store': { useStore: () => store },
   }, { setTimeout: (fn) => { events.push('yield'); if (options.pauseOnYield) allowed = false; fn(); return 1; } });
   hook.useHistoryImport();

@@ -211,6 +211,29 @@ export const applyMaterializedImportBatch = (
   }));
   const repaired = repairDuplicateStatements(merged);
   const retained = reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions));
+  const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
+
+  // First-history import arrives in bounded durable pages. Rebuilding the
+  // complete transfer graph after every page makes foreground history scale
+  // with (pages × ledger size) and pins Hermes while the user is trying to use
+  // the app. Intermediate pages therefore keep the last safe transfer-id
+  // snapshot only for provisional UI accounting and deliberately DROP the
+  // durable normalization receipt. The final page runs the exact full-ledger
+  // reconciliation below and restores a current receipt. If the process dies
+  // mid-history, hydration sees the missing receipt and fails safe by doing one
+  // exact reconciliation before trusting the ledger again.
+  if (historyStillRunning) {
+    return {
+      ...repaired,
+      cardDues:
+        repaired === merged
+          ? merged.cardDues
+          : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
+      transactions: sortTransactions(retained),
+      transferNormalizationVersion: undefined,
+      transferInternalIds: state.transferInternalIds ?? [],
+    };
+  }
   // Reconcile the rows this import actually STORES. Reconciling `retained`
   // instead classified against the pre-normalization graph, where a row with
   // explicit own-ownership may still seed the absorption step it is excluded

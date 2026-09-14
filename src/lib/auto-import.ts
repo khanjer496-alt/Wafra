@@ -41,6 +41,7 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -82,8 +83,10 @@ interface ParseYieldState {
 }
 
 function yieldToUi(): Promise<void> {
-  const delay = RNAppState?.currentState === 'active' ? FOREGROUND_PARSE_YIELD_MS : 0;
-  return new Promise((resolve) => setTimeout(resolve, delay));
+  if (RNAppState?.currentState !== 'active') {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return waitForForegroundHistoryIdle(FOREGROUND_PARSE_YIELD_MS);
 }
 
 const createParseYieldState = (): ParseYieldState => ({ startedAt: Date.now(), parsed: 0 });

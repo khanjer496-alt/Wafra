@@ -87,6 +87,7 @@ const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
 const surface = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
 const captureExecutor = fs.readFileSync(path.join(root, 'src/lib/capture-executor.ts'), 'utf8');
+const relay = fs.readFileSync(path.join(root, 'src/lib/relay.ts'), 'utf8');
 ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
   /from 'expo-file-system'/.test(transport) &&
   /from 'expo\/fetch'/.test(transport) &&
@@ -117,6 +118,13 @@ ok('a password-protected PDF is deferred and the rest of the batch still uploads
   !/return;/.test(uploadLoop));
 ok('a failed post-upload sync is reported, not folded into the pending status',
   /copy\.syncFailed/.test(surface) && /syncFailureReason/.test(surface));
+ok('statement upload and relay queue drain use the same Expo native fetch transport',
+  /from 'expo\/fetch'/.test(transport) && /from 'expo\/fetch'/.test(relay) &&
+    /return await expoFetch\(url/.test(relay));
+ok('queued statement rows retry without requiring another upload',
+  /queuedRetryNeededRef/.test(surface) &&
+    /AppState\.addEventListener\('change'/.test(surface) &&
+    /setTimeout\(\(\) => \{ void retryQueued\(\); \}, 1_500\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <

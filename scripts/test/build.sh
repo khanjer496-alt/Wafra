@@ -48,6 +48,7 @@ rewrite() {
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
       -e "s|from 'expo-constants'|from './stub-expo-constants'|" \
       -e "s|from 'expo-crypto'|from './stub-expo-crypto'|" \
+      -e "s|from 'expo/fetch'|from './stub-expo-fetch'|" \
       -e "s|from 'expo-secure-store'|from './stub-secure-store'|" \
       -e "s|from '@react-native-async-storage/async-storage'|from './stub-async-storage'|" \
       "$1" > "$2"
@@ -65,7 +66,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases markets i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
-         history-import diagnostic-export diagnostic-messages transaction-filter capture-trace \
+         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-filter capture-trace \
          launch-performance launch-benchmark \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \

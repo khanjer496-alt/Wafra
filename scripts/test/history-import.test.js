@@ -20,6 +20,11 @@ const autoImportSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/u
 const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8');
+const tabBarSource = fs.readFileSync(path.join(__dirname, '../../src/components/tab-bar.tsx'), 'utf8');
+const prioritySource = fs.readFileSync(path.join(
+  __dirname,
+  '../../src/lib/foreground-history-priority.ts',
+), 'utf8');
 const smsReaderNativeSource = fs.readFileSync(path.join(
   __dirname,
   '../../modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
@@ -87,6 +92,26 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
       /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
+  );
+  ok(
+    'tab touch-down reserves foreground JS time before navigation renders',
+    /onPressIn=\{\(\) => prioritizeForegroundNavigation\(\)\}/.test(tabBarSource),
+  );
+  ok(
+    'parser yields and page commits both respect the navigation-priority lease',
+    /waitForForegroundHistoryIdle\(FOREGROUND_PARSE_YIELD_MS\)/.test(
+      fs.readFileSync(path.join(__dirname, '../../src/lib/auto-import.ts'), 'utf8'),
+    ) &&
+      /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyHookSource) &&
+      /await waitForForegroundHistoryIdle\(\);/.test(historyHookSource) &&
+      /blockedUntil = Math\.max\(blockedUntil, now \+ quietMs\)/.test(prioritySource),
+  );
+  ok(
+    'intermediate history pages defer exact transfer reconciliation until completion',
+    /historyStillRunning[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
+      fs.readFileSync(path.join(__dirname, '../../src/lib/ledger-import.ts'), 'utf8'),
+    ) &&
+      /next\.historyImport\?\.status === 'running'/.test(storeSource),
   );
 
   eq('a new import starts paused with no provider cursor',
