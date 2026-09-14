@@ -73,8 +73,29 @@ import {
   type PushEnv,
 } from './push';
 
+interface DiagnosticEmailBinding {
+  send(message: {
+    to: string;
+    from: string;
+    subject: string;
+    text: string;
+    attachments: Array<{
+      content: string;
+      filename: string;
+      type: string;
+      disposition: 'attachment';
+    }>;
+  }): Promise<void>;
+}
+
 export interface Env extends PushEnv {
   DB: D1Database;
+  /** Optional Cloudflare Email Service binding for final-test diagnostic copies. */
+  DIAGNOSTIC_EMAIL?: DiagnosticEmailBinding;
+  /** Verified destination mailbox that receives tester diagnostic attachments. */
+  REPORT_EMAIL?: string;
+  /** Sender on a domain onboarded to Cloudflare Email Service. */
+  REPORT_FROM_EMAIL?: string;
   /** Domain routed to this Email Worker, for token@domain forwarding. */
   EMAIL_DOMAIN?: string;
   /**
@@ -149,6 +170,7 @@ const DEFAULT_MARKET = 'AE';
 const PUSH_COALESCE_SECONDS = 600;
 const textEncoder = new TextEncoder();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ANDROID_TESTER_DIAGNOSTIC_TEXT = 'Android tester diagnostics.';
 
 function headers(contentType?: string): HeadersInit {
   return {
@@ -564,6 +586,61 @@ async function sendRepositoryDispatch(env: Env, feedbackId: string): Promise<voi
   )
     .bind(feedbackId, status)
     .run();
+}
+
+/** Best-effort convenience copy for the owner's final-test inbox. */
+async function sendTesterDiagnosticEmail(
+  env: Env,
+  feedbackId: string,
+  record: {
+    appVersion: string;
+    platform: string;
+    locale: string | null;
+    text: string;
+    diagnostic: string | null;
+  },
+): Promise<void> {
+  if (!env.DIAGNOSTIC_EMAIL || !env.REPORT_EMAIL || !env.REPORT_FROM_EMAIL) return;
+  if (record.text !== ANDROID_TESTER_DIAGNOSTIC_TEXT || record.platform !== 'android') return;
+
+  const diagnostic = (() => {
+    if (!record.diagnostic) return null;
+    try {
+      return JSON.parse(record.diagnostic) as unknown;
+    } catch {
+      return null;
+    }
+  })();
+  const attachment = JSON.stringify({
+    id: feedbackId,
+    appVersion: record.appVersion,
+    platform: record.platform,
+    locale: record.locale,
+    text: record.text,
+    diagnostic,
+  }, null, 2);
+
+  try {
+    await env.DIAGNOSTIC_EMAIL.send({
+      to: env.REPORT_EMAIL,
+      from: env.REPORT_FROM_EMAIL,
+      subject: `Wafra Android diagnostic · ${record.appVersion} · ${feedbackId.slice(0, 8)}`,
+      text:
+        `A Wafra Android tester diagnostic was received.\n\n` +
+        `Report ID: ${feedbackId}\n` +
+        `App version: ${record.appVersion}\n` +
+        `Locale: ${record.locale ?? 'unknown'}\n\n` +
+        `The privacy-safe diagnostic JSON is attached. The Cloudflare D1 copy remains available for 14 days.`,
+      attachments: [{
+        content: b64encode(textEncoder.encode(attachment)),
+        filename: `wafra-diagnostic-${feedbackId}.json`,
+        type: 'application/json',
+        disposition: 'attachment',
+      }],
+    });
+  } catch {
+    // Report storage already succeeded. Email is a convenience channel only.
+  }
 }
 
 async function queueIsFull(env: Env, deviceId: string): Promise<boolean> {
@@ -2030,6 +2107,15 @@ export default {
       // The report is already durable. A GitHub/network failure updates the row
       // to `failed` without turning a successful submission into a client error.
       if (dispatched) ctx.waitUntil(sendRepositoryDispatch(env, id));
+      if (validated.text === ANDROID_TESTER_DIAGNOSTIC_TEXT && validated.platform === 'android') {
+        ctx.waitUntil(sendTesterDiagnosticEmail(env, id, {
+          appVersion: validated.appVersion,
+          platform: validated.platform,
+          locale: validated.locale,
+          text: validated.text,
+          diagnostic: validated.diagnostic,
+        }));
+      }
       return json({ id, dispatched }, 202);
     }
 
