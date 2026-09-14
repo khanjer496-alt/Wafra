@@ -36,6 +36,8 @@ interface NotificationReaderModule {
   openSettings(): boolean;
   /** Source-free local diagnostics; never returns notification text. */
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;
+  /** Explicit heavy recovery pass over notifications still visible in the shade. */
+  sweepVisible(): Promise<boolean>;
   /** Captured money-related notifications with ts >= sinceMs, oldest first. */
   getCaptured(sinceMs: number): Promise<CapturedNotification[]>;
   ackCaptured(ids: string[]): Promise<boolean>;

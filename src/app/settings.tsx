@@ -612,11 +612,19 @@ export default function SettingsScreen() {
   const refreshNotificationDiagnostics = useCallback(async () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
+    try { setNotifDiagnostics(await reader.getDiagnostics()); }
+    catch { setNotifDiagnostics(null); }
+  }, [notifAvailable]);
+  const recoverNotificationDiagnostics = useCallback(async () => {
+    const reader = NotificationReader;
+    if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
     setNotifDiagnosticsBusy(true);
     try {
-      // This recovery surface should do more than recount the queue: drain the
-      // encrypted bank-notification candidates through the normal parser and
-      // durable write path first. It never touches the SMS inbox.
+      // Recovery is intentionally explicit. Walking the full Android shade is
+      // too expensive for ordinary app open/resume, especially on OEMs that
+      // retain hundreds of notifications. Sweep once, drain the repaired
+      // encrypted queue, then read source-free counts.
+      await reader.sweepVisible?.();
       await runAndroidNotificationDrain();
       setNotifDiagnostics(await reader.getDiagnostics());
     }
@@ -1440,7 +1448,7 @@ export default function SettingsScreen() {
                 </ThemedText> : null}
               </View>
               <Button inline variant="outline" label={t('notifDiagnosticsRefresh')}
-                disabled={notifDiagnosticsBusy} onPress={() => void refreshNotificationDiagnostics()} />
+                disabled={notifDiagnosticsBusy} onPress={() => void recoverNotificationDiagnostics()} />
             </Block>
           )}
         </Section>

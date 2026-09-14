@@ -56,9 +56,15 @@ class NotificationReaderModule : Module() {
     AsyncFunction("setCaptureEnabled") { enabled: Boolean, expiresAtMs: Double ->
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
       val context = appContext.reactContext ?: return@AsyncFunction false
+      val wasEnabled = NotificationCapturePolicy.isEnabled(context)
       val expiresAt = if (expiresAtMs.isFinite() && expiresAtMs > 0.0) expiresAtMs.toLong() else 0L
-      val changed = NotificationCapturePolicy.setEnabled(context, enabled, expiresAt)
-      if (enabled && changed) BankNotificationListenerService.sweepConnected()
+      NotificationCapturePolicy.setEnabled(context, enabled, expiresAt)
+      val nowEnabled = NotificationCapturePolicy.isEnabled(context)
+      // Refreshing the bounded entitlement lease changes expiresAt on every
+      // foreground. That is not a new capture grant and must not rescan the
+      // entire Android notification shade. Sweep only on a real off -> on
+      // transition; explicit recovery has its own operation below.
+      if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
       true
     }
 
@@ -90,19 +96,7 @@ class NotificationReaderModule : Module() {
       val available = TrustedBankNotificationPackages.CAPTURE_ENABLED
       val systemAccess = available && hasSystemAccess(context)
       val admissionActive = available && NotificationCapturePolicy.isEnabled(context)
-      if (systemAccess && admissionActive) {
-        BankNotificationListenerService.resetAdmissionDiagnostics()
-        val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
-        if (!sweptImmediately) {
-          for (attempt in 0 until 10) {
-            if (BankNotificationListenerService.isConnected()) {
-              BankNotificationListenerService.sweepConnected()
-              break
-            }
-            Thread.sleep(50)
-          }
-        }
-      }
+      BankNotificationListenerService.resetAdmissionDiagnostics()
       val visibility = BankNotificationListenerService.visibilityDiagnostics(context)
       val admission = BankNotificationListenerService.admissionDiagnostics()
       val queued = if (admissionActive) {
@@ -123,6 +117,31 @@ class NotificationReaderModule : Module() {
       )
     }
 
+    /**
+     * Explicit, potentially expensive recovery pass over notifications that
+     * are still visible in the Android shade. Normal queue drains never call
+     * this: the listener captures new rows incrementally as they arrive.
+     */
+    AsyncFunction("sweepVisible") {
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
+        return@AsyncFunction false
+      }
+      val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
+      if (!sweptImmediately) {
+        for (attempt in 0 until 10) {
+          if (BankNotificationListenerService.isConnected()) {
+            BankNotificationListenerService.sweepConnected()
+            return@AsyncFunction true
+          }
+          Thread.sleep(50)
+        }
+        return@AsyncFunction false
+      }
+      true
+    }
+
     /** Captured money-related notifications with ts >= sinceMs, oldest first. */
     AsyncFunction("getCaptured") { sinceMs: Double ->
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction emptyList<Map<String, Any>>()
@@ -130,25 +149,6 @@ class NotificationReaderModule : Module() {
         ?: return@AsyncFunction emptyList<Map<String, Any>>()
       if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
         return@AsyncFunction emptyList<Map<String, Any>>()
-      }
-      // Re-sweep notifications that are still visible in the shade on every
-      // drain. This recovers an alert if Android delivered it while the JS
-      // bridge was starting, after an OEM restarted the listener, or before a
-      // corrected admission rule reached the current build. append() is
-      // idempotent for the same package/text/postTime tuple.
-      val sweptImmediately = BankNotificationListenerService.sweepOrRequestRebind(context)
-      if (!sweptImmediately) {
-        // requestRebind() is asynchronous. Without a short bounded wait the
-        // first manual refresh always read the queue before onListenerConnected
-        // had a chance to sweep the visible notification shade. On affected OEMs
-        // that looked exactly like a successful scan that found nothing.
-        for (attempt in 0 until 10) {
-          if (BankNotificationListenerService.isConnected()) {
-            BankNotificationListenerService.sweepConnected()
-            break
-          }
-          Thread.sleep(50)
-        }
       }
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
         val sourceClass = TrustedBankNotificationPackages.sourceClass(
