@@ -85,7 +85,7 @@ interface DiagnosticEmailBinding {
       type: string;
       disposition: 'attachment';
     }>;
-  }): Promise<void>;
+  }): Promise<{ messageId: string }>;
 }
 
 export interface Env extends PushEnv {
@@ -621,7 +621,7 @@ async function sendTesterDiagnosticEmail(
   }, null, 2);
 
   try {
-    await env.DIAGNOSTIC_EMAIL.send({
+    const result = await env.DIAGNOSTIC_EMAIL.send({
       to: env.REPORT_EMAIL,
       from: env.REPORT_FROM_EMAIL,
       subject: `Wafra Android diagnostic · ${record.appVersion} · ${feedbackId.slice(0, 8)}`,
@@ -638,8 +638,13 @@ async function sendTesterDiagnosticEmail(
         disposition: 'attachment',
       }],
     });
-  } catch {
-    // Report storage already succeeded. Email is a convenience channel only.
+    console.log('diagnostic_email_sent', feedbackId, result.messageId);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error
+      ? String((error as { code?: unknown }).code ?? 'unknown')
+      : 'unknown';
+    // Report storage already succeeded. Log only source-free delivery metadata.
+    console.warn('diagnostic_email_failed', feedbackId, code);
   }
 }
 
