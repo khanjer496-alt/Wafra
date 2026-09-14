@@ -30,10 +30,40 @@ Keep four top-level destinations: Home, Flow, Bills, Wallet. Move Settings to a
 header action. Keep transaction entry as a clear contextual action on Home and
 Transactions, not as a decorative centre tab.
 
-The current custom tab bar should eventually migrate to native tabs, but only
-in its own tested redesign branch. That change affects safe areas, deep links,
-screen persistence, screenshots, and accessibility, so it should not be folded
-into parser launch work.
+On iOS the tab bar is now the system one: `src/components/app-tabs-layout.ios.tsx`
+renders Expo Router native tabs, so iOS 26 draws it in Liquid Glass with SF
+Symbols and the system label font, and earlier iOS versions draw the standard
+UIKit bar. Android and the web keep the hand-built bar in
+`src/components/app-tabs-layout.tsx`. Content insets still come from
+`ScreenScaffold`: the native triggers opt out of the automatic scroll inset,
+and `useTabBarClearance` in native mode reads the per-tab safe-area inset
+(which already contains the system bar) instead of adding the custom bar's
+height. Bottom sheets read the window's own bottom inset for the same reason. Native tabs are a beta API in SDK 55, so the
+tab shell must be re-checked on a device after each Expo upgrade: safe areas,
+deep links, screen persistence, screenshots, and VoiceOver order.
+
+## Platform scope
+
+- **Liquid Glass.** Only where the system provides it: the iOS tab bar above
+  and the native stack headers that `ScreenHeader` already uses in its
+  `native` mode. Wafra's own bottom sheets stay opaque on purpose. They sit
+  over ledger figures, and a translucent surface would put amounts behind
+  amounts; the contrast has not been checked on a device, so do not add
+  `GlassView` to them without that check.
+- **App icon.** `assets/wafra.icon` is an Icon Composer document: the Wafra
+  mark as a white glass layer over the brand green. `ios.icon` in
+  `app.json` points at it, so iOS 26 renders the default, dark, clear and
+  tinted appearances from one source and Xcode renders the flat fallback for
+  older iOS. Android and the web keep `assets/images/icon.png`. The rendered
+  result has not yet been checked on a device or in Xcode; do that before a
+  store submission.
+- **iPad.** Deliberately off (`ios.supportsTablet: false`). Every screen is
+  designed for one phone-width column and iPhone-only Shortcuts capture; an
+  iPad listing would ship a stretched phone layout, which the Human Interface
+  Guidelines call out. Enabling it is its own project: a regular-width layout
+  for Home, Flow, Bills and Wallet, sidebar-adaptable tabs, iPad screenshots,
+  and store metadata. Until then the store listing is iPhone only, and that
+  is a scope choice, not an omission.
 
 ## Screen-by-screen proposal
 
