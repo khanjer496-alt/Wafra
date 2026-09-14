@@ -36,6 +36,16 @@ interface FeedbackResponse {
   dispatched?: unknown;
 }
 
+export interface TesterDiagnosticWirePayload {
+  schema: 1;
+  text: 'Android tester diagnostics.';
+  appVersion: string;
+  platform: 'android';
+  locale: string;
+  aiReviewConsent: false;
+  diagnostic: Record<string, unknown>;
+}
+
 const wireEncoder = new TextEncoder();
 
 export class FeedbackSendError extends Error {
@@ -183,6 +193,66 @@ export async function submitParserResearchFeedback(
     throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
   }
   return { id: parsed.id, dispatched: parsed.dispatched === true };
+}
+
+/**
+ * Explicit final-test support upload. It deliberately reuses the already
+ * deployed, short-retention Cloudflare feedback store instead of adding a
+ * second unauthenticated upload surface. The report builder owns redaction;
+ * this transport only enforces the same byte ceilings as every other feedback
+ * attachment and returns the Cloudflare report id.
+ */
+export async function submitTesterDiagnostics(
+  wire: TesterDiagnosticWirePayload,
+): Promise<FeedbackReceipt> {
+  if (!DEFAULT_RELAY_URL) {
+    throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
+  }
+  const diagnosticBytes = wireEncoder.encode(JSON.stringify(wire.diagnostic)).byteLength;
+  if (diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES) {
+    throw new FeedbackSendError('This diagnostic is too large to send.', 'diagnostic_too_large');
+  }
+  const body = JSON.stringify(wire);
+  if (wireEncoder.encode(body).byteLength > MAX_BODY_BYTES) {
+    throw new FeedbackSendError('This diagnostic is too large to send.', 'too_large');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+  } catch {
+    throw new FeedbackSendError('Could not reach the server.', 'network');
+  }
+  if (!response.ok) {
+    let code: string | null = null;
+    try {
+      const parsed: unknown = await response.json();
+      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+        code = (parsed as { error: string }).error;
+      }
+    } catch {
+      code = null;
+    }
+    throw new FeedbackSendError(
+      `The server refused the diagnostic (${response.status}).`,
+      code,
+      response.status,
+    );
+  }
+  let parsed: FeedbackResponse;
+  try {
+    parsed = (await response.json()) as FeedbackResponse;
+  } catch {
+    throw new FeedbackSendError('The server answered with something unreadable.', 'bad_response');
+  }
+  if (typeof parsed.id !== 'string' || parsed.id === '') {
+    throw new FeedbackSendError('The server did not return a diagnostic id.', 'no_id');
+  }
+  return { id: parsed.id, dispatched: false };
 }
 
 /**

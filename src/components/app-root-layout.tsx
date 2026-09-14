@@ -34,6 +34,7 @@ import { marketCurrencyCode } from '@/lib/markets';
 import '@/lib/background-relay';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
@@ -207,6 +208,8 @@ export default function RootLayout() {
   // server render cannot observe a browser font-load event, so waiting here
   // returned null and shipped an empty HTML body to crawlers.
   const ready = Platform.OS === 'web' || fontsLoaded || !!fontError;
+
+  useEffect(() => startRuntimePerformanceMonitor(), []);
 
   useEffect(() => {
     if (ready) {

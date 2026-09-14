@@ -25,6 +25,7 @@ import * as Sharing from 'expo-sharing';
 
 import { buildLedgerCsv } from '@/lib/ledger-export';
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
+import { TesterDiagnosticsControl } from '@/components/tester-diagnostics-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -1605,6 +1606,7 @@ export default function SettingsScreen() {
 
         <Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('supportHeader')} />
+          <TesterDiagnosticsControl />
           {linkRow(
             t('sendFeedback'),
             t('sendFeedbackDetail'),

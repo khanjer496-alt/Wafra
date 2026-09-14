@@ -297,6 +297,20 @@ function ensureLoaded(): void {
 }
 
 /**
+ * Read the bounded, source-free storage failure ring for an explicit support
+ * report. The returned rows contain only the closed vocabularies documented in
+ * {@link StorageFailure}; arbitrary native error text never reaches this API.
+ */
+export function getStorageFailures(): StorageFailure[] {
+  try {
+    ensureLoaded();
+    return recent.map((failure) => ({ ...failure }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Write the ring buffer out, at most once every {@link MIN_WRITE_INTERVAL_MS}.
  *
  * `File.write` is SYNCHRONOUS, so it lands on the JS thread — and the path
