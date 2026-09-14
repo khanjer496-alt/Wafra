@@ -44,7 +44,7 @@ export function buildColumnFrameProbe() {
   const column = name => ({ ...page, Aggrandizements: [property(name),
     { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] });
   const combine = value => outValue(emit('is.workflow.actions.text.combine', {
-    WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, WFInput: attachment(value),
+    WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, text: attachment(value),
   }), 'Combined Text');
   const split = value => outValue(emit('is.workflow.actions.text.split', {
     WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, text: scalar(value),

@@ -39,9 +39,10 @@ test('deterministic paged graph is the shipping history shortcut', () => {
   assert.equal(graph.WFWorkflowName, 'Wafra History v2');
   assert.equal(verifyPagedHistoryShortcut(graph), true);
   assert.deepEqual(graph, buildPagedHistoryShortcut());
-  // The published v2 record is compared byte-for-byte against this generator
-  // by the release check, so adding the column-framed candidate must not have
-  // moved a single v2 action or identifier.
+  // The public record check compares the published record byte-for-byte
+  // against this generator. The action count is unchanged by the Combine Text
+  // key repair; the record `5a0da9b5…` is expected to mismatch until the
+  // repaired graph is signed and published.
   assert.equal(graph.WFWorkflowActions.length, 98);
   assert.doesNotMatch(JSON.stringify(graph), /StageWafraPagedColumnsIntent|Frame Mode|Columns Result/);
 });
@@ -59,11 +60,11 @@ test('column framing reads each field for the whole page with no per-message act
     a.WFWorkflowActionParameters.WFTextSeparator === 'Custom');
   assert.equal(combines.length, 4);
   for (const combine of combines) assert.equal(combine.WFWorkflowActionParameters.WFTextCustomSeparator, COLUMN_SEPARATOR);
-  const properties = combines.map(c => c.WFWorkflowActionParameters.WFInput.Value.Aggrandizements?.[0]?.PropertyName);
+  const properties = combines.map(c => c.WFWorkflowActionParameters.text.Value.Aggrandizements?.[0]?.PropertyName);
   assert.deepEqual(properties.slice(0, 3), ['GUID', 'Body', 'Sender']);
   // The date column comes from Format Date applied to the whole page, so the
   // native side receives the same ISO instant format as the v2 line frame.
-  const dateInput = combines[3].WFWorkflowActionParameters.WFInput.Value;
+  const dateInput = combines[3].WFWorkflowActionParameters.text.Value;
   const formatter = actions.find(a => a.WFWorkflowActionParameters.UUID === dateInput.OutputUUID);
   assert.equal(formatter.WFWorkflowActionIdentifier, 'is.workflow.actions.format.date');
   assert.equal(formatter.WFWorkflowActionParameters.WFDateFormat, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
@@ -189,6 +190,28 @@ test('all message queries are bounded and paging uses a single strict upper date
     const filters = a.WFWorkflowActionParameters.WFContentItemFilter.Value.WFActionParameterFilterTemplates;
     assert.equal(filters.length, 1); assert.equal(filters[0].Property, 'date'); assert.equal(filters[0].Operator, 0);
   }
+});
+test('Combine Text and Split Text receive their input under Apple\'s `text` key', () => {
+  // Builds 127-137 handed Wafra an empty frame on a real iPhone: the v2 graph
+  // keyed Combine Text's input as `WFInput`, which Shortcuts ignores, so the
+  // action fell back to the preceding Repeat's (empty) results. Every text
+  // component action must bind its input as `text` and never as `WFInput`.
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildColumnFrameProbe()]) {
+    const components = graph.WFWorkflowActions.filter(a =>
+      a.WFWorkflowActionIdentifier === 'is.workflow.actions.text.combine' ||
+      a.WFWorkflowActionIdentifier === 'is.workflow.actions.text.split');
+    assert.ok(components.length > 0);
+    for (const action of components) {
+      const p = action.WFWorkflowActionParameters;
+      assert.equal(p.WFInput, undefined, 'WFInput is not a Combine/Split Text parameter');
+      assert.ok(p.text, 'text input is bound');
+      assert.ok(['WFTextTokenAttachment', 'WFTextTokenString'].includes(p.text.WFSerializationType));
+      assert.ok(['New Lines', 'Spaces', 'Custom'].includes(p.WFTextSeparator));
+    }
+  }
+  const frame = buildPagedHistoryShortcut().WFWorkflowActions.find(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.text.combine');
+  assert.deepEqual(frame.WFWorkflowActionParameters.text.Value, { Type: 'Variable', VariableName: 'Encoded Page' });
+  assert.equal(frame.WFWorkflowActionParameters.WFTextSeparator, 'New Lines');
 });
 test('bounded list collection does not retain per-record repeat results', () => {
   const actions = buildPagedHistoryShortcut().WFWorkflowActions;

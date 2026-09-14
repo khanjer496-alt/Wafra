@@ -1,0 +1,125 @@
+name: Sign Wafra iOS History Shortcut
+
+# Generates the paged History graph from an exact main commit, verifies it
+# against the audited generator, converts it to a binary Shortcut and signs it
+# with Apple's `shortcuts sign --mode anyone` on a macOS runner. The signed file
+# is named so that Apple installs it under the name the app already runs
+# (`Wafra-History-v2-typed-date.signed`), so a phone can test a repaired graph
+# against an existing TestFlight build without an app rebuild. Nothing here
+# publishes an iCloud record, touches TestFlight, or installs anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: 'Exact 40-character main commit to generate the graph from.'
+        type: string
+        required: true
+      graph:
+        description: 'Which generator output to sign.'
+        type: choice
+        options: [paged-v2, columnar-v3]
+        default: paged-v2
+      installed_name:
+        description: 'Basename Apple will install the Shortcut under (the app runs it by this name).'
+        type: string
+        default: 'Wafra-History-v2-typed-date.signed'
+      release:
+        description: 'Also attach the signed file to a prerelease so a phone can download it from GitHub.'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-sign-history-shortcut
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      GRAPH: ${{ inputs.graph }}
+      INSTALLED_NAME: ${{ inputs.installed_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate the request
+        run: |
+          printf '%s' "$SOURCE_COMMIT" | grep -qE '^[0-9a-f]{40}$'
+          printf '%s' "$INSTALLED_NAME" | grep -qE '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}$'
+          case "$GRAPH" in paged-v2|columnar-v3) ;; *) echo 'Unsupported graph.'; exit 1 ;; esac
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+
+      - name: Refuse a commit that is not on main
+        run: git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Generate and verify the graph
+        run: |
+          mkdir -p shortcut-out
+          if [ "$GRAPH" = columnar-v3 ]; then
+            node scripts/build-ios-paged-history-shortcut.mjs --columnar shortcut-out/graph.json
+          else
+            node scripts/build-ios-paged-history-shortcut.mjs shortcut-out/graph.json
+          fi
+          node --test scripts/test/ios-paging-shortcut.test.mjs
+          node --input-type=module - shortcut-out/graph.json "$GRAPH" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { verifyPagedHistoryShortcut, verifyColumnarHistoryShortcut } from './scripts/build-ios-paged-history-shortcut.mjs';
+          const graph = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          (process.argv[3] === 'columnar-v3' ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(graph);
+          const combines = graph.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.text.combine');
+          if (combines.length === 0 || combines.some(a => !a.WFWorkflowActionParameters.text || a.WFWorkflowActionParameters.WFInput)) {
+            throw new Error('Combine Text must bind its input under the `text` key');
+          }
+          console.log(JSON.stringify({ actions: graph.WFWorkflowActions.length, combines: combines.length, name: graph.WFWorkflowName }));
+          NODE
+
+      - name: Convert and sign with Apple's Shortcuts CLI
+        run: |
+          plutil -convert binary1 -o shortcut-out/unsigned.shortcut shortcut-out/graph.json
+          shortcuts sign --mode anyone --input shortcut-out/unsigned.shortcut --output "shortcut-out/${INSTALLED_NAME}.shortcut"
+          magic=$(LC_ALL=C dd if="shortcut-out/${INSTALLED_NAME}.shortcut" bs=1 count=4 status=none)
+          test "$magic" = "AEA1" || { echo 'Apple did not produce a signed AEA1 Shortcut.'; exit 1; }
+          shasum -a 256 "shortcut-out/${INSTALLED_NAME}.shortcut" | tee shortcut-out/sha256.txt
+          node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync("shortcut-out/manifest.json", JSON.stringify({
+              sourceCommit: process.env.SOURCE_COMMIT, graph: process.env.GRAPH,
+              installedName: process.env.INSTALLED_NAME, signedAt: new Date().toISOString(),
+              sha256: fs.readFileSync("shortcut-out/sha256.txt", "utf8").split(" ")[0],
+              graphSha256: require("node:crypto").createHash("sha256").update(fs.readFileSync("shortcut-out/graph.json")).digest("hex"),
+            }, null, 2) + "\n");
+          '
+          rm -f shortcut-out/unsigned.shortcut
+
+      - name: Preserve the signed Shortcut
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-history-shortcut-${{ inputs.graph }}-${{ github.run_id }}
+          path: |
+            shortcut-out/*.shortcut
+            shortcut-out/manifest.json
+            shortcut-out/graph.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach the signed Shortcut to a prerelease
+        if: inputs.release
+        run: |
+          tag="history-shortcut-${GRAPH}-${SOURCE_COMMIT:0:12}-run${GITHUB_RUN_ID}"
+          gh release create "$tag" "shortcut-out/${INSTALLED_NAME}.shortcut" shortcut-out/manifest.json \
+            --target "$SOURCE_COMMIT" --prerelease \
+            --title "Signed History Shortcut (${GRAPH}, ${SOURCE_COMMIT:0:12})" \
+            --notes "Signed on macOS with \`shortcuts sign --mode anyone\` from main commit ${SOURCE_COMMIT}. Installs under the name \`${INSTALLED_NAME}\`. Delete the previously installed Shortcut of that name before opening this file on the iPhone. See manifest.json for the SHA-256."
+          echo "release=$tag" >> "$GITHUB_OUTPUT"

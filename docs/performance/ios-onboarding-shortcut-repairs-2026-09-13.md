@@ -121,6 +121,46 @@ now carries the observed counts (`fragments`, `separators`, `records`,
 `found`) so the next alert, if any, identifies the shape directly. The
 Shortcut graph is unchanged; only the app build changes.
 
+## Build 137 device result and the root cause (14 September)
+
+Build 137 refused the same first page with
+`invalid-input-lines fragments=0 separators=0 records=0 partial=0 found=51`:
+Shortcuts found 51 Messages and handed Wafra an **empty** frame. That rules
+out wrapping, encoding and the native reader. It also re-explains the earlier
+alerts: the dictionary-framed graph's `invalid-input` and build 135's
+`invalid-input-lines` were the same empty frame, read by less specific checks.
+
+The cause is one parameter key in the generator. Apple's Combine Text action
+(`is.workflow.actions.text.combine`) takes its input under the key `text`,
+not `WFInput`. Every Combine Text in `scripts/build-ios-paged-history-shortcut.mjs`
+(the v2 frame, the v3 column joins) and in the column probe used `WFInput`.
+Shortcuts ignores an unknown key and gives the action the previous action's
+output instead. In the v2 graph the previous action is the end of the
+per-message Repeat, whose results are empty because the loop body ends with
+Nothing, so the frame was always empty. Split Text, whose key the probe
+already had right, uses the same `text` key; the other actions in the graph
+(Base64 Encode, Add to Variable, Set Variable, Repeat, Get Item, Dictionary
+Value) do take `WFInput`, and every one of those has behaved on the device.
+
+The repair is the key: `text: attachment(variable('Encoded Page'))`. The graph
+keeps its 98 actions and every other identifier and parameter. A test now
+fails any Combine or Split Text that binds `WFInput` or omits `text`.
+
+The published record `5a0da9b5…` still carries the broken key, and this host
+cannot sign or publish a Shortcut. `.github/workflows/ios-sign-history-shortcut.yml`
+generates the repaired graph from an exact main commit on a macOS runner,
+verifies it against the generator, converts it and signs it with
+`shortcuts sign --mode anyone`, and stores it as a workflow artifact and a
+prerelease asset under the file name `Wafra-History-v2-typed-date.signed.shortcut`.
+Apple installs a signed file under its basename, which is the name build 137
+already runs, so a phone can delete the installed Shortcut, open the signed
+file, and test the repaired graph without a new app build. Once a page imports
+on the phone, the Shortcut is published to iCloud from that phone, and the new
+record ID replaces `5a0da9b5…` in `IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS`,
+`ios-paged-setup.ts`, `scripts/release/ios-public-shortcut-check.mjs` and
+`eas.json`, followed by an app build. Until then the public record check
+reports a mismatch for the history record, which is the truthful state.
+
 ## Verification
 
 | Check | Result |
@@ -130,7 +170,7 @@ Shortcut graph is unchanged; only the app build changes.
 | `scripts/test/ios-setup-ux.test.js` | 274 passed |
 | `scripts/test/onboarding.test.js` | 98 passed |
 | `scripts/test/contracts.test.js` | passed |
-| `node --test scripts/test/ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs` | 154 passed |
+| `node --test scripts/test/ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs` | 154 passed (13 Sep); `ios-paging-shortcut.test.mjs` 18 passed after the Combine Text key repair |
 | `scripts/test/ios-capture-setup.test.js` | trigger-guard assertions pass; two later assertions need the prebuilt `ios/Wafra.xcodeproj` and fail on this host without it (unchanged by this work) |
 | Native paged store (`bash scripts/test/ios-history-paging.sh`) | **not executed here — no `swiftc` on this Linux host.** New checks added for the oversize-body skip and the three named refusals. Run on a Mac before any build. |
 | Physical iPhone | **not tested.** The automation guidance, the Back path, the Home exit and the alert reason all need one device run on the next build. |

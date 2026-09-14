@@ -139,7 +139,7 @@ function buildPagedGraph({ columnar }) {
     const column = name => ({ ...variable('Page'), Aggrandizements: [property(name),
       { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] });
     const combine = value => output(emit('is.workflow.actions.text.combine', {
-      WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, WFInput: attachment(value),
+      WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, text: attachment(value),
     }), 'Combined Text');
     const formatted = emit('is.workflow.actions.format.date', {
       WFDate: scalar({ ...variable('Page'), Aggrandizements: [property('date')] }),
@@ -196,7 +196,12 @@ function buildPagedGraph({ columnar }) {
   emit('is.workflow.actions.appendvariable', { WFVariableName: 'Encoded Page', WFInput: attachment(output(record, 'Text')) });
   nothing();
   emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
-  const frame = emit('is.workflow.actions.text.combine', { WFTextSeparator: 'New Lines', WFInput: attachment(variable('Encoded Page')) });
+  // Combine Text's input parameter is keyed `text`, not `WFInput`. With the
+  // wrong key Shortcuts ignores the value and feeds the previous action's
+  // output instead: the Repeat's results, which are empty because the loop
+  // ends with Nothing. That is why every device run of the published record
+  // (`5a0da9b5…`) handed Wafra an empty frame (`fragments=0 … found=51`).
+  const frame = emit('is.workflow.actions.text.combine', { WFTextSeparator: 'New Lines', text: attachment(variable('Encoded Page')) });
   const response = native('StageWafraPagedImportIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')), frame: scalar(output(frame, 'Combined Text')) });
   set('Request', output(response));
   if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });
