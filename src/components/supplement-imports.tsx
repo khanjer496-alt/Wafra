@@ -325,7 +325,7 @@ export function SupplementImports() {
     rejected: number,
     pages: number,
   ): Promise<boolean> => {
-    setStatus(interpolate(copy.acceptedPending, { accepted }));
+    setStatus(interpolate(copy.acceptedFiling, { accepted }));
     try {
       // Paint the accepted state before planning/reconciling a potentially large ledger.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
