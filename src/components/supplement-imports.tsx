@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
@@ -165,6 +165,14 @@ export function SupplementImports() {
   const [status, setStatus] = useState<string | null>(null);
   const [pendingPdf, setPendingPdf] = useState<PendingProtectedPdf | null>(null);
   const pendingPdfRef = useRef<PendingProtectedPdf | null>(null);
+  const queuedRetryNeededRef = useRef(false);
+  const queuedRetryInFlightRef = useRef(false);
+  const queuedRetryContextRef = useRef<{
+    files: number;
+    accepted: number;
+    rejected: number;
+    pages: number;
+  } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   const coverage = useMemo(
     () => summarizeCoverage(state.statementCoverage ?? [], language),
@@ -309,6 +317,8 @@ export function SupplementImports() {
       // Paint the accepted state before planning/reconciling a potentially large ledger.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const imported = await syncQueued();
+      queuedRetryNeededRef.current = false;
+      queuedRetryContextRef.current = null;
       setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
         files, accepted, rejected, pages, imported,
       }));
@@ -319,10 +329,54 @@ export function SupplementImports() {
       // instead of folding every failure into the "not synced yet" status.
       setStatus(interpolate(copy.acceptedPending, { accepted }));
       setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
+      queuedRetryNeededRef.current = true;
+      queuedRetryContextRef.current = { files, accepted, rejected, pages };
       failed();
       return false;
     }
   }, [copy, syncFailureReason, syncQueued]);
+
+  // Successful upload means the normalized rows are already safe in the relay
+  // queue. If the immediate phone-side drain loses a network turn, retry once
+  // shortly afterwards and again whenever the app returns to foreground. The
+  // capture executor still owns save-before-ACK, so a retry cannot retire rows
+  // until the local encrypted ledger write is durable.
+  useEffect(() => {
+    if (!cfg || state.privateMode) return;
+
+    const retryQueued = async () => {
+      if (!queuedRetryNeededRef.current || queuedRetryInFlightRef.current) return;
+      queuedRetryInFlightRef.current = true;
+      try {
+        const imported = await syncQueued();
+        queuedRetryNeededRef.current = false;
+        const context = queuedRetryContextRef.current;
+        queuedRetryContextRef.current = null;
+        setError(null);
+        if (context) {
+          setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+            ...context,
+            imported,
+          }));
+        }
+        committed();
+      } catch {
+        // Keep the queued rows untouched. A later foreground transition gets
+        // another chance without asking the user to upload the statement again.
+      } finally {
+        queuedRetryInFlightRef.current = false;
+      }
+    };
+
+    const timer = setTimeout(() => { void retryQueued(); }, 1_500);
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void retryQueued();
+    });
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [cfg, copy.statementsNoNew, copy.statementsSuccess, state.privateMode, syncQueued]);
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities || pendingPdf) return;

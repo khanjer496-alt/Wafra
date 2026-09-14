@@ -47,6 +47,7 @@
 import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { fetch as expoFetch } from 'expo/fetch';
 
 import type { ScannedSms } from '@/lib/auto-import';
 import {
@@ -763,7 +764,11 @@ async function request(url: string, init: RequestInit & { token?: string }): Pro
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    return await fetch(url, {
+    // Keep relay sync/ACK on the same native transport used by statement
+    // uploads. Android could otherwise upload successfully through expo/fetch
+    // and then fail the immediate queue drain through React Native's global
+    // fetch even though both requests target the same relay.
+    return await expoFetch(url, {
       ...init,
       signal: controller.signal,
       headers: {

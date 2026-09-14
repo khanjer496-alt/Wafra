@@ -48,6 +48,7 @@ rewrite() {
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
       -e "s|from 'expo-constants'|from './stub-expo-constants'|" \
       -e "s|from 'expo-crypto'|from './stub-expo-crypto'|" \
+      -e "s|from 'expo/fetch'|from './stub-expo-fetch'|" \
       -e "s|from 'expo-secure-store'|from './stub-secure-store'|" \
       -e "s|from '@react-native-async-storage/async-storage'|from './stub-async-storage'|" \
       "$1" > "$2"
