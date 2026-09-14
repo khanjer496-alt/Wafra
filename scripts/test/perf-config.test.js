@@ -828,6 +828,13 @@ function bodyOf(source, header) {
       /state\.marketId, period, projectionDay, hasPendingReview\]/.test(home) &&
       /state\.marketId, period, projectionDay\]/.test(home),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
+
+  ok('Home defers optional historical insight work until after the first usable frame',
+    /InteractionManager\.runAfterInteractions/.test(home) &&
+      /homeAnalysisReady && insightWidgetVisible/.test(home) &&
+      /projectDashboardInsight\(state, period, now\)/.test(home) &&
+      !/surface: 'dashboard', includeInsights: true/.test(home),
+    'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

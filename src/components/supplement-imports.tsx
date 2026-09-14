@@ -266,13 +266,22 @@ export function SupplementImports() {
   };
 
   const syncQueued = useCallback(async (): Promise<number> => {
-    const outcome = await captureExecutor.execute('supplemental');
-    if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
-    if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
-    return outcome.kind === 'imported' || outcome.kind === 'up-to-date'
-      ? outcome.transactions
-      : 0;
-  }, [captureExecutor, copy.notHydrated, copy.unavailable]);
+    let imported = 0;
+    // The relay intentionally serves at most 200 rows per page. A multi-file
+    // statement import can queue more than that, so one successful page must not
+    // be mistaken for a completed import. Drain page-by-page, yielding between
+    // durable commits so the Settings screen and tab bar stay responsive.
+    for (let page = 0; page < 50; page += 1) {
+      const outcome = await captureExecutor.execute('supplemental');
+      if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
+      if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
+      if (outcome.kind !== 'imported' && outcome.kind !== 'up-to-date') return imported;
+      imported += outcome.transactions;
+      if (outcome.moreQueued !== true) return imported;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error(copy.syncFailedUnknown);
+  }, [captureExecutor, copy.notHydrated, copy.syncFailedUnknown, copy.unavailable]);
 
   // Coverage is written after the whole batch has uploaded, not between files.
   // recordStatementCoverage persists the full encrypted ledger on every call,
@@ -414,7 +423,7 @@ export function SupplementImports() {
           acceptedRows += accepted.acceptedRows;
           rejectedRows += accepted.rejectedRows;
           uploadedFiles += 1;
-          if ('pages' in accepted) pages += accepted.pages;
+          if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
           coverage.push({ item: accepted.coverage, format: csv ? 'csv' : 'pdf' });
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&

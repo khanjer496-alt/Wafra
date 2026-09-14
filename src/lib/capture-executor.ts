@@ -31,6 +31,8 @@ import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
 export interface CaptureImportSummary {
+  /** Relay returned a full page; supplemental callers should drain another page after yielding. */
+  moreQueued?: boolean;
   transactions: number;
   dues: number;
   bills: number;
@@ -464,9 +466,13 @@ export const createCaptureExecutor = ({
       if (captureStopped(activeLedger, 'relay')) return stopped();
       await dependencies.acknowledge(cfg, acknowledge);
     }
+    const pageSummary = {
+      ...summary(plan, transactionIds, reviewAlerts),
+      moreQueued: queued.pageFull === true,
+    };
     return hasChanges(plan)
-      ? { kind: 'imported', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) }
-      : { kind: 'up-to-date', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) };
+      ? { kind: 'imported', source: 'relay', ...pageSummary }
+      : { kind: 'up-to-date', source: 'relay', ...pageSummary };
   };
 
   const executeBackground = async (): Promise<CaptureExecutionOutcome> => {

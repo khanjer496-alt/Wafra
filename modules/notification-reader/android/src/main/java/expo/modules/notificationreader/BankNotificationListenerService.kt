@@ -99,19 +99,33 @@ class BankNotificationListenerService : NotificationListenerService() {
         return
       }
       recordAdmission("securityPassed", adcb)
-      if (!MONEY_RE.containsMatchIn("$title $text")) {
-        recordAdmission("moneyRejected", adcb)
-        return
-      }
-      recordAdmission("moneyPassed", adcb)
-      // Unknown apps do not become trusted banks merely because their text
-      // resembles one. Native intake still requires Google Play provenance;
-      // unregistered candidates are carried as review-only source classes.
-      if (TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body) == null) {
+      // Resolve package trust before applying the cheap money heuristic. Exact
+      // curated bank packages already crossed Android's package-identity boundary
+      // and the security filter above; their wording belongs to the real parser,
+      // not this deliberately incomplete native regex. ADCB, for example, can
+      // render a real charge in a standard Notification field whose currency
+      // formatting does not match MONEY_RE. Dropping it here made the parser
+      // impossible to improve because JS never saw the encrypted candidate.
+      //
+      // Unknown Google Play financial candidates remain review-only and still
+      // require MONEY_RE. That keeps arbitrary apps from filling the bounded
+      // encrypted queue merely by using financial vocabulary.
+      val sourceClass = TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body)
+      if (sourceClass == null) {
         recordAdmission("sourceRejected", adcb)
         return
       }
       recordAdmission("sourcePassed", adcb)
+      if (sourceClass != TrustedBankNotificationPackages.SOURCE_TRUSTED_BANK &&
+          !MONEY_RE.containsMatchIn("$title $text")) {
+        recordAdmission("moneyRejected", adcb)
+        return
+      }
+      if (sourceClass == TrustedBankNotificationPackages.SOURCE_TRUSTED_BANK &&
+          !MONEY_RE.containsMatchIn("$title $text")) {
+        recordAdmission("moneyHeuristicBypassed", adcb)
+      }
+      recordAdmission("moneyPassed", adcb)
 
       val blockReason = NotificationCaptureStore.admissionBlockReason(
         this, sbn.packageName, text, sbn.postTime,

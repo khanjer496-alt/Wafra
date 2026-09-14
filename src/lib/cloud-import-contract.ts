@@ -41,6 +41,8 @@ export interface PdfImportAccepted {
   acceptedRows: number;
   /** Date-led money lines the relay would not read; 0 from a relay that predates the field. */
   rejectedRows: number;
+  /** Accepted + rejected rows; synthesized for an older relay response. */
+  totalRows: number;
   pages: number;
   coverage: StatementImportCoverage | null;
 }
@@ -188,9 +190,16 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   // is a different relay contract and is refused like any other field.
   const rejectedRows = body.rejectedRows === undefined ? 0 : body.rejectedRows;
   if (!nonNegativeInt(rejectedRows)) return null;
-  const coverage = parseStatementCoverage(body.coverage);
-  if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
-  return { acceptedRows: body.acceptedRows, rejectedRows, pages: body.pages, coverage };
+  const totalRows = body.totalRows === undefined
+    ? body.acceptedRows + rejectedRows
+    : body.totalRows;
+  if (!positiveInt(totalRows) || body.acceptedRows + rejectedRows !== totalRows) return null;
+  const parsedCoverage = parseStatementCoverage(body.coverage);
+  if (body.coverage !== null && body.coverage !== undefined && !parsedCoverage) return null;
+  // Defensive compatibility: an older relay may send a min/max range even when
+  // it also admits skipped rows. Do not persist that range as complete locally.
+  const coverage = rejectedRows === 0 ? parsedCoverage : null;
+  return { acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage };
 }
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {

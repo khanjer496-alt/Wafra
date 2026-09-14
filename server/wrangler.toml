@@ -22,6 +22,10 @@ database_name = "wafra"
 # placeholder, so the failure is a sentence rather than a Cloudflare API error.
 database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
+# Best-effort email copy of privacy-safe Android tester diagnostics.
+[[send_email]]
+name = "DIAGNOSTIC_EMAIL"
+
 # Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
 crons = ["*/30 * * * *"]

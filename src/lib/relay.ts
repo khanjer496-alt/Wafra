@@ -1269,6 +1269,8 @@ export async function unregisterRelayPush(cfg: RelayConfig): Promise<void> {
 export interface RelaySyncResult {
   /** Parsed rows, oldest first, shaped exactly like an Android inbox scan. */
   parsed: ScannedSms[];
+  /** True when the server filled the 200-row page; another sync may be needed. */
+  pageFull?: boolean;
   /** Queue ids to acknowledge once the rows are safely in the ledger. */
   ids: string[];
   /** Rows the client could not open — a key mismatch, not a transient fault. */
@@ -1524,6 +1526,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
   return {
     parsed,
+    pageFull: items.length === PAGE,
     reviewCandidates,
     ids,
     unreadable,

@@ -744,14 +744,17 @@ function wideTextPdf(lines) {
     parseStatementText('01/07/2026 CARREFOUR MARKET -40.00').length === 1);
 
   const partialPdf = await extractPdfStatementRows(tinyPdf('01/07/2026 CARREFOUR MARKET 40.00 DR'));
-  ok('a fully read PDF reports zero rejected rows', partialPdf.rejectedRows === 0);
+  ok('a fully read PDF reports zero rejected rows',
+    partialPdf.rejectedRows === 0 && partialPdf.totalRows === partialPdf.rows.length &&
+    partialPdf.completeRowAccounting === true);
   const rejectedPdf = parseStatementLines([
     '01/07/2026 CARREFOUR MARKET 40.00 DR',
     '02/07/2026 AMBIGUOUS VISUAL COLUMN 22.00',
     '32/07/2026 IMPOSSIBLE AED 9.00 DR',
   ].join('\n'));
   ok('PDF text reports date-led money lines it could not read as rejected',
-    rejectedPdf.rows.length === 1 && rejectedPdf.rejectedRows === 2);
+    rejectedPdf.rows.length === 1 && rejectedPdf.rejectedRows === 2 &&
+    rejectedPdf.totalRows === 3 && rejectedPdf.completeRowAccounting === true);
 
   let tooLong = '';
   try {

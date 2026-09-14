@@ -893,8 +893,12 @@ function trailingBalanceRuns(lines: string[]): boolean {
 
 export interface StatementTextResult {
   rows: StatementParsedRow[];
+  /** Every date-led money row this parser accounted for, accepted or rejected. */
+  totalRows: number;
   /** Date-led lines that carried money but could not be read as a transaction. */
   rejectedRows: number;
+  /** True when every row in totalRows is represented by rows or rejectedRows. */
+  completeRowAccounting: boolean;
 }
 
 /**
@@ -1018,7 +1022,12 @@ export function parseStatementLines(
     }
     if (countable && rows.length === accepted) rejectedRows += 1;
   }
-  return { rows, rejectedRows };
+  return {
+    rows,
+    totalRows: rows.length + rejectedRows,
+    rejectedRows,
+    completeRowAccounting: true,
+  };
 }
 
 export function parseStatementText(
@@ -1036,7 +1045,9 @@ export async function extractPdfStatementRows(
 ): Promise<{
   pages: number;
   rows: ParsedSms[];
+  totalRows: number;
   rejectedRows: number;
+  completeRowAccounting: boolean;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
@@ -1045,7 +1056,13 @@ export async function extractPdfStatementRows(
     // not a scan, and telling the user it is sends them the wrong way.
     if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
     const parsed = parseStatementLines(extracted.text, currency);
-    return { pages: extracted.totalPages, rows: parsed.rows, rejectedRows: parsed.rejectedRows };
+    return {
+      pages: extracted.totalPages,
+      rows: parsed.rows,
+      totalRows: parsed.totalRows,
+      rejectedRows: parsed.rejectedRows,
+      completeRowAccounting: parsed.completeRowAccounting,
+    };
   } finally {
     const disposable = document as unknown as {
       destroy?: () => Promise<void> | void;

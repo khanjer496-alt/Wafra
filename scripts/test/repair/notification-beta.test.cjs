@@ -39,9 +39,11 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(native, /SOURCE_FINANCIAL_CANDIDATE/);
   assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
   assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
-  // The money gate now runs over the chosen text candidate and the joined
-  // title/text rather than one `body` binding; the gate itself must remain.
-  assert.match(listener, /MONEY_RE\.containsMatchIn\(/);
+  // Exact curated banks are package-authenticated and must reach the real
+  // parser even when the cheap native money regex does not understand one
+  // notification rendering. Unknown Play financial candidates keep the gate.
+  assert.match(listener, /sourceClass != TrustedBankNotificationPackages\.SOURCE_TRUSTED_BANK[\s\S]{0,180}!MONEY_RE\.containsMatchIn/);
+  assert.match(listener, /moneyHeuristicBypassed/);
   assert.match(listener, /Notification\.EXTRA_TEXT_LINES/);
   assert.match(listener, /Notification\.EXTRA_SUB_TEXT/);
 });
