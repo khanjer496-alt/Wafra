@@ -1037,6 +1037,7 @@ export function buildImportPlan(
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
         type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+        captureSource: p.captureSource, transferHint: p.transferHint,
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
         captureInstrument: captureInstrumentOf(p),
       };
@@ -1081,6 +1082,7 @@ export function buildImportPlan(
         ts: p.smsTs,
         source: 'sms',
         smsKey,
+        captureSource: p.captureSource,
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1097,6 +1099,7 @@ export function buildImportPlan(
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+      captureSource: p.captureSource, transferHint: p.transferHint,
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
@@ -1274,6 +1277,7 @@ export function buildImportPlan(
       captureInstrument: captureInstrumentOf(p),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,

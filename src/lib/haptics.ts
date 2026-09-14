@@ -26,16 +26,35 @@ const native = Platform.OS === 'ios' || Platform.OS === 'android';
 export function tapped(): void {
   if (!native) return;
   if (Platform.OS === 'android') {
-    // Routine Android tap haptics fire on nearly every navigation/control action.
-    // On OEM builds where the haptics service is slow, dozens of bridge calls
-    // can overlap the JS navigation turn and make a registered tap feel late.
-    // Keep commitment/error haptics below, but ordinary Android taps use the
-    // platform ripple only.
+    // Deferred, not removed — and the distinction is the whole point.
     //
-    // Re-added once, with the guard below rewritten to allow it, on the
-    // reasoning that Context_Click is short. Short is not the problem: the
-    // bridge call on every one of ~39 tap sites is, and the app was reported
-    // slow and laggy on exactly the navigation this covers.
+    // History: `9626f4f` deleted this call because a bridge hop on every one
+    // of ~39 tap sites can land on the same JS turn as the navigation it
+    // accompanies, making a registered tap feel late on OEM devices. `4fdf50f`
+    // put it back and rewrote the guard to demand it. `dcfe56d7` deleted it
+    // again and restored the guard.
+    //
+    // Build 219 shipped that deletion, and it is now measured against the
+    // phone rather than argued: the tap haptics are gone AND the navigation
+    // lag is still reported. Removing the call cost the app its feel and did
+    // not buy the responsiveness it was removed for, so the premise that this
+    // call is the dominant cost does not survive contact with the device.
+    //
+    // What the guard was actually protecting is in its own words: the call
+    // must not "overlap the navigation turn". A macrotask does not. The tap
+    // handler and the navigation it schedules complete first; the bridge hop
+    // happens on a later turn, typically inside one frame, which is well under
+    // the ~10-20ms at which a haptic stops feeling simultaneous with the touch.
+    // So the feedback returns and the invariant the guard names still holds.
+    //
+    // Context_Click, not Segment_Tick: expo-haptics resolves these constants by
+    // reflection and throws HapticsNotSupportedException when the field is
+    // absent. CONTEXT_CLICK is one of the five it can always fall back to and
+    // predates this app's minSdk 24; SEGMENT_TICK is API 34+, so on anything
+    // older it would be a silent no-op behind the .catch below.
+    setTimeout(() => {
+      Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click).catch(() => {});
+    }, 0);
     return;
   }
   Haptics.selectionAsync().catch(() => {});

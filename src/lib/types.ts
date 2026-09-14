@@ -152,6 +152,19 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /**
+   * Where this row came from, when it was not the bank's own alert.
+   *
+   * Only statements ('pdf', 'csv') change how a row must be matched: they name
+   * the acquirer descriptor the card network settled against rather than the
+   * merchant, so the same charge reads as "noon DUBAI" here and "Noon" in the
+   * alert. Without this the ledger cannot tell the two apart after the fact and
+   * the pair is deduplicated on a title that will never match.
+   *
+   * Optional and absent on every row written before it existed, which reads
+   * exactly like the alert-captured rows those all were.
+   */
+  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
   captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
@@ -711,6 +724,7 @@ export interface TxHealUpdate {
   ts?: number;
   smsKey?: string;
   viaPush?: boolean;
+  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
   captureInstrument?: CaptureInstrument;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
