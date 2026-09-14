@@ -2848,6 +2848,34 @@ asyncSuites.push((async () => {
   const before2 = calls;
   h.migratePersistedState(staleGrammar, options);
   ok('a revision-1 receipt naming an older grammar still forces a re-read', calls > before2);
+  // The row repairs share the re-parse receipt. They are idempotent fixes for
+  // rows an OLDER parser wrote, and they scanned the whole ledger on every
+  // launch: 180ms at 15,000 rows in V8, and 1,081ms between the
+  // ledger-overrides-complete and ledger-row-transforms-complete phase markers
+  // on a real 8,219-row Android ledger. A receipt naming this grammar is proof
+  // they already ran, so they must be skipped -- and must still run without one.
+  const structural = () => ({
+    marketId: 'AE', parserVersion: parser.PARSER_VERSION,
+    merchantOverrides: {},
+    transactions: [tx('legacy-card-payment', { title: '123456XX7890' })],
+  });
+  const stamped = {
+    ...structural(),
+    hydrationReparseKey: JSON.stringify([2, parser.PARSER_VERSION, 'AE']),
+  };
+  const skipped = h.migratePersistedState(stamped, options);
+  ok('a receipt for this grammar skips the legacy row repairs',
+    skipped.transactions[0].title === '123456XX7890');
+  const unstamped = h.migratePersistedState(structural(), options);
+  ok('without a receipt the legacy row repairs still run',
+    unstamped.transactions[0].title === 'Card payment' &&
+      unstamped.transactions[0].isTransfer === true);
+  // The gate is the RECEIPT, not the caller: an ordinary migration (a restored
+  // backup) carries no permission to trust one.
+  const restoredPath = h.migratePersistedState({ ...stamped });
+  ok('ordinary migration callers still run the row repairs despite a receipt',
+    restoredPath.transactions[0].title === 'Card payment');
+
   const corrupt = { ...upgraded, hydrationReparseKey: 'not-json' };
   const before3 = calls;
   h.migratePersistedState(corrupt, options);
