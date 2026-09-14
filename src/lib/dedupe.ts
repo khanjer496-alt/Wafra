@@ -113,6 +113,20 @@ export function sameMerchantCapture(a: string, b: string): boolean {
 
 export type CaptureChannel = 'inbox' | 'delivery' | 'push';
 
+/**
+ * Where a row came from, when it did not come from the bank's own alert.
+ *
+ * Only the statement sources matter to deduplication: a PDF or CSV statement
+ * names the acquirer descriptor the card network settled against, never the
+ * merchant name the alert used, so those two rows cannot be paired on title.
+ */
+export type CaptureSource = 'shortcut' | 'email' | 'pdf' | 'csv';
+
+/** True for the sources whose merchant text is an acquirer descriptor. */
+export function isStatementSource(source: CaptureSource | undefined): boolean {
+  return source === 'pdf' || source === 'csv';
+}
+
 export interface DuplicateCandidate {
   date: string;
   amountFils: number;
@@ -125,6 +139,10 @@ export interface DuplicateCandidate {
   /** Capture time, independent of the channel-specific SMS fingerprint. */
   ts?: number;
   channel?: CaptureChannel;
+  /** Set when the row came from a statement rather than a bank alert. */
+  captureSource?: CaptureSource;
+  /** Money moved between the user's own accounts, not spent at a merchant. */
+  transferHint?: boolean;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
   accountId?: string;
   captureInstrument?: CaptureInstrument;
@@ -207,6 +225,10 @@ interface SeenEvent {
   userEdited?: boolean;
   /** One capture explains one event on the other channel, not every one. */
   consumed?: boolean;
+  /** This row is itself a statement line, so another statement cannot claim it. */
+  statement?: boolean;
+  /** Transfers reconcile on bank reference evidence, never on money alone. */
+  isTransfer?: boolean;
 }
 
 /**
@@ -362,6 +384,8 @@ export function duplicateGuard(
         title: t.title,
         captureInstrument: t.captureInstrument,
         userEdited: t.userEdited,
+        statement: isStatementSource(t.captureSource),
+        isTransfer: t.isTransfer === true,
       });
     }
     if (t.cardPaymentSide) {
@@ -520,6 +544,55 @@ export function duplicateGuard(
           // One SMS row accounts for one notification. Left uncounted, a
           // single AED 25 SMS silenced every AED 25 push in the next two
           // minutes, and the second real charge was never imported at all.
+          match.consumed = true;
+          lastMatchedId = match.id ?? null;
+          return true;
+        }
+      }
+      // A statement line for a charge the bank already alerted about.
+      //
+      // Same asymmetry as the push rule above and for the same reason: the
+      // alert has the real clock, the merchant name and the fuller parse, so
+      // it wins and the statement line is the one dropped.
+      //
+      // Title is not consulted at all here, unlike the push rule, which still
+      // requires `crossChannelPair`. A push omits the merchant ("Card
+      // purchase"); a statement states a DIFFERENT one -- the acquirer
+      // descriptor the card network settled against, "noon DUBAI" against the
+      // alert's "Noon". There is no wording test that pairs those two across
+      // every bank and market, and inventing one would be a guess about text.
+      // The money facts are not a guess: same account, same direction, same
+      // amount, same day.
+      //
+      // Time is not consulted either, because a statement has none. It states
+      // a date, so the row is built at midnight; the alert for the same charge
+      // is hours away and would fail any event-sized window. The shared day is
+      // already carried by `crossChannelKey`.
+      //
+      // Everything this does NOT do is deliberate, and follows the rule that
+      // under-merging beats over-merging: a different amount, a different day,
+      // a different card or the opposite direction are all left as two visible
+      // rows the user can settle, never merged on a near-miss. One statement
+      // line consumes at most one alert, so a user who really was charged the
+      // same amount twice in one day keeps both charges.
+      //
+      // Ordinary charges only, on BOTH sides. A transfer between the user's own
+      // accounts reconciles against a bank reference in `transferEvidence` and
+      // has its own path for it; money facts alone must never turn a named
+      // merchant purchase into a transfer, or pick one of two candidate
+      // transfers, because at equal amount and date those are different events
+      // that merely collide. Excluding them leaves that judgement where the
+      // evidence to make it lives.
+      if (isStatementSource(c.captureSource) && !c.transferHint) {
+        const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
+        const match = rows.find(
+          (row) =>
+            !row.statement &&
+            !row.consumed &&
+            !row.isTransfer &&
+            compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument),
+        );
+        if (match) {
           match.consumed = true;
           lastMatchedId = match.id ?? null;
           return true;
