@@ -857,31 +857,40 @@ export async function scanInbox(
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
         const sourceClass = n.sourceClass;
         if (sourceClass !== 'trusted-bank' && sourceClass !== 'financial-candidate') continue;
-        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoSource = sourceClass === 'trusted-bank' || learned;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
+        // The curated package list is stronger issuer evidence, not a permanent
+        // support list. Any financial candidate is still sent through the real
+        // transaction parser below. What package provenance controls is whether
+        // a parser result may be written automatically on first sight.
+        //
+        // Native can prove only "Google Play app + financial-looking
+        // notification" for an unknown package. A chat/shopping app can satisfy
+        // that description, so sourceClass (or a spoofable package/title string)
+        // cannot safely authorize a ledger write. The first confident event from
+        // a genuinely new bank goes to Review; confirming it learns the package,
+        // and future confident events auto-import without a new app release.
+        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
+        const autoAuthorized = sourceClass === 'trusted-bank' || learned;
         // An unconfirmed arbitrary package name never gets to impersonate a
         // bank merely by choosing a convincing Android package/title string.
-        const sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ? `${n.pkg} ${n.title}` : '');
+        const sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ? `${n.pkg} ${n.title}` : '');
         const worldwide = inspectWorldwide(
           source,
           sender,
         );
-        // Known packages keep their exact market pin. Locally learned packages
-        // use the normal parser's own market/money evidence. Every unconfirmed
-        // Google Play candidate remains review-only.
-        const p = autoSource
-          ? trustedMarket === 'AE' || trustedMarket === 'SA'
-            ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
-            : parseLaunchAlert(source, sender, worldwide)
-          : null;
+        // Every admitted financial candidate reaches the parser. Curated
+        // packages keep their exact market pin; everything else uses only the
+        // message's own market/money evidence until its package is confirmed.
+        const p = trustedMarket === 'AE' || trustedMarket === 'SA'
+          ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
+          : parseLaunchAlert(source, sender, worldwide);
         const pushSource = { packageName: n.pkg, sourceClass } as const;
-        const reviewed = p && shouldReviewParsedIncome(p)
+        const reviewed = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(source, n.ts, sender, 'push', worldwide, undefined, pushSource)
           : false;
-        if (p && !reviewed) {
+        if (p && autoAuthorized && !reviewed) {
           parsed.push({
             ...p,
             date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(n.ts)),

@@ -139,6 +139,8 @@ test('the scanner reads only with native availability and granted notification a
     '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => [] } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -169,6 +171,8 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -178,14 +182,16 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
   assert.equal(result.inboxHistoryComplete, false, 'notification scan cannot claim SMS history completion');
 });
 
-test('unknown Play financial candidates stay review-only until explicitly learned on that phone', () => {
+test('every financial candidate reaches the parser but only trusted or confirmed packages auto-import', () => {
   const scanner = read('src/lib/auto-import.ts');
   const promotion = read('src/lib/review-promotion.ts');
   const types = read('src/lib/types.ts');
-  assert.match(scanner, /sourceClass === 'financial-candidate' && learnedPackages\.has\(n\.pkg\)/);
-  assert.match(scanner, /const autoSource = sourceClass === 'trusted-bank' \|\| learned/);
-  assert.match(scanner, /const p = autoSource/);
-  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoSource \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
+  assert.match(scanner, /learnedPackages\.has\(n\.pkg\)/);
+  assert.match(scanner, /const autoAuthorized = sourceClass === 'trusted-bank' \|\| learned/);
+  assert.match(scanner, /const p = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
+  assert.match(scanner, /shouldReviewParsedIncome\(p\) \|\| !autoAuthorized/);
+  assert.match(scanner, /p && autoAuthorized && !reviewed/);
+  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoAuthorized \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
   assert.match(promotion, /learnedNotificationPackage/);
   assert.match(types, /trustedNotificationPackages: string\[\]/);
@@ -221,6 +227,8 @@ test('500 queued notification candidates process without touching SMS and ACK on
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
     }) },

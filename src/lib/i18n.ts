@@ -75,6 +75,22 @@ const S = {
     en: 'To show an instant transaction alert, Wafra receives SMS as they arrive and checks them on this device for financial activity. Raw message text is not uploaded or kept by Wafra after the delivery check, and non-financial messages are ignored. This is separate from inbox-history access.',
     ar: 'لعرض تنبيه فوري للعملية، يستقبل وفرة رسائل SMS عند وصولها ويفحصها على هذا الجهاز بحثاً عن نشاط مالي. لا يرفع وفرة نص الرسالة الخام ولا يحتفظ به بعد فحص الوصول، ويتجاهل الرسائل غير المالية. هذا الإذن منفصل عن الوصول إلى سجل الرسائل.',
   },
+  testerDiagnosticsSend: { en: 'Send test diagnostics', ar: 'إرسال تشخيص الاختبار' },
+  testerDiagnosticsCollecting: { en: 'Collecting diagnostics…', ar: 'جارٍ جمع التشخيص…' },
+  testerDiagnosticsDetail: {
+    en: 'Sends one privacy-safe report to Wafra Cloudflare with performance, parser/category, SMS import and bank-notification health. Raw SMS, names, card/account numbers and exact amounts are not uploaded.',
+    ar: 'يرسل تقريراً واحداً آمناً للخصوصية إلى Cloudflare يتضمن الأداء والمحلل والتصنيفات واستيراد SMS وحالة إشعارات البنوك. لا يتم رفع نص الرسائل أو الأسماء أو أرقام البطاقات/الحسابات أو المبالغ الدقيقة.',
+  },
+  testerDiagnosticsSentTitle: { en: 'Diagnostics sent', ar: 'تم إرسال التشخيص' },
+  testerDiagnosticsSentBody: {
+    en: 'Report ID: {id}\n\nKeep this ID so the report can be retrieved from Cloudflare.',
+    ar: 'معرّف التقرير: {id}\n\nاحتفظ بهذا المعرّف لاسترجاع التقرير من Cloudflare.',
+  },
+  testerDiagnosticsFailedTitle: { en: 'Could not send diagnostics', ar: 'تعذر إرسال التشخيص' },
+  testerDiagnosticsFailedBody: {
+    en: 'The report stayed on this phone. Check your connection and try again.',
+    ar: 'بقي التقرير على هذا الهاتف. تحقق من الاتصال وحاول مرة أخرى.',
+  },
   filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
   incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },
   incomeAccountReviewBody: { en: 'This payment counts as income, but the message did not identify its bank account. Edit this entry to select the correct account. No bank balance has been inferred.', ar: 'تُحتسب هذه الدفعة ضمن الدخل، لكن الرسالة لم تحدد حسابها المصرفي. عدّل العملية لاختيار الحساب الصحيح. لم يتم افتراض أي رصيد مصرفي.' },

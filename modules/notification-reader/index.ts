@@ -23,7 +23,7 @@ export interface CapturedNotification {
   text: string;
   /** Epoch milliseconds. */
   ts: number;
-  /** Native source confidence; unknown candidates are review-only initially. */
+  /** Native source provenance. JS still requires issuer/parser evidence before auto-import. */
   sourceClass: 'trusted-bank' | 'financial-candidate';
 }
 

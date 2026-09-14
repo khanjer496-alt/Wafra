@@ -69,6 +69,30 @@ for (const language of ['en', 'ar']) for (const salaryDay of [1, 25]) {
     assert.equal(index.ordered('oldest'), index.ordered('oldest'), 'sort result reused for the immutable ledger');
   });
 }
+
+test('credit-card repayment stays visible but contributes zero to day and result totals', () => {
+  setMonthStartDay(1);
+  const repayment = {
+    id: 'repayment', title: 'Card •5444 payment', amountFils: 1_207_532,
+    category: 'other', type: 'income', date: '2026-09-02', accountId: 'card',
+    source: 'sms', isTransfer: true, cardPaymentSide: 'receipt',
+  };
+  const purchase = {
+    id: 'purchase', title: 'Bed And Co Furniture', amountFils: 101_900,
+    category: 'shopping', type: 'expense', date: '2026-09-02', accountId: 'card', source: 'sms',
+  };
+  const options = { ...o, period: { mode: 'all' }, live: new Set(['active', 'card']), internal: new Set() };
+  const result = projectTransactionFilter(
+    createTransactionFilterIndex([repayment, purchase], 'en'),
+    { ...defaults, datePreset: 'all' },
+    options,
+  );
+  assert.deepEqual(result.filtered.map(row => row.id), ['repayment', 'purchase']);
+  assert.equal(result.totalShown, -101_900, 'repayment must not change the result total');
+  assert.equal(result.days[0].totalFils, -101_900, 'repayment must not change Day total');
+  assert.equal(result.excluded.transfers, 1, 'repayment is visible as excluded transfer activity');
+});
+
 test('records a repeat-filter benchmark without asserting phone performance or flaky wall-clock budgets', () => {
   setMonthStartDay(1); const start = performance.now(); const index = createTransactionFilterIndex(rows, 'en');
   const indexMs = performance.now() - start;
