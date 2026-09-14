@@ -220,6 +220,9 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
           market: state.marketId,
           overrides: state.merchantOverrides,
           shouldContinue: () => true,
+          // One tap, no progress UI, no cancel. This report wants parser
+          // ratios, not a whole-inbox audit; the export control keeps that.
+          bounded: true,
         },
       );
       let parsedExpectedLedger = 0;
@@ -256,6 +259,8 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
         scanPerformed: true,
         skippedReason: null,
         checked: collected.coverage.checked,
+        inboxReadComplete: collected.coverage.nativeFilteredInboxReadComplete,
+        stoppedAtCheckedLimit: collected.coverage.stoppedAtCheckedLimit === true,
         bankMoneyMessages: collected.coverage.included,
         excluded: collected.coverage.excluded,
         parserRejected,

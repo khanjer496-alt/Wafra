@@ -76,6 +76,34 @@ test('optional bank diagnostic read is cursor-complete and excludes personal/sec
   assert.ok(!JSON.stringify(report).includes('984321'));
   assert.ok(!JSON.stringify(report).includes('+971500000000'));
 });
+test('the one-tap tester read stops at its row cap and never calls a bounded sample complete', async () => {
+  // A full inbox: the provider always answers a whole 250-row page, so the
+  // unbounded loop only ends when the caller stops asking. Before the cap, the
+  // one-tap button walked every page of a real 15,000-message inbox behind a
+  // spinner with no end and no cancel.
+  let id = 1_000_000;
+  const fullPage = () => Array.from({ length: 250 }, (_, i) => ({
+    id: id - i, date: id - i, address: 'Liv',
+    body: `AED ${100 + i}.00 credited to your account from TALABAT BUSINESS.`,
+  }));
+  const reader = async () => { const page = fullPage(); id -= 250; return page; };
+
+  const base = { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true };
+  const bounded = await collectDiagnosticBankMessages(reader, { ...base, bounded: true });
+  assert.equal(bounded.coverage.checked, 2000, 'stops at the documented row cap');
+  assert.equal(bounded.coverage.stoppedAtCheckedLimit, true);
+  // The claim that matters: a bounded slice must not report a complete read.
+  assert.equal(bounded.coverage.nativeFilteredInboxReadComplete, false);
+
+  // The export control asked for everything and must still get everything:
+  // an exhausted provider reports complete and sets no limit flag.
+  id = 1_000_000;
+  let pages = 0;
+  const short = async () => (pages++ === 0 ? fullPage() : []);
+  const complete = await collectDiagnosticBankMessages(short, base);
+  assert.equal(complete.coverage.nativeFilteredInboxReadComplete, true);
+  assert.equal(complete.coverage.stoppedAtCheckedLimit, false);
+});
 test('malformed/non-advancing pages fail instead of emitting a partial complete export', async () => {
   const opts = { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true };
   await assert.rejects(collectDiagnosticBankMessages(async () => [
