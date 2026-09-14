@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.UUID
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
@@ -34,9 +35,11 @@ object NotificationCaptureStore {
   private const val PREFS = "wafra_notification_capture_v2"
   private const val QUEUE = "encrypted_queue"
   private const val CLEARED_THROUGH = "cleared_through_ms"
+  private const val ACKED = "acked_fingerprints"
   private const val LEGACY_PREFS = "wafra_notification_capture"
   private const val KEY_ALIAS = "wafra.notification.capture.v1"
   private const val MAX_ROWS = 500
+  private const val MAX_ACKED_FINGERPRINTS = 2_000
   private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
   private const val VERSION = 1
 
@@ -48,6 +51,7 @@ object NotificationCaptureStore {
     purgeLegacyPlaintext(context)
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
     val samePostedNotification = current.indexOfFirst { it.pkg == pkg && it.ts == ts }
     if (samePostedNotification >= 0) {
@@ -78,6 +82,7 @@ object NotificationCaptureStore {
     if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
     return try {
       if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) "duplicate" else null
     } catch (_: Exception) {
@@ -101,8 +106,18 @@ object NotificationCaptureStore {
   fun acknowledge(context: Context, ids: Set<String>) {
     if (ids.isEmpty()) return
     purgeLegacyPlaintext(context)
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val current = readAll(context)
-    writeAll(context, current.filterNot { ids.contains(it.id) })
+    val acknowledgedRows = current.filter { ids.contains(it.id) }
+    if (acknowledgedRows.isEmpty()) return
+    val remaining = current.filterNot { ids.contains(it.id) }
+    val acked = (readAcked(prefs) + acknowledgedRows.map { notificationFingerprint(it.pkg, it.ts) })
+      .distinct().takeLast(MAX_ACKED_FINGERPRINTS)
+    val ok = prefs.edit()
+      .putString(QUEUE, encodeRows(remaining))
+      .putString(ACKED, JSONArray(acked).toString())
+      .commit()
+    if (!ok) throw IllegalStateException("Notification capture acknowledgement could not be persisted")
   }
 
   @Synchronized
@@ -114,6 +129,7 @@ object NotificationCaptureStore {
     // An append before this lock is removed; one after sees the watermark.
     val ok = prefs.edit()
       .remove(QUEUE)
+      .remove(ACKED)
       .putLong(CLEARED_THROUGH, clearedThrough)
       .commit()
     if (!ok) throw IllegalStateException("Notification queue could not be cleared")
@@ -159,13 +175,38 @@ object NotificationCaptureStore {
     return out
   }
 
-  private fun writeAll(context: Context, rows: List<CapturedBankNotification>) {
+  private fun encodeRows(rows: List<CapturedBankNotification>): String {
     val encrypted = JSONArray()
     val secretKey = if (rows.isEmpty()) null else key()
     rows.forEach { encrypted.put(encrypt(it, requireNotNull(secretKey))) }
+    return encrypted.toString()
+  }
+
+  private fun writeAll(context: Context, rows: List<CapturedBankNotification>) {
     val ok = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      .edit().putString(QUEUE, encrypted.toString()).commit()
+      .edit().putString(QUEUE, encodeRows(rows)).commit()
     if (!ok) throw IllegalStateException("Notification queue could not be persisted")
+  }
+
+  private fun readAcked(prefs: android.content.SharedPreferences): List<String> {
+    val raw = prefs.getString(ACKED, null) ?: return emptyList()
+    return try {
+      val array = JSONArray(raw)
+      buildList {
+        for (index in 0 until array.length()) {
+          val value = array.optString(index)
+          if (value.isNotBlank()) add(value)
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  private fun notificationFingerprint(pkg: String, ts: Long): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+      .digest("$pkg\u0000$ts".toByteArray(Charsets.UTF_8))
+    return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
   }
 
   private fun encrypt(row: CapturedBankNotification, secretKey: SecretKey): JSONObject {

@@ -54,6 +54,10 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(listener, /notification\.tickerText/);
   assert.match(listener, /filter \{ key -> looksLikeTextExtraKey\(key\) \}/);
   assert.match(listener, /extendedMoneySurface/);
+  assert.match(listener, /POSTING_CONTEXT_RE/);
+  assert.match(listener, /composedMoneySurface/);
+  assert.match(listener, /listOf\(contextCandidate, moneyCandidate\)\.distinct\(\)\.joinToString\(" "\)/);
+  assert.equal(enabled.trustedBankNotificationSender('com.adcb.nexgen'), 'ADCB');
 });
 
 test('known bank packages survive OEM/restore installer metadata while unknown apps still require Play provenance', () => {
@@ -101,6 +105,11 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(store, /"cleared-through"/);
   assert.match(store, /indexOfFirst \{ it\.pkg == pkg && it\.ts == ts \}/);
   assert.match(store, /prior\.copy\(title = title, text = text\)/);
+  assert.match(store, /private const val ACKED = "acked_fingerprints"/);
+  assert.match(store, /notificationFingerprint\(pkg, ts\)/);
+  assert.match(store, /return "acknowledged"/);
+  assert.match(store, /putString\(ACKED, JSONArray\(acked\)\.toString\(\)\)/);
+  assert.match(store, /acknowledgedRows\.map \{ notificationFingerprint\(it\.pkg, it\.ts\) \}/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
   assert.match(bridge, /sweepVisible\(\): Promise<boolean>/);
   assert.match(settings, /notifDiagnosticsTitle/);
@@ -292,6 +301,7 @@ test('Settings and draining use the same availability gate while permission revo
 
 test('foreground notification drain is independent of SMS freshness and Settings can recover it', () => {
   const hook = read('src/hooks/use-auto-import.ts');
+  const scanner = read('src/lib/auto-import.ts');
   const settings = read('src/app/settings.tsx');
   const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
   assert.match(hook, /const runAndroidNotificationDrain = useCallback/);
@@ -314,4 +324,8 @@ test('foreground notification drain is independent of SMS freshness and Settings
   const diagnosticsEnd = module.indexOf('AsyncFunction("sweepVisible")');
   assert.doesNotMatch(module.slice(diagnosticsStart, diagnosticsEnd), /sweepOrRequestRebind|sweepConnected/,
     'reading diagnostic counts must not sweep the full shade');
+  const tester = read('src/lib/android-tester-diagnostics.ts');
+  assert.match(tester, /getAndroidNotificationImportDiagnostics\(\)/);
+  assert.match(scanner, /acknowledgementPlanned/);
+  assert.match(scanner, /unresolved/);
 });

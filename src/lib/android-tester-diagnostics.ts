@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
-import { hasSmsPermission } from '@/lib/auto-import';
+import { getAndroidNotificationImportDiagnostics, hasSmsPermission } from '@/lib/auto-import';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { collectDiagnosticBankMessages } from '@/lib/diagnostic-messages';
 import { buildFeedbackPayload } from '@/lib/feedback';
@@ -367,7 +367,10 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
       ledgerSources: state.privateMode ? null : ledger.summary,
     },
     parser,
-    notifications: notificationDiagnostics,
+    notifications: {
+      native: notificationDiagnostics,
+      lastImport: getAndroidNotificationImportDiagnostics(),
+    },
   };
   return fitDiagnostic(report);
 }

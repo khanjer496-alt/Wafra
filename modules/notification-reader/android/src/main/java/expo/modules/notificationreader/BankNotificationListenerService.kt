@@ -120,8 +120,22 @@ class BankNotificationListenerService : NotificationListenerService() {
       if (moneyCandidate != null && textCandidates.indexOf(moneyCandidate) >= standardCandidateCount) {
         recordAdmission("extendedMoneySurface", adcb)
       }
+      val contextCandidate = nonBlankTextCandidates
+        .filter { candidate ->
+          candidate != moneyCandidate && !MONEY_RE.containsMatchIn(candidate) &&
+            POSTING_CONTEXT_RE.containsMatchIn(candidate)
+        }
+        .maxByOrNull { it.length }
+      val reconstructed = if (trustedPackage && moneyCandidate != null &&
+          !POSTING_CONTEXT_RE.containsMatchIn(moneyCandidate) && contextCandidate != null) {
+        listOf(contextCandidate, moneyCandidate).distinct().joinToString(" ")
+      } else null
+      if (reconstructed != null && reconstructed.length <= MAX_TEXT_CHARS) {
+        recordAdmission("composedMoneySurface", adcb)
+      }
       val composite = nonBlankTextCandidates.distinct().joinToString("\n")
-      val text = moneyCandidate
+      val text = reconstructed?.takeIf { it.length <= MAX_TEXT_CHARS }
+        ?: moneyCandidate
         ?: composite.takeIf { trustedPackage && it.length <= MAX_TEXT_CHARS && it.isNotBlank() }
         ?: nonBlankTextCandidates.firstOrNull()
         ?: ""
@@ -295,6 +309,13 @@ class BankNotificationListenerService : NotificationListenerService() {
     // out ("150.00 درهم"), so a bank app posting in Arabic passed none of the
     // prefix-only tests and every one of its notifications was dropped here,
     // before anything downstream could see it.
+    private val POSTING_CONTEXT_RE = Regex(
+      "(?:\\b(?:credit|debit|covered|prepaid|charge)\\s*card\\b|" +
+        "\\bcard\\b|\\b(?:purchase|used|spent|debited|credited|transferred|transfer|" +
+        "withdraw(?:al)?|payment|paid|refund(?:ed)?|cashback)\\b)",
+      RegexOption.IGNORE_CASE,
+    )
+
     val MONEY_RE = Regex(
       // Bank apps commonly concatenate the ISO currency and amount (for
       // example ADCB posts AED181.00). \s* already permits that; keep the

@@ -46,6 +46,26 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
+
+export interface AndroidNotificationImportDiagnostics {
+  attemptedAt: number;
+  captured: number;
+  autoParsed: number;
+  review: number;
+  declined: number;
+  ignored: number;
+  unresolved: number;
+  acknowledgementPlanned: number;
+  acknowledged: number;
+}
+
+let latestAndroidNotificationImportDiagnostics: AndroidNotificationImportDiagnostics | null = null;
+
+/** Source-free last-drain counters for tester diagnostics. */
+export const getAndroidNotificationImportDiagnostics = (): AndroidNotificationImportDiagnostics | null =>
+  latestAndroidNotificationImportDiagnostics
+    ? { ...latestAndroidNotificationImportDiagnostics }
+    : null;
 // Cheap superset of currencies the worldwide reviewer can currently ground.
 // It avoids running fourteen market packs over ordinary personal SMS, while
 // false positives merely reach the review module and are refused there.
@@ -557,6 +577,7 @@ export async function scanInbox(
   };
   const declined: DeclinedSms[] = [];
   const notificationIds = new Set<string>();
+  let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
   const inspectWorldwide = launchSession.inspect;
   const parseLaunchAlert = launchSession.parse;
@@ -853,6 +874,17 @@ export async function scanInbox(
       // retained row: using the ledger watermark here could strand an older
       // unacknowledged notification forever after a newer SMS advances it.
       const captured = await notificationReader.getCaptured(0);
+      notificationImportStats = {
+        attemptedAt: Date.now(),
+        captured: captured.length,
+        autoParsed: 0,
+        review: 0,
+        declined: 0,
+        ignored: 0,
+        unresolved: 0,
+        acknowledgementPlanned: 0,
+        acknowledged: 0,
+      };
       const learnedPackages = new Set(options.learnedNotificationPackages ?? []);
       const notificationYield = createParseYieldState();
       for (let i = 0; i < captured.length; i++) {
@@ -904,6 +936,7 @@ export async function scanInbox(
             sender,
             channel: 'push',
           });
+          if (notificationImportStats) notificationImportStats.autoParsed += 1;
           handled = true;
         } else if (!p) {
           refusal = await inspectRefused(
@@ -916,8 +949,17 @@ export async function scanInbox(
             pushSource,
           );
         }
-        if (refusal?.kind === 'review' || refusal?.kind === 'declined') handled = true;
-        if (refusal?.kind === 'ignored' && refusal.reason !== 'unrecognized') handled = true;
+        if (refusal?.kind === 'review') {
+          if (notificationImportStats) notificationImportStats.review += 1;
+          handled = true;
+        } else if (refusal?.kind === 'declined') {
+          if (notificationImportStats) notificationImportStats.declined += 1;
+          handled = true;
+        } else if (refusal?.kind === 'ignored' && refusal.reason !== 'unrecognized') {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          handled = true;
+        }
+        if (!handled && notificationImportStats) notificationImportStats.unresolved += 1;
         // Claim the row only when Wafra has a durable/safe outcome. An
         // unresolved money-bearing bank notification used to be ACKed here even
         // though neither the ledger nor Review contained it, making the evidence
@@ -928,6 +970,10 @@ export async function scanInbox(
           await yieldToUi();
           resetParseYieldState(notificationYield);
         }
+      }
+      if (notificationImportStats) {
+        notificationImportStats.acknowledgementPlanned = notificationIds.size;
+        latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
       }
       onProgress?.(scannedCount, parsed.length);
     } catch (error) {
@@ -956,6 +1002,13 @@ export async function scanInbox(
       ? async () => {
           const acknowledged = await notificationReader.ackCaptured([...notificationIds]);
           if (!acknowledged) throw new Error('Notification capture acknowledgement failed');
+          if (notificationImportStats &&
+              latestAndroidNotificationImportDiagnostics?.attemptedAt === notificationImportStats.attemptedAt) {
+            latestAndroidNotificationImportDiagnostics = {
+              ...latestAndroidNotificationImportDiagnostics,
+              acknowledged: notificationIds.size,
+            };
+          }
         }
       : NOOP_SCAN_COMMIT,
   };

@@ -2,8 +2,8 @@
  * Curated Android bank-app identities used as strong issuer/market evidence.
  * Native capture separately admits financial-looking notifications from other
  * Google Play-installed apps. Unknown packages do not inherit this map's trust:
- * they use the universal parser and remain review-only until explicitly learned
- * locally.
+ * they enter the same parser under weaker issuer evidence. Only parser-confirmed
+ * posted events auto-import; uncertain shapes remain review-only.
  * Keep the curated map aligned with native; contracts.test.js enforces it.
  */
 export const TRUSTED_BANK_NOTIFICATION_PACKAGES = {
@@ -67,17 +67,30 @@ export const trustedBankNotificationMarket = (
  * exact Play-installed package. It lets the review grammar use package
  * identity without treating a notification title/body as issuer proof.
  */
-const TRUSTED_GLOBAL_NOTIFICATION_SENDERS: Partial<
+const TRUSTED_NOTIFICATION_SENDERS: Partial<
   Record<keyof typeof TRUSTED_BANK_NOTIFICATION_PACKAGES, string>
 > = {
+  'com.emiratesnbd.android': 'Emirates NBD',
+  'com.adcb.nexgen': 'ADCB',
+  'com.adcb.bank': 'ADCB',
+  'com.fab.personalbanking': 'FAB',
+  'com.vipera.ts.starter.MashreqAE': 'Mashreq',
+  'io.wio.retail': 'Wio',
+  'ae.wio.personal': 'Wio',
+  'ae.hsbc.hsbcuae': 'HSBC',
+  'com.alrajhiretailapp': 'Al Rajhi',
+  'com.BankAlBilad': 'Bank AlBilad',
+  'com.bankalbilad.NewRMB': 'Bank AlBilad',
+  'com.riyadbank.digitalmobile': 'Riyad Bank',
+  'com.AamalTech.alinmaBank': 'Alinma',
   'net.bnpparibas.mescomptes': 'BNPPARIBAS',
   'com.barclays.android.barclaysmobilebanking': 'BARCLAYS',
   'com.hdfcbank.android.now': 'HDFCBK',
 };
 
 export const trustedBankNotificationSender = (packageName: string): string | null =>
-  Object.prototype.hasOwnProperty.call(TRUSTED_GLOBAL_NOTIFICATION_SENDERS, packageName)
-    ? TRUSTED_GLOBAL_NOTIFICATION_SENDERS[
-        packageName as keyof typeof TRUSTED_GLOBAL_NOTIFICATION_SENDERS
+  Object.prototype.hasOwnProperty.call(TRUSTED_NOTIFICATION_SENDERS, packageName)
+    ? TRUSTED_NOTIFICATION_SENDERS[
+        packageName as keyof typeof TRUSTED_NOTIFICATION_SENDERS
       ] ?? null
     : null;
