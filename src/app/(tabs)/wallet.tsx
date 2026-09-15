@@ -30,18 +30,13 @@ import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
-import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
-import { summarizeCashOutflow } from '@/lib/cash-flow';
 import {
   formatAmount,
-  monthKey,
   parseAmountWithMoneySpec,
-  totalAsShown,
   shortDate,
   toISODate,
 } from '@/lib/format';
@@ -195,14 +190,6 @@ export default function WalletScreen() {
   const reissues = useMemo(() => reissueSuggestions(state, now),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
-  // Totalled AS SHOWN, because this figure is printed directly above the
-  // rows it covers. Summing the exact fils and rounding once gives a heading
-  // that can differ from its own list by a dirham — the same defect that put
-  // "AED 1,025/mo" over rows adding to 1,022 on Bills.
-  const duesTotalFils = useMemo(
-    () => totalAsShown(dues.map((d) => d.remainingFils)),
-    [dues],
-  );
   const dueByAccountId = useMemo(
     () => new Map(dues.map((item) => [item.due.accountId, item] as const)),
     [dues],
@@ -233,38 +220,6 @@ export default function WalletScreen() {
   const smsCount = useMemo(
     () => state.transactions.filter((tx) => tx.source === 'sms').length,
     [state.transactions],
-  );
-
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
-  const cashOut = useMemo(
-    () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),
-    // Include the setting that changes the global reporting-month boundary.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, state.cardDues, state.monthStartDay, now, liveAccounts, internal],
-  );
-  /**
-   * Both halves of a move between the user's own accounts are excluded, as
-   * they are on Home and Flow — otherwise the second line under a card reads
-   * back the sweep that left it as money spent.
-   *
-   * The live-account set is deliberately not applied, for the reason spelled
-   * out over the same map on the Cards screen: this is a per-account figure
-   * shown on that account's own row, and no total is built from it.
-   */
-  const currencies = useMemo(() => {
-    const key = monthKey(now);
-    return summarizeForeignActivity(
-      state.transactions,
-      (transaction) => monthKey(transaction.date) === key,
-    ).groups;
-  }, [state.transactions, now]);
-  const currenciesTotalFils = useMemo(
-    () => totalAsShown(currencies.map((group) => group.localFils)),
-    [currencies],
   );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
@@ -389,25 +344,14 @@ export default function WalletScreen() {
             balanceCoverageText={balanceCoverageText}
             balanceFils={balances.balanceFils}
             knownBalanceCount={balanceAccountCoverage.known}
-            duesTotalFils={duesTotalFils}
-            cashOutTotalFils={cashOut.totalFils}
-            cashOutCardPaymentsFils={cashOut.cardPaymentsFils}
-            cashOutAccountOutflowFils={cashOut.accountOutflowFils}
-            currencies={currencies}
-            currenciesTotalFils={currenciesTotalFils}
             activeSourceCount={activeSources.length}
             largeText={largeText}
             theme={theme}
-            onOpenBills={() => {
-              tapped();
-              router.push('/bills');
-            }}
-            onOpenCurrency={() => router.push('/currency')}
           />
 
-          {/* Group by account purpose without implying a live bank connection. */}
-          <Button label={t('accountTransferHistory')} variant="ghost" icon="chevron-right"
-            onPress={() => router.push('/review-transfers')} />
+          {/* Accounts is the source-of-truth surface for balances and instruments.
+              Transfer reconciliation is contextual work, not a permanent section
+              between the balance hero and the accounts it summarizes. */}
           <View style={styles.section}>
 
 

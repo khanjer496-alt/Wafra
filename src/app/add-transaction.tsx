@@ -28,7 +28,7 @@ import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
-import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting } from '@/components/universal-review-fields';
+import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting, reviewMoneyChoices } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { CategoryId, TransactionType } from '@/lib/types';
@@ -95,8 +95,19 @@ export default function AddTransactionScreen() {
       : reviewFamily === 'cash-withdrawal'
         ? 'cash-withdrawal'
         : null;
-  const reviewTitle = rememberedReview?.title ?? (event
-    ? event.merchant.evidence === 'explicit' ? event.merchant.value ?? '' : ''
+  const universalFallbackTitle = event ? tUi(event.family === 'purchase' || event.family === 'recurring-payment'
+    ? 'genericCardPayment'
+    : event.family === 'transfer' ? 'reviewAlertPossibleTransfer'
+      : event.family === 'cash-withdrawal' ? 'reviewAlertPossibleCash'
+        : event.family === 'refund' ? 'reviewAlertPossibleRefund'
+          : event.family === 'fee' ? 'reviewAlertPossibleFee'
+            : event.family === 'utility' ? 'reviewAlertPossibleUtility'
+              : 'newTransaction') : '';
+  const explicitMerchantTitle = event?.merchant.evidence === 'explicit'
+    ? event.merchant.value?.trim() ?? ''
+    : '';
+  const reviewTitle = rememberedReview?.title?.trim() || (event
+    ? explicitMerchantTitle || universalFallbackTitle
     : registeredItem ? defaultReviewTitle(registeredItem) : '');
   const matchingAccounts = reviewInstrument?.last4 ? state.accounts.filter((account) =>
     account.last4 === reviewInstrument.last4 &&
@@ -107,28 +118,36 @@ export default function AddTransactionScreen() {
 
   const [type, setType] = useState<TransactionType>(reviewType);
   const [directionConfirmed, setDirectionConfirmed] = useState(!event || event.direction === 'debit' || event.direction === 'credit');
-  const [postedConfirmed, setPostedConfirmed] = useState(event?.status === 'posted');
-  const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(event?.amount.evidence === 'explicit' ? event.amount.value : null);
+  const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(() => {
+    if (!event) return null;
+    if (event.amount.evidence === 'explicit' && event.amount.value) return event.amount.value;
+    const choices = reviewMoneyChoices(event);
+    return choices.length === 1 ? choices[0] : null;
+  });
   const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
     rememberedReview ? rememberedReview.category as CategoryId : reviewItem
-      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : null : 'groceries',
+      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : 'other' : 'groceries',
   );
   const [accountId, setAccountId] = useState(
     reviewItem ? rememberedReview?.accountId ?? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
   );
   const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
+  const observedReviewDate = reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '';
+  const explicitReviewDate = event?.transactionDate.evidence === 'explicit'
+    ? event.transactionDate.value
+    : null;
   const [reviewDate, setReviewDate] = useState(
-    event ? event.transactionDate.evidence === 'explicit' ? event.transactionDate.value ?? '' : ''
-      : reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
+    explicitReviewDate && validReviewDate(explicitReviewDate) ? explicitReviewDate : observedReviewDate,
   );
   const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(
     rememberedReview?.betweenOwnAccounts ?? false,
   );
+  const reviewDirectionKnown = reviewDirection === 'credit' || reviewDirection === 'debit';
   const [saving, setSaving] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const amountRef = useRef<TextInput>(null);
@@ -160,7 +179,7 @@ export default function AddTransactionScreen() {
   const moneyMatchesLedger = !selectedMoney || !state.ledgerMoney ||
     (state.ledgerMoney.currency === selectedMoney.currency && state.ledgerMoney.exponent === selectedMoney.exponent);
   const genericReady = !event || (ordinaryPosting && !sourceChanged && !!selectedMoney &&
-    /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed && postedConfirmed &&
+    /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed &&
     title.trim().length > 0 && title.trim().length <= 80 &&
     (event.instrument.evidence !== 'ambiguous' || selectedInstrument !== null));
   const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid && genericReady &&
@@ -169,8 +188,6 @@ export default function AddTransactionScreen() {
   const amountInvalid = showValidation && !reviewItem && !amountFils;
   const categoryInvalid = showValidation && !category;
   const accountInvalid = showValidation && !accountId;
-  const reviewDateInvalid = showValidation && !!reviewItem &&
-    !validReviewDate(reviewDate);
   const categoryLabelId = 'add-transaction-category-label';
   const categoryErrorId = 'add-transaction-category-error';
   const accountLabelId = 'add-transaction-account-label';
@@ -197,7 +214,7 @@ export default function AddTransactionScreen() {
     setType(t);
     setDirectionConfirmed(true);
     const suggestion = event ? suggestUniversalCategory(event, { type: t, overrides: state.merchantOverrides }) : null;
-    setCategory(reviewItem ? suggestion && !suggestion.needsReview ? suggestion.category : null
+    setCategory(reviewItem ? suggestion && !suggestion.needsReview ? suggestion.category : 'other'
       : t === 'expense' ? 'groceries' : 'salary');
   };
 
@@ -353,7 +370,7 @@ export default function AddTransactionScreen() {
       keyboardAware
       headerMode="inline"
       header={{
-        title: tUi(genericItem ? 'genericReviewTitle' : reviewItem ? 'reviewAlertAddTitle' : 'newTransaction'),
+        title: tUi(reviewItem ? 'genericReviewTitle' : 'newTransaction'),
         back: { label: tUi('close'), icon: 'close', onPress: () => router.back() },
       }}
       scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
@@ -384,8 +401,10 @@ export default function AddTransactionScreen() {
           </Pressable>
         </View>
       )}>
-      {/* Type switch */}
-      <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+      {/* A captured alert asks only what Wafra genuinely does not know. If the
+          bank already supplied debit/credit direction, do not make the person
+          reconfirm it. Manual entries still need the normal type switch. */}
+      {(!reviewItem || !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
                 const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
@@ -408,7 +427,7 @@ export default function AddTransactionScreen() {
                   </Pressable>
                 );
               })}
-      </View>
+      </View> : null}
 
       {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
       {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
@@ -445,7 +464,6 @@ export default function AddTransactionScreen() {
       {event && genericItem ? (
         <UniversalReviewFields event={event} money={selectedMoney} onMoneyChange={setSelectedMoney}
           instrument={selectedInstrument} onInstrumentChange={(value) => { setSelectedInstrument(value); setAccountId(''); }}
-          postedConfirmed={postedConfirmed} onPostedConfirmed={setPostedConfirmed}
           date={reviewDate} onDateChange={setReviewDate} observedDate={toISODate(new Date(genericItem.observedAt))}
           observedDateLabel={tUi(genericItem.channel === 'paste' ? 'genericUsePasteDate' : 'genericUseMessageDate')} />
       ) : registeredItem ? (
@@ -494,7 +512,7 @@ export default function AddTransactionScreen() {
               </Pressable>
       )}
 
-      <View
+      {!reviewItem ? <View
         ref={categoryRef}
         collapsable={false}
         accessibilityRole="radiogroup"
@@ -525,10 +543,10 @@ export default function AddTransactionScreen() {
                   {tUi('reviewAlertChooseCategory')}
                 </ThemedText>
               )}
-      </View>
+      </View> : null}
 
       {/* Account */}
-      <View
+      {(!reviewItem || !matchedAccount || event?.instrument.evidence === 'ambiguous') ? <View
         ref={accountRef}
         collapsable={false}
         accessibilityRole="radiogroup"
@@ -590,23 +608,10 @@ export default function AddTransactionScreen() {
                   </ThemedText>
                 </Pressable>
               )}
-      </View>
+      </View> : null}
 
       {/* Date quick-pick */}
-      <View style={styles.fieldBlock}>
-              {reviewItem ? (
-          <TextField
-            ref={reviewDateRef}
-            label={tUi('when')}
-                  value={reviewDate}
-                  onChangeText={setReviewDate}
-                  accessibilityLabel={tUi('reviewAlertDateA11y')}
-                  placeholder="YYYY-MM-DD"
-            inputMode="numeric"
-            invalid={reviewDateInvalid}
-            errorText={reviewDateInvalid ? tUi('reviewAlertDateA11y') : undefined}
-                />
-              ) : (
+      {!reviewItem ? <View style={styles.fieldBlock}>
           <>
             <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
               <View style={styles.dateRow}>
@@ -635,13 +640,12 @@ export default function AddTransactionScreen() {
                     </Pressable>
                   );
                 })}
-              </View>
+            </View>
           </>
-              )}
-      </View>
+      </View> : null}
 
       {/* Title */}
-      <TextField
+      {!reviewItem ? <TextField
         label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
                 value={title}
                 onChangeText={setTitle}
@@ -650,7 +654,7 @@ export default function AddTransactionScreen() {
                 invalid={!!genericItem && (title.length > 80 || (showValidation && !title.trim()))}
                 errorText={genericItem && title.length > 80 ? tUi('genericShortenTitle') : undefined}
                 placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
-              />
+              /> : null}
     </ScreenScaffold>
     <LedgerCurrencySheet
       visible={currencySheetVisible}

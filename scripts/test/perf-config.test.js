@@ -831,8 +831,8 @@ function bodyOf(source, header) {
   const home = stripComments(read('src/screens/journal-home-screen.tsx'));
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&
-      /state\.marketId, period, projectionDay, hasPendingReview\]/.test(home) &&
-      /state\.marketId, period, projectionDay\]/.test(home),
+      (home.match(/state\.marketId, period, projectionDay\]/g) ?? []).length >= 2 &&
+      !/state\.marketId, period, now\]/.test(home),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 
   ok('Home defers optional historical insight work until after the first usable frame',

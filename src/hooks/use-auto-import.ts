@@ -43,6 +43,7 @@ import {
   subscribeIosCaptureStatusRefresh,
 } from '@/lib/capture';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
+import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
@@ -564,6 +565,12 @@ export function useAutoImport(
       }),
     [captureLedger],
   );
+  useEffect(() => {
+    // Exactly one mounted owner lends the headless task the live StoreProvider.
+    // Pull-to-refresh hooks in the other tabs must not race to replace it.
+    if (Platform.OS !== 'android' || !watchForeground) return;
+    return installAndroidLiveCaptureLedger(captureLedger);
+  }, [captureLedger, watchForeground]);
   const iosNative = useMemo(() => getIosCaptureNativeModule(), []);
   const statusReadInProgress = useRef(false);
   const ignoreOwnWarningSignal = useRef(false);

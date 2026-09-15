@@ -60,6 +60,13 @@ class NotificationReaderModule : Module() {
       hasSystemAccess(context)
     }
 
+    /** Source-free entitlement/admission lease for SMS headless capture too. */
+    Function("isAdmissionActive") {
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false
+      val context = appContext.reactContext ?: return@Function false
+      NotificationCapturePolicy.isEnabled(context)
+    }
+
     /** The OS grant, even while Wafra's saved tracking choice is off. */
     Function("hasSystemAccess") {
       val context = appContext.reactContext ?: return@Function false

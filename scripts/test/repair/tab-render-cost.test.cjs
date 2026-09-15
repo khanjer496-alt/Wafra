@@ -95,13 +95,14 @@ for (const screen of ['wallet', 'bills']) {
   });
 }
 
-test('Wallet recomputes cash outflow when the salary-month boundary changes', () => {
+test('Wallet does not compute the removed cash-outflow summary', () => {
   const p = screenProbe('wallet');
   p.render();
-  const before = p.counts.summarizeCashOutflow;
+  assert.equal(p.counts.summarizeCashOutflow, 0);
   p.state = { ...p.state, monthStartDay: 25 };
   p.render();
-  assert.equal(p.counts.summarizeCashOutflow, before + 1);
+  assert.equal(p.counts.summarizeCashOutflow, 0,
+    'Accounts should not rescan the ledger for a cash-out figure it no longer renders');
 });
 
 test('Wallet uses fresh balances after an account snapshot changes', () => {

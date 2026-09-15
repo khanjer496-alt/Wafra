@@ -33,6 +33,10 @@ import { marketCurrencyCode } from '@/lib/markets';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
+// Android SMS_RECEIVED / bank-app notification events can launch the JS bundle
+// without mounting a React tree. Register that short headless task at module
+// scope for the same reason the iOS relay handler above is registered here.
+import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';

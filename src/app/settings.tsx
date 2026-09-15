@@ -1569,7 +1569,7 @@ export default function SettingsScreen() {
         <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={words.needsReview} />
           {reviewAlertCount > 0 && linkRow(
-            t('reviewAlertsTitle'),
+            words.reviewTitle,
             tf('reviewAlertsSettingsCount', { count: reviewAlertCount }),
             () => router.push('/review-alerts'),
           )}

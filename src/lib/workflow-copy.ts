@@ -7,9 +7,9 @@ const en = {
   settingsTitle: 'Make Wafra yours',
   settingsBody: 'Your preferences, import controls and data. All in one place.',
   settingsNavigation: 'Settings sections',
-  reviewTitle: 'A quick check from you',
-  reviewBody: 'These alerts are not included in your totals. Review the details before adding them.',
-  pending: 'Awaiting review', complete: 'All caught up',
+  reviewTitle: 'Bank alerts needing help',
+  reviewBody: "Wafra couldn't safely add these automatically. Tap one to fix only the missing detail.",
+  pending: 'Needs your input', complete: 'All caught up',
   sortTitle: 'Give every merchant a home',
   sortBody: 'Choose a category for a merchant. The rule updates its matching entries and future spending.',
   merchants: 'Merchants left', entries: 'Matching entries',
@@ -28,7 +28,7 @@ const en = {
   manualBody: 'Check the amount, account and category before saving.',
   privacyTitle: 'Your data stays in your hands',
   privacyBody: 'Exports, privacy controls and removal are separate actions. Nothing is shared or deleted by opening this screen.',
-  needsReview: 'Needs your review', chooseCategory: 'Choose a category',
+  needsReview: 'Needs your attention', chooseCategory: 'Choose a category',
   stepCurrent: 'Current step', stepComplete: 'Completed step',
 } as const;
 const ar: Record<keyof typeof en, string> = {
@@ -39,9 +39,9 @@ const ar: Record<keyof typeof en, string> = {
   settingsTitle: 'وفرة على طريقتك',
   settingsBody: 'تفضيلاتك وإعدادات الاستيراد وبياناتك في مكان واحد.',
   settingsNavigation: 'أقسام الإعدادات',
-  reviewTitle: 'مراجعة بسيطة منك',
-  reviewBody: 'هذه التنبيهات غير محسوبة في إجمالياتك. راجع التفاصيل قبل إضافتها.',
-  pending: 'بانتظار المراجعة', complete: 'اكتملت المراجعة',
+  reviewTitle: 'تنبيهات بنكية تحتاج مساعدتك',
+  reviewBody: 'لم تستطع وفرة إضافة هذه التنبيهات بأمان تلقائياً. افتح التنبيه وحدد المعلومة الناقصة فقط.',
+  pending: 'تحتاج إدخالك', complete: 'تم كل شيء',
   sortTitle: 'فئة واضحة لكل متجر',
   sortBody: 'اختر فئة للمتجر. تطبّق القاعدة على حركاته المطابقة والإنفاق القادم.',
   merchants: 'المتاجر المتبقية', entries: 'الحركات المطابقة',
@@ -60,7 +60,7 @@ const ar: Record<keyof typeof en, string> = {
   manualBody: 'تحقق من المبلغ والحساب والفئة قبل الحفظ.',
   privacyTitle: 'بياناتك تحت سيطرتك',
   privacyBody: 'التصدير والخصوصية والحذف إجراءات منفصلة. فتح هذه الشاشة لا يشارك بياناتك ولا يحذفها.',
-  needsReview: 'يحتاج إلى مراجعتك', chooseCategory: 'اختر الفئة',
+  needsReview: 'يحتاج إلى انتباهك', chooseCategory: 'اختر الفئة',
   stepCurrent: 'الخطوة الحالية', stepComplete: 'خطوة مكتملة',
 };
 export function workflowCopy(language: string): Record<keyof typeof en, string> {

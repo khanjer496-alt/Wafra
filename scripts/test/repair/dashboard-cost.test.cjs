@@ -70,19 +70,17 @@ test('Home requests cards and bills without evaluating discarded financial secti
   for (const key of ['comparison', 'foreignActivity', 'insight']) assert.equal(Object.hasOwn(lean, key), false);
 });
 
-test('Home does not scan retained SMS when a review or category prompt already takes priority', () => {
-  for (const options of [{ pending: [{ expiresAt: Date.now() + 60000 }] }, { needsCategory: true }]) {
-    const h = harness([], { ...options, unread: 8 });
-    assert.equal(h.project({ surface: 'home' }).unreadFormats, null, 'null means not computed, not zero formats');
-    assert.equal(h.counts().unread, 0);
-    const full = h.project();
-    assert.equal(full.unreadFormats.count, 8, 'existing full projection still includes every section');
-    assert.equal(h.counts().unread, 1);
-  }
+test('Home does not scan retained SMS when a category prompt already takes priority', () => {
+  const h = harness([], { needsCategory: true, unread: 8 });
+  assert.equal(h.project({ surface: 'home' }).unreadFormats, null, 'null means not computed, not zero formats');
+  assert.equal(h.counts().unread, 0);
+  const full = h.project();
+  assert.equal(full.unreadFormats.count, 8, 'existing full projection still includes every section');
+  assert.equal(h.counts().unread, 1);
 });
 
-test('Home restores exact unread prompt count when reviews expire and no category prompt remains', () => {
-  const h = harness([], { pending: [{ expiresAt: 0 }], unread: 8 });
+test('parser review state no longer hides Home unread-format work', () => {
+  const h = harness([], { pending: [{ expiresAt: Date.now() + 60000 }], unread: 8 });
   const projected = h.project({ surface: 'home' });
   assert.equal(projected.unreadFormats.count, 8);
   assert.equal(projected.unreadFormats.shouldPrompt, true);
