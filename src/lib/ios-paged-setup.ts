@@ -6,7 +6,7 @@
 // (ios-history-setup.ts); this module stays dependency-free for its tests.
 export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date.signed';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v3';
-const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa';
+const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
 // A build that installs the paged record runs the paged graph whether or not
 // the beta flag is set: production shipped `5a0da9b5…` without the flag, so its
 // users ran a paged Shortcut while the app still showed the legacy history UI
