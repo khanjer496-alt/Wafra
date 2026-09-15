@@ -876,16 +876,20 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
 // bounded grammar's promise: only supported filters land on a financial tool,
 // unresolved ones ask for clarification with concrete "did you mean" hints.
 {
-  // Casual synonyms route to the same category-breakdown as the canonical alias.
-  for (const [question, expectedFils, description] of [
-    ['How much did I spend on coffee this month?', 5_000, 'coffee maps to dining'],
-    ['How much did I spend on lunch this month?', 5_000, 'lunch maps to dining'],
-    ['How much did I spend on takeaway this month?', 5_000, 'takeaway maps to dining'],
+  // Broad category names may route to the category total, but narrower concepts
+  // must not silently inherit the whole category. We do not know which dining
+  // purchases were coffee/lunch/takeaway, or which transport purchases were fuel.
+  for (const question of [
+    'How much did I spend on coffee this month?',
+    'How much did I spend on lunch this month?',
+    'How much did I spend on takeaway this month?',
+    'How much did I spend on fuel this month?',
+    'How much did I spend on shoes this month?',
+    'How much did I spend on AI tools this month?',
   ]) {
     const answer = answerWafraQuestion(state, question, now);
-    assert.equal(answer.tool, 'category-breakdown', description);
-    assert.equal(answer.data.category, 'dining');
-    assert.equal(answer.data.totalFils, expectedFils);
+    assert.equal(answer.tool, 'help', `narrow concept must not broaden to a whole category: ${question}`);
+    assert.equal(answer.data, undefined);
   }
 
   // Casual spending verbs still route to the spending intent when no category
@@ -898,10 +902,16 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
   assert.equal(dropped.tool, 'spending-total');
   assert.equal(dropped.data.totalFils, 6_000);
 
-  // Casual income phrasings recognized alongside the canonical verbs.
-  const takeHome = answerWafraQuestion(state, 'How much did I take home this month?', now);
-  assert.equal(takeHome.tool, 'income-total');
-  assert.equal(takeHome.data.totalFils, 20_000);
+  // "Take home" and "waste" carry semantics the ledger cannot prove. Do not
+  // reinterpret them as all income/all spending just because an amount exists.
+  for (const question of ['How much did I take home this month?', 'How much did I waste this month?']) {
+    const answer = answerWafraQuestion(state, question, now);
+    assert.equal(answer.tool, 'help', `subjective or narrower metric must clarify: ${question}`);
+    assert.equal(answer.data, undefined);
+  }
+  const earnings = answerWafraQuestion(state, 'How much earnings did I receive this month?', now);
+  assert.equal(earnings.tool, 'income-total');
+  assert.equal(earnings.data.totalFils, 20_000);
 
   // Fuzzy merchant match: a small typo resolves to the recorded merchant.
   const typo = answerWafraQuestion(state, 'How much did I spend at Talbat this month?', now);

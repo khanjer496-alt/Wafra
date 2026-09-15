@@ -266,26 +266,21 @@ function requestedLimit(question: string): number | undefined {
 }
 
 const CATEGORY_ALIASES: [RegExp, CategoryId][] = [
-    [/\b(?:dining|restaurants?|food|eating out|coffee|cafes?|takeaway|takeout|snacks?|lunch|dinner|breakfast|brunch|meals?)\b/, 'dining'],
+    [/\b(?:dining|restaurants?|food|eating out)\b/, 'dining'],
     [/\bother\b/, 'other'],
-    [/\b(?:grocery|groceries|supermarkets?|hypermarkets?)\b/, 'groceries'],
-    [/\b(?:transport|taxi|taxis|fuel|petrol|ride hailing|ride hail|cabs?|bus|metro|tram|parking|tolls?|car wash|commute|commuting)\b/, 'transport'],
-    [/\b(?:shopping|clothes|clothing|apparel|shoes|electronics|gadgets|malls?)\b/, 'shopping'],
-    [/\b(?:software|apps|saas|developer tools|dev tools|ai tools)\b/, 'software'],
-    [/\b(?:utilities|electricity|water|electricity bill|water bill|power bill)\b/, 'utilities'],
-    [/\b(?:telecom|phone|mobile|sim|data plan|internet)\b/, 'telecom'],
-    [/\b(?:rent|rental)\b/, 'rent'],
-    [/\b(?:travel|flights?|hotels?|airlines?|holidays?|vacations?|trips?|tourism)\b/, 'travel'],
-    [/\b(?:entertainment|movies|gaming|cinema|theatre|theater|concerts?|events?|streaming|games)\b/, 'entertainment'],
-    [/\b(?:health|doctor|clinic|pharmacy|medical|hospitals?|dentist|dental|optician|prescription|medicine|therapy|physio)\b/, 'health'],
-    [/\b(?:personal care|salon|barber|spa|grooming|haircut|nails|manicure|pedicure|beauty|skincare|cosmetics|makeup)\b/, 'personal-care'],
-    [/\b(?:home services?|cleaning|maintenance|maid|plumber|electrician|handyman|nanny|gardener|carpenter|painter|repairs?)\b/, 'home-services'],
-    [/\b(?:education|school|university|course|tuition|textbooks?|training|lessons|classes)\b/, 'education'],
-    [/\b(?:charity|donations?|zakat|sadaqah)\b/, 'charity'],
-    [/\b(?:government|visa|traffic fine|fines?|police|court)\b/, 'government'],
-    [/\b(?:loan|instalment|installment|emi|repayments?|debts?)\b/, 'loan'],
-    [/\b(?:investing|investment|broker|crypto|stocks?|shares|etfs?|bonds?|forex|trading|portfolio)\b/, 'investing'],
-    [/\b(?:cash withdrawal|atm|withdrew)\b/, 'cash-withdrawal'],
+    [/\b(?:grocery|groceries|supermarkets?)\b/, 'groceries'],
+    [/\b(?:transport|taxi)\b/, 'transport'], [/\bshopping\b/, 'shopping'],
+    [/\b(?:software|apps)\b/, 'software'], [/\b(?:utilities|electricity|water)\b/, 'utilities'],
+    [/\b(?:telecom|phone|mobile)\b/, 'telecom'], [/\brent\b/, 'rent'],
+    [/\b(?:travel|flights?|hotels?)\b/, 'travel'], [/\b(?:entertainment|movies|gaming)\b/, 'entertainment'],
+    [/\b(?:health|doctor|clinic|pharmacy|medical)\b/, 'health'],
+    [/\b(?:personal care|salon|barber|spa|grooming)\b/, 'personal-care'],
+    [/\b(?:home services?|cleaning|maintenance|maid)\b/, 'home-services'],
+    [/\b(?:education|school|university|course)\b/, 'education'],
+    [/\b(?:charity|donation)\b/, 'charity'], [/\b(?:government|visa|traffic fine)\b/, 'government'],
+    [/\b(?:loan|instalment|installment)\b/, 'loan'],
+    [/\b(?:investing|investment|broker|crypto)\b/, 'investing'],
+    [/\b(?:cash withdrawal|atm)\b/, 'cash-withdrawal'],
   ];
 
 function categoriesFromQuestion(question: string): CategoryId[] {
@@ -296,8 +291,8 @@ function categoriesFromQuestion(question: string): CategoryId[] {
 function hasUnsupportedRemainder(question: string): boolean {
   let rest = question;
   for (const [pattern] of CATEGORY_ALIASES) rest = rest.replace(new RegExp(pattern.source, 'g'), ' ');
-  rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b|\b(?:take|takes|took|taking) home\b/g, ' ');
-  const grammar = new Set(('how much money did do does i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone get got gets getting take took takes taking make made makes making drop dropped blew blow burned burnt burn splurged splurge wasted waste put many some any else then still ever revenue').split(' '));
+  rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b/g, ' ');
+  const grammar = new Set(('how much money did do does i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone get got gets getting drop dropped blew blow burned burnt burn put many some any else then still ever').split(' '));
   return normalizeMerchantText(rest).split(' ').some((token) => token && !grammar.has(token) && !/^\d+$/.test(token));
 }
 
@@ -1055,7 +1050,7 @@ export function planAssistantQuestion(
   const limit = requestedLimit(q);
   if (limit !== undefined && (limit < 1 || limit > 10)) return clarification('Choose between 1 and 10 results.');
   const intentText = clauses[0].rest;
-  const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn|revenue)\b|\b(?:take|takes|took|taking) home\b/.test(intentText);
+  const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn)\b/.test(intentText);
   const net = /income minus spending|spen[dt] more than i earned|more than i earn|what.*net|net spending|net cashflow/.test(intentText);
   if (isIncomeQuestion && !net && /\b(?:spend|spent|spending|expenses?)\b/.test(intentText)) return clarification('Ask for income and spending separately, or ask for income minus spending.');
   const recurring = /\b(?:recurring|subscription|subscriptions|renewal|renewals)\b/.test(q) && /\b(?:change|changed|changes|increase|increased|decrease|decreased|compare)\b/.test(q);
@@ -1192,7 +1187,7 @@ export function planAssistantQuestion(
   if (isIncomeQuestion) return { tool: 'income-total', ...scoped };
   if (filters.merchant) return { tool: 'merchant-breakdown', ...scoped, merchant: filters.merchant };
   if (filters.category) return { tool: 'category-breakdown', ...scoped, category: filters.category };
-  if (/\b(?:spend|spent|spending|expense|expenses|purchase|purchases|paid|pay|bought|buy|buying|drop|dropped|blew|blow|burn|burned|burnt|splurge|splurged|waste|wasted)\b|cost me/.test(q)) return { tool: 'spending-total', ...scoped };
+  if (/\b(?:spend|spent|spending|expense|expenses|purchase|purchases|paid|pay|bought|buy|buying|drop|dropped|blew|blow|burn|burned|burnt)\b|cost me/.test(q)) return { tool: 'spending-total', ...scoped };
   return { tool: 'help' };
 }
 
