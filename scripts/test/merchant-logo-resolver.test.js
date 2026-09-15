@@ -45,6 +45,28 @@ const response = rows => ({ ok: true, json: async () => rows });
         { name: 'Aseer Time', domain: 'aseertime.com', claimed: false, brandId: 'aseer' },
         { name: 'Discover Aseer', domain: 'discoveraseer.com', claimed: false, brandId: 'other' },
       ]);
+      if (url.includes('Cloudflare%20San%20Francisco')) return response([
+        { name: 'Cloudflare', domain: 'cloudflare.com', claimed: true, brandId: 'cloudflare' },
+        { name: 'Cloudflare', domain: 'cloudflare-quic.com', claimed: false, brandId: 'other' },
+      ]);
+      if (url.includes('Clemta.%20Lewes') || url.includes('Clemta%20Lewes')) return response([
+        { name: 'Clemta', domain: 'clemta.com', claimed: true, brandId: 'clemta' },
+        { name: 'Lewes Depot', domain: 'lewesdepot.org', claimed: false, brandId: 'lewes' },
+      ]);
+      if (url.includes('Torbox%20Sheridan')) return response([
+        { name: 'TorBox', domain: 'torbox.app', claimed: true, brandId: 'torbox' },
+        { name: 'Sheridan Media', domain: 'sheridanmedia.com', claimed: false, brandId: 'sheridan' },
+      ]);
+      if (url.includes('Apple%20Cafe')) return response([
+        { name: 'Apple', domain: 'apple.com', claimed: true, brandId: 'apple' },
+      ]);
+      if (url.includes('Tamara%20Restaurant')) return response([
+        { name: 'Tamara', domain: 'tamara.co', claimed: true, brandId: 'tamara' },
+        { name: 'Tamara Restaurant', domain: 'tamararestaurant.com', claimed: false, brandId: 'restaurant' },
+      ]);
+      if (url.includes('Starbucks%20Secret%20Donation')) return response([
+        { name: 'Starbucks', domain: 'starbucks.com', claimed: true, brandId: 'starbucks' },
+      ]);
       if (url.includes('Talabat%20sales')) return response([
         { name: 'Talabat', domain: 'talabat.com', claimed: true, brandId: 'talabat' },
         { name: 'Salesforce', domain: 'salesforce.com', claimed: true, brandId: 'salesforce' },
@@ -85,6 +107,23 @@ const response = rows => ({ ok: true, json: async () => rows });
   const ambiguous = await m.resolveRemoteMerchantLogo('Sesame Al Ja Qlub');
   assert.equal(ambiguous, null, 'a loose first search result must not become the merchant logo');
 
+  for (const [title, domain] of [
+    ['Cloudflare San Francisco', 'cloudflare.com'],
+    ['Clemta. Lewes', 'clemta.com'],
+    ['Torbox Sheridan', 'torbox.app'],
+  ]) {
+    const value = await m.resolveRemoteMerchantLogo(title);
+    assert.equal(value?.domain, domain, `${title}: first claimed brand survives a location/acquirer suffix`);
+    assert.equal(value?.source, 'search');
+  }
+
+  for (const title of ['Apple Cafe', 'Starbucks Secret Donation']) {
+    assert.equal(await m.resolveRemoteMerchantLogo(title), null,
+      `${title}: business/category suffix must not impersonate a famous brand`);
+  }
+  assert.equal((await m.resolveRemoteMerchantLogo('Tamara Restaurant'))?.domain, 'tamararestaurant.com',
+    'an exact separate Brandfetch identity remains eligible instead of being rewritten to Tamara');
+
   const afterFirstPass = calls.length;
   assert.equal((await m.resolveRemoteMerchantLogo('Aseer Time'))?.domain, 'aseertime.com');
   assert.equal(await m.resolveRemoteMerchantLogo('Sesame Al Ja Qlub'), null);
@@ -107,7 +146,7 @@ const response = rows => ({ ok: true, json: async () => rows });
     },
   };
   const cachedResolver = load({
-    data: new Map([['wafra:merchant-logo:v3:aseer%20time', JSON.stringify(cached)]]),
+    data: new Map([['wafra:merchant-logo:v4:aseer%20time', JSON.stringify(cached)]]),
     fetchImpl: async () => { throw new Error('cache should satisfy this lookup'); },
   });
   assert.equal((await cachedResolver.resolveRemoteMerchantLogo('Aseer Time')).logoUrl,
