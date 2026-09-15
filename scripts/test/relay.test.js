@@ -2052,7 +2052,7 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
-        const failed = Promise.reject(new Error('SQLCipher write failed'));
+        const failed = () => Promise.reject(new Error('SQLCipher write failed'));
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(failed, events),
           dependencies: {
@@ -2093,7 +2093,9 @@ async function queueItem(id, row, publicKey) {
           },
         });
         const running = executor.execute('routine');
-        await Promise.resolve();
+        for (let i = 0; i < 10 && events.length < 1; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: routine acknowledgement waits while durability is pending',
           events, ['persist']);
         release();
@@ -2234,7 +2236,9 @@ async function queueItem(id, row, publicKey) {
           ledgerId: 'changed-during-review', captureOptOut: false,
         };
         releaseReview();
-        for (let i = 0; i < 10 && events.length < 3; i += 1) await Promise.resolve();
+        for (let i = 0; i < 10 && events.length < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: a mixed review and deduplicated relay page flushes the current ledger',
           events, ['review-stage', 'plan:changed-during-review', 'flush:changed-during-review']);
         releaseLedger();
