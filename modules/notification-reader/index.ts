@@ -10,6 +10,8 @@ export interface NotificationReaderDiagnostics {
   adcbVisible: boolean;
   adcbActiveCount: number;
   queuedCandidateCount: number;
+  /** Exact queued package+postTime identities that are still visible in Android. */
+  queuedVisibleMatchCount: number;
   admissionCounts: Record<string, number>;
   adcbAdmissionCounts: Record<string, number>;
 }

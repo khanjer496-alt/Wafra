@@ -55,6 +55,10 @@ export interface AndroidNotificationImportDiagnostics {
   declined: number;
   ignored: number;
   unresolved: number;
+  unresolvedTrustedBank: number;
+  unresolvedFinancialCandidate: number;
+  unresolvedParserMiss: number;
+  unresolvedReviewRefusal: number;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
@@ -897,6 +901,10 @@ export async function scanInbox(
         declined: 0,
         ignored: 0,
         unresolved: 0,
+        unresolvedTrustedBank: 0,
+        unresolvedFinancialCandidate: 0,
+        unresolvedParserMiss: 0,
+        unresolvedReviewRefusal: 0,
         acknowledgementPlanned: 0,
         acknowledged: 0,
       };
@@ -974,7 +982,13 @@ export async function scanInbox(
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }
-        if (!handled && notificationImportStats) notificationImportStats.unresolved += 1;
+        if (!handled && notificationImportStats) {
+          notificationImportStats.unresolved += 1;
+          if (sourceClass === 'trusted-bank') notificationImportStats.unresolvedTrustedBank += 1;
+          else notificationImportStats.unresolvedFinancialCandidate += 1;
+          if (!p) notificationImportStats.unresolvedParserMiss += 1;
+          else notificationImportStats.unresolvedReviewRefusal += 1;
+        }
         // Claim the row only when Wafra has a durable/safe outcome. An
         // unresolved money-bearing bank notification used to be ACKed here even
         // though neither the ledger nor Review contained it, making the evidence

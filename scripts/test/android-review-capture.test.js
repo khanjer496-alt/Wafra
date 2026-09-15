@@ -106,6 +106,7 @@ const notificationReader = {
     const trusted = new Set([
       'net.bnpparibas.mescomptes',
       'ae.hsbc.hsbcuae',
+      'com.adcb.nexgen',
     ]);
     return notificationRows.map((row) => ({
       sourceClass: trusted.has(row.pkg) ? 'trusted-bank' : 'financial-candidate',

@@ -111,6 +111,7 @@ class NotificationReaderModule : Module() {
         "adcbVisible" to false,
         "adcbActiveCount" to 0,
         "queuedCandidateCount" to 0,
+        "queuedVisibleMatchCount" to 0,
         "admissionCounts" to emptyMap<String, Int>(),
         "adcbAdmissionCounts" to emptyMap<String, Int>(),
       )
@@ -123,6 +124,9 @@ class NotificationReaderModule : Module() {
       val queued = if (admissionActive) {
         try { NotificationCaptureStore.read(context, 0L).size } catch (_: Exception) { -1 }
       } else 0
+      val queuedVisibleMatches = if (admissionActive && systemAccess) {
+        BankNotificationListenerService.queuedVisibleMatchCount()
+      } else 0
       mapOf(
         "available" to available,
         "systemAccess" to systemAccess,
@@ -133,6 +137,7 @@ class NotificationReaderModule : Module() {
         "adcbVisible" to (visibility["adcbVisible"] ?: false),
         "adcbActiveCount" to (visibility["adcbActiveCount"] ?: 0),
         "queuedCandidateCount" to queued,
+        "queuedVisibleMatchCount" to queuedVisibleMatches,
         "admissionCounts" to (admission["admissionCounts"] ?: emptyMap<String, Int>()),
         "adcbAdmissionCounts" to (admission["adcbAdmissionCounts"] ?: emptyMap<String, Int>()),
       )
@@ -232,6 +237,10 @@ class NotificationReaderModule : Module() {
       if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
         return@AsyncFunction emptyList<Map<String, Any>>()
       }
+      // Heal only currently visible notifications that already exist in the
+      // encrypted queue. This is intentionally not sweepVisible(): unrelated
+      // shade notifications never enter the expensive extraction path here.
+      BankNotificationListenerService.refreshQueuedVisible()
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
         val sourceClass = TrustedBankNotificationPackages.sourceClass(
           context,
