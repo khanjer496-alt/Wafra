@@ -28,6 +28,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
@@ -101,7 +102,7 @@ export default function BillsScreen() {
    */
   const { refreshing, onRefresh } = usePullToRefresh();
 
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
   const key = monthKey(now);
   const todayISO = toISODate(now);
 

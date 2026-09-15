@@ -55,6 +55,13 @@ export default function TabsLayout() {
         // Detaching native views alone does not stop hidden React consumers
         // processing each import update. Keep their state, but suspend hidden
         // Android renders. CaptureOwner above remains live outside the tabs.
+        //
+        // ANDROID ONLY, deliberately. Every tab subscribes to the whole store,
+        // so freezing iOS too would stop hidden tabs re-running their
+        // projections on each import page — but this navigator's behaviour is
+        // decided by measurement here (see detachInactiveScreens above), and
+        // there is none for iOS. `tab-render-cost.test.cjs` pins the negative
+        // for iOS and web; changing it needs a device pass first.
         screenOptions={{ headerShown: false, freezeOnBlur: Platform.OS === 'android' }}
         tabBar={(props) => <WafraTabBar {...props} />}>
         <Tabs.Screen name="index" />

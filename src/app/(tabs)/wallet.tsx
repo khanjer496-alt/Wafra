@@ -26,6 +26,7 @@ import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-s
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
@@ -110,7 +111,7 @@ export default function WalletScreen() {
   // Every tab that shows money the inbox produces can now go and refresh it.
   const { refreshing, onRefresh } = usePullToRefresh();
 
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -245,9 +246,7 @@ export default function WalletScreen() {
       : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
     return { account, figureFils, caption, freshness };
   // Captions also follow language; unrelated store metadata must not rescan rows.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dueByAccountId,
-    dueAccountIds, balances.balanceByAccountId, language]);
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language]);
 
   const openingFils = openingText.trim() === ''
     ? 0

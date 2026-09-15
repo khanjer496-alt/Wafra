@@ -83,9 +83,8 @@ function harness(options = {}) {
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {
       if (request.surface === 'home' && request.includeInsights === false) return dashboard;
-      if (request.surface === 'dashboard' && request.includeInsights === true) return dashboard;
       throw new Error('Home requested an unexpected financial projection');
-    } },
+    }, projectHomeInsight: () => dashboard.insight ?? null },
     '@/lib/auto-import': { openSmsPermissionSettings: async () => events.push(['permissions']) },
     '@/lib/fx': { buildReferenceFxUpdates: async () => [] },
     '@/lib/leaving-soon': { daysPhrase: (days) => language === 'ar' ? `خلال ${days} أيام` : `In ${days} days` },

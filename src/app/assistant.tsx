@@ -84,7 +84,10 @@ export default function AssistantScreen() {
   const correctionContextTurn = [...currentTurns].reverse().find((turn) => turn.answer.tool !== 'help');
   const conversationContext = latestAssistantContext(currentTurns.map((turn) => turn.request));
   const contextPeriod = conversationContext && 'period' in conversationContext ? conversationContext.period : period;
-  const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [], [state, period]);
+  const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [],
+    // Suggestions read the ledger, not capture/progress metadata.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.hydrated, state.transactions, state.bills, state.cardDues, state.budgets, state.accounts, state.notSubscriptions, state.monthStartDay, period]);
   const latestSuggestions = latest?.answer.suggestions?.length &&
     (latest.request.tool !== 'help' || latest.request.suggestions?.length)
     ? latest.answer.suggestions : undefined;

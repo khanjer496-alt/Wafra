@@ -1697,6 +1697,36 @@ asyncSuites.push((async () => {
   }
 
   {
+    // Chunk bodies are reused by ROW IDENTITY, not by re-serializing the whole
+    // ledger on every save. Store snapshots are immutable, so a chunk made of
+    // the same row objects has the same bytes; only a chunk holding a new or
+    // replaced object is stringified and written.
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const oldest = { id: 'o1' }; const older = { id: 'o2' };
+    const newer = { id: 'n1' }; const newest = { id: 'n2' };
+    await persistence.save(snapshot('base', [newest, newer, older, oldest]));
+    const setsAfterBase = memory.calls.filter((call) => call.op === 'set').length;
+    const keysWritten = () => memory.calls.filter((call) => call.op === 'set').at(-1).entries.map(([key]) => key);
+
+    // A fresh array of the very same objects: rows "changed" by identity,
+    // bodies did not, so no chunk is written — only the meta key.
+    await persistence.save(snapshot('same-rows', [newest, newer, older, oldest]));
+    const sameRowsWrites = keysWritten();
+    // Replacing one object in the newest chunk rewrites that chunk alone.
+    await persistence.save(snapshot('edited', [{ id: 'n2', title: 'edited' }, newer, older, oldest]));
+    const editedWrites = keysWritten();
+    ok('an unchanged chunk is reused by row identity and never rewritten',
+      memory.calls.filter((call) => call.op === 'set').length === setsAfterBase + 2 &&
+        sameRowsWrites.length === 1 && sameRowsWrites[0] === LEDGER_KEY &&
+        editedWrites.length === 2 && editedWrites.includes(`${LEDGER_KEY}:tx:1`) &&
+        !editedWrites.includes(`${LEDGER_KEY}:tx:0`) &&
+        JSON.parse(memory.data.get(`${LEDGER_KEY}:tx:1`))[0].title === 'edited' &&
+        memory.data.get(`${LEDGER_KEY}:tx:0`) === JSON.stringify([older, oldest]));
+  }
+
+  {
     const memory = memoryStorage();
     const persistence = createPersistence(memory);
     await persistence.load();
@@ -1752,7 +1782,9 @@ asyncSuites.push((async () => {
 
   {
     const rows = [{ id: 'n1' }, { id: 'n2' }, { id: 'o1' }, { id: 'o2' }];
-    const chunks = testChunkTransactions(rows);
+    // Oldest-first bodies: chunk 0 holds the oldest rows, exactly as the
+    // persistence module serializes them.
+    const chunks = [JSON.stringify(rows.slice(2)), JSON.stringify(rows.slice(0, 2))];
     const memory = memoryStorage({
       [LEDGER_KEY]: JSON.stringify({ txChunks: 2, txChunkOrder: 'oldest-first' }),
       [`${LEDGER_KEY}:tx:0`]: chunks[0],

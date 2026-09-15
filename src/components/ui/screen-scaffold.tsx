@@ -91,7 +91,7 @@ export function ScreenScaffold({
 }: ScreenScaffoldProps) {
   const safeAreaInsets = useSafeAreaInsets();
   const contentInsets = useScreenContentInsets({ tabbed, hasFooter: footer !== undefined });
-  const keyboardHeight = useKeyboardHeight();
+  const keyboardHeight = useKeyboardHeight(keyboardAware && Platform.OS !== 'ios');
   const resolvedHeaderMode = headerMode === 'auto'
     ? (tabbed ? 'inline' : 'native')
     : headerMode;

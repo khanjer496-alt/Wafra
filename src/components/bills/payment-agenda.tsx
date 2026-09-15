@@ -1,5 +1,5 @@
 import { paymentAgendaCopy as copy } from '@/lib/reference-copy';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { BankAvatar } from '@/components/ui/bank-avatar';
@@ -38,10 +38,16 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
-  const visibleItems = selectedGroup
+  // Filtering and date grouping both scan/sort the agenda. Bills re-renders on
+  // every keystroke in its reminder sheet, so keep the approved date-first
+  // redesign while avoiding repeated ledger-derived work on unrelated renders.
+  const visibleItems = useMemo(() => selectedGroup
     ? items.filter((item) => paymentGroupFor(item) === selectedGroup)
-    : items;
-  const sections = groupPaymentAgenda(visibleItems, includePaid);
+    : items, [selectedGroup, items]);
+  const sections = useMemo(
+    () => groupPaymentAgenda(visibleItems, includePaid),
+    [visibleItems, includePaid],
+  );
   const emptyFor = (key: PaymentGroup): string => key === 'subscriptions'
     ? w.emptySubscriptions
     : key === 'utilities'
@@ -51,7 +57,10 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
         : key === 'loans'
           ? w.emptyLoans
           : w.emptyOther;
-  const visibleCount = sections.reduce((sum, section) => sum + section.items.length, 0);
+  const visibleCount = useMemo(
+    () => sections.reduce((sum, section) => sum + section.items.length, 0),
+    [sections],
+  );
   return <View style={styles.root} testID="payment-agenda">
     {visibleCount === 0 && selectedGroup && <View style={styles.emptyState}>
       <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>

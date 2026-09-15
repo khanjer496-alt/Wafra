@@ -77,10 +77,10 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
 
   const spent = useMemo(
     () =>
-      picked
+      picked && open
         ? spentInMonthForCategory(state.transactions, key, picked, liveAccounts, internal)
         : 0,
-    [state.transactions, key, picked, liveAccounts, internal],
+    [state.transactions, key, picked, open, liveAccounts, internal],
   );
 
   /**
@@ -93,7 +93,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * a number the user had never once spent under.
    */
   const threeMonthAverage = useMemo(() => {
-    if (!picked) return 0;
+    if (!picked || !open) return 0;
     let total = 0;
     for (let i = 1; i <= 3; i++) {
       total += spentInMonthForCategory(
@@ -105,7 +105,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       );
     }
     return Math.round(total / 3);
-  }, [state.transactions, key, picked, liveAccounts, internal]);
+  }, [state.transactions, key, picked, open, liveAccounts, internal]);
 
   /**
    * Who the money went to, so the number has something behind it.
@@ -118,7 +118,9 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * takes the identical cure — keep the total honest and state the rest.
    */
   const { merchants, restFils, restCount, shownTotalFils } = useMemo(() => {
-    if (!picked) return { merchants: [], restFils: 0, restCount: 0, shownTotalFils: 0 };
+    // Flow keeps this sheet mounted while closed; a closed sheet must not
+    // walk the ledger on every import page behind the tab.
+    if (!picked || !open) return { merchants: [], restFils: 0, restCount: 0, shownTotalFils: 0 };
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
       // Same filter as `spent` above, or the rows listed here do not add up to
@@ -148,7 +150,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       // them, so the two cannot drift apart however the rounding falls.
       shownTotalFils: all.reduce((s, m) => s + m.totalFils, 0),
     };
-  }, [state.transactions, key, picked, liveAccounts, internal]);
+  }, [state.transactions, key, picked, open, liveAccounts, internal]);
 
   const limitFils = state.ledgerMoney
     ? parseAmountWithMoneySpec(text, state.ledgerMoney)

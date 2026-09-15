@@ -732,7 +732,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!showOverlay) return <>{children}</>;
+  // The same wrapper whether the overlay is up or not. Returning bare
+  // `children` here and `<View><View hidden>{children}</View>…</View>` below
+  // changes the element type at the child position, which is how React
+  // decides identity: the navigator was unmounted and remounted the moment
+  // onboarding finished, throwing away the route it had just been sent to and
+  // rebuilding every tab while the finish animation ran. See the comment
+  // above `showRecovery` — this is the swap that comment says must not happen.
+  const gatedChildren = (
+    <View
+      style={showOverlay ? styles.hidden : styles.container}
+      pointerEvents={showOverlay ? 'none' : 'auto'}
+      accessibilityElementsHidden={showOverlay}
+      importantForAccessibility={showOverlay ? 'no-hide-descendants' : 'auto'}>
+      {children}
+    </View>
+  );
+  if (!showOverlay) return <View style={styles.container}>{gatedChildren}</View>;
 
   const entering = reducedMotion ? undefined : FadeInDown.duration(320);
   const automaticCompletion =
@@ -773,14 +789,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   return (
     <View style={styles.container}>
+      {gatedChildren}
       <StatusBar style="light" />
-      <View
-        style={styles.hidden}
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants">
-        {children}
-      </View>
       <View style={[StyleSheet.absoluteFillObject, styles.root]}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           {activeStep === 'welcome' ? (

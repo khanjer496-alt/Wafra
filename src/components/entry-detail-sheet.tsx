@@ -101,7 +101,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
     setIsTransfer(isLedgerTransfer(transaction));
-  }, [transaction]);
+    // Keyed on the entry's id, not the object. Callers that hold the row in
+    // their own state pass a stable reference, but the assistant's evidence
+    // sheet derives it from a map rebuilt out of the store — so a background
+    // import tick handed this a new object for the SAME entry and wiped the
+    // fields the user was part-way through typing, flipping `editing` off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transaction?.id]);
 
   /**
    * How many OTHER entries "yes, update all" would move.

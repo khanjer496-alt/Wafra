@@ -125,27 +125,35 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [state.appLock]);
 
-  if (!lockRequired) {
-    return <PrivacyGateContext.Provider value>{children}</PrivacyGateContext.Provider>;
-  }
+  /*
+    ONE tree shape whether locked or not. This used to return `children`
+    bare when unlocked and `<View><View hidden>{children}</View>…lock UI…`
+    when locked, which changes the element TYPE at the child position, so
+    React unmounted and remounted `children` — the whole router, the tabs and
+    every mounted tab screen — on every lock AND every unlock. With App Lock
+    on, a cold launch built the tab tree three times (before hydration, behind
+    the biometric prompt, and again after unlocking), and React Navigation
+    clears a navigator's state on unmount, so a re-lock also dropped the user
+    back onto the first tab. Keeping the wrapper and toggling its props keeps
+    the navigator alive across the lock.
 
+    The router's Stack stays mounted; the lock paints over it. Opacity alone
+    only hides it from EYES — VoiceOver and TalkBack still walk the tree
+    underneath and will happily read out every balance on the locked screen,
+    so the subtree has to be removed from the accessibility tree explicitly
+    (each platform has its own prop) and made untappable.
+  */
   return (
-    <PrivacyGateContext.Provider value={false}>
+    <PrivacyGateContext.Provider value={!lockRequired}>
     <View style={styles.container}>
-      {/*
-        The router's Stack stays mounted; the lock paints over it. Opacity
-        alone only hides it from EYES — VoiceOver and TalkBack still walk the
-        tree underneath and will happily read out every balance on the locked
-        screen, so the subtree has to be removed from the accessibility tree
-        explicitly (each platform has its own prop) and made untappable.
-      */}
       <View
-        style={styles.hidden}
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants">
+        style={lockRequired ? styles.hidden : styles.container}
+        pointerEvents={lockRequired ? 'none' : 'auto'}
+        accessibilityElementsHidden={lockRequired}
+        importantForAccessibility={lockRequired ? 'no-hide-descendants' : 'auto'}>
         {children}
       </View>
+      {lockRequired ? (
       <ThemedView accessibilityViewIsModal style={[StyleSheet.absoluteFillObject, styles.root]}>
         <View style={styles.centre}>
           <WafraMark size={46} />
@@ -216,6 +224,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
           </View>
         )}
       </ThemedView>
+      ) : null}
     </View>
     </PrivacyGateContext.Provider>
   );

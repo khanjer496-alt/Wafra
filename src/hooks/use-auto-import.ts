@@ -1317,7 +1317,12 @@ export function useAutoImport(
       foreground.remove();
       scheduler.dispose();
     };
-  }, [entitlementActive, getStateSnapshot, needsPermission, state.captureOptOut, state.historyImport,
+  // `state.historyImport` is deliberately NOT a dependency: the effect reads
+  // live state through `getStateSnapshot()`, and the progress object is
+  // replaced on every committed page, so listing it tore down and recreated
+  // the native inbox observer, the AppState listener and the scheduler every
+  // ~500ms for the whole of a history import.
+  }, [entitlementActive, getStateSnapshot, needsPermission, state.captureOptOut,
     state.hydrated, state.onboarded, watchForeground]);
 
   // The native signal carries no source data and is only a foreground hint.
@@ -1463,12 +1468,21 @@ export function useAutoImport(
    * another tab still updates the shared transaction array, so Home's mounted
    * owner sees it and keeps the digest current.
    */
+  // While a history import is committing pages, every page replaces the
+  // transaction array; rescheduling the digest (a permission query, a channel
+  // write, a full-ledger summary and a native schedule call) per page is
+  // wasted work that competes with the import itself. The completing page
+  // changes `historyImportRunning` back and schedules once with the final
+  // ledger.
+  const historyImportRunning = state.historyImport?.status === 'running';
   useEffect(() => {
     if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
+    if (historyImportRunning) return;
     void syncDailySummary(getStateSnapshot()).catch(() => {
       // A digest is never worth surfacing an error over.
     });
-  }, [getStateSnapshot, state.dailySummary, state.hydrated, state.onboarded, state.transactions, watchForeground]);
+  }, [getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
+    state.transactions, watchForeground]);
 
   return {
     runAutoImport,

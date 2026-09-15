@@ -25,8 +25,23 @@ import { useStore } from '@/lib/store';
 
 const rowKey = (row: MerchantStat) => merchantSpendingKey(row.title);
 
+const MerchantRow = React.memo(function MerchantRow({ item, purchases, onOpen }: {
+  item: MerchantStat; purchases: string; onOpen: (title: string) => void;
+}) {
+  const theme = useTheme();
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${item.title}. ${formatAED(item.totalFils)}. ${purchases}: ${item.count}`}
+    testID="merchant-spending-row" onPress={() => onOpen(item.title)}
+    style={({ pressed }) => [styles.row, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+    <MerchantAvatar title={item.title} category={item.category} size={40} />
+    <View style={styles.words}><ThemedText type="smallBold">{item.title}</ThemedText>
+      <ThemedText type="meta" themeColor="textSecondary">{purchases} · {item.count}</ThemedText>
+      <Money fils={item.totalFils} type="smallBold" /></View>
+    <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+  </Pressable>;
+});
+
 export default function MerchantsScreen() {
-  const router = useRouter(); const theme = useTheme(); const language = useLanguage();
+  const router = useRouter(); const language = useLanguage();
   const { state } = useStore(); const { period, setPeriod } = usePeriod();
   const insets = useScreenContentInsets({ hasFooter: false });
   const w = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
@@ -42,16 +57,11 @@ export default function MerchantsScreen() {
   const rows = useMemo(() => needle ? merchants.filter(row => merchantSpendingKey(row.title).includes(needle)) : merchants,
     [merchants, needle]);
   const totalFils = useMemo(() => checkedMinorSum(rows.map(row => row.totalFils)), [rows]);
+  const openMerchant = useCallback((title: string) => router.push(merchantSpendingHref(title)), [router]);
+  // The filtered list is a new array per deferred keystroke; a memoized row
+  // lets the list skip every cell whose merchant did not change.
   const renderRow = useCallback(({ item }: { item: MerchantStat }) =>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${item.title}. ${formatAED(item.totalFils)}. ${w.purchases}: ${item.count}`}
-      testID="merchant-spending-row" onPress={() => router.push(merchantSpendingHref(item.title))}
-      style={({ pressed }) => [styles.row, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-      <MerchantAvatar title={item.title} category={item.category} size={40} />
-      <View style={styles.words}><ThemedText type="smallBold">{item.title}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{w.purchases} · {item.count}</ThemedText>
-        <Money fils={item.totalFils} type="smallBold" /></View>
-      <Icon name="chevron-right" size={17} color={theme.textTertiary} />
-    </Pressable>, [router, theme, w]);
+    <MerchantRow item={item} purchases={w.purchases} onOpen={openMerchant} />, [openMerchant, w.purchases]);
 
   return <>
     <ScreenScaffold scroll={false} virtualized keyboardAware testID="merchant-directory"

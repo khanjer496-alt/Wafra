@@ -185,12 +185,18 @@ export default function SettingsScreen() {
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
-  const formats = useMemo(() => unreadFormatCount(state), [state]);
+  // Both scans walk every transaction. Keyed on the rows rather than the
+  // whole store, so a toggle on this very screen does not re-run them.
+  const formats = useMemo(() => unreadFormatCount(state),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
   // their way down to two merchants loses the only route to the screen with
   // the job half done. This row is the permanent way in, and it stays visible
   // at zero to say so.
-  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
+  const unsorted = useMemo(() => uncategorisedMerchants(state),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, state.accounts, state.merchantOverrides, state.notSubscriptions]);
   // A count of 0 is not a verdict on every device — see noFormatsReason().
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
@@ -608,7 +614,7 @@ export default function SettingsScreen() {
     };
     refresh();
     if (notifAvailable && !state.captureOptOut && proActive) {
-      void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state))
+      void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(getStateSnapshot()))
         .then(refresh).catch(() => {});
     }
     const subscription = RNAppState.addEventListener('change', (next) => {
@@ -620,12 +626,15 @@ export default function SettingsScreen() {
       try { granted = reader.hasSystemAccess(); } catch { /* Treat an unreadable OS grant as absent. */ }
       if (!granted || !proActive) { refresh(); return; }
       void (async () => {
-        const wasOptedOut = state.captureOptOut;
+        // The listener outlives the render that registered it; read the live
+        // store rather than a snapshot captured when the effect last ran.
+        const current = getStateSnapshot();
+        const wasOptedOut = current.captureOptOut;
         try {
           // A canceled system permission flow must leave a prior global
           // opt-out intact. Resume only after the OS confirms this grant.
           if (wasOptedOut) await setCaptureOptOut(false);
-          if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state)))) {
+          if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(current)))) {
             throw new Error('notification_capture_unavailable');
           }
           // The bank-listener grant lets Wafra READ bank-app notifications.
@@ -642,7 +651,7 @@ export default function SettingsScreen() {
       })();
     });
     return () => subscription.remove();
-  }, [notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
+  }, [getStateSnapshot, notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
   const onNotificationAccess = () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader) {
