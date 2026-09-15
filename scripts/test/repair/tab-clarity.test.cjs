@@ -62,22 +62,22 @@ test('Home renders at most five recent transactions without losing the full acti
   const all = walk(activity).find(n => n.props?.onPress && text(n).includes(h.deps['@/lib/i18n'].t('allActivity')));
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
-test('Bills separates detected subscriptions, utility/telecom reminders and card payments', () => {
+test('Bills keeps every obligation in one due-date timeline instead of type silos', () => {
   const tree = createHarness().render('bills');
-  const subscriptions = text(nodeById(tree, 'bills-subscriptions'));
-  const utilities = text(nodeById(tree, 'bills-utilities'));
-  const cards = text(nodeById(tree, 'bills-cards'));
-  assert.match(subscriptions, /Netflix/); assert.match(subscriptions, /Spotify/);
-  assert.doesNotMatch(subscriptions, /DEWA|Etisalat|NBD credit/);
-  assert.match(utilities, /DEWA/); assert.match(utilities, /Etisalat/);
-  assert.doesNotMatch(utilities, /Netflix|Spotify/);
-  assert.match(cards, /NBD credit card/);
+  const agenda = text(nodeById(tree, 'payment-agenda'));
+  for (const label of ['Netflix', 'Spotify', 'DEWA', 'Etisalat', 'NBD credit card']) {
+    assert.match(agenda, new RegExp(label));
+  }
+  assert.equal(nodeById(tree, 'bills-subscriptions'), undefined);
+  assert.equal(nodeById(tree, 'bills-utilities'), undefined);
+  assert.equal(nodeById(tree, 'bills-cards'), undefined);
+  assert.ok(agenda.indexOf('Next 7 days') < agenda.indexOf('Later'));
 });
-test('a manually tracked detected subscription is shown once, in subscriptions', () => {
+test('a manually tracked detected subscription is shown once in the due timeline', () => {
   const h = createHarness();
   h.state.bills.push({ id: 'netflix', title: 'Netflix', category: 'entertainment', amountFils: 4900, dueDay: 9, paidMonths: [] });
   const tree = h.render('bills');
-  const rows = walk(nodeById(tree, 'bills-subscriptions')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
+  const rows = walk(nodeById(tree, 'payment-agenda')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
   assert.equal(rows.length, 1);
   assert.match(rows[0].props.accessibilityLabel, /49.00/);
   assert.doesNotMatch(rows[0].props.accessibilityLabel, /Estimated/);
@@ -99,8 +99,9 @@ test('estimated, confirmed overdue and paid semantics survive payment-type group
   assert.equal(projection.groupPaymentKinds(items, false).find(g => g.key === 'utilities').sections.length, 2);
   assert.equal(JSON.stringify(items), before);
 });
-test('empty Bills retains clearly separated sections without inventing reminders', () => {
+test('empty Bills shows one truthful empty timeline without inventing type sections', () => {
   const tree = createHarness({ empty: true }).render('bills');
-  assert.match(text(nodeById(tree, 'bills-subscriptions')), /No subscription renewals/);
-  assert.match(text(nodeById(tree, 'bills-utilities')), /No utility bills/);
+  assert.match(text(nodeById(tree, 'payment-agenda-summary')), /Nothing coming up/);
+  assert.equal(nodeById(tree, 'bills-subscriptions'), undefined);
+  assert.equal(nodeById(tree, 'bills-utilities'), undefined);
 });

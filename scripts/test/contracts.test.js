@@ -1007,8 +1007,9 @@ function ktSources(dir) {
       scan.includes('Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS)') &&
       scan.includes('state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE)') &&
       // Inbox parsing, its proven-duplicate fast path, the retired delivery
-      // buffer and trusted bank notifications each keep the same UI yield.
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
+      // buffer, the notification promotional fast path and ordinary bank
+      // notifications each keep the same UI yield.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 5,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&

@@ -39,6 +39,14 @@ export const assistantCopy = {
   import: 'Import transactions',
   add: 'Add a transaction',
   noRecords: 'No recorded transactions matched this answer.',
+  correctionMerchantCategory: (merchant: string, category: string, direction: string) =>
+    `Updated ${merchant} to ${category} for matching ${direction} transactions.`,
+  correctionTransactionCategory: (category: string) => `Updated that transaction to ${category}.`,
+  correctionNotSubscription: (merchant: string) => `Marked ${merchant} as not a subscription.`,
+  correctionTargetMissing: 'Correction target disappeared',
+  correctionTransferOwn: 'Marked that transaction as a transfer involving your own accounts.',
+  correctionTransferExternal: 'Marked that transfer as involving an external party.',
+  correctionUpdatedTitle: (title: string) => `Updated · ${title}`,
   previous: 'Previous page',
   next: 'Next page',
 } as const;
