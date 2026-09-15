@@ -1640,13 +1640,16 @@ for (const rel of ['src/app/cards.tsx']) {
     'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
 }
 
-// Accounts removed per-account spending and cash-flow drilldowns. Keep its
-// account figures on the canonical card helper without reintroducing either
-// whole-ledger spending or money-movement summaries into the Accounts tab.
+// Accounts removed per-account spending and cash-flow drilldowns. Its render
+// path now consumes the already-indexed balance and due projections instead of
+// calling cardFigure() once per account (which can rescan the ledger). Keep the
+// same no-spending/no-cashflow boundary while pinning that cheaper projection.
 {
  const wallet=read('src/app/(tabs)/wallet.tsx');
- ok('Wallet uses shared card figures without rebuilding spending or cash-flow summaries',
-  /cardFigure\(state, account, now\)/.test(wallet) &&
+ ok('Wallet uses indexed balance and due figures without rebuilding spending or cash-flow summaries',
+  /dueByAccountId\.get\(account\.id\)/.test(wallet) &&
+  /balances\.balanceByAccountId\[account\.id\]/.test(wallet) &&
+  !/cardFigure\(state, account, now\)/.test(code(wallet)) &&
   !/summarizeCashOutflow\(|monthSpendByAccount|isSpending\(/.test(wallet));
 }
 /* ── subscriptions and the expense export learn the same two exclusions ── */
