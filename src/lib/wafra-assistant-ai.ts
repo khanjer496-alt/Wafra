@@ -188,7 +188,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
         (candidate.metric === undefined || ['amount', 'count'].includes(String(candidate.metric))) &&
         (candidate.limit === undefined || (Number.isSafeInteger(candidate.limit) && (candidate.limit as number) >= 1 && (candidate.limit as number) <= 10));
     case 'historical-baseline':
-      return validPeriod(candidate.period) && ['highest-month', 'typical-month', 'closest-month'].includes(String(candidate.baseline));
+      return validPeriod(candidate.period) && ['highest-month', 'typical-month', 'closest-month', 'last-similar-month'].includes(String(candidate.baseline));
     case 'spending-total':
     case 'income-total':
     case 'compare-periods':

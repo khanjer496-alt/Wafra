@@ -119,6 +119,11 @@ const now = new Date('2026-09-20T12:00:00Z');
   assert.equal(planAssistantQuestion(local, 'How much did I spend on NOON.COM?', now).tool, 'merchant-breakdown');
   assert.equal(planAssistantQuestion(local, 'How much did I spend on Talbat?', now).merchant, 'Talabat');
   assert.equal(planAssistantQuestion(local, 'How much did I spend on dining?', now).tool, 'category-breakdown');
+  const categoryCollision = { ...state, transactions: [...state.transactions,
+    tx('merchant-with-category-word', '2026-09-09', 'Previous groceries', 900, 'groceries')] };
+  const groceriesCategory = planAssistantQuestion(categoryCollision, 'How much did I spend on groceries this month?', now);
+  assert.equal(groceriesCategory.tool, 'category-breakdown');
+  assert.equal(groceriesCategory.category, 'groceries', 'generic category language must not be stolen by a merchant containing that word');
   const noon = answerWafraQuestion(local, 'How much did I spend on Noon?', now);
   assert.equal(noon.tool, 'help');
   assert.ok(noon.suggestions.some((item) => item.includes('NOON.COM')) && noon.suggestions.some((item) => item.includes('Noon Minutes')));
@@ -176,6 +181,28 @@ const now = new Date('2026-09-20T12:00:00Z');
   assert.equal(planAssistantQuestion(natural, 'How much did I spend month to date?', now).tool, 'spending-total');
   assert.equal(planAssistantQuestion(natural, 'How much did I spend in the past fortnight?', now).tool, 'spending-total');
   assert.equal(planAssistantQuestion(natural, 'How much did I spend since September 5?', now).tool, 'spending-total');
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend since Sep 5?', now).period,
+    { mode: 'range', from: '2026-09-05', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend after Sep 5?', now).period,
+    { mode: 'range', from: '2026-09-06', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend before Sep 5?', now).period,
+    { mode: 'range', from: '2026-09-01', to: '2026-09-04' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend this weekend?', now).period,
+    { mode: 'range', from: '2026-09-19', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend after my pay came in?', now).period,
+    { mode: 'range', from: '2026-09-10', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend before pay?', now).period,
+    { mode: 'range', from: '2026-09-01', to: '2026-09-09' });
+
+  const talabatContext = planAssistantQuestion(state, 'How much did I spend at Talabat?', now);
+  const sameMonthLastYear = planAssistantQuestion(state, 'Same month last year', now, talabatContext);
+  assert.equal(sameMonthLastYear.tool, 'merchant-breakdown');
+  assert.deepEqual(sameMonthLastYear.period, { mode: 'month', key: '2025-09' });
+  assert.equal(sameMonthLastYear.merchant, 'Talabat');
+  const twoMonthsAgo = planAssistantQuestion(state, 'Two months ago', now, talabatContext);
+  assert.equal(twoMonthsAgo.tool, 'merchant-breakdown');
+  assert.deepEqual(twoMonthsAgo.period, { mode: 'month', key: '2026-07' });
+  assert.equal(twoMonthsAgo.merchant, 'Talabat');
 }
 
 {
@@ -306,11 +333,24 @@ const now = new Date('2026-09-20T12:00:00Z');
     kind: 'merchant-category', merchant: 'Talabat', category: 'groceries', direction: 'expense',
   });
   const multi = answerWafraQuestion(state, 'How much did I spend at Talabat?', now);
-  assert.equal(planAssistantCorrection(state, 'That was groceries.', multi).kind, 'clarification',
+  const multiCorrection = planAssistantCorrection(state, 'That was groceries.', multi);
+  assert.equal(multiCorrection.kind, 'clarification',
     'a pronoun correction must not choose between multiple evidenced transactions');
+  assert.deepEqual(multiCorrection.suggestions, ['Set all matching transactions to Groceries', 'Choose one transaction']);
+  assert.deepEqual(planAssistantCorrection(state, 'Set all matching transactions to Groceries', multi), {
+    kind: 'merchant-category', merchant: 'Talabat', category: 'groceries', direction: 'expense',
+  });
   assert.deepEqual(planAssistantCorrection(state, 'Talabat is not a subscription', multi), {
     kind: 'not-subscription', merchant: 'Talabat',
   });
+  assert.deepEqual(planAssistantCorrection(state, 'That is not a subscription', multi), {
+    kind: 'not-subscription', merchant: 'Talabat',
+  });
+  const { runWafraAssistant } = require('./build/wafra-assistant');
+  const choose = runWafraAssistant(state, 'Choose one transaction', now,
+    planAssistantQuestion(state, 'How much did I spend at Talabat?', now));
+  assert.equal(choose.answer.showEvidence, true);
+  assert.equal(choose.answer.evidence[0].transactionIds.length, 2);
   const transfer = { ...tx('transfer-one', '2026-09-08', 'Transfer to savings', 1_500, 'other'),
     transferEvidence: { version: 1, currency: 'AED', attribution: 'source' } };
   const transferState = { ...state, transactions: [...state.transactions, transfer] };
@@ -1040,8 +1080,20 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
 
   const similar = answerWafraQuestion(history, 'When did I last spend this much?', now);
   assert.equal(similar.tool, 'historical-baseline');
-  assert.equal(similar.data.monthKey, '2026-07');
-  assert.equal(similar.data.baselineFils, 3_000);
+  assert.equal(similar.data.similarFound, false,
+    'last-time wording must not relabel a merely-nearest amount as similar');
+
+  const recentComparable = { ...history, transactions: [
+    tx('jun-similar', '2026-06-05', 'Market', 5_100, 'groceries'),
+    tx('jul-similar', '2026-07-05', 'Market', 4_800, 'groceries'),
+    tx('aug-not-similar', '2026-08-05', 'Market', 8_000, 'groceries'),
+    tx('sep-current', '2026-09-05', 'Market', 5_000, 'groceries'),
+  ] };
+  const lastSimilar = answerWafraQuestion(recentComparable, 'When did I last spend this much?', now);
+  assert.equal(lastSimilar.data.monthKey, '2026-07', 'most recent comparable month wins over a closer older amount');
+  assert.equal(lastSimilar.data.similarFound, true);
+  const closest = answerWafraQuestion(recentComparable, 'Which earlier month was closest to this?', now);
+  assert.equal(closest.data.monthKey, '2026-06', 'explicit closest wording retains nearest-amount semantics');
 }
 
 // Natural date phrases resolve locally to exact ranges. Payday language depends
