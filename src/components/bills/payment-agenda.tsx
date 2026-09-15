@@ -2,43 +2,30 @@ import { paymentAgendaCopy as copy } from '@/lib/reference-copy';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
+import { BankAvatar } from '@/components/ui/bank-avatar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
-import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
-import { bankBrandForName } from '@/lib/markets';
 import { groupPaymentKinds, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
-
-/** Card-payment tile with the issuing bank's own brand colour so two 'FAB
- *  Credit Card' rows are not both a plain receipt icon — the colour tells
- *  them apart at a glance without waiting on a CDN logo fetch. */
-function BankBrandTile({ title, size = 40 }: { title: string; size?: number }) {
-  const brand = bankBrandForName(title);
-  if (!brand) return null;
-  return <View
-    accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-    style={{ width: size, height: size, borderRadius: Radius.control,
-      backgroundColor: brand.color + '22', alignItems: 'center', justifyContent: 'center' }}>
-    <Icon name="wallet" size={Math.round(size * 0.5)} color={brand.color} strokeWidth={2} />
-  </View>;
-}
+import type { Account } from '@/lib/types';
 
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
 };
 
 /** Payment type is the main hierarchy; dates and verified status stay beside each charge. */
-export function PaymentAgenda({ items, includePaid, onOpen }: {
-  items: readonly PaymentAgendaItem[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
+export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
+  items: readonly PaymentAgendaItem[]; accounts?: readonly Account[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
+  const accountById = new Map(accounts.map((account) => [account.id, account] as const));
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
@@ -135,12 +122,13 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
             const dateChipBg = isOverdue ? theme.expenseSoftBg : isToday ? theme.goldSoft : 'transparent';
             const dateChipBorder = isOverdue ? theme.expenseSoftBorder : isToday ? theme.goldSoft : 'transparent';
             const dateChipColor = isOverdue ? theme.expense : isToday ? theme.warning : theme.textSecondary;
+            const cardAccount = item.kind === 'card' && item.accountId ? accountById.get(item.accountId) : undefined;
             return <Pressable key={item.id} accessibilityRole="button"
               accessibilityLabel={`${item.title}. ${dateText}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
               onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
                 { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-              {item.kind === 'card' && bankBrandForName(item.title)
-                ? <BankBrandTile title={item.title} size={40} />
+              {cardAccount
+                ? <BankAvatar account={cardAccount} size={40} />
                 : <MerchantAvatar title={item.title} category={item.category} size={40} />}
               <View style={styles.content}>
                 <View style={[styles.top, large && styles.stack]}>

@@ -49,6 +49,7 @@ function harness() {
     '@/hooks/use-color-scheme': { useColorScheme: () => 'light' },
     '@/components/ui/category-avatar': { CategoryAvatar: 'CategoryAvatar' },
     '@/components/ui/charts': { CategoryDonut: 'CategoryDonut', useRamp: () => [], useCategoricalPalette: () => ['#1F6B52','#B4503C','#A07B2A','#3B7A8C','#7A4E76'] },
+    '@/components/ui/bank-avatar': { BankAvatar: 'BankAvatar' },
     '@/components/ui/merchant-avatar': { MerchantAvatar: 'MerchantAvatar' },
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
     '@/components/ui/controls': { Button: 'Button' },
