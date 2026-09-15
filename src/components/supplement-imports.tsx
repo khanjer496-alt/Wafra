@@ -166,8 +166,9 @@ export function SupplementImports() {
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [pendingPdf, setPendingPdf] = useState<PendingProtectedPdf | null>(null);
-  const pendingPdfRef = useRef<PendingProtectedPdf | null>(null);
+  const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
+  const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
+  const pendingPdf = pendingPdfs[0] ?? null;
   const queuedRetryNeededRef = useRef(false);
   const queuedRetryInFlightRef = useRef(false);
   const queuedRetryContextRef = useRef<{
@@ -184,15 +185,16 @@ export function SupplementImports() {
   );
 
   useEffect(() => {
-    pendingPdfRef.current = pendingPdf;
-  }, [pendingPdf]);
+    pendingPdfsRef.current = pendingPdfs;
+  }, [pendingPdfs]);
 
   useEffect(() => () => {
-    const pending = pendingPdfRef.current;
-    try {
-      if (pending?.file.exists) pending.file.delete();
-    } catch {
-      // Picker cache cleanup is best effort.
+    for (const pending of pendingPdfsRef.current) {
+      try {
+        if (pending.file.exists) pending.file.delete();
+      } catch {
+        // Picker cache cleanup is best effort.
+      }
     }
   }, []);
 
@@ -392,7 +394,7 @@ export function SupplementImports() {
   }, [cfg, copy.statementsNoNew, copy.statementsSuccess, state.privateMode, syncQueued]);
 
   const pickAndUpload = async () => {
-    if (!cfg || !capabilities || pendingPdf) return;
+    if (!cfg || !capabilities || pendingPdfs.length > 0) return;
     if (!state.ledgerMoney) {
       setCurrencySheetVisible(true);
       return;
@@ -400,10 +402,10 @@ export function SupplementImports() {
     setError(null);
     setStatus(null);
     const pickedFiles: File[] = [];
-    let retainedUri: string | null = null;
+    const retainedUris = new Set<string>();
     // Declared outside the try so a failure later in the batch still hands the
-    // deferred locked PDF to the password prompt instead of leaking its copy.
-    let protectedPdf: PendingProtectedPdf | null = null;
+    // deferred locked PDFs to the password prompt instead of leaking their copies.
+    const protectedPdfs: PendingProtectedPdf[] = [];
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
@@ -417,7 +419,6 @@ export function SupplementImports() {
       let pages = 0;
       let uploadedFiles = 0;
       const coverage: { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[] = [];
-      let skippedProtected = 0;
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
         const file = new File(asset.uri);
@@ -436,16 +437,13 @@ export function SupplementImports() {
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
-            // Keep only this picker cache copy until the user supplies the
-            // password, and carry on with the rest of the batch: one locked
-            // statement used to abandon every file picked after it. The
-            // prompt holds one file; further locked PDFs are reported, not lost.
-            if (protectedPdf) {
-              skippedProtected += 1;
-            } else {
-              retainedUri = asset.uri;
-              protectedPdf = { asset, file };
-            }
+            // Retain every locked picker copy and ask for one password at a
+            // time. Keeping the secrets sequential means Wafra can accept a
+            // mixed batch of protected statements without ever holding a list
+            // of passwords in memory or asking the user to re-pick skipped
+            // files.
+            retainedUris.add(asset.uri);
+            protectedPdfs.push({ asset, file });
             continue;
           }
           throw e;
@@ -455,27 +453,24 @@ export function SupplementImports() {
         }
       }
       await rememberCoverage(coverage);
-      if (protectedPdf) {
-        setPendingPdf(protectedPdf);
+      if (protectedPdfs.length > 0) {
+        setPendingPdfs(protectedPdfs);
         setPdfPassword('');
         setError(null);
       }
-      const synced = uploadedFiles > 0
-        ? await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages)
-        : true;
-      if (synced && skippedProtected > 0) {
-        setError(interpolate(copy.passwordSkipped, { count: skippedProtected }));
+      if (uploadedFiles > 0) {
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
       }
     } catch (e) {
-      if (protectedPdf) {
-        setPendingPdf(protectedPdf);
+      if (protectedPdfs.length > 0) {
+        setPendingPdfs(protectedPdfs);
         setPdfPassword('');
       }
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
       failed();
     } finally {
       for (const file of pickedFiles) {
-        if (file.uri === retainedUri) continue;
+        if (retainedUris.has(file.uri)) continue;
         try {
           if (file.exists) file.delete();
         } catch {
@@ -506,7 +501,9 @@ export function SupplementImports() {
       await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
       await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
       try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
-      setPendingPdf(null);
+      setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+        ? current.slice(1)
+        : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
       setPdfPassword('');
     } catch (e) {
       setError(errorText(e));
@@ -521,7 +518,9 @@ export function SupplementImports() {
   const cancelProtectedPdf = () => {
     if (!pendingPdf) return;
     try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
-    setPendingPdf(null);
+    setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+      ? current.slice(1)
+      : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
     setPdfPassword('');
     setError(null);
   };
@@ -608,7 +607,7 @@ export function SupplementImports() {
               icon="upload"
               label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
-              disabled={!capabilities || busy !== null || !!pendingPdf || !state.ledgerMoney}
+              disabled={!capabilities || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
           </Block>
 
@@ -620,7 +619,12 @@ export function SupplementImports() {
                 </View>
                 <View style={styles.cardCopy}>
                   <ThemedText type="small">{copy.passwordTitle}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">{copy.passwordBody}</ThemedText>
+                  <ThemedText type="meta" numberOfLines={1}>{pendingPdf.asset.name}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {pendingPdfs.length > 1
+                      ? interpolate(copy.passwordQueueBody, { count: pendingPdfs.length })
+                      : copy.passwordBody}
+                  </ThemedText>
                 </View>
               </View>
               <TextField

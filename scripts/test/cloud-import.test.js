@@ -109,7 +109,7 @@ ok('statement uploads send the authoritative ledger currency and exponent, never
 ok('statement import requires an explicit ledger currency before picking files',
   /LedgerCurrencySheet/.test(surface) &&
     /!state\.ledgerMoney/.test(surface) &&
-    /disabled=\{!capabilities \|\| busy !== null \|\| !!pendingPdf \|\| !state\.ledgerMoney\}/.test(surface));
+    /disabled=\{!capabilities \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /file\.delete\(\)/.test(surface));
@@ -117,7 +117,7 @@ ok('statement screen no longer exposes forwarded-email setup',
   !/createEmailForwardingAddress|revokeEmailForwardingAddress|forwardingAddress|Create private address/.test(surface));
 ok('protected PDF retry keeps the picker copy only until password retry or cancel',
   /pdf_password_required/.test(surface) && /secureTextEntry/.test(surface) &&
-  /retryProtectedPdf/.test(surface) && /pendingPdf\.file\.delete\(\)/.test(surface));
+    /retryProtectedPdf/.test(surface) && /pendingPdf\.file\.delete\(\)/.test(surface));
 // Coverage is persisted once the whole batch has uploaded. Awaiting a full
 // ledger persist inside the per-file loop was the "laggy import" report.
 const uploadLoop = surface.slice(
@@ -127,9 +127,14 @@ const uploadLoop = surface.slice(
 ok('statement coverage is recorded after the upload loop, not per file',
   uploadLoop.length > 0 && !/rememberCoverage\(/.test(uploadLoop) &&
   !/recordStatementCoverage\(/.test(uploadLoop));
-ok('a password-protected PDF is deferred and the rest of the batch still uploads',
-  /protectedPdf = \{ asset, file \};[\s\S]{0,40}continue;/.test(uploadLoop) &&
-  !/return;/.test(uploadLoop));
+ok('password-protected PDFs are all deferred and the rest of the batch still uploads',
+  /protectedPdfs\.push\(\{ asset, file \}\);[\s\S]{0,40}continue;/.test(uploadLoop) &&
+    !/return;/.test(uploadLoop));
+ok('multiple protected PDFs are queued for sequential passwords instead of being skipped',
+  /const protectedPdfs: PendingProtectedPdf\[\] = \[\]/.test(surface) &&
+    /setPendingPdfs\(protectedPdfs\)/.test(surface) &&
+    /pendingPdfs\.length > 1/.test(surface) &&
+    !/skippedProtected|passwordSkipped/.test(surface));
 ok('a failed post-upload sync is reported, not folded into the pending status',
   /copy\.syncFailed/.test(surface) && /syncFailureReason/.test(surface));
 ok('statement upload and relay queue drain use the same Expo native fetch transport',
