@@ -100,7 +100,7 @@ export function BottomSheet({
   }, []);
 
   const requestDismiss = useCallback(() => {
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       finishDismiss();
       return;
     }
@@ -125,7 +125,7 @@ export function BottomSheet({
     if (visible || !mounted) return;
     opened.current = false;
 
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       setMounted(false);
       return;
     }
@@ -143,7 +143,7 @@ export function BottomSheet({
       opened.current = false;
       return;
     }
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       // A screen reader or Reduce Motion can be enabled while the entrance is
       // already running. Assigning the resting value cancels that spring
       // immediately instead of waiting for the sheet to finish moving.
@@ -161,7 +161,11 @@ export function BottomSheet({
   const drag = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(dismissible && !reducedMotion)
+        // Android Modal + gesture/spring animations can leave a stale window
+        // composited for a frame (or longer when Hermes is busy). Android keeps
+        // the explicit close/backdrop controls and settles sheets immediately;
+        // iOS retains the native-feeling swipe interaction.
+        .enabled(dismissible && !reducedMotion && Platform.OS !== 'android')
         .activeOffsetY(8)
         .failOffsetX([-24, 24])
         .onStart(() => {

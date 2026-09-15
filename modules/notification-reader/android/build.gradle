@@ -14,8 +14,8 @@ android {
   defaultConfig {
     versionCode 1
     versionName '0.1.0'
-    // The listener ships in normal Android builds. Android notification access
-    // and the exact Play-installed bank package allowlist still gate capture.
+    // The listener ships in normal Android builds. Android notification access,
+    // local admission and bank/Play provenance still gate native capture.
     buildConfigField 'boolean', 'WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED', 'true'
   }
 }

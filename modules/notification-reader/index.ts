@@ -23,7 +23,7 @@ export interface CapturedNotification {
   text: string;
   /** Epoch milliseconds. */
   ts: number;
-  /** Native source confidence; unknown candidates are review-only initially. */
+  /** Native source provenance. JS still requires issuer/parser evidence before auto-import. */
   sourceClass: 'trusted-bank' | 'financial-candidate';
 }
 
@@ -36,6 +36,8 @@ interface NotificationReaderModule {
   openSettings(): boolean;
   /** Source-free local diagnostics; never returns notification text. */
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;
+  /** Explicit heavy recovery pass over notifications still visible in the shade. */
+  sweepVisible(): Promise<boolean>;
   /** Captured money-related notifications with ts >= sinceMs, oldest first. */
   getCaptured(sinceMs: number): Promise<CapturedNotification[]>;
   ackCaptured(ids: string[]): Promise<boolean>;

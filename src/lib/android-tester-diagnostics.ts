@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
-import { hasSmsPermission } from '@/lib/auto-import';
+import { getAndroidNotificationImportDiagnostics, hasSmsPermission } from '@/lib/auto-import';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { collectDiagnosticBankMessages } from '@/lib/diagnostic-messages';
 import { buildFeedbackPayload } from '@/lib/feedback';
@@ -25,6 +25,7 @@ import { getStorageFailures } from '@/lib/storage-diagnostics';
 import type { AppState } from '@/lib/types';
 
 const SAMPLE_LIMIT_PER_OUTCOME = 6;
+const DIAGNOSTIC_SMS_CHECK_LIMIT = 1_000;
 const DIAGNOSTIC_TEXT = 'Android tester diagnostics.' as const;
 const encoder = new TextEncoder();
 
@@ -220,12 +221,14 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
           market: state.marketId,
           overrides: state.merchantOverrides,
           shouldContinue: () => true,
+          maxChecked: DIAGNOSTIC_SMS_CHECK_LIMIT,
         },
       );
       let parsedExpectedLedger = 0;
       let parsedExpectedLedgerPresent = 0;
       let parserRejected = 0;
       const samples: SafeParserSample[] = [];
+      const missingIdentitySamples: SafeParserSample[] = [];
       for (const message of collected.messages) {
         if (!message.parser) parserRejected += 1;
         const expectsLedgerRow = message.parser?.kind === 'transaction' ||
@@ -234,6 +237,20 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
           parsedExpectedLedger += 1;
           if (ledger.sourceIdentityCounts.has(message.canonicalSourceKey)) {
             parsedExpectedLedgerPresent += 1;
+          } else if (message.parser) {
+            const missingSample = parserSample(
+              message.sender,
+              message.body,
+              {
+                kind: message.parser.kind,
+                type: message.parser.type,
+                merchant: message.parser.merchant,
+                category: message.parser.category,
+                categoryDeliberate: message.parser.categoryDeliberate,
+              },
+              null,
+            );
+            if (missingSample) missingIdentitySamples.push(missingSample);
           }
         }
         const sample = parserSample(
@@ -251,17 +268,27 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
         if (sample) samples.push(sample);
       }
       parser.samples = aggregateSamples(samples);
+      parser.parsedWithoutExactStoredSourceIdentitySamples = aggregateSamples(missingIdentitySamples)
+        .filter((sample) => sample.outcome === 'parsed')
+        .slice(0, SAMPLE_LIMIT_PER_OUTCOME);
       parser.inbox = {
         readPermission: true,
         scanPerformed: true,
         skippedReason: null,
+        auditScope: collected.coverage.truncated ? 'recent-bounded' : 'complete-readable-inbox',
+        checkedLimit: collected.coverage.checkedLimit,
+        readComplete: collected.coverage.nativeFilteredInboxReadComplete,
         checked: collected.coverage.checked,
         bankMoneyMessages: collected.coverage.included,
         excluded: collected.coverage.excluded,
         parserRejected,
         parsedExpectedLedger,
         parsedExpectedLedgerPresent,
-        parsedExpectedLedgerSourceMissing: Math.max(0, parsedExpectedLedger - parsedExpectedLedgerPresent),
+        // This is identity coverage, not proof of a lost transaction: card-payment
+        // and statement/live reconciliation can intentionally merge two source
+        // events into one ledger row. Targeted masked samples above make the
+        // remaining cases actionable without overstating what the count proves.
+        parsedWithoutExactStoredSourceIdentity: Math.max(0, parsedExpectedLedger - parsedExpectedLedgerPresent),
       };
     } catch {
       parser.inbox = {
@@ -289,7 +316,10 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
     },
     build: {
       version: buildVersion,
-      buildNumber: Constants.nativeBuildVersion ?? null,
+      buildNumber: Constants.nativeBuildVersion ??
+        (Constants.expoConfig?.android?.versionCode != null
+          ? String(Constants.expoConfig.android.versionCode)
+          : null),
       platform: 'android',
       osVersion: Device.osVersion ?? String(Platform.Version),
       androidApi: Platform.Version,
@@ -337,7 +367,10 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
       ledgerSources: state.privateMode ? null : ledger.summary,
     },
     parser,
-    notifications: notificationDiagnostics,
+    notifications: {
+      native: notificationDiagnostics,
+      lastImport: getAndroidNotificationImportDiagnostics(),
+    },
   };
   return fitDiagnostic(report);
 }

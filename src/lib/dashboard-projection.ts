@@ -49,23 +49,28 @@ export interface HomeDashboardProjection extends Pick<DashboardProjection,
 const UPCOMING_WITHIN_DAYS = 9;
 
 /**
- * Home's one insight, on its own.
- *
- * Home used to obtain this by running the FULL dashboard projection a second
- * time and keeping `.insight`: subscription detection, the cash-outflow
- * summary, the period comparison and the foreign-activity scan, all thrown
- * away, on every ledger change — roughly eight extra full ledger walks per
- * history-import page. The insight needs only what `buildInsights` reads.
+ * The Home insight widget needs one ranked observation, not the entire dashboard
+ * projection. Keep this separate so Home does not also build cash-outflow, period
+ * comparison, foreign-activity and a second subscription timeline just to render
+ * one optional card.
  */
-export function projectHomeInsight(
-  request: Pick<DashboardProjectionRequest, 'state' | 'period' | 'now'>,
+export function projectDashboardInsight(
+  state: AppState,
+  period: Period,
+  now: Date,
+  dismissedInsightId?: string | null,
 ): Insight | null {
-  const { state, period, now } = request;
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, state.accounts);
   return buildInsights(
-    state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal,
-  )[0] ?? null;
+    state.transactions,
+    state.budgets,
+    period,
+    now,
+    state.notSubscriptions,
+    liveAccounts,
+    internal,
+  ).find((item) => item.id !== dismissedInsightId) ?? null;
 }
 
 export function projectDashboard(request: DashboardProjectionRequest & { surface: 'home' }): HomeDashboardProjection;

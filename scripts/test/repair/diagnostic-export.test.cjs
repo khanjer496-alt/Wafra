@@ -76,6 +76,23 @@ test('optional bank diagnostic read is cursor-complete and excludes personal/sec
   assert.ok(!JSON.stringify(report).includes('984321'));
   assert.ok(!JSON.stringify(report).includes('+971500000000'));
 });
+test('one-tap support audits can bound inbox work without claiming complete history', async () => {
+  const rows = [
+    { id: 4, date: 400, address: 'Liv', body: 'AED 10.00 credited to your account.' },
+    { id: 3, date: 300, address: 'FAB', body: 'AED 20.00 purchase at TEST SHOP.' },
+  ];
+  let requested = 0;
+  const report = await collectDiagnosticBankMessages(async (_date, _row, max) => {
+    requested = max;
+    return rows.slice(0, max);
+  }, { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true, maxChecked: 2 });
+  assert.equal(requested, 2);
+  assert.equal(report.coverage.checked, 2);
+  assert.equal(report.coverage.checkedLimit, 2);
+  assert.equal(report.coverage.truncated, true);
+  assert.equal(report.coverage.nativeFilteredInboxReadComplete, false);
+});
+
 test('malformed/non-advancing pages fail instead of emitting a partial complete export', async () => {
   const opts = { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true };
   await assert.rejects(collectDiagnosticBankMessages(async () => [

@@ -46,6 +46,26 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
 const MAX_REVIEW_CANDIDATES = 50;
+
+export interface AndroidNotificationImportDiagnostics {
+  attemptedAt: number;
+  captured: number;
+  autoParsed: number;
+  review: number;
+  declined: number;
+  ignored: number;
+  unresolved: number;
+  acknowledgementPlanned: number;
+  acknowledged: number;
+}
+
+let latestAndroidNotificationImportDiagnostics: AndroidNotificationImportDiagnostics | null = null;
+
+/** Source-free last-drain counters for tester diagnostics. */
+export const getAndroidNotificationImportDiagnostics = (): AndroidNotificationImportDiagnostics | null =>
+  latestAndroidNotificationImportDiagnostics
+    ? { ...latestAndroidNotificationImportDiagnostics }
+    : null;
 // Cheap superset of currencies the worldwide reviewer can currently ground.
 // It avoids running fourteen market packs over ordinary personal SMS, while
 // false positives merely reach the review module and are refused there.
@@ -392,7 +412,7 @@ export interface SourceFreeReviewIdentity {
 export type SourceFreeRefusedAlertDecision =
   | { kind: 'declined'; reason: NonPostingReason }
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
-  | { kind: 'ignored' };
+  | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
 
 /**
  * One source-free refusal policy shared by Android inbox capture and iOS local
@@ -415,10 +435,12 @@ export function inspectSourceFreeRefusedAlert(input: {
   if (input.channel === 'push' &&
     /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(input.source) &&
     !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(input.source)) {
-    return { kind: 'ignored' };
+    return { kind: 'ignored', reason: 'promotion' };
   }
   if (!hasBankAlertMoneyHint(input.source) &&
-    !hasGenericBankAlertContext(input.source, input.sender)) return { kind: 'ignored' };
+    !hasGenericBankAlertContext(input.source, input.sender)) {
+    return { kind: 'ignored', reason: 'non-financial' };
+  }
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
@@ -453,7 +475,7 @@ export function inspectSourceFreeRefusedAlert(input: {
       channel: input.channel,
       event,
     }) : null;
-    if (!universal) return { kind: 'ignored' };
+    if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
     return { kind: 'review', candidate };
   }
@@ -555,6 +577,7 @@ export async function scanInbox(
   };
   const declined: DeclinedSms[] = [];
   const notificationIds = new Set<string>();
+  let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
   const inspectWorldwide = launchSession.inspect;
   const parseLaunchAlert = launchSession.parse;
@@ -575,7 +598,7 @@ export async function scanInbox(
       packageName: string;
       sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
     },
-  ): Promise<boolean> => {
+  ): Promise<SourceFreeRefusedAlertDecision> => {
     const decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
@@ -592,9 +615,9 @@ export async function scanInbox(
         reason: decision.reason,
         sourceEventId,
       });
-      return false;
+      return decision;
     }
-    if (decision.kind === 'ignored') return false;
+    if (decision.kind === 'ignored') return decision;
     const legacyIdentity = await identifyCapture(body, sender, ts, channel);
     if (!legacyIdentity) throw new ReviewIdentityError('Encrypted review identity is invalid');
     // Keep exact old/new tuples only when the ledger requested that old hash.
@@ -617,7 +640,7 @@ export async function scanInbox(
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
     };
-    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return true;
+    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return decision;
     reviewSourceKeys.add(sourceIdentity.sourceKey);
     // Keep the explicit encrypted-identity merge visible to the repository's
     // static safety contract even though the shared helper validated it too.
@@ -630,7 +653,7 @@ export async function scanInbox(
     if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
       reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
     }
-    return true;
+    return decision;
   };
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
@@ -721,11 +744,12 @@ export async function scanInbox(
       // foreign-card purchase merely because that launch pack is active. The
       // routed alert remains review-only until its own bank/template gates pass.
       const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-      const reviewed = p && shouldReviewParsedIncome(p)
+      const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
           )
-        : false;
+        : null;
+      const reviewed = reviewDecision?.kind === 'review';
       if (p && !reviewed) {
         // A parser improvement can turn an old review into a normal parsed
         // row. Attest its old identity before planning, but do no extra source
@@ -811,9 +835,10 @@ export async function scanInbox(
         if (!inboxBodies.has(bodyPrint(sms.body))) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-          const reviewed = p && shouldReviewParsedIncome(p)
+          const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
-            : false;
+            : null;
+          const reviewed = reviewDecision?.kind === 'review';
           if (p && !reviewed) {
             parsed.push({
               ...p,
@@ -849,6 +874,17 @@ export async function scanInbox(
       // retained row: using the ledger watermark here could strand an older
       // unacknowledged notification forever after a newer SMS advances it.
       const captured = await notificationReader.getCaptured(0);
+      notificationImportStats = {
+        attemptedAt: Date.now(),
+        captured: captured.length,
+        autoParsed: 0,
+        review: 0,
+        declined: 0,
+        ignored: 0,
+        unresolved: 0,
+        acknowledgementPlanned: 0,
+        acknowledged: 0,
+      };
       const learnedPackages = new Set(options.learnedNotificationPackages ?? []);
       const notificationYield = createParseYieldState();
       for (let i = 0; i < captured.length; i++) {
@@ -857,31 +893,42 @@ export async function scanInbox(
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
         const sourceClass = n.sourceClass;
         if (sourceClass !== 'trusted-bank' && sourceClass !== 'financial-candidate') continue;
-        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoSource = sourceClass === 'trusted-bank' || learned;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
+        // The curated package list is stronger issuer evidence, not a permanent
+        // support list. Any financial candidate is still sent through the real
+        // transaction parser below. What package provenance controls is whether
+        // a parser result may be written automatically on first sight.
+        //
+        // Native can prove only "Google Play app + financial-looking
+        // notification" for an unknown package. A chat/shopping app can satisfy
+        // that description, so sourceClass (or a spoofable package/title string)
+        // cannot safely authorize a ledger write. The first confident event from
+        // a genuinely new bank goes to Review; confirming it learns the package,
+        // and future confident events auto-import without a new app release.
+        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
+        const autoAuthorized = sourceClass === 'trusted-bank' || learned;
         // An unconfirmed arbitrary package name never gets to impersonate a
         // bank merely by choosing a convincing Android package/title string.
-        const sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ? `${n.pkg} ${n.title}` : '');
+        const sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ? `${n.pkg} ${n.title}` : '');
         const worldwide = inspectWorldwide(
           source,
           sender,
         );
-        // Known packages keep their exact market pin. Locally learned packages
-        // use the normal parser's own market/money evidence. Every unconfirmed
-        // Google Play candidate remains review-only.
-        const p = autoSource
-          ? trustedMarket === 'AE' || trustedMarket === 'SA'
-            ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
-            : parseLaunchAlert(source, sender, worldwide)
-          : null;
+        // Every admitted financial candidate reaches the parser. Curated
+        // packages keep their exact market pin; everything else uses only the
+        // message's own market/money evidence until its package is confirmed.
+        const p = trustedMarket === 'AE' || trustedMarket === 'SA'
+          ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
+          : parseLaunchAlert(source, sender, worldwide);
         const pushSource = { packageName: n.pkg, sourceClass } as const;
-        const reviewed = p && shouldReviewParsedIncome(p)
+        let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(source, n.ts, sender, 'push', worldwide, undefined, pushSource)
-          : false;
-        if (p && !reviewed) {
+          : null;
+        const reviewed = refusal?.kind === 'review';
+        let handled = false;
+        if (p && autoAuthorized && !reviewed) {
           parsed.push({
             ...p,
             date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(n.ts)),
@@ -889,8 +936,10 @@ export async function scanInbox(
             sender,
             channel: 'push',
           });
+          if (notificationImportStats) notificationImportStats.autoParsed += 1;
+          handled = true;
         } else if (!p) {
-          await inspectRefused(
+          refusal = await inspectRefused(
             source,
             n.ts,
             sender,
@@ -900,13 +949,31 @@ export async function scanInbox(
             pushSource,
           );
         }
-        // Claim the row only after all parser/review work for it completed.
-        // If anything above throws, this ciphertext remains for the next run.
-        notificationIds.add(n.id);
+        if (refusal?.kind === 'review') {
+          if (notificationImportStats) notificationImportStats.review += 1;
+          handled = true;
+        } else if (refusal?.kind === 'declined') {
+          if (notificationImportStats) notificationImportStats.declined += 1;
+          handled = true;
+        } else if (refusal?.kind === 'ignored' && refusal.reason !== 'unrecognized') {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          handled = true;
+        }
+        if (!handled && notificationImportStats) notificationImportStats.unresolved += 1;
+        // Claim the row only when Wafra has a durable/safe outcome. An
+        // unresolved money-bearing bank notification used to be ACKed here even
+        // though neither the ledger nor Review contained it, making the evidence
+        // vanish and leaving diagnostics at queued=0. Keep unrecognized rows in
+        // the encrypted queue so parser fixes/diagnostics can retry them.
+        if (handled) notificationIds.add(n.id);
         if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
           await yieldToUi();
           resetParseYieldState(notificationYield);
         }
+      }
+      if (notificationImportStats) {
+        notificationImportStats.acknowledgementPlanned = notificationIds.size;
+        latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
       }
       onProgress?.(scannedCount, parsed.length);
     } catch (error) {
@@ -935,6 +1002,13 @@ export async function scanInbox(
       ? async () => {
           const acknowledged = await notificationReader.ackCaptured([...notificationIds]);
           if (!acknowledged) throw new Error('Notification capture acknowledgement failed');
+          if (notificationImportStats &&
+              latestAndroidNotificationImportDiagnostics?.attemptedAt === notificationImportStats.attemptedAt) {
+            latestAndroidNotificationImportDiagnostics = {
+              ...latestAndroidNotificationImportDiagnostics,
+              acknowledged: notificationIds.size,
+            };
+          }
         }
       : NOOP_SCAN_COMMIT,
   };

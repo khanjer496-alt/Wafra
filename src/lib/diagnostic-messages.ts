@@ -23,17 +23,31 @@ export const isDiagnosticBankSender = (sender: string): boolean =>
 export async function collectDiagnosticBankMessages(readPage: DiagnosticPageReader, options: {
   currency: string | null; market: string; overrides: Record<string, CategoryId>;
   shouldContinue: () => boolean; onProgress?: (checked: number, included: number) => void;
+  /** Optional recent-inbox ceiling for one-tap support reports. Omit for a full audit/export. */
+  maxChecked?: number;
 }) {
   let beforeDate = Number.MAX_SAFE_INTEGER; let beforeId = Number.MAX_SAFE_INTEGER;
   let checked = 0; let excluded = 0; let totalChars = 0;
+  const maxChecked = Number.isSafeInteger(options.maxChecked) && Number(options.maxChecked) > 0
+    ? Number(options.maxChecked)
+    : Number.POSITIVE_INFINITY;
   const messages = [];
   const session = createLaunchAlertSession({ overrides: options.overrides,
     pinnedCurrency: options.currency, activeMarket: options.market });
   while (true) {
     assertDiagnosticContinues(options.shouldContinue);
-    const page = await readPage(beforeDate, beforeId, 250);
+    const remaining = maxChecked - checked;
+    if (remaining <= 0) return { messages, coverage: {
+      nativeFilteredInboxReadComplete: false, checked, included: messages.length, excluded,
+      truncated: true, checkedLimit: maxChecked,
+      emptyProviderDoesNotProveNoMessages: checked === 0,
+      personalAndUnknownSendersExcluded: true, securityMessagesExcluded: true,
+      scope: 'Recent readable bank-money SMS only (bounded support audit). Deleted SMS and bank-app notification history are not included.',
+    } };
+    const pageSize = Math.min(250, remaining);
+    const page = await readPage(beforeDate, beforeId, pageSize);
     assertDiagnosticContinues(options.shouldContinue);
-    if (!Array.isArray(page) || page.length > 250) throw new Error('diagnostic_invalid_page');
+    if (!Array.isArray(page) || page.length > pageSize) throw new Error('diagnostic_invalid_page');
     for (let index = 0; index < page.length; index++) {
       const row = page[index];
       if (!row || !Number.isSafeInteger(row.id) || row.id < 0 || !Number.isSafeInteger(row.date) || row.date < 0 ||
@@ -60,11 +74,15 @@ export async function collectDiagnosticBankMessages(readPage: DiagnosticPageRead
     }
     options.onProgress?.(checked, messages.length);
     assertDiagnosticContinues(options.shouldContinue);
-    if (page.length < 250) return { messages, coverage: {
-      nativeFilteredInboxReadComplete: true, checked, included: messages.length, excluded,
+    if (page.length < pageSize || checked >= maxChecked) return { messages, coverage: {
+      nativeFilteredInboxReadComplete: page.length < pageSize, checked, included: messages.length, excluded,
+      truncated: checked >= maxChecked && page.length === pageSize,
+      checkedLimit: Number.isFinite(maxChecked) ? maxChecked : null,
       emptyProviderDoesNotProveNoMessages: checked === 0,
       personalAndUnknownSendersExcluded: true, securityMessagesExcluded: true,
-      scope: 'Currently readable bank-money SMS only. The native reader omits credential messages. Deleted SMS and bank-app notification history are not included.',
+      scope: Number.isFinite(maxChecked)
+        ? 'Recent readable bank-money SMS only (bounded support audit). Deleted SMS and bank-app notification history are not included.'
+        : 'Currently readable bank-money SMS only. The native reader omits credential messages. Deleted SMS and bank-app notification history are not included.',
     } };
     await diagnosticYield();
   }

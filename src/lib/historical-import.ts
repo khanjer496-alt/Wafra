@@ -80,7 +80,7 @@ const inspectHistoricalRefusal = (input: {
       },
     };
   }
-  if (decision.kind === 'ignored') return decision;
+  if (decision.kind === 'ignored') return { kind: 'ignored' };
   const identity = appleMessageReviewIdentity(input.record.id);
   if (!identity) return { kind: 'ignored' };
   const identified = identifySourceFreeReviewAlert(

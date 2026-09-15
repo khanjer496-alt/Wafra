@@ -39,11 +39,25 @@ test('curated package identity remains exact while native intake can discover ne
   assert.match(native, /SOURCE_FINANCIAL_CANDIDATE/);
   assert.match(listener, /TrustedBankNotificationPackages\.sourceClass\(this, sbn\.packageName, body\)/);
   assert.match(listener, /SensitiveNotificationFilter\.shouldReject\(body\)/);
-  // The money gate now runs over the chosen text candidate and the joined
-  // title/text rather than one `body` binding; the gate itself must remain.
-  assert.match(listener, /MONEY_RE\.containsMatchIn\(/);
+  // Exact curated banks are package-authenticated and must reach the real
+  // parser even when the cheap native money regex does not understand one
+  // notification rendering. Unknown Play financial candidates keep the gate.
+  assert.match(listener, /sourceClass != TrustedBankNotificationPackages\.SOURCE_TRUSTED_BANK[\s\S]{0,180}!MONEY_RE\.containsMatchIn/);
+  assert.match(listener, /moneyHeuristicBypassed/);
   assert.match(listener, /Notification\.EXTRA_TEXT_LINES/);
   assert.match(listener, /Notification\.EXTRA_SUB_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_INFO_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_SUMMARY_TEXT/);
+  assert.match(listener, /Notification\.EXTRA_TITLE_BIG/);
+  assert.match(listener, /Notification\.EXTRA_MESSAGES/);
+  assert.match(listener, /Notification\.EXTRA_HISTORIC_MESSAGES/);
+  assert.match(listener, /notification\.tickerText/);
+  assert.match(listener, /filter \{ key -> looksLikeTextExtraKey\(key\) \}/);
+  assert.match(listener, /extendedMoneySurface/);
+  assert.match(listener, /POSTING_CONTEXT_RE/);
+  assert.match(listener, /composedMoneySurface/);
+  assert.match(listener, /listOf\(contextCandidate, moneyCandidate\)\.distinct\(\)\.joinToString\(" "\)/);
+  assert.equal(enabled.trustedBankNotificationSender('com.adcb.nexgen'), 'ADCB');
 });
 
 test('known bank packages survive OEM/restore installer metadata while unknown apps still require Play provenance', () => {
@@ -54,15 +68,20 @@ test('known bank packages survive OEM/restore installer metadata while unknown a
     'exact curated package ids must be admitted before the unknown-app Play installer gate');
 });
 
-test('every notification drain re-sweeps or rebinds before reading the encrypted queue', () => {
+test('ordinary notification drains are sweep-free and shade recovery is explicit', () => {
   const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
   const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
-  const sweep = module.indexOf('BankNotificationListenerService.sweepOrRequestRebind(context)');
+  const getCaptured = module.indexOf('AsyncFunction("getCaptured")');
   const readQueue = module.indexOf('NotificationCaptureStore.read(context, sinceMs.toLong())');
-  assert.ok(sweep >= 0 && readQueue > sweep);
+  const getCapturedBody = module.slice(getCaptured, readQueue);
+  assert.ok(getCaptured >= 0 && readQueue > getCaptured);
+  assert.doesNotMatch(getCapturedBody, /sweepOrRequestRebind|sweepConnected|Thread\.sleep/);
+  const explicitSweep = module.indexOf('AsyncFunction("sweepVisible")');
+  assert.ok(explicitSweep >= 0 && explicitSweep < getCaptured);
+  assert.match(module.slice(explicitSweep, getCaptured), /BankNotificationListenerService\.sweepOrRequestRebind\(context\)/);
+  assert.match(module.slice(explicitSweep, getCaptured), /Thread\.sleep\(50\)/);
   assert.match(listener, /requestRebind\(ComponentName\(context, BankNotificationListenerService::class\.java\)\)/);
   assert.match(listener, /fun isConnected\(\): Boolean = connected != null/);
-  assert.match(module, /if \(!sweptImmediately\)[\s\S]{0,700}isConnected\(\)[\s\S]{0,260}Thread\.sleep\(50\)/);
   assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,120}sweepActiveNotifications\(\)/);
 });
 
@@ -80,11 +99,19 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
   assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
   assert.match(listener, /recordAdmission\("exception", adcb\)/);
-  assert.match(listener, /firstOrNull \{ MONEY_RE\.containsMatchIn\(it\) \}/);
+  assert.match(listener, /filter \{ MONEY_RE\.containsMatchIn\(it\) \}[\s\S]{0,80}maxByOrNull \{ it\.length \}/);
   assert.match(listener, /listOf\(title\) \+ nonBlankTextCandidates/);
   const store = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt');
   assert.match(store, /"cleared-through"/);
+  assert.match(store, /indexOfFirst \{ it\.pkg == pkg && it\.ts == ts \}/);
+  assert.match(store, /prior\.copy\(title = title, text = text\)/);
+  assert.match(store, /private const val ACKED = "acked_fingerprints"/);
+  assert.match(store, /notificationFingerprint\(pkg, ts\)/);
+  assert.match(store, /return "acknowledged"/);
+  assert.match(store, /putString\(ACKED, JSONArray\(acked\)\.toString\(\)\)/);
+  assert.match(store, /acknowledgedRows\.map \{ notificationFingerprint\(it\.pkg, it\.ts\) \}/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
+  assert.match(bridge, /sweepVisible\(\): Promise<boolean>/);
   assert.match(settings, /notifDiagnosticsTitle/);
   assert.doesNotMatch(settings, /notifDiagnostics[\s\S]{0,500}\.text/);
 });
@@ -111,7 +138,9 @@ test('native opt-out defaults closed and clears ciphertext before future callbac
   assert.ok(listener.indexOf('if (!NotificationCapturePolicy.isEnabled(this)) return') <
     listener.indexOf('NotificationCaptureStore.append('));
   assert.match(module, /AsyncFunction\("setCaptureEnabled"\)/);
-  assert.match(module, /if \(enabled && changed\) BankNotificationListenerService\.sweepConnected\(\)/);
+  assert.match(module, /val wasEnabled = NotificationCapturePolicy\.isEnabled\(context\)/);
+  assert.match(module, /val nowEnabled = NotificationCapturePolicy\.isEnabled\(context\)/);
+  assert.match(module, /if \(!wasEnabled && nowEnabled\) BankNotificationListenerService\.sweepConnected\(\)/);
   assert.match(module, /ComponentName\.unflattenFromString\(value\)/);
   assert.match(module, /if \(!NotificationCapturePolicy\.isEnabled\(context\) \|\| !hasSystemAccess\(context\)\)/);
 });
@@ -137,6 +166,8 @@ test('the scanner reads only with native availability and granted notification a
     '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => [] } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -167,6 +198,8 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -176,14 +209,16 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
   assert.equal(result.inboxHistoryComplete, false, 'notification scan cannot claim SMS history completion');
 });
 
-test('unknown Play financial candidates stay review-only until explicitly learned on that phone', () => {
+test('every financial candidate reaches the parser but only trusted or confirmed packages auto-import', () => {
   const scanner = read('src/lib/auto-import.ts');
   const promotion = read('src/lib/review-promotion.ts');
   const types = read('src/lib/types.ts');
-  assert.match(scanner, /sourceClass === 'financial-candidate' && learnedPackages\.has\(n\.pkg\)/);
-  assert.match(scanner, /const autoSource = sourceClass === 'trusted-bank' \|\| learned/);
-  assert.match(scanner, /const p = autoSource/);
-  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoSource \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
+  assert.match(scanner, /learnedPackages\.has\(n\.pkg\)/);
+  assert.match(scanner, /const autoAuthorized = sourceClass === 'trusted-bank' \|\| learned/);
+  assert.match(scanner, /const p = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
+  assert.match(scanner, /shouldReviewParsedIncome\(p\) \|\| !autoAuthorized/);
+  assert.match(scanner, /p && autoAuthorized && !reviewed/);
+  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoAuthorized \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
   assert.match(promotion, /learnedNotificationPackage/);
   assert.match(types, /trustedNotificationPackages: string\[\]/);
@@ -219,6 +254,8 @@ test('500 queued notification candidates process without touching SMS and ACK on
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
     }) },
@@ -259,4 +296,36 @@ test('Settings and draining use the same availability gate while permission revo
   const copy = load(path.join(root, 'src/lib/i18n.ts'));
   assert.match(copy.t('notifAccessFull', 'en'), /without SMS access/);
   assert.match(copy.t('notifAccessFull', 'ar'), /دون إذن الرسائل/);
+});
+
+
+test('foreground notification drain is independent of SMS freshness and Settings can recover it', () => {
+  const hook = read('src/hooks/use-auto-import.ts');
+  const scanner = read('src/lib/auto-import.ts');
+  const settings = read('src/app/settings.tsx');
+  const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
+  assert.match(hook, /const runAndroidNotificationDrain = useCallback/);
+  assert.match(hook, /captureExecutor\.execute\('notification-only'\)/);
+  assert.match(hook, /Android's NotificationListenerService can enqueue a bank alert/);
+  assert.match(hook, /setTimeout\([\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?, 350\)/);
+  const drainStart = hook.indexOf('const runAndroidNotificationDrain = useCallback');
+  const drainEnd = hook.indexOf(`/**\n   * The current scan`, drainStart);
+  const drainBody = hook.slice(drainStart, drainEnd);
+  assert.doesNotMatch(drainBody, /lastScanAt|RESCAN_AFTER_MS|hasSmsPermission|getInboxSms/);
+  const ordinaryStart = settings.indexOf('const refreshNotificationDiagnostics = useCallback');
+  const recoverStart = settings.indexOf('const recoverNotificationDiagnostics = useCallback');
+  const ordinaryBody = settings.slice(ordinaryStart, recoverStart);
+  const recoverBody = settings.slice(recoverStart, settings.indexOf('const pendingNotificationConsent', recoverStart));
+  assert.doesNotMatch(ordinaryBody, /sweepVisible|runAndroidNotificationDrain/,
+    'opening Settings must not perform recovery work');
+  assert.match(recoverBody, /await reader\.sweepVisible\?\.\(\);[\s\S]*?await runAndroidNotificationDrain\(\);[\s\S]*?reader\.getDiagnostics\(\)/);
+  assert.match(settings, /onPress=\{\(\) => void recoverNotificationDiagnostics\(\)\}/);
+  const diagnosticsStart = module.indexOf('AsyncFunction("getDiagnostics")');
+  const diagnosticsEnd = module.indexOf('AsyncFunction("sweepVisible")');
+  assert.doesNotMatch(module.slice(diagnosticsStart, diagnosticsEnd), /sweepOrRequestRebind|sweepConnected/,
+    'reading diagnostic counts must not sweep the full shade');
+  const tester = read('src/lib/android-tester-diagnostics.ts');
+  assert.match(tester, /getAndroidNotificationImportDiagnostics\(\)/);
+  assert.match(scanner, /acknowledgementPlanned/);
+  assert.match(scanner, /unresolved/);
 });

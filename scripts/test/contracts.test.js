@@ -241,10 +241,13 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('Function("isAvailable")'));
   const promotion = code(read('src/lib/review-promotion.ts'));
   const stateTypes = code(read('src/lib/types.ts'));
-  ok('unrecognized financial app packages remain review-only until explicit confirmation learns them locally',
+  ok('every financial candidate reaches parsing while unknown packages require one explicit confirmation before auto-import',
     scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
-      scanner.includes("const autoSource = sourceClass === 'trusted-bank' || learned") &&
-      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? (autoSource ?") &&
+      scanner.includes("const autoAuthorized = sourceClass === 'trusted-bank' || learned") &&
+      scanner.includes("const p = trustedMarket === 'AE' || trustedMarket === 'SA'") &&
+      scanner.includes("shouldReviewParsedIncome(p) || !autoAuthorized") &&
+      scanner.includes("p && autoAuthorized && !reviewed") &&
+      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ?") &&
       promotion.includes("item.sourceClass === 'financial-candidate'") &&
       promotion.includes('learnedNotificationPackage') &&
       stateTypes.includes('trustedNotificationPackages: string[]'));
@@ -1623,6 +1626,15 @@ for (const rel of ['src/app/cards.tsx']) {
   ok(`${rel} excludes own-account moves from per-account spend`,
     /isSpending\(\w+, undefined, internal\)/.test(screen),
     screen.match(/isSpending\([^)]*\)/g));
+}
+
+{
+  const statement = read('src/components/card-payment-sheet.tsx');
+  ok('credit-card statement activity uses canonical spending rather than a hand-written transfer check',
+    /internalTransferIds\(state\.transactions, state\.accounts\)/.test(statement) &&
+      /isSpending\(t, undefined, internal\)/.test(statement) &&
+      !/t\.isTransfer \|\| t\.type !== 'expense'/.test(code(statement)),
+    'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
 }
 
 // Accounts removed per-account spending. Keep it on canonical card/cashflow values.

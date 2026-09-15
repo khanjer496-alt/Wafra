@@ -154,3 +154,13 @@ test('opening an entry never reconciles the complete ledger, before or after fin
   h.state.transactions = [...h.state.transactions]; render(); assert.equal(calls, 0);
   h.state.accounts = [...h.state.accounts]; render(); assert.equal(calls, 0);
 });
+
+test('Android bottom sheets do not animate a separate modal window across interaction frames', () => {
+  const fs = require('fs');
+  const source = fs.readFileSync(path.join(root, 'src/components/ui/bottom-sheet.tsx'), 'utf8');
+  assert.match(source, /reducedMotion \|\| Platform\.OS === 'android'/);
+  assert.ok((source.match(/reducedMotion \|\| Platform\.OS === 'android'/g) ?? []).length >= 3,
+    'open, external-close and explicit-dismiss paths should all settle immediately on Android');
+  assert.match(source, /\.enabled\(dismissible && !reducedMotion && Platform\.OS !== 'android'\)/,
+    'Android must not re-enter the animated dismissal path through the drag gesture');
+});

@@ -638,6 +638,20 @@ jobs:
           printf '%s' "$value" | npx --no-install wrangler secret put EXPO_ACCESS_TOKEN
           echo "set=set" >> "$GITHUB_OUTPUT"
 
+      - name: Set diagnostic email delivery
+        working-directory: server
+        env:
+          REPORT_EMAIL: ${{ secrets.WAFRA_REPORT_EMAIL }}
+          REPORT_FROM_EMAIL: ${{ secrets.WAFRA_REPORT_FROM_EMAIL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REPORT_EMAIL:-}" ] || [ -z "${REPORT_FROM_EMAIL:-}" ]; then
+            echo "Diagnostic email secrets are absent — upload still works, email copy disabled."
+            exit 0
+          fi
+          printf '%s' "$REPORT_EMAIL" | npx --no-install wrangler secret put REPORT_EMAIL
+          printf '%s' "$REPORT_FROM_EMAIL" | npx --no-install wrangler secret put REPORT_FROM_EMAIL
+
       # ---- Verification. A deploy that is not checked is a rumour.
       - name: Health check
         id: health

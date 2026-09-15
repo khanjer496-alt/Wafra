@@ -70,6 +70,12 @@ ok('pdf response: skipped rows are read when sent, default to zero from an older
   parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.rejectedRows === 0 &&
   parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: -1 }) === null &&
   parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: '3' }) === null);
+ok('pdf response: accepted + rejected rows must reconcile and incomplete coverage is never persisted',
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, pages: 2, coverage: {
+    sourceKey: 'account-1', label: 'Account', startDate: '2026-01-01', endDate: '2026-01-31',
+  } })?.coverage === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 9, pages: 2 }) === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, pages: 2 })?.totalRows === 10);
 ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
   pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',
@@ -125,6 +131,10 @@ ok('queued statement rows retry without requiring another upload',
   /queuedRetryNeededRef/.test(surface) &&
     /AppState\.addEventListener\('change'/.test(surface) &&
     /setTimeout\(\(\) => \{ void retryQueued\(\); \}, 1_500\)/.test(surface));
+ok('multi-file statement imports drain full 200-row relay pages without one giant JS turn',
+  /for \(let page = 0; page < 50; page \+= 1\)/.test(surface) &&
+    /outcome\.moreQueued !== true/.test(surface) &&
+    /await new Promise<void>\(\(resolve\) => setTimeout\(resolve, 0\)\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <

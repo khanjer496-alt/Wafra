@@ -7,7 +7,9 @@ import android.os.Build
  * Exact package identities from current official bank listings plus
  * launch-tested legacy bank packages. Known bank ids may come from Play, an OEM
  * store or an Android restore/clone. Unknown apps still require Google Play as
- * installer and remain review-only until explicitly learned locally.
+ * installer plus financial context before they can enter the encrypted queue.
+ * JS parses every candidate, but an automatic ledger write still requires an
+ * exact curated package or a package the user previously confirmed.
  *
  * Keep this map byte-for-byte aligned with
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.
@@ -65,8 +67,7 @@ object TrustedBankNotificationPackages {
   /**
    * Notification access is device-wide. Rank sources locally before queueing:
    * exact known banks are strongest. Any other Google Play-installed app must
-   * carry clear financial context and is review-only until the user confirms
-   * that package in Wafra. Android does not expose the Google Play "Finance"
+   * carry clear financial context. Android does not expose the Google Play "Finance"
    * store category through ApplicationInfo, so never infer trust from an app
    * category that the platform cannot actually provide.
    */
@@ -76,8 +77,8 @@ object TrustedBankNotificationPackages {
     // leave installingPackageName null/non-Play even for the real bank app.
     // A second APK cannot coexist under the same package id, so requiring the
     // installer here made real ADCB/ENBD notifications silently disappear on
-    // otherwise healthy phones. Unknown packages still require Play provenance
-    // and remain review-only.
+    // otherwise healthy phones. Unknown packages still require Play provenance;
+    // this native classification alone never authorizes a ledger import.
     if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
     if (!playInstalled(context, packageName)) return null
     return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null

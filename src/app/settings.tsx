@@ -186,6 +186,7 @@ export default function SettingsScreen() {
   const iosCapturePreferenceInFlight = useRef<Promise<void> | null>(null);
   const {
     captureState,
+    runAndroidNotificationDrain,
     iosCaptureStatus,
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
@@ -617,11 +618,25 @@ export default function SettingsScreen() {
   const refreshNotificationDiagnostics = useCallback(async () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
-    setNotifDiagnosticsBusy(true);
     try { setNotifDiagnostics(await reader.getDiagnostics()); }
     catch { setNotifDiagnostics(null); }
-    finally { setNotifDiagnosticsBusy(false); }
   }, [notifAvailable]);
+  const recoverNotificationDiagnostics = useCallback(async () => {
+    const reader = NotificationReader;
+    if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
+    setNotifDiagnosticsBusy(true);
+    try {
+      // Recovery is intentionally explicit. Walking the full Android shade is
+      // too expensive for ordinary app open/resume, especially on OEMs that
+      // retain hundreds of notifications. Sweep once, drain the repaired
+      // encrypted queue, then read source-free counts.
+      await reader.sweepVisible?.();
+      await runAndroidNotificationDrain();
+      setNotifDiagnostics(await reader.getDiagnostics());
+    }
+    catch { setNotifDiagnostics(null); }
+    finally { setNotifDiagnosticsBusy(false); }
+  }, [notifAvailable, runAndroidNotificationDrain]);
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
@@ -1442,7 +1457,7 @@ export default function SettingsScreen() {
                 </ThemedText> : null}
               </View>
               <Button inline variant="outline" label={t('notifDiagnosticsRefresh')}
-                disabled={notifDiagnosticsBusy} onPress={() => void refreshNotificationDiagnostics()} />
+                disabled={notifDiagnosticsBusy} onPress={() => void recoverNotificationDiagnostics()} />
             </Block>
           )}
         </Section>

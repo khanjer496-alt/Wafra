@@ -1,6 +1,6 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 
@@ -20,7 +20,7 @@ import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { projectDashboard, projectHomeInsight } from '@/lib/dashboard-projection';
+import { projectDashboard, projectDashboardInsight } from '@/lib/dashboard-projection';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { formatAmount } from '@/lib/format';
@@ -91,6 +91,7 @@ export default function JournalHomeScreen() {
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
+  const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -131,10 +132,22 @@ export default function JournalHomeScreen() {
   }, [focused]);
 
   useEffect(() => {
-    if (focused && privacyGateCleared && state.hydrated && state.onboarded) {
-      markLaunchPhase('first-usable-home');
-    }
-  }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    // Mark Home usable from the first committed ledger frame. Historical insight
+    // analysis is optional decoration and must not sit in front of navigation or
+    // touch handling on a large ledger. Let initial interactions settle, then
+    // give Android one extra quiet beat before doing that full-ledger analysis.
+    markLaunchPhase('first-usable-home');
+    if (homeAnalysisReady) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => setHomeAnalysisReady(true), 250);
+    });
+    return () => {
+      task.cancel();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [focused, homeAnalysisReady, privacyGateCleared, state.hydrated, state.onboarded]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', (next) => {
       if (next === 'active') setNow(new Date());
@@ -160,12 +173,17 @@ export default function JournalHomeScreen() {
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.marketId, period, projectionDay, hasPendingReview, historyImportRunning]);
   const payments = dashboard.upcoming.items;
-  const insightVisible = homeWidgetVisible(homeWidgets, 'insight');
-  const homeInsight = useMemo(() => insightVisible ? projectHomeInsight({ state, period, now }) : null,
-    // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
+  const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
+  const homeInsight = useMemo(() =>
+    homeAnalysisReady && insightWidgetVisible
+      ? projectDashboardInsight(state, period, now)
+      : null,
+    // Capture/progress state must not restart historical analysis. The optional
+    // insight is computed only after Home is already interactive and only while
+    // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [insightVisible, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
-      state.ledgerMoney, state.marketId, period, projectionDay]);
+    [homeAnalysisReady, insightWidgetVisible, state.transactions, state.accounts, state.budgets,
+      state.notSubscriptions, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;

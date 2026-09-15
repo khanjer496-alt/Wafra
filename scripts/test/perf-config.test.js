@@ -663,10 +663,11 @@ function fastest(fn, runs = 7) {
     'the selected row already carries normalized transfer evidence; rebuilding the whole ledger graph on every tap blocks the JS thread');
 
   const tapped = bodyOf(haptics, 'export function tapped');
-  ok('routine Android taps do not schedule haptic bridge work',
-    !!tapped && tapped.includes("Platform.OS === 'android'") && tapped.includes('return;') &&
-      !tapped.includes('performAndroidHapticsAsync'),
-    'Android ripple is immediate feedback; a haptics bridge call on every navigation tap can overlap the navigation turn on OEM devices');
+  ok('routine Android taps reserve navigation first and defer a short haptic until the next frame',
+    !!tapped && tapped.includes('prioritizeForegroundNavigation()') &&
+      tapped.includes("Platform.OS === 'android'") && tapped.includes('requestAnimationFrame') &&
+      tapped.includes('performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click)'),
+    'the haptic must not compete with the JS turn that handles navigation, but Android taps still need physical feedback');
 }
 
 // ---------------------------------------------------------------------------
@@ -816,6 +817,11 @@ function bodyOf(source, header) {
       /setTimeout\([\s\S]*?void run\(\)[\s\S]*?FOREGROUND_HISTORY_RESUME_GRACE_MS\)/.test(historyImport),
     'parser migration is maintenance work and must not start or restart in the first launch/resume frames');
 
+  ok('history planning and commit both honor the foreground navigation lease',
+    /FOREGROUND_HISTORY_COMMIT_GAP_MS\s*=\s*120/.test(historyImport) &&
+      (historyImport.match(/waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_COMMIT_GAP_MS\)/g) ?? []).length >= 2,
+    'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
+
   const captureExecutor = stripComments(read('src/lib/capture-executor.ts'));
   ok('routine capture yields between collection and synchronous import planning',
     /collected\.parsed\.length > 0 \|\| collected\.declined\.length > 0/.test(captureExecutor) &&
@@ -828,6 +834,13 @@ function bodyOf(source, header) {
       /state\.marketId, period, projectionDay, hasPendingReview\]/.test(home) &&
       /state\.marketId, period, projectionDay\]/.test(home),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
+
+  ok('Home defers optional historical insight work until after the first usable frame',
+    /InteractionManager\.runAfterInteractions/.test(home) &&
+      /homeAnalysisReady && insightWidgetVisible/.test(home) &&
+      /projectDashboardInsight\(state, period, now\)/.test(home) &&
+      !/surface: 'dashboard', includeInsights: true/.test(home),
+    'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

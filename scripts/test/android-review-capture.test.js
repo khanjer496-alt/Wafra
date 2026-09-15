@@ -218,6 +218,27 @@ const { scanInbox } = require('./build/auto-import.js');
   inboxRows = [];
   receivedRows = [];
   notificationRows = [{
+    id: 'adcb-notification-format-0001',
+    pkg: 'com.adcb.nexgen',
+    title: 'ADCBAlert',
+    text: 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT',
+    ts: NOW + 5_250,
+  }];
+  const adcbPush = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('the exact ADCB Android push format imports through the full notification parser path',
+    adcbPush.parsed.length === 1 && adcbPush.reviewCandidates.length === 0 &&
+      adcbPush.parsed[0]?.amountFils === 2590 && adcbPush.parsed[0]?.merchant === 'Test Merchant' &&
+      adcbPush.parsed[0]?.card?.last4 === '7720' && adcbPush.parsed[0]?.card?.kind === 'credit' &&
+      adcbPush.parsed[0]?.date === '2026-09-14',
+    JSON.stringify(adcbPush));
+  const ackBeforeAdcbPush = acknowledgedNotifications.length;
+  await adcbPush.commit();
+  ok('the ADCB push is acknowledged only after the parsed row commit boundary',
+    acknowledgedNotifications.length === ackBeforeAdcbPush + 1 &&
+      acknowledgedNotifications.includes('adcb-notification-format-0001'),
+    JSON.stringify(acknowledgedNotifications));
+
+  notificationRows = [{
     id: 'hostile-notification-0001',
     pkg: 'com.example.chat',
     title: 'Friends',
@@ -233,6 +254,57 @@ const { scanInbox } = require('./build/auto-import.js');
       hostile.reviewCandidates[0]?.sourceClass === 'financial-candidate' &&
       acknowledgedNotifications.includes('hostile-notification-0001'),
     JSON.stringify({ hostile, acknowledgedNotifications }));
+
+  notificationRows = [{
+    id: 'noncurated-adib-0001',
+    pkg: 'com.example.adibmobile',
+    title: 'ADIB',
+    text: 'Purchase of AED 61.25 at CARREFOUR with Debit Card ending 1234',
+    ts: NOW + 5_750,
+  }];
+  const nonCuratedBank = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('a non-curated bank is parsed but its first transaction is reviewed before package trust is learned',
+    nonCuratedBank.parsed.length === 0 && nonCuratedBank.reviewCandidates.length === 1 &&
+      nonCuratedBank.reviewCandidates[0]?.sourcePackage === 'com.example.adibmobile' &&
+      nonCuratedBank.reviewCandidates[0]?.sourceClass === 'financial-candidate',
+    JSON.stringify(nonCuratedBank));
+  await nonCuratedBank.commit();
+  ok('the first non-curated bank review is acknowledged only after the normal commit boundary',
+    acknowledgedNotifications.includes('noncurated-adib-0001'),
+    JSON.stringify(acknowledgedNotifications));
+
+  notificationRows = [{
+    id: 'noncurated-adib-0002',
+    pkg: 'com.example.adibmobile',
+    title: 'ADIB',
+    text: 'Purchase of AED 62.50 at CARREFOUR with Debit Card ending 1234',
+    ts: NOW + 5_900,
+  }];
+  const learnedBank = await scanInbox(0, {}, undefined, 'en-AE', {
+    notificationOnly: true,
+    learnedNotificationPackages: ['com.example.adibmobile'],
+  });
+  ok('after one confirmation the same non-curated bank auto-posts future confident transactions',
+    learnedBank.parsed.length === 1 && learnedBank.reviewCandidates.length === 0 &&
+      learnedBank.parsed[0]?.amountFils === 6250 && learnedBank.parsed[0]?.merchant === 'Carrefour',
+    JSON.stringify(learnedBank));
+  await learnedBank.commit();
+
+  const ackBeforeUnrecognized = acknowledgedNotifications.length;
+  notificationRows = [{
+    id: 'trusted-unrecognized-0001',
+    pkg: 'ae.hsbc.hsbcuae',
+    title: 'HSBC UAE',
+    text: 'AED 42.00 reference updated',
+    ts: NOW + 5_950,
+  }];
+  const unresolvedTrusted = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  await unresolvedTrusted.commit();
+  ok('an unresolved money-bearing trusted-bank notification stays queued instead of disappearing',
+    unresolvedTrusted.parsed.length === 0 && unresolvedTrusted.reviewCandidates.length === 0 &&
+      acknowledgedNotifications.length === ackBeforeUnrecognized &&
+      !acknowledgedNotifications.includes('trusted-unrecognized-0001'),
+    JSON.stringify({ unresolvedTrusted, acknowledgedNotifications }));
 
   const hsbcTitle = 'Your credit card transaction is approved';
   const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';

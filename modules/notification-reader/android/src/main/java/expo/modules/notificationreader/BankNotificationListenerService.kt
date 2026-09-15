@@ -3,6 +3,7 @@ package expo.modules.notificationreader
 import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -57,25 +58,85 @@ class BankNotificationListenerService : NotificationListenerService() {
       recordAdmission("active", adcb)
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+      val trustedPackage = TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)
       // Banks do not all populate EXTRA_TEXT. Some OEM-rendered notifications
       // put the visible body in BIG_TEXT, TEXT_LINES or SUB_TEXT instead. Read
       // the same bounded textual surfaces Android itself renders so a visible
       // ADCB charge cannot be dropped merely because it chose another standard
       // Notification field.
       val textCandidates = mutableListOf<String>()
-      extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.let(textCandidates::add)
-      extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.let(textCandidates::add)
-      extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
-        ?.map { it.toString() }
-        ?.filter { it.isNotBlank() }
-        ?.let { textCandidates.add(it.joinToString("\n")) }
-      extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.let(textCandidates::add)
+      fun addText(value: Any?, depth: Int = 0) {
+        if (value == null || depth > MAX_TEXT_NESTING || textCandidates.size >= MAX_TEXT_CANDIDATES) return
+        when (value) {
+          is CharSequence -> {
+            val candidate = value.toString().trim()
+            if (candidate.isNotEmpty() && candidate.length <= MAX_TEXT_CHARS &&
+                !textCandidates.contains(candidate)) {
+              textCandidates.add(candidate)
+            }
+          }
+          is Bundle -> value.keySet().take(MAX_NESTED_KEYS).forEach { key ->
+            addText(value.get(key), depth + 1)
+          }
+          is Array<*> -> value.take(MAX_NESTED_KEYS).forEach { addText(it, depth + 1) }
+          is Iterable<*> -> value.take(MAX_NESTED_KEYS).forEach { addText(it, depth + 1) }
+        }
+      }
+
+      // Public Notification fields first. These cover ordinary, BigTextStyle,
+      // InboxStyle and MessagingStyle notifications across AOSP and most OEMs.
+      addText(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
+      addText(extras.getCharSequence(Notification.EXTRA_TEXT))
+      addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))
+      addText(extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
+      addText(extras.getCharSequence(Notification.EXTRA_INFO_TEXT))
+      addText(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT))
+      addText(extras.getCharSequence(Notification.EXTRA_TITLE_BIG))
+      addText(extras.get(Notification.EXTRA_MESSAGES))
+      addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))
+      addText(sbn.notification.tickerText)
+
+      // ColorOS/OxygenOS bank notifications can render the visible transaction
+      // from a vendor text/message extra instead of EXTRA_TEXT/BIG_TEXT. For an
+      // exact curated bank package we can safely inspect bounded textual extras
+      // whose key itself says it is display text. Unknown Play apps do NOT get
+      // this broader surface; they still need the ordinary money gate below.
+      val standardCandidateCount = textCandidates.size
+      if (trustedPackage) {
+        extras.keySet()
+          .asSequence()
+          .filter { key -> looksLikeTextExtraKey(key) }
+          .take(MAX_EXTRA_KEYS)
+          .forEach { key -> addText(extras.get(key)) }
+      }
       // ColorOS can expose several populated standard fields for the same
       // notification. ADCB's first non-blank field is not necessarily the
       // visible charge body. Prefer the bounded field that actually carries a
       // money amount; otherwise retain the old first-nonblank fallback.
       val nonBlankTextCandidates = textCandidates.filter { it.isNotBlank() }
-      val text = nonBlankTextCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }
+      val moneyCandidate = nonBlankTextCandidates
+        .filter { MONEY_RE.containsMatchIn(it) }
+        .maxByOrNull { it.length }
+      if (moneyCandidate != null && textCandidates.indexOf(moneyCandidate) >= standardCandidateCount) {
+        recordAdmission("extendedMoneySurface", adcb)
+      }
+      val contextCandidate = nonBlankTextCandidates
+        .filter { candidate ->
+          candidate != moneyCandidate && !MONEY_RE.containsMatchIn(candidate) &&
+            POSTING_CONTEXT_RE.containsMatchIn(candidate)
+        }
+        .maxByOrNull { it.length }
+      val reconstructed = if (trustedPackage && moneyCandidate != null &&
+          !POSTING_CONTEXT_RE.containsMatchIn(moneyCandidate) && contextCandidate != null) {
+        listOf(contextCandidate, moneyCandidate).distinct().joinToString(" ")
+      } else null
+      if (reconstructed != null && reconstructed.length <= MAX_TEXT_CHARS) {
+        recordAdmission("composedMoneySurface", adcb)
+      }
+      val composite = nonBlankTextCandidates.distinct().joinToString("\n")
+      val text = reconstructed?.takeIf { it.length <= MAX_TEXT_CHARS }
+        ?: moneyCandidate
+        ?: composite.takeIf { trustedPackage && it.length <= MAX_TEXT_CHARS && it.isNotBlank() }
         ?: nonBlankTextCandidates.firstOrNull()
         ?: ""
       // A bank alert is short. Refuse pathological payloads rather than
@@ -99,19 +160,33 @@ class BankNotificationListenerService : NotificationListenerService() {
         return
       }
       recordAdmission("securityPassed", adcb)
-      if (!MONEY_RE.containsMatchIn("$title $text")) {
-        recordAdmission("moneyRejected", adcb)
-        return
-      }
-      recordAdmission("moneyPassed", adcb)
-      // Unknown apps do not become trusted banks merely because their text
-      // resembles one. Native intake still requires Google Play provenance;
-      // unregistered candidates are carried as review-only source classes.
-      if (TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body) == null) {
+      // Resolve package trust before applying the cheap money heuristic. Exact
+      // curated bank packages already crossed Android's package-identity boundary
+      // and the security filter above; their wording belongs to the real parser,
+      // not this deliberately incomplete native regex. ADCB, for example, can
+      // render a real charge in a standard Notification field whose currency
+      // formatting does not match MONEY_RE. Dropping it here made the parser
+      // impossible to improve because JS never saw the encrypted candidate.
+      //
+      // Unknown Google Play financial candidates remain review-only and still
+      // require MONEY_RE. That keeps arbitrary apps from filling the bounded
+      // encrypted queue merely by using financial vocabulary.
+      val sourceClass = TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body)
+      if (sourceClass == null) {
         recordAdmission("sourceRejected", adcb)
         return
       }
       recordAdmission("sourcePassed", adcb)
+      if (sourceClass != TrustedBankNotificationPackages.SOURCE_TRUSTED_BANK &&
+          !MONEY_RE.containsMatchIn("$title $text")) {
+        recordAdmission("moneyRejected", adcb)
+        return
+      }
+      if (sourceClass == TrustedBankNotificationPackages.SOURCE_TRUSTED_BANK &&
+          !MONEY_RE.containsMatchIn("$title $text")) {
+        recordAdmission("moneyHeuristicBypassed", adcb)
+      }
+      recordAdmission("moneyPassed", adcb)
 
       val blockReason = NotificationCaptureStore.admissionBlockReason(
         this, sbn.packageName, text, sbn.postTime,
@@ -214,11 +289,33 @@ class BankNotificationListenerService : NotificationListenerService() {
 
     private const val MAX_TITLE_CHARS = 512
     private const val MAX_TEXT_CHARS = 4096
+    private const val MAX_TEXT_CANDIDATES = 32
+    private const val MAX_EXTRA_KEYS = 64
+    private const val MAX_NESTED_KEYS = 16
+    private const val MAX_TEXT_NESTING = 2
+
+    private fun looksLikeTextExtraKey(key: String): Boolean {
+      val normalized = key.lowercase()
+      return normalized.contains("text") ||
+        normalized.contains("message") ||
+        normalized.contains("summary") ||
+        normalized.contains("title") ||
+        normalized.contains("content") ||
+        normalized.contains("body") ||
+        normalized.contains("info")
+    }
 
     // Arabic writes the currency on either side of the figure and spells it
     // out ("150.00 درهم"), so a bank app posting in Arabic passed none of the
     // prefix-only tests and every one of its notifications was dropped here,
     // before anything downstream could see it.
+    private val POSTING_CONTEXT_RE = Regex(
+      "(?:\\b(?:credit|debit|covered|prepaid|charge)\\s*card\\b|" +
+        "\\bcard\\b|\\b(?:purchase|used|spent|debited|credited|transferred|transfer|" +
+        "withdraw(?:al)?|payment|paid|refund(?:ed)?|cashback)\\b)",
+      RegexOption.IGNORE_CASE,
+    )
+
     val MONEY_RE = Regex(
       // Bank apps commonly concatenate the ISO currency and amount (for
       // example ADCB posts AED181.00). \s* already permits that; keep the
