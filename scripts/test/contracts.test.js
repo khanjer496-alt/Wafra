@@ -149,7 +149,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     const exposed = new Set([...kt.matchAll(/(?:Async)?Function\("([a-zA-Z]+)"/g)].map((m) => m[1]));
     // Expo NativeModule supplies addListener for explicitly declared events;
     // it is not a hand-written Function in the module's Kotlin definition.
-    if (dir === 'sms-reader' && /Events\("onInboxChanged"\)/.test(kt)) exposed.add('addListener');
+    if (/Events\("[^"]+"\)/.test(kt)) exposed.add('addListener');
     const ts = read(`modules/${dir}/index.ts`);
     const jsName = ts.match(/requireOptionalNativeModule<[^>]+>\('([^']+)'\)/)?.[1];
     const expects = [...ts.matchAll(/^ {2}([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
@@ -1637,12 +1637,14 @@ for (const rel of ['src/app/cards.tsx']) {
     'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
 }
 
-// Accounts removed per-account spending. Keep it on canonical card/cashflow values.
+// Accounts removed per-account spending and cash-flow drilldowns. Keep its
+// account figures on the canonical card helper without reintroducing either
+// whole-ledger spending or money-movement summaries into the Accounts tab.
 {
  const wallet=read('src/app/(tabs)/wallet.tsx');
- ok('Wallet uses shared card figures and transfer-aware cash outflow',
-  /cardFigure\(state, account, now\)/.test(wallet) && /summarizeCashOutflow\(state,[\s\S]*?internal/.test(wallet) &&
-  !/monthSpendByAccount|isSpending\(/.test(wallet));
+ ok('Wallet uses shared card figures without rebuilding spending or cash-flow summaries',
+  /cardFigure\(state, account, now\)/.test(wallet) &&
+  !/summarizeCashOutflow\(|monthSpendByAccount|isSpending\(/.test(wallet));
 }
 /* ── subscriptions and the expense export learn the same two exclusions ── */
 //
@@ -1842,7 +1844,9 @@ ok('the spoken label agrees with the sign on screen',
     'otherwise a 400-groceries/100-dining charge adds 500 to a groceries total');
 
   ok('"Last 3 months" is bounded at both ends',
-    /month < three \|\| month > options\.currentKey/.test(projection),
+    /filters\.datePreset === '3months'\) \{ monthFrom = three; monthTo = options\.currentKey; \}/.test(projection) &&
+      /belowMonth = monthFrom !== null && month < monthFrom/.test(projection) &&
+      /aboveMonth = monthTo !== null && month > monthTo/.test(projection),
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',
