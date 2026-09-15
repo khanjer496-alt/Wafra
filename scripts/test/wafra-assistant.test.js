@@ -8,6 +8,7 @@ const {
   latestAssistantContext,
   planAssistantCorrection,
   planAssistantQuestion,
+  runWafraAssistant,
 } = require('./build/wafra-assistant');
 const {
   buildAssistantExplanationEnvelope,
@@ -1344,3 +1345,88 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
   }
 }
 console.log('✓ Ask Wafra broader vocabulary and typo-tolerant merchant resolution');
+
+// Obligation/status questions must use statement/bill accounting rather than
+// falling through to generic spending language. A "settled" answer requires
+// recorded statement coverage plus enough payment allocation to reach zero.
+{
+  const card = { ...account, id: 'enbd-card', name: 'ENBD Credit Card', kind: 'card', cardType: 'credit',
+    bankName: 'Emirates NBD', last4: '4110' };
+  const payment = { ...tx('enbd-payment', '2026-09-18', 'Card payment', 5_000, 'other', 'income'),
+    accountId: card.id, isTransfer: true, cardPaymentSide: 'receipt' };
+  const due = { id: 'enbd-due', accountId: card.id, totalDueFils: 5_000, minDueFils: 250,
+    dueDate: '2026-09-25', paidFils: 0 };
+  const cardState = { ...state, accounts: [account, card], transactions: [...state.transactions, payment], cardDues: [due] };
+
+  for (const question of ['Did I settle enbd credit card?', 'Is my ENBD card paid?', 'Did I clear my card?',
+    'Did the card payment go through?', 'Is ENBD settled?', 'Have I paid the statement?']) {
+    const answer = answerWafraQuestion(cardState, question, now);
+    assert.equal(answer.tool, 'obligation-status', question);
+    assert.equal(answer.data.settled, true, question);
+    assert.equal(answer.data.remainingFils, 0, question);
+    assert.match(answer.headline, /settled/i, question);
+    assert.equal(answer.destination, '/bills');
+  }
+
+  const remaining = answerWafraQuestion(cardState, 'How much is left on ENBD?', now);
+  assert.equal(remaining.tool, 'obligation-status');
+  assert.equal(remaining.data.remainingFils, 0);
+
+  const paid = answerWafraQuestion(cardState, 'How much did I pay toward ENBD?', now);
+  assert.equal(paid.tool, 'obligation-status');
+  assert.equal(paid.data.paidFils, 5_000);
+  assert.equal(paid.data.paymentCount, 1);
+  assert.deepEqual(paid.evidence[0].transactionIds, ['enbd-payment']);
+
+  const when = answerWafraQuestion(cardState, 'When did I pay ENBD card?', now);
+  assert.equal(when.tool, 'obligation-status');
+  assert.equal(when.data.latestPaymentDate, '2026-09-18');
+  assert.equal(answerWafraQuestion(cardState, 'When did I pay the card?', now).data.latestPaymentDate, '2026-09-18');
+
+  const context = planAssistantQuestion(cardState, 'Did I settle ENBD card?', now);
+  const follow = planAssistantQuestion(cardState, 'How much is left?', now, context);
+  assert.equal(follow.tool, 'obligation-status');
+  assert.equal(follow.accountId, card.id);
+  assert.equal(follow.query, 'remaining');
+  const show = runWafraAssistant(cardState, 'Show the payments', now, context);
+  assert.equal(show.request.tool, 'obligation-status');
+  assert.equal(show.answer.showEvidence, true);
+
+  const partialPayment = { ...payment, id: 'enbd-partial', amountFils: 3_000 };
+  const partialState = { ...cardState, transactions: [...state.transactions, partialPayment] };
+  const partial = answerWafraQuestion(partialState, 'Did I settle ENBD credit card?', now);
+  assert.equal(partial.data.settled, false);
+  assert.equal(partial.data.remainingFils, 2_000);
+  assert.match(partial.headline, /2,?000|20\.00|remaining/i);
+
+  const noStatement = answerWafraQuestion({ ...cardState, cardDues: [] }, 'Did I settle ENBD card?', now);
+  assert.equal(noStatement.tool, 'obligation-status');
+  assert.equal(noStatement.data.statementAvailable, false);
+  assert.match(noStatement.headline, /can.t confirm/i);
+
+  const secondCard = { ...card, id: 'enbd-card-2', name: 'ENBD Platinum', last4: '9221' };
+  const ambiguous = answerWafraQuestion({ ...cardState, accounts: [account, card, secondCard] }, 'Did I settle ENBD card?', now);
+  assert.equal(ambiguous.tool, 'help');
+  assert.ok(ambiguous.suggestions.length >= 2);
+
+  const dewa = { id: 'dewa-bill', title: 'DEWA', category: 'utilities', amountFils: 1_200,
+    dueDay: 20, paidMonths: ['2026-09'] };
+  const billState = { ...state, bills: [dewa] };
+  const billPaid = answerWafraQuestion(billState, 'Did I pay DEWA?', now);
+  assert.equal(billPaid.tool, 'obligation-status');
+  assert.equal(billPaid.data.paid, true);
+  assert.match(billPaid.headline, /paid/i);
+  const billUnpaid = answerWafraQuestion({ ...billState, bills: [{ ...dewa, paidMonths: [] }] }, 'How much is left on DEWA bill?', now);
+  assert.equal(billUnpaid.tool, 'obligation-status');
+  assert.equal(billUnpaid.data.remainingFils, 1_200);
+
+  const networkCard = { ...card, id: 'network-card', name: 'Travel Mastercard 7788', bankName: 'Other Bank', last4: '7788' };
+  const networkState = { ...cardState, accounts: [account, networkCard], cardDues: [{ ...due, id: 'network-due', accountId: networkCard.id }],
+    transactions: [{ ...payment, id: 'network-payment', accountId: networkCard.id }] };
+  assert.equal(answerWafraQuestion(networkState, 'Did I pay off Mastercard?', now).tool, 'obligation-status');
+
+  // A plain merchant payment question must keep its historical spending meaning.
+  assert.equal(answerWafraQuestion(state, 'How much did I pay at Carrefour last month?', now).tool, 'merchant-breakdown');
+  assert.notEqual(answerWafraQuestion(cardState, 'How much did I pay at Carrefour with my card?', now).tool, 'obligation-status');
+}
+console.log('✓ Ask Wafra obligation and settlement status');
