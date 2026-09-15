@@ -32,6 +32,7 @@ function sessionHarness(options = {}) {
   const intervals = new Map();
   const nativeListeners = new Set();
   const calls = [];
+  const haptics = [];
   const cleanups = [];
   const getStateSnapshot = () => state;
   const getStateGeneration = () => generation;
@@ -79,6 +80,7 @@ function sessionHarness(options = {}) {
     });
   };
   h.deps['@/lib/store'] = { useStore: () => ({ state, getStateSnapshot, getStateGeneration }) };
+  h.deps['@/lib/haptics'] = { tapped: () => haptics.push('tap') };
   h.deps['@/lib/period-context'] = { usePeriod: () => ({ period }) };
   h.deps['@/lib/period'].periodRange = () => '';
   h.deps['@/components/assistant-findings'] = {
@@ -162,7 +164,7 @@ function sessionHarness(options = {}) {
   const button = label => find(node => node.type === 'Button' && node.props.label === label);
   const turns = () => walk(tree).filter(node => node.props?.testID === 'assistant-turn');
   return {
-    render, flushFrames, calls, turns, find, button,
+    render, flushFrames, calls, haptics, turns, find, button,
     get tree() { return tree; }, get state() { return state; }, get frameCount() { return frames.size; },
     patchState: patch => { state = { ...state, ...patch }; },
     setGeneration: value => { generation = value; },
@@ -220,7 +222,7 @@ test('generic language failures get one semantic rewrite, then deterministic loc
   assert.match(text(h.tree), /gimme the money burn rn/);
 }));
 
-test('semantic fallback immediately acknowledges send and blocks duplicate taps while language help is pending', async () => {
+test('semantic fallback never blocks the local reply and upgrades the same turn in place', async () => {
   let resolveSemantic;
   const semantic = new Promise(resolve => { resolveSemantic = resolve; });
   await usingAsync({
@@ -228,27 +230,23 @@ test('semantic fallback immediately acknowledges send and blocks duplicate taps 
     semanticInterpreter: () => semantic,
   }, async h => {
     h.render();
-    const input = h.find(node => node.props?.testID === 'assistant-input');
-    input.props.onChangeText('gimme the money burn rn');
+    h.submit('gimme the money burn rn');
     h.render();
-    const stalePress = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
-    const first = stalePress();
-    stalePress();
-    h.render();
-    assert.ok(h.find(node => node.props?.testID === 'assistant-pending-turn'), 'the sent question is visible immediately');
-    assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
-    assert.equal(h.find(node => node.props?.testID === 'assistant-send').props.disabled, true);
-    assert.equal(h.calls.filter(call => call.kind === 'semantic').length, 1, 'repeated taps cannot start duplicate model calls');
-    resolveSemantic('How much did I spend this month?');
-    await first;
-    h.render();
+    assert.equal(h.turns().length, 1, 'a safe local clarification renders without waiting for the model');
+    assert.match(text(h.tree), /didn.t quite understand/i);
     assert.equal(h.find(node => node.props?.testID === 'assistant-pending-turn'), undefined);
-    assert.equal(h.turns().length, 1);
+    assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
+    assert.equal(h.find(node => node.props?.testID === 'assistant-send').props.disabled, true, 'empty composer is disabled, not a model-loading lock');
+    assert.equal(h.calls.filter(call => call.kind === 'semantic').length, 1);
+    resolveSemantic('How much did I spend this month?');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    h.render();
+    assert.equal(h.turns().length, 1, 'language repair replaces the existing turn rather than adding chatter');
     assert.match(text(h.tree), /Spending/);
   });
 });
 
-test('a background ledger generation change during language help does not silently lose the sent question', async () => {
+test('a background language upgrade cannot cross a ledger generation replacement', async () => {
   let resolveSemantic;
   const semantic = new Promise(resolve => { resolveSemantic = resolve; });
   await usingAsync({
@@ -256,16 +254,30 @@ test('a background ledger generation change during language help does not silent
     semanticInterpreter: () => semantic,
   }, async h => {
     h.render();
-    const pending = h.submitAsync('gimme the money burn rn');
+    h.submit('gimme the money burn rn');
+    h.render();
+    assert.equal(h.turns().length, 1);
     h.patchState({ transactions: [transaction(9_000)] });
     h.setGeneration(2);
     resolveSemantic('How much did I spend this month?');
-    await pending;
+    await new Promise(resolve => setTimeout(resolve, 0));
     h.render();
-    assert.equal(h.turns().length, 1);
-    assert.match(text(h.tree), /AED 90\b/);
+    assert.equal(h.turns().length, 0, 'ledger replacement clears the old local answer and rejects its late AI upgrade');
   });
 });
+
+test('Ask Wafra direct controls restore tap haptics', () => using({ state: fixture }, h => {
+  h.render();
+  const before = h.haptics.length;
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much did I spend?');
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-send').props.onPress();
+  assert.equal(h.haptics.length, before + 1, 'Send should register a tap');
+  h.render();
+  const period = h.find(node => node.props?.accessibilityLabel?.startsWith('Change reporting period:'));
+  period.props.onPress();
+  assert.equal(h.haptics.length, before + 2, 'period control should register a tap');
+}));
 
 test('known local questions do not pay the semantic fallback cost', async () => usingAsync({
   state: { ...fixture, privateMode: false },

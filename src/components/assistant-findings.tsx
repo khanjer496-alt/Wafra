@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { tapped } from '@/lib/haptics';
 import type { AssistantAnswer, AssistantFinding } from '@/lib/wafra-assistant';
 
 /** Findings are descriptions of recorded activity, with explicit local proof. */
@@ -34,7 +35,7 @@ export function AssistantCoverage({ coverage }: { coverage: NonNullable<Assistan
   const [expanded, setExpanded] = useState(false);
   return <View testID="assistant-coverage" style={[styles.coverage, { borderTopColor: theme.primaryBorder }]}>
     <Pressable accessibilityRole="button" accessibilityLabel={copy.dataUsed}
-      accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.coverageToggle}>
+      accessibilityState={{ expanded }} onPress={() => { tapped(); setExpanded((value) => !value); }} style={styles.coverageToggle}>
       <View style={styles.grow}>
         <ThemedText type="smallBold">{copy.dataUsed}</ThemedText>
         {expanded ? <ThemedText type="meta" themeColor="textSecondary">

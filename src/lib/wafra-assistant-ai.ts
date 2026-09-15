@@ -41,6 +41,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'account-inventory', purpose: 'Count or list locally recorded accounts or cards, optionally filtered by a bank named by the user', arguments: ['accountKind', 'bankName'] },
   { tool: 'top-accounts', purpose: 'Rank locally known accounts or cards by recorded spending or purchase count', arguments: [...PERIOD_FILTER_ARGUMENTS, 'accountKind', 'metric', 'limit'] },
   { tool: 'obligation-status', purpose: 'Check a locally resolved credit-card statement or bill reminder status without guessing payment completion', arguments: ['obligation', 'accountId', 'billId', 'query', 'monthKey'] },
+  { tool: 'credit-card-settlement-summary', purpose: 'Check whether all locally recorded credit-card statements are settled, optionally for one calendar month', arguments: ['monthKey'] },
   { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'unusual-charges', purpose: 'Review purchases unusually high against established earlier history', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'possible-duplicates', purpose: 'Review possible duplicate purchases without changing any records', arguments: PERIOD_FILTER_ARGUMENTS },
@@ -167,6 +168,8 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'help':
     case 'subscriptions':
       return true;
+    case 'credit-card-settlement-summary':
+      return candidate.monthKey === undefined || (typeof candidate.monthKey === 'string' && validMonthKey(candidate.monthKey));
     case 'obligation-status':
       return (candidate.obligation === 'card' || candidate.obligation === 'bill') &&
         ['summary', 'remaining', 'payments', 'paid-date'].includes(String(candidate.query)) &&

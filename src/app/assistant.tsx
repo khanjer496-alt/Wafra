@@ -18,6 +18,7 @@ import { interpretAssistantLanguage } from '@/lib/assistant-language';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
+import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { periodLabel, periodRange } from '@/lib/period';
@@ -139,6 +140,7 @@ export default function AssistantScreen() {
       setEvidenceSelection({ turnId: id });
     }
     if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(result.answer.title + '. ' + result.answer.body);
+    return id;
   };
 
   const appendCorrectionResult = (
@@ -250,27 +252,33 @@ export default function AssistantScreen() {
         return;
       }
       const previous = usePrevious && renderIsCurrent ? contextRequest ?? conversationContext : null;
-      let answerSnapshot = snapshot;
-      let result = runWafraAssistant(answerSnapshot, clean, now, previous, period);
+      const result = runWafraAssistant(snapshot, clean, now, previous, period);
       if (!snapshot.privateMode && shouldTryAssistantSemanticFallback(clean, result.request)) {
-        const canonical = await interpretAssistantLanguage(snapshot, clean, previous);
-        // A background import can legitimately change the store while the
-        // language-only request is in flight. Never silently drop the user's
-        // send in that case: recompute against the newest hydrated snapshot and
-        // discard stale conversational scope instead.
-        if (startGeneration !== getStateGeneration()) {
+        // Local parsing always wins the interaction frame. The AI layer is only
+        // a language repair pass, so it must never make Send wait on a network
+        // round trip. Show the safe local clarification immediately, then
+        // upgrade that exact turn in place only if a high-confidence rewrite
+        // arrives while the same ledger generation is still active.
+        const turnId = appendAnswer(clean, result, snapshot, now);
+        void interpretAssistantLanguage(snapshot, clean, previous).then((canonical) => {
+          if (!canonical || canonical === clean || startGeneration !== getStateGeneration()) return;
           const latestSnapshot = getStateSnapshot();
-          const latestGeneration = getStateGeneration();
-          if (!latestSnapshot.hydrated) throw new Error('assistant_ledger_unavailable');
-          previousGeneration.current = latestGeneration;
-          answerSnapshot = latestSnapshot;
-          result = runWafraAssistant(answerSnapshot, canonical ?? clean, now, null, period);
-        } else if (canonical && canonical !== clean) {
-          const interpreted = runWafraAssistant(answerSnapshot, canonical, now, previous, period);
-          if (interpreted.request.tool !== 'help') result = interpreted;
-        }
+          if (!latestSnapshot.hydrated) return;
+          const interpreted = runWafraAssistant(latestSnapshot, canonical, now, previous, period);
+          if (interpreted.request.tool === 'help') return;
+          const currentGeneration = getStateGeneration();
+          needsScroll.current = true;
+          setTurns((current) => current.map((turn) =>
+            turn.id === turnId && turn.generation === currentGeneration
+              ? { ...turn, request: interpreted.request, answer: interpreted.answer, inputs: ledgerInputs(latestSnapshot) }
+              : turn));
+        }).catch(() => {
+          // The local clarification is already on screen; a language-helper
+          // timeout/failure must not surface as an app error or block input.
+        });
+        return;
       }
-      appendAnswer(clean, result, answerSnapshot, now);
+      appendAnswer(clean, result, snapshot, now);
     } catch {
       // Restore the draft when submission fails; financial records never enter logs.
       setQuestion((current) => current || clean);
@@ -418,7 +426,7 @@ export default function AssistantScreen() {
       }]}>
         <View style={styles.context}>
           <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
-            onPress={() => { Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
+            onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
             <Icon name="calendar" size={15} color={theme.textSecondary} />
             <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
             <Icon name="chevron-down" size={12} color={theme.textSecondary} />
@@ -439,7 +447,7 @@ export default function AssistantScreen() {
               color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]} />
           <Pressable testID="assistant-send" accessibilityRole="button" accessibilityLabel={copy.send}
             accessibilityState={{ disabled: !question.trim() || !state.hydrated || isSending, busy: isSending }}
-            disabled={!question.trim() || !state.hydrated || isSending} onPress={() => ask()}
+            disabled={!question.trim() || !state.hydrated || isSending} onPress={() => { tapped(); void ask(); }}
             style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated && !isSending ? 1 : 0.4 }]}>
             <Icon name="arrow-up" size={20} color={theme.onPrimary} />
           </Pressable>
@@ -457,7 +465,7 @@ export default function AssistantScreen() {
           <Button label={copy.import} onPress={() => router.push('/import-sms')} />
           <Button label={copy.add} variant="outline" onPress={() => router.push('/add-transaction')} />
         </View> : currentTurns.length === 0 ? <View style={styles.suggestions}>
-          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
+          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
             style={[styles.suggestion, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="small" style={styles.suggestionText}>{item}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -503,7 +511,7 @@ export default function AssistantScreen() {
         </View>
       </View>)}
       {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.quickFollowUps}>
-        {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
+        {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
           style={[styles.followUpChip, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
           <ThemedText type="meta" style={styles.followUpText}>{item}</ThemedText>
         </Pressable>)}
