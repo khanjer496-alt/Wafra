@@ -22,6 +22,8 @@ test('provider plans cannot silently drop a filter or accept malformed account s
     { tool: 'cash-outflow', period, merchant: 'Coffee' },
     { tool: 'subscriptions', period },
     { tool: 'upcoming-payments', accountIds: ['checking'] },
+    { tool: 'historical-baseline', period, baseline: 'average-ever' },
+    { tool: 'top-accounts', period, accountKind: 'wallet' },
     { tool: 'help', clarification: 'A provider must not supply local clarification copy.' },
   ]) assert.equal(boundary.isAssistantToolRequest(request), false, JSON.stringify(request));
 });
@@ -41,6 +43,8 @@ test('valid combined filters and income categories survive the boundary', () => 
     { tool: 'income-total', period, accountIds: ['checking'], category: 'salary' },
     { tool: 'compare-periods', period, category: 'groceries', comparisonPeriod: { mode: 'month', key: '2026-08' } },
     { tool: 'cash-outflow', period, accountIds: ['checking'] },
+    { tool: 'historical-baseline', period, baseline: 'typical-month' },
+    { tool: 'top-accounts', period, accountKind: 'card', category: 'dining', limit: 3 },
   ]) assert.equal(boundary.isAssistantToolRequest(request), true, JSON.stringify(request));
 });
 

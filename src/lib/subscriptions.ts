@@ -275,6 +275,17 @@ export function detectSubscriptions(
   }
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
+  // Persisted/store transaction order is newest-first. Remember whether this
+  // input has that invariant so each merchant group can be reversed in O(n)
+  // rather than independently sorted. Callers with arbitrary arrays still get
+  // the old comparator path.
+  let newestFirst = true;
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) {
+      newestFirst = false;
+      break;
+    }
+  }
   for (const t of transactions) {
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
@@ -292,7 +303,8 @@ export function detectSubscriptions(
 
   const subs: Subscription[] = [];
   for (const txs of groups.values()) {
-    txs.sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (newestFirst) txs.reverse();
+    else txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const title = txs[txs.length - 1].title;
     const known = KNOWN_SUBSCRIPTION_MERCHANTS.test(title);
     // This evidence belongs to every source observation, not to the collapsed

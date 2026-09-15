@@ -370,6 +370,32 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('history-date-account-questions')) {
+    const name = 'history-date-account-questions';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const highest = await ask(page, 'Is this my highest month?');
+        assert.match(await highest.innerText(), /highest recorded month/i);
+        assert.ok((await highest.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const recent = await ask(page, 'How much did I spend in the last 2 weeks?');
+        assert.ok((await recent.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const payday = await ask(page, 'How much did I spend since payday?');
+        assert.ok((await payday.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const account = await ask(page, 'Which account did I use most?');
+        const accountText = await account.innerText();
+        assert.match(accountText, /Everyday account/);
+        assert.ok(accountText.includes(money(CURRENT_TOTAL)));
+        await shot(page, name);
+        return { highest: await highest.innerText(), recent: await recent.innerText(), account: accountText };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;

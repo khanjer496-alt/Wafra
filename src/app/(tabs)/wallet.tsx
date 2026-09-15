@@ -30,7 +30,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { cardFigure, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthBreakdown } from '@/lib/balances';
 import {
@@ -222,21 +222,32 @@ export default function WalletScreen() {
   );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
-    const figure = cardFigure(state, account, now);
     const due = dueByAccountId.get(account.id);
     const debtObserved = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
       || dueAccountIds.has(account.id);
-    const figureFils = account.cardType === 'credit' && !debtObserved ? null
-      : figure.fils === null ? null : figure.kind === 'owed' ? Math.abs(figure.fils) : figure.fils;
+    // Wallet already indexed the entire ledger once in netWorthBreakdown() and
+    // openDues(). Do not call cardFigure() per account: non-credit cards can
+    // otherwise re-scan transactions account-by-account on the render path.
+    const figureFils = account.cardType === 'credit'
+      ? !debtObserved
+        ? null
+        : due
+          ? Math.abs(due.remainingFils)
+          : account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+            ? Math.abs(account.snapshotFils)
+            : 0
+      : balances.balanceByAccountId[account.id] ?? null;
+    const figureKind = account.cardType === 'credit' ? 'owed' : figureFils === null ? 'unknown' : 'balance';
     const caption = figureFils === null ? t('noBalanceYet')
-      : figure.kind === 'owed' ? t('owed')
+      : figureKind === 'owed' ? t('owed')
         : account.snapshotKind === 'balance' ? t('perBankSms') : t('trackedManually');
     const freshness = due ? `${language === 'ar' ? 'الاستحقاق' : 'Due'} ${shortDate(due.due.dueDate)}`
       : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
     return { account, figureFils, caption, freshness };
   // Captions also follow language; unrelated store metadata must not rescan rows.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dueByAccountId, dueAccountIds, language]);
+  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dueByAccountId,
+    dueAccountIds, balances.balanceByAccountId, language]);
 
   const openingFils = openingText.trim() === ''
     ? 0

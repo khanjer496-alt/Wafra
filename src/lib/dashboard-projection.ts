@@ -17,6 +17,8 @@ export interface DashboardProjectionRequest {
   dismissedInsightId?: string | null;
   /** Screens that do not render insights need not run their historical analysis. */
   includeInsights?: boolean;
+  /** Home can paint money first and defer cleanup scans until after interaction. */
+  includeCleanupPrompts?: boolean;
   /** Home renders cashflow, cards/bills and one priority prompt. */
   surface?: 'dashboard' | 'home';
 }
@@ -70,6 +72,7 @@ export function projectDashboardInsight(
     state.notSubscriptions,
     liveAccounts,
     internal,
+    { includeRecurringAnalysis: false },
   ).find((item) => item.id !== dismissedInsightId) ?? null;
 }
 
@@ -77,7 +80,14 @@ export function projectDashboard(request: DashboardProjectionRequest & { surface
 export function projectDashboard(request: DashboardProjectionRequest & { surface?: 'dashboard' }): DashboardProjection;
 export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection;
 export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection {
-  const { state, period, now, dismissedInsightId, includeInsights = true } = request;
+  const {
+    state,
+    period,
+    now,
+    dismissedInsightId,
+    includeInsights = true,
+    includeCleanupPrompts = true,
+  } = request;
   const homeOnly = request.surface === 'home';
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, state.accounts);
@@ -88,11 +98,12 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   // Parser exceptions no longer occupy Home. They remain available from the
   // bank-alert/settings workflow, so they must not suppress unrelated cleanup
   // prompts such as merchant categorisation or unread formats here.
-  const uncategorisedSummary = historyImportBusy
+  const uncategorisedSummary = historyImportBusy || (homeOnly && !includeCleanupPrompts)
     ? { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }
     : uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
-  const hideUnreadPrompt = historyImportBusy || (homeOnly && uncategorised.shouldPrompt);
+  const hideUnreadPrompt = historyImportBusy ||
+    (homeOnly && (!includeCleanupPrompts || uncategorised.shouldPrompt));
   const unreadCount = hideUnreadPrompt ? null : unreadFormatCount(state);
   const unreadFormats = unreadCount === null ? null
     : { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD };
