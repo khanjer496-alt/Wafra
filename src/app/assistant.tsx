@@ -23,7 +23,7 @@ import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { AppState } from '@/lib/types';
 import {
-  assistantFollowUpQuestions, executeAssistantTool, runWafraAssistant, suggestedAssistantQuestions,
+  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, runWafraAssistant, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
@@ -77,9 +77,10 @@ export default function AssistantScreen() {
   const [inputHeight, setInputHeight] = useState(minInputHeight);
   const currentTurns = turns.filter((turn) => turn.generation === generation);
   const latest = currentTurns.at(-1);
-  const contextPeriod = latest && 'period' in latest.request ? latest.request.period : period;
+  const conversationContext = latestAssistantContext(currentTurns.map((turn) => turn.request));
+  const contextPeriod = conversationContext && 'period' in conversationContext ? conversationContext.period : period;
   const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [], [state, period]);
-  const followUps = latest?.answer.suggestions ?? (latest ? assistantFollowUpQuestions(latest.request) : []);
+  const followUps = latest?.answer.suggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []);
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));
@@ -131,7 +132,7 @@ export default function AssistantScreen() {
     if (!clean || !snapshot.hydrated || generation !== getStateGeneration()) return;
     const now = new Date();
     try {
-      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? latest?.request : null, period);
+      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? conversationContext : null, period);
       appendAnswer(clean, result, snapshot, now);
     } catch {
       // Keep the question available to edit; financial records never enter logs.

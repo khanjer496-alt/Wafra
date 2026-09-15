@@ -310,6 +310,41 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('conversation-context-followups')) {
+    const name = 'conversation-context-followups';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const merchant = await ask(page, merchantQuestion);
+        assert.ok((await merchant.innerText()).includes(money(777)));
+
+        const narrow = await ask(page, 'How much did I spend on coffee this month?');
+        assert.match(await narrow.innerText(), /without guessing|broader dining/i);
+
+        const why = await ask(page, 'Why did it change?');
+        const whyText = await why.innerText();
+        assert.ok(whyText.includes(money(777)), whyText);
+        assert.ok(whyText.includes(money(333)), 'clarification must not erase the merchant scope: ' + whyText);
+
+        await newChat(page);
+        await ask(page, merchantQuestion);
+        const groceries = await ask(page, 'What about groceries?');
+        const groceryText = await groceries.innerText();
+        assert.ok(groceryText.includes(money(GROCERY_TOTAL)), groceryText);
+        assert.ok(!groceryText.includes(money(777)), 'new category subject must replace the merchant scope');
+
+        const merchantAgain = await ask(page, `And ${JSON.stringify(MERCHANT)}?`);
+        const merchantAgainText = await merchantAgain.innerText();
+        assert.ok(merchantAgainText.includes(money(777)), merchantAgainText);
+        assert.ok(!merchantAgainText.includes(money(GROCERY_TOTAL)), 'new merchant subject must replace the category scope');
+        await shot(page, name);
+        return { why: whyText, category: groceryText, merchant: merchantAgainText };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;
