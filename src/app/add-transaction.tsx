@@ -669,7 +669,7 @@ export default function AddTransactionScreen() {
       testID="account-picker-sheet">
       <View accessibilityRole="radiogroup" accessibilityLabel={tUi('account')} style={styles.pickerContent}>
         <TextField
-          label={tUi('searchAccounts')}
+          label={tUi('searchLabel')}
           value={accountSearch}
           onChangeText={setAccountSearch}
           placeholder={tUi('searchAccounts')}

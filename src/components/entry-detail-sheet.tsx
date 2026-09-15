@@ -584,7 +584,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         testID="entry-detail-account-picker">
         <View style={styles.pickerContent}>
           <TextField
-            label={t('searchAccounts')}
+            label={t('searchLabel')}
             value={accountSearch}
             onChangeText={setAccountSearch}
             placeholder={t('searchAccounts')}
