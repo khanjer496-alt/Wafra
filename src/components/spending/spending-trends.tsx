@@ -71,7 +71,6 @@ export function SpendingTrends(p: Props) {
   // showing an implausible +100%.
   const selectedIndex = p.months.findIndex((m) => m.key === p.selectedKey);
   const previous = selectedIndex > 0 ? p.months[selectedIndex - 1] : null;
-  const selectedNet = selected ? selected.incomeFils - selected.expenseFils : 0;
   const previousExpense = previous?.expenseFils ?? 0;
   const deltaFils = selected && previous ? selected.expenseFils - previousExpense : 0;
   const deltaPct = selected && previous && previousExpense > 0
@@ -133,20 +132,11 @@ export function SpendingTrends(p: Props) {
             </ThemedText>
           </View>}
         </View>
-        <View style={styles.selectedFigures}>
-          <View style={styles.selectedFigure}>
-            <ThemedText type="nano" themeColor="textTertiary">{w.income}</ThemedText>
-            <Money fils={selected.incomeFils} type="smallBold" />
-          </View>
-          <View style={styles.selectedFigure}>
-            <ThemedText type="nano" themeColor="textTertiary">{w.spending}</ThemedText>
-            <Money fils={selected.expenseFils} type="smallBold" color={theme.expense} />
-          </View>
-          <View style={styles.selectedFigure}>
-            <ThemedText type="nano" themeColor="textTertiary">{w.net}</ThemedText>
-            <Money fils={selectedNet} type="smallBold" sign="auto"
-              color={selectedNet < 0 ? theme.expense : theme.income} />
-          </View>
+        {monthFigures(selected)}
+        <View style={styles.selectedNetRow}>
+          <ThemedText type="nano" themeColor="textTertiary">{w.net}</ThemedText>
+          <Money fils={selected.incomeFils - selected.expenseFils} type="smallBold" sign="auto"
+            color={selected.incomeFils - selected.expenseFils < 0 ? theme.expense : theme.income} />
         </View>
       </View>}
       {!showAllTrendLabels && <View style={styles.monthDetails} testID="cashflow-month-details">
@@ -234,8 +224,7 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   selected: { paddingVertical: 12, paddingHorizontal: 14, gap: 10, borderWidth: 1, borderRadius: 12 },
   selectedHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
-  selectedFigures: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  selectedFigure: { gap: 2, minWidth: 84 },
+  selectedNetRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
   section: { gap: 10 }, group: { overflow: 'hidden', },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, paddingVertical: 16 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
