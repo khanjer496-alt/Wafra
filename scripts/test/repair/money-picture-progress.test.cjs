@@ -33,6 +33,21 @@ test('money picture reflects durable import state without inventing a percentage
   }));
 });
 
+test('completed history retires the first-week card immediately', () => {
+  assert.equal(progress.moneyPictureProgress({
+    nowMs: NOW, trialStartTs: NOW - DAY,
+    history: { status: 'complete', scanned: 29919, found: 15518, cursor: null, startedAt: NOW - 1000, updatedAt: NOW, error: null },
+    transactionCount: 14866, activeAccountCount: 44, obligationCount: 12, captureReady: true,
+  }), null);
+});
+
+test('manual first real activity retires the card instead of keeping a ready state for seven days', () => {
+  assert.equal(progress.moneyPictureProgress({
+    nowMs: NOW, trialStartTs: NOW - DAY, history: null,
+    transactionCount: 1, activeAccountCount: 1, obligationCount: 0, captureReady: false,
+  }), null);
+});
+
 test('first-week Home replaces the duplicate history banner with one money-picture surface', () => {
   const now = Date.now();
   const h = harness({

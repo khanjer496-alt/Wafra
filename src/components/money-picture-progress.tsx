@@ -16,9 +16,8 @@ export function MoneyPictureProgress({ model, onResume }: {
   const needsAction = model.state === 'saved' || model.state === 'attention';
   const subtitle = model.state === 'attention' ? t('moneyPictureAttention')
     : model.state === 'saved' ? t('moneyPictureSaved')
-      : model.state === 'ready' ? t('moneyPictureReady')
-        : model.state === 'starting' ? t('moneyPictureStarting')
-          : t('moneyPictureBuilding');
+      : model.state === 'starting' ? t('moneyPictureStarting')
+        : t('moneyPictureBuilding');
 
   const metrics = [
     model.historyScanned === null ? null : {

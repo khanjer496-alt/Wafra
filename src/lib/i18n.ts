@@ -2323,10 +2323,6 @@ const S = {
     en: 'History import needs attention before it can continue.',
     ar: 'يحتاج استيراد السجل إلى مراجعة قبل أن يتابع.',
   },
-  moneyPictureReady: {
-    en: 'Your first setup is organized. New activity will keep filling this in.',
-    ar: 'تم تنظيم إعدادك الأول. وسيواصل النشاط الجديد ملء هذه الصورة.',
-  },
   moneyPictureStarting: {
     en: 'Add or connect real activity and this picture will fill itself in.',
     ar: 'أضف أو اربط نشاطاً حقيقياً وستمتلئ هذه الصورة تلقائياً.',
