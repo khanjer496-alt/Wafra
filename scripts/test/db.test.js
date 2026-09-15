@@ -1713,6 +1713,44 @@ asyncSuites.push((async () => {
   }
 
   {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const rows = Array.from({ length: 6 }, (_, index) => ({
+      id: `history-${index}`,
+      title: `row-${index}`,
+    }));
+    const running = (transactions) => ({
+      ...snapshot('history-running', transactions),
+      historyImport: {
+        status: 'running', cursor: { beforeDateMs: 1, beforeId: 1 },
+        scanned: 500, found: 100, startedAt: 1, updatedAt: 2, error: null,
+      },
+    });
+    await persistence.save(running(rows));
+
+    const edited = [...rows];
+    edited[3] = { ...edited[3], title: 'healed' };
+    const originalStringify = JSON.stringify;
+    let transactionChunkSerializations = 0;
+    JSON.stringify = function(value, ...args) {
+      if (Array.isArray(value) && value.length > 0 &&
+          value.every((row) => row && typeof row === 'object' && /^history-/.test(row.id ?? ''))) {
+        transactionChunkSerializations += 1;
+      }
+      return originalStringify.call(JSON, value, ...args);
+    };
+    try {
+      await persistence.save(running(edited));
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    ok('one history-page heal serializes only the chunk containing changed row identities',
+      transactionChunkSerializations === 1,
+      `${transactionChunkSerializations} transaction chunks serialized`);
+  }
+
+  {
     const rows = [{ id: 'n1' }, { id: 'n2' }, { id: 'o1' }, { id: 'o2' }];
     const chunks = testChunkTransactions(rows);
     const memory = memoryStorage({

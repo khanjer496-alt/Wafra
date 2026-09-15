@@ -783,7 +783,7 @@ function bodyOf(source, header) {
   const persist = bodyOf(ledgerPersistenceSource, 'const writeSnapshot = async');
   ok('every meta record says which layout the chunks on disk are in',
     !!persist && /txChunkOrder: order/.test(persist) &&
-      /chunks \? currentChunkOrder : storedChunkOrder/.test(persist),
+      /const order = needsChunks \? targetOrder : storedChunkOrder/.test(persist),
     'meta is written on saves that do not touch transactions too, and one of those stamping ' +
       'the new layout over old chunks is the same data-scrambling bug from the other side');
 }
