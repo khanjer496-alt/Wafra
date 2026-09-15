@@ -21,9 +21,8 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 100;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 500;
-const FOREGROUND_HISTORY_COMMIT_GAP_MS = 120;
+const HISTORY_IMPORT_PAGE_SIZE = 500;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // Resuming the window is not idle time. Give Android a usable frame/input
 // window before parser-migration maintenance restarts; subsequent pages retain
 // the normal 500ms cooperative gap.
@@ -70,8 +69,11 @@ export function useHistoryImport(): void {
       // Keep pages small and leave a real idle window between them so Hermes
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, RNAppState.currentState === 'active' ? FOREGROUND_HISTORY_PAGE_GAP_MS : 0));
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -118,7 +120,7 @@ export function useHistoryImport(): void {
       // the ledger mutation. A tap extends the lease; background history keeps
       // the immediate path because there is no visible interaction to protect.
       if (RNAppState.currentState === 'active') {
-        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_COMMIT_GAP_MS);
+        await waitForForegroundHistoryIdle();
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
@@ -128,7 +130,7 @@ export function useHistoryImport(): void {
         : getStateSnapshot();
       const plan = buildImportPlan(page.parsed, ledger, page.newestTs, undefined, page.declined);
       if (RNAppState.currentState === 'active') {
-        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_COMMIT_GAP_MS);
+        await waitForForegroundHistoryIdle();
       }
       if (!canCommit()) return false;
       await importBatch({
