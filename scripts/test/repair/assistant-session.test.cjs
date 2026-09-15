@@ -120,6 +120,7 @@ function sessionHarness(options = {}) {
   h.deps['@/lib/assistant-language'] = {
     interpretAssistantLanguage: async (...args) => {
       calls.push({ kind: 'semantic', state: args[0], question: args[1], previous: args[2] });
+      if (options.semanticInterpreter) return options.semanticInterpreter(...args);
       return options.semanticQuestion ?? null;
     },
   };
@@ -219,6 +220,53 @@ test('generic language failures get one semantic rewrite, then deterministic loc
   assert.match(text(h.tree), /gimme the money burn rn/);
 }));
 
+test('semantic fallback immediately acknowledges send and blocks duplicate taps while language help is pending', async () => {
+  let resolveSemantic;
+  const semantic = new Promise(resolve => { resolveSemantic = resolve; });
+  await usingAsync({
+    state: { ...fixture, privateMode: false },
+    semanticInterpreter: () => semantic,
+  }, async h => {
+    h.render();
+    const input = h.find(node => node.props?.testID === 'assistant-input');
+    input.props.onChangeText('gimme the money burn rn');
+    h.render();
+    const stalePress = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
+    const first = stalePress();
+    stalePress();
+    h.render();
+    assert.ok(h.find(node => node.props?.testID === 'assistant-pending-turn'), 'the sent question is visible immediately');
+    assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
+    assert.equal(h.find(node => node.props?.testID === 'assistant-send').props.disabled, true);
+    assert.equal(h.calls.filter(call => call.kind === 'semantic').length, 1, 'repeated taps cannot start duplicate model calls');
+    resolveSemantic('How much did I spend this month?');
+    await first;
+    h.render();
+    assert.equal(h.find(node => node.props?.testID === 'assistant-pending-turn'), undefined);
+    assert.equal(h.turns().length, 1);
+    assert.match(text(h.tree), /Spending/);
+  });
+});
+
+test('a background ledger generation change during language help does not silently lose the sent question', async () => {
+  let resolveSemantic;
+  const semantic = new Promise(resolve => { resolveSemantic = resolve; });
+  await usingAsync({
+    state: { ...fixture, privateMode: false },
+    semanticInterpreter: () => semantic,
+  }, async h => {
+    h.render();
+    const pending = h.submitAsync('gimme the money burn rn');
+    h.patchState({ transactions: [transaction(9_000)] });
+    h.setGeneration(2);
+    resolveSemantic('How much did I spend this month?');
+    await pending;
+    h.render();
+    assert.equal(h.turns().length, 1);
+    assert.match(text(h.tree), /AED 90\b/);
+  });
+});
+
 test('known local questions do not pay the semantic fallback cost', async () => usingAsync({
   state: { ...fixture, privateMode: false },
   semanticQuestion: 'How much did I spend this month?',
@@ -274,24 +322,29 @@ test('a queued finding action cannot read or announce a replacement or changed l
   });
 });
 
-test('queued send and refresh actions cannot cross ledger replacement', () => {
-  for (const action of ['send', 'refresh']) using({ state: fixture }, h => {
-    h.render(); h.submit('How much did I spend?');
-    let press;
-    if (action === 'send') {
-      h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much income did I receive?');
-      h.render();
-      press = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
-    } else {
-      h.patchState({ transactions: [transaction(7_000)] }); h.render();
-      press = h.button('Refresh answer').props.onPress;
-    }
-    const count = h.calls.length;
-    h.patchState({ transactions: [transaction(900_000)] }); h.setGeneration(2);
-    press();
-    assert.equal(h.calls.length, count, 'obsolete action must not read replacement ledger: ' + action);
-  });
-});
+test('a queued send after ledger replacement uses the authoritative new ledger without stale conversation scope', async () => usingAsync({ state: fixture }, async h => {
+  h.render(); h.submit('How much did I spend?');
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much income did I receive?');
+  h.render();
+  const press = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
+  const count = h.calls.length;
+  h.patchState({ transactions: [{ ...transaction(900_000), type: 'income' }] }); h.setGeneration(2);
+  await press(); h.render();
+  assert.equal(h.calls.length, count + 1, 'the send is not silently dropped');
+  assert.equal(h.calls.at(-1).state, h.state, 'the new ledger snapshot is authoritative');
+  assert.equal(h.calls.at(-1).previous, null, 'stale conversation context is discarded');
+  assert.equal(h.turns().length, 1);
+}));
+
+test('a queued refresh still cannot cross ledger replacement', () => using({ state: fixture }, h => {
+  h.render(); h.submit('How much did I spend?');
+  h.patchState({ transactions: [transaction(7_000)] }); h.render();
+  const press = h.button('Refresh answer').props.onPress;
+  const count = h.calls.length;
+  h.patchState({ transactions: [transaction(900_000)] }); h.setGeneration(2);
+  press();
+  assert.equal(h.calls.length, count, 'an obsolete refresh must not read the replacement ledger');
+}));
 
 function coldHydrationScenario(sourceTransform) {
   return using({ sourceTransform, generation: 0, question: 'How much did I spend?',
@@ -406,10 +459,9 @@ test('regression proof: a cold-hydration route marked handled too early is caugh
     'if (hadHydratedLedger.current) routeQuestionHandled.current =', 'routeQuestionHandled.current =')),
   /route question executes exactly once/);
 });
-test('regression proof: removing both queued-frame and request generation checks is caught', () => {
-  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(replaceOnce(source,
-    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */'),
-  ' || generation !== getStateGeneration()', '')),
+test('regression proof: removing the queued-frame generation check is caught', () => {
+  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(source,
+    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */')),
   /old route frame must check/);
 });
 test('regression proof: refreshing at the original answer date is caught', () => {
