@@ -1,4 +1,3 @@
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
@@ -54,7 +53,6 @@ export default function AssistantScreen() {
   const params = useLocalSearchParams<{ question?: string }>();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const { fontScale, height } = useWindowDimensions();
@@ -68,10 +66,13 @@ export default function AssistantScreen() {
   const scrollFrame = useRef<number | null>(null);
   const nextId = useRef(0);
   const routeQuestionHandled = useRef<string | null>(null);
+  const sendingRef = useRef(false);
   const previousGeneration = useRef(generation);
   const hadHydratedLedger = useRef(false);
   const previousPeriod = useRef(periodKey);
   const [question, setQuestion] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [droppedTurns, setDroppedTurns] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
@@ -224,10 +225,21 @@ export default function AssistantScreen() {
   const ask = async (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
     const clean = value.trim().slice(0, 1000);
     const snapshot = getStateSnapshot();
-    if (!clean || !snapshot.hydrated || generation !== getStateGeneration()) return;
+    if (!clean || !snapshot.hydrated || sendingRef.current) return;
+    const startGeneration = getStateGeneration();
+    const renderIsCurrent = generation === startGeneration;
+    if (!renderIsCurrent) previousGeneration.current = startGeneration;
     const now = new Date();
+    sendingRef.current = true;
+    setIsSending(true);
+    setPendingQuestion(clean);
+    setQuestion('');
+    setError(null);
+    Keyboard.dismiss();
     try {
-      const correction = usePrevious ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer) : undefined;
+      const correction = usePrevious && renderIsCurrent
+        ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer)
+        : undefined;
       if (correction?.kind === 'clarification') {
         const request: AssistantToolRequest = { tool: 'help', clarification: correction.body, suggestions: correction.suggestions };
         appendAnswer(clean, { request, answer: executeAssistantTool(snapshot, request, now) }, snapshot, now);
@@ -237,23 +249,36 @@ export default function AssistantScreen() {
         await applyCorrection(clean, correction, snapshot, now);
         return;
       }
-      const previous = usePrevious ? contextRequest ?? conversationContext : null;
-      let result = runWafraAssistant(snapshot, clean, now, previous, period);
+      const previous = usePrevious && renderIsCurrent ? contextRequest ?? conversationContext : null;
+      let answerSnapshot = snapshot;
+      let result = runWafraAssistant(answerSnapshot, clean, now, previous, period);
       if (!snapshot.privateMode && shouldTryAssistantSemanticFallback(clean, result.request)) {
         const canonical = await interpretAssistantLanguage(snapshot, clean, previous);
-        // A model is only a language normalizer. It never gets to turn one
-        // generic local failure into another generic answer, and a ledger
-        // replacement while the request was in flight invalidates the result.
-        if (generation !== getStateGeneration()) return;
-        if (canonical && canonical !== clean) {
-          const interpreted = runWafraAssistant(snapshot, canonical, now, previous, period);
+        // A background import can legitimately change the store while the
+        // language-only request is in flight. Never silently drop the user's
+        // send in that case: recompute against the newest hydrated snapshot and
+        // discard stale conversational scope instead.
+        if (startGeneration !== getStateGeneration()) {
+          const latestSnapshot = getStateSnapshot();
+          const latestGeneration = getStateGeneration();
+          if (!latestSnapshot.hydrated) throw new Error('assistant_ledger_unavailable');
+          previousGeneration.current = latestGeneration;
+          answerSnapshot = latestSnapshot;
+          result = runWafraAssistant(answerSnapshot, canonical ?? clean, now, null, period);
+        } else if (canonical && canonical !== clean) {
+          const interpreted = runWafraAssistant(answerSnapshot, canonical, now, previous, period);
           if (interpreted.request.tool !== 'help') result = interpreted;
         }
       }
-      appendAnswer(clean, result, snapshot, now);
+      appendAnswer(clean, result, answerSnapshot, now);
     } catch {
-      // Keep the question available to edit; financial records never enter logs.
+      // Restore the draft when submission fails; financial records never enter logs.
+      setQuestion((current) => current || clean);
       setError(copy.failed);
+    } finally {
+      sendingRef.current = false;
+      setIsSending(false);
+      setPendingQuestion(null);
     }
   };
   const askRef = useRef(ask);
@@ -365,7 +390,12 @@ export default function AssistantScreen() {
   return <>
     <ScreenScaffold testID="assistant-screen"
       keyboardAware={Platform.OS === 'ios'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      // ScreenScaffold owns this screen's header. `useHeaderHeight()` cannot be
+      // used here because the root stack starts with `headerShown: false`; on
+      // Android it throws before the first frame, leaving only the window
+      // background visible. The keyboard-avoiding view already lives below the
+      // native header on iOS, so no navigator-header offset is required.
+      keyboardVerticalOffset={0}
       scrollRef={scrollRef}
       contentStyle={composerHeight > 0 ? { paddingBottom: composerHeight + 12 } : undefined}
       scrollProps={{ keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
@@ -379,7 +409,12 @@ export default function AssistantScreen() {
         if (next !== composerHeight) setComposerHeight(next);
       }} style={[styles.composer, {
         borderColor: theme.cardBorder,
-        marginBottom: Platform.OS === 'android' ? Math.max(0, keyboardHeight - insets.bottom) : 0,
+        // keyboardDidHide can occasionally be missed on some Android OEMs.
+        // Never keep a stale keyboard height lifting the composer after the OS
+        // itself says the keyboard is gone.
+        marginBottom: Platform.OS === 'android' && Keyboard.isVisible()
+          ? Math.max(0, keyboardHeight - insets.bottom)
+          : 0,
       }]}>
         <View style={styles.context}>
           <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
@@ -396,16 +431,16 @@ export default function AssistantScreen() {
         <View style={styles.inputRow}>
           <TextInput testID="assistant-input" value={question} onChangeText={(value) => { setQuestion(value); setError(null); }}
             onSubmitEditing={() => ask()} returnKeyType="send" submitBehavior="submit" multiline
-            accessibilityLabel={copy.placeholder} maxLength={1000} editable={state.hydrated}
+            accessibilityLabel={copy.placeholder} maxLength={1000} editable={state.hydrated && !isSending}
             placeholder={copy.placeholder} placeholderTextColor={theme.textTertiary}
             selectionColor={theme.primary} autoComplete="off" textAlignVertical="top"
             onContentSizeChange={(event) => setInputHeight(event.nativeEvent.contentSize.height)}
             style={[styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
               color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]} />
           <Pressable testID="assistant-send" accessibilityRole="button" accessibilityLabel={copy.send}
-            accessibilityState={{ disabled: !question.trim() || !state.hydrated }}
-            disabled={!question.trim() || !state.hydrated} onPress={() => ask()}
-            style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated ? 1 : 0.4 }]}>
+            accessibilityState={{ disabled: !question.trim() || !state.hydrated || isSending, busy: isSending }}
+            disabled={!question.trim() || !state.hydrated || isSending} onPress={() => ask()}
+            style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated && !isSending ? 1 : 0.4 }]}>
             <Icon name="arrow-up" size={20} color={theme.onPrimary} />
           </Pressable>
         </View>
@@ -429,6 +464,12 @@ export default function AssistantScreen() {
           </Pressable>)}
         </View> : null}
       {droppedTurns ? <ThemedText type="meta" themeColor="textTertiary">{copy.recentQuestions(MAX_TURNS)}</ThemedText> : null}
+      {pendingQuestion ? <View style={styles.turn} testID="assistant-pending-turn">
+        <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+          <ThemedText type="smallBold" selectable>{pendingQuestion}</ThemedText>
+        </View>
+        <ThemedText type="meta" themeColor="textTertiary" accessibilityRole="progressbar">{copy.understanding}</ThemedText>
+      </View> : null}
       {currentTurns.map((turn, index) => <View key={turn.id} style={styles.turn} testID="assistant-turn">
         <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
           <ThemedText type="smallBold" selectable>{turn.question}</ThemedText>

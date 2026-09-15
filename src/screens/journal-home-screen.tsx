@@ -1,4 +1,5 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
+import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -28,6 +29,7 @@ import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { periodLabel } from '@/lib/period';
@@ -196,6 +198,16 @@ export default function JournalHomeScreen() {
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
+  const moneyPicture = moneyPictureProgress({
+    nowMs: now.getTime(),
+    trialStartTs: state.trialStartTs,
+    history: state.historyImport,
+    transactionCount: state.transactions.length,
+    activeAccountCount: state.accounts.reduce((count, account) => count + (account.archived ? 0 : 1), 0),
+    obligationCount: state.bills.length + state.cardDues.length,
+    captureReady: status === 'waiting-for-alert' || status === 'first-alert-captured' ||
+      (Platform.OS === 'android' && !state.captureOptOut && !needsPermission),
+  });
 
   useEffect(() => {
     if (!state.hydrated || state.privateMode) return;
@@ -361,8 +373,11 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')} />
-        {/* Blocking states stay visible, but a healthy connection is not a banner. */}
-        {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
+        {/* First week: one truthful progress surface. After it retires, blocking
+            history states keep their existing compact recovery card. */}
+        {moneyPicture
+          ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
+          : history ? <HistoryReadingStatus progress={history} onResume={retryHistory} /> : null}
 
         {homeWidgets.order.map(renderWidget)}
 

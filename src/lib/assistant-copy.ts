@@ -6,6 +6,7 @@ export const assistantCopy = {
   privacy: 'Financial calculations stay on your device. If wording is unclear, Wafra may send only a redacted question for language help. Private Mode keeps everything local.',
   placeholder: 'Ask about your transactions',
   send: 'Send question',
+  understanding: 'Understanding your question…',
   newChat: 'New chat',
   explain: 'Explain this',
   explainCategory: 'Explain this category',

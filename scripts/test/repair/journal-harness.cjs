@@ -35,6 +35,7 @@ function harness(options = {}) {
   const state = {
     hydrated: options.hydrated ?? true, onboarded: true, language,
     captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
+    trialStartTs: options.trialStartTs ?? 0,
     transactions: options.empty ? [] : transactions, accounts: [account], budgets: [], bills: [], cardDues: [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
@@ -124,6 +125,8 @@ function harness(options = {}) {
   dependencies['@/components/wafra-logo'] = { WafraMark: () => null };
   dependencies['@/lib/ledger-light-copy'] = load(path.join(root, 'src/lib/ledger-light-copy.ts'), dependencies);
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
+  dependencies['@/lib/money-picture-progress'] = load(path.join(root, 'src/lib/money-picture-progress.ts'), dependencies);
+  dependencies['@/components/money-picture-progress'] = load(path.join(root, 'src/components/money-picture-progress.tsx'), dependencies);
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));

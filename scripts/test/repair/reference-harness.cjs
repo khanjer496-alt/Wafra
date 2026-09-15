@@ -155,6 +155,8 @@ function createHarness(options = {}) {
   local('@/components/wafra-logo');
   local('@/lib/ledger-light-copy','src/lib/ledger-light-copy.ts');
   local('@/components/history-reading-status');
+  local('@/lib/money-picture-progress','src/lib/money-picture-progress.ts');
+  local('@/components/money-picture-progress');
   local('@/components/transfer-review-notice');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');
