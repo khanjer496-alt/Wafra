@@ -252,6 +252,8 @@ test('real bank app identity can auto-import on first sight while ambiguous apps
   assert.match(scanner, /sourceClass === 'trusted-bank' \|\| sourceClass === 'play-finance' \|\| learned/);
   assert.match(scanner, /FINANCIAL_APP_LABEL_RE/);
   assert.match(scanner, /KNOWN_FINTECH_LABEL_RE/);
+  assert.match(scanner, /NON_FINANCIAL_BANK_LABEL_RE/);
+  assert.match(scanner, /if \(NON_FINANCIAL_BANK_LABEL_RE\.test\(label\)\) return null/);
   assert.match(scanner, /detectLaunchMarketFromSender\(candidate\) !== null \|\| hasUniversalInstitutionSender\(candidate\)/);
   assert.match(scanner, /const launchParsed = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
   assert.match(scanner, /parsedUniversalPosting\(universalEvent, source, overrides, routedMarket\)/);
