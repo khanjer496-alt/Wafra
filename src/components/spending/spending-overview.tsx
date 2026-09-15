@@ -131,11 +131,7 @@ export function SpendingOverview(p: Props) {
         accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${moneyLabel(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
         style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-        <View style={styles.categoryAvatarWrap}>
-          <CategoryAvatar category={row.category} size={44} />
-          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-            style={[styles.categoryDot, { backgroundColor: sliceColor, borderColor: theme.background }]} />
-        </View>
+        <CategoryAvatar category={row.category} size={44} color={sliceColor} />
         <View style={styles.categoryContent}>
           <View style={[styles.categoryTop, large && styles.stack]}>
             <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(row.category, language)}</ThemedText>
@@ -191,8 +187,6 @@ const styles = StyleSheet.create({
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
   categories: { gap: 0 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 0, borderTopWidth: 1 },
-  categoryAvatarWrap: { position: 'relative' },
-  categoryDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   categoryContent: { flex: 1, minWidth: 0, gap: 7 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   categoryBottom: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0 }, caption: { fontSize: 12, lineHeight: 18 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
