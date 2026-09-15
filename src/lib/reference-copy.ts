@@ -8,7 +8,10 @@ export const paymentAgendaCopy = {
     today: 'Today', tomorrow: 'Tomorrow', paidStatement: 'Paid statement · due',
     subscriptions: 'Subscriptions', utilities: 'Utilities & telecom', cards: 'Card payments', loans: 'Loan repayments', other: 'Other bills',
     subscriptionsHint: 'Recurring memberships and services', utilitiesHint: 'Electricity, water, phone and internet',
-    emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.' },
+    emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.',
+    summaryTitle: 'Coming up', summaryPayments: 'payments', summaryDueTodayOne: '1 due today', summaryDueTodayMany: '{n} due today',
+    summaryOverdueOne: '1 past due', summaryOverdueMany: '{n} past due', summaryEstimatedOne: '1 estimated', summaryEstimatedMany: '{n} estimated',
+    summaryEmpty: 'Nothing coming up' },
   ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'مستحقة قريباً', later: 'قادمة', paid: 'مدفوعة مؤخراً',
     estimate: 'تقديري', recorded: 'مدفوعة · استحقاقها', statement: 'استحقاق الكشف', empty: 'لا توجد دفعات قادمة',
     emptyBody: 'أضف تذكيراً بفاتورة أو استورد تنبيهات البنك لعرض التواريخ المعروفة.',
@@ -16,7 +19,10 @@ export const paymentAgendaCopy = {
     today: 'اليوم', tomorrow: 'غداً', paidStatement: 'كشف مدفوع · استحقاقه',
     subscriptions: 'الاشتراكات', utilities: 'المرافق والاتصالات', cards: 'دفعات البطاقات', loans: 'أقساط القروض', other: 'فواتير أخرى',
     subscriptionsHint: 'العضويات والخدمات المتكررة', utilitiesHint: 'الكهرباء والمياه والهاتف والإنترنت',
-    emptySubscriptions: 'لا توجد تجديدات اشتراكات لعرضها.', emptyUtilities: 'لا توجد فواتير مرافق لعرضها.' },
+    emptySubscriptions: 'لا توجد تجديدات اشتراكات لعرضها.', emptyUtilities: 'لا توجد فواتير مرافق لعرضها.',
+    summaryTitle: 'قادمة', summaryPayments: 'دفعات', summaryDueTodayOne: 'واحدة مستحقة اليوم', summaryDueTodayMany: '{n} مستحقة اليوم',
+    summaryOverdueOne: 'واحدة متأخرة', summaryOverdueMany: '{n} متأخرة', summaryEstimatedOne: 'واحدة تقديرية', summaryEstimatedMany: '{n} تقديرية',
+    summaryEmpty: 'لا توجد دفعات قادمة' },
 };
 
 export const accountGroupsCopy = {
