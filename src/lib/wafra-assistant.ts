@@ -48,6 +48,7 @@ export type AssistantTool =
   | 'possible-duplicates'
   | 'money-review'
   | 'historical-baseline'
+  | 'account-inventory'
   | 'top-accounts'
   | 'compare-accounts'
   | 'obligation-status'
@@ -92,6 +93,7 @@ export type AssistantToolRequest =
   | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'money-review' | 'data-coverage'; period: Period }))
   | { tool: 'subscriptions' }
   | { tool: 'upcoming-payments'; withinDays?: number }
+  | { tool: 'account-inventory'; accountKind?: 'all' | 'bank' | 'card' | 'credit-card' | 'debit-card'; bankName?: string }
   | { tool: 'obligation-status'; obligation: 'card' | 'bill'; accountId?: string; billId?: string;
     query: 'summary' | 'remaining' | 'payments' | 'paid-date' };
 
@@ -542,6 +544,29 @@ function obligationQueryFromQuestion(question: string): ObligationQuery | null {
 
 function creditCards(state: AppState): Account[] {
   return state.accounts.filter((account) => account.cardType === 'credit' && !account.archived);
+}
+
+function accountInventoryRequest(question: string): AssistantToolRequest | undefined {
+  const q = normalizeAssistantSemanticLanguage(normalize(question))
+    .replace(/\bccs\b/g, 'credit cards')
+    .replace(/\bcc\b/g, 'credit card');
+  const countQuestion = /\bhow many\b[^?!.]{0,80}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b[^?!.]{0,50}\b(?:do i have|i have|are there|have i got|have i)\b/.test(q)
+    || /\bhow many\b[^?!.]{0,80}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b/.test(q);
+  const listQuestion = /\b(?:what|which|show|list)\b[^?!.]{0,40}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b[^?!.]{0,50}\b(?:do i have|i have|are mine|my)\b/.test(q)
+    || /\b(?:show|list)\s+(?:me\s+)?my\s+(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b/.test(q);
+  if (!countQuestion && !listQuestion) return undefined;
+
+  const accountKind: 'all' | 'bank' | 'card' | 'credit-card' | 'debit-card' = /\bcredit cards?\b/.test(q)
+    ? 'credit-card'
+    : /\bdebit cards?\b/.test(q)
+      ? 'debit-card'
+      : /\bcards?\b/.test(q)
+        ? 'card'
+        : /\bbank accounts?\b/.test(q)
+          ? 'bank'
+          : 'all';
+  const bankName = bankBrandForName(question)?.name;
+  return { tool: 'account-inventory', accountKind, ...(bankName ? { bankName } : {}) };
 }
 
 function accountChoiceLabel(account: Account): string {
@@ -1165,6 +1190,51 @@ function executeAssistantToolResult(
         body: request.clarification ?? 'Ask Wafra about spending, income, merchants, categories, accounts/cards, card and bill status, historical monthly baselines, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
         suggestions: request.suggestions ?? ['How much did I spend?', 'Why did my spending change?', 'What payments are due soon?'],
       };
+
+    case 'account-inventory': {
+      const live = liveAccountIds(state.accounts);
+      const bankName = request.bankName;
+      const bankIdentity = bankName ? normalize(bankBrandForName(bankName)?.name ?? bankName) : null;
+      const matches = state.accounts.filter((account) => {
+        if (!live.has(account.id)) return false;
+        const kindMatches = request.accountKind === 'bank'
+          ? account.kind === 'bank'
+          : request.accountKind === 'card'
+            ? account.kind === 'card'
+            : request.accountKind === 'credit-card'
+              ? account.kind === 'card' && account.cardType === 'credit'
+              : request.accountKind === 'debit-card'
+                ? account.kind === 'card' && account.cardType === 'debit'
+                : true;
+        if (!kindMatches) return false;
+        if (!bankIdentity) return true;
+        const accountBank = bankBrandForName(account.bankName ?? account.name)?.name ?? account.bankName;
+        return !!accountBank && normalize(accountBank) === bankIdentity;
+      });
+      const singular = request.accountKind === 'credit-card' ? 'credit card'
+        : request.accountKind === 'debit-card' ? 'debit card'
+          : request.accountKind === 'card' ? 'card'
+            : request.accountKind === 'bank' ? 'bank account' : 'account';
+      const plural = `${singular}${singular.endsWith('account') ? 's' : 's'}`;
+      const label = matches.length === 1 ? singular : plural;
+      const bankPrefix = bankName ? `${bankName} ` : '';
+      return {
+        tool: request.tool,
+        title: bankName ? `${bankName} ${matches.length === 1 ? singular : plural}` : `Recorded ${matches.length === 1 ? singular : plural}`,
+        headline: `${matches.length} ${label}`,
+        body: matches.length
+          ? `I found ${matches.length} recorded ${bankPrefix}${label} in Wafra.`
+          : `I do not see any recorded ${bankPrefix}${plural} in Wafra.`,
+        facts: matches.slice(0, 10).map((account) => ({
+          label: accountChoiceLabel(account),
+          value: account.bankName ?? bankBrandForName(account.name)?.name ?? (account.kind === 'card' ? 'Card' : 'Account'),
+        })),
+        suggestions: matches.length > 1 && request.accountKind === 'credit-card'
+          ? ['Which card did I use most?', 'Did I settle my credit card?']
+          : ['Which account did I use most?', 'What payments are due soon?'],
+        data: { accountCount: matches.length, accountKind: request.accountKind ?? 'all', bankName: bankName ?? null },
+      };
+    }
 
     case 'obligation-status': {
       if (request.obligation === 'card') {
@@ -1823,7 +1893,8 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
     }
   }
   const answer = executeAssistantToolResult(state, request, now);
-  if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status') return answer;
+  if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status' ||
+      request.tool === 'account-inventory') return answer;
   if (request.tool === 'subscriptions' || request.tool === 'upcoming-payments') return {
     ...answer,
     body: `${answer.body} ${request.tool === 'subscriptions' ? 'These are estimates from recurring recorded charges; actual renewals may differ.' : 'Includes recorded bills and predicted recurring charges; amounts or dates may change.'}`,
@@ -1977,6 +2048,8 @@ export function planAssistantQuestion(
   let q = normalize(question);
   if (!q || q.length > 1000) return clarification('Ask one short question about your recorded spending, income, or payments.');
   if (/^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return { tool: 'help' };
+  const inventory = accountInventoryRequest(q);
+  if (inventory) return inventory;
   const obligation = planObligationQuestion(state, q, previousRequest);
   if (obligation) return obligation;
   const prior = previousRequest && 'period' in previousRequest ? previousRequest : undefined;
@@ -2298,6 +2371,9 @@ export function assistantFollowUpQuestions(request?: AssistantToolRequest): stri
   if (!request || request.tool === 'help') return ['How much did I spend?', 'What is my recorded history?'];
   if (request.tool === 'subscriptions') return ['Which recurring charges changed?', 'What payments are due soon?', 'Anything unusual?'];
   if (request.tool === 'upcoming-payments') return ['What subscriptions do I have?', 'Anything unusual?', 'How much did I spend?'];
+  if (request.tool === 'account-inventory') return request.accountKind === 'credit-card'
+    ? ['Which card did I use most?', 'Did I settle my credit card?', 'What payments are due soon?']
+    : ['Which account did I use most?', 'How much did I spend?', 'Anything unusual?'];
   if (request.tool === 'obligation-status') return request.obligation === 'card'
     ? ['How much is left?', 'When did I pay it?', 'Show the payments']
     : ['How much is left?', 'When did I pay it?', 'What payments are due soon?'];

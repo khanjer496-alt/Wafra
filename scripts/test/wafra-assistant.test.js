@@ -1346,6 +1346,43 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
 }
 console.log('✓ Ask Wafra broader vocabulary and typo-tolerant merchant resolution');
 
+// Account/card inventory questions are about the recorded account list, not
+// spending in the selected month. They should answer directly and safely
+// narrow by a named bank without requiring an account-selection clarification.
+{
+  const adcbCreditA = { ...account, id: 'adcb-credit-a', name: 'ADCB TouchPoints Card', kind: 'card', cardType: 'credit',
+    bankName: 'ADCB', last4: '1111' };
+  const adcbCreditB = { ...adcbCreditA, id: 'adcb-credit-b', name: 'ADCB Traveller Card', last4: '2222' };
+  const adcbDebit = { ...adcbCreditA, id: 'adcb-debit', name: 'ADCB Debit Card', cardType: 'debit', last4: '3333' };
+  const enbdCredit = { ...adcbCreditA, id: 'enbd-credit', name: 'ENBD Credit Card', bankName: 'Emirates NBD', last4: '4444' };
+  const archivedAdcb = { ...adcbCreditA, id: 'adcb-old', name: 'Old ADCB Card', archived: true, last4: '9999' };
+  const inventoryState = { ...state, accounts: [account, adcbCreditA, adcbCreditB, adcbDebit, enbdCredit, archivedAdcb] };
+
+  const adcbCount = answerWafraQuestion(inventoryState, 'How many adcb credit cards I have ?', now);
+  assert.equal(adcbCount.tool, 'account-inventory');
+  assert.equal(adcbCount.data.accountCount, 2);
+  assert.equal(adcbCount.data.accountKind, 'credit-card');
+  assert.equal(adcbCount.data.bankName, 'ADCB');
+  assert.match(adcbCount.headline, /2 credit cards/i);
+  assert.equal(adcbCount.facts.length, 2);
+
+  const allCredit = answerWafraQuestion(inventoryState, 'How many credit cards do I have?', now);
+  assert.equal(allCredit.tool, 'account-inventory');
+  assert.equal(allCredit.data.accountCount, 3);
+
+  const debit = answerWafraQuestion(inventoryState, 'How many ADCB debit cards do I have?', now);
+  assert.equal(debit.data.accountCount, 1);
+  assert.equal(debit.data.accountKind, 'debit-card');
+
+  const list = answerWafraQuestion(inventoryState, 'Show me my credit cards', now);
+  assert.equal(list.tool, 'account-inventory');
+  assert.equal(list.facts.length, 3);
+
+  assert.equal(isAssistantToolRequest({ tool: 'account-inventory', accountKind: 'credit-card', bankName: 'ADCB' }), true);
+  assert.equal(isAssistantToolRequest({ tool: 'account-inventory', accountKind: 'loan', bankName: 'ADCB' }), false);
+}
+console.log('✓ Ask Wafra account and card inventory');
+
 // Obligation/status questions must use statement/bill accounting rather than
 // falling through to generic spending language. A "settled" answer requires
 // recorded statement coverage plus enough payment allocation to reach zero.

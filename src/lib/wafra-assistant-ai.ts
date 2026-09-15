@@ -38,6 +38,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds', 'excludedAccountIds'] },
   { tool: 'month-forecast', purpose: 'Current-month pace estimate when observed history is sufficient', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'historical-baseline', purpose: 'Compare recorded spending with prior monthly history without assuming missing months are zero', arguments: [...PERIOD_FILTER_ARGUMENTS, 'baseline'] },
+  { tool: 'account-inventory', purpose: 'Count or list locally recorded accounts or cards, optionally filtered by a bank named by the user', arguments: ['accountKind', 'bankName'] },
   { tool: 'top-accounts', purpose: 'Rank locally known accounts or cards by recorded spending or purchase count', arguments: [...PERIOD_FILTER_ARGUMENTS, 'accountKind', 'metric', 'limit'] },
   { tool: 'obligation-status', purpose: 'Check the locally resolved latest credit-card statement or bill reminder status without guessing payment completion', arguments: ['obligation', 'accountId', 'billId', 'query'] },
   { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
@@ -172,6 +173,9 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
         (candidate.obligation === 'card'
           ? validName(candidate.accountId) && candidate.billId === undefined
           : validName(candidate.billId) && candidate.accountId === undefined);
+    case 'account-inventory':
+      return (candidate.accountKind === undefined || ['all', 'bank', 'card', 'credit-card', 'debit-card'].includes(String(candidate.accountKind))) &&
+        (candidate.bankName === undefined || validName(candidate.bankName));
     case 'upcoming-payments':
       return candidate.withinDays === undefined ||
         (Number.isSafeInteger(candidate.withinDays) && (candidate.withinDays as number) > 0 &&
