@@ -8,7 +8,7 @@ export interface MerchantLogo {
 }
 
 // Static requires are intentional: Metro includes these files in native builds
-// and OTA updates. No merchant name, bank message or device IP goes to a logo API.
+// and OTA updates. These known identities render without any Brandfetch search.
 const ENTRIES: readonly [string, number, readonly string[]][] = [
   // Bare Arabic كريم is also a person's name; a title alone cannot identify the company.
   ['careem', require('../../../assets/merchants/careem.png'), ['Careem', 'Careem Food', 'Careem Pay', 'Careem Pay Topup', 'Careem Pay Top-up', 'Careem Pay Top Up', 'Careem Plus', 'Careem Networks']],

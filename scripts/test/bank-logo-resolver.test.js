@@ -5,8 +5,12 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 const root = path.resolve(__dirname, '../..');
-function load({ fetchImpl = async () => ({ ok: false }), data = new Map() } = {}) {
-  const storage = { async getItem(k) { return data.get(k) ?? null; }, async setItem(k,v) { data.set(k,v); }, async removeItem(k) { data.delete(k); } };
+function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), data = new Map() } = {}) {
+  const storage = {
+    async getItem(k) { return data.get(k) ?? null; },
+    async setItem(k, v) { data.set(k, v); },
+    async removeItem(k) { data.delete(k); },
+  };
   const modules = new Map();
   function requireModule(id) {
     if (id === '@react-native-async-storage/async-storage') return storage;
@@ -14,25 +18,46 @@ function load({ fetchImpl = async () => ({ ok: false }), data = new Map() } = {}
     assert.ok(id.startsWith('@/lib/'), id);
     const filename = path.join(root, 'src/lib', id.slice(6) + '.ts');
     const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-      fileName: filename, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+      fileName: filename,
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText;
     const exports = {};
     modules.set(id, exports);
-    vm.runInNewContext(output, { exports, require: requireModule, process: { env: {} },
-      fetch: fetchImpl, AbortController, setTimeout, clearTimeout, console }, { filename });
+    vm.runInNewContext(output, {
+      exports, require: requireModule, process: { env: {} }, fetch: fetchImpl,
+      AbortController, setTimeout, clearTimeout, console,
+    }, { filename });
     return exports;
   }
   return { ...requireModule('@/lib/bank-logo-resolver'), marketBanks: requireModule('@/lib/markets').MARKETS.flatMap(market => market.banks) };
 }
+
+const response = rows => ({ ok: true, json: async () => rows });
+
 (async () => {
-  let calls = 0;
   const data = new Map();
-  const m = load({ data, fetchImpl: async () => { calls++; return { ok: false }; } });
-  for (const name of ['Fixture Bank', 'Household savings 1234', 'FAB Plumbing', 'Emirates NBD Secret Account', undefined]) {
-    assert.equal(await m.resolveBankLogo(name), null, 'unknown institutions stay local');
-  }
-  assert.equal(calls, 0, 'unknown bank names must not be searched remotely');
-  assert.equal(data.size, 0, 'unknown institution strings must not become cache identities');
+  const calls = [];
+  const m = load({
+    data,
+    fetchImpl: async url => {
+      calls.push(url);
+      if (url.includes('Bank%20of%20America')) return response([
+        { name: 'Bank of America', domain: 'bankofamerica.com', claimed: true },
+        { name: 'Bank of America Private Bank', domain: 'privatebank.bankofamerica.com', claimed: false },
+      ]);
+      if (url.includes('Lloyds%20Bank')) return response([
+        { name: 'Lloyds Bank', domain: 'lloydsbank.com', claimed: true },
+      ]);
+      if (url.includes('Societe%20Generale')) return response([
+        { name: 'Société Générale', domain: 'societegenerale.com', claimed: true },
+      ]);
+      if (url.includes('Chase%20Savings')) return response([
+        { name: 'Chase', domain: 'chase.com', claimed: true },
+      ]);
+      return response([]);
+    },
+  });
+
   for (const [name, domain] of [['FAB', 'bankfab.com'], ['Emirates NBD', 'emiratesnbd.com'], ['Al Rajhi', 'alrajhibank.com.sa']]) {
     const logo = await m.resolveBankLogo(name);
     assert.equal(logo.domain, domain);
@@ -42,13 +67,49 @@ function load({ fetchImpl = async () => ({ ok: false }), data = new Map() } = {}
   for (const bank of m.marketBanks.filter(bank => bank.domain)) {
     assert.equal((await m.resolveBankLogo(bank.name))?.domain, bank.domain, `preserve market bank ${bank.name}`);
   }
-  const hostile = JSON.stringify({ expiresAt: Date.now() + 60_000, value: {
-    id: 'bank:attacker.invalid', domain: 'attacker.invalid', canonicalName: 'Fixture Bank',
-    logoUrl: 'https://attacker.invalid/account-1234', source: 'brandfetch',
-  } });
-  const poisoned = load({ data: new Map([['wafra:bank-logo:v1:fixture%20bank', hostile], ['wafra:bank-logo:v1:fab', hostile]]) });
-  assert.equal(await poisoned.resolveBankLogo('Fixture Bank'), null, 'legacy unknown mapping cannot authorize a remote image');
-  assert.equal((await poisoned.resolveBankLogo('FAB')).domain, 'bankfab.com', 'cache cannot replace verified market domain');
-  assert.equal(calls, 0, 'known bank identity needs no search');
-  console.log('✓ bank logos keep fixed market domains, reject unknown/cache identities, and never search remotely');
+  assert.equal(calls.length, 0, 'known launch-market banks stay on the local fast path');
+
+  const boa = await m.resolveBankLogo('Bank of America');
+  assert.equal(boa?.domain, 'bankofamerica.com');
+  assert.equal(boa?.source, 'search');
+  assert.match(calls[0], /\/v2\/search\/Bank%20of%20America\?c=1idPBg9EKr252UlBUPZ$/);
+
+  const lloyds = await m.resolveBankLogo('Lloyds Bank');
+  assert.equal(lloyds?.domain, 'lloydsbank.com');
+  assert.equal((await m.resolveBankLogo('Societe Generale'))?.domain, 'societegenerale.com',
+    'accent differences do not block a confident global bank match');
+  assert.equal(await m.resolveBankLogo('Chase Savings'), null,
+    'a claimed bank result still cannot replace a more specific unmatched account label');
+
+  const afterFirstPass = calls.length;
+  assert.equal((await m.resolveBankLogo('Bank of America'))?.domain, 'bankofamerica.com');
+  assert.equal(await m.resolveBankLogo('Chase Savings'), null);
+  assert.equal(calls.length, afterFirstPass, 'bank search hits and misses are cached');
+
+  for (const name of ['Household savings 1234', 'Card **8575', 'Bank\u202e', undefined]) {
+    assert.equal(await m.resolveBankLogo(name), null, `unsafe/private account label: ${name}`);
+  }
+  assert.equal(calls.length, afterFirstPass, 'account/card tails and unsafe strings never become bank searches');
+
+  const cached = {
+    query: 'bank of america', expiresAt: Date.now() + 60_000, value: {
+      id: 'bank:bankofamerica.com', domain: 'bankofamerica.com', canonicalName: 'Bank of America',
+      logoUrl: 'https://attacker.invalid/account', source: 'search',
+    },
+  };
+  const cachedResolver = load({
+    data: new Map([['wafra:bank-logo:v2:bank%20of%20america', JSON.stringify(cached)]]),
+    fetchImpl: async () => { throw new Error('cache should satisfy this lookup'); },
+  });
+  assert.equal((await cachedResolver.resolveBankLogo('Bank of America')).logoUrl,
+    'https://cdn.brandfetch.io/domain/bankofamerica.com?c=1idPBg9EKr252UlBUPZ',
+    'cached data cannot choose an arbitrary image host');
+
+  let failures = 0;
+  const failing = load({ fetchImpl: async () => { failures++; throw new Error('offline'); } });
+  assert.equal(await failing.resolveBankLogo('Worldwide Example Bank'), null);
+  assert.equal(await failing.resolveBankLogo('Worldwide Example Bank'), null);
+  assert.equal(failures, 2, 'transient failures remain retryable instead of becoming cached misses');
+
+  console.log('✓ bank logos keep known local domains and search Brandfetch globally for other clean institution names');
 })().catch(error => { console.error(error); process.exitCode = 1; });
