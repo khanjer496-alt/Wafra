@@ -233,6 +233,9 @@ test('every financial candidate reaches the parser but only trusted or confirmed
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
   assert.match(promotion, /learnedNotificationPackage/);
   assert.match(types, /trustedNotificationPackages: string\[\]/);
+  assert.match(scanner, /parsedFinancialCandidateReview\(p, n\.ts\)/);
+  assert.match(scanner, /decision\.kind === 'ignored' && decision\.reason === 'unrecognized' && parsedFallback/);
+  assert.match(scanner, /decision = \{ kind: 'review', candidate: parsedFallback \}/);
 });
 
 test('500 queued notification candidates process without touching SMS and ACK only after commit', async () => {
