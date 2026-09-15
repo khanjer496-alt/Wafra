@@ -103,7 +103,7 @@ public final class WafraPagedHistoryStore {
     let fields = line.split(separator: "|", omittingEmptySubsequences: false)
     if fields.count == 4 {
       guard let decodedGuid = try decodeBase64Field(fields[0], maximum: 1_024),
-            let decodedDate = try decodeBase64Field(fields[3], maximum: 64) else {
+            let decodedDate = try decodeBase64Field(fields[3], maximum: 128) else {
         throw Failure.fieldEncoding
       }
       guid = decodedGuid
@@ -182,7 +182,7 @@ public final class WafraPagedHistoryStore {
     return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1_000))
   }
   private func date(_ value: String) throws -> Date {
-    guard let normalized = WafraMessageHistoryStore.normalizeShortcutInstant(value, now: now()) else {
+    guard let normalized = WafraMessageHistoryStore.normalizeShortcutProducedInstant(value, now: now()) else {
       throw Failure.fieldDate
     }
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -353,7 +353,7 @@ public final class WafraPagedHistoryStore {
           guids.utf8.count <= found * 1_024 + separators * 3,
           bodies.utf8.count <= found * 16 * 1_024 + separators * 3,
           senders.utf8.count <= found * 1_024 + separators * 3,
-          dates.utf8.count <= found * 64 + separators * 3 else {
+          dates.utf8.count <= found * 128 + separators * 3 else {
       throw Failure.invalidInput
     }
     func column(_ value: String) -> [Substring] {

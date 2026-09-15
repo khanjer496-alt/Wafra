@@ -489,6 +489,50 @@ struct NativeHistoryStoreTests {
   }
 
   private static func testShortcutOffsetRecords() throws {
+    let localizedInstant = Date(timeIntervalSince1970: 1_760_000_000)
+    let localizedCases: [(String, Calendar.Identifier)] = [
+      ("en_US", .gregorian),
+      ("ar_EG", .gregorian),
+      ("ar_SA", .islamicUmmAlQura),
+      ("th_TH", .buddhist),
+    ]
+    for (localeId, calendarId) in localizedCases {
+      var calendar = Calendar(identifier: calendarId)
+      let zone = TimeZone(secondsFromGMT: 4 * 60 * 60)!
+      calendar.timeZone = zone
+      let locale = Locale(identifier: localeId)
+      let formatter = DateFormatter()
+      formatter.locale = locale
+      formatter.calendar = calendar
+      formatter.timeZone = zone
+      formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+      let shortcutText = formatter.string(from: localizedInstant)
+      check(
+        "Shortcut localized date from \(localeId) canonicalizes to the same UTC instant",
+        WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+          shortcutText,
+          now: fixedNow,
+          locale: locale,
+          calendar: calendar,
+          timeZone: zone
+        ) == "2025-10-09T08:53:20.000Z"
+      )
+    }
+    var hijriCalendar = Calendar(identifier: .islamicUmmAlQura)
+    let dubai = TimeZone(secondsFromGMT: 4 * 60 * 60)!
+    hijriCalendar.timeZone = dubai
+    let hijriLocale = Locale(identifier: "ar_SA")
+    let hijriFormatter = DateFormatter()
+    hijriFormatter.locale = hijriLocale
+    hijriFormatter.calendar = hijriCalendar
+    hijriFormatter.timeZone = dubai
+    hijriFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    let hijriText = hijriFormatter.string(from: localizedInstant)
+    check(
+      "strict ASCII adapter still refuses localized Hijri text",
+      WafraMessageHistoryStore.normalizeShortcutInstant(hijriText, now: fixedNow) == nil
+    )
+
     let accepted: [(String, String)] = [
       ("2026-04-30T12:00:00.001+04:00", "2026-04-30T08:00:00.001Z"),
       ("2026-04-30T12:00:00.999+04:00", "2026-04-30T08:00:00.999Z"),
