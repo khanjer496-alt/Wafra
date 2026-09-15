@@ -331,6 +331,22 @@ const { scanInbox } = require('./build/auto-import.js');
     JSON.stringify({ hostile, acknowledgedNotifications }));
 
   notificationRows = [{
+    id: 'power-bank-monitor-0001',
+    pkg: 'com.example.powerbankmonitor',
+    appLabel: 'Power Bank Monitor',
+    title: 'Battery status',
+    text: 'Purchase of AED 51.00 at CARREFOUR with Debit Card ending 1234',
+    ts: NOW + 5_650,
+  }];
+  const fakeBankLabel = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  await fakeBankLabel.commit();
+  ok('a non-financial app label containing the word bank cannot gain automatic trust',
+    fakeBankLabel.parsed.length === 0 && fakeBankLabel.reviewCandidates.length === 1 &&
+      fakeBankLabel.reviewCandidates[0]?.sourcePackage === 'com.example.powerbankmonitor' &&
+      fakeBankLabel.reviewCandidates[0]?.sourceClass === 'financial-candidate',
+    JSON.stringify(fakeBankLabel));
+
+  notificationRows = [{
     id: 'noncurated-adib-0001',
     pkg: 'com.example.adibmobile',
     appLabel: 'ADIB',

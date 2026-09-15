@@ -71,6 +71,7 @@ export interface AndroidNotificationImportDiagnostics {
 
 const FINANCIAL_APP_LABEL_RE = /\b(?:bank|banking|banque|banco|banca|credit\s*union|finance|financial|mobile\s*money|wallet)\b|بنك|مصرف|محفظة|बैंक/iu;
 const KNOWN_FINTECH_LABEL_RE = /\b(?:revolut|wise|monzo|n26|paypal|venmo|cash\s*app|cashapp|klarna|stc\s*pay|mada\s*pay)\b/iu;
+const NON_FINANCIAL_BANK_LABEL_RE = /\b(?:power\s*bank|blood\s*bank|food\s*bank|question\s*bank|test\s*bank|bank\s*(?:exam|quiz|questions?|dictionary|calculator|monitor|manager|wallpaper)|memory\s*bank)\b/iu;
 
 /**
  * Strong local identity for an unseen Play-installed finance app.
@@ -91,6 +92,7 @@ const verifiedFinancialAppSender = (appLabel: string): string | null => {
   const registered = candidates.find((candidate) =>
     detectLaunchMarketFromSender(candidate) !== null || hasUniversalInstitutionSender(candidate));
   if (registered) return registered;
+  if (NON_FINANCIAL_BANK_LABEL_RE.test(label)) return null;
   return FINANCIAL_APP_LABEL_RE.test(label) || KNOWN_FINTECH_LABEL_RE.test(label) ? label : null;
 };
 
