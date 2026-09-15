@@ -2119,7 +2119,12 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
-        const failed = Promise.reject(new Error('SQLCipher write failed'));
+        // Create the rejection only when the executor reaches its durability
+        // boundary. Constructing an already-rejected Promise here lets modern
+        // Node report it as unhandled before execute() attaches its await/catch,
+        // terminating the entire suite instead of exercising the intended
+        // failure path.
+        const failed = () => Promise.reject(new Error('SQLCipher write failed'));
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(failed, events),
           dependencies: {
@@ -2160,7 +2165,13 @@ async function queueItem(id, row, publicKey) {
           },
         });
         const running = executor.execute('routine');
-        await Promise.resolve();
+        // executeRoutine deliberately yields with setTimeout(0) before the
+        // synchronous planner/persistence path so foreground input can paint.
+        // Wait for the phase we are asserting rather than assuming which timer
+        // was enqueued first in this Node release.
+        for (let i = 0; i < 10 && events.length === 0; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: routine acknowledgement waits while durability is pending',
           events, ['persist']);
         release();
@@ -2301,7 +2312,9 @@ async function queueItem(id, row, publicKey) {
           ledgerId: 'changed-during-review', captureOptOut: false,
         };
         releaseReview();
-        for (let i = 0; i < 10 && events.length < 3; i += 1) await Promise.resolve();
+        for (let i = 0; i < 10 && events.length < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: a mixed review and deduplicated relay page flushes the current ledger',
           events, ['review-stage', 'plan:changed-during-review', 'flush:changed-during-review']);
         releaseLedger();
