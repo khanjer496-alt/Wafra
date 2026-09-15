@@ -150,7 +150,7 @@ reactNative.Platform.OS = 'android';
 const markets = require('./build/markets.js');
 markets.setLedgerCurrency(null);
 markets.setActiveMarket('AE');
-const { scanInbox } = require('./build/auto-import.js');
+const { scanInbox, getAndroidNotificationImportDiagnostics } = require('./build/auto-import.js');
 
 (async () => {
   const first = await scanInbox(0, {}, undefined, 'fr-FR');
@@ -393,6 +393,15 @@ const { scanInbox } = require('./build/auto-import.js');
       acknowledgedNotifications.length === ackBeforeUnrecognized &&
       !acknowledgedNotifications.includes('trusted-unrecognized-0001'),
     JSON.stringify({ unresolvedTrusted, acknowledgedNotifications }));
+  const firstUnresolvedAttempt = getAndroidNotificationImportDiagnostics();
+  const unresolvedRetry = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  const secondUnresolvedAttempt = getAndroidNotificationImportDiagnostics();
+  ok('the same unresolved native notification is not reparsed again in one JS session',
+    firstUnresolvedAttempt?.captured === 1 &&
+      secondUnresolvedAttempt?.captured === 0 &&
+      unresolvedRetry.parsed.length === 0 && unresolvedRetry.reviewCandidates.length === 0 &&
+      acknowledgedNotifications.length === ackBeforeUnrecognized,
+    JSON.stringify({ firstUnresolvedAttempt, secondUnresolvedAttempt }));
 
   const hsbcTitle = 'Your credit card transaction is approved';
   const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';

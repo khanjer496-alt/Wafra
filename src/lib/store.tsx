@@ -331,6 +331,22 @@ export function migratePersistedState(
       ))].slice(-64)
     : [];
   markLaunchPhase('ledger-metadata-complete');
+  // `hydrationReparseKey` is the durable receipt that this exact parser/market
+  // already repaired the persisted rows. Build 261 still ran the row-local
+  // migration below on EVERY launch even when this receipt was current. On a
+  // real 14.7k-row ledger that single unnecessary pass cost ~1.1 seconds of
+  // foreground JS before Home could render.
+  //
+  // Trust only the exact revision-2 receipt here. The compatibility logic
+  // later in this function may accept an older revision-1 receipt for raw-SMS
+  // reparsing, but revision 1 never promised that all row-local transforms had
+  // completed. Backup restore also deliberately bypasses this shortcut: an
+  // imported file must be normalized by the receiving build even if it carries
+  // a receipt copied from another installation.
+  const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
+  const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
+  const persistedRowRepairsAreCurrent =
+    options?.reuseCompletedReparse === true && parsed.hydrationReparseKey === reparseKey;
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -490,7 +506,7 @@ export function migratePersistedState(
   }
 
   markLaunchPhase('ledger-overrides-complete');
-  if (parsed.transactions) {
+  if (parsed.transactions && !persistedRowRepairsAreCurrent) {
     // Hydration used to walk the complete ledger once for every historical
     // repair below. On a real 15k-row phone that meant seven full JS passes
     // before Home could render. Keep the exact same ordered semantics, but run
@@ -574,8 +590,6 @@ export function migratePersistedState(
     // Android alone may defer a new grammar to its durable paged history job.
     // Backup restore also repairs immediately because the backup cannot assume
     // this installation still has the source inbox that produced it.
-    const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
-    const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
     const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
       if (receipt === reparseKey) return true;
       if (typeof receipt !== 'string') return false;
@@ -621,6 +635,11 @@ export function migratePersistedState(
     // the synchronous launch pass. `parserVersion` remains old until the final
     // history page commits, so the migration itself is still visibly pending.
     parsed.hydrationReparseKey = reparseKey;
+  } else if (parsed.transactions) {
+    // Keep launch diagnostics phase-complete even when the durable receipt lets
+    // us skip the expensive pass. The grammar receipt is already exact, so no
+    // parser/global-market mutation is needed on this path.
+    markLaunchPhase('ledger-row-transforms-complete');
   }
   markLaunchPhase('ledger-reparse-complete');
 
