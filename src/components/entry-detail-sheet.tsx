@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { accountDisplayName, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -362,7 +362,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               return (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={selected ? `${t('account')}: ${selected.name}` : t('account')}
+                  accessibilityLabel={selected ? `${t('account')}: ${accountDisplayName(selected)}` : t('account')}
                   onPress={() => setAccountPickerOpen(true)}
                   style={({ pressed }) => [
                     styles.accountTrigger,
@@ -373,7 +373,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                   ]}>
                   {selected ? <>
                     <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-                    <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{selected.name}</ThemedText>
+                    <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
                   </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
                     {t('account')}
                   </ThemedText>}
@@ -419,7 +419,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               },
               {
                 label: t('account'),
-                value: <ThemedText type="small">{account?.name ?? t('unassigned')}</ThemedText>,
+                value: <ThemedText type="small">{account ? accountDisplayName(account) : t('unassigned')}</ThemedText>,
               },
               {
                 label: t('source'),
@@ -584,17 +584,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         testID="entry-detail-account-picker">
         <View style={styles.pickerContent}>
           <TextField
-            label={t('account')}
+            label={t('searchAccounts')}
             value={accountSearch}
             onChangeText={setAccountSearch}
-            placeholder={t('account')}
+            placeholder={t('searchAccounts')}
             autoCorrect={false}
           />
           <View style={styles.pickerList}>
             {state.accounts
               .filter((a) => {
                 const needle = accountSearch.trim().toLocaleLowerCase();
-                return !needle || a.name.toLocaleLowerCase().includes(needle);
+                return !needle || accountDisplayName(a).toLocaleLowerCase().includes(needle);
               })
               .map((a) => {
                 const active = accountId === a.id;
@@ -602,7 +602,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                   <Pressable
                     key={a.id}
                     accessibilityRole="radio"
-                    accessibilityLabel={a.name}
+                    accessibilityLabel={accountDisplayName(a)}
                     accessibilityState={{ checked: active }}
                     onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
                     style={({ pressed }) => [
@@ -613,7 +613,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       },
                     ]}>
                     <View style={[styles.accountDot, { backgroundColor: a.color }]} />
-                    <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{a.name}</ThemedText>
+                    <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{accountDisplayName(a)}</ThemedText>
                     {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
                   </Pressable>
                 );

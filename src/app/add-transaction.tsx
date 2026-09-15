@@ -25,6 +25,7 @@ import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, I
 import { parseAmountToFils, parseAmountWithMoneySpec, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
+import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
@@ -565,7 +566,7 @@ export default function AddTransactionScreen() {
               ]}>
               {selected ? <>
                 <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{selected.name}</ThemedText>
+                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
               </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
                 {tUi('reviewAlertChooseAccount')}
               </ThemedText>}
@@ -668,17 +669,17 @@ export default function AddTransactionScreen() {
       testID="account-picker-sheet">
       <View accessibilityRole="radiogroup" accessibilityLabel={tUi('account')} style={styles.pickerContent}>
         <TextField
-          label={tUi('reviewAlertChooseAccount')}
+          label={tUi('searchAccounts')}
           value={accountSearch}
           onChangeText={setAccountSearch}
-          placeholder={tUi('reviewAlertChooseAccount')}
+          placeholder={tUi('searchAccounts')}
           autoCorrect={false}
         />
         <View style={styles.pickerList}>
           {state.accounts
             .filter((a) => {
               const needle = accountSearch.trim().toLocaleLowerCase();
-              return !needle || a.name.toLocaleLowerCase().includes(needle);
+              return !needle || accountDisplayName(a).toLocaleLowerCase().includes(needle);
             })
             .map((a) => {
               const active = accountId === a.id;
@@ -686,7 +687,7 @@ export default function AddTransactionScreen() {
                 <Pressable
                   key={a.id}
                   accessibilityRole="radio"
-                  accessibilityLabel={a.name}
+                  accessibilityLabel={accountDisplayName(a)}
                   accessibilityState={{ checked: active }}
                   onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
                   style={({ pressed }) => [
@@ -697,7 +698,7 @@ export default function AddTransactionScreen() {
                     },
                   ]}>
                   <View style={[styles.accountDot, { backgroundColor: a.color }]} />
-                  <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{a.name}</ThemedText>
+                  <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{accountDisplayName(a)}</ThemedText>
                   {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
                 </Pressable>
               );
