@@ -78,11 +78,14 @@ export function SpendingOverview(p: Props) {
   // Legend rows for the picture the donut is drawing: the same slices, in the
   // same order, with the same colours and their share of the total. Uses the
   // slices array rather than re-deriving from rows so the legend can never
-  // disagree with the pie.
+  // disagree with the pie. `category` is null for the __tail wedge, and the
+  // legend renders it as a generic receipt glyph rather than pretending the
+  // aggregation is a real category id.
   const legendItems = useMemo(() => slices.map((slice) => ({
     key: slice.key,
     label: slice.label,
     color: slice.color,
+    category: slice.key === '__tail' ? null : (slice.key as CategoryId),
     share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
   })), [slices, p.totalFils]);
   return <View style={styles.root} testID="spending-categories">
@@ -104,7 +107,9 @@ export function SpendingOverview(p: Props) {
       </View>
       {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {legendItems.map((item) => <View key={item.key} style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+          {item.category !== null
+            ? <CategoryAvatar category={item.category} size={20} color={item.color} />
+            : <Icon name="receipt" size={16} color={item.color} strokeWidth={2} />}
           <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
           <ThemedText type="meta" tabular themeColor="textSecondary">{spendingShareLabel(item.share, language)}</ThemedText>
         </View>)}
@@ -178,9 +183,8 @@ const styles = StyleSheet.create({
   hero: { paddingVertical: 12, gap: 12, alignItems: 'stretch' },
   donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
   heroNote: { textAlign: 'center' },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 8, justifyContent: 'center' },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 8, justifyContent: 'center' },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '48%' },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendLabel: { flexShrink: 1, minWidth: 0 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
