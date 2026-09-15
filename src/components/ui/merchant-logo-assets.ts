@@ -11,13 +11,13 @@ export interface MerchantLogo {
 // and OTA updates. No merchant name, bank message or device IP goes to a logo API.
 const ENTRIES: readonly [string, number, readonly string[]][] = [
   // Bare Arabic كريم is also a person's name; a title alone cannot identify the company.
-  ['careem', require('../../../assets/merchants/careem.png'), ['Careem', 'Careem Food', 'Careem Pay', 'Careem Plus', 'Careem Networks']],
-  ['talabat', require('../../../assets/merchants/talabat.png'), ['Talabat', 'Talabat Mart', 'Talabat Pro', 'Talabat.com', 'طلبات']],
+  ['careem', require('../../../assets/merchants/careem.png'), ['Careem', 'Careem Food', 'Careem Pay', 'Careem Pay Topup', 'Careem Pay Top-up', 'Careem Pay Top Up', 'Careem Plus', 'Careem Networks']],
+  ['talabat', require('../../../assets/merchants/talabat.png'), ['Talabat', 'Talabat Mart', 'Talabat Pro', 'Talabat.com', 'Talabat sales', 'Talabat Business', 'طلبات']],
   ['deliveroo', require('../../../assets/merchants/deliveroo.png'), ['Deliveroo', 'Deliveroo Plus', 'Deliveroo.ae', 'ديليفرو', 'دليفرو']],
   ['carrefour', require('../../../assets/merchants/carrefour.png'), ['Carrefour', 'Carrefour Hypermarket', 'Carrefour Hyper', 'Carrefour Market', 'Carrefour MOE', 'Carrefour Mall of the Emirates', 'كارفور']],
   ['lulu', require('../../../assets/merchants/lulu.png'), ['Lulu', 'LuLu Hypermarket', 'Lulu Hyper Market', 'Lulu Hyper', 'Lulu Supermarket', 'لولو', 'لولو هايبرماركت', 'لولو هايبر ماركت']],
   ['spinneys', require('../../../assets/merchants/spinneys.png'), ['Spinneys', 'Spinneys.com', 'سبينس', 'سبينيس']],
-  ['noon', require('../../../assets/merchants/noon.png'), ['Noon', 'Noon.com', 'Noon One', 'Noon Food', 'Noon Minutes', 'Noon Grocery', 'نون']],
+  ['noon', require('../../../assets/merchants/noon.png'), ['Noon', 'Noon.com', 'Noon One', 'Noon Food', 'Noon Minutes', 'Noon Grocery', 'Noon Send', 'نون']],
   ['amazon', require('../../../assets/merchants/amazon.png'), ['Amazon', 'Amazon.ae', 'Amazon.com', 'Amazon.sa', 'Amazon Prime', 'Amazon Marketplace', 'Amazon Retail', 'AMZN', 'AMZN Mktp', 'امازون', 'أمازون']],
   ['netflix', require('../../../assets/merchants/netflix.png'), ['Netflix', 'Netflix.com', 'نتفليكس', 'نتفلكس']],
   ['spotify', require('../../../assets/merchants/spotify.png'), ['Spotify', 'Spotify Premium', 'Spotify AB', 'سبوتيفاي']],

@@ -46,6 +46,7 @@ function harness() {
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
     '@/components/ui/category-avatar': { CategoryAvatar: 'CategoryAvatar' },
+    '@/components/ui/bank-avatar': { BankAvatar: 'BankAvatar' },
     '@/components/ui/merchant-avatar': { MerchantAvatar: 'MerchantAvatar' },
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
     '@/components/ui/controls': { Button: 'Button' },

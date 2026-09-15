@@ -208,11 +208,11 @@ export default function BillsScreen() {
     const accountNames = new Map(state.accounts.map((a) => [a.id, a.name]));
     const items: PaymentAgendaItem[] = dues.map(({ due, daysLeft, remainingFils }) => ({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
-      kind: 'card', dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
+      kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
     }));
     for (const { due, daysLeft } of paidCards) items.push({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
-      kind: 'card', dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
+      kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
     });
     for (const { bill, status, dueISO, daysLeft } of rows) items.push({
       id: `bill-${bill.id}`, title: bill.title, category: bill.category, kind: 'bill', dateISO: dueISO,
@@ -554,7 +554,7 @@ export default function BillsScreen() {
         scrollProps={{ showsVerticalScrollIndicator: false }}>
         <SegmentedControl label={t('billsTitle')} value={agendaView} onChange={setAgendaView}
           segments={[{ value: 'upcoming', label: words.upcoming }, { value: 'all', label: words.all }]} />
-        <PaymentAgenda items={agendaItems} includePaid={agendaView === 'all'} onOpen={(item) => {
+        <PaymentAgenda items={agendaItems} accounts={state.accounts} includePaid={agendaView === 'all'} onOpen={(item) => {
           if (item.kind === 'card') {
             const id = item.id.slice(5);
             const due = state.cardDues.find((due) => due.id === id);
