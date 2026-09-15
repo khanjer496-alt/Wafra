@@ -600,36 +600,17 @@ export function migratePersistedState(
     // arriving, not of the one it replaces.
     setGlobalLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
-    // This receipt belongs to saved-row repair, never to the full-inbox scan
-    // represented by parserVersion. Only local hydration may reuse it;
-    // backup restore always repairs the incoming rows. Import paths already
-    // parse their new rows with this running grammar. Increment revision 2
-    // below when heal semantics change without a PARSER_VERSION change.
+    // Saved-row healing and the full-inbox parser migration are two different
+    // maintenance jobs on Android. A parser-version bump already creates the
+    // resumable history import in `reduceState`; doing another raw-SMS pass here
+    // made launch pay for the same grammar twice before Home could render.
     //
-    // Deliberately keyed on the GRAMMAR only. `merchantOverrides` used to be
-    // part of this key, which meant saving one merchant rule re-parsed every
-    // raw-bearing row in the ledger on the next launch — seconds of blocked
-    // UI on a large ledger, and it got worse with each rule, because
-    // `healPatch` keeps `raw` forever on precisely the rows a rule pinned
-    // (heal.ts: the `prior.raw && !p.categoryPinned` branch). So the cost grew
-    // with the number of rules while the benefit was already nil: a pinned
-    // category reaches `if (p.categoryPinned) … delete patch.category`, which
-    // exists so that "remember for future" stays a default for NEW rows and a
-    // rescan cannot widen it to history. Overrides are still passed to
-    // `parseSms` below, so a grammar re-parse applies them exactly as before;
-    // only the trigger is narrowed. The one outcome this defers is the pinned
-    // direction-incompatible repair (`patch.category = 'other'`), which
-    // repairs an already-corrupt row and still lands on the next parser bump.
+    // Keep the exact grammar receipt for platforms that cannot reread an inbox.
+    // Android alone may defer a new grammar to its durable paged history job.
+    // Backup restore also repairs immediately because the backup cannot assume
+    // this installation still has the source inbox that produced it.
     const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
     const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
-    // Revision 1 stored [1, PARSER_VERSION, marketId, overrideEntries]. Revision
-    // 2 removed only the override entries, on the grounds that overrides never
-    // changed what `healPatch` did to an existing row — and that same fact
-    // makes a revision-1 receipt naming THIS grammar proof that this ledger was
-    // already healed under it. Accept and restamp such a receipt rather than
-    // charging every existing install one full re-read for a pure key-format
-    // change: a receipt that records the right answer is still the right
-    // answer, whatever shape it was written in.
     const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
       if (receipt === reparseKey) return true;
       if (typeof receipt !== 'string') return false;
@@ -637,13 +618,21 @@ export function migratePersistedState(
       try {
         prior = JSON.parse(receipt);
       } catch {
-        // Not a receipt this build wrote; repair rather than trust it.
         return false;
       }
+      // Revision 1 stored the merchant-override entries too. They never changed
+      // existing-row healing, so a receipt for this exact parser + market is
+      // equivalent and can be restamped without another pass.
       return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
         prior[1] === PARSER_VERSION && prior[2] === grammarMarketId;
     };
-    if (!options?.reuseCompletedReparse || !healedUnderThisGrammar(parsed.hydrationReparseKey)) {
+    const completedRepair = healedUnderThisGrammar(parsed.hydrationReparseKey);
+    const parserUpgradeWillUseHistory = options?.reuseCompletedReparse === true &&
+      Platform.OS === 'android' && parsed.onboarded === true &&
+      parsed.parserVersion !== PARSER_VERSION;
+    const mustRepairSynchronously = options?.reuseCompletedReparse !== true ||
+      (!completedRepair && !parserUpgradeWillUseHistory);
+    if (mustRepairSynchronously) {
       parsed.transactions = parsed.transactions.flatMap((t) => {
         if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
         const p = parseSms(t.raw, parsed.merchantOverrides);
@@ -655,22 +644,18 @@ export function migratePersistedState(
         if (p.kind === 'billDue' || p.kind === 'cardStatement') {
           // This migration can heal transactions but cannot materialize the
           // CardDue/Bill that now represents this message. Keep the legacy row
-          // until a rescan can atomically create that obligation; deleting it
-          // here loses the only record when lastScanTs prevents re-offering it.
+          // until a rescan can atomically create that obligation.
           return [t];
         }
         const patch = healPatch(t, p);
         return [patch ? applyHealPatch(t, patch) : t];
       });
-      // Assigned only after the entire pass succeeds. The existing atomic
-      // snapshot save persists repaired rows and their receipt together.
-      parsed.hydrationReparseKey = reparseKey;
-    } else {
-      // An accepted revision-1 receipt is upgraded in place, so the next launch
-      // settles this on one string comparison and the acceptance path above is
-      // walked exactly once per install rather than on every launch.
-      parsed.hydrationReparseKey = reparseKey;
     }
+    // Android stamps the grammar receipt when it hands the upgrade to durable
+    // history so a restart while that job is unfinished does not reintroduce
+    // the synchronous launch pass. `parserVersion` remains old until the final
+    // history page commits, so the migration itself is still visibly pending.
+    parsed.hydrationReparseKey = reparseKey;
   }
   markLaunchPhase('ledger-reparse-complete');
 

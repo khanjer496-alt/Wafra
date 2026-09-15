@@ -818,8 +818,9 @@ function bodyOf(source, header) {
     'parser migration is maintenance work and must not start or restart in the first launch/resume frames');
 
   ok('history planning and commit both honor the foreground navigation lease',
-    /FOREGROUND_HISTORY_COMMIT_GAP_MS\s*=\s*120/.test(historyImport) &&
-      (historyImport.match(/waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_COMMIT_GAP_MS\)/g) ?? []).length >= 2,
+    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
+      /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
+      (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
 
   const captureExecutor = stripComments(read('src/lib/capture-executor.ts'));

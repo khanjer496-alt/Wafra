@@ -40,9 +40,7 @@ test('deterministic paged graph is the shipping history shortcut', () => {
   assert.equal(verifyPagedHistoryShortcut(graph), true);
   assert.deepEqual(graph, buildPagedHistoryShortcut());
   // The public record check compares the published record byte-for-byte
-  // against this generator. The action count is unchanged by the Combine Text
-  // key repair; the record `5a0da9b5…` is expected to mismatch until the
-  // repaired graph is signed and published.
+  // against this generator, so any graph change needs a newly published record.
   assert.equal(graph.WFWorkflowActions.length, 98);
   assert.doesNotMatch(JSON.stringify(graph), /StageWafraPagedColumnsIntent|Frame Mode|Columns Result/);
 });
