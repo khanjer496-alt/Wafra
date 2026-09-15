@@ -33,7 +33,7 @@ export interface IosHistoryShortcutRecord {
   resumesOnRerun: boolean;
 }
 export const IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS: Readonly<Record<string, IosHistoryShortcutRecord>> = {
-  '5a0da9b5d3a641d9958f3dfa37851afa': { name: 'Wafra-History-v2-typed-date.signed', resumesOnRerun: true },
+  'bc30c7ae89d6494c9ef0aea1a666d72d': { name: 'Wafra-History-v2-typed-date.signed', resumesOnRerun: true },
 };
 export const IOS_HISTORY_SHORTCUT_DEFAULT_NAME = 'Wafra History Import';
 const iosHistoryShortcutRecord = (installUrl: unknown): IosHistoryShortcutRecord | null => {
@@ -72,6 +72,8 @@ export type IosHistoryReturnRoute =
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const HISTORY_SHORTCUT_RETURN_URL = 'wafra://import-sms';
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
+  // Bound Combine Text input under `WFInput`, so every page reached Wafra empty.
+  '5a0da9b5d3a641d9958f3dfa37851afa',
   // Diagnostic graph retired after the physical V3 two-ended import passed.
   'cc85a21db99a4e4698c1a498de670199',
   // Build 99 legacy per-message graph. The next release uses bounded paging.

@@ -29,18 +29,18 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(api.PAGED_HISTORY_INSTALL_URL, null);
   const beta = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
-    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d',
   } } });
   assert.equal(beta.pagedHistoryEnabled(), true);
-  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa');
+  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
   // Production installs the verified paged record without the beta flag. The
   // paged surfaces (progress, resume, review) must follow the record the build
   // actually installs, or users run a paged Shortcut against the legacy UI.
   const production = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
-    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d',
   } } });
   assert.equal(production.pagedHistoryEnabled(), true);
-  assert.equal(production.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa');
+  assert.equal(production.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
   const unverified = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
     EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789',
@@ -54,7 +54,7 @@ test('the production profile installs the paged record and every iOS binary reta
     assert.equal(config.build['history-beta'].env[key], '1');
   }
   assert.equal(config.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
-    'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa');
+    'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,
