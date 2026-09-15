@@ -24,6 +24,10 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     '../../modules/notification-reader': { __esModule: true, default: null },
     '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => batch } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-01' },
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/ledger-money': { ledgerMoneySpec: currency => ({ currency, exponent: 2 }) },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => null,

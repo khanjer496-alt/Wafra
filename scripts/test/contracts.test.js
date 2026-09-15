@@ -438,7 +438,7 @@ function ktSources(dir) {
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',
     /pro: _pro,[\s\S]{0,120}trialStartTs: _trial/.test(store) &&
-      /pro: state\.pro,[\s\S]{0,120}trialStartTs: state\.trialStartTs/.test(store));
+      /const current = authoritativeState\.current;[\s\S]{0,180}pro: current\.pro,[\s\S]{0,180}trialStartTs: current\.trialStartTs/.test(store));
 }
 
 
@@ -1007,8 +1007,9 @@ function ktSources(dir) {
       scan.includes('Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS)') &&
       scan.includes('state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE)') &&
       // Inbox parsing, its proven-duplicate fast path, the retired delivery
-      // buffer and trusted bank notifications each keep the same UI yield.
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
+      // buffer, the notification promotional fast path and ordinary bank
+      // notifications each keep the same UI yield.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 5,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
@@ -1639,12 +1640,17 @@ for (const rel of ['src/app/cards.tsx']) {
     'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
 }
 
-// Accounts removed per-account spending. Keep it on canonical card/cashflow values.
+// Accounts removed per-account spending and cash-flow drilldowns. Its render
+// path now consumes the already-indexed balance and due projections instead of
+// calling cardFigure() once per account (which can rescan the ledger). Keep the
+// same no-spending/no-cashflow boundary while pinning that cheaper projection.
 {
  const wallet=read('src/app/(tabs)/wallet.tsx');
- ok('Wallet uses shared card figures and transfer-aware cash outflow',
-  /cardFigure\(state, account, now\)/.test(wallet) && /summarizeCashOutflow\(state,[\s\S]*?internal/.test(wallet) &&
-  !/monthSpendByAccount|isSpending\(/.test(wallet));
+ ok('Wallet uses indexed balance and due figures without rebuilding spending or cash-flow summaries',
+  /dueByAccountId\.get\(account\.id\)/.test(wallet) &&
+  /balances\.balanceByAccountId\[account\.id\]/.test(wallet) &&
+  !/cardFigure\(state, account, now\)/.test(code(wallet)) &&
+  !/summarizeCashOutflow\(|monthSpendByAccount|isSpending\(/.test(wallet));
 }
 /* ── subscriptions and the expense export learn the same two exclusions ── */
 //
@@ -1844,7 +1850,9 @@ ok('the spoken label agrees with the sign on screen',
     'otherwise a 400-groceries/100-dining charge adds 500 to a groceries total');
 
   ok('"Last 3 months" is bounded at both ends',
-    /month < three \|\| month > options\.currentKey/.test(projection),
+    /filters\.datePreset === '3months'\) \{ monthFrom = three; monthTo = options\.currentKey; \}/.test(projection) &&
+      /belowMonth = monthFrom !== null && month < monthFrom/.test(projection) &&
+      /aboveMonth = monthTo !== null && month > monthTo/.test(projection),
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',

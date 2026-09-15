@@ -83,7 +83,7 @@ export type AssistantToolRequest =
   | { tool: 'net-income-spending'; period: Period }
   | { tool: 'cash-outflow'; period: Period }
   | { tool: 'month-forecast'; period: Period }
-  | { tool: 'historical-baseline'; period: Period; baseline: 'highest-month' | 'typical-month' | 'closest-month' }
+  | { tool: 'historical-baseline'; period: Period; baseline: 'highest-month' | 'typical-month' | 'closest-month' | 'last-similar-month' }
   | { tool: 'top-accounts'; period: Period; accountKind?: 'all' | 'bank' | 'card'; metric?: 'amount' | 'count'; limit?: number }
   | { tool: 'compare-accounts'; period: Period; leftAccountId: string; rightAccountId: string }
   | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'money-review' | 'data-coverage'; period: Period }))
@@ -183,6 +183,8 @@ function total(rows: Transaction[]): number {
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
   'july', 'august', 'september', 'october', 'november', 'december'];
 const MONTH_PATTERN = MONTHS.join('|');
+const MONTH_ABBREVIATIONS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DATE_MONTH_PATTERN = [...MONTHS, ...MONTH_ABBREVIATIONS].join('|');
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const containsPhrase = (text: string, phrase: string) =>
   (` ${normalizeMerchantText(text)} `).includes(` ${normalizeMerchantText(phrase)} `);
@@ -220,8 +222,13 @@ function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeri
   };
   const range = (from: string, to: string): Period | null => validISODate(from) && validISODate(to) && from <= to
     ? { mode: 'range', from, to } : null;
+  const monthIndex = (monthName: string): number => {
+    const full = MONTHS.indexOf(monthName);
+    if (full >= 0) return full;
+    return MONTH_ABBREVIATIONS.indexOf(monthName.replace(/\.$/, ''));
+  };
   const monthDay = (monthName: string, dayText: string, yearText?: string): string | null => {
-    const month = MONTHS.indexOf(monthName);
+    const month = monthIndex(monthName);
     if (month < 0) return null;
     const year = yearText ? Number(yearText) : month > now.getMonth() ? now.getFullYear() - 1 : now.getFullYear();
     const value = `${year}-${String(month + 1).padStart(2, '0')}-${String(Number(dayText)).padStart(2, '0')}`;
@@ -248,7 +255,7 @@ function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeri
       `${year}-${String(last + 1).padStart(2, '0')}-${m[5].padStart(2, '0')}`);
   });
   consume(/\b\d{4}-\d{2}-\d{2}\b/g, (m) => range(m[0], m[0]));
-  consume(new RegExp(`\\b(since|after|before)\\s+(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'g'), (m) => {
+  consume(new RegExp(`\\b(since|after|before)\\s+(${DATE_MONTH_PATTERN})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'g'), (m) => {
     const date = monthDay(m[2], m[3], m[4]);
     if (!date) return null;
     if (m[1] === 'since') return range(date, toISODate(now));
@@ -262,7 +269,7 @@ function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeri
     const start = state ? periodStartISO(reporting, state.transactions) : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     return start ? range(start, toISODate(boundary)) : null;
   });
-  consume(new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'g'), (m) => {
+  consume(new RegExp(`\\b(${DATE_MONTH_PATTERN})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'g'), (m) => {
     const day = monthDay(m[1], m[2], m[3]);
     return day ? range(day, day) : null;
   });
@@ -296,6 +303,18 @@ function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeri
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
     return range(toISODate(start), toISODate(now));
   });
+  consume(/\b(?:this|last) weekend\b/g, (m) => {
+    // Spending questions about "this weekend" should never point at future
+    // dates. Use the weekend that has most recently started; on Sat/Sun that is
+    // the current weekend, otherwise it is the immediately preceding Sat/Sun.
+    const day = now.getDay();
+    const start = new Date(now);
+    const daysBack = day === 6 ? 0 : day === 0 ? 1 : day + 1;
+    start.setDate(start.getDate() - daysBack - (m[0] === 'last weekend' && day >= 6 ? 7 : 0));
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    const cappedEnd = end > now ? now : end;
+    return range(toISODate(start), toISODate(cappedEnd));
+  });
   consume(/\bmonth to date\b/g, () => {
     const reporting = currentMonthPeriod(now);
     const start = state ? periodStartISO(reporting, state.transactions) : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -316,8 +335,23 @@ function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeri
     const end = toISODate(endDate);
     return start && start <= end ? range(start, end) : null;
   };
-  consume(/\b(?:since payday|since my (?:last )?(?:salary|paycheck|pay cheque)(?: came in| arrived)?|after (?:my )?(?:last )?(?:salary|payday|paycheck|pay cheque)(?: came in| arrived)?)\b/g, () => paydayRange(false));
-  consume(/\b(?:before payday|before my (?:last )?(?:salary|paycheck|pay cheque)(?: came in| arrived)?)\b/g, () => paydayRange(true));
+  const payWords = '(?:salary|payday|paycheck|pay cheque|pay)';
+  consume(new RegExp(`\\b(?:since|after)\\s+(?:my\\s+)?(?:last\\s+)?${payWords}(?:\\s+(?:came in|arrived))?\\b`, 'g'), () => paydayRange(false));
+  consume(new RegExp(`\\bbefore\\s+(?:my\\s+)?(?:last\\s+)?${payWords}(?:\\s+(?:came in|arrived))?\\b`, 'g'), () => paydayRange(true));
+  consume(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s+months?\s+ago\b/g, (m) => {
+    const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+      seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+    const token = m[0].split(/\s+/)[0];
+    const months = words[token] ?? Number(token);
+    if (!Number.isInteger(months) || months < 1 || months > 24) return null;
+    let period: Period = currentMonthPeriod(now);
+    for (let index = 0; index < months; index++) period = previousPeriod(period) ?? period;
+    return period;
+  });
+  consume(/\bsame month last year\b/g, () => {
+    const current = currentMonthPeriod(now);
+    return current.mode === 'month' ? { mode: 'month', key: `${Number(current.key.slice(0, 4)) - 1}${current.key.slice(4)}` } : null;
+  });
   consume(/\b(?:today|yesterday|this month|current month|last month|previous month|this year|current year|last year|previous year|all time|ever|since i started|past week|last week)\b/g, (m) => {
     const phrase = m[0];
     if (/all time|ever|since/.test(phrase)) return { mode: 'all' };
@@ -396,6 +430,92 @@ function categoriesFromQuestion(question: string): CategoryId[] {
   return CATEGORY_ALIASES.filter(([pattern]) => pattern.test(question)).map(([, category]) => category);
 }
 
+/**
+ * Normalize high-confidence conversational shorthand after recorded merchant/account
+ * identities have been protected. This is intentionally conservative: it rewrites
+ * language, never financial values or recorded names.
+ */
+function normalizeAssistantSemanticLanguage(question: string): string {
+  let text = question;
+
+  // Common chat contractions / politeness. These are semantically inert.
+  text = text
+    .replace(/\bwhat['’]?s\b|\bwhats\b/g, 'what is')
+    .replace(/\b(?:pls|plz)\b/g, 'please')
+    .replace(/\b(can|could|would)\s+u\b/g, '$1 you')
+    .replace(/^\s*(?:hey\s+)?wafra[,:]?\s+/g, '')
+    .replace(/^\s*(?:can|could|would)\s+you\s+(?:please\s+)?/g, '')
+    .replace(/^\s*please\s+/g, '')
+    .replace(/^\s*tell\s+me\s+/g, '');
+
+  // Date shorthand users type naturally in chat.
+  text = text
+    .replace(/\bmtd\b/g, 'month to date')
+    .replace(/\bytd\b/g, 'year to date')
+    .replace(/\bthis\s+mo\b/g, 'this month')
+    .replace(/\b(?:last|prev)\s+mo\b/g, 'last month')
+    .replace(/\bthis\s+wk\b/g, 'this week')
+    .replace(/\blast\s+wk\b/g, 'last week')
+    .replace(/\bpast\s+wk\b/g, 'past week')
+    .replace(/\bthis\s+yr\b/g, 'this year')
+    .replace(/\b(?:last|prev)\s+yr\b/g, 'last year')
+    .replace(/\byday\b/g, 'yesterday')
+    .replace(/\balltime\b/g, 'all time')
+    .replace(/\b(last|past)\s+(\d+)d\b/g, '$1 $2 days')
+    .replace(/\b(last|past)\s+(\d+)w\b/g, '$1 $2 weeks')
+    .replace(/\bthis month so far\b/g, 'month to date')
+    .replace(/\bthis year so far\b|\byear so far\b/g, 'year to date');
+
+  // Transaction / account abbreviations. Only rewrite the financial-language form.
+  text = text
+    .replace(/\b(?:txn|transction|transcation)\b/g, 'transaction')
+    .replace(/\b(?:txns|transctions|transcations)\b/g, 'transactions')
+    .replace(/\b(which|what)\s+cc\b/g, '$1 card')
+    .replace(/\btop\s+ccs?\b/g, 'top cards')
+    .replace(/\bcc\s+did\s+i\s+use\b/g, 'card did i use')
+    .replace(/\b(which|what)\s+acct\b/g, '$1 account')
+    .replace(/\btop\s+accts?\b/g, 'top accounts');
+
+  // Subscription shorthand. Preserve an explicit merchant phrase such as "at Subs".
+  if (!/\b(?:at|from|on)\s+subs?\b/.test(text)) {
+    text = text
+      .replace(/\bwhat am i subscribed to\b|\bwhat do i subscribe to\b/g, 'what subscriptions do i have')
+      .replace(/\bwhat services am i paying for\b|\bwhat do i pay every month\b|\bwhat is charging me every month\b/g, 'what subscriptions do i have')
+      .replace(/\banything renewing\b/g, 'what subscriptions do i have')
+      .replace(/\b(?:subscriptons|subsciptions|subcriptions|subsriptions)\b/g, 'subscriptions')
+      .replace(/\bwhat sub do i have\b/g, 'what subscription do i have')
+      .replace(/\bshow my sub\b|\blist my sub\b/g, 'show my subscription')
+      .replace(/\bsubs\b/g, 'subscriptions')
+      .replace(/\b(?:memberships?)\b/g, 'subscriptions')
+      .replace(/\bauto[ -]?renewals?\b/g, 'renewals')
+      .replace(/\brecurring stuff\b/g, 'recurring charges');
+  }
+
+  // Very common finance-chat phrasing with one deterministic interpretation.
+  text = text
+    .replace(/\b(?:what needs paying|anything i need to pay|what payments are next)\b/g, 'what is due')
+    .replace(/\b(?:where did my money go|where is my money going|what did i spend (?:the )?most on)\b/g, 'top categories')
+    .replace(/\b(?:anything off|anything strange|anything fishy|anything look wrong|anything i should worry about)\b/g, 'anything unusual')
+    .replace(/\b(?:weird|odd|strange) charges?\b/g, 'unusual charges')
+    .replace(/\b(?:did i pay twice|double payment|double payments|same amount twice)\b/g, 'possible duplicate charges')
+    .replace(/\b(?:biggest|top) spends?\b/g, 'largest purchases')
+    .replace(/\btop shops?\b/g, 'top merchants')
+    .replace(/\bwhich shop did i spend most at\b/g, 'which merchant did i spend most at')
+    .replace(/\bmoney went out\b/g, 'money out')
+    .replace(/\bhow much (?:did|have) i get paid\b/g, 'how much income did i receive')
+    .replace(/\bhow much (?:salary|pay) came in\b/g, 'how much income did i receive')
+    .replace(/\bhow much was my (?:paycheck|pay cheque|wage)\b/g, 'how much salary did i receive')
+    .replace(/\b(?:paychecks?|pay cheques?|wages?)\b/g, 'salary');
+
+  // Common category typos. These map only to existing deterministic categories.
+  text = text
+    .replace(/\b(?:grocreies|groceries|grocries)\b/g, 'groceries')
+    .replace(/\b(?:resturants?|restaraunts?)\b/g, 'restaurants')
+    .replace(/\butilites\b/g, 'utilities');
+
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 /** A bounded grammar: every meaningful token must be consumed, not ignored. */
 function hasUnsupportedRemainder(question: string): boolean {
   let rest = question;
@@ -469,6 +589,20 @@ function answerTransactionIds(answer?: AssistantAnswer): string[] {
   return [...new Set(answer.evidence.flatMap((group) => group.transactionIds))];
 }
 
+function answerMerchantCandidates(state: AppState, answer?: AssistantAnswer): string[] {
+  if (!answer) return [];
+  const names = new Set<string>();
+  if (answer.tool === 'merchant-breakdown' && answer.title.trim()) names.add(answer.title.trim());
+  for (const id of answerTransactionIds(answer)) {
+    const row = state.transactions.find((transaction) => transaction.id === id);
+    if (row?.title.trim()) names.add(row.title.trim());
+  }
+  if (answer.tool === 'subscriptions' && answer.facts?.length === 1 && answer.facts[0].label.trim()) {
+    names.add(answer.facts[0].label.trim());
+  }
+  return [...names];
+}
+
 /**
  * Parse only explicit, high-confidence ledger corrections. This deliberately
  * refuses ambiguous pronouns/multi-row evidence instead of guessing which row
@@ -479,10 +613,37 @@ export function planAssistantCorrection(
   question: string,
   previousAnswer?: AssistantAnswer,
 ): AssistantCorrectionPlan | undefined {
-  const q = normalize(question).replace(/[?!]+$/, '').trim();
+  let q = normalize(question).replace(/[?!]+$/, '').trim();
+  q = q.replace(/\bxfer\b/g, 'transfer');
   if (!q) return undefined;
 
-  const explicitNotSubscription = q.match(/^(.+?)\s+(?:is|was)\s+not\s+(?:a\s+)?subscription\.?$/);
+  const contextualNotSubscription = /^(?:that|this|it)\s+(?:is|was)\s+not\s+(?:a\s+)?(?:subscription|sub|recurring charge)\.?$/.test(q);
+  if (contextualNotSubscription) {
+    const candidates = answerMerchantCandidates(state, previousAnswer);
+    if (candidates.length === 1) return { kind: 'not-subscription', merchant: candidates[0] };
+    return { kind: 'clarification',
+      body: candidates.length
+        ? 'That answer refers to more than one merchant. Choose which one is not a subscription.'
+        : 'I cannot tell which recorded merchant “that” refers to. Name the merchant.',
+      suggestions: candidates.slice(0, 4).map((merchant) => `${merchant} is not a subscription`) };
+  }
+
+  const applyAll = q.match(/^set all matching transactions to (.+)$/);
+  if (applyAll) {
+    const category = correctionCategory(applyAll[1]);
+    const candidates = answerMerchantCandidates(state, previousAnswer);
+    if (!category || candidates.length !== 1) return undefined;
+    const merchant = candidates[0];
+    const matchingRows = state.transactions.filter((row) => normalize(row.title) === normalize(merchant));
+    const meta = CATEGORIES.find((item) => item.id === category);
+    const recordedTypes = [...new Set(matchingRows.map((row) => row.type))];
+    const direction = category === 'other' && recordedTypes.length === 1 ? recordedTypes[0] : meta?.type ?? 'expense';
+    if (!matchingRows.some((row) => row.type === direction)) return { kind: 'clarification',
+      body: `${merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en')} would not apply to those transactions.` };
+    return { kind: 'merchant-category', merchant, category, direction };
+  }
+
+  const explicitNotSubscription = q.match(/^(.+?)\s+(?:is|was)\s+not\s+(?:a\s+)?(?:subscription|sub|recurring charge)\.?$/);
   if (explicitNotSubscription && !/^(?:that|this|it)$/.test(explicitNotSubscription[1].trim())) {
     const resolved = resolveMerchant(explicitNotSubscription[1].trim(), state.transactions);
     if (resolved.merchant) return { kind: 'not-subscription', merchant: resolved.merchant };
@@ -507,8 +668,19 @@ export function planAssistantCorrection(
   if (demonstrative) {
     const category = correctionCategory(demonstrative[1]);
     if (!category) return undefined;
-    if (evidenceIds.length !== 1) return { kind: 'clarification',
-      body: 'That answer contains more than one transaction. Name the merchant to correct all matching transactions, or open the transaction you mean.' };
+    if (evidenceIds.length === 0) return { kind: 'clarification',
+      body: 'That answer has no matching transaction to correct.' };
+    if (evidenceIds.length !== 1) {
+      const merchants = answerMerchantCandidates(state, previousAnswer);
+      const label = categoryLabel(category, 'en');
+      return { kind: 'clarification',
+        body: merchants.length === 1
+          ? `That answer contains more than one ${merchants[0]} transaction. Apply ${label} to all matching transactions, or choose one transaction.`
+          : 'That answer contains more than one transaction. Choose the transaction you want to correct.',
+        suggestions: merchants.length === 1
+          ? [`Set all matching transactions to ${label}`, 'Choose one transaction']
+          : ['Choose one transaction'] };
+    }
     const row = state.transactions.find((transaction) => transaction.id === evidenceIds[0]);
     if (!row) return { kind: 'clarification', body: 'That transaction is no longer available.' };
     if (row.splits?.length) return { kind: 'clarification',
@@ -1110,6 +1282,30 @@ function executeAssistantToolResult(
       if (!earlier.length) return { tool: request.tool, title: 'Closest earlier month',
         body: 'I do not have an earlier recorded month for that scope to compare with this amount.',
         data: { monthsAnalyzed: months.length, currentFils: currentTotal, baselineFils: null } };
+      if (request.baseline === 'last-similar-month') {
+        const tolerance = Math.max(1, Math.round(Math.abs(currentTotal) * 0.1));
+        const recentFirst = [...earlier].sort((a, b) => b.key.localeCompare(a.key));
+        const similar = currentTotal > 0
+          ? recentFirst.find((month) => Math.abs(month.totalFils - currentTotal) <= tolerance)
+          : undefined;
+        if (similar) return {
+          tool: request.tool, title: 'Last similar month',
+          body: `${similar.key} is the most recent earlier recorded month within 10% of this amount: ${formatLedgerMoney(similar.totalFils)} versus ${formatLedgerMoney(currentTotal)} now.`,
+          facts: [{ label: similar.key, value: formatLedgerMoney(similar.totalFils) },
+            { label: 'Selected period', value: formatLedgerMoney(currentTotal) }],
+          data: { monthsAnalyzed: earlier.length, baselineFils: similar.totalFils, currentFils: currentTotal,
+            deltaFils: checkedMinorSum([currentTotal, -similar.totalFils]), monthKey: similar.key, similarFound: true },
+        };
+        const nearest = [...earlier].sort((a, b) => Math.abs(a.totalFils - currentTotal) - Math.abs(b.totalFils - currentTotal) || b.key.localeCompare(a.key))[0];
+        return {
+          tool: request.tool, title: 'No similar earlier month',
+          body: `I do not see an earlier recorded month within 10% of ${formatLedgerMoney(currentTotal)}. The closest recorded month was ${nearest.key} at ${formatLedgerMoney(nearest.totalFils)}, so I am not calling it the last time you spent this much.`,
+          facts: [{ label: 'Closest recorded month', value: `${nearest.key} · ${formatLedgerMoney(nearest.totalFils)}` },
+            { label: 'Selected period', value: formatLedgerMoney(currentTotal) }],
+          data: { monthsAnalyzed: earlier.length, baselineFils: null, currentFils: currentTotal,
+            nearestFils: nearest.totalFils, nearestMonthKey: nearest.key, similarFound: false },
+        };
+      }
       const closest = [...earlier].sort((a, b) => Math.abs(a.totalFils - currentTotal) - Math.abs(b.totalFils - currentTotal) || b.key.localeCompare(a.key))[0];
       return {
         tool: request.tool, title: 'Closest earlier month',
@@ -1516,19 +1712,42 @@ export function planAssistantQuestion(
   if (!q || q.length > 1000) return clarification('Ask one short question about your recorded spending, income, or payments.');
   if (/^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return { tool: 'help' };
   const prior = previousRequest && 'period' in previousRequest ? previousRequest : undefined;
-  if (/^show (?:me )?(?:(?:those|the|matching) )?(?:transactions|them|those)[?!.]?$/.test(q)) {
+  if (/^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/.test(q)) {
     return prior ?? clarification('Ask about a spending or income period first, then show its matching transactions.');
   }
   const relativePreviousFollowUp = !!prior && /^(?:(?:what about|how about|and)\s+(?:the\s+)?)?(?:last|previous)\s+month[?!.]?$|^(?:and\s+)?before that[?!.]?$|^what about (?:the )?month before[?!.]?$|^how much (?:last|previous) month[?!.]?$/.test(q);
-  const relativePeriodOverride = relativePreviousFollowUp && prior ? previousPeriod(prior.period) : null;
-  const planningQuestion = relativePreviousFollowUp
+  const sameMonthLastYearFollowUp = !!prior && /^(?:(?:what about|how about|and)\s+)?(?:the\s+)?same month last year[?!.]?$/.test(q);
+  const monthsAgoFollowUpMatch = prior ? q.match(/^(?:(?:what about|how about|and)\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s+months?\s+ago[?!.]?$/) : null;
+  const monthsAgoFollowUp = !!monthsAgoFollowUpMatch;
+  const sameMonthLastYearOverride: Period | null = sameMonthLastYearFollowUp && prior
+    ? prior.period.mode === 'month'
+      ? { mode: 'month', key: `${Number(prior.period.key.slice(0, 4)) - 1}${prior.period.key.slice(4)}` }
+      : prior.period.mode === 'range'
+        ? { mode: 'range', from: `${Number(prior.period.from.slice(0, 4)) - 1}${prior.period.from.slice(4)}`,
+          to: `${Number(prior.period.to.slice(0, 4)) - 1}${prior.period.to.slice(4)}` }
+        : prior.period.mode === 'year' ? { mode: 'year', year: prior.period.year - 1 } : null
+    : null;
+  let monthsAgoOverride: Period | null = null;
+  if (monthsAgoFollowUpMatch) {
+    const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+      seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+    const count = words[monthsAgoFollowUpMatch[1]] ?? Number(monthsAgoFollowUpMatch[1]);
+    if (!Number.isInteger(count) || count < 1 || count > 24) return clarification('Use between 1 and 24 months ago.');
+    let cursor: Period = currentMonthPeriod(now);
+    for (let index = 0; index < count; index++) cursor = previousPeriod(cursor) ?? cursor;
+    monthsAgoOverride = cursor;
+  }
+  const relativePeriodOverride = relativePreviousFollowUp && prior ? previousPeriod(prior.period)
+    : sameMonthLastYearOverride ?? monthsAgoOverride;
+  const planningQuestion = relativePreviousFollowUp || sameMonthLastYearFollowUp || monthsAgoFollowUp
     ? (/^how much\b/.test(q) ? 'how much' : 'what about')
     : q;
   const contextualComparison = !!prior && /^(?:why\s*[?!.]?$|why did (?:it|that|this)\b|why (?:is|was) (?:it|that|this)\b|what changed\b|did (?:it|that|this)\b|was (?:it|that|this)\b|is (?:it|that|this)\b|how (?:does|did) (?:it|that|this) compare\b)/.test(q);
   const scopeOnlyAmount = new RegExp(`^how much(?:\\s+(?:today|yesterday|this month|current month|last month|previous month|this year|current year|last year|previous year|all time|ever|past week|last week|${MONTH_PATTERN}(?:\\s+\\d{4})?|(?:last|past)\\s+\\d+\\s+days?))?\\s*[?!.]?$`).test(q);
-  const scopeOnlyFollowUp = !!prior && (scopeOnlyAmount || /^same(?: thing)?(?: for)?\b/.test(q));
+  const dateShorthandFollowUp = !!prior && /^(?:mtd|ytd|this mo|last mo|prev mo|this wk|last wk|past wk)[?!.]?$/.test(q);
+  const scopeOnlyFollowUp = !!prior && (scopeOnlyAmount || dateShorthandFollowUp || /^same(?: thing)?(?: for)?\b/.test(q));
   const followUp = /^(?:and\b|what about\b|how about\b|compare\b|top\b|show\b|exclude\b|excluding\b|without\b|ignore\b)/.test(q)
-    || contextualComparison || scopeOnlyFollowUp || relativePreviousFollowUp;
+    || contextualComparison || scopeOnlyFollowUp || relativePreviousFollowUp || sameMonthLastYearFollowUp || monthsAgoFollowUp;
   const filters = followUp && prior ? copyFilters(prior) : {};
   const quotedNames: string[] = [];
   const protectedQuestion = planningQuestion.replace(/"(?:[^"\\]|\\.)*"/g, (name) => { quotedNames.push(name); return `quotedmerchanttoken${quotedNames.length - 1}end`; });
@@ -1539,28 +1758,34 @@ export function planAssistantQuestion(
   const clauses = rawClauses.map((clause, index) => extractNamedClause(state, clause, question, index > 0));
   const failed = clauses.find((clause) => clause.error);
   if (failed?.error) return failed.error;
+  for (const clause of clauses) clause.rest = normalizeAssistantSemanticLanguage(clause.rest);
   q = clauses.map((clause) => clause.rest).join(' ');
   if (/\b(?:afford|should i|can i|budget left|safe to spend|balance|save|saving|recommend|refund|over\s+\d|under\s+\d|above\s+\d|below\s+\d)\b/.test(q)) {
     return clarification('I can explain recorded spending and income, but cannot reliably answer that condition. Try a spending total or an income comparison.');
   }
   const limit = requestedLimit(q);
   if (limit !== undefined && (limit < 1 || limit > 10)) return clarification('Choose between 1 and 10 results.');
-  const intentText = clauses[0].rest.replace(/\b(?:since|before|after)\s+(?:my\s+)?(?:last\s+)?(?:salary|payday|paycheck|pay cheque)(?:\s+(?:came in|arrived))?\b/g, ' ');
-  const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn)\b/.test(intentText);
+  const intentText = clauses[0].rest.replace(/\b(?:since|before|after)\s+(?:my\s+)?(?:last\s+)?(?:salary|payday|paycheck|pay cheque|pay)(?:\s+(?:came in|arrived))?\b/g, ' ');
+  const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn|wage|wages|paycheck|paychecks)\b/.test(intentText)
+    || /\b(?:got paid|get paid|pay came in)\b/.test(intentText);
   const net = /income minus spending|spen[dt] more than i earned|more than i earn|what.*net|net spending|net cashflow/.test(intentText);
   if (isIncomeQuestion && !net && /\b(?:spend|spent|spending|expenses?)\b/.test(intentText)) return clarification('Ask for income and spending separately, or ask for income minus spending.');
   const recurring = /\b(?:recurring|subscription|subscriptions|renewal|renewals)\b/.test(q) && /\b(?:change|changed|changes|increase|increased|decrease|decreased|compare)\b/.test(q);
   const unusual = /\b(?:unusual|unusually|outlier|outliers)\b/.test(q);
-  const duplicates = /\b(?:duplicate|duplicates|duplicated|charged twice|double charged)\b/.test(q);
-  const moneyReview = /\b(?:anything unusual|anything weird|anything odd|anything suspicious|anything i should review|what should i review|review my spending|review my transactions)\b/.test(q);
+  const duplicates = /\b(?:duplicate|duplicates|duplicated|charged twice|charged me twice|double charged|double charge|double charges|same charge twice|same payment twice)\b/.test(q);
+  const moneyReview = /\b(?:anything unusual|anything weird|anything odd|anything strange|anything suspicious|anything off|anything look wrong|anything i should review|anything i should worry about|what should i review|review my spending|review my transactions)\b/.test(q);
   const coverageQuestion = /\b(?:coverage|data gaps|missing imports|import status|import history|recorded history)\b/.test(q);
   const highestMonthQuestion = /\b(?:highest|biggest|most expensive)\s+(?:recorded\s+)?(?:spending\s+)?month\b|\bhighest monthly\b/.test(q);
   const typicalMonthQuestion = /\b(?:normal|typical|usual)\b.*\b(?:month|monthly|spend|spending)\b|\bmonthly median\b/.test(q);
-  const closestMonthQuestion = /\bwhen did i last spend (?:about )?this much\b|\blast time i spent (?:about )?this much\b|\bclosest earlier month\b/.test(q);
+  const lastSimilarMonthQuestion = /\bwhen did i last spend (?:about )?this much\b|\bwhen was the last time i spent (?:about )?this much\b|\blast time i spent (?:about )?this much\b/.test(q);
+  const closestMonthQuestion = /\bclosest earlier month\b|\bwhich earlier month was closest to this\b/.test(q);
   const accountRankingQuestion = /\b(?:which|what)\s+(?:bank\s+)?(?:account|card)\b.*\b(?:most|highest)\b|\btop\s+(?:accounts?|cards?)\b/.test(q);
   const comparison = !net && !recurring && (contextualComparison || /\b(?:compare|more than|less than|higher|lower|increase|decrease|change|changed|difference|different|vs|versus)\b|why.*spend/.test(q));
-  const upcoming = /\b(?:due|upcoming|bills?)\b/.test(q) && !/\b(?:paid|spent|did|last|previous)\b/.test(q);
-  const subscriptions = !recurring && /\b(?:subscriptions?|recurring charges?|renewals?)\b/.test(q) && !/\b(?:paid|spent|did|last|previous|change|changed|increase|decrease|compare)\b/.test(q);
+  const conversationalUpcoming = /\b(?:what do i owe|anything due|payments? coming up|bills? coming up|what is coming up|stuff due)\b/.test(q);
+  const upcoming = (conversationalUpcoming || /\b(?:due|upcoming|bills?)\b/.test(q)) && !/\b(?:paid|spent|did|last|previous)\b/.test(q);
+  const subscriptions = !recurring && (/\b(?:subscriptions?|recurring charges?|recurring payments?|renewals?)\b/.test(q)
+    || /\b(?:what am i subscribed to|what do i subscribe to)\b/.test(q))
+    && !/\b(?:paid|spent|did|last|previous|change|changed|increase|decrease|compare)\b/.test(q);
   if (upcoming || subscriptions) {
     if (/\b(?:this week|next week|next month)\b/.test(q)) return clarification('Use a specific upcoming window, such as payments due within the next 7 days.');
     const windowless = q.replace(/\b(?:next|within)\s+\d+\s+days?\b/g, ' ');
@@ -1573,10 +1798,10 @@ export function planAssistantQuestion(
     const withinDays = match ? Number(match[1]) : 30;
     if (withinDays < 1 || withinDays > 90) return clarification('Use an upcoming window between 1 and 90 days.');
     if (subscriptions) {
-      const remaining = q.replace(/\b(?:what|which|are|is|my|the|active|biggest|all|subscriptions|subscription|recurring|charges|charge|renewal|renewals|monthly|total|cost|how|much|do|i|pay|for|have)\b/g, '').replace(/[?!.\s]/g, '');
+      const remaining = q.replace(/\b(?:what|which|are|is|am|my|the|active|biggest|all|any|show|list|please|subscriptions|subscription|subscribed|subscribe|recurring|payments|payment|charges|charge|renewal|renewals|monthly|total|cost|how|much|do|i|pay|for|have|to)\b/g, '').replace(/[?!.\s]/g, '');
       return remaining ? clarification('I can show all active subscription estimates. Try asking which recurring charges changed for a historical analysis.') : { tool: 'subscriptions' };
     }
-    const remaining = q.replace(/\b(?:what|which|when|are|is|my|the|all|payments|payment|bills|bill|due|upcoming|soon|in|within|next|days|day|how|much|do|i|have|to|pay)\b/g, '').replace(/[?!.\s\d]/g, '');
+    const remaining = q.replace(/\b(?:what|which|when|are|is|my|the|all|anything|stuff|payments|payment|bills|bill|due|upcoming|soon|coming|up|owe|in|within|next|days|day|how|much|do|i|have|to|pay)\b/g, '').replace(/[?!.\s\d]/g, '');
     return remaining ? clarification('I can show all upcoming payments within a number of days. Filtering those estimates by service is not available yet.') : { tool: 'upcoming-payments', withinDays };
   }
   if (/\bbills?\b/.test(q)) return clarification('I can show upcoming bills. For past spending, name a merchant or category and a date range.');
@@ -1606,18 +1831,15 @@ export function planAssistantQuestion(
     const phrase = merchantPhrase?.[2]?.trim().replace(/^(?:and|or)\s+/, '').trim();
     if (phrase && !/^(?:and|or)$/.test(phrase) && !/^(?:change|changed|increase|decrease|with|using|on|in|for|compared|versus|vs)\b/.test(phrase)) {
       if (/\b(?:account|card)\b/.test(phrase)) return accountClarification(state);
-      const resolved = resolveMerchant(phrase, state.transactions);
-      if (!resolved.merchant) {
-        const candidates = resolved.candidates ?? [];
-        // “on dining” is category syntax, while “on Talbat” is a merchant typo.
-        // Only claim the former as a merchant when ledger identity evidence exists.
-        const semanticOnSyntax = preposition === 'on' && !candidates.length &&
-          (categoriesFromQuestion(phrase).length > 0 || !!narrowConceptParent(phrase) || /^track\b/.test(phrase));
-        if (!semanticOnSyntax) {
+      const semanticOnSyntax = preposition === 'on' &&
+        (categoriesFromQuestion(phrase).length > 0 || !!narrowConceptParent(phrase) || /^track\b/.test(phrase));
+      if (!semanticOnSyntax) {
+        const resolved = resolveMerchant(phrase, state.transactions);
+        if (!resolved.merchant) {
+          const candidates = resolved.candidates ?? [];
           return clarification(candidates.length ? `Several recorded merchants match “${phrase}”. Choose the exact merchant.` : `I could not find a recorded merchant matching “${phrase}”. Check the name in Transactions.`,
             candidates.slice(0, 4).map((candidate) => question.replace(new RegExp(escapeRegExp(phrase), 'i'), JSON.stringify(candidate))));
         }
-      } else {
         clause.merchants.push(resolved.merchant); clause.rest = clause.rest.replace(phrase, ' ');
       }
     }
@@ -1672,8 +1894,10 @@ export function planAssistantQuestion(
   baselineText = baselineText.replace(/\s+/g, ' ');
   const cleanedHighestMonthQuestion = highestMonthQuestion || /\b(?:highest|biggest|most expensive)\s+(?:recorded\s+)?(?:spending\s+)?month\b|\bhighest monthly\b/.test(baselineText);
   const cleanedTypicalMonthQuestion = typicalMonthQuestion || /\b(?:normal|typical|usual)\b.*\b(?:month|monthly|spend|spending)\b|\bmonthly median\b/.test(baselineText);
-  if (cleanedHighestMonthQuestion || cleanedTypicalMonthQuestion || closestMonthQuestion) {
-    const baseline = cleanedHighestMonthQuestion ? 'highest-month' : cleanedTypicalMonthQuestion ? 'typical-month' : 'closest-month';
+  if (cleanedHighestMonthQuestion || cleanedTypicalMonthQuestion || closestMonthQuestion || lastSimilarMonthQuestion) {
+    const baseline = cleanedHighestMonthQuestion ? 'highest-month'
+      : cleanedTypicalMonthQuestion ? 'typical-month'
+        : lastSimilarMonthQuestion ? 'last-similar-month' : 'closest-month';
     return { tool: 'historical-baseline', period, ...filters, baseline };
   }
   if (comparison && filters.accountIds?.length === 2 && !includedMerchants(filters).length && !includedCategories(filters).length) {
@@ -1700,11 +1924,11 @@ export function planAssistantQuestion(
     /\b(?:in|during|before|after|since|between|with|using)\s+(?!(?:the )?previous period\b)\S|\b(?:usd|eur|gbp|aed|sar|jpy|kwd)\b|[$€£]/.test(q) ||
     (!hasCategoryFilter(filters) && /\bon\s+(?!track\b)\S/.test(q)) ||
     (includedMerchants(filters).length > 1 && /\b(?:vs|versus)\b/.test(q))) {
-    return clarification('I could not preserve every condition in that question. Use exact merchants, categories, accounts, and date ranges.');
+    return clarification('I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date.');
   }
   const scopeError = invalidFilters(state, filters);
   if (scopeError) return clarification(scopeError);
-  if (hasUnsupportedRemainder(q)) return clarification('I could not identify every condition in that question. Ask about recorded spending or income with named filters and a date range.');
+  if (hasUnsupportedRemainder(q)) return clarification('I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.');
   const scoped = { period, ...filters };
   const multipleDimensions = includedCategories(filters).length > 1 || includedMerchants(filters).length > 1 || (filters.accountIds?.length ?? 0) > 1;
   if (comparison && multipleDimensions && !comparisonPeriod && parsed.periods.length < 2 && !/\b(?:why|change|changed|previous period|same dates)\b/.test(q)) return clarification('I can compare the combined spending for these filters over time. Name two periods or ask why their combined spending changed.');
@@ -1722,7 +1946,7 @@ export function planAssistantQuestion(
     if (isIncomeQuestion || net) return clarification('Charge patterns are available for recorded spending. Ask for income totals separately.');
     return { tool: recurring ? 'recurring-changes' : unusual ? 'unusual-charges' : 'possible-duplicates', ...scoped };
   }
-  if (followUp && prior && (exclusionOnly || /^(?:(?:and\s+)?(?:what about|how about)|(?:and\s+)?how much|same(?: thing)?(?: for)?)\s*[?!.]?$/.test(q))) {
+  if (followUp && prior && (exclusionOnly || dateShorthandFollowUp || /^(?:(?:and\s+)?(?:what about|how about)|(?:and\s+)?how much|same(?: thing)?(?: for)?)\s*[?!.]?$/.test(q))) {
     const inherited = { ...prior, ...filters, period };
     // Replacing a plural dimension must remove the prior singular form, too.
     for (const field of ['merchant', 'merchants', 'category', 'categories'] as const) if (!(field in filters)) delete inherited[field];
@@ -1743,6 +1967,7 @@ export function planAssistantQuestion(
     return { tool: 'cash-outflow', ...scoped };
   }
   if (/forecast|on track|end of (the )?month|projected/.test(q)) return { tool: 'month-forecast', ...scoped };
+  if (/\b(?:where did my money go|where is my money going|what did i spend (?:the )?most on)\b/.test(q)) return { tool: 'top-categories', ...scoped, ...(limit ? { limit } : {}) };
   if (/biggest purchase|largest purchase|largest transaction|most expensive purchase|top(?:\s+\d+)? (?:purchases?|transactions?)/.test(q)) return { tool: 'largest-purchases', ...scoped, limit: limit ?? 5 };
   if (/per day|daily average|average daily|spend.*daily|spend.*each day/.test(q)) return { tool: 'daily-average', ...scoped };
   if (net) return { tool: 'net-income-spending', ...scoped };
@@ -1771,7 +1996,7 @@ export function runWafraAssistant(state: AppState, question: string, now = new D
   const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
     ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
   const answer = executeAssistantTool(state, request, now);
-  return { request, answer: answer.evidence?.length && /^show (?:me )?(?:(?:those|the|matching) )?(?:transactions|them|those)[?!.]?$/i.test(question.trim()) ? { ...answer, showEvidence: true } : answer };
+  return { request, answer: answer.evidence?.length && /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ? { ...answer, showEvidence: true } : answer };
 }
 
 /**
@@ -1801,6 +2026,8 @@ export function suggestedAssistantQuestions(state: AppState, period = currentMon
 /** Every suggested continuation retains the active scope and supported intent. */
 export function assistantFollowUpQuestions(request?: AssistantToolRequest): string[] {
   if (!request || request.tool === 'help') return ['How much did I spend?', 'What is my recorded history?'];
+  if (request.tool === 'subscriptions') return ['Which recurring charges changed?', 'What payments are due soon?', 'Anything unusual?'];
+  if (request.tool === 'upcoming-payments') return ['What subscriptions do I have?', 'Anything unusual?', 'How much did I spend?'];
   if (!('period' in request)) return ['What is due in the next 7 days?', 'How much did I spend?'];
   const previous = previousScopeQuestion(request.period) ?? 'What about the previous period?';
   if (request.tool === 'data-coverage') return [previous, 'Show my largest purchases'];

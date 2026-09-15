@@ -78,8 +78,11 @@ export const Colors = {
 };
 
 export const DataViz = {
-  light: { ramp: ['#1F6B52', '#488269', '#779E89', '#A7BFAC', '#C8D8C9'], neutral: '#E3DED2', axis: '#6B6559', expenseSoft: '#B4503C' },
-  dark: { ramp: ['#57B894', '#479A7B', '#377D63', '#29634D', '#1E4839'], neutral: '#3B362E', axis: '#9B948A', expenseSoft: '#E0836B' },
+  light: { ramp: ['#1F6B52', '#488269', '#779E89', '#A7BFAC', '#C8D8C9'], neutral: '#E3DED2', axis: '#6B6559', expenseSoft: '#B4503C',
+    /** Multi-hue palette for a categorical picture (a pie or a stacked area) where the ramp's single-hue gradient would tell the reader "same series, different age" instead of "different categories". Kept muted and desaturated so it still reads as one Ledger & Light system, not a rainbow. */
+    categorical: ['#1F6B52', '#B4503C', '#A07B2A', '#3B7A8C', '#7A4E76'] },
+  dark: { ramp: ['#57B894', '#479A7B', '#377D63', '#29634D', '#1E4839'], neutral: '#3B362E', axis: '#9B948A', expenseSoft: '#E0836B',
+    categorical: ['#57B894', '#E0836B', '#D9AE62', '#7EBACE', '#C79ABE'] },
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;

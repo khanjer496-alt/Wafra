@@ -45,6 +45,7 @@ test('valid combined filters and income categories survive the boundary', () => 
     { tool: 'compare-periods', period, category: 'groceries', comparisonPeriod: { mode: 'month', key: '2026-08' } },
     { tool: 'cash-outflow', period, accountIds: ['checking'] },
     { tool: 'historical-baseline', period, baseline: 'typical-month' },
+    { tool: 'historical-baseline', period, baseline: 'last-similar-month' },
     { tool: 'top-accounts', period, accountKind: 'card', category: 'dining', metric: 'count', limit: 3 },
   ]) assert.equal(boundary.isAssistantToolRequest(request), true, JSON.stringify(request));
 });

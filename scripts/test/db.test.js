@@ -2859,10 +2859,12 @@ asyncSuites.push((async () => {
 
 {
   let calls = 0;
+  let normalizeCalls = 0;
+  let guessCalls = 0;
   const parser = {
     PARSER_VERSION: 999,
-    normalizeServiceName: () => null,
-    guessCategory: () => 'other',
+    normalizeServiceName: () => { normalizeCalls++; return null; },
+    guessCategory: () => { guessCalls++; return 'other'; },
     parseSms: () => { calls++; return null; },
   };
   const h = loadHydrationExports({ '@/lib/sms-parser': parser });
@@ -2873,9 +2875,13 @@ asyncSuites.push((async () => {
     transactions: [tx('retained-raw', { raw: 'temporarily unsupported source' })],
   }, options);
   ok('inbox parserVersion cannot bypass the first saved-SMS migration', calls === 1);
+  const firstGuessCalls = guessCalls;
   const before = JSON.stringify(first.transactions);
   const repeat = h.migratePersistedState(JSON.parse(JSON.stringify(first)), options);
   ok('unchanged saved SMS do not re-enter the parser on the next launch', calls === 1);
+  ok('a current hydration receipt skips the full row-local transform pass on the next launch',
+    firstGuessCalls > 0 && guessCalls === firstGuessCalls,
+    `first=${firstGuessCalls} repeat=${guessCalls}`);
   ok('cached startup retains exact transaction data and independent inbox receipt',
     JSON.stringify(repeat.transactions) === before && repeat.parserVersion === 999);
   parser.PARSER_VERSION++;
@@ -2895,8 +2901,10 @@ asyncSuites.push((async () => {
   ok('changed parser market invalidates saved-SMS parsing', calls === 3);
   h.migratePersistedState(upgraded);
   ok('ordinary migration callers still force saved-SMS repair', calls === 4);
+  const beforeRestoreNormalize = normalizeCalls;
   const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
-  ok('restored backups cannot use a local startup receipt to bypass repair', restored && calls === 5);
+  ok('restored backups cannot use a local startup receipt to bypass repair',
+    restored && calls === 5 && normalizeCalls > beforeRestoreNormalize);
   // Upgrading to the grammar-only receipt must not cost a re-read. A stored
   // revision-1 receipt naming this same parser version and market already
   // proves the ledger was healed under this grammar, so it is accepted and

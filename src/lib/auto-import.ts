@@ -19,6 +19,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
 import {
   nonPostingReason,
+  PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
@@ -461,9 +462,25 @@ export type SourceFreeRefusedAlertDecision =
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
 
+// An unresolved encrypted push row remains in the native queue on purpose so
+// a future parser can recover it. Retrying the same parser miss on every tab
+// foreground is different: it burns CPU without adding evidence. Keep only the
+// opaque native id for this JS process, and clear the set whenever the parser
+// context changes. A process restart or app/parser update naturally retries.
+const unresolvedNotificationIdsThisSession = new Set<string>();
+let unresolvedNotificationSessionKey = '';
+
 const isPromotionalBankPush = (source: string): boolean =>
   /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(source) &&
   !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(source);
+
+// A regional transaction parser can legitimately refuse a non-posting bank
+// fact that still belongs in Review (balance/limit/statement/bill). Those
+// bounded shapes keep the universal informational fallback. A bare amount plus
+// status/reference prose has no additional market/role evidence and is the
+// expensive repeated miss we leave encrypted for a future parser instead.
+const KNOWN_BANK_UNIVERSAL_INFO_HINT =
+  /\b(?:available|current|remaining)\s+(?:balance|limit)|\b(?:credit\s+limit|statement|minimum\s+(?:amount\s+)?due|total\s+(?:amount\s+)?due|amount\s+due|bill\s+due|payment\s+due)\b|رصيد|حد\s+ائتمان|كشف|مستحق/iu;
 
 /**
  * A parsed notification from an unconfirmed Android package is strong enough
@@ -635,6 +652,8 @@ export function inspectSourceFreeRefusedAlert(input: {
   channel: CaptureChannel;
   session: Pick<LaunchAlertSession, 'inspect'>;
   existingInspection?: UniversalAlertReview | null;
+  /** Known launch-bank package identity makes worldwide fallback unnecessary. */
+  skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
@@ -674,6 +693,12 @@ export function inspectSourceFreeRefusedAlert(input: {
       })
     : null);
   if (!reviewPrepared) {
+    // A curated UAE/Saudi Android package already established the market. If
+    // the mature regional parser and its launch-review fallback both refused
+    // the alert, running the eight-language generic parser cannot improve
+    // issuer routing and can be very expensive on rich OEM notification text.
+    // Leave the encrypted row unresolved for a future parser instead.
+    if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
     const event = inspectGenericBankEventForReview(input.source, input.sender);
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
@@ -806,6 +831,7 @@ export async function scanInbox(
       sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
     },
     parsedFallback?: SourceFreeReviewCandidate | null,
+    skipUniversalFallback = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -814,6 +840,7 @@ export async function scanInbox(
       channel,
       session: launchSession,
       existingInspection,
+      skipUniversalFallback,
     });
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
@@ -1090,7 +1117,19 @@ export async function scanInbox(
       const notificationLimit = options.maxNotificationRows === undefined
         ? Number.POSITIVE_INFINITY
         : Math.max(1, Math.floor(options.maxNotificationRows));
-      const captured = retained.slice(0, notificationLimit);
+      const learnedPackages = new Set(options.learnedNotificationPackages ?? []);
+      const notificationSessionKey = [
+        PARSER_VERSION,
+        pinnedLedgerCurrencyCode() ?? 'un-pinned',
+        [...learnedPackages].sort().join(','),
+      ].join('|');
+      if (notificationSessionKey !== unresolvedNotificationSessionKey) {
+        unresolvedNotificationSessionKey = notificationSessionKey;
+        unresolvedNotificationIdsThisSession.clear();
+      }
+      const captured = retained
+        .filter((row) => !unresolvedNotificationIdsThisSession.has(row.id))
+        .slice(0, notificationLimit);
       notificationImportStats = {
         attemptedAt: Date.now(),
         captured: captured.length,
@@ -1107,18 +1146,20 @@ export async function scanInbox(
         acknowledgementPlanned: 0,
         acknowledged: 0,
       };
-      const learnedPackages = new Set(options.learnedNotificationPackages ?? []);
       const notificationYield = createParseYieldState();
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
+        const knownLaunchBank = trustedMarket === 'AE' || trustedMarket === 'SA';
         const nativeSourceClass = n.sourceClass;
         if (nativeSourceClass !== 'trusted-bank' && nativeSourceClass !== 'play-finance' &&
             nativeSourceClass !== 'financial-candidate') continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
+        const skipKnownLaunchUniversal =
+          knownLaunchBank && !KNOWN_BANK_UNIVERSAL_INFO_HINT.test(source);
         // Unknown Play apps enter native capture only after financial-context and
         // money gates. Before forcing a first-transaction Review, also verify the
         // INSTALLED app's own Android label. A recognized bank alias or explicit
@@ -1145,10 +1186,9 @@ export async function scanInbox(
           }
           continue;
         }
-        const worldwide = inspectWorldwide(
-          source,
-          sender,
-        );
+        // Curated UAE/Saudi package identity already establishes the launch
+        // market. Do not pre-run worldwide routing before the regional parser.
+        const worldwide = knownLaunchBank ? null : inspectWorldwide(source, sender);
         // Every admitted financial candidate reaches the parser. UAE/Saudi keep
         // their mature regional grammar as a fast path. A curated, locally
         // verified Play-finance, or previously confirmed package from any other
@@ -1179,7 +1219,8 @@ export async function scanInbox(
           : null;
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(
-              source, n.ts, sender, 'push', worldwide, undefined, pushSource, parsedCandidateFallback,
+              source, n.ts, sender, 'push', worldwide, undefined, pushSource,
+              parsedCandidateFallback, skipKnownLaunchUniversal,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1203,6 +1244,8 @@ export async function scanInbox(
             worldwide,
             undefined,
             pushSource,
+            undefined,
+            skipKnownLaunchUniversal,
           );
         }
         if (refusal?.kind === 'review') {
@@ -1222,6 +1265,7 @@ export async function scanInbox(
           else notificationImportStats.unresolvedFinancialCandidate += 1;
           if (!p) notificationImportStats.unresolvedParserMiss += 1;
           else notificationImportStats.unresolvedReviewRefusal += 1;
+          unresolvedNotificationIdsThisSession.add(n.id);
         }
         // Claim the row only when Wafra has a durable/safe outcome. An
         // unresolved money-bearing bank notification used to be ACKed here even

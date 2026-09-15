@@ -74,13 +74,31 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
         keyboardShouldPersistTaps="handled" initialNumToRender={12} maxToRenderPerBatch={10} windowSize={7}
         removeClippedSubviews={Platform.OS === 'android'}
         ListHeaderComponent={<View style={styles.header}>
-          <View style={styles.identity}><MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} />
-            <ThemedText type="heading" style={styles.name}>{merchant || pickLabel}</ThemedText></View>
-          <View testID="merchant-period" style={styles.period}><Button label={periodLabel(period)} icon="calendar" variant="ghost" wrapLabel onPress={() => setPeriodOpen(true)} /></View>
-          {periodRange(period) ? <ThemedText type="meta" themeColor="textSecondary">{periodRange(period)}</ThemedText> : null}
-          <View style={styles.hero} testID={income ? 'merchant-total-received' : 'merchant-total-spent'}>
-            <ThemedText type="small" themeColor="textSecondary">{income ? w.totalReceived : w.total}</ThemedText>
-            <Money fils={primaryTotal} type="display" color={income ? theme.income : undefined} />
+          <View style={[styles.hero, { borderColor: theme.cardBorder }]}>
+            <View style={[styles.identity, large && styles.stack]}>
+              <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={52} />
+              <View style={styles.identityCopy}>
+                <ThemedText type="heading" numberOfLines={2}>{merchant || pickLabel}</ThemedText>
+                {periodRange(period) ? <ThemedText type="meta" themeColor="textSecondary">{periodRange(period)}</ThemedText> : null}
+              </View>
+              <View testID="merchant-period" style={styles.periodSlot}>
+                <Button label={periodLabel(period)} icon="calendar" variant="ghost" wrapLabel onPress={() => setPeriodOpen(true)} />
+              </View>
+            </View>
+            <View style={styles.heroAmount} testID={income ? 'merchant-total-received' : 'merchant-total-spent'}>
+              <ThemedText type="micro" themeColor="textSecondary">{income ? w.totalReceived : w.total}</ThemedText>
+              <Money fils={primaryTotal} type="amount" color={income ? theme.income : undefined} />
+            </View>
+          </View>
+          <View style={[styles.tileRow, large && styles.stack]}>
+            <View style={[styles.tile, { borderColor: theme.cardBorder }]}>
+              <ThemedText type="micro" themeColor="textSecondary">{income ? w.incomeCount : w.purchases}</ThemedText>
+              <ThemedText type="title" tabular testID={income ? 'merchant-income-count' : 'merchant-purchase-count'}>{primaryRows.length}</ThemedText>
+            </View>
+            {average !== null && <View style={[styles.tile, { borderColor: theme.cardBorder }]}>
+              <ThemedText type="micro" themeColor="textSecondary">{income ? w.averageReceived : w.average}{approximate ? ' ≈' : ''}</ThemedText>
+              <Money fils={average} type="subtitle" />
+            </View>}
           </View>
           {merchant && view !== 'all' && <View testID="merchant-ask-wafra" style={styles.assistantAction}>
             <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark"
@@ -88,24 +106,20 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
                 ? assistantCopy.incomeQuestion(merchant)
                 : assistantCopy.merchantChangedQuestion(merchant) } })} />
           </View>}
-          <View style={[styles.facts, { borderColor: theme.cardBorder }, large && styles.stack]}>
-            <View style={styles.fact}><ThemedText type="meta" themeColor="textSecondary">{income ? w.incomeCount : w.purchases}</ThemedText>
-              <ThemedText type="heading" tabular testID={income ? 'merchant-income-count' : 'merchant-purchase-count'}>{primaryRows.length}</ThemedText></View>
-            {average !== null && <View style={styles.fact}>
-              <ThemedText type="meta" themeColor="textSecondary">{income ? w.averageReceived : w.average}{approximate ? ' ≈' : ''}</ThemedText>
-              <Money fils={average} type="smallBold" /></View>}
-          </View>
-          {!income && summary.received.length > 0 && <View style={styles.received} testID="merchant-money-received">
-            <ThemedText type="smallBold">{w.received}</ThemedText><Money fils={summary.receivedFils} type="smallBold" color={theme.income} />
+          {!income && summary.received.length > 0 && <View style={[styles.received, { borderColor: theme.cardBorder }]} testID="merchant-money-received">
+            <View style={styles.receivedRow}>
+              <ThemedText type="smallBold">{w.received}</ThemedText>
+              <Money fils={summary.receivedFils} type="smallBold" color={theme.income} />
+            </View>
             <ThemedText type="meta" themeColor="textSecondary">{w.receivedNote}</ThemedText>
           </View>}
-          <ThemedText type="meta" themeColor="textSecondary">{income ? w.incomeExclusions : w.exclusions}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary" style={styles.exclusions}>{income ? w.incomeExclusions : w.exclusions}</ThemedText>
           <SegmentedControl value={view} onChange={setView} label={activityTitle} segments={[
             income ? { value: 'received', label: w.income } : { value: 'spending', label: w.spending }, { value: 'all', label: w.allActivity },
           ]} />
           <View style={styles.recentHeading}>
-          <ThemedText type="smallBold">{w.recent}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">{data.length} / {matches.length}</ThemedText>
+            <ThemedText type="smallBold">{w.recent}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">{data.length} / {matches.length}</ThemedText>
           </View>
         </View>}
         ListEmptyComponent={<View style={styles.empty}><ThemedText type="smallBold">{view === 'received' ? w.incomeEmpty : view === 'spending' ? w.empty : w.emptyActivity}</ThemedText>
@@ -129,12 +143,20 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 const styles = StyleSheet.create({
   assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
   listContent: { gap: 0 },
-  header: { gap: 12, paddingBottom: 12 }, identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  period: { alignSelf: 'flex-start', maxWidth: '100%' },
+  header: { gap: 14, paddingBottom: 12 },
+  hero: { gap: 14, paddingVertical: 16, paddingHorizontal: 16, borderWidth: 1, borderRadius: 14 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  identityCopy: { flex: 1, minWidth: 120, gap: 2 },
+  periodSlot: { alignSelf: 'center', maxWidth: '100%' },
+  heroAmount: { gap: 4 },
+  tileRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  tile: { flex: 1, minWidth: 140, paddingVertical: 12, paddingHorizontal: 14, gap: 6, borderWidth: 1, borderRadius: 12 },
   recentHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  name: { flex: 1, minWidth: 0 }, hero: { gap: 6, paddingVertical: 8 },
-  facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  fact: { flex: 1, minWidth: 110, gap: 6 }, stack: { flexDirection: 'column' },
-  received: { gap: 8 }, transaction: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  empty: { gap: 16, paddingVertical: 24 }, footer: { gap: 8, paddingVertical: 24 },
+  stack: { flexDirection: 'column', alignItems: 'flex-start' },
+  received: { gap: 6, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderRadius: 12 },
+  receivedRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  exclusions: { paddingTop: 2 },
+  transaction: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  empty: { gap: 16, paddingVertical: 24 },
+  footer: { gap: 8, paddingVertical: 24 },
 });

@@ -48,6 +48,21 @@ const button = (page, name) => page.getByRole('button', { name, exact: true });
 const click = async (page, name, role = 'button') => (await visible(page.getByRole(role, { name, exact: true }))).click();
 const field = (page, name) => page.getByRole('textbox', { name, exact: true });
 const fill = async (page, name, value) => (await visible(field(page, name))).fill(value);
+
+/**
+ * Choose an account through the compact picker sheet.
+ *
+ * The Account field used to render every saved account as its own inline
+ * radio chip, so `click(page, name, 'radio')` matched the on-screen row
+ * directly. It is now a compact trigger that opens a bottom sheet of radios,
+ * so the click must first tap the trigger and only then match the radio by
+ * name. `exact: false` handles the case where `accountDisplayName` appends
+ * "·NNNN" to accounts that carry a `last4`, so the fixture name is enough.
+ */
+const chooseAccount = async (page, name) => {
+  await (await visible(page.getByTestId('account-picker-trigger'))).click();
+  await (await visible(page.getByRole('radio', { name, exact: false }))).click();
+};
 // TextField's visible web label is authoritative through aria-labelledby;
 // its longer native accessibilityLabel does not override that browser name.
 const DATE_LABEL = 'When';
@@ -129,8 +144,8 @@ try {
     await visible(page.getByText('AED 1000.00', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'Cedar Cafe');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-09-01');
-    await visible(page.getByRole('radio', { name: 'QA Review Card', exact: true }));
-    await click(page, 'QA Review Card', 'radio');
+    await visible(page.getByRole('button', { name: /QA Review Card/, exact: false }));
+    await chooseAccount(page, 'QA Review Card');
     await click(page, 'Dining');
     await fill(page, TITLE_LABEL, 'Cedar Cafe reviewed');
     await fill(page, DATE_LABEL, '2026-09-02');
@@ -172,7 +187,7 @@ try {
   await scenario('unknown direction and posting status each need confirmation', 'unresolved', async (page) => {
     await openReview(page);
     await fill(page, TITLE_LABEL, 'Confirmed account activity');
-    await click(page, 'QA Current Account', 'radio');
+    await chooseAccount(page, 'QA Current Account');
     await click(page, 'Dining');
     assert.notEqual(await page.getByRole('tab', { name: 'Expense', exact: true }).getAttribute('aria-selected'), 'true');
     assert.notEqual(await page.getByRole('tab', { name: 'Income', exact: true }).getAttribute('aria-selected'), 'true');
@@ -243,7 +258,7 @@ try {
     await visible(page.getByText('EUR 908.20', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'BOULANGERIE DES PINS');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-08-19');
-    await click(page, 'QA Current Account', 'radio');
+    await chooseAccount(page, 'QA Current Account');
     await click(page, 'Dining');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
@@ -262,7 +277,7 @@ try {
     await visible(page.getByText('JPY 2786', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'こもれび文具');
     assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '');
-    await click(page, 'QA Current Account', 'radio');
+    await chooseAccount(page, 'QA Current Account');
     await click(page, 'Shopping');
     await expectConfirmationRefusal(page);
     await fill(page, DATE_LABEL, '2026-09-05');
@@ -305,7 +320,7 @@ try {
     await openReview(page);
     await visible(page.getByText('CAD 42.60', { exact: true }));
     assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'LANTERN BOOKSHOP');
-    await click(page, 'QA Refund Card', 'radio');
+    await chooseAccount(page, 'QA Refund Card');
     await click(page, 'Other');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
@@ -322,7 +337,7 @@ try {
 
   await scenario('explicit category correction wins over the merchant suggestion after reload', 'purchase', async (page) => {
     await openReview(page);
-    await click(page, 'QA Review Card', 'radio');
+    await chooseAccount(page, 'QA Review Card');
     await click(page, 'Dining');
     await click(page, 'Transport');
     await click(page, CONFIRM);

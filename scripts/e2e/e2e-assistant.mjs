@@ -429,6 +429,70 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('remaining-conversation-edge-cases')) {
+    const name = 'remaining-conversation-edge-cases';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const merchant = await ask(page, merchantQuestion);
+        assert.ok((await merchant.innerText()).includes(money(777)));
+
+        const lastYear = await ask(page, 'Same month last year');
+        assert.match(await lastYear.innerText(), /No recorded|transactions/i);
+        const twoMonths = await ask(page, 'Two months ago');
+        assert.match(await twoMonths.innerText(), /No recorded|transactions/i);
+
+        await newChat(page);
+        await ask(page, merchantQuestion);
+        const notSub = await ask(page, 'That is not a subscription');
+        assert.match(await notSub.innerText(), /Marked .* not a subscription|Updated/i);
+
+        await newChat(page);
+        await ask(page, 'How much did I spend this month?');
+        const ambiguous = await ask(page, 'That was dining');
+        assert.match(await ambiguous.innerText(), /choose one transaction|more than one .* transaction/i);
+        const choose = screen(page).getByRole('button', { name: 'Choose one transaction', exact: true });
+        assert.equal(await choose.count(), 1, 'ambiguous correction should offer a direct transaction-choice action');
+        await choose.click();
+        await evidence(page).waitFor({ state: 'visible' });
+        assert.ok(await evidence(page).getByTestId('assistant-evidence-row').count() > 1);
+        await shot(page, name);
+        return { lastYear: await lastYear.innerText(), twoMonths: await twoMonths.innerText() };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('launch-language-shorthand')) {
+    const name = 'launch-language-shorthand';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+
+        const subs = await ask(page, 'What subs do I have?');
+        const subsText = await subs.innerText();
+        assert.match(subsText, /subscriptions?|active subscription/i);
+        assert.doesNotMatch(subsText, /clarify that|didn.t quite understand|not enough to answer safely/i);
+
+        const due = await ask(page, 'Anything due?');
+        const dueText = await due.innerText();
+        assert.match(dueText, /upcoming payments|payments? due|do not see any payments due/i);
+
+        const mtd = await ask(page, 'How much did I spend MTD?');
+        const mtdText = await mtd.innerText();
+        assert.ok(mtdText.includes(money(CURRENT_TOTAL)), mtdText);
+
+        await newChat(page);
+        const casualSubs = await ask(page, 'Can u show my subs?');
+        assert.match(await casualSubs.innerText(), /subscriptions?|active subscription/i);
+        await shot(page, name);
+        return { subs: subsText, due: dueText, mtd: mtdText };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;

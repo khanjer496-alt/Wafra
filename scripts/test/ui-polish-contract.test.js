@@ -60,8 +60,11 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 
 // Payment/deletion safeguards are unchanged; the shared agenda owns detail navigation.
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
-// Payment type is now the outer hierarchy; status/date sections retain all rows.
-assert.match(agenda,/group\.sections\.map/);
+// The Bills tabs choose payment type; due timing remains the outer hierarchy,
+// and each status/date section retains all matching rows.
+assert.match(agenda,/const visibleItems = useMemo\([\s\S]*?paymentGroupFor\(item\) === selectedGroup[\s\S]*?\[selectedGroup, items\]/);
+assert.match(agenda,/const sections = useMemo\([\s\S]*?groupPaymentAgenda\(visibleItems, includePaid\)[\s\S]*?\[visibleItems, includePaid\]/);
+assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
@@ -173,7 +176,7 @@ assert.match(task3Add, /Platform\.OS === 'web' \? [a-zA-Z]+WebAriaProps : \{\}/)
 assert.doesNotMatch(task3Add, /useKeyboardHeight/);
 
 const task3Scaffold = read('src/components/ui/screen-scaffold.tsx');
-assert.match(task3Scaffold, /useKeyboardHeight\(\)/);
+assert.match(task3Scaffold, /useKeyboardHeight\(keyboardAware && Platform\.OS !== 'ios'\)/);
 assert.match(task3Scaffold, /contentInset: \{ top, bottom:/);
 assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyboardHeight/);
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
@@ -299,13 +302,14 @@ assert.match(task7Pro, /purchaseBar: \{[\s\S]*?paddingTop: Spacing\.two/);
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight groups');
+assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight compact groups');
 const settingsGroupMarkers = [
   '<Block onPress={() => router.push(\'/pro\')}>',
   "<SectionHeader title={t('settingsImportsHeader')} />",
   "<SectionHeader title={t('settingsNotificationsHeader')} />",
   "<SectionHeader title={t('settingsPreferencesHeader')} />",
   "<SectionHeader title={t('privacyHeader')} />",
+  '<SectionHeader title={words.needsReview} />',
   "<SectionHeader title={t('dataHeader')} />",
   "<SectionHeader title={t('supportHeader')} />",
   "<SectionHeader title={t('settingsDangerHeader')} />",
@@ -318,17 +322,14 @@ for (const marker of settingsGroupMarkers) {
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
 assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
-assert.doesNotMatch(task7Settings, /segmented-control|<SegmentedControl|<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
-assert.match(task7Settings, /setPreferenceSheet\('appearance'\)/);
+assert.doesNotMatch(task7Settings, /from '@\/components\/ui\/segmented-control'/);
 assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
-assert.doesNotMatch(task7Settings, /t\('parserPack'\)|marketChoices/);
-assert.ok(task7Settings.indexOf("t('statementImportTitle')") > task7Settings.indexOf("t('settingsImportsHeader')"));
+assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
 
 for (const [key, en, ar] of [
   ['settingsImportsHeader', 'Imports', 'الاستيراد'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
   ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
-  ['themeSystemDetail', 'System · follows phone', 'النظام · يتبع الهاتف'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],

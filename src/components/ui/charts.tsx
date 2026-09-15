@@ -16,12 +16,24 @@ import { DataViz, Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { donutSliceAtPoint } from '@/lib/donut-hit-test';
 import { formatAED } from '@/lib/format';
 import { isRTL, t, tf } from '@/lib/i18n';
 
 export function useRamp(): readonly string[] {
   const scheme = useColorScheme();
   return DataViz[scheme === 'dark' ? 'dark' : 'light'].ramp;
+}
+
+/**
+ * A multi-hue palette for categorical pictures — a pie, a stacked area — where
+ * `useRamp`'s single-hue gradient would tell the reader "same series, different
+ * age" instead of "different categories". Muted and desaturated by design so
+ * the surface still belongs in Ledger & Light rather than a rainbow.
+ */
+export function useCategoricalPalette(): readonly string[] {
+  const scheme = useColorScheme();
+  return DataViz[scheme === 'dark' ? 'dark' : 'light'].categorical;
 }
 
 // There is deliberately no `useOutBarColor` here any more. It returned a muted
@@ -35,6 +47,176 @@ export function useRamp(): readonly string[] {
 /* ── Progress ────────────────────────────────────────────────────────── */
 
 export { ProgressBar } from '@/components/ui/progress-bar';
+
+/* ── Donut ───────────────────────────────────────────────────────────── */
+
+export interface DonutSlice {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+/**
+ * A ringed donut with a hollow center for a headline figure. The ring is drawn
+ * as separate SVG arcs so each slice can carry its own colour without becoming
+ * a series that fights the category rows underneath — the rows own the labels,
+ * the donut owns the shape. When there is only one non-empty slice we still
+ * draw it as a full ring rather than a crescent, since a lone crescent reads as
+ * "a piece is missing" rather than "one category".
+ *
+ * Slices are interactive, but SVG paths do not own the touch gesture. A single
+ * stable Pressable resolves the tap from its coordinates against a forgiving
+ * ring hit-band. That removes dead gaps and press-in/press-out flicker on small
+ * Android slices while preserving the exact visual geometry.
+ */
+export function CategoryDonut({
+  slices,
+  size = 200,
+  thickness = 22,
+  centerLabel,
+  centerValue,
+  centerMeta,
+  onPressSlice,
+}: {
+  slices: DonutSlice[];
+  size?: number;
+  thickness?: number;
+  centerLabel?: string;
+  centerValue?: React.ReactNode;
+  centerMeta?: string;
+  /** Called with the slice's key on tap. Absent = donut is decorative. */
+  onPressSlice?: (key: string) => void;
+}) {
+  const theme = useTheme();
+  const total = slices.reduce((s, x) => s + Math.max(0, x.value), 0);
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - thickness / 2;
+  const r0 = r - thickness / 2;
+  // Empty state: a plain track ring so the shape is still there.
+  if (total <= 0) {
+    return (
+      <View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={t('noSpendingComposition')}
+        style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size} height={size}>
+          <Circle cx={cx} cy={cy} r={r} stroke={theme.track} strokeWidth={thickness} fill="none" />
+        </Svg>
+        {(centerLabel || centerValue || centerMeta) && (
+          <View style={styles.donutCenter} pointerEvents="none">
+            {centerLabel && (
+              <ThemedText type="nano" themeColor="textSecondary">
+                {centerLabel}
+              </ThemedText>
+            )}
+            {centerValue}
+            {centerMeta && (
+              <ThemedText type="nano" themeColor="textTertiary">
+                {centerMeta}
+              </ThemedText>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+  // A single non-empty slice draws as a full ring; the other slices contribute
+  // zero and never claim an arc of their own.
+  const nonEmpty = slices.filter((s) => s.value > 0);
+  const drawRingOnly = nonEmpty.length === 1;
+  // Small gap in radians so segments read as separate but no gap is ever
+  // wider than the slice itself. Skipped when only one slice is drawn.
+  const gap = drawRingOnly ? 0 : Math.PI / 180 * 1.2;
+  let a = -Math.PI / 2; // 12 o'clock start
+  const paths: React.ReactElement[] = [];
+  if (drawRingOnly) {
+    const only = nonEmpty[0]!;
+    paths.push(
+      <Circle
+        key={only.key}
+        cx={cx}
+        cy={cy}
+        r={r}
+        stroke={only.color}
+        strokeWidth={thickness}
+        fill="none"
+      />,
+    );
+  } else {
+    for (const slice of slices) {
+      if (slice.value <= 0) continue;
+      const span = (slice.value / total) * Math.PI * 2;
+      const s = a + Math.min(gap / 2, span / 3);
+      const e = a + span - Math.min(gap / 2, span / 3);
+      const large = e - s > Math.PI ? 1 : 0;
+      const x1 = cx + Math.cos(s) * r;
+      const y1 = cy + Math.sin(s) * r;
+      const x2 = cx + Math.cos(e) * r;
+      const y2 = cy + Math.sin(e) * r;
+      const x3 = cx + Math.cos(e) * r0;
+      const y3 = cy + Math.sin(e) * r0;
+      const x4 = cx + Math.cos(s) * r0;
+      const y4 = cy + Math.sin(s) * r0;
+      // A filled ring wedge (outer arc → inner arc) so each slice carries its
+      // own colour without a stroke join darkening it against its neighbour.
+      const d = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${large} 0 ${x4},${y4} Z`;
+      paths.push(<Path key={slice.key} d={d} fill={slice.color} pointerEvents="none" />);
+      a += span;
+    }
+  }
+  const totalLabel = nonEmpty
+    .map((s) => `${s.label}, ${Math.round((s.value / total) * 100)}%`)
+    .join('. ');
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={totalLabel}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Pressable
+        accessible={false}
+        disabled={!onPressSlice}
+        onPress={onPressSlice ? (event) => {
+          const key = donutSliceAtPoint(
+            slices,
+            size,
+            thickness,
+            event.nativeEvent.locationX,
+            event.nativeEvent.locationY,
+          );
+          if (key) onPressSlice(key);
+        } : undefined}
+        style={({ pressed }) => ({
+          width: size,
+          height: size,
+          opacity: pressed && onPressSlice ? 0.96 : 1,
+        })}>
+        <Svg width={size} height={size} pointerEvents="none">
+          <Circle cx={cx} cy={cy} r={r} stroke={theme.track} strokeWidth={thickness} fill="none" />
+          {paths}
+        </Svg>
+      </Pressable>
+      {(centerLabel || centerValue || centerMeta) && (
+        <View style={styles.donutCenter} pointerEvents="none">
+          {centerLabel && (
+            <ThemedText type="nano" themeColor="textSecondary">
+              {centerLabel}
+            </ThemedText>
+          )}
+          {centerValue}
+          {centerMeta && (
+            <ThemedText type="nano" themeColor="textTertiary">
+              {centerMeta}
+            </ThemedText>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
 
 /* ── Composition bar ─────────────────────────────────────────────────── */
 
@@ -480,5 +662,12 @@ const styles = StyleSheet.create({
   },
   historyBar: {
     width: 16,
+  },
+  donutCenter: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    maxWidth: '78%',
   },
 });

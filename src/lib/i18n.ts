@@ -136,6 +136,38 @@ const S = {
     en: 'Reporting period: {period}. Tap to change.',
     ar: 'فترة التقرير: {period}. اضغط للتغيير.',
   },
+  assistantCorrectionUpdatedTitle: {
+    en: 'Updated · {title}',
+    ar: 'تم التحديث · {title}',
+  },
+  assistantCorrectionMerchantCategoryIncome: {
+    en: 'Updated {merchant} to {category} for matching income transactions.',
+    ar: 'تم تحديث {merchant} إلى {category} لعمليات الدخل المطابقة.',
+  },
+  assistantCorrectionMerchantCategoryExpense: {
+    en: 'Updated {merchant} to {category} for matching expense transactions.',
+    ar: 'تم تحديث {merchant} إلى {category} لعمليات المصروفات المطابقة.',
+  },
+  assistantCorrectionTransactionCategory: {
+    en: 'Updated that transaction to {category}.',
+    ar: 'تم تحديث تلك العملية إلى {category}.',
+  },
+  assistantCorrectionNotSubscription: {
+    en: 'Marked {merchant} as not a subscription.',
+    ar: 'تم اعتبار {merchant} غير اشتراك.',
+  },
+  assistantCorrectionTargetMissing: {
+    en: 'Correction target disappeared',
+    ar: 'لم تعد العملية المستهدفة للتصحيح متاحة',
+  },
+  assistantCorrectionOwnTransfer: {
+    en: 'Marked that transaction as a transfer involving your own accounts.',
+    ar: 'تم اعتبار تلك العملية تحويلاً بين حساباتك.',
+  },
+  assistantCorrectionExternalTransfer: {
+    en: 'Marked that transfer as involving an external party.',
+    ar: 'تم اعتبار ذلك التحويل مع طرف خارجي.',
+  },
 
   // Greetings
   goodMorning: { en: 'Good morning', ar: 'صباح الخير' },
@@ -1568,6 +1600,8 @@ const S = {
   parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   billRemindersDetected: { en: 'Bill reminders detected', ar: 'تم اكتشاف تذكيرات فواتير' },
   searchMerchants: { en: 'Search merchants or categories', ar: 'ابحث في المتاجر أو التصنيفات' },
+  searchAccounts: { en: 'Search accounts or last-four digits', ar: 'ابحث بالحساب أو آخر أربعة أرقام' },
+  searchLabel: { en: 'Search', ar: 'بحث' },
   remindDayBefore: { en: 'Remind me the day before', ar: 'ذكّرني قبل يوم' },
   cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
   transferBetweenMine: { en: 'Transfer between my accounts', ar: 'تحويل بين حساباتي' },

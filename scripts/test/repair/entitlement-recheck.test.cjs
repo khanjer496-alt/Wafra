@@ -123,7 +123,10 @@ function harness(overrides = {}, options = {}) {
     },
     '../../modules/notification-reader': { __esModule: true, default: {
       setCaptureEnabled: async enabled => { notificationPolicy = enabled; calls.policy.push(enabled); return true; },
+      addListener: () => ({ remove() {} }),
+      postImportNotice: () => {},
     } },
+    '../../modules/sms-reader': { __esModule: true, default: { getInstantAlerts: () => true } },
     '@/lib/background-relay': {
       enableRelayBackgroundSync: async () => { calls.setup += 1; },
       setChargeAlertsEnabled: async () => {},
@@ -143,6 +146,7 @@ function harness(overrides = {}, options = {}) {
       return { kind: 'up-to-date', source: intent === 'notification-only' ? 'push' : 'sms', transactions: 0, dues: 0,
         bills: 0, healed: 0, newAccounts: 0, transactionIds: [], reviewAlerts: 0 };
     } }) },
+    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
     '@/lib/haptics': { committed: () => {} },
     '@/lib/i18n': { t: key => key, tf: key => key },
     '@/lib/notifications': { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} },
@@ -175,7 +179,9 @@ function harness(overrides = {}, options = {}) {
     update: async patch => { state = { ...state, ...patch }; render(); await settle(); },
     advance: ms => { now += ms; },
     background: () => { native.AppState.currentState = 'background'; for (const listener of appListeners) listener('background'); },
-    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    // Shipping Android deliberately defers source-free resume scans by 1.5s so
+    // reopening the app stays responsive. Provider events still wake sooner.
+    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 1900)); await settle(); },
     emitInboxChange: () => { for (const listener of inboxListeners) listener(); },
     inboxChanged: async () => { for (const listener of inboxListeners) listener(); await new Promise(r => setTimeout(r, 280)); await settle(); },
     observerCount: () => inboxListeners.size,
@@ -198,7 +204,7 @@ test('a foreground inactive-to-Pro transition scans once without a navigation or
   assert.equal(h.calls.setup, 1);
 });
 
-test('reactivation bypasses recent scan freshness, while revocation never reads the inbox', async t => {
+test('reactivation bypasses recent scan freshness while an immediately fresh resume stays quiet', async t => {
   const h = harness({ pro: true }); t.after(h.runtime.cleanup);
   h.render(); await h.settle();
   assert.equal(h.calls.scans, 1);
@@ -209,7 +215,7 @@ test('reactivation bypasses recent scan freshness, while revocation never reads 
   await h.update({ pro: true });
   assert.equal(h.calls.scans, 2, 'the earlier successful scan must not suppress renewed eligibility');
   await h.resume();
-  assert.equal(h.calls.scans, 3, 'Android resume checks new messages even within 30 seconds of the previous read');
+  assert.equal(h.calls.scans, 2, 'a source-free resume inside the freshness window must not repeat the same read');
 });
 
 test('history ownership defers an activation retry without consuming its freshness bypass', async t => {

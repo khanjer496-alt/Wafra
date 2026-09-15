@@ -176,5 +176,6 @@ const real = MerchantAvatar({ title: 'Lulu Hypermarket', category: 'groceries', 
 assert.equal(real.key, 'lulu');
 assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');
 const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
-assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{64\}/);
+assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{52\}/,
+  'transaction details keep the current compact merchant-logo treatment');
 console.log(`✓ ${assets.size} bundled logos; ${Object.keys(matches).length} identity cases; ${samples.length} negative cases; asset integrity, privacy, accessibility and failure recovery`);

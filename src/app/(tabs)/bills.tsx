@@ -107,7 +107,7 @@ export default function BillsScreen() {
   const todayISO = toISODate(now);
 
   const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
-  const words = { unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
+  const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
@@ -589,7 +589,10 @@ export default function BillsScreen() {
         <BillsSegmentControl segment={agendaView} onChange={setAgendaView} />
         <View
           accessible
-          accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', { count: summary.count, s: summary.count === 1 ? '' : 's' })}`}
+          accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', {
+            count: summary.count,
+            s: summary.count === 1 ? '' : 's',
+          })}`}
           style={[styles.summary, { borderColor: theme.cardBorder }]}>
           <ThemedText type="micro" themeColor="textSecondary" style={styles.summaryLabel}>
             {summary.label}
@@ -597,7 +600,10 @@ export default function BillsScreen() {
           <Money fils={summary.totalFils} type="display" decimals />
           <View style={styles.summaryMeta}>
             <ThemedText type="meta" themeColor="textSecondary">
-              {tf('billsSummaryPayments', { count: summary.count, s: summary.count === 1 ? '' : 's' })}
+              {tf('billsSummaryPayments', {
+                count: summary.count,
+                s: summary.count === 1 ? '' : 's',
+              })}
             </ThemedText>
             {summary.estimated > 0 && <>
               <ThemedText type="meta" themeColor="textTertiary">·</ThemedText>

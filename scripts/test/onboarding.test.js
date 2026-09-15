@@ -629,11 +629,11 @@ eq('balance-coverage copy resolves every placeholder',
     /p\.knownBalanceCount > 0\s*\? formatAmount\(p\.balanceFils\) : '—'/.test(
       walletOverviewSource,
     ));
-  ok('Wallet replaces net worth with balances, card dues and paid-from-account facts',
+  ok('Wallet replaces net worth with a focused recorded-balances summary',
     /availableBalances/.test(walletPresentationSource) &&
       /balanceCoverage/.test(walletPresentationSource) &&
-      /paidFromAccounts/.test(walletPresentationSource) &&
-      /cashOutBreakdown/.test(walletPresentationSource) &&
+      !/paidFromAccounts/.test(walletPresentationSource) &&
+      !/cashOutBreakdown/.test(walletPresentationSource) &&
       !/estimatedNetWorth/.test(walletPresentationSource));
 }
 
