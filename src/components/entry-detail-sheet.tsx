@@ -233,16 +233,14 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             />
           </View>
       )}>
-      <View style={styles.head}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
-        <View style={styles.headText}>
-          <ThemedText type="heading" style={{ textAlign: 'center' }}>
-            {transaction.title}
-          </ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">
-            {friendlyDate(transaction.date, toISODate(new Date()))}
-          </ThemedText>
-        </View>
+      <View style={[styles.head, { borderColor: theme.cardBorder }]}>
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />
+        <ThemedText type="heading" style={styles.headTitle} numberOfLines={2}>
+          {transaction.title}
+        </ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
+          {friendlyDate(transaction.date, toISODate(new Date()))}
+        </ThemedText>
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
             −73. Lists round; the place you go to check does not. */}
@@ -569,15 +567,23 @@ const styles = StyleSheet.create({
   head: {
     flexDirection: 'column',
     paddingVertical: 16,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    gap: Spacing.three - 2,
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
   },
-  headText: {
-    alignItems: 'center',
-    gap: Spacing.half,
+  headTitle: {
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: '90%',
+  },
+  headDate: {
+    textAlign: 'center',
   },
   headAmount: {
     alignSelf: 'center',
+    marginTop: 8,
   },
   field: {
     gap: Spacing.two,
