@@ -37,7 +37,9 @@ export function AssistantCoverage({ coverage }: { coverage: NonNullable<Assistan
       accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.coverageToggle}>
       <View style={styles.grow}>
         <ThemedText type="smallBold">{copy.dataUsed}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{copy.coverageCount(coverage.recordCount, coverage.accountCount, coverage.totalAccounts)}</ThemedText>
+        {expanded ? <ThemedText type="meta" themeColor="textSecondary">
+          {copy.coverageCount(coverage.recordCount, coverage.accountCount, coverage.totalAccounts)}
+        </ThemedText> : null}
       </View>
       <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} color={theme.textSecondary} />
     </Pressable>
@@ -54,7 +56,7 @@ const styles = StyleSheet.create({
   list: { gap: 12 },
   finding: { gap: 8, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
   coverage: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 4 },
-  coverageToggle: { minHeight: 48, flexDirection: 'row', gap: 8, alignItems: 'center' },
+  coverageToggle: { minHeight: 36, flexDirection: 'row', gap: 8, alignItems: 'center' },
   grow: { flex: 1, minWidth: 0, gap: 3 },
   notes: { gap: 6, paddingTop: 4 },
 });

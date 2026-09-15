@@ -345,6 +345,39 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('smooth-zero-period-progression')) {
+    const name = 'smooth-zero-period-progression';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const current = await ask(page, merchantQuestion);
+        const currentText = await current.innerText();
+        assert.ok(currentText.includes(money(777)), currentText);
+        assert.ok(!/Period:|Based on recorded transactions/i.test(currentText),
+          'ordinary answer card should not repeat period/warning boilerplate');
+
+        const august = await ask(page, 'What about last month?');
+        const augustText = await august.innerText();
+        assert.ok(augustText.includes(money(333)), augustText);
+
+        const july = await ask(page, 'What about last month?');
+        const julyText = await july.innerText();
+        assert.match(julyText, /No recorded transactions|0 transactions/i);
+        assert.equal(await july.getByRole('button', { name: 'View transactions', exact: true }).count(), 0,
+          'zero-result answer must not offer an empty evidence sheet');
+        const quick = screen(page).getByTestId('assistant-followups');
+        const quickText = await quick.innerText();
+        assert.ok(!quickText.includes('What about last month?'),
+          'quick replies should progress to an explicit earlier month instead of looping');
+        await composerLayout(page, name + '-layout');
+        await shot(page, name);
+        return { current: currentText, august: augustText, july: julyText, quick: quickText };
+      });
+    } finally { await context.close(); }
+  }
+
   if (!FILTER || FILTER.test('conversation-correction')) {
     const name = 'conversation-correction';
     const { context, page } = await contextFor(name);

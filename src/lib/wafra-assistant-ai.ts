@@ -38,7 +38,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds', 'excludedAccountIds'] },
   { tool: 'month-forecast', purpose: 'Current-month pace estimate when observed history is sufficient', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'historical-baseline', purpose: 'Compare recorded spending with prior monthly history without assuming missing months are zero', arguments: [...PERIOD_FILTER_ARGUMENTS, 'baseline'] },
-  { tool: 'top-accounts', purpose: 'Rank locally known accounts or cards by recorded spending', arguments: [...PERIOD_FILTER_ARGUMENTS, 'accountKind', 'limit'] },
+  { tool: 'top-accounts', purpose: 'Rank locally known accounts or cards by recorded spending or purchase count', arguments: [...PERIOD_FILTER_ARGUMENTS, 'accountKind', 'metric', 'limit'] },
   { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'unusual-charges', purpose: 'Review purchases unusually high against established earlier history', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'possible-duplicates', purpose: 'Review possible duplicate purchases without changing any records', arguments: PERIOD_FILTER_ARGUMENTS },
@@ -185,6 +185,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'top-accounts':
       return validPeriod(candidate.period) &&
         (candidate.accountKind === undefined || ['all', 'bank', 'card'].includes(String(candidate.accountKind))) &&
+        (candidate.metric === undefined || ['amount', 'count'].includes(String(candidate.metric))) &&
         (candidate.limit === undefined || (Number.isSafeInteger(candidate.limit) && (candidate.limit as number) >= 1 && (candidate.limit as number) <= 10));
     case 'historical-baseline':
       return validPeriod(candidate.period) && ['highest-month', 'typical-month', 'closest-month'].includes(String(candidate.baseline));
