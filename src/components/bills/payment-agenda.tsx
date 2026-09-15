@@ -5,13 +5,29 @@ import { ThemedText } from '@/components/themed-text';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
+import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { bankBrandForName } from '@/lib/markets';
 import { groupPaymentKinds, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
+
+/** Card-payment tile with the issuing bank's own brand colour so two 'FAB
+ *  Credit Card' rows are not both a plain receipt icon — the colour tells
+ *  them apart at a glance without waiting on a CDN logo fetch. */
+function BankBrandTile({ title, size = 40 }: { title: string; size?: number }) {
+  const brand = bankBrandForName(title);
+  if (!brand) return null;
+  return <View
+    accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+    style={{ width: size, height: size, borderRadius: Radius.control,
+      backgroundColor: brand.color + '22', alignItems: 'center', justifyContent: 'center' }}>
+    <Icon name="wallet" size={Math.round(size * 0.5)} color={brand.color} strokeWidth={2} />
+  </View>;
+}
 
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
@@ -123,7 +139,9 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
               accessibilityLabel={`${item.title}. ${dateText}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
               onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
                 { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-              <MerchantAvatar title={item.title} category={item.category} size={40} />
+              {item.kind === 'card' && bankBrandForName(item.title)
+                ? <BankBrandTile title={item.title} size={40} />
+                : <MerchantAvatar title={item.title} category={item.category} size={40} />}
               <View style={styles.content}>
                 <View style={[styles.top, large && styles.stack]}>
                   <ThemedText type="smallBold" style={styles.grow}>{item.title}</ThemedText>
