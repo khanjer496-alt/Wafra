@@ -8,8 +8,10 @@ import android.os.Build
  * launch-tested legacy bank packages. Known bank ids may come from Play, an OEM
  * store or an Android restore/clone. Unknown apps still require Google Play as
  * installer plus financial context before they can enter the encrypted queue.
- * JS parses every candidate, but an automatic ledger write still requires an
- * exact curated package or a package the user previously confirmed.
+ * JS parses every candidate. Curated package ids remain strongest; previously
+ * unseen Play-installed apps may also auto-import when their installed app
+ * identity is independently bank/finance-like and the real parser produces a
+ * confident posted transaction. Ambiguous app identity remains review-only.
  *
  * Keep this map byte-for-byte aligned with
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.

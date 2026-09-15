@@ -403,13 +403,13 @@ await pressEverything('transactions', async () => { await home(); await tapKey(p
 // capability is present, then sweep the complete scroll range; the former
 // 2400 px limit stopped before Data and Support on this longer screen.
 await settings();
-for (const section of ['Money', 'Imports', 'Notifications', 'Appearance & language', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
+for (const section of ['Imports', 'Notifications', 'Preferences', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
   ok(`settings: ${section} section is reachable`, !!(await locate(page, section)));
 }
 const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
-  'Wafra Pro', 'Bank-message region', 'Daily spend summary', 'System', 'Light', 'Dark',
+  'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
   'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
