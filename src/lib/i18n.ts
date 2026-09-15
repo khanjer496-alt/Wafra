@@ -2310,6 +2310,40 @@ const S = {
   subscriptionsWord: { en: 'subscriptions', ar: 'اشتراكات' },
   nextWord: { en: 'next', ar: 'التالي' },
   allWord: { en: 'All', ar: 'الكل' },
+  moneyPictureTitle: { en: 'Your money picture', ar: 'صورتك المالية' },
+  moneyPictureBuilding: {
+    en: 'Wafra is organizing real activity as it arrives.',
+    ar: 'ينظّم وفرة نشاطك الحقيقي كلما وصل.',
+  },
+  moneyPictureSaved: {
+    en: 'Progress is saved. Continue whenever you are ready.',
+    ar: 'تم حفظ التقدّم. تابع متى كنت جاهزاً.',
+  },
+  moneyPictureAttention: {
+    en: 'History import needs attention before it can continue.',
+    ar: 'يحتاج استيراد السجل إلى مراجعة قبل أن يتابع.',
+  },
+  moneyPictureReady: {
+    en: 'Your first setup is organized. New activity will keep filling this in.',
+    ar: 'تم تنظيم إعدادك الأول. وسيواصل النشاط الجديد ملء هذه الصورة.',
+  },
+  moneyPictureStarting: {
+    en: 'Add or connect real activity and this picture will fill itself in.',
+    ar: 'أضف أو اربط نشاطاً حقيقياً وستمتلئ هذه الصورة تلقائياً.',
+  },
+  moneyPictureContinue: { en: 'Continue', ar: 'متابعة' },
+  moneyPictureMessagesChecked: { en: 'messages checked', ar: 'رسائل تم فحصها' },
+  moneyPictureEntries: { en: 'entries organized', ar: 'عمليات تم تنظيمها' },
+  moneyPictureAccounts: { en: 'accounts recognized', ar: 'حسابات تم التعرف عليها' },
+  moneyPicturePayments: { en: 'bills & card dues', ar: 'فواتير ومستحقات بطاقات' },
+  moneyPictureHistoryFound: {
+    en: '{count} money entries found in history',
+    ar: 'عُثر على {count} عملية مالية في السجل',
+  },
+  moneyPictureTruthNote: {
+    en: 'Only activity already found in your ledger is shown here.',
+    ar: 'يظهر هنا فقط النشاط الذي تم العثور عليه فعلاً في سجلك.',
+  },
 
   // Import screen
   importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
