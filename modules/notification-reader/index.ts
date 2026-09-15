@@ -21,12 +21,14 @@ export interface CapturedNotification {
   id: string;
   /** Package name of the app that posted it (e.g. a bank app). */
   pkg: string;
+  /** Android application label for package-identity verification; never notification text. */
+  appLabel: string;
   title: string;
   text: string;
   /** Epoch milliseconds. */
   ts: number;
   /** Native source provenance. JS still requires issuer/parser evidence before auto-import. */
-  sourceClass: 'trusted-bank' | 'financial-candidate';
+  sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
 }
 
 interface NotificationReaderModule {

@@ -241,13 +241,15 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('Function("isAvailable")'));
   const promotion = code(read('src/lib/review-promotion.ts'));
   const stateTypes = code(read('src/lib/types.ts'));
-  ok('every financial candidate reaches parsing while unknown packages require one explicit confirmation before auto-import',
+  ok('strong installed bank identity can auto-import on first sight while ambiguous apps still require review',
     scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
-      scanner.includes("const autoAuthorized = sourceClass === 'trusted-bank' || learned") &&
-      scanner.includes("const p = trustedMarket === 'AE' || trustedMarket === 'SA'") &&
+      scanner.includes("verifiedFinancialAppSender(n.appLabel ?? '')") &&
+      scanner.includes("sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned") &&
+      scanner.includes("const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'") &&
       scanner.includes("shouldReviewParsedIncome(p) || !autoAuthorized") &&
       scanner.includes("p && autoAuthorized && !reviewed") &&
-      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ?") &&
+      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender") &&
+      nativeModule.includes('"appLabel" to TrustedBankNotificationPackages.applicationLabel(context, row.pkg)') &&
       promotion.includes("item.sourceClass === 'financial-candidate'") &&
       promotion.includes('learnedNotificationPackage') &&
       stateTypes.includes('trustedNotificationPackages: string[]'));

@@ -240,24 +240,33 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
   assert.equal(result.inboxHistoryComplete, false, 'notification scan cannot claim SMS history completion');
 });
 
-test('every financial candidate reaches the parser but only trusted or confirmed packages auto-import', () => {
+test('real bank app identity can auto-import on first sight while ambiguous apps remain review-first', () => {
   const scanner = read('src/lib/auto-import.ts');
   const promotion = read('src/lib/review-promotion.ts');
   const types = read('src/lib/types.ts');
+  const bridge = read('modules/notification-reader/index.ts');
+  const native = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt');
   assert.match(scanner, /learnedPackages\.has\(n\.pkg\)/);
-  assert.match(scanner, /const autoAuthorized = sourceClass === 'trusted-bank' \|\| learned/);
+  assert.match(scanner, /verifiedFinancialAppSender\(n\.appLabel \?\? ''\)/);
+  assert.match(scanner, /sourceClass === 'trusted-bank' \|\| sourceClass === 'play-finance' \|\| learned/);
+  assert.match(scanner, /FINANCIAL_APP_LABEL_RE/);
+  assert.match(scanner, /KNOWN_FINTECH_LABEL_RE/);
+  assert.match(scanner, /detectLaunchMarketFromSender\(candidate\) !== null \|\| hasUniversalInstitutionSender\(candidate\)/);
   assert.match(scanner, /const launchParsed = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
   assert.match(scanner, /parsedUniversalPosting\(universalEvent, source, overrides, routedMarket\)/);
   assert.match(scanner, /ledgerMoneySpec\(event\.amount\.value\.currency\)/);
   assert.match(scanner, /shouldReviewParsedIncome\(p\) \|\| !autoAuthorized/);
   assert.match(scanner, /p && autoAuthorized && !reviewed/);
-  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoAuthorized \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
+  assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? verifiedSender \?\?/);
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
   assert.match(promotion, /learnedNotificationPackage/);
   assert.match(types, /trustedNotificationPackages: string\[\]/);
   assert.match(scanner, /parsedFinancialCandidateReview\(p, n\.ts\)/);
   assert.match(scanner, /decision\.kind === 'ignored' && decision\.reason === 'unrecognized' && parsedFallback/);
   assert.match(scanner, /decision = \{ kind: 'review', candidate: parsedFallback \}/);
+  assert.match(bridge, /appLabel: string/);
+  assert.match(bridge, /'trusted-bank' \| 'play-finance' \| 'financial-candidate'/);
+  assert.match(native, /fun applicationLabel\(context: Context, packageName: String\): String/);
 });
 
 test('500 queued notification candidates process without touching SMS and ACK only after commit', async () => {
@@ -265,6 +274,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
   const rows = Array.from({ length: 500 }, (_, index) => ({
     id: `notification-row-${String(index).padStart(4, '0')}`,
     pkg: 'com.example.financeapp',
+    appLabel: 'Example Bank',
     title: 'Card purchase',
     text: `AED ${index + 1}.00 at TEST SHOP`,
     ts: 1_800_000_000_000 + index,
@@ -299,10 +309,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
     }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
-  const result = await scanner.scanInbox(0, {}, undefined, null, {
-    notificationOnly: true,
-    learnedNotificationPackages: ['com.example.financeapp'],
-  });
+  const result = await scanner.scanInbox(0, {}, undefined, null, { notificationOnly: true });
   assert.equal(smsReads, 0);
   assert.equal(parseCalls, 500);
   assert.equal(result.parsed.length, 500);

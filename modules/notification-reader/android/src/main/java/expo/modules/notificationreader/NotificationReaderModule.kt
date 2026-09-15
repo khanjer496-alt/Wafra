@@ -250,6 +250,7 @@ class NotificationReaderModule : Module() {
         mapOf(
           "id" to row.id,
           "pkg" to row.pkg,
+          "appLabel" to TrustedBankNotificationPackages.applicationLabel(context, row.pkg),
           "title" to row.title,
           "text" to row.text,
           "ts" to row.ts.toDouble(),
