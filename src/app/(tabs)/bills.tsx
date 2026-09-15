@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
 import {
+  InteractionManager,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -121,6 +123,30 @@ export default function BillsScreen() {
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  // Recurrence detection walks the complete ledger and can produce a large
+  // agenda. On Android the Bills tab is lazy-mounted on the first tap, so doing
+  // that work inside the navigation render makes the tap itself feel frozen.
+  // Paint the card/manual-bill truth first, then join recurrence after two
+  // frames once the tab is visibly on screen. iOS keeps the existing eager path
+  // until it has its own device measurements.
+  const [recurringReady, setRecurringReady] = useState(Platform.OS !== 'android');
+  useEffect(() => {
+    if (Platform.OS !== 'android' || recurringReady) return;
+    let firstFrame: number | null = null;
+    let secondFrame: number | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => {
+          startTransition(() => setRecurringReady(true));
+        });
+      });
+    });
+    return () => {
+      task.cancel();
+      if (firstFrame !== null) cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [recurringReady]);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -177,9 +203,10 @@ export default function BillsScreen() {
     [rows, selectedReminderId],
   );
   const detected = useMemo(
-    () =>
-      detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
-    [state.transactions, state.notSubscriptions, now, liveAccounts, internal],
+    () => recurringReady
+      ? detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal)
+      : [],
+    [recurringReady, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
   const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
   const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);

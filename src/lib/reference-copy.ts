@@ -9,7 +9,8 @@ export const paymentAgendaCopy = {
     subscriptions: 'Subscriptions', utilities: 'Utilities & telecom', cards: 'Card payments', loans: 'Loan repayments', other: 'Other bills',
     subscriptionsHint: 'Recurring memberships and services', utilitiesHint: 'Electricity, water, phone and internet',
     emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.',
-    emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.' },
+    emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.',
+    showMore: (count: number) => `Show ${count} more` },
   ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'خلال 7 أيام', later: 'لاحقاً', paid: 'مدفوعة مؤخراً',
     estimate: 'تقديري', recorded: 'مدفوعة · استحقاقها', statement: 'استحقاق الكشف', empty: 'لا توجد دفعات قادمة',
     emptyBody: 'أضف تذكيراً بفاتورة أو استورد تنبيهات البنك لعرض التواريخ المعروفة.',
@@ -18,7 +19,8 @@ export const paymentAgendaCopy = {
     subscriptions: 'الاشتراكات', utilities: 'المرافق والاتصالات', cards: 'دفعات البطاقات', loans: 'أقساط القروض', other: 'فواتير أخرى',
     subscriptionsHint: 'العضويات والخدمات المتكررة', utilitiesHint: 'الكهرباء والمياه والهاتف والإنترنت',
     emptySubscriptions: 'لا توجد تجديدات اشتراكات لعرضها.', emptyUtilities: 'لا توجد فواتير مرافق لعرضها.',
-    emptyCards: 'لا توجد دفعات بطاقات ائتمانية لعرضها.', emptyLoans: 'لا توجد أقساط قروض لعرضها.', emptyOther: 'لا توجد فواتير أخرى لعرضها.' },
+    emptyCards: 'لا توجد دفعات بطاقات ائتمانية لعرضها.', emptyLoans: 'لا توجد أقساط قروض لعرضها.', emptyOther: 'لا توجد فواتير أخرى لعرضها.',
+    showMore: (count: number) => `عرض ${count} أخرى` },
 };
 
 export const accountGroupsCopy = {
