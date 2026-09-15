@@ -62,7 +62,8 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
 // The Bills tabs choose payment type; due timing remains the outer hierarchy,
 // and each status/date section retains all matching rows.
-assert.match(agenda,/const sections = groupPaymentAgenda\(visibleItems, includePaid\)/);
+assert.match(agenda,/const visibleItems = useMemo\([\s\S]*?paymentGroupFor\(item\) === selectedGroup[\s\S]*?\[selectedGroup, items\]/);
+assert.match(agenda,/const sections = useMemo\([\s\S]*?groupPaymentAgenda\(visibleItems, includePaid\)[\s\S]*?\[visibleItems, includePaid\]/);
 assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
@@ -175,7 +176,7 @@ assert.match(task3Add, /Platform\.OS === 'web' \? [a-zA-Z]+WebAriaProps : \{\}/)
 assert.doesNotMatch(task3Add, /useKeyboardHeight/);
 
 const task3Scaffold = read('src/components/ui/screen-scaffold.tsx');
-assert.match(task3Scaffold, /useKeyboardHeight\(\)/);
+assert.match(task3Scaffold, /useKeyboardHeight\(keyboardAware && Platform\.OS !== 'ios'\)/);
 assert.match(task3Scaffold, /contentInset: \{ top, bottom:/);
 assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyboardHeight/);
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);

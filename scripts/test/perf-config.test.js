@@ -800,9 +800,9 @@ function bodyOf(source, header) {
     'provider/foreground scans are background bookkeeping; only an explicit refresh should announce success');
 
   ok('daily summary work is keyed to ledger changes, not every store mutation',
-    /\[getStateSnapshot, state\.dailySummary, state\.hydrated, state\.onboarded, state\.transactions, watchForeground\]/.test(autoImport) &&
+    /\[getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
       !/\}, \[state, watchForeground\]\);/.test(autoImport),
-    'history progress, settings changes, and other unrelated reducer updates must not reschedule the daily summary');
+    'history pages, settings changes, and other unrelated reducer updates must not reschedule the daily summary; completion may schedule once');
 
   ok('Android resume catch-up leaves the first reopened frames to UI/input',
     /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*1_500/.test(autoImport) &&
@@ -832,7 +832,7 @@ function bodyOf(source, header) {
   const home = stripComments(read('src/screens/journal-home-screen.tsx'));
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&
-      (home.match(/state\.marketId, period, projectionDay\]/g) ?? []).length >= 2 &&
+      (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&
       !/state\.marketId, period, now\]/.test(home),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 

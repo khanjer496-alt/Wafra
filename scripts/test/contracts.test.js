@@ -438,7 +438,7 @@ function ktSources(dir) {
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',
     /pro: _pro,[\s\S]{0,120}trialStartTs: _trial/.test(store) &&
-      /pro: state\.pro,[\s\S]{0,120}trialStartTs: state\.trialStartTs/.test(store));
+      /const current = authoritativeState\.current;[\s\S]{0,180}pro: current\.pro,[\s\S]{0,180}trialStartTs: current\.trialStartTs/.test(store));
 }
 
 
