@@ -158,7 +158,10 @@ const task3Add = read('src/app/add-transaction.tsx');
 assert.match(task3Add, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="inline"/);
 assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}\}/);
 assert.match(task3Add, /footer=\{/);
-assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 3, 'Add keeps three labelled editable TextFields');
+assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
+  'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
+assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
+  'captured-alert review does not ask the user to rewrite a title Wafra already has');
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);
@@ -180,6 +183,9 @@ assert.match(task4Flow, /summarizeMonth\(/);
 assert.match(task4Flow, /spendingCategoryRows\(/);
 assert.match(task4Flow, /router\.push\(`\/transactions\?type=expense&category=\$\{id\}`\)/);
 assert.match(task4Flow, /<SpendingOverview/); assert.match(task4Flow, /<SpendingTrends/);
+assert.match(task4Flow, /foreign\.transactions\.length > 0[\s\S]*?testID="foreign-spending-entry"[\s\S]*?router\.push\('\/currency'\)/);
+assert.match(task4Flow, /live\.has\(tx\.accountId\) && !internal\.has\(tx\.id\) && inPeriod\(tx\.date, period\)/,
+  'Foreign spending uses the same live-account and transfer exclusions as Spending totals');
 
 const task4Stats = read('src/app/stats.tsx');
 assert.match(task4Stats,/import \{ Redirect \} from 'expo-router'/);
@@ -421,15 +427,19 @@ for (const count of ['summary.rowCount', 'm.count', 'sortedRows']) {
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
   'summarizeForeignActivity(', 'inPeriod(tx.date, period)', 'ledgerCurrency,',
-  'visibleGroups', 'visibleTransactions', 'normalizedQuery', '<PeriodSheet', '<EntryDetailSheet',
+  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIds(', '<PeriodSheet', '<EntryDetailSheet',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
 const currencyScaffoldContent = task8Currency.match(
   /<ScreenScaffold[\s\S]*?<PeriodPill[\s\S]*?<TextField/,
 )?.[0] ?? '';
-assert.ok(currencyScaffoldContent.length > 0, 'Currency keeps PeriodPill before its search field');
+assert.ok(currencyScaffoldContent.length > 0, 'Currency keeps PeriodPill before its optional search field');
+assert.match(task8Currency, /const showSearch = chargeCount >= 12/);
 assert.match(task8Currency, /<TextField[\s\S]*?label=\{t\('searchForeignSpending', language\)\}[\s\S]*?value=\{query\}[\s\S]*?onChangeText=\{setQuery\}/);
 assert.match(task8Currency, /leading=\{<Icon name="search"/);
-assert.match(task8Currency, /<ActionIconButton[\s\S]*?label=\{t\('clearSearch', language\)\}[\s\S]*?variant="plain"[\s\S]*?onPress=\{\(\) => setQuery\(''\)\}/);
+assert.match(task8Currency, /formatOriginalCurrency\(transaction\.originalAmountMinor![\s\S]*?formatAED\(transaction\.amountFils/,
+  'Foreign rows keep original and ledger amounts together');
+assert.doesNotMatch(task8Currency, /conversionQuality|bankQuoted|referenceRate|offlineEstimate/,
+  'Foreign spending should not expose FX diagnostics as a primary page section');
 
 const task8Feedback = read('src/app/feedback.tsx');
 assert.match(task8Feedback, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="native"[\s\S]*?header=\{feedbackHeader\}/);

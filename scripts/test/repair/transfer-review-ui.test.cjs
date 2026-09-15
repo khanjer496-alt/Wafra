@@ -250,8 +250,9 @@ for (const change of ['edit', 'delete']) {
 
 test('reviewed decisions undo individually with the current decision fingerprint', async () => {
   const tx = row('reviewed', { transferDecision: { version: 1, ownership: 'external', decidedAt: 2 } });
-  const h = createUI({ transactions: [tx] });
-  byId(h.render(), 'transfer-filter-reviewed').props.onPress();
+  // Confirmed transfers are no longer a second history browser. They remain
+  // correctable from a contextual deep link (for example transaction details).
+  const h = createUI({ transactions: [tx], params: { transactionId: 'reviewed' } });
   openEntry(h);
   const tree = h.render();
   assert.ok(text(byId(tree, 'transfer-review-confirmation')).includes(h.words.undoBody));
@@ -283,13 +284,11 @@ test('leaving an uncertain entry unclassified does not write, dismiss, or announ
   assert.deepEqual(h.events, []);
 });
 
-test('3,106 old entries stay optional and collapse into a bounded historical view', () => {
+test('3,106 unresolved entries stay bounded without exposing a second transfer-history mode', () => {
   const h = createUI({ transactions: Array.from({ length: 3106 }, (_, i) => row(`old-${i}`, { date: '2022-11-05' })) });
   let tree = h.render();
-  assert.ok(text(tree).includes(h.words.recentEmpty));
-  assert.ok(text(tree).includes(h.words.historyAvailable(3106)));
-  byId(tree, 'transfer-scope-all').props.onPress();
-  tree = h.render();
+  assert.equal(byId(tree, 'transfer-scope-all'), undefined);
+  assert.equal(byId(tree, 'transfer-filter-reviewed'), undefined);
   assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-group-toggle').length, 1);
   assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-review-entry').length, 0);
   expandGroups(h); tree = h.render();

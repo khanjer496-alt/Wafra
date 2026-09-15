@@ -6,8 +6,6 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { TransactionRow } from '@/components/transaction-row';
-import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { Icon } from '@/components/ui/icon';
 import { SectionHeader } from '@/components/ui/layout';
 import { PeriodPill } from '@/components/ui/period-pill';
@@ -18,9 +16,10 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { formatAED } from '@/lib/format';
+import { formatAED, shortDate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 import { inPeriod } from '@/lib/period';
@@ -54,21 +53,27 @@ export default function CurrencyScreen() {
   // in" — a SAR charge on a SAR ledger is not foreign activity, and its stored
   // fils are the same money as its original amount, not a conversion of it.
   const ledgerCurrency = ledgerCurrencyCode();
+  const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, state.accounts),
+    [state.transactions, state.accounts],
+  );
   const summary = useMemo(
     () =>
       summarizeForeignActivity(
         state.transactions,
-        (tx) => inPeriod(tx.date, period),
+        (tx) => live.has(tx.accountId) && !internal.has(tx.id) && inPeriod(tx.date, period),
         ledgerCurrency,
       ),
-    [state.transactions, period, ledgerCurrency],
+    [state.transactions, period, ledgerCurrency, live, internal],
   );
   const accountById = useMemo(
     () => new Map(state.accounts.map((account) => [account.id, account] as const)),
     [state.accounts],
   );
   const chargeCount = summary.transactions.length;
-  const normalizedQuery = query.trim().toLowerCase();
+  const showSearch = chargeCount >= 12;
+  const normalizedQuery = showSearch ? query.trim().toLowerCase() : '';
   const visibleGroups = normalizedQuery
     ? summary.groups.filter((group) => group.currency.toLowerCase().includes(normalizedQuery))
     : summary.groups;
@@ -109,24 +114,18 @@ export default function CurrencyScreen() {
             {t('foreignSpendingSubtitle', language)}
           </ThemedText>
 
-          <TextField
-            label={t('searchForeignSpending', language)}
-            value={query}
-            onChangeText={setQuery}
-            inputMode="search"
-            returnKeyType="search"
-            placeholder={t('searchForeignSpending', language)}
-            autoCorrect={false}
-            leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-            trailing={query.length > 0 ? (
-              <ActionIconButton
-                icon="close"
-                label={t('clearSearch', language)}
-                variant="plain"
-                onPress={() => setQuery('')}
-              />
-            ) : undefined}
-          />
+          {showSearch ? (
+            <TextField
+              label={t('searchForeignSpending', language)}
+              value={query}
+              onChangeText={setQuery}
+              inputMode="search"
+              returnKeyType="search"
+              placeholder={t('searchForeignSpending', language)}
+              autoCorrect={false}
+              leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+            />
+          ) : null}
 
           <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(320)}>
             <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
@@ -146,42 +145,12 @@ export default function CurrencyScreen() {
           {summary.transactions.length > 0 ? (
             <>
               <Animated.View
-                entering={reducedMotion ? undefined : FadeInDown.delay(40).duration(320)}
-                style={styles.section}>
-                <SectionHeader title={t('conversionQuality', language)} />
-                <View style={[styles.quality, { borderColor: theme.cardBorder }]}>
-                  {[
-                    [t('bankQuoted', language), summary.bankQuotedCount, theme.income],
-                    [t('referenceRate', language), summary.referenceCount, theme.primary],
-                    [t('offlineEstimate', language), summary.estimatedCount, theme.warning],
-                  ].map(([label, count, color], index) => (
-                    <View
-                      key={String(label)}
-                      style={[
-                        styles.qualityCell,
-                        index > 0 && { borderStartColor: theme.cardBorder, borderStartWidth: StyleSheet.hairlineWidth },
-                      ]}>
-                      <ThemedText type="heading" tabular style={{ color: String(color) }}>
-                        {String(count)}
-                      </ThemedText>
-                      <ThemedText type="nano" themeColor="textTertiary" style={styles.qualityLabel}>
-                        {String(label)}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-              </Animated.View>
-
-              <Animated.View
                 entering={reducedMotion ? undefined : FadeInDown.delay(80).duration(320)}
                 style={styles.section}>
                 <SectionHeader title={t('currencyBreakdown', language)} />
                 {visibleGroups.map((group, index) => (
-                  <Pressable
+                  <View
                     key={group.currency}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${group.currency}, ${group.count} ${t('charges', language)}`}
-                    onPress={() => setQuery(group.currency)}
                     style={[
                       styles.currencyRow,
                       {
@@ -213,7 +182,7 @@ export default function CurrencyScreen() {
                     <ThemedText type="smallBold" tabular>
                       {formatAED(group.localFils, { decimals: false })}
                     </ThemedText>
-                  </Pressable>
+                  </View>
                 ))}
               </Animated.View>
 
@@ -222,19 +191,37 @@ export default function CurrencyScreen() {
                 style={styles.section}>
                 <SectionHeader title={t('foreignRecent', language)} />
                 {visibleTransactions.map((transaction, index) => (
-                  <View
+                  <Pressable
                     key={transaction.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${transaction.title}. ${formatOriginalCurrency(
+                      transaction.originalAmountMinor!,
+                      transaction.originalCurrency!,
+                      language,
+                    )}. ${formatAED(transaction.amountFils, { decimals: true })}`}
+                    onPress={() => setEntry(transaction)}
                     style={
-                      index > 0
-                        ? { borderTopColor: theme.cardBorder, borderTopWidth: StyleSheet.hairlineWidth }
-                        : undefined
+                      [styles.transactionRow,
+                        index > 0
+                          ? { borderTopColor: theme.cardBorder, borderTopWidth: StyleSheet.hairlineWidth }
+                          : undefined]
                     }>
-                    <TransactionRow
-                      transaction={transaction}
-                      account={accountById.get(transaction.accountId)}
-                      onPress={setEntry}
-                    />
-                  </View>
+                    <View style={styles.transactionCopy}>
+                      <ThemedText type="smallBold">{transaction.title}</ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary">
+                        {[accountById.get(transaction.accountId)?.name, shortDate(transaction.date)]
+                          .filter(Boolean).join(' · ')}
+                      </ThemedText>
+                    </View>
+                    <View style={styles.transactionAmounts}>
+                      <ThemedText type="smallBold" tabular>
+                        {formatOriginalCurrency(transaction.originalAmountMinor!, transaction.originalCurrency!, language)}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary" tabular>
+                        {formatAED(transaction.amountFils, { decimals: true })}
+                      </ThemedText>
+                    </View>
+                  </Pressable>
                 ))}
               </Animated.View>
             </>
@@ -265,13 +252,6 @@ const styles = StyleSheet.create({
   heroLabel: { marginBottom: Spacing.two },
   caption: { marginTop: Spacing.three, marginBottom: Spacing.one },
   section: { marginTop: Spacing.five },
-  quality: {
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  qualityCell: { flex: 1, paddingVertical: Spacing.three, gap: 5, alignItems: 'center' },
-  qualityLabel: { textAlign: 'center' },
   currencyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -291,6 +271,10 @@ const styles = StyleSheet.create({
   },
   flag: { fontSize: 15, lineHeight: 19 },
   currencyMiddle: { flex: 1, gap: 2 },
+  transactionRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: Spacing.three,
+    paddingVertical: Spacing.two },
+  transactionCopy: { flex: 1, minWidth: 0, gap: 2 },
+  transactionAmounts: { flexShrink: 0, alignItems: 'flex-end', gap: 2 },
   empty: {
     marginTop: Spacing.five,
     borderWidth: StyleSheet.hairlineWidth,

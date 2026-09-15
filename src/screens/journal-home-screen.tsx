@@ -45,13 +45,13 @@ const copy = {
   en: { journal: 'Your money, in view', month: 'THIS PERIOD', activity: 'Recent transactions',
     add: 'Add an entry', breakdown: 'View spending', upcoming: 'Upcoming',
     import: 'Bank alerts', paused: 'History import paused', resume: 'Resume',
-    review: 'Review alerts', more: 'View all payments', accounts: 'Your accounts',
+    more: 'View all payments', accounts: 'Your accounts',
     income: 'Money in', spent: 'Spent', netNote: 'Income minus spending · not your bank balance',
     progress: 'Reading history', attention: 'Needs your attention' },
   ar: { journal: 'أموالك بوضوح', month: 'هذه الفترة', activity: 'حركتك المالية',
     add: 'إضافة حركة', breakdown: 'عرض الإنفاق', upcoming: 'الدفعات القادمة',
     import: 'تنبيهات البنك', paused: 'استيراد السجل متوقف مؤقتاً', resume: 'متابعة',
-    review: 'مراجعة التنبيهات', more: 'عرض كل الدفعات', accounts: 'حساباتك',
+    more: 'عرض كل الدفعات', accounts: 'حساباتك',
     income: 'الدخل', spent: 'الإنفاق', netNote: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك' },
 } as const;
@@ -146,8 +146,6 @@ export default function JournalHomeScreen() {
     return () => listener.remove();
   }, []);
 
-  const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
-  const hasPendingReview = reviewCount > 0;
   // The clock is refreshed on every foreground resume for greeting/review
   // freshness, but Home's money projections are day-based. Depending on the
   // Date object itself made every reopen synchronously re-walk a large ledger
@@ -159,7 +157,7 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
-      state.ledgerMoney, state.marketId, period, projectionDay, hasPendingReview]);
+      state.ledgerMoney, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const homeInsight = useMemo(() =>
@@ -349,10 +347,7 @@ export default function JournalHomeScreen() {
               <ThemedText type="meta" themeColor="textSecondary">{captureLabel}</ThemedText></View>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} />
           </Pressable>
-          {reviewCount > 0 ? <Pressable onPress={() => router.push('/review-alerts')} accessibilityRole="button" style={styles.footerAction}>
-            <ThemedText type="smallBold" style={{ color: theme.warning }}>{words.review} · {reviewCount}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.warning} /></Pressable>
-          : dashboard.uncategorised.shouldPrompt ? <Pressable onPress={() => router.push('/categorise')} accessibilityRole="button" style={styles.footerAction}>
+          {dashboard.uncategorised.shouldPrompt ? <Pressable onPress={() => router.push('/categorise')} accessibilityRole="button" style={styles.footerAction}>
             <ThemedText type="meta">{tf('uncategorisedMerchantCount', { count: dashboard.uncategorised.summary.merchants.length,
               s: dashboard.uncategorised.summary.merchants.length === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>

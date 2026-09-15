@@ -40,11 +40,11 @@ test('cash and investment movements stay visible records without inflating incom
   assert.equal(cash.totalFils, 190000, 'withdrawal, investment and purchase still leave the bank');
 });
 
-test('Home does not turn unresolved-transfer backlog into the main product experience', () => {
+test('Home and Accounts do not turn transfer reconciliation into primary navigation', () => {
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   const wallet = fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8');
   assert.doesNotMatch(home, /TransferReviewNotice|\/review-transfers/);
-  assert.match(wallet, /router\.push\('\/review-transfers'\)/);
+  assert.doesNotMatch(wallet, /router\.push\('\/review-transfers'\)/);
 });
 
 test('Home labels the economic totals as Spending, Income and Net rather than bank cash movement', () => {

@@ -84,14 +84,15 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
-  const reviewPromptActive = homeOnly &&
-    state.reviewTray.pending.some((item) => item.expiresAt > now.getTime());
   const historyImportBusy = homeOnly && state.historyImport?.status === 'running';
-  const uncategorisedSummary = reviewPromptActive || historyImportBusy
+  // Parser exceptions no longer occupy Home. They remain available from the
+  // bank-alert/settings workflow, so they must not suppress unrelated cleanup
+  // prompts such as merchant categorisation or unread formats here.
+  const uncategorisedSummary = historyImportBusy
     ? { merchants: [], rowCount: 0, totalFils: 0 }
     : uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
-  const hideUnreadPrompt = historyImportBusy || reviewPromptActive || (homeOnly && uncategorised.shouldPrompt);
+  const hideUnreadPrompt = historyImportBusy || (homeOnly && uncategorised.shouldPrompt);
   const unreadCount = hideUnreadPrompt ? null : unreadFormatCount(state);
   const unreadFormats = unreadCount === null ? null
     : { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD };

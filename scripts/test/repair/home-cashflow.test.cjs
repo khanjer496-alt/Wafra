@@ -84,7 +84,7 @@ test('Home keeps transfer uncertainty and raw cash movement out of the primary d
     'Home does not dump transfer diagnostics into the primary money summary');
 });
 
-test('Home refreshes its conditional prompt after the final review is dismissed without a ledger change', () => {
+test('Home ignores parser-review churn and keeps useful cleanup prompts visible', () => {
   const h = createHarness({ state: { reviewTray: { pending: [{ expiresAt: Date.now() + 864000000 }] } } });
   const project = h.deps['@/lib/dashboard-projection'].projectDashboard;
   let projections = 0;
@@ -136,7 +136,7 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
     assert.equal(request.surface, 'home');
     assert.equal(request.includeInsights, false);
     const projected = project();
-    return { ...projected, unreadFormats: request.state.reviewTray.pending.length ? null : { count: 3, shouldPrompt: true } };
+    return { ...projected, unreadFormats: { count: 3, shouldPrompt: true } };
   };
   const render = () => {
     memoCursor = 0; stateCursor = 0; effectCursor = 0;
@@ -146,10 +146,12 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
   };
   render();
   const sameTransactions = h.state.transactions;
+  const insightBeforeReviewChange = insightProjections;
   h.state.reviewTray = { pending: [] };
   const tree = render();
   assert.equal(h.state.transactions, sameTransactions);
-  assert.equal(projections, 2, 'the changed prompt priority invalidates only the existing Home projection memo');
-  assert.equal(insightProjections, 1, 'dismissing a review does not recompute historical insight analysis');
+  assert.equal(projections, 1, 'parser-review status is no longer a Home projection dependency');
+  assert.equal(insightProjections, insightBeforeReviewChange,
+    'parser-review churn does not recompute historical insight analysis');
   assert.ok(text(tree).includes(h.deps['@/lib/i18n'].tf('unreadFormatCount', { count: 3, s: 's' })));
 });

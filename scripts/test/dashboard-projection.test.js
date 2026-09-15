@@ -277,11 +277,11 @@ setActiveMarket('AE');
   const home = () => projectDashboard(request(ledger, { surface: 'home' }));
   eq('eligible Home fallback exposes the exact unread-format count', home().unreadFormats, unread);
   ledger.reviewTray = { pending: [{ expiresAt: now.getTime() + 1 }] };
-  eq('a live review takes priority without scanning unread formats', home().unreadFormats, null);
+  eq('a live parser exception no longer steals Home prompt priority', home().unreadFormats, unread);
   ledger.reviewTray = { pending: [{ expiresAt: now.getTime() - 1 }] };
-  eq('expired reviews restore the unread fallback on the same transaction array', home().unreadFormats, unread);
+  eq('expired parser exceptions leave the unread fallback unchanged', home().unreadFormats, unread);
   ledger.reviewTray = { pending: [] };
-  eq('dismissed reviews restore the unread fallback on the same transaction array', home().unreadFormats, unread);
+  eq('dismissed parser exceptions leave the unread fallback unchanged', home().unreadFormats, unread);
 }
 
 {
