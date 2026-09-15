@@ -89,6 +89,24 @@ class NotificationReaderModule : Module() {
       true
     }
 
+    /**
+     * Cheap foreground self-heal. Do nothing while Android's listener is
+     * already connected; if an OEM killed it despite the permission still
+     * being granted, request a rebind. onListenerConnected() owns the recovery
+     * sweep, so normal app resumes never walk the notification shade.
+     */
+    AsyncFunction("ensureListenerConnected") {
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
+        return@AsyncFunction false
+      }
+      if (!BankNotificationListenerService.isConnected()) {
+        BankNotificationListenerService.sweepOrRequestRebind(context)
+      }
+      true
+    }
+
     /** Opens the system Notification access screen for the user to enable it. */
     Function("openSettings") {
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false

@@ -139,7 +139,8 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(store, /acknowledgedRows\.map \{ notificationFingerprint\(it\.pkg, it\.ts\) \}/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
   assert.match(bridge, /sweepVisible\(\): Promise<boolean>/);
-  assert.match(settings, /notifDiagnosticsTitle/);
+  assert.doesNotMatch(settings, /notifDiagnosticsTitle|notifDiagnosticsRefresh/,
+    'raw notification diagnostics should not be part of normal Settings');
   assert.doesNotMatch(settings, /notifDiagnostics[\s\S]{0,500}\.text/);
 });
 
@@ -344,27 +345,28 @@ test('Settings and draining use the same availability gate while permission revo
 });
 
 
-test('foreground notification drain is independent of SMS freshness and Settings can recover it', () => {
+test('foreground notification drain is independent of SMS freshness and self-heals a killed listener', () => {
   const hook = read('src/hooks/use-auto-import.ts');
   const scanner = read('src/lib/auto-import.ts');
   const settings = read('src/app/settings.tsx');
+  const bridge = read('modules/notification-reader/index.ts');
   const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
   assert.match(hook, /const runAndroidNotificationDrain = useCallback/);
   assert.match(hook, /captureExecutor\.execute\('notification-only'\)/);
   assert.match(hook, /Android's NotificationListenerService can enqueue a bank alert/);
-  assert.match(hook, /setTimeout\([\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?, 350\)/);
+  assert.match(hook, /setTimeout\([\s\S]*?ensureListenerConnected[\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?, 350\)/);
   const drainStart = hook.indexOf('const runAndroidNotificationDrain = useCallback');
   const drainEnd = hook.indexOf(`/**\n   * The current scan`, drainStart);
   const drainBody = hook.slice(drainStart, drainEnd);
   assert.doesNotMatch(drainBody, /lastScanAt|RESCAN_AFTER_MS|hasSmsPermission|getInboxSms/);
-  const ordinaryStart = settings.indexOf('const refreshNotificationDiagnostics = useCallback');
-  const recoverStart = settings.indexOf('const recoverNotificationDiagnostics = useCallback');
-  const ordinaryBody = settings.slice(ordinaryStart, recoverStart);
-  const recoverBody = settings.slice(recoverStart, settings.indexOf('const pendingNotificationConsent', recoverStart));
-  assert.doesNotMatch(ordinaryBody, /sweepVisible|runAndroidNotificationDrain/,
-    'opening Settings must not perform recovery work');
-  assert.match(recoverBody, /await reader\.sweepVisible\?\.\(\);[\s\S]*?await runAndroidNotificationDrain\(\);[\s\S]*?reader\.getDiagnostics\(\)/);
-  assert.match(settings, /onPress=\{\(\) => void recoverNotificationDiagnostics\(\)\}/);
+  assert.doesNotMatch(settings, /sweepVisible|recoverNotificationDiagnostics|notifDiagnosticsRefresh/,
+    'normal Settings must not own notification recovery');
+  assert.match(bridge, /ensureListenerConnected\?\(\): Promise<boolean>/);
+  const healStart = module.indexOf('AsyncFunction("ensureListenerConnected")');
+  const healEnd = module.indexOf('/** Opens the system Notification access screen', healStart);
+  const healBody = module.slice(healStart, healEnd);
+  assert.match(healBody, /if \(!BankNotificationListenerService\.isConnected\(\)\)/);
+  assert.match(healBody, /sweepOrRequestRebind\(context\)/);
   const diagnosticsStart = module.indexOf('AsyncFunction("getDiagnostics")');
   const diagnosticsEnd = module.indexOf('AsyncFunction("sweepVisible")');
   assert.doesNotMatch(module.slice(diagnosticsStart, diagnosticsEnd), /sweepOrRequestRebind|sweepConnected/,

@@ -25,7 +25,9 @@ assert.match(add, /promoteReviewAlert/);
 assert.match(add, /addTransaction/);
 
 const bills = code(read('src/app/(tabs)/bills.tsx'));
-assert.match(bills, /useState<'upcoming' \| 'all'>/);
+const billsFilter = code(read('src/components/bills/bills-segment-control.tsx'));
+assert.match(bills, /useState<BillsSegment>\('upcoming'\)/);
+assert.match(billsFilter, /'upcoming' \| 'subscriptions' \| 'utilities' \| 'cards' \| 'all'/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -58,8 +60,10 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 
 // Payment/deletion safeguards are unchanged; the shared agenda owns detail navigation.
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
-// Payment type is now the outer hierarchy; status/date sections retain all rows.
-assert.match(agenda,/group\.sections\.map/);
+// The Bills tabs choose payment type; the agenda itself keeps Claude's due-time
+// hierarchy so the nearest obligation is still the first thing the user sees.
+assert.match(agenda,/const sections = groupPaymentAgenda\(visibleItems, includePaid\)/);
+assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
@@ -208,18 +212,18 @@ assert.match(trends,/backgroundColor: theme\.primary/);
 assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
 const task5Bills = read('src/app/(tabs)/bills.tsx');
-const task5Segments = read('src/components/ui/segmented-control.tsx');
+const task5Segments = read('src/components/bills/bills-segment-control.tsx');
 assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
 assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 1, 'Bills keeps only its bounded subscription-history scroller');
 assert.match(task5Bills, /testID="subscription-history-scroll"/);
-assert.match(task5Bills,/<SegmentedControl[\s\S]*?label=\{t\('billsTitle'\)\}/);
+assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
 assert.match(task5Segments,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
-assert.ok(Number(task5Segments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','refAll']) assert.ok(task5Bills.includes(`t('${label}')`));
+for (const label of ['refUpcoming','subscriptionsSeg','utilitiesSeg','cardsSeg','refAll']) assert.ok(task5Segments.includes(`t('${label}')`));
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
@@ -297,14 +301,14 @@ assert.match(task7Pro, /purchaseBar: \{[\s\S]*?paddingTop: Spacing\.two/);
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 9, 'Settings renders exactly nine groups');
+assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight compact groups');
 const settingsGroupMarkers = [
   '<Block onPress={() => router.push(\'/pro\')}>',
-  "<SectionHeader title={t('settingsMoneyHeader')} />",
   "<SectionHeader title={t('settingsImportsHeader')} />",
   "<SectionHeader title={t('settingsNotificationsHeader')} />",
-  "<SectionHeader title={t('settingsAppearanceLanguageHeader')} />",
+  "<SectionHeader title={t('settingsPreferencesHeader')} />",
   "<SectionHeader title={t('privacyHeader')} />",
+  '<SectionHeader title={words.needsReview} />',
   "<SectionHeader title={t('dataHeader')} />",
   "<SectionHeader title={t('supportHeader')} />",
   "<SectionHeader title={t('settingsDangerHeader')} />",
@@ -317,15 +321,14 @@ for (const marker of settingsGroupMarkers) {
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
 assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
-assert.match(task7Settings, /from '@\/components\/ui\/segmented-control'/);
-assert.match(task7Settings, /<SegmentedControl[\s\S]*?onChange=\{setThemePreference\}/);
+assert.doesNotMatch(task7Settings, /from '@\/components\/ui\/segmented-control'/);
+assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
 assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
 
 for (const [key, en, ar] of [
-  ['settingsMoneyHeader', 'Money', 'المال'],
   ['settingsImportsHeader', 'Imports', 'الاستيراد'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
-  ['settingsAppearanceLanguageHeader', 'Appearance & language', 'المظهر واللغة'],
+  ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],

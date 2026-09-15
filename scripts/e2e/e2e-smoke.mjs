@@ -389,8 +389,7 @@ await tapTab(page, 'Bills');
 ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
 await agenda.waitFor({state:'visible'});
-ok('Agenda states that marking paid only updates Wafra and sends no payment',
-  /Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));
+ok('Agenda states that recording a payment does not move money',/Recording a payment does not move money/.test(await agenda.innerText()));
 await tapText(page,'All',600);
 const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
 ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));
@@ -465,10 +464,10 @@ await tapLabel(page, 'Settings', 1400);
  // Settings now presents task sections in one scrollable screen. Read each
  // actual heading sequentially: parallel scroll attempts race one another.
  const sections=[];
- for (const title of ['Money','Imports','Notifications','Appearance & language','Privacy','Data','Support & feedback']) {
+ for (const title of ['Imports','Notifications','Preferences','Privacy','Data','Support & feedback']) {
    sections.push(!!(await visibleText(page,new RegExp(`^${title}$`,'i'))));
  }
- ok('Settings exposes its money, import, appearance, privacy, data and support sections',sections.every(Boolean));
+ ok('Settings exposes its import, preferences, privacy, data and support sections',sections.every(Boolean));
 }
 ok('Settings keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
 ok('Support keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
@@ -481,7 +480,8 @@ ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
  * one of them is reading the OS directly.
  */
 {
-  ok('settings offers an Appearance & language section', !!(await visibleText(page, /^Appearance & language$/i)));
+  ok('settings offers a compact Appearance preference', !!(await visibleText(page, /^Appearance$/i)));
+  await tapText(page, /^Appearance$/i, 1200);
   for (const opt of ['System', 'Light', 'Dark']) {
     ok(`appearance offers ${opt}`, !!(await visibleText(page, opt)));
   }
@@ -502,12 +502,14 @@ ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
   };
   await tapText(page, 'Light', 1200);
   ok('appearance: Light turns the whole app over while the OS is dark', await acrossTheApp('light'));
+  await tapText(page, /^Appearance$/i, 1200);
   await tapText(page, 'Dark', 1200);
   ok('appearance: Dark pins it back', await acrossTheApp('dark'));
+  await tapText(page, /^Appearance$/i, 1200);
   await tapText(page, 'System', 1200);
   ok('appearance: System follows the OS again', await acrossTheApp('dark'));
   ok('appearance: System says it is following the phone',
-    !!(await visibleText(page, /Following your phone/)));
+    !!(await visibleText(page, /System · follows phone/)));
 }
 
 // ── Import ────────────────────────────────────────────────────────────

@@ -9,9 +9,7 @@ export const paymentAgendaCopy = {
     subscriptions: 'Subscriptions', utilities: 'Utilities & telecom', cards: 'Card payments', loans: 'Loan repayments', other: 'Other bills',
     subscriptionsHint: 'Recurring memberships and services', utilitiesHint: 'Electricity, water, phone and internet',
     emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.',
-    summaryTitle: 'Upcoming total', summaryPayments: 'payments', summaryDueTodayOne: '1 due today', summaryDueTodayMany: '{n} due today',
-    summaryOverdueOne: '1 past due', summaryOverdueMany: '{n} past due', summaryEstimatedOne: '1 estimated', summaryEstimatedMany: '{n} estimated',
-    summaryEmpty: 'Nothing coming up' },
+    emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.' },
   ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'خلال 7 أيام', later: 'لاحقاً', paid: 'مدفوعة مؤخراً',
     estimate: 'تقديري', recorded: 'مدفوعة · استحقاقها', statement: 'استحقاق الكشف', empty: 'لا توجد دفعات قادمة',
     emptyBody: 'أضف تذكيراً بفاتورة أو استورد تنبيهات البنك لعرض التواريخ المعروفة.',
@@ -20,9 +18,7 @@ export const paymentAgendaCopy = {
     subscriptions: 'الاشتراكات', utilities: 'المرافق والاتصالات', cards: 'دفعات البطاقات', loans: 'أقساط القروض', other: 'فواتير أخرى',
     subscriptionsHint: 'العضويات والخدمات المتكررة', utilitiesHint: 'الكهرباء والمياه والهاتف والإنترنت',
     emptySubscriptions: 'لا توجد تجديدات اشتراكات لعرضها.', emptyUtilities: 'لا توجد فواتير مرافق لعرضها.',
-    summaryTitle: 'إجمالي القادم', summaryPayments: 'دفعات', summaryDueTodayOne: 'واحدة مستحقة اليوم', summaryDueTodayMany: '{n} مستحقة اليوم',
-    summaryOverdueOne: 'واحدة متأخرة', summaryOverdueMany: '{n} متأخرة', summaryEstimatedOne: 'واحدة تقديرية', summaryEstimatedMany: '{n} تقديرية',
-    summaryEmpty: 'لا توجد دفعات قادمة' },
+    emptyCards: 'لا توجد دفعات بطاقات ائتمانية لعرضها.', emptyLoans: 'لا توجد أقساط قروض لعرضها.', emptyOther: 'لا توجد فواتير أخرى لعرضها.' },
 };
 
 export const accountGroupsCopy = {
@@ -56,15 +52,13 @@ export const spendingCopy = {
 } as const;
 
 export const spendingTrendsCopy = {
-  en: { cashflow: 'Income & spending', sixMonths: 'Six money months', income: 'Income', spending: 'Spending',
-    net: 'Net',
+  en: { cashflow: 'Income & spending', sixMonths: 'Six money months', income: 'Income', spending: 'Spending', net: 'Net',
     merchants: 'Top merchants', change: 'What changed', fewer: 'Less', more: 'More', vs: 'Compared with',
     noMerchants: 'Merchant trends will appear after you add spending.', noChange: 'No material category change for this comparison.',
     missingComparison: 'Choose a shorter period for a comparable view.', patterns: 'Spending by weekday',
     patternsNote: 'Recorded spending, excluding fixed commitments. This is not a forecast.',
     noData: 'No recorded activity', records: 'transactions', partial: 'The selected month may be incomplete.' },
-  ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق',
-    net: 'الصافي',
+  ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق', net: 'الصافي',
     merchants: 'أبرز التجار', change: 'ما الذي تغير', fewer: 'أقل', more: 'أكثر', vs: 'مقارنة مع',
     noMerchants: 'ستظهر اتجاهات التجار بعد إضافة المصروفات.', noChange: 'لا يوجد تغير كبير في الفئات لهذه المقارنة.',
     missingComparison: 'اختر فترة أقصر لعرض المقارنة.', patterns: 'الإنفاق حسب أيام الأسبوع',

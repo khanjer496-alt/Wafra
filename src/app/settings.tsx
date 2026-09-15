@@ -53,7 +53,6 @@ import { Block, Row, Section } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { SectionHeader } from '@/components/ui/section-header';
-import { SegmentedControl } from '@/components/ui/segmented-control';
 import { WafraMark } from '@/components/wafra-logo';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -86,7 +85,7 @@ import {
 } from '@/lib/founder-pro';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
+import { ledgerCurrencyDisplay, marketCurrencyCode } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
 // Deliberately this branch's relay client, not the other one's isRelaySupported/
@@ -120,7 +119,7 @@ import {
 import { ClearAllError, useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
-import NotificationReader, { type NotificationReaderDiagnostics } from '../../modules/notification-reader';
+import NotificationReader from '../../modules/notification-reader';
 import {
   bankNotificationAdmissionExpiresAt,
   isBankNotificationCaptureAvailable,
@@ -153,7 +152,6 @@ export default function SettingsScreen() {
     setCaptureOptOut,
     beginHistoryImport,
     setLedgerMoney,
-    setMarket,
     setUiLanguage,
     exportBackup,
     getStateSnapshot,
@@ -169,9 +167,6 @@ export default function SettingsScreen() {
       ? state.themePreference
       : 'system';
 
-  const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
-  const hasGlobalLedger = state.ledgerMoney != null &&
-    state.ledgerMoney.currency !== 'AED' && state.ledgerMoney.currency !== 'SAR';
   const language: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
   const reviewAlertCount = state.reviewTray.pending.filter(
     (item) => item.expiresAt > Date.now(),
@@ -186,7 +181,6 @@ export default function SettingsScreen() {
   const iosCapturePreferenceInFlight = useRef<Promise<void> | null>(null);
   const {
     captureState,
-    runAndroidNotificationDrain,
     iosCaptureStatus,
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
@@ -544,8 +538,8 @@ export default function SettingsScreen() {
 
   /** Per-charge Wafra alerts default on; the OS remains the final sound/banner control. */
   const [chargeAlerts, setChargeAlerts] = useState(true);
-  /** Which region picker is open, if any. Only one can be. */
-  const [regionSheet, setRegionSheet] = useState<'country' | 'language' | null>(null);
+  /** Which compact preference picker is open, if any. Only one can be. */
+  const [preferenceSheet, setPreferenceSheet] = useState<'appearance' | 'language' | null>(null);
   /**
    * The one confirmation on this screen, whichever is currently being asked.
    *
@@ -606,30 +600,6 @@ export default function SettingsScreen() {
 
   const [notifEnabled, setNotifEnabled] = useState(false);
   const instantAlertSourceReady = smsGranted || notifEnabled;
-  const [notifDiagnostics, setNotifDiagnostics] = useState<NotificationReaderDiagnostics | null>(null);
-  const [notifDiagnosticsBusy, setNotifDiagnosticsBusy] = useState(false);
-  const refreshNotificationDiagnostics = useCallback(async () => {
-    const reader = NotificationReader;
-    if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
-    try { setNotifDiagnostics(await reader.getDiagnostics()); }
-    catch { setNotifDiagnostics(null); }
-  }, [notifAvailable]);
-  const recoverNotificationDiagnostics = useCallback(async () => {
-    const reader = NotificationReader;
-    if (!notifAvailable || !reader?.getDiagnostics) { setNotifDiagnostics(null); return; }
-    setNotifDiagnosticsBusy(true);
-    try {
-      // Recovery is intentionally explicit. Walking the full Android shade is
-      // too expensive for ordinary app open/resume, especially on OEMs that
-      // retain hundreds of notifications. Sweep once, drain the repaired
-      // encrypted queue, then read source-free counts.
-      await reader.sweepVisible?.();
-      await runAndroidNotificationDrain();
-      setNotifDiagnostics(await reader.getDiagnostics());
-    }
-    catch { setNotifDiagnostics(null); }
-    finally { setNotifDiagnosticsBusy(false); }
-  }, [notifAvailable, runAndroidNotificationDrain]);
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
@@ -637,7 +607,6 @@ export default function SettingsScreen() {
       catch { setNotifEnabled(false); }
     };
     refresh();
-    void refreshNotificationDiagnostics();
     if (notifAvailable && !state.captureOptOut && proActive) {
       void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state))
         .then(refresh).catch(() => {});
@@ -673,7 +642,7 @@ export default function SettingsScreen() {
       })();
     });
     return () => subscription.remove();
-  }, [notifAvailable, proActive, refreshNotificationDiagnostics, setCaptureOptOut, state.captureOptOut]);
+  }, [notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
   const onNotificationAccess = () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader) {
@@ -696,57 +665,6 @@ export default function SettingsScreen() {
       },
     });
   };
-
-  /* ── Region ─────────────────────────────────────────────────────────── */
-
-  const marketName = (id: string) => t(id === 'SA' ? 'saudiName' : 'uaeName');
-
-  /**
-   * The country pack is a choice, not a cycle.
-   *
-   * It used to be one tap on a chevron row, advancing to the next pack in the
-   * list modulo its length: no picker, no confirmation, no undo. Nothing
-   * converts the ledger when it moves, so the same stored 125050 fils printed
-   * "AED 1,250.50" before the tap and "SAR 1,250.50" after it — every figure
-   * in the app relabelled in a currency the money was never in. It also swaps
-   * the bank and merchant registry the parser matches senders against. A
-   * thumb landing short of Language was enough to do all of that, and nothing
-   * on screen said so.
-   *
-   * Now the row opens the list and the user names the country they mean.
-   *
-   * The list is a ChoiceSheet rather than an alert. `Alert.alert` cannot be
-   * the control here on either platform this app actually ships to plus the
-   * one it exports to: Android draws at most three alert buttons — the two
-   * packs plus Cancel, already at the ceiling — and on react-native-web
-   * `Alert.alert` is an empty method, so the row did nothing at all.
-   */
-  /**
-   * A pack denominated differently from money already recorded is SHOWN and
-   * refused, with the reason on the row.
-   *
-   * `setMarket` answers such a request by changing nothing at all — the right
-   * answer, because there is no rate that could convert a ledger of
-   * hand-entered amounts, bill totals and statement balances, and a plausible
-   * wrong number is worse than an honest label. But a silent no-op is the
-   * same class of defect as the alert that never opened: the user taps, the
-   * app does nothing, and nothing says why. So the constraint is stated
-   * before the tap rather than swallowed after it.
-   *
-   * Shown rather than omitted: a user hunting for Saudi Arabia in a list that
-   * does not contain it concludes the app cannot do Saudi Arabia at all.
-   */
-  const marketChoices = MARKETS.map((m) => {
-    const allowed = canSelectMarket(m.id);
-    return {
-      value: m.id,
-      label: marketName(m.id),
-      detail: allowed
-        ? m.currency.display
-        : tf('marketPinned', { currency: ledgerCurrencyDisplay() }),
-      disabled: !allowed,
-    };
-  });
 
   const languagePreference = state.languagePreference ?? 'system';
   const ledgerCurrencyLocked = ledgerStateHasMoney(state);
@@ -781,6 +699,11 @@ export default function SettingsScreen() {
       value: code,
       label: LANGUAGE_NAMES[code],
     })),
+  ];
+  const appearanceChoices: { value: ThemePreference; label: string; detail?: string }[] = [
+    { value: 'system', label: t('themeSystem'), detail: t('themeSystemDetail') },
+    { value: 'light', label: t('themeLight') },
+    { value: 'dark', label: t('themeDark') },
   ];
 
   /* ── Data ───────────────────────────────────────────────────────────── */
@@ -878,7 +801,7 @@ export default function SettingsScreen() {
       const html = buildExpenseReportHtml({
         transactions: state.transactions,
         accounts: state.accounts,
-        currency: state.ledgerMoney?.currency ?? market.currency.code,
+        currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),
         currencyExponent: state.ledgerMoney?.exponent ?? 2,
         language: state.language === 'ar' ? 'ar' : 'en',
         from,
@@ -1299,33 +1222,16 @@ export default function SettingsScreen() {
           </Block>
         </Section>
 
-        <Section index={1} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
-          <SectionHeader title={t('settingsMoneyHeader')} />
-          {hasGlobalLedger ? (
-            <Row last>
-              <View style={styles.rowText}>
-                <ThemedText type="small">{t('parserPack')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {tf('globalParserPackDetail', { currency: state.ledgerMoney!.currency })}
-                </ThemedText>
-              </View>
-            </Row>
-          ) : linkRow(
-            t('parserPack'),
-            tf('parserPackDetail', {
-              country: marketName(market.id),
-              currency: market.currency.display,
-            }),
-            () => setRegionSheet('country'),
-            { last: true },
-          )}
-        </Section>
-
-        <Section index={2} testID="settings-imports" onLayout={({ nativeEvent }) => {
+        <Section index={1} testID="settings-imports" onLayout={({ nativeEvent }) => {
           importsOffset.current = nativeEvent.layout.y;
           scrollToRequestedSection();
         }} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
+          {linkRow(
+            t('statementImportTitle'),
+            t('statementImportSettingsDetail'),
+            () => router.push('/statement-import'),
+          )}
           {Platform.OS === 'ios' && linkRow(
             t('iosSetupTitle'),
             t('iosMessageSettingsDetail'),
@@ -1422,42 +1328,9 @@ export default function SettingsScreen() {
               gated(onNotificationAccess),
               { pro: true },
             )}
-          {notifAvailable && (
-            <Block style={styles.historyImportSettings}>
-              <View style={styles.historyImportSettingsCopy}>
-                <ThemedText type="smallBold">{t('notifDiagnosticsTitle')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {notifDiagnostics ? tf('notifDiagnosticsAccess', {
-                    system: t(notifDiagnostics.systemAccess ? 'settingStatusYes' : 'settingStatusNo'),
-                    admission: t(notifDiagnostics.admissionActive ? 'settingStatusYes' : 'settingStatusNo'),
-                    listener: t(notifDiagnostics.listenerConnected ? 'settingStatusYes' : 'settingStatusNo'),
-                  }) : t('notifDiagnosticsUnavailable')}
-                </ThemedText>
-                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
-                  {tf('notifDiagnosticsVisible', {
-                    active: notifDiagnostics.activeNotificationCount,
-                    trusted: notifDiagnostics.trustedBankVisibleCount,
-                    adcb: t(notifDiagnostics.adcbVisible ? 'settingStatusYes' : 'settingStatusNo'),
-                    adcbCount: notifDiagnostics.adcbActiveCount ?? 0,
-                  })}
-                </ThemedText> : null}
-                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
-                  {tf('notifDiagnosticsQueue', { queued: notifDiagnostics.queuedCandidateCount })}
-                </ThemedText> : null}
-                {notifDiagnostics ? <ThemedText type="meta" themeColor="textSecondary">
-                  {tf('notifDiagnosticsStages', {
-                    stages: Object.entries(notifDiagnostics.adcbAdmissionCounts ?? {})
-                      .map(([key, value]) => `${key}=${value}`).join(' · ') || 'none',
-                  })}
-                </ThemedText> : null}
-              </View>
-              <Button inline variant="outline" label={t('notifDiagnosticsRefresh')}
-                disabled={notifDiagnosticsBusy} onPress={() => void recoverNotificationDiagnostics()} />
-            </Block>
-          )}
         </Section>
 
-        <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsNotificationsHeader')} />
           {switchRow(
             t('dailySummarySetting'),
@@ -1494,30 +1367,18 @@ export default function SettingsScreen() {
             )}
         </Section>
 
-        <Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
-          <SectionHeader title={t('settingsAppearanceLanguageHeader')} />
-          <Block>
-            <SegmentedControl
-              label={t('appearanceHeader')}
-              segments={[
-                { value: 'system', label: t('themeSystem') },
-                { value: 'light', label: t('themeLight') },
-                { value: 'dark', label: t('themeDark') },
-              ]}
-              value={themeChoice}
-              onChange={setThemePreference}
-            />
-            <ThemedText type="meta" themeColor="textTertiary">
-              {themeChoice === 'system'
-                ? t('followingPhone')
-                : tf('pinnedTheme', {
-                    theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
-                  })}
-            </ThemedText>
-          </Block>
+        <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+          <SectionHeader title={t('settingsPreferencesHeader')} />
+          {linkRow(
+            t('appearanceHeader'),
+            themeChoice === 'system'
+              ? t('themeSystemDetail')
+              : t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
+            () => setPreferenceSheet('appearance'),
+          )}
           {linkRow(t('language'), languagePreference === 'system'
             ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
-            : LANGUAGE_NAMES[language], () => setRegionSheet('language'))}
+            : LANGUAGE_NAMES[language], () => setPreferenceSheet('language'))}
           {linkRow(
             t('homeCustomizeTitle'),
             t('homeCustomizeDetail'),
@@ -1543,7 +1404,7 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('privacyHeader')} />
           {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
           {linkRow(t('messagesPrivacy'), t('privacyBuiltInDetail'), () => setPrivacyDetailsVisible(true), { last: true })}
@@ -1557,7 +1418,7 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={words.needsReview} />
           {reviewAlertCount > 0 && linkRow(
             words.reviewTitle,
@@ -1587,11 +1448,6 @@ export default function SettingsScreen() {
             () => router.push('/accuracy'),
           )}
           <SectionHeader title={t('dataHeader')} />
-          {linkRow(
-            t('statementImportTitle'),
-            t('statementImportSettingsDetail'),
-            () => router.push('/statement-import'),
-          )}
           {linkRow(t('backupJson'), null, backupJson)}
           {isSmsCorpusExportAvailable() && (
             <Block>
@@ -1623,9 +1479,8 @@ export default function SettingsScreen() {
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
         </Section>
 
-        <Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('supportHeader')} />
-          <TesterDiagnosticsControl />
           {linkRow(
             t('sendFeedback'),
             t('sendFeedbackDetail'),
@@ -1669,9 +1524,10 @@ export default function SettingsScreen() {
               Wafra {version}
             </ThemedText>
           </View>
+          <TesterDiagnosticsControl />
         </Section>
 
-        <Section index={8} style={styles.danger}>
+        <Section index={7} style={styles.danger}>
           <SectionHeader title={t('settingsDangerHeader')} />
           <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
         </Section>
@@ -1693,17 +1549,16 @@ export default function SettingsScreen() {
       </BottomSheet>
 
       <ChoiceSheet
-        visible={regionSheet === 'country'}
-        onClose={() => setRegionSheet(null)}
-        title={t('parserPack')}
-        body={t('parserPackPickerBody')}
-        options={marketChoices}
-        value={market.id}
-        onSelect={setMarket}
+        visible={preferenceSheet === 'appearance'}
+        onClose={() => setPreferenceSheet(null)}
+        title={t('appearanceHeader')}
+        options={appearanceChoices}
+        value={themeChoice}
+        onSelect={setThemePreference}
       />
       <ChoiceSheet
-        visible={regionSheet === 'language'}
-        onClose={() => setRegionSheet(null)}
+        visible={preferenceSheet === 'language'}
+        onClose={() => setPreferenceSheet(null)}
         title={t('language')}
         options={languageChoices}
         value={languagePreference}

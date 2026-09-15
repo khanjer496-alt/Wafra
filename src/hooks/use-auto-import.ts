@@ -1166,7 +1166,15 @@ export function useAutoImport(
       timer = setTimeout(() => {
         timer = null;
         if (!mounted || RNAppState.currentState !== 'active') return;
-        void runAndroidNotificationDrain().catch(() => {});
+        void (async () => {
+          // Notification access can remain granted while some Android OEMs
+          // kill the listener service. Repair only that disconnected state;
+          // the native method is otherwise a no-op and never scans the shade.
+          if (hasBankNotificationAccess()) {
+            await NotificationReader?.ensureListenerConnected?.().catch(() => false);
+          }
+          await runAndroidNotificationDrain();
+        })().catch(() => {});
       }, 350);
     };
     schedule();
