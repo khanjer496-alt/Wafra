@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { isLogoCacheGenerationCurrent, logoCacheGeneration, mutateLogoCache, registerLogoCacheReset } from '@/lib/logo-cache-lifecycle';
-import { verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
+import { brandfetchSearchUrl, verifiedLogoUrl, verifiedMerchantIdentity } from '@/lib/verified-logo-identities';
 
 export interface RemoteMerchantLogo {
   readonly id: string;
@@ -9,22 +9,42 @@ export interface RemoteMerchantLogo {
   readonly canonicalName: string;
   readonly logoUrl: string;
   readonly confidence: number;
-  readonly source: 'verified';
+  readonly source: 'verified' | 'search';
 }
 
-type CacheRecord = { value: RemoteMerchantLogo; expiresAt: number };
-const CACHE_PREFIX = 'wafra:merchant-logo:v2:';
+type CacheRecord = { query: string; value: RemoteMerchantLogo | null; expiresAt: number };
+type BrandfetchSearchResult = {
+  icon?: unknown;
+  name?: unknown;
+  domain?: unknown;
+  claimed?: unknown;
+  brandId?: unknown;
+};
+const CACHE_PREFIX = 'wafra:merchant-logo:v3:';
 const POSITIVE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
+const SEARCH_TIMEOUT_MS = 4_000;
+const MAX_CONCURRENT_SEARCHES = 3;
 const memory = new Map<string, CacheRecord>();
 const pending = new Map<string, Promise<RemoteMerchantLogo | null>>();
+let activeSearches = 0;
+const searchWaiters: (() => void)[] = [];
 
 const LOCATION_TAIL = /\s+(?:dubai|dxb|abu dhabi|sharjah|ajman|al ain|riyadh|jeddah|dammam|doha|kuwait|manama|muscat|cairo|amman|beirut|london|paris|new york|uae|u\.a\.e\.?|are|ae|ksa|sau|sa|qa|qat|kw|kwt|bh|bhr|om|omn|eg|egy|jo|jor|lb|lbn|uk|gb|usa|us|دبي|أبوظبي|ابوظبي|أبو ظبي|ابو ظبي|الشارقة|عجمان|الرياض|جدة|الدوحة|الكويت|المنامة|مسقط)(?:\s+#?\d{1,12})?$/iu;
 const TERMINAL_TAIL = /\s+(?:store|branch|shop|terminal|kiosk|pos|t\d+|#?\d{3,12})$/iu;
 const PAYMENT_PREFIX = /^(?:(?:pos|purchase|card purchase|debit card purchase|credit card purchase|payment|paid to|spent at|transaction at|visa|mastercard|mada)\s*[:*\-]?\s*)+/iu;
+const PROCESSOR_PREFIX = /^(?:paypal|stripe|square|sq|sumup|adyen|opn|2c2p|tst|sp)\s*[*:/-]\s*/iu;
 const GENERIC_ONLY = /^(?:shop|store|market|restaurant|cafe|coffee|payment|purchase|merchant|online|retail|supermarket|grocery|food|services?|trading|general trading)$/iu;
+const NON_MERCHANT_ONLY = /^(?:(?:incoming|outgoing|bank|own|internal)?\s*(?:money\s+)?transfer|(?:atm|cash)\s+withdrawal|(?:credit\s+)?card\s+payment|payment\s+(?:received|sent)|salary|cash\s+deposit|refund|reversal)$/iu;
+const DESCRIPTOR_WORDS = new Set([
+  'app', 'business', 'cafe', 'coffee', 'company', 'co', 'food', 'general', 'grocery', 'groceries',
+  'hypermarket', 'inc', 'llc', 'ltd', 'market', 'online', 'pay', 'payment', 'payments', 'restaurant',
+  'sales', 'send', 'service', 'services', 'shop', 'store', 'supermarket', 'topup', 'trading',
+]);
 
 function normalized(value: string): string {
-  return value.normalize('NFKC').toLowerCase()
+  return value.normalize('NFKD').toLowerCase()
+    .replace(/\p{M}+/gu, '')
     .replace(/[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed\u0640]/g, '')
     .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي')
     .replace(/&/g, ' and ')
@@ -34,8 +54,8 @@ function normalized(value: string): string {
 
 /**
  * Convert a display merchant title into the smallest useful brand candidate.
- * This value is used only for local exact identity matching. It must never
- * become a network query or authorize an unreviewed domain.
+ * Only this cleaned value may become a Brandfetch name query. Raw bank text,
+ * amounts and account/card tails are deliberately stripped before this point.
  */
 export function merchantBrandCandidate(title: string): string | null {
   if (typeof title !== 'string' || !title.trim() || title.length > 160) return null;
@@ -43,6 +63,7 @@ export function merchantBrandCandidate(title: string): string | null {
 
   let value = title.normalize('NFKC').trim()
     .replace(PAYMENT_PREFIX, '')
+    .replace(PROCESSOR_PREFIX, '')
     .replace(/^at\s+/iu, '')
     .replace(/\b(?:aed|sar|usd|eur|gbp|qar|kwd|bhd|omr)\s*[\d,.]+\b/giu, ' ')
     .replace(/\b(?:card|acct|account|a\/c)\s*(?:x+|\*+)?\d{2,16}\b/giu, ' ')
@@ -58,7 +79,7 @@ export function merchantBrandCandidate(title: string): string | null {
 
   if (value.length < 2 || value.length > 80 || GENERIC_ONLY.test(value)) return null;
   const key = normalized(value);
-  if (key.length < 2 || /^\d+$/.test(key)) return null;
+  if (key.length < 2 || /^\d+$/.test(key) || NON_MERCHANT_ONLY.test(key)) return null;
   return value;
 }
 
@@ -66,67 +87,160 @@ function cacheKey(name: string): string {
   return CACHE_PREFIX + encodeURIComponent(normalized(name));
 }
 
-function matches(record: CacheRecord | null, expected: RemoteMerchantLogo): boolean {
-  const value = record?.value;
-  return typeof record?.expiresAt === 'number' && record.expiresAt > Date.now() && !!value &&
-    value.id === expected.id && value.domain === expected.domain &&
-    value.canonicalName === expected.canonicalName && value.logoUrl === expected.logoUrl &&
-    value.source === expected.source && value.confidence === expected.confidence;
+function brandCore(value: string): string {
+  return normalized(value).split(' ').filter(token => token && !DESCRIPTOR_WORDS.has(token)).join(' ');
 }
 
-async function readCached(expected: RemoteMerchantLogo, generation: number): Promise<boolean> {
-  const key = cacheKey(expected.canonicalName);
+function safeCachedValue(value: unknown): RemoteMerchantLogo | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as Partial<RemoteMerchantLogo>;
+  if (candidate.source !== 'search' || typeof candidate.domain !== 'string' ||
+      typeof candidate.canonicalName !== 'string' || candidate.canonicalName.length > 160 ||
+      /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(candidate.canonicalName) ||
+      typeof candidate.confidence !== 'number') return undefined;
+  const logoUrl = verifiedLogoUrl(candidate.domain);
+  if (!logoUrl || candidate.confidence < 0 || candidate.confidence > 1) return undefined;
+  return Object.freeze({
+    id: `brandfetch:${candidate.domain}`,
+    domain: candidate.domain,
+    canonicalName: candidate.canonicalName,
+    logoUrl,
+    confidence: candidate.confidence,
+    source: 'search' as const,
+  });
+}
+
+async function readCached(candidate: string, generation: number): Promise<RemoteMerchantLogo | null | undefined> {
+  const query = normalized(candidate);
+  const key = cacheKey(candidate);
   const hot = memory.get(key);
-  if (hot && matches(hot, expected)) return true;
+  if (hot && hot.expiresAt > Date.now() && hot.query === query) return safeCachedValue(hot.value);
   if (hot) memory.delete(key);
   try {
     const raw = await AsyncStorage.getItem(key);
-    if (!isLogoCacheGenerationCurrent(generation) || !raw) return false;
+    if (!isLogoCacheGenerationCurrent(generation) || !raw) return undefined;
     const record = JSON.parse(raw) as CacheRecord;
-    if (!matches(record, expected)) {
+    const safe = record && record.query === query && record.expiresAt > Date.now()
+      ? safeCachedValue(record.value) : undefined;
+    if (safe === undefined) {
       await mutateLogoCache(generation, () => AsyncStorage.removeItem(key)).catch(() => undefined);
-      return false;
+      return undefined;
     }
-    // Publish only the locally constructed identity, never an object from storage.
-    memory.set(key, { value: expected, expiresAt: record.expiresAt });
-    return true;
+    // Publish a reconstructed CDN URL, never an arbitrary URL from storage.
+    memory.set(key, { query, value: safe, expiresAt: record.expiresAt });
+    return safe;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
-async function writeCached(value: RemoteMerchantLogo, generation: number): Promise<void> {
-  const record: CacheRecord = { value, expiresAt: Date.now() + POSITIVE_TTL_MS };
+async function writeCached(candidate: string, value: RemoteMerchantLogo | null, generation: number): Promise<void> {
+  const record: CacheRecord = {
+    query: normalized(candidate),
+    value,
+    expiresAt: Date.now() + (value ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
+  };
   try {
     await mutateLogoCache(generation, async () => {
-      memory.set(cacheKey(value.canonicalName), record);
-      await AsyncStorage.setItem(cacheKey(value.canonicalName), JSON.stringify(record));
+      memory.set(cacheKey(candidate), record);
+      await AsyncStorage.setItem(cacheKey(candidate), JSON.stringify(record));
     });
   } catch {
     // Optional artwork must not block the ledger when storage is unavailable.
   }
 }
 
-/** Resolve reviewed identities locally. Unknown transaction names never leave the device. */
+function scoredSearchResult(candidate: string, result: BrandfetchSearchResult): { value: RemoteMerchantLogo; score: number } | null {
+  if (typeof result.name !== 'string' || typeof result.domain !== 'string') return null;
+  const logoUrl = verifiedLogoUrl(result.domain);
+  if (!logoUrl) return null;
+  const query = normalized(candidate);
+  const name = normalized(result.name);
+  if (!query || !name) return null;
+  const exact = query === name;
+  const compact = query.replace(/\s/g, '') === name.replace(/\s/g, '');
+  const core = brandCore(candidate);
+  const resultCore = brandCore(result.name);
+  const claimed = result.claimed === true;
+  let score = exact ? 100 : compact && claimed ? 94 : core && core === resultCore && claimed ? 90 : 0;
+  if (!score) return null;
+  if (claimed) score += 4;
+  const confidence = Math.min(0.99, score / 105);
+  return {
+    score,
+    value: Object.freeze({
+      id: `brandfetch:${result.domain}`,
+      domain: result.domain,
+      canonicalName: result.name.trim(),
+      logoUrl,
+      confidence,
+      source: 'search',
+    }),
+  };
+}
+
+async function withSearchSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeSearches >= MAX_CONCURRENT_SEARCHES) await new Promise<void>(resolve => searchWaiters.push(resolve));
+  activeSearches += 1;
+  try {
+    return await task();
+  } finally {
+    activeSearches -= 1;
+    searchWaiters.shift()?.();
+  }
+}
+
+/** null = a successful search with no confident match; undefined = transient lookup failure. */
+async function searchBrandfetch(candidate: string, generation: number): Promise<RemoteMerchantLogo | null | undefined> {
+  const url = brandfetchSearchUrl(candidate);
+  if (!url || !isLogoCacheGenerationCurrent(generation)) return undefined;
+  return withSearchSlot(async () => {
+    if (!isLogoCacheGenerationCurrent(generation)) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { method: 'GET', signal: controller.signal });
+      if (!response.ok || !isLogoCacheGenerationCurrent(generation)) return undefined;
+      const raw = await response.json();
+      if (!Array.isArray(raw)) return undefined;
+      const ranked = raw
+        .map(result => scoredSearchResult(candidate, result as BrandfetchSearchResult))
+        .filter((value): value is { value: RemoteMerchantLogo; score: number } => value !== null)
+        .sort((a, b) => b.score - a.score);
+      return ranked[0]?.value ?? null;
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+}
+
+/** Resolve bundled shortcuts locally, then enrich a sanitized merchant name through Brandfetch Search. */
 export async function resolveRemoteMerchantLogo(title: string): Promise<RemoteMerchantLogo | null> {
   const generation = logoCacheGeneration();
   if (generation === null) return null;
   const candidate = merchantBrandCandidate(title);
+  if (!candidate) return null;
   const identity = candidate ? verifiedMerchantIdentity(candidate) : null;
-  if (!identity) return null; // Ignore legacy unknown-name mappings entirely.
-  const logoUrl = verifiedLogoUrl(identity.domain);
-  if (!logoUrl) return null;
-  const expected: RemoteMerchantLogo = Object.freeze({
-    id: `brandfetch:${identity.domain}`, ...identity, logoUrl, confidence: 1, source: 'verified',
-  });
-  const key = cacheKey(expected.canonicalName);
+  if (identity) {
+    const logoUrl = verifiedLogoUrl(identity.domain);
+    return logoUrl ? Object.freeze({
+      id: `brandfetch:${identity.domain}`, ...identity, logoUrl, confidence: 1, source: 'verified',
+    }) : null;
+  }
+  const key = cacheKey(candidate);
   const active = pending.get(key);
   if (active) return active;
   const request = (async () => {
-    const cached = await readCached(expected, generation);
+    const cached = await readCached(candidate, generation);
     if (!isLogoCacheGenerationCurrent(generation)) return null;
-    if (!cached) await writeCached(expected, generation);
-    return isLogoCacheGenerationCurrent(generation) ? expected : null;
+    if (cached !== undefined) return cached;
+    const found = await searchBrandfetch(candidate, generation);
+    if (!isLogoCacheGenerationCurrent(generation)) return null;
+    if (found !== undefined) await writeCached(candidate, found, generation);
+    return isLogoCacheGenerationCurrent(generation) ? found ?? null : null;
   })().finally(() => {
     if (pending.get(key) === request) pending.delete(key);
   });

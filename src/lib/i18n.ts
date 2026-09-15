@@ -1163,8 +1163,8 @@ const S = {
     ar: 'الخصوصية جزء أساسي من وفرة. سجلك مشفّر على آيفون وأندرويد، ويعمل الالتقاط المحلي لرسائل البنك دون رفع رسائلك. ويضيف قفل التطبيق حماية عندما يستخدم شخص آخر هاتفك المفتوح.',
   },
   privacyLogosBody: {
-    en: 'Logos appear automatically. Many ship with the app; others load using a verified brand domain. Unknown transaction names are never sent to a logo search service. The image provider can see a requested brand domain and your network address.',
-    ar: 'تظهر الشعارات تلقائياً. يأتي كثير منها مع التطبيق، ويُحمَّل بعضها باستخدام نطاق علامة تجارية موثّق. لا تُرسل أسماء العمليات غير المعروفة إلى خدمة بحث عن الشعارات. ويمكن لمزوّد الصور رؤية نطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
+    en: 'Logos appear automatically. Many merchant and bank identities ship with the app. For other merchants or banks, Wafra may send only a cleaned brand or institution name — not the amount, account/card number or bank message — to Brandfetch to find a confident match, then load its logo. Brandfetch can see that name lookup, the requested brand domain and your network address.',
+    ar: 'تظهر الشعارات تلقائياً، ويأتي كثير من هويات التجّار والبنوك مع التطبيق. وللتجّار أو البنوك الأخرى قد ترسل وفرة اسم العلامة أو المؤسسة المنظّف فقط — دون المبلغ أو رقم الحساب أو البطاقة أو نص رسالة البنك — إلى Brandfetch للعثور على تطابق موثوق ثم تحميل شعاره. ويمكن لـ Brandfetch رؤية بحث الاسم ونطاق العلامة المطلوب وعنوان اتصالك بالشبكة.',
   },
   privacyLegacyTitle: { en: 'Your earlier local-only choice is saved', ar: 'اختيارك السابق للمعالجة المحلية محفوظ' },
   privacyLegacyBody: {
