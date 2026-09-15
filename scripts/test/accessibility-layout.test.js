@@ -15,7 +15,7 @@ const bills = source('src/app/(tabs)/bills.tsx');
 const wallet = source('src/app/(tabs)/wallet.tsx');
 const settings = source('src/app/settings.tsx');
 const tabBar = source('src/components/tab-bar.tsx');
-const billsSegments=source('src/components/ui/segmented-control.tsx');
+const billsSegments=source('src/components/bills/bills-segment-control.tsx');
 const spendingOverview=source('src/components/spending/spending-overview.tsx');
 const spendingTrends=source('src/components/spending/spending-trends.tsx');
 const paymentAgenda=source('src/components/bills/payment-agenda.tsx');
@@ -62,7 +62,7 @@ for (const [name, code] of Object.entries({ Home: home, Flow: spendingOverview, 
 ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitLarge/.test(home));
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
-  /<SegmentedControl/.test(bills) && /large && styles\.stack/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
+  /<BillsSegmentControl/.test(bills) && /<ScrollView[\s\S]*?horizontal/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
 ok('Wallet collapses overview facts to a vertical list',
   /p\.largeText && styles\.stack/.test(walletOverview) && /detailRow, p\.largeText && styles\.stack/.test(walletOverview));
 ok('Bills uses the shared accessible sheet contract',
@@ -226,8 +226,8 @@ ok('Bills uses one scaffold scroller with an inline typed header',
     (bills.match(/<ScrollView/g) ?? []).length === 1 &&
     /testID="subscription-history-scroll"/.test(bills));
 ok('Bills uses canonical labelled control and selection semantics',
- /<SegmentedControl/.test(bills) && /label=\{t\('billsTitle'\)\}/.test(bills) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
-ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+ /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
+ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 ok('Bills reminder entry exposes three labelled shared fields and a disabled Save footer',
   (bills.match(/<TextField/g) ?? []).length === 3 &&
     !/<TextInput/.test(bills) &&

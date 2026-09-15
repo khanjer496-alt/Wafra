@@ -25,7 +25,9 @@ assert.match(add, /promoteReviewAlert/);
 assert.match(add, /addTransaction/);
 
 const bills = code(read('src/app/(tabs)/bills.tsx'));
-assert.match(bills, /useState<'upcoming' \| 'all'>/);
+const billsFilter = code(read('src/components/bills/bills-segment-control.tsx'));
+assert.match(bills, /useState<BillsSegment>\('upcoming'\)/);
+assert.match(billsFilter, /'upcoming' \| 'subscriptions' \| 'utilities' \| 'cards' \| 'all'/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -208,18 +210,18 @@ assert.match(trends,/backgroundColor: theme\.primary/);
 assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
 const task5Bills = read('src/app/(tabs)/bills.tsx');
-const task5Segments = read('src/components/ui/segmented-control.tsx');
+const task5Segments = read('src/components/bills/bills-segment-control.tsx');
 assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
 assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 1, 'Bills keeps only its bounded subscription-history scroller');
 assert.match(task5Bills, /testID="subscription-history-scroll"/);
-assert.match(task5Bills,/<SegmentedControl[\s\S]*?label=\{t\('billsTitle'\)\}/);
+assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
 assert.match(task5Segments,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
-assert.ok(Number(task5Segments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','refAll']) assert.ok(task5Bills.includes(`t('${label}')`));
+for (const label of ['refUpcoming','subscriptionsSeg','utilitiesSeg','cardsSeg','refAll']) assert.ok(task5Segments.includes(`t('${label}')`));
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
