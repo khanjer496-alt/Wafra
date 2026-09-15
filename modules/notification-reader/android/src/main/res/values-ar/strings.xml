@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="wafra_bank_import_channel">عمليات البنك المباشرة</string>
+  <string name="wafra_bank_import_channel_description">تنبيهات وفرة المرئية بعد إضافة عمليات البنك.</string>
+</resources>

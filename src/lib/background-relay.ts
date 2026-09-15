@@ -121,15 +121,10 @@ export interface ChargeAlertPreference {
 }
 
 async function readAlertPreference(): Promise<ChargeAlertPreference> {
-  // ON until the user turns it off, which is the opposite of Android's
-  // InstantAlert.isEnabled, and the reason is the delivery and not a change of
-  // mind. Android's banner is a heads-up over whatever is on screen, so it
-  // defaults off because it is an interruption. This one is posted `passive`
-  // on a device that iOS setup only ever asked for PROVISIONAL authorization —
-  // it lands quietly in Notification Center with no banner and no sound. An
-  // interruption is worth an opt-in; a quiet line in a list the user chose to
-  // open is not, and defaulting it off would leave the iOS half of the product
-  // with no per-charge alert at all for everyone who never found the switch.
+  // ON until the user turns it off. The OS still owns whether a visible banner
+  // and sound are allowed; Wafra should request/display a real transaction
+  // alert whenever that permission exists rather than deliberately marking the
+  // notification passive and silent.
   const fallback: ChargeAlertPreference = { enabled: true, lang: detectLanguage() };
   try {
     const raw = await backgroundRelayStorage.getItem(ALERT_KEY);
@@ -186,12 +181,12 @@ async function announceCharges(rows: ScannedSms[]): Promise<void> {
       content: {
         title: alert.title,
         ...(alert.body.length > 0 && { body: alert.body }),
-        // Silent, and passive so it never lights the screen. These arrive
-        // several times a day; the Kotlin channel makes the same two choices
-        // for the same reason. No `data`, because the notification carries no
-        // payload it needs and a bank-derived one has no business in one.
-        sound: false,
-        interruptionLevel: 'passive',
+        // A per-charge alert is user-facing, not a background implementation
+        // detail. Use the platform's normal visible/sounding presentation when
+        // the user has granted it. No `data`: bank-derived content never needs
+        // to become a notification payload.
+        sound: 'default',
+        interruptionLevel: 'active',
       },
       // Immediately — there is nothing to schedule, the charge already
       // happened.

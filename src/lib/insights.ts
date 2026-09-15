@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory, isFixedCommitment } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { daysInMonth, formatAED, shortDate } from '@/lib/format';
+import { daysInMonth, formatAED, getMonthStartDay, shortDate } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -25,6 +25,23 @@ export interface MonthSummary {
   expenseFils: number;
   byCategory: { category: CategoryId; totalFils: number; share: number }[];
 }
+
+let monthSummaryCache: {
+  transactions: Transaction[];
+  period: string;
+  monthStartDay: number;
+  live?: Set<string>;
+  internal?: Set<string>;
+  value: MonthSummary;
+} | null = null;
+
+const summaryPeriodKey = (periodLike: PeriodLike): string => {
+  const period = toPeriod(periodLike);
+  if (period.mode === 'month') return `month:${period.key}`;
+  if (period.mode === 'year') return `year:${period.year}`;
+  if (period.mode === 'range') return `range:${period.from}:${period.to}`;
+  return 'all';
+};
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
 export const MAX_COMPOSITION_SLICES = 5;
@@ -79,6 +96,14 @@ export function summarizeMonth(
   live?: Set<string>,
   internal?: Set<string>,
 ): MonthSummary {
+  const periodKey = summaryPeriodKey(period);
+  const monthStartDay = getMonthStartDay();
+  if (monthSummaryCache?.transactions === transactions &&
+      monthSummaryCache.period === periodKey &&
+      monthSummaryCache.monthStartDay === monthStartDay &&
+      monthSummaryCache.live === live && monthSummaryCache.internal === internal) {
+    return monthSummaryCache.value;
+  }
   let incomeFils = 0;
   let expenseFils = 0;
   const catTotals = new Map<CategoryId, number>();
@@ -105,7 +130,9 @@ export function summarizeMonth(
     }))
     .sort((a, b) => b.totalFils - a.totalFils);
 
-  return { incomeFils, expenseFils, byCategory };
+  const value = { incomeFils, expenseFils, byCategory };
+  monthSummaryCache = { transactions, period: periodKey, monthStartDay, live, internal, value };
+  return value;
 }
 
 export function spentInMonthForCategory(

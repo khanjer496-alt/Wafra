@@ -31,6 +31,7 @@ function createHarness(options = {}) {
     return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
   };
   const format={ formatAED, formatAmount:amount, formatCompactAED:f=>amount(f,{decimals:false}),
+    getMonthStartDay:()=>1,
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},

@@ -205,6 +205,9 @@ class BankNotificationListenerService : NotificationListenerService() {
         ts = sbn.postTime,
       )
       recordAdmission("appendSucceeded", adcb)
+      // Source-free wake-up only. The encrypted queue remains the source of
+      // truth, and a backgrounded/killed JS runtime simply catches up on resume.
+      NotificationReaderModule.notifyQueueChanged()
     } catch (_: Exception) {
       recordAdmission("exception", adcb)
       // Never crash the listener; a dropped notification is recoverable, a

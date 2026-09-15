@@ -66,6 +66,8 @@ import type {
   WafraLiveCaptureNativeModule,
   WafraLiveCaptureStatus,
 } from '../../modules/wafra-live-capture';
+import NotificationReader from '../../modules/notification-reader';
+import SmsReader from '../../modules/sms-reader';
 
 /** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
@@ -1082,6 +1084,34 @@ export function useAutoImport(
     [startAutoImport, toast],
   );
 
+  const postAndroidImportNotice = useCallback((transactionIds: readonly string[]): void => {
+    if (Platform.OS !== 'android' || transactionIds.length === 0 ||
+        !NotificationReader?.postImportNotice) return;
+    // Keep one user preference for per-charge Wafra alerts regardless of
+    // whether the bank delivered the event by SMS or app notification.
+    try {
+      if (SmsReader?.getInstantAlerts?.() === false) return;
+    } catch {
+      // Older native builds have no preference reader; default remains on.
+    }
+    const ids = new Set(transactionIds);
+    const rows = getStateSnapshot().transactions.filter(
+      (transaction) => ids.has(transaction.id) && transaction.viaPush === true,
+    );
+    if (rows.length === 0) return;
+    const title = rows.length === 1
+      ? t('bankPushNoticeTitle')
+      : tf('bankPushNoticeGroupTitle', { count: rows.length });
+    const body = rows.length === 1
+      ? tf('bankPushNoticeBody', { merchant: rows[0].title })
+      : tf('bankPushNoticeGroupBody', { count: rows.length });
+    try {
+      NotificationReader.postImportNotice(title, body);
+    } catch {
+      // The ledger write is authoritative; a presentation failure is not.
+    }
+  }, [getStateSnapshot]);
+
   const runAndroidNotificationDrain = useCallback(async (): Promise<void> => {
     if (Platform.OS !== 'android') return;
 
@@ -1102,14 +1132,18 @@ export function useAutoImport(
       .then<AutoImportOutcome>((outcome) => {
         if (outcome.kind === 'not-hydrated') return 'not-hydrated';
         if (outcome.kind === 'needs-setup') return 'needs-setup';
-        return outcome.kind === 'imported' ? 'imported' : 'up-to-date';
+        if (outcome.kind === 'imported') {
+          postAndroidImportNotice(outcome.transactionIds);
+          return 'imported';
+        }
+        return 'up-to-date';
       })
       .finally(() => {
         if (importInFlight?.promise === operation) importInFlight = null;
       });
     importInFlight = { promise: operation, interactive: false };
     await operation;
-  }, [captureExecutor, getStateSnapshot, syncAndroidNotificationAdmission]);
+  }, [captureExecutor, getStateSnapshot, postAndroidImportNotice, syncAndroidNotificationAdmission]);
 
   // Android's NotificationListenerService can enqueue a bank alert while the
   // app is backgrounded without changing the SMS provider. Drain that source
@@ -1139,6 +1173,42 @@ export function useAutoImport(
       subscription.remove();
     };
   }, [entitlementActive, runAndroidNotificationDrain, state.captureOptOut,
+    state.hydrated, state.onboarded, watchForeground]);
+
+  // Truly live bank-app capture while Wafra is already open. The native
+  // listener emits no bank data here — only a source-free queue-changed edge.
+  // The encrypted queue is then drained through the same parser/durable commit
+  // boundary used by resume recovery. Bursts coalesce, and no SMS/provider or
+  // full notification-shade scan is performed.
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
+      !state.onboarded || state.captureOptOut || !entitlementActive ||
+      !NotificationReader?.addListener) return;
+    let mounted = true;
+    const canDrain = () => {
+      const current = getStateSnapshot();
+      return mounted && RNAppState.currentState === 'active' && current.hydrated &&
+        current.onboarded && !current.captureOptOut && isProActive(current) &&
+        hasBankNotificationAccess();
+    };
+    const scheduler = createInboxRefreshScheduler(async () => {
+      const ongoing = importInFlight?.promise;
+      if (ongoing) await ongoing.catch(() => {});
+      if (canDrain()) await runAndroidNotificationDrain();
+    }, canDrain);
+    let subscription: { remove(): void } | null = null;
+    try {
+      subscription = NotificationReader.addListener('onQueueChanged', () => scheduler.request());
+    } catch {
+      scheduler.dispose();
+      return;
+    }
+    return () => {
+      mounted = false;
+      subscription?.remove();
+      scheduler.dispose();
+    };
+  }, [entitlementActive, getStateSnapshot, runAndroidNotificationDrain, state.captureOptOut,
     state.hydrated, state.onboarded, watchForeground]);
 
   /**

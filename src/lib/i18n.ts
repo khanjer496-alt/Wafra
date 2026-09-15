@@ -75,6 +75,19 @@ const S = {
     en: 'To show an instant transaction alert, Wafra receives SMS as they arrive and checks them on this device for financial activity. Raw message text is not uploaded or kept by Wafra after the delivery check, and non-financial messages are ignored. This is separate from inbox-history access.',
     ar: 'لعرض تنبيه فوري للعملية، يستقبل وفرة رسائل SMS عند وصولها ويفحصها على هذا الجهاز بحثاً عن نشاط مالي. لا يرفع وفرة نص الرسالة الخام ولا يحتفظ به بعد فحص الوصول، ويتجاهل الرسائل غير المالية. هذا الإذن منفصل عن الوصول إلى سجل الرسائل.',
   },
+  bankPushNoticeTitle: { en: 'Bank transaction added', ar: 'تمت إضافة عملية بنكية' },
+  bankPushNoticeBody: {
+    en: '{merchant} was added to Wafra.',
+    ar: 'تمت إضافة {merchant} إلى وفرة.',
+  },
+  bankPushNoticeGroupTitle: {
+    en: '{count} bank transactions added',
+    ar: 'تمت إضافة {count} عمليات بنكية',
+  },
+  bankPushNoticeGroupBody: {
+    en: 'Wafra updated your ledger automatically.',
+    ar: 'حدّثت وفرة سجلك تلقائياً.',
+  },
   testerDiagnosticsSend: { en: 'Send test diagnostics', ar: 'إرسال تشخيص الاختبار' },
   testerDiagnosticsCollecting: { en: 'Collecting diagnostics…', ar: 'جارٍ جمع التشخيص…' },
   testerDiagnosticsDetail: {
@@ -1011,8 +1024,8 @@ const S = {
   },
   turnSmsReadingOff: { en: 'Turn SMS reading off', ar: 'إيقاف قراءة الرسائل' },
   instantAlertsOn: {
-    en: 'On · a quiet banner when the bank texts',
-    ar: 'مفعّل · تنبيه هادئ عند وصول رسالة البنك',
+    en: 'On · visible alert with sound and vibration',
+    ar: 'مفعّل · تنبيه مرئي مع صوت واهتزاز',
   },
   instantAlertsOff: {
     en: 'Off · charges appear when Wafra next opens',
@@ -1021,6 +1034,18 @@ const S = {
   instantAlertsNeedSms: {
     en: 'Needs bank SMS reading above',
     ar: 'يحتاج تفعيل قراءة رسائل البنك أعلاه',
+  },
+  instantAlertsNeedBankSource: {
+    en: 'Turn on bank SMS or bank app notifications first',
+    ar: 'فعّل رسائل البنك أو إشعارات تطبيق البنك أولاً',
+  },
+  turnOnBankCaptureFirst: {
+    en: 'Turn on bank capture first',
+    ar: 'فعّل التقاط تنبيهات البنك أولاً',
+  },
+  turnOnBankCaptureFirstBody: {
+    en: 'Enable bank SMS reading or bank app notifications, then turn on per-transaction alerts.',
+    ar: 'فعّل قراءة رسائل البنك أو إشعارات تطبيق البنك، ثم فعّل تنبيهات كل عملية.',
   },
   instantAlertsSmsPermissionTitle: {
     en: 'Incoming SMS access was not allowed',
@@ -1031,8 +1056,8 @@ const S = {
     ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل تنبيهات البنك يعمل بإذن قراءة الرسائل المنفصل.',
   },
   bankPushOn: {
-    en: 'On · processed when Wafra opens or refreshes',
-    ar: 'مفعّل · تُعالج عند فتح وفرة أو تحديثه',
+    en: 'On · new bank notifications are added automatically',
+    ar: 'مفعّل · تُضاف إشعارات البنك الجديدة تلقائياً',
   },
   bankPushOff: {
     en: 'Off · grant bank notification access',

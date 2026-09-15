@@ -34,7 +34,11 @@ import android.os.Build
  * good way to break the host build.
  */
 object InstantAlert {
-  const val CHANNEL_ID = "instant-transactions"
+  // v2 intentionally creates a new Android channel. Channel importance/sound
+  // cannot be raised programmatically after a user/device has created v1 as
+  // silent, so keeping the old id would make the code look fixed while every
+  // upgraded phone stayed quiet forever.
+  const val CHANNEL_ID = "instant-transactions-v2"
   const val PREFS = "wafra_alert_prefs"
   const val KEY_ENABLED = "instant_alerts"
 
@@ -114,6 +118,11 @@ object InstantAlert {
         .setCategory(Notification.CATEGORY_STATUS)
         .setAutoCancel(true)
         .setOnlyAlertOnce(true)
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        @Suppress("DEPRECATION")
+        builder.setPriority(Notification.PRIORITY_HIGH)
+        builder.setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
+      }
       if (pending != null) builder.setContentIntent(pending)
 
       // One id per message text: two different charges in the same minute get
@@ -130,18 +139,18 @@ object InstantAlert {
   private fun ensureChannel(context: Context, manager: NotificationManager) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-    // DEFAULT, silent: these arrive several times a day. A heads-up banner
-    // with a sound for every coffee is how an app gets muted wholesale — and
-    // a user who mutes Wafra loses the payment reminders along with it.
+    // This is the user's explicit "Alert every charge" channel. A transaction
+    // alert that quietly disappears into the shade does not satisfy that
+    // setting, so use a heads-up-capable channel with normal sound/vibration.
+    // Android still gives the user per-channel control in system settings.
     manager.createNotificationChannel(
       NotificationChannel(
         CHANNEL_ID,
         context.getString(R.string.wafra_alert_channel),
-        NotificationManager.IMPORTANCE_DEFAULT,
+        NotificationManager.IMPORTANCE_HIGH,
       ).apply {
         description = context.getString(R.string.wafra_alert_channel_description)
-        enableVibration(false)
-        setSound(null, null)
+        enableVibration(true)
       },
     )
   }

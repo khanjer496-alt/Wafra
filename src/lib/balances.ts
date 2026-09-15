@@ -25,6 +25,12 @@ export interface NetWorthBreakdown {
   balanceByAccountId: Readonly<Record<string, number | null>>;
 }
 
+let netWorthBreakdownCache: {
+  accounts: Account[];
+  transactions: AppState['transactions'];
+  value: NetWorthBreakdown;
+} | null = null;
+
 /** Current balance of an account: opening balance plus all its transactions. */
 export function accountBalanceFils(state: BalanceState, accountId: string): number {
   const account = state.accounts.find((a) => a.id === accountId);
@@ -76,6 +82,10 @@ export function netWorthFils(state: BalanceState): number {
  * the exact same reliability rules are applied to each active account.
  */
 export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
+  if (netWorthBreakdownCache?.accounts === state.accounts &&
+      netWorthBreakdownCache.transactions === state.transactions) {
+    return netWorthBreakdownCache.value;
+  }
   const runningByAccount = new Map<string, number>();
   const smsAccountIds = new Set<string>();
   const secondary = reconcileTransfers(state.transactions, state.accounts).corroboratingIds;
@@ -126,7 +136,7 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
     else balanceFils += reliable;
   }
 
-  return {
+  const value = {
     balanceFils,
     debtFils,
     totalFils: balanceFils - debtFils,
@@ -135,4 +145,6 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
     unknownAccountCount,
     balanceByAccountId,
   };
+  netWorthBreakdownCache = { accounts: state.accounts, transactions: state.transactions, value };
+  return value;
 }

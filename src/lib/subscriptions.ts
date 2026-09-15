@@ -249,6 +249,15 @@ function recurringProviderTitle(transaction: Transaction): string {
   return title;
 }
 
+let subscriptionDetectionCache: {
+  transactions: Transaction[];
+  notSubscriptions: string[];
+  todayKey: string;
+  liveAccounts?: Set<string>;
+  internalTransfers?: Set<string>;
+  value: Subscription[];
+} | null = null;
+
 export function detectSubscriptions(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
@@ -256,6 +265,14 @@ export function detectSubscriptions(
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
 ): Subscription[] {
+  const todayKey = toISODate(today);
+  if (subscriptionDetectionCache?.transactions === transactions &&
+      subscriptionDetectionCache.notSubscriptions === notSubscriptions &&
+      subscriptionDetectionCache.todayKey === todayKey &&
+      subscriptionDetectionCache.liveAccounts === liveAccounts &&
+      subscriptionDetectionCache.internalTransfers === internalTransfers) {
+    return subscriptionDetectionCache.value;
+  }
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
   for (const t of transactions) {
@@ -462,6 +479,14 @@ export function detectSubscriptions(
   }
 
   subs.sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
+  subscriptionDetectionCache = {
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    value: subs,
+  };
   return subs;
 }
 
