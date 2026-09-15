@@ -777,6 +777,101 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
   }
 }
 
+// Final-launch conversational language: accept common shorthand and chat phrasing
+// without allowing it to hijack an explicitly recorded merchant identity.
+{
+  for (const question of [
+    'What subs do I have?',
+    'Show my subs',
+    'What sub do I have?',
+    'What memberships do I have?',
+    'What am I subscribed to?',
+    'Any auto renewals?',
+    'Recurring stuff?',
+    'What recurring payments do I have?',
+    'What subscriptons do I have?',
+    'Can u show my subs?',
+    'pls show my subs',
+    'Hey Wafra, what subs do I have?',
+    'Would u pls show my subs?',
+    'What services am I paying for?',
+    'What do I pay every month?',
+    'Anything renewing?',
+  ]) {
+    assert.equal(answerWafraQuestion(state, question, now).tool, 'subscriptions', question);
+  }
+
+  for (const question of ['Anything due?', 'What do I owe?', 'Payments coming up?', 'Bills coming up?', 'Stuff due?',
+    'What needs paying?', 'Anything I need to pay?', 'What payments are next?']) {
+    assert.equal(answerWafraQuestion(state, question, now).tool, 'upcoming-payments', question);
+  }
+
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend MTD?', now).period,
+    { mode: 'range', from: '2026-09-01', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend YTD?', now).period,
+    { mode: 'range', from: '2026-01-01', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend last 2w?', now).period,
+    { mode: 'range', from: '2026-09-07', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend last 7d?', now).period,
+    { mode: 'range', from: '2026-09-14', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend this month so far?', now).period,
+    { mode: 'range', from: '2026-09-01', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend year so far?', now).period,
+    { mode: 'range', from: '2026-01-01', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(state, 'How much did I spend yday?', now).period,
+    { mode: 'range', from: '2026-09-19', to: '2026-09-19' });
+  const merchantContext = planAssistantQuestion(state, 'How much did I spend at Talabat?', now);
+  const merchantMtd = planAssistantQuestion(state, 'MTD', now, merchantContext);
+  assert.equal(merchantMtd.tool, 'merchant-breakdown');
+  assert.equal(merchantMtd.merchant, 'Talabat');
+  assert.deepEqual(merchantMtd.period, { mode: 'range', from: '2026-09-01', to: '2026-09-20' });
+  const { runWafraAssistant, assistantFollowUpQuestions } = require('./build/wafra-assistant');
+  const txns = runWafraAssistant(state, 'Show txns', now, merchantContext);
+  assert.equal(txns.request.merchant, 'Talabat');
+  assert.equal(txns.answer.showEvidence, true);
+
+  const card = { ...account, id: 'launch-card', name: 'Launch Visa', kind: 'card', cardType: 'credit' };
+  const cardState = { ...state, accounts: [account, card], transactions: [...state.transactions,
+    { ...tx('launch-card-row', '2026-09-09', 'Cafe', 2_500), accountId: card.id },
+  ] };
+  const cc = planAssistantQuestion(cardState, 'Which cc did I use most?', now);
+  assert.equal(cc.tool, 'top-accounts');
+  assert.equal(cc.accountKind, 'card');
+  assert.equal(planAssistantQuestion(cardState, 'Which acct did I use most?', now).tool, 'top-accounts');
+
+  assert.equal(answerWafraQuestion(state, 'Top spends', now).tool, 'largest-purchases');
+  assert.equal(answerWafraQuestion(state, 'Top shops', now).tool, 'top-merchants');
+  assert.equal(answerWafraQuestion(state, 'Where did my money go?', now).tool, 'top-categories');
+  assert.equal(answerWafraQuestion(state, 'Anything off?', now).tool, 'money-review');
+  assert.equal(answerWafraQuestion(state, 'Anything fishy?', now).tool, 'money-review');
+  assert.equal(answerWafraQuestion(state, 'Weird charges?', now).tool, 'unusual-charges');
+  assert.equal(answerWafraQuestion(state, 'Same charge twice?', now).tool, 'possible-duplicates');
+  assert.equal(answerWafraQuestion(state, 'Did I pay twice?', now).tool, 'possible-duplicates');
+  assert.equal(answerWafraQuestion(state, 'Same amount twice?', now).tool, 'possible-duplicates');
+  assert.equal(answerWafraQuestion(state, 'Double charges?', now).tool, 'possible-duplicates');
+  assert.equal(answerWafraQuestion(state, 'How much did I get paid?', now).tool, 'income-total');
+  assert.equal(answerWafraQuestion(state, 'How much was my paycheck?', now).tool, 'income-total');
+  assert.equal(answerWafraQuestion(state, 'How much salary came in?', now).tool, 'income-total');
+  assert.equal(answerWafraQuestion(state, 'How much grocreies spending?', now).tool, 'category-breakdown');
+  assert.equal(answerWafraQuestion(state, 'How much did I spend on resturant?', now).tool, 'category-breakdown');
+
+  const merchantNamedSubs = { ...state, transactions: [...state.transactions, tx('subs-shop', '2026-09-08', 'Subs', 1_200)] };
+  const explicitSubsMerchant = planAssistantQuestion(merchantNamedSubs, 'How much did I spend at Subs?', now);
+  assert.equal(explicitSubsMerchant.tool, 'merchant-breakdown');
+  assert.equal(explicitSubsMerchant.merchant, 'Subs');
+
+  const merchantAnswer = answerWafraQuestion(state, 'How much did I spend at Talabat?', now);
+  assert.deepEqual(planAssistantCorrection(state, 'That is not a sub', merchantAnswer),
+    { kind: 'not-subscription', merchant: 'Talabat' });
+  assert.deepEqual(planAssistantCorrection(state, 'Talabat is not a sub', merchantAnswer),
+    { kind: 'not-subscription', merchant: 'Talabat' });
+
+  assert.deepEqual(assistantFollowUpQuestions({ tool: 'subscriptions' }),
+    ['Which recurring charges changed?', 'What payments are due soon?', 'Anything unusual?']);
+  assert.deepEqual(assistantFollowUpQuestions({ tool: 'upcoming-payments', withinDays: 30 }),
+    ['What subscriptions do I have?', 'Anything unusual?', 'How much did I spend?']);
+}
+
 {
   const reviewState = { ...state, transactions: [...state.transactions,
     tx('coffee-review', '2026-09-06', 'STARBUCKS MARINA', 3_000),

@@ -464,6 +464,35 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('launch-language-shorthand')) {
+    const name = 'launch-language-shorthand';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+
+        const subs = await ask(page, 'What subs do I have?');
+        const subsText = await subs.innerText();
+        assert.match(subsText, /subscriptions?|active subscription/i);
+        assert.doesNotMatch(subsText, /clarify that|didn.t quite understand|not enough to answer safely/i);
+
+        const due = await ask(page, 'Anything due?');
+        const dueText = await due.innerText();
+        assert.match(dueText, /upcoming payments|payments? due|do not see any payments due/i);
+
+        const mtd = await ask(page, 'How much did I spend MTD?');
+        const mtdText = await mtd.innerText();
+        assert.ok(mtdText.includes(money(CURRENT_TOTAL)), mtdText);
+
+        await newChat(page);
+        const casualSubs = await ask(page, 'Can u show my subs?');
+        assert.match(await casualSubs.innerText(), /subscriptions?|active subscription/i);
+        await shot(page, name);
+        return { subs: subsText, due: dueText, mtd: mtdText };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;
