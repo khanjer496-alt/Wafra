@@ -98,7 +98,9 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
           </View>
           {upcomingCount > 0 ? <View style={styles.sectionTotal}>
             <Money fils={subtotalFils} type="smallBold" />
-            <ThemedText type="micro" themeColor="textSecondary">{upcomingCount} · {count}</ThemedText>
+            <ThemedText type="micro" themeColor="textSecondary">
+              {upcomingCount === count ? String(count) : `${upcomingCount} · ${count}`}
+            </ThemedText>
           </View> : <ThemedText type="meta" tabular themeColor="textTertiary">{count}</ThemedText>}
         </View>
         {count === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>
