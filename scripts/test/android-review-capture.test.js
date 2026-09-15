@@ -107,6 +107,8 @@ const notificationReader = {
       'net.bnpparibas.mescomptes',
       'ae.hsbc.hsbcuae',
       'com.adcb.nexgen',
+      'com.barclays.android.barclaysmobilebanking',
+      'com.hdfcbank.android.now',
     ]);
     return notificationRows.map((row) => ({
       sourceClass: trusted.has(row.pkg) ? 'trusted-bank' : 'financial-candidate',
@@ -216,8 +218,82 @@ const { scanInbox } = require('./build/auto-import.js');
       acknowledgedNotifications[0] === 'notification-row-0001',
     JSON.stringify(acknowledgedNotifications));
 
+  // Global Android bank-app capture is not a UAE/Saudi-only feature. Exact
+  // curated package identity may auto-import a source-grounded posting when its
+  // native currency matches the ledger. Unknown packages remain Review-first;
+  // once the user confirms one package, the same global path may run for it.
   inboxRows = [];
   receivedRows = [];
+  markets.setLedgerCurrency('EUR', 2);
+  notificationRows = [{
+    id: 'bnp-eur-push-global-01',
+    pkg: 'net.bnpparibas.mescomptes',
+    title: 'BNP Paribas',
+    text: 'Paiement par carte débité de EUR 9,99 chez PRIVATE-CAFE',
+    ts: NOW + 5_100,
+  }];
+  const bnpGlobal = await scanInbox(0, {}, undefined, 'fr-FR', { notificationOnly: true });
+  ok('trusted BNP Android push auto-imports in a matching EUR ledger',
+    bnpGlobal.parsed.length === 1 && bnpGlobal.reviewCandidates.length === 0 &&
+      bnpGlobal.parsed[0]?.currency === 'EUR' && bnpGlobal.parsed[0]?.amountFils === 999 &&
+      bnpGlobal.parsed[0]?.merchant === 'PRIVATE-CAFE',
+    JSON.stringify(bnpGlobal));
+  await bnpGlobal.commit();
+
+  markets.setLedgerCurrency('GBP', 2);
+  notificationRows = [{
+    id: 'barclays-gbp-global-01',
+    pkg: 'com.barclays.android.barclaysmobilebanking',
+    title: 'Barclays',
+    text: 'Your card ending 1234 was charged GBP 12.34 at TESCO.',
+    ts: NOW + 5_150,
+  }];
+  const barclaysGlobal = await scanInbox(0, {}, undefined, 'en-GB', { notificationOnly: true });
+  ok('trusted Barclays Android push auto-imports in a matching GBP ledger',
+    barclaysGlobal.parsed.length === 1 && barclaysGlobal.reviewCandidates.length === 0 &&
+      barclaysGlobal.parsed[0]?.currency === 'GBP' && barclaysGlobal.parsed[0]?.amountFils === 1234,
+    JSON.stringify(barclaysGlobal));
+  await barclaysGlobal.commit();
+
+  markets.setLedgerCurrency('JPY', 0);
+  notificationRows = [{
+    id: 'learned-jpy-global-0001',
+    pkg: 'com.example.jpbank',
+    title: 'JP Bank',
+    text: 'Card purchase JPY 2400 at LOCAL CAFE.',
+    ts: NOW + 5_175,
+  }];
+  const learnedJpy = await scanInbox(0, {}, undefined, 'ja-JP', {
+    notificationOnly: true,
+    learnedNotificationPackages: ['com.example.jpbank'],
+  });
+  ok('a user-confirmed bank package can auto-import zero-decimal JPY',
+    learnedJpy.parsed.length === 1 && learnedJpy.reviewCandidates.length === 0 &&
+      learnedJpy.parsed[0]?.currency === 'JPY' && learnedJpy.parsed[0]?.amountFils === 2400,
+    JSON.stringify(learnedJpy));
+  await learnedJpy.commit();
+
+  markets.setLedgerCurrency('KWD', 3);
+  notificationRows = [{
+    id: 'learned-kwd-global-0001',
+    pkg: 'com.example.kwbank',
+    title: 'Kuwait Bank',
+    text: 'تم خصم KWD ١٢٫٣٤٥ لشراء بالبطاقة لدى LOCAL CAFE',
+    ts: NOW + 5_190,
+  }];
+  const learnedKwd = await scanInbox(0, {}, undefined, 'ar-KW', {
+    notificationOnly: true,
+    learnedNotificationPackages: ['com.example.kwbank'],
+  });
+  ok('a user-confirmed bank package can auto-import three-decimal KWD',
+    learnedKwd.parsed.length === 1 && learnedKwd.reviewCandidates.length === 0 &&
+      learnedKwd.parsed[0]?.currency === 'KWD' && learnedKwd.parsed[0]?.amountFils === 12345,
+    JSON.stringify(learnedKwd));
+  await learnedKwd.commit();
+
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+
   notificationRows = [{
     id: 'adcb-notification-format-0001',
     pkg: 'com.adcb.nexgen',
@@ -479,6 +555,13 @@ const { scanInbox } = require('./build/auto-import.js');
     body: `BNP Paribas: Paiement par carte débité de EUR ${index + 1},00 chez STORE-${index}`,
     date: NOW - 100_000 + index,
   }));
+  notificationRows = [{
+    id: 'unknown-global-review-0001',
+    pkg: 'com.example.globalbank',
+    title: 'Global Bank',
+    text: 'Card purchase EUR 77.00 at NEW SHOP',
+    ts: NOW + 5_600,
+  }];
   const boundedNewest = await scanInbox(0, {}, undefined, 'fr-FR');
   ok('the bounded review window keeps a newer push over older inbox history',
     boundedNewest.reviewCandidates.length === 50 &&

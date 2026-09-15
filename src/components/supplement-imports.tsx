@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, SectionHeader } from '@/components/ui/layout';
@@ -33,6 +34,7 @@ import {
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
 import type { StatementCoverageEntry } from '@/lib/types';
 
@@ -142,6 +144,7 @@ export function SupplementImports() {
     stageReviewAlerts,
     ensureDurable,
     setMarket,
+    setLedgerMoney,
     stageStatementCoverage,
   } = useStore();
   const captureExecutor = useMemo(
@@ -174,6 +177,7 @@ export function SupplementImports() {
     pages: number;
   } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const coverage = useMemo(
     () => summarizeCoverage(state.statementCoverage ?? [], language),
     [language, state.statementCoverage],
@@ -389,6 +393,10 @@ export function SupplementImports() {
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities || pendingPdf) return;
+    if (!state.ledgerMoney) {
+      setCurrencySheetVisible(true);
+      return;
+    }
     setError(null);
     setStatus(null);
     const pickedFiles: File[] = [];
@@ -418,8 +426,8 @@ export function SupplementImports() {
           capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
         try {
           const accepted = csv
-            ? await uploadCsvStatement(cfg, asset, capabilities)
-            : await uploadPdfStatement(cfg, asset, capabilities);
+            ? await uploadCsvStatement(cfg, asset, capabilities, state.ledgerMoney)
+            : await uploadPdfStatement(cfg, asset, capabilities, state.ledgerMoney);
           acceptedRows += accepted.acceptedRows;
           rejectedRows += accepted.rejectedRows;
           uploadedFiles += 1;
@@ -481,10 +489,20 @@ export function SupplementImports() {
 
   const retryProtectedPdf = async () => {
     if (!cfg || !capabilities || !pendingPdf || !pdfPassword || busy !== null) return;
+    if (!state.ledgerMoney) {
+      setCurrencySheetVisible(true);
+      return;
+    }
     setBusy('statement');
     setError(null);
     try {
-      const accepted = await uploadPdfStatement(cfg, pendingPdf.asset, capabilities, pdfPassword);
+      const accepted = await uploadPdfStatement(
+        cfg,
+        pendingPdf.asset,
+        capabilities,
+        state.ledgerMoney,
+        pdfPassword,
+      );
       await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
       await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
       try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
@@ -572,11 +590,25 @@ export function SupplementImports() {
                 })}
               </ThemedText>
             )}
+            {!state.ledgerMoney && (
+              <View style={styles.currencyPrompt}>
+                <View style={styles.cardCopy}>
+                  <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyBody')}</ThemedText>
+                </View>
+                <Button
+                  variant="outline"
+                  label={t('chooseLedgerCurrency')}
+                  onPress={() => setCurrencySheetVisible(true)}
+                  disabled={busy !== null}
+                />
+              </View>
+            )}
             <Button
               icon="upload"
               label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
-              disabled={!capabilities || busy !== null || !!pendingPdf}
+              disabled={!capabilities || busy !== null || !!pendingPdf || !state.ledgerMoney}
             />
           </Block>
 
@@ -664,6 +696,12 @@ export function SupplementImports() {
           <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
         </View>
       </View>
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
+      />
     </View>
   );
 }
@@ -672,6 +710,7 @@ const styles = StyleSheet.create({
   root: { gap: Spacing.three },
   hero: { gap: Spacing.one },
   importCard: { gap: Spacing.three },
+  currencyPrompt: { gap: Spacing.two },
   passwordCard: { gap: Spacing.three },
   coverageCard: { gap: Spacing.two },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2 },

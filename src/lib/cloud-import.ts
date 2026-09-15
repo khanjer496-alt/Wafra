@@ -15,6 +15,7 @@ import {
   type EmailForwardingCredential,
 } from '@/lib/cloud-import-contract';
 import type { RelayConfig } from '@/lib/relay';
+import type { LedgerMoneySpec } from '@/lib/ledger-money';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -100,6 +101,7 @@ export async function uploadPdfStatement(
   cfg: RelayConfig,
   picked: PickedStatement,
   capabilities: ImportCapabilities,
+  ledgerMoney: LedgerMoneySpec,
   password?: string,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
@@ -115,6 +117,8 @@ export async function uploadPdfStatement(
     method: 'POST',
     headers: {
       'content-type': 'application/pdf',
+      'x-wafra-ledger-currency': ledgerMoney.currency,
+      'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
       ...(password ? { 'x-wafra-pdf-password': password } : {}),
     },
     body: file,
@@ -131,6 +135,7 @@ export async function uploadCsvStatement(
   cfg: RelayConfig,
   picked: PickedStatement,
   capabilities: ImportCapabilities,
+  ledgerMoney: LedgerMoneySpec,
 ): Promise<CsvImportAccepted> {
   if (!capabilities.csv.enabled) throw new CloudImportError('service');
   const file = new File(picked.uri);
@@ -150,7 +155,11 @@ export async function uploadCsvStatement(
 
   const response = await relayFetch(`${cfg.baseUrl}/v1/import/csv`, cfg.adminToken, {
     method: 'POST',
-    headers: { 'content-type': contentType },
+    headers: {
+      'content-type': contentType,
+      'x-wafra-ledger-currency': ledgerMoney.currency,
+      'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
+    },
     body: file,
   });
   const body = await safeJson(response);

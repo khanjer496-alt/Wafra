@@ -40,6 +40,7 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'unusual-charges', purpose: 'Review purchases unusually high against established earlier history', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'possible-duplicates', purpose: 'Review possible duplicate purchases without changing any records', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'money-review', purpose: 'Combine conservative duplicate, unusual-purchase and recurring-change checks', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'data-coverage', purpose: 'Describe recorded activity and known import limitations without claiming full bank coverage', arguments: PERIOD_FILTER_ARGUMENTS },
 ] as const;
 
@@ -189,6 +190,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'recurring-changes':
     case 'unusual-charges':
     case 'possible-duplicates':
+    case 'money-review':
     case 'data-coverage':
       return validPeriod(candidate.period);
     default:

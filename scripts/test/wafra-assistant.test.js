@@ -6,6 +6,7 @@ const {
   answerWafraQuestion,
   executeAssistantTool,
   latestAssistantContext,
+  planAssistantCorrection,
   planAssistantQuestion,
 } = require('./build/wafra-assistant');
 const {
@@ -210,6 +211,36 @@ const now = new Date('2026-09-20T12:00:00Z');
   assert.equal(answer.data.previousFils, 2_000);
   assert.equal(answer.data.deltaPercent, 200);
   assert.ok(answer.facts.some((fact) => fact.label === 'Dining change'));
+  assert.ok(answer.facts.some((fact) => fact.label === 'Top merchant driver' && /Talabat/.test(fact.value)));
+  assert.ok(answer.facts.some((fact) => fact.label === 'Largest current purchase' && /Talabat/.test(fact.value)));
+  assert.match(answer.body, /Dining was the biggest category driver/i);
+  assert.match(answer.body, /Talabat was the biggest merchant driver/i);
+  assert.match(answer.body, /largest recorded purchase/i);
+}
+
+{
+  const onePurchase = executeAssistantTool(state,
+    { tool: 'largest-purchases', period: { mode: 'month', key: '2026-09' }, limit: 1 }, now);
+  assert.deepEqual(planAssistantCorrection(state, 'That was groceries, not dining.', onePurchase), {
+    kind: 'transaction-category', transactionId: 'sep-food-1', category: 'groceries',
+  });
+  assert.deepEqual(planAssistantCorrection(state, 'Talabat should be groceries', onePurchase), {
+    kind: 'merchant-category', merchant: 'Talabat', category: 'groceries', direction: 'expense',
+  });
+  const multi = answerWafraQuestion(state, 'How much did I spend at Talabat?', now);
+  assert.equal(planAssistantCorrection(state, 'That was groceries.', multi).kind, 'clarification',
+    'a pronoun correction must not choose between multiple evidenced transactions');
+  assert.deepEqual(planAssistantCorrection(state, 'Talabat is not a subscription', multi), {
+    kind: 'not-subscription', merchant: 'Talabat',
+  });
+  const transfer = { ...tx('transfer-one', '2026-09-08', 'Transfer to savings', 1_500, 'other'),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source' } };
+  const transferState = { ...state, transactions: [...state.transactions, transfer] };
+  const transferAnswer = { tool: 'spending-total', title: 'Transfer', body: '',
+    evidence: [{ label: 'Transfer', transactionIds: [transfer.id], totalFils: transfer.amountFils, accountNames: ['Everyday'] }] };
+  assert.deepEqual(planAssistantCorrection(transferState, 'This is my own transfer', transferAnswer), {
+    kind: 'transfer-ownership', transactionId: transfer.id, ownership: 'own',
+  });
 }
 
 {
@@ -840,6 +871,15 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
     }
     assert.match(answer.coverage.notes.join(' '), /split|conversion/i);
   }
+  const review = answerWafraQuestion(local, 'Anything unusual?', now);
+  assert.equal(review.tool, 'money-review');
+  assert.ok(review.data.duplicateCount >= 1);
+  assert.ok(review.data.unusualCount >= 1);
+  assert.ok(review.data.recurringChangeCount >= 1);
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Possible duplicate ·')));
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Unusual purchase ·')));
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Recurring change ·')));
+  assert.match(review.body, /not proof that anything is wrong/i);
   assert.equal(answerWafraQuestion(local, 'Which recurring charges changed at Local service?', now).data.candidateCount, 1);
   assert.equal(answerWafraQuestion(local, 'Which recurring charges changed excluding Local service?', now).data.candidateCount, 0);
   assert.equal(answerWafraQuestion(local, 'Show unusual dining charges', now).tool, 'help', 'patterns may not compare allocated split amounts to full-charge history');

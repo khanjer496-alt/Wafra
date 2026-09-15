@@ -7,6 +7,22 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const moduleFor = env => load(path.join(root, 'src/lib/trusted-bank-notification-packages.ts'), {}, { process: { env } });
+const globalMoneyStub = {
+  ledgerMoneySpec: (currency) => {
+    const code = String(currency ?? '').trim().toUpperCase();
+    const exponent = code === 'JPY' ? 0 : ['KWD', 'BHD', 'OMR', 'JOD'].includes(code) ? 3 : 2;
+    return /^[A-Z]{3}$/.test(code) ? { schemaVersion: 2, currency: code, exponent } : null;
+  },
+};
+const globalCategoryStub = {
+  suggestUniversalCategory: (event) => ({
+    merchant: event?.merchant?.value ?? '',
+    category: event?.family === 'cash-withdrawal' ? 'cash-withdrawal' : 'other',
+    source: 'unresolved',
+    reason: 'test-stub',
+    needsReview: true,
+  }),
+};
 
 test('normal Android builds expose notification capture when the native module is available', () => {
   assert.equal(typeof moduleFor({}).isBankNotificationCaptureAvailable, 'function');
@@ -178,7 +194,9 @@ test('the scanner reads only with native availability and granted notification a
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
-    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    '@/lib/ledger-money': globalMoneyStub,
+    '@/lib/universal-categorization': globalCategoryStub,
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -210,7 +228,9 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
-    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    '@/lib/ledger-money': globalMoneyStub,
+    '@/lib/universal-categorization': globalCategoryStub,
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
@@ -226,7 +246,9 @@ test('every financial candidate reaches the parser but only trusted or confirmed
   const types = read('src/lib/types.ts');
   assert.match(scanner, /learnedPackages\.has\(n\.pkg\)/);
   assert.match(scanner, /const autoAuthorized = sourceClass === 'trusted-bank' \|\| learned/);
-  assert.match(scanner, /const p = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
+  assert.match(scanner, /const launchParsed = trustedMarket === 'AE' \|\| trustedMarket === 'SA'/);
+  assert.match(scanner, /parsedUniversalPosting\(universalEvent, source, overrides, routedMarket\)/);
+  assert.match(scanner, /ledgerMoneySpec\(event\.amount\.value\.currency\)/);
   assert.match(scanner, /shouldReviewParsedIncome\(p\) \|\| !autoAuthorized/);
   assert.match(scanner, /p && autoAuthorized && !reviewed/);
   assert.match(scanner, /trustedBankNotificationSender\(n\.pkg\) \?\? \(autoAuthorized \? `\$\{n\.pkg\} \$\{n\.title\}` : ''\)/);
@@ -269,7 +291,9 @@ test('500 queued notification candidates process without touching SMS and ACK on
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
-    '@/lib/markets': { detectLaunchMarketFromSender: () => null },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    '@/lib/ledger-money': globalMoneyStub,
+    '@/lib/universal-categorization': globalCategoryStub,
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
     }) },

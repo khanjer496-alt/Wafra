@@ -102,6 +102,14 @@ ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
 ok('CSV and TSV use a distinct authenticated statement endpoint',
   /uploadCsvStatement/.test(transport) && /\/v1\/import\/csv/.test(transport) &&
     /text\/tab-separated-values/.test(transport));
+ok('statement uploads send the authoritative ledger currency and exponent, never infer money from country',
+  /x-wafra-ledger-currency/.test(transport) &&
+    /x-wafra-ledger-exponent/.test(transport) &&
+    /ledgerMoney\.currency/.test(transport) && /ledgerMoney\.exponent/.test(transport));
+ok('statement import requires an explicit ledger currency before picking files',
+  /LedgerCurrencySheet/.test(surface) &&
+    /!state\.ledgerMoney/.test(surface) &&
+    /disabled=\{!capabilities \|\| busy !== null \|\| !!pendingPdf \|\| !state\.ledgerMoney\}/.test(surface));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /file\.delete\(\)/.test(surface));

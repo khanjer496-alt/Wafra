@@ -84,6 +84,14 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   eq('backup validation rejects negative onboarding clocks',
     backupValidation.isValidBackupState({ ...profileState,
       onboardingProfile: { ...profileState.onboardingProfile, startedAt: -1 } }), false);
+  for (const currency of ['USD', 'EUR', 'JPY', 'KWD']) {
+    eq(`backup validation preserves global onboarding currency evidence (${currency})`,
+      backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: currency }), true);
+  }
+  eq('backup validation rejects non-canonical currency evidence',
+    backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'usd' }), false);
+  eq('backup validation rejects ISO currencies whose exponent the ledger cannot represent',
+    backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'CLF' }), false);
 }
 
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {

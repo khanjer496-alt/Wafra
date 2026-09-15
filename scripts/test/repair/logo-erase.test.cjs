@@ -8,7 +8,7 @@ const ts = require('typescript');
 
 const ROOT = path.resolve(__dirname, '../../..');
 const LEDGER = 'wafra/erase-fixture';
-const MERCHANT_KEY = 'wafra:merchant-logo:v3:aseer%20time';
+const MERCHANT_KEY = 'wafra:merchant-logo:v4:aseer%20time';
 const BANK_KEY = 'wafra:bank-logo:v2:bank%20of%20america';
 const cachedRecord = (query, value) => JSON.stringify({ query, value, expiresAt: Date.now() + 60_000 });
 const MERCHANT_RECORD = cachedRecord('aseer time', {

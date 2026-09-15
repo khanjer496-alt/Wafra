@@ -4,6 +4,7 @@ import { parse as parseCsvRecords } from 'csv-parse/sync';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 import { classifyMerchantDescription, type ParsedSms } from '@/lib/sms-parser';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 
 const MAX_NORMALIZED_CHARS = 128_000;
@@ -15,7 +16,10 @@ const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)
 // `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
 const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
 const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
-const AMOUNT_TOKEN = String.raw`(?:(?:AED|SAR)\s*)?([\d,]+(?:\.\d{1,2})?)`;
+// Statement money follows the ledger's ISO exponent (0, 2 or 3), not a Gulf
+// hard-code. This permissive row lexer is narrowed again by amountMinor(),
+// which validates grouping, currency and exact fractional precision.
+const AMOUNT_TOKEN = String.raw`(?:(?:[A-Z]{3})\s*)?([\d,]+(?:\.\d{1,3})?)`;
 const ROW_END_DIRECTION = new RegExp(
   `^(${DATE_TOKEN})\\s+(.{2,180}?)\\s+${AMOUNT_TOKEN}\\s+(DR|CR|DEBIT|CREDIT)$`,
   'i',
@@ -29,16 +33,9 @@ const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
 // integer at the end of a flattened PDF row is as likely a cheque or reference
 // number as money. One decimal place is still money — real statements print
 // `32.8` and `715.0`, and requiring two rejected every such row.
-const CENTS_MONEY = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{1,2}`;
-const CURRENCY_WORD = String.raw`(?:AED|SAR)`;
-const MONEY_UNSIGNED = new RegExp(`^${CURRENCY_WORD}?(${CENTS_MONEY})$`, 'i');
-const MONEY_SIGNED = new RegExp(
-  `^(?:([+-])${CURRENCY_WORD}?(${CENTS_MONEY})|${CURRENCY_WORD}?([+-])(${CENTS_MONEY})|${CURRENCY_WORD}?(${CENTS_MONEY})([+-])|\\(${CURRENCY_WORD}?(${CENTS_MONEY})\\))$`,
-  'i',
-);
 // What an empty debit or credit cell becomes once a PDF table is flattened.
-const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00)$/;
-const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,2}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b`, 'i');
+const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00|0\.000)$/;
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b|\\b[A-Z]{3}\\s+\\d+`, 'i');
 // Opening/closing balance, brought/carried forward and total lines carry money
 // but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
 // as income and a "Total 40.00 0.00" as a second expense, and counting them as
@@ -46,19 +43,7 @@ const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,2}(?:\\D|$)|\\b(?:DR|CR|DE
 // the description so a merchant merely containing the word is untouched.
 // "Total" only counts when a figure, a colon or a totals word follows it;
 // "TOTAL ENERGIES FUEL 120.00" is a merchant.
-const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:AED|SAR)?\s*[\d,]+\.\d{2}\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
-// The codes that actually appear as foreign originals on UAE and Saudi
-// statements: the Gulf, the majors, and the remittance corridors this app's
-// users send money down. Deliberately a list and not `[A-Z]{3}`, which also
-// matches LLC, FZE, LTD and PSC.
-const FOREIGN_CURRENCY_CODE = new Set([
-  'AED', 'SAR', 'USD', 'EUR', 'GBP', 'CHF', 'JPY', 'CNY', 'HKD', 'SGD', 'AUD', 'CAD', 'NZD',
-  'KWD', 'BHD', 'OMR', 'QAR', 'JOD', 'EGP', 'LBP', 'IQD', 'TRY', 'RUB', 'ZAR',
-  'INR', 'PKR', 'BDT', 'LKR', 'NPR', 'PHP', 'IDR', 'MYR', 'THB', 'VND', 'KRW',
-  'KES', 'NGN', 'GHS', 'ETB', 'UGX', 'TZS', 'MAD', 'TND', 'DZD', 'SDG', 'SOS', 'AFN', 'IRR',
-  'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RON', 'UAH', 'ILS', 'MXN', 'BRL', 'ARS',
-]);
-
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:[A-Z]{3})?\s*[\d,]+(?:\.\d{1,3})?\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
 };
@@ -134,7 +119,7 @@ export async function parseRawEmail(
   return { text, pdfAttachments, csvAttachments };
 }
 
-type StatementCurrency = 'AED' | 'SAR';
+type StatementCurrency = string;
 
 type StatementParsedRow = ParsedSms & { transferEvidence?: TransferEvidence };
 
@@ -397,26 +382,66 @@ function statementCurrency(value: string): StatementCurrency | null {
   const normalized = normalizeDigits(value).normalize('NFKC').trim().toUpperCase();
   if (/^(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?)$/iu.test(normalized)) return 'AED';
   if (/^(?:SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?)$/iu.test(normalized)) return 'SAR';
-  return null;
+  return /^[A-Z]{3}$/.test(normalized) && ledgerMoneySpec(normalized) ? normalized : null;
 }
 
 function amountMinor(value: string, currency: StatementCurrency, signed: boolean): number | null {
   let normalized = normalizeDigits(value).normalize('NFKC').replace(/[\s\u00a0]+/g, ' ').trim();
-  if (!normalized || /^(?:-|--|N\/?A|0(?:\.0{1,2})?)$/i.test(normalized)) return null;
-  const explicit = /(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?)/iu.exec(normalized)?.[0];
-  if (explicit && statementCurrency(explicit) !== currency) return null;
-  normalized = normalized
-    .replace(/^(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?)\s*/iu, '')
-    .replace(/\s*(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?)$/iu, '')
-    .trim();
-  const match = (signed ? /^([+-])((?:\d{1,3}(?:,\d{3})+|\d+))(?:\.(\d{1,2}))?$/ : /^((?:\d{1,3}(?:,\d{3})+|\d+))(?:\.(\d{1,2}))?$/).exec(normalized);
+  const spec = ledgerMoneySpec(currency);
+  if (!spec || !normalized || /^(?:-|--|N\/?A|0(?:\.0{1,3})?)$/i.test(normalized)) return null;
+
+  let negative = false;
+  let explicitSign = false;
+  if (/^\(.+\)$/.test(normalized)) {
+    negative = true;
+    explicitSign = true;
+    normalized = normalized.slice(1, -1).trim();
+  }
+  const takeSign = () => {
+    const prefix = /^([+-])/.exec(normalized)?.[1];
+    const suffix = /([+-])$/.exec(normalized)?.[1];
+    const sign = prefix ?? suffix;
+    if (!sign) return;
+    explicitSign = true;
+    negative = sign === '-';
+    normalized = prefix ? normalized.slice(1).trim() : normalized.slice(0, -1).trim();
+  };
+  takeSign();
+
+  // Amount cells may carry either a canonical ISO code or the two launch-era
+  // local aliases. Currency evidence is checked, never used to change the
+  // requested ledger denomination.
+  const localAlias = String.raw`(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?|[A-Z]{3})`;
+  const prefixCurrency = new RegExp(`^(${localAlias})\\s*`, 'iu').exec(normalized)?.[1];
+  if (prefixCurrency) {
+    if (statementCurrency(prefixCurrency) !== currency) return null;
+    normalized = normalized.slice(prefixCurrency.length).trim();
+  } else {
+    const suffixCurrency = new RegExp(`\\s*(${localAlias})$`, 'iu').exec(normalized)?.[1];
+    if (suffixCurrency) {
+      if (statementCurrency(suffixCurrency) !== currency) return null;
+      normalized = normalized.slice(0, normalized.length - suffixCurrency.length).trim();
+    }
+  }
+  // Also accept sign placement immediately after/before a currency code.
+  takeSign();
+  if (signed !== explicitSign) return null;
+
+  const fractionPattern = spec.exponent === 0 ? '' : `(?:\\.(\\d{1,${spec.exponent}}))?`;
+  const match = new RegExp(`^((?:\\d{1,3}(?:,\\d{3})+|\\d+))${fractionPattern}$`).exec(normalized);
   if (!match) return null;
-  const sign = signed ? match[1] : '+';
-  const whole = (signed ? match[2] : match[1]).replace(/,/g, '');
-  const fraction = (signed ? match[3] : match[2]) ?? '';
-  const minor = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  if (!Number.isSafeInteger(minor) || minor <= 0) return null;
-  return sign === '-' ? -minor : minor;
+  const whole = match[1].replace(/,/g, '');
+  const fraction = spec.exponent === 0 ? '' : (match[2] ?? '');
+  let minor: bigint;
+  try {
+    minor = BigInt(whole) * BigInt(10 ** spec.exponent) +
+      BigInt((fraction || '').padEnd(spec.exponent, '0') || '0');
+  } catch {
+    return null;
+  }
+  if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  const valueMinor = Number(minor);
+  return negative ? -valueMinor : valueMinor;
 }
 
 function rowDirection(value: string): 'expense' | 'income' | null {
@@ -466,6 +491,7 @@ export function parseStatementCsv(
   defaultCurrency: StatementCurrency,
   maxRows = 200,
 ): StatementCsvResult {
+  if (!ledgerMoneySpec(defaultCurrency)) throw new Error('unsupported_statement_currency');
   const delimiter = csvDelimiter(text);
   if (!delimiter) throw new Error('invalid_csv');
   let records: string[][];
@@ -584,7 +610,7 @@ export function parseStatementCsv(
     const classification = classifyMerchantDescription(
       merchant,
       type,
-      defaultCurrency === 'AED' ? 'AE' : 'SA',
+      defaultCurrency === 'AED' ? 'AE' : defaultCurrency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceIndex >= 0
       ? safeStatementReference(record[referenceIndex] ?? '')
@@ -706,24 +732,22 @@ type MoneyToken =
   | { kind: 'unsigned'; minor: number }
   | { kind: 'signed'; minor: number; type: 'expense' | 'income' };
 
-function moneyMinor(text: string): number | null {
-  const minor = Math.round(Number(text.replace(/,/g, '')) * 100);
-  return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
-}
-
-function classifyMoneyToken(token: string): MoneyToken | null {
+function classifyMoneyToken(token: string, currency: StatementCurrency): MoneyToken | null {
   if (MONEY_PLACEHOLDER.test(token)) return { kind: 'placeholder' };
-  const unsigned = MONEY_UNSIGNED.exec(token);
-  if (unsigned) {
-    const minor = moneyMinor(unsigned[1]);
-    return minor === null ? null : { kind: 'unsigned', minor };
-  }
-  const signed = MONEY_SIGNED.exec(token);
-  if (!signed) return null;
-  const amount = signed[2] ?? signed[4] ?? signed[5] ?? signed[7];
-  const negative = signed[7] !== undefined || (signed[1] ?? signed[3] ?? signed[6]) === '-';
-  const minor = moneyMinor(amount);
-  return minor === null ? null : { kind: 'signed', minor, type: negative ? 'expense' : 'income' };
+  const spec = ledgerMoneySpec(currency);
+  if (!spec) return null;
+  // Flattened PDF rows lose column boundaries. For decimal currencies, a bare
+  // integer at the tail is more likely a cheque/reference number than money;
+  // preserve the old conservative requirement for a decimal point. Zero-decimal
+  // ledgers (JPY/KRW/etc.) necessarily use whole-unit money and are the exception.
+  const numericSurface = token.replace(/[()\sA-Za-z+\-]/g, '');
+  if (spec.exponent > 0 && !numericSurface.includes('.')) return null;
+  const unsigned = amountMinor(token, currency, false);
+  if (unsigned !== null) return { kind: 'unsigned', minor: unsigned };
+  const signed = amountMinor(token, currency, true);
+  return signed === null
+    ? null
+    : { kind: 'signed', minor: Math.abs(signed), type: signed < 0 ? 'expense' : 'income' };
 }
 
 /**
@@ -772,17 +796,15 @@ function parseColumnTail(
   let cut = words.length;
   while (cut > 0 && tail.length < 4) {
     const word = words[cut - 1];
-    const upper = word.toUpperCase();
-    if (upper === 'AED' || upper === 'SAR') {
+    const standaloneCurrency = statementCurrency(word);
+    if (standaloneCurrency) {
       // A currency word only qualifies the money token after it; one that
       // names another market's currency means this row is not ours.
-      if (tail.length === 0 || upper !== currency) return null;
+      if (tail.length === 0 || standaloneCurrency !== currency) return null;
       cut -= 1;
       continue;
     }
-    const explicit = /^(AED|SAR)/i.exec(word)?.[1]?.toUpperCase();
-    if (explicit && explicit !== currency) return null;
-    const token = classifyMoneyToken(word);
+    const token = classifyMoneyToken(word, currency);
     if (!token) break;
     tail.unshift(token);
     cut -= 1;
@@ -817,11 +839,12 @@ function parseColumnTail(
  */
 function rowBalanceFigures(
   rest: string,
+  currency: StatementCurrency,
 ): { merchant: string; amountMinor: number; balanceMinor: number } | null {
   const words = rest.trim().split(' ');
   if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(words.at(-1) ?? '')) words.pop();
-  const balance = classifyMoneyToken(words.at(-1) ?? '');
-  const amount = classifyMoneyToken(words.at(-2) ?? '');
+  const balance = classifyMoneyToken(words.at(-1) ?? '', currency);
+  const amount = classifyMoneyToken(words.at(-2) ?? '', currency);
   // A currency code before the figure marks the foreign original Gulf
   // statements print inside the description, not a column of its own. Tested
   // against real codes rather than any three capitals, because company
@@ -830,7 +853,7 @@ function rowBalanceFigures(
   // does not know costs nothing: the row then has to satisfy the exact balance
   // step like any other, and simply breaks the chain when it cannot.
   if (!balance || !amount || balance.kind === 'placeholder' || amount.kind === 'placeholder' ||
-    FOREIGN_CURRENCY_CODE.has((words.at(-3) ?? '').toUpperCase())) {
+    statementCurrency(words.at(-3) ?? '') !== null) {
     return null;
   }
   // A running balance goes negative — an overdraft, and every credit card that
@@ -866,14 +889,14 @@ function rowBalanceFigures(
  * so a file that merely happens to contain a few reconciling pairs does not
  * license reading the rest of it.
  */
-function trailingBalanceRuns(lines: string[]): boolean {
+function trailingBalanceRuns(lines: string[], currency: StatementCurrency): boolean {
   let previous: number | null = null;
   let checked = 0;
   let agreed = 0;
   for (const line of lines) {
     const prefixed = ROW_DATE_PREFIX.exec(line);
     if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
-    const figures = rowBalanceFigures(prefixed[2]);
+    const figures = rowBalanceFigures(prefixed[2], currency);
     // A row this cannot read is a hole in the chain, not a disagreement. Its
     // successor must not be measured against a balance two rows back, or a
     // statement whose descriptions merely happen to end in a three-letter word
@@ -914,6 +937,7 @@ export function parseStatementLines(
   currency: StatementCurrency = 'AED',
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
 ): StatementTextResult {
+  if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
   const sourceInstrument = identity.card ?? statementHeaderInstrument(text);
@@ -922,7 +946,7 @@ export function parseStatementLines(
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
-  const balanceTrailing = trailingBalanceRuns(lines);
+  const balanceTrailing = trailingBalanceRuns(lines, currency);
   const cardStatement = isCardStatement(text);
   let previousBalance: number | null = null;
   const push = (
@@ -935,7 +959,7 @@ export function parseStatementLines(
     const classification = classifyMerchantDescription(
       merchant,
       type,
-      currency === 'AED' ? 'AE' : 'SA',
+      currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceFromDescription(merchant);
     const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
@@ -960,7 +984,7 @@ export function parseStatementLines(
     const accepted = rows.length;
     // Read before either branch and carried forward whether or not this row is
     // accepted, so one unreadable row cannot break the chain for the next.
-    const figures = balanceTrailing && prefixed ? rowBalanceFigures(prefixed[2]) : null;
+    const figures = balanceTrailing && prefixed ? rowBalanceFigures(prefixed[2], currency) : null;
     const priorBalance = previousBalance;
     // Same hole rule as the proving pass, and here it is a correctness one:
     // a delta measured across a row that was skipped could carry the wrong
@@ -968,14 +992,14 @@ export function parseStatementLines(
     if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) previousBalance = figures?.balanceMinor ?? null;
     const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
     if (match) {
-      const explicitCurrency = /\s(AED|SAR)\s+[\d,]+(?:\.\d{2})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
+      const explicitCurrency = /\s([A-Z]{3})\s+[\d,]+(?:\.\d{1,3})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
         .exec(line)?.[1]?.toUpperCase();
       const date = isoDate(match[1], dateOrder);
       const merchant = match[2].replace(/\s+/g, ' ').trim();
       const endDirection = /^(?:DR|CR|DEBIT|CREDIT)$/i.test(match[4] ?? '');
       const amountText = endDirection ? match[3] : match[4];
       const direction = (endDirection ? match[4] : match[3]).toUpperCase();
-      const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
+      const amountFils = amountMinor(amountText, currency, false);
       // `CARREFOUR 40.00 1,234.00 CR`: the labelled figure is the running
       // balance and the purchase sits at the end of the description. Two
       // money figures before one DR/CR label are ambiguous, so the line is
@@ -988,16 +1012,17 @@ export function parseStatementLines(
       // DR` and `SPINNEYS JLT 120.00 27,890.00 DR` read their SECOND figure as
       // a currency marker under `[A-Z]{3}`, which switched this guard off and
       // imported the running balance as the amount.
-      const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '')?.kind === 'unsigned' &&
-        !FOREIGN_CURRENCY_CODE.has((descriptionWords.at(-2) ?? '').toUpperCase());
+      const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
+        statementCurrency(descriptionWords.at(-2) ?? '') === null;
       const credit = direction === 'CR' || direction === 'CREDIT';
       if (
-        (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
-        Number.isSafeInteger(amountFils) && amountFils > 0 && merchant
+        (!explicitCurrency || statementCurrency(explicitCurrency) === currency) && date && !balanceLabelled &&
+        amountFils !== null && merchant
       ) {
         push(date, merchant, amountFils, credit ? 'income' : 'expense', line);
       } else if (
-        balanceLabelled && date && figures && (!explicitCurrency || explicitCurrency === currency)
+        balanceLabelled && date && figures &&
+        (!explicitCurrency || statementCurrency(explicitCurrency) === currency)
       ) {
         // The label belongs to the balance; the charge is the figure before it,
         // which is where this row's description was made to end. Only reachable

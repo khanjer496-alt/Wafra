@@ -165,6 +165,34 @@ function wideTextPdf(lines) {
     splitCsv.totalRows === 5 && splitCsv.rejectedRows === 2 &&
       splitCsv.rows[1].merchant === 'Salary' && splitCsv.rows[2].merchant === 'Salary');
 
+  const globalCsv = [
+    ['USD', '24.90', 2490],
+    ['EUR', '12.34', 1234],
+    ['JPY', '2400', 2400],
+    ['KWD', '12.345', 12345],
+  ];
+  for (const [currency, amount, minor] of globalCsv) {
+    const parsedGlobal = parseStatementCsv([
+      'Date,Description,Debit,Credit,Currency',
+      `01/07/2026,GLOBAL SHOP,${amount},,${currency}`,
+    ].join('\n'), currency);
+    ok(`global CSV keeps ${currency} in its exact ISO minor units`,
+      parsedGlobal.rows.length === 1 && parsedGlobal.rejectedRows === 0 &&
+        parsedGlobal.rows[0].currency === currency && parsedGlobal.rows[0].amountFils === minor,
+      JSON.stringify(parsedGlobal));
+  }
+  const badJpyPrecision = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency',
+    '01/07/2026,GLOBAL SHOP,24.50,,JPY',
+  ].join('\n'), 'JPY');
+  const badKwdPrecision = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency',
+    '01/07/2026,GLOBAL SHOP,12.3456,,KWD',
+  ].join('\n'), 'KWD');
+  ok('global CSV rejects fractional precision that the ledger currency cannot represent',
+    badJpyPrecision.rows.length === 0 && badJpyPrecision.rejectedRows === 1 &&
+      badKwdPrecision.rows.length === 0 && badKwdPrecision.rejectedRows === 1);
+
   const identifiedCsv = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency,Card Number,Account Number',
     '01/07/2026,Carrefour,40.00,,AED,XXXX XXXX XXXX 4821,',
@@ -385,6 +413,12 @@ function wideTextPdf(lines) {
   ok('Saudi statement rows retain SAR and reject explicit AED rows',
     saRows.length === 1 && saRows[0].currency === 'SAR' && saRows[0].amountFils === 4500 &&
       saRows[0].categoryGuess === 'groceries' && saRows[0].categoryDeliberate === true);
+  const jpyRows = parseStatementText('01/07/2026 TOKYO STORE JPY 2400 DR', 'JPY');
+  const kwdRows = parseStatementText('01/07/2026 KUWAIT STORE KWD 12.345 DR', 'KWD');
+  ok('global text/PDF rows honor zero- and three-decimal ledger currencies',
+    jpyRows.length === 1 && jpyRows[0].currency === 'JPY' && jpyRows[0].amountFils === 2400 &&
+      kwdRows.length === 1 && kwdRows[0].currency === 'KWD' && kwdRows[0].amountFils === 12345,
+    JSON.stringify({ jpyRows, kwdRows }));
   const currencyWordMerchant = parseStatementText('01/07/2026 SAR TRADING 45.00 DR', 'AED');
   ok('a currency word inside the merchant is not mistaken for an amount currency',
     currencyWordMerchant.length === 1 && currencyWordMerchant[0].currency === 'AED');
