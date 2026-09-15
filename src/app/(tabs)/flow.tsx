@@ -118,11 +118,11 @@ export default function FlowScreen() {
       ]} />
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
-        onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
-      {view === 'categories' && <View testID="spending-ask-wafra" style={styles.assistantAction}>
-        <Button label={assistantCopy.explain} variant="ghost" icon="spark"
-          onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
-      </View>}
+        onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')}
+        assistantSlot={<View testID="spending-ask-wafra" style={styles.assistantAction}>
+          <Button label={assistantCopy.explain} variant="ghost" icon="spark"
+            onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+        </View>} />}
       {view === 'categories' && <MerchantSpendingLink />}
       {view === 'categories' && foreign && foreign.transactions.length > 0 && (
         <Pressable

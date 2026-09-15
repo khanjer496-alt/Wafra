@@ -34,6 +34,11 @@ type Props = {
   onPeriod: () => void;
   onCategory: (category: CategoryId) => void;
   onNewLimit: () => void;
+  /** Optional secondary action rendered between the donut summary and the
+   *  category list — the natural place for a follow-up like the assistant
+   *  ghost. Rendering it as a sibling in the parent buried it beneath the
+   *  whole list, which read as a footer, not a companion to the summary. */
+  assistantSlot?: React.ReactNode;
 };
 
 /** Categories and their limits are ONE list. No repeated category chart below it. */
@@ -136,6 +141,7 @@ export function SpendingOverview(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary" style={styles.heroNote}>{w.shareNote}</ThemedText>
     </View>
 
+    {p.assistantSlot}
     <ThemedText type="heading">{w.breakdown}</ThemedText>
     {p.monthScoped && <View style={styles.filters} accessibilityLabel={w.categories}>
       {([{ key: 'all', label: w.all }, { key: 'limited', label: w.withLimits }, { key: 'unlimited', label: w.noLimits }] as const)
