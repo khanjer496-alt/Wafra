@@ -12,6 +12,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
@@ -131,6 +132,8 @@ export default function AddTransactionScreen() {
   );
   const [saving, setSaving] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [accountSearch, setAccountSearch] = useState('');
   const amountRef = useRef<TextInput>(null);
   const categoryRef = useRef<View>(null);
   const accountRef = useRef<View>(null);
@@ -527,11 +530,12 @@ export default function AddTransactionScreen() {
               )}
       </View>
 
-      {/* Account */}
+      {/* Account picker: a compact selected-pill trigger that opens a sheet.
+          The old inline chip list rendered every account as its own 52-tall
+          row; users with 30-40 saved cards saw the field eat the whole page. */}
       <View
         ref={accountRef}
         collapsable={false}
-        accessibilityRole="radiogroup"
         accessibilityLabel={tUi('account')}
         accessibilityLabelledBy={accountLabelId}
         accessibilityHint={tUi('reviewAlertChooseAccount')}
@@ -543,33 +547,32 @@ export default function AddTransactionScreen() {
           nativeID={accountLabelId}>
           {tUi('account')}
         </ThemedText>
-              {/* Bleeds to both screen edges. Inset inside the page padding, a
-                  chip that overflowed was sliced 16px short of the edge — it
-                  read as a clipped label ("Casl"), not as a row that scrolls.
-                  Cut at the edge itself, it reads as more to come. */}
-              <View style={styles.accountRow}>
-                {state.accounts.map((a) => {
-                  const active = accountId === a.id;
-                  return (
-                    <Pressable
-                      key={a.id}
-                      accessibilityRole="radio"
-                      accessibilityLabel={a.name}
-                      accessibilityState={{ checked: active }}
-                      onPress={() => setAccountId(a.id)}
-                      style={[
-                        styles.accountChip,
-                        {
-                          backgroundColor: active ? `${a.color}26` : theme.backgroundElement,
-                          borderColor: active ? a.color : theme.cardBorder,
-                        },
-                      ]}>
-                      <View style={[styles.accountDot, { backgroundColor: a.color }]} />
-                      <ThemedText type="small" style={{ flex: 1, flexShrink: 1 }}>{a.name}</ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
+        {state.accounts.length > 0 ? (() => {
+          const selected = state.accounts.find((a) => a.id === accountId) ?? null;
+          const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={selected ? `${tUi('account')}: ${selected.name}` : tUi('reviewAlertChooseAccount')}
+              accessibilityHint={tUi('reviewAlertChooseAccount')}
+              onPress={() => setAccountPickerOpen(true)}
+              style={({ pressed }) => [
+                styles.accountTrigger,
+                {
+                  borderColor,
+                  backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                },
+              ]}>
+              {selected ? <>
+                <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
+                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{selected.name}</ThemedText>
+              </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
+                {tUi('reviewAlertChooseAccount')}
+              </ThemedText>}
+              <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+            </Pressable>
+          );
+        })() : null}
         {accountInvalid && (
           <ThemedText
             type="meta"
@@ -577,19 +580,19 @@ export default function AddTransactionScreen() {
             nativeID={accountErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-                  {tUi('reviewAlertChooseAccount')}
-                </ThemedText>
-              )}
-              {state.accounts.length === 0 && (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push('/wallet')}
-                  style={styles.emptyAccountAction}>
-                  <ThemedText type="small" style={{ color: theme.primary }}>
-                    {tUi('reviewAlertCreateAccount')}
-                  </ThemedText>
-                </Pressable>
-              )}
+            {tUi('reviewAlertChooseAccount')}
+          </ThemedText>
+        )}
+        {state.accounts.length === 0 && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/wallet')}
+            style={styles.emptyAccountAction}>
+            <ThemedText type="small" style={{ color: theme.primary }}>
+              {tUi('reviewAlertCreateAccount')}
+            </ThemedText>
+          </Pressable>
+        )}
       </View>
 
       {/* Date quick-pick */}
@@ -658,6 +661,50 @@ export default function AddTransactionScreen() {
       onClose={() => setCurrencySheetVisible(false)}
       onSelect={setLedgerMoney}
     />
+    <BottomSheet
+      visible={accountPickerOpen}
+      onClose={() => { setAccountPickerOpen(false); setAccountSearch(''); }}
+      title={tUi('account')}
+      testID="account-picker-sheet">
+      <View accessibilityRole="radiogroup" accessibilityLabel={tUi('account')} style={styles.pickerContent}>
+        <TextField
+          label={tUi('reviewAlertChooseAccount')}
+          value={accountSearch}
+          onChangeText={setAccountSearch}
+          placeholder={tUi('reviewAlertChooseAccount')}
+          autoCorrect={false}
+        />
+        <View style={styles.pickerList}>
+          {state.accounts
+            .filter((a) => {
+              const needle = accountSearch.trim().toLocaleLowerCase();
+              return !needle || a.name.toLocaleLowerCase().includes(needle);
+            })
+            .map((a) => {
+              const active = accountId === a.id;
+              return (
+                <Pressable
+                  key={a.id}
+                  accessibilityRole="radio"
+                  accessibilityLabel={a.name}
+                  accessibilityState={{ checked: active }}
+                  onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    {
+                      borderColor: theme.cardBorder,
+                      backgroundColor: active ? `${a.color}22` : pressed ? theme.backgroundSelected : 'transparent',
+                    },
+                  ]}>
+                  <View style={[styles.accountDot, { backgroundColor: a.color }]} />
+                  <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{a.name}</ThemedText>
+                  {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
+                </Pressable>
+              );
+            })}
+        </View>
+      </View>
+    </BottomSheet>
     </>
   );
 }
@@ -722,28 +769,34 @@ const styles = StyleSheet.create({
   fieldBlock: {
     gap: Spacing.two,
   },
-  accountScroll: {
-    marginHorizontal: -Spacing.three,
-  },
-  accountRow: {
-    gap: Spacing.two,
-    paddingHorizontal: 0,
-  },
-  accountChip: {
+  accountTrigger: {
     minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.two + 4,
+    paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two,
-    borderRadius: Radius.full,
+    borderRadius: Radius.control,
     borderWidth: 1.5,
   },
+  accountTriggerName: { flex: 1, minWidth: 0 },
   accountDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
+  pickerContent: { gap: Spacing.three - 2, maxHeight: 480 },
+  pickerList: { gap: 0 },
+  pickerRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three - 4,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pickerRowName: { flex: 1, minWidth: 0 },
   emptyAccountAction: {
     minHeight: 44,
     alignSelf: 'flex-start',
