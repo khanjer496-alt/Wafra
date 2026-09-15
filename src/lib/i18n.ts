@@ -1039,6 +1039,7 @@ const S = {
   },
   appearanceHeader: { en: 'Appearance', ar: 'المظهر' },
   themeSystem: { en: 'System', ar: 'النظام' },
+  themeSystemDetail: { en: 'System · follows phone', ar: 'النظام · يتبع الهاتف' },
   themeLight: { en: 'Light', ar: 'فاتح' },
   themeDark: { en: 'Dark', ar: 'داكن' },
   pinnedTheme: {
@@ -3338,6 +3339,7 @@ const S = {
   },
   assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
   settingsAppearanceLanguageHeader: { en: 'Appearance & language', ar: 'المظهر واللغة' },
+  settingsPreferencesHeader: { en: 'Preferences', ar: 'التفضيلات' },
   settingsDangerHeader: { en: 'Danger zone', ar: 'منطقة الخطر' },
   supportWebsite: { en: 'Support', ar: 'الدعم' },
   publicLinkUnavailable: { en: 'Unavailable in this build', ar: 'غير متاح في هذا الإصدار' },

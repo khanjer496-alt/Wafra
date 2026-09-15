@@ -299,13 +299,12 @@ assert.match(task7Pro, /purchaseBar: \{[\s\S]*?paddingTop: Spacing\.two/);
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 9, 'Settings renders exactly nine groups');
+assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight groups');
 const settingsGroupMarkers = [
   '<Block onPress={() => router.push(\'/pro\')}>',
-  "<SectionHeader title={t('settingsMoneyHeader')} />",
   "<SectionHeader title={t('settingsImportsHeader')} />",
   "<SectionHeader title={t('settingsNotificationsHeader')} />",
-  "<SectionHeader title={t('settingsAppearanceLanguageHeader')} />",
+  "<SectionHeader title={t('settingsPreferencesHeader')} />",
   "<SectionHeader title={t('privacyHeader')} />",
   "<SectionHeader title={t('dataHeader')} />",
   "<SectionHeader title={t('supportHeader')} />",
@@ -319,15 +318,17 @@ for (const marker of settingsGroupMarkers) {
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
 assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
-assert.match(task7Settings, /from '@\/components\/ui\/segmented-control'/);
-assert.match(task7Settings, /<SegmentedControl[\s\S]*?onChange=\{setThemePreference\}/);
-assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
+assert.doesNotMatch(task7Settings, /segmented-control|<SegmentedControl|<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
+assert.match(task7Settings, /setPreferenceSheet\('appearance'\)/);
+assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
+assert.doesNotMatch(task7Settings, /t\('parserPack'\)|marketChoices/);
+assert.ok(task7Settings.indexOf("t('statementImportTitle')") > task7Settings.indexOf("t('settingsImportsHeader')"));
 
 for (const [key, en, ar] of [
-  ['settingsMoneyHeader', 'Money', 'المال'],
   ['settingsImportsHeader', 'Imports', 'الاستيراد'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
-  ['settingsAppearanceLanguageHeader', 'Appearance & language', 'المظهر واللغة'],
+  ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
+  ['themeSystemDetail', 'System · follows phone', 'النظام · يتبع الهاتف'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],

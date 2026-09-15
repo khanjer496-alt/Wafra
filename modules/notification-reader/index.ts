@@ -41,6 +41,8 @@ interface NotificationReaderModule {
   hasSystemAccess(): boolean;
   /** Persist the app's tracking choice; disabling also erases queued alerts. */
   setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;
+  /** Cheap foreground self-heal: request an Android listener rebind only when disconnected. */
+  ensureListenerConnected?(): Promise<boolean>;
   openSettings(): boolean;
   /** Source-free local diagnostics; never returns notification text. */
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;
