@@ -144,6 +144,31 @@ ok('an explicitly stated AED amount confirms the deferred ledger currency',
     foreignPlan.batch.confirmedLedgerCurrency === undefined,
     foreignPlan.batch.confirmedLedgerCurrency);
 }
+
+// A fresh global ledger is denominated by the bank event itself, not by the
+// UAE/Saudi parser preference that happens to be active on this test device.
+for (const [currency, exponent, minor] of [
+  ['USD', 2, 2490],
+  ['EUR', 2, 1234],
+  ['JPY', 0, 2400],
+  ['KWD', 3, 12345],
+]) {
+  const ts = T0 + 200_000 + exponent;
+  const row = {
+    kind: 'transaction', type: 'expense', amountFils: minor, currency,
+    merchant: `Global ${currency} Shop`, date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: { last4: '9876', kind: 'debit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'shopping', categoryDeliberate: true,
+    smsTs: ts, sender: 'GLOBALBANK', channel: 'push',
+  };
+  const plan = buildImportPlan([row], BASE, ts);
+  ok(`${currency}/${exponent}: a fresh global bank row pins its exact ledger money`,
+    plan.txCount === 1 && plan.batch.importMoney?.currency === currency &&
+      plan.batch.importMoney?.exponent === exponent &&
+      plan.batch.confirmedLedgerCurrency === currency &&
+      plan.batch.transactions[0]?.amountFils === minor,
+    plan.batch);
+}
 const afterFirst = apply(BASE, first);
 
 /* ── supplemental statements heal transfer semantics without guessing ─── */

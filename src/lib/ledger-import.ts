@@ -45,7 +45,7 @@ export interface MaterializedImportBatch {
   snapshots: ImportBatchInput['snapshots'];
   bankNames: Record<string, string>;
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
-  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  confirmedLedgerCurrency?: string;
   parserRereadComplete: boolean;
   historyImport: ImportBatchInput['historyImport'];
   lastScanTs: number;

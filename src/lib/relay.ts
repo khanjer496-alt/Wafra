@@ -52,6 +52,8 @@ import { fetch as expoFetch } from 'expo/fetch';
 import type { ScannedSms } from '@/lib/auto-import';
 import {
   prepareLaunchReviewAlert,
+  prepareUniversalReviewAlert,
+  type ReviewEntry,
   type ReviewAlert,
 } from '@/lib/alert-review-tray';
 import { MARKETS, bankFromName, bankFromSender, getActiveMarket } from '@/lib/markets';
@@ -67,6 +69,7 @@ import type { ParsedSms } from '@/lib/sms-parser';
 import { isTransferEvidence } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import type { UnparsedLaunchAlertReview } from '@/lib/unparsed-launch-alert';
+import type { UniversalBankEvent } from '@/lib/universal-types';
 import {
   parseTrustedDevices,
   validTrustedDeviceName,
@@ -1280,7 +1283,7 @@ export interface RelaySyncResult {
   /** Probe ids are reserved for the foreground setup verifier. */
   testIds: string[];
   /** Sanitized parser misses that require explicit user confirmation. */
-  reviewCandidates?: ReviewAlert[];
+  reviewCandidates?: ReviewEntry[];
   /** Review rows stay queued until their encrypted tray write is durable. */
   reviewIds?: string[];
   /**
@@ -1295,15 +1298,19 @@ export interface RelaySyncResult {
   shortcutRowsWithBank: number;
 }
 
-export interface RelayReviewRow {
+interface RelayReviewRowBase {
   relayReview: true;
   id: string;
   sourceKey: string;
   templateKey: string;
-  review: UnparsedLaunchAlertReview;
   receivedAt: string;
   captureSource: 'shortcut';
 }
+
+export type RelayReviewRow = RelayReviewRowBase & (
+  | { reviewKind?: 'launch'; review: UnparsedLaunchAlertReview; event?: never }
+  | { reviewKind: 'universal'; event: UniversalBankEvent; review?: never }
+);
 
 const opaqueReviewKey = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(value);
@@ -1318,9 +1325,19 @@ export const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
     return false;
   }
   if (typeof row.review !== 'object' || row.review === null || Array.isArray(row.review)) {
-    return false;
+    if (row.reviewKind !== 'universal' || typeof row.event !== 'object' ||
+      row.event === null || Array.isArray(row.event)) return false;
   }
   try {
+    if (row.reviewKind === 'universal') {
+      return prepareUniversalReviewAlert({
+        id: row.id,
+        sourceKey: row.sourceKey,
+        observedAt: Date.parse(row.receivedAt),
+        channel: 'shortcut',
+        event: row.event as UniversalBankEvent,
+      }) !== null;
+    }
     return prepareLaunchReviewAlert({
       id: row.id,
       sourceKey: row.sourceKey,
@@ -1333,7 +1350,18 @@ export const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
   }
 };
 
-export const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewAlert => {
+export const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewEntry => {
+  if (row.reviewKind === 'universal') {
+    const prepared = prepareUniversalReviewAlert({
+      id: row.id,
+      sourceKey: row.sourceKey,
+      observedAt: Date.parse(row.receivedAt),
+      channel: 'shortcut',
+      event: row.event,
+    });
+    if (!prepared) throw new Error('Invalid relay universal review row');
+    return prepared;
+  }
   const prepared = prepareLaunchReviewAlert({
     id: row.id,
     sourceKey: row.sourceKey,
@@ -1451,7 +1479,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   }
   const items = body.items;
   const parsed: ScannedSms[] = [];
-  const reviewCandidates: ReviewAlert[] = [];
+  const reviewCandidates: ReviewEntry[] = [];
   const ids: string[] = [];
   let unreadable = 0;
   let shortcutRows = 0;

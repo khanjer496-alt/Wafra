@@ -1995,7 +1995,7 @@ const S = {
   featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
   // Onboarding
   obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
-  obSubtitle: { en: 'Track an AED or SAR ledger privately.', ar: 'تتبّع سجلاً بالدرهم أو الريال بخصوصية.' },
+  obSubtitle: { en: 'Track your money privately, in your own currency.', ar: 'تتبّع أموالك بخصوصية وبعملتك.' },
   getStarted: { en: 'Get started', ar: 'ابدأ الآن' },
   exploreSample: { en: 'Explore with sample data', ar: 'جرّب ببيانات تجريبية' },
 

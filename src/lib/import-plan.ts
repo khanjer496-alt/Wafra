@@ -179,10 +179,10 @@ function emptyPlan(): ImportPlan {
  * `originalCurrency`; a foreign-only charge does, so it cannot silently pin
  * AED/SAR from the current pack.
  */
-function confirmedLedgerCurrency(rows: readonly ScannedSms[]): 'AED' | 'SAR' | undefined {
-  const observed = new Set<'AED' | 'SAR'>();
+function confirmedLedgerCurrency(rows: readonly ScannedSms[]): string | undefined {
+  const observed = new Set<string>();
   for (const row of rows) {
-    if (row.currency !== 'AED' && row.currency !== 'SAR') continue;
+    if (!ledgerMoneySpec(row.currency)) continue;
     if (row.originalCurrency && row.originalCurrency !== row.currency) continue;
     observed.add(row.currency);
   }
@@ -243,13 +243,9 @@ export function buildImportPlan(
   const storedMoney = migrateLegacyLedgerMoney(state);
   const currencies = new Set(parsed.map((row) => row.currency));
   const singleCurrency = currencies.size === 1 ? [...currencies][0] : undefined;
-  const importMoney = storedMoney ?? (
-    singleCurrency === 'AED' || singleCurrency === 'SAR' ? ledgerMoneySpec(singleCurrency) : null
-  );
-  const acceptsLaunchMoney = importMoney !== null && importMoney.exponent === 2 &&
-    ledgerMoneyMatchesCurrentMetadata(importMoney) &&
-    (importMoney.currency === 'AED' || importMoney.currency === 'SAR');
-  const validMoney = (row: ScannedSms): boolean => acceptsLaunchMoney && row.currency === importMoney!.currency &&
+  const importMoney = storedMoney ?? (singleCurrency ? ledgerMoneySpec(singleCurrency) : null);
+  const acceptsImportedMoney = importMoney !== null && ledgerMoneyMatchesCurrentMetadata(importMoney);
+  const validMoney = (row: ScannedSms): boolean => acceptsImportedMoney && row.currency === importMoney!.currency &&
     Number.isSafeInteger(row.amountFils) && row.amountFils > 0 &&
     (row.minDueFils == null || (Number.isSafeInteger(row.minDueFils) && row.minDueFils >= 0)) &&
     (row.snapshotFils == null || Number.isSafeInteger(row.snapshotFils));

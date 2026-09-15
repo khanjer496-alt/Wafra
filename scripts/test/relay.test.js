@@ -58,6 +58,7 @@ const { deviceKeypair, encodeKey, decodeKey } = require('./build/relay-crypto.cj
 const { parseSms } = require('./build/sms-parser');
 const { setActiveMarket } = require('./build/markets');
 const { inspectUnparsedLaunchAlert } = require('./build/unparsed-launch-alert.js');
+const { inspectGenericBankEventForReview } = require('./build/launch-alert-parser.js');
 const secure = require('./build/stub-secure-store');
 const rn = require('./build/stub-react-native');
 const worker = require('./build/worker').default;
@@ -195,6 +196,21 @@ function reviewRowFor(text, sender = 'FAB') {
     review: decision.review,
     captureSource: 'shortcut',
     receivedAt: '2026-07-17T09:00:00.000Z',
+  };
+}
+
+function universalReviewRowFor(text, sender = 'CHASE') {
+  const event = inspectGenericBankEventForReview(text, sender);
+  if (!event) throw new Error('fixture is not globally reviewable');
+  return {
+    relayReview: true,
+    reviewKind: 'universal',
+    id: `ari1_${'d'.repeat(43)}`,
+    sourceKey: `arc1_${'e'.repeat(43)}`,
+    templateKey: `art1_${'f'.repeat(43)}`,
+    event,
+    captureSource: 'shortcut',
+    receivedAt: '2026-07-17T09:01:00.000Z',
   };
 }
 
@@ -769,6 +785,32 @@ async function queueItem(id, row, publicKey) {
         !JSON.stringify(result.reviewCandidates).includes('FAB payroll'));
     eq('review row: its queue id stays distinguishable until tray persistence',
       result.reviewIds, ['56565656-5656-4656-8656-565656565656']);
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const globalText = 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.';
+    const reviewItem = await queueItem(
+      '57575757-5757-4757-8757-575757575757',
+      universalReviewRowFor(globalText),
+    );
+    net.on('GET /v1/sync', () => json(200, { items: [reviewItem] }));
+    const result = await relay.syncRelay(cfg);
+    eq('global review row: worldwide Shortcut money never enters the automatic ledger path',
+      result.parsed.length, 0);
+    eq('global review row: the phone receives one sanitized universal review candidate',
+      result.reviewCandidates.length, 1);
+    const globalReview = result.reviewCandidates[0];
+    ok('global review row: structured money and merchant survive with no raw message or sender',
+      globalReview?.kind === 'universal' &&
+        globalReview?.event?.amount?.value?.currency === 'USD' &&
+        globalReview?.event?.amount?.value?.minorUnits === '2000' &&
+        globalReview?.event?.merchant?.value === 'TARGET' &&
+        !Object.prototype.hasOwnProperty.call(globalReview, 'raw') &&
+        !Object.prototype.hasOwnProperty.call(globalReview, 'sender') &&
+        !JSON.stringify(globalReview).includes('Chase Alert'));
+    eq('global review row: queue identity stays reserved until tray durability',
+      result.reviewIds, ['57575757-5757-4757-8757-575757575757']);
   }
 
   /* ═════════════════ Revoked from another device ═════════════════
@@ -1546,6 +1588,31 @@ async function queueItem(id, row, publicKey) {
       !dumpAll().includes('FAB payroll') && !dumpAll().includes('WPS credit') &&
         !JSON.stringify(reviewCollected.parsed).includes('WPS'));
     await relay.ackRelay(cfg, reviewCollected.ids);
+
+    const globalShortcutText = 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.';
+    const globalAccepted = await shortcutPost(
+      globalShortcutText,
+      'CHASE',
+      '2026-07-17T10:30:00.000Z',
+      'global-us-review-01',
+      'message',
+    );
+    eq('global Shortcut e2e: a supported worldwide bank alert is accepted without UAE fallback',
+      globalAccepted.status, 202);
+    const globalCollected = await relay.syncRelay(cfg);
+    eq('global Shortcut e2e: worldwide SMS stays review-first rather than auto-posting',
+      globalCollected.parsed.length, 0);
+    ok('global Shortcut e2e: exact USD facts arrive as a sanitized universal review',
+      globalCollected.reviewCandidates.length === 1 &&
+        globalCollected.reviewCandidates[0]?.kind === 'universal' &&
+        globalCollected.reviewCandidates[0]?.event?.amount?.value?.currency === 'USD' &&
+        globalCollected.reviewCandidates[0]?.event?.amount?.value?.minorUnits === '2000' &&
+        globalCollected.reviewCandidates[0]?.event?.merchant?.value === 'TARGET' &&
+        !dumpAll().includes(globalShortcutText) &&
+        !JSON.stringify(globalCollected.reviewCandidates).includes('Chase Alert'));
+    eq('global Shortcut e2e: review row remains distinguishable until tray durability',
+      globalCollected.reviewIds.length, 1);
+    await relay.ackRelay(cfg, globalCollected.reviewIds);
 
     // A Shortcut whose HTTP action retries. The relay's keyed replay receipt
     // collapses it, so one purchase cannot be filed as two.
