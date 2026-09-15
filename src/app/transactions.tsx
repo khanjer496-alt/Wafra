@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -147,7 +147,12 @@ export default function TransactionsScreen() {
   const [smsOnly, setSmsOnly] = useState(source === 'sms');
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const pendingFilterFrame = useRef<number | null>(null);
   const listInsets = useScreenContentInsets({ hasFooter: false });
+
+  useEffect(() => () => {
+    if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
+  }, []);
 
   const todayISO = toISODate(new Date());
   const currentKey = monthKey(new Date());
@@ -222,6 +227,23 @@ export default function TransactionsScreen() {
     setMerchantFilter(null);
     setSmsOnly(false);
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
+  }, []);
+
+  const applyFilters = useCallback((nextFilters: Filters, resetScope: boolean) => {
+    // Closing an Android Modal and projecting a 10k+ row ledger in the same
+    // press made the date-filter button feel as if it had not registered. Let
+    // the sheet disappear and Android present that frame first. The exact
+    // projection the sheet just previewed is cached by the filter index, so in
+    // the common case the next render reuses it without another ledger walk.
+    setSheetVisible(false);
+    const commit = () => {
+      pendingFilterFrame.current = null;
+      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
+      setFilters(nextFilters);
+    };
+    if (Platform.OS !== 'android') { commit(); return; }
+    if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
+    pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
   const transactionResults = useMemo(() => (
@@ -447,11 +469,7 @@ export default function TransactionsScreen() {
 
       {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
         accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
-        onClose={() => setSheetVisible(false)} onApply={(nextFilters, resetScope) => {
-          if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
-          setFilters(nextFilters);
-          setSheetVisible(false);
-        }} />}
+        onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
       <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
     </>

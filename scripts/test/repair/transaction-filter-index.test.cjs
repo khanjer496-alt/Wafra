@@ -103,3 +103,35 @@ test('records a repeat-filter benchmark without asserting phone performance or f
   const indexedMs = measure(() => projectTransactionFilter(index, filters, o));
   console.log(JSON.stringify({ rows: rows.length, indexMs, originalMs, indexedMs, scope: 'local Node benchmark, not Android frame time' }));
 });
+
+test('date-bounded newest filters stop once the requested window has passed', () => {
+  setMonthStartDay(1);
+  let amountChecks = 0;
+  const dated = Array.from({ length: 1200 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 11, 31));
+    d.setUTCDate(d.getUTCDate() - i);
+    const row = {
+      id: `dated-${i}`, title: 'Cafe', category: 'dining', type: 'expense',
+      date: d.toISOString().slice(0, 10), accountId: 'active',
+    };
+    Object.defineProperty(row, 'amountFils', { enumerable: true, get() { amountChecks += 1; return 1000; } });
+    row.source = 'sms';
+    return row;
+  });
+  const index = createTransactionFilterIndex(dated, 'en');
+  amountChecks = 0;
+  const result = projectTransactionFilter(index,
+    { ...defaults, datePreset: 'custom', dateFrom: '2026-12-01', dateTo: '2026-12-31' }, o);
+  assert.equal(result.filtered.length, 31);
+  assert.ok(amountChecks <= 31,
+    `date boundary should avoid checking old rows after the range; checked ${amountChecks}`);
+});
+
+test('the filter-sheet preview is reused when Apply projects the exact same filter object', () => {
+  setMonthStartDay(1);
+  const index = createTransactionFilterIndex(rows, 'en');
+  const filters = { ...defaults, datePreset: 'custom', dateFrom: '2026-08-01', dateTo: '2026-09-30' };
+  const first = projectTransactionFilter(index, filters, o);
+  const second = projectTransactionFilter(index, filters, o);
+  assert.equal(second, first, 'Apply should reuse the result the sheet just counted');
+});
