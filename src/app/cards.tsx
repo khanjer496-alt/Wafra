@@ -17,6 +17,7 @@ import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { internalTransferIds, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
@@ -59,7 +60,7 @@ export default function CardsScreen() {
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const { state, editAccount, deleteAccount, setLedgerMoney } = useStore();
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
 
   const [showInactive, setShowInactive] = useState(false);
   const [detail, setDetail] = useState<Account | null>(null);
@@ -83,18 +84,39 @@ export default function CardsScreen() {
     () => state.accounts.filter((a) => a.kind === 'card' || a.cardType),
     [state.accounts],
   );
+  // Activity depends on account snapshots and transaction dates only; keyed
+  // on those rather than the whole store so import progress does not rescan.
   const activeCards = useMemo(
     () => cards.filter((c) => !isInactiveAccount(state, c, now)),
-    [cards, state, now],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cards, state.accounts, state.transactions, now],
   );
   const inactiveCards = useMemo(
     () => cards.filter((c) => isInactiveAccount(state, c, now)),
-    [cards, state, now],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cards, state.accounts, state.transactions, now],
   );
   const inactiveDisclosureLabel = `${t('inactiveCards')} ${inactiveCards.length}. ${
     showInactive ? t('hide') : t('show')
   }`;
-  const dues = useMemo(() => openDues(state, now), [state, now]);
+  const dues = useMemo(() => openDues(state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, now]);
+  const dueByAccountId = useMemo(
+    () => new Map(dues.map((d) => [d.due.accountId, d] as const)),
+    [dues],
+  );
+  /**
+   * The bank-quoted figure per card, computed once per ledger. This used to
+   * be `reliableBalanceFils(state, card)` inside `renderCard` — a full
+   * transaction walk per card on every render, including every keystroke in
+   * the credit-limit field below.
+   */
+  const reliableByCardId = useMemo(
+    () => new Map(cards.map((card) => [card.id, reliableBalanceFils(state, card)] as const)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cards, state.accounts, state.transactions],
+  );
   const internal = useMemo(
     () => internalTransferIds(state.transactions, state.accounts),
     [state.transactions, state.accounts],
@@ -168,7 +190,7 @@ export default function CardsScreen() {
   const renderCard = (card: Account, i: number, list: Account[], inactive: boolean) => {
     const isCredit = card.cardType === 'credit';
     // Only a bank-quoted outstanding figure is trustworthy.
-    const reliable = reliableBalanceFils(state, card);
+    const reliable = reliableByCardId.get(card.id) ?? null;
     const outstanding = isCredit && reliable !== null ? Math.abs(reliable) : null;
     const quotedLeft =
       card.snapshotKind === 'limit' && card.snapshotFils !== undefined ? card.snapshotFils : null;
@@ -180,7 +202,7 @@ export default function CardsScreen() {
         ? Math.max(0, card.creditLimitFils - outstanding)
         : null);
     const spent = monthSpend.get(card.id) ?? 0;
-    const due = dues.find((d) => d.due.accountId === card.id);
+    const due = dueByAccountId.get(card.id);
     const lastUsed = inactive ? accountLastActivityISO(state, card.id) : null;
 
     return (

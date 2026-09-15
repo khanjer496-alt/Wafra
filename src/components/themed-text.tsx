@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode } from 'react';
+import { isValidElement, useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, type StyleProp, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
@@ -42,7 +42,11 @@ export function ThemedText({
   const theme = useTheme();
   const language = useLanguage();
   const color = themeColor ?? (type === 'linkPrimary' ? 'primary' : 'text');
-  const arabic = holdsArabic(rest.children) || (language === 'ar' && !tabular);
+  // This is the hottest render path in the app (every text node, every list
+  // row). The regex walk over children only needs to run again when the
+  // children themselves change, which for a static label is never.
+  const childrenArabic = useMemo(() => holdsArabic(rest.children), [rest.children]);
+  const arabic = childrenArabic || (language === 'ar' && !tabular);
 
   return (
     <Text

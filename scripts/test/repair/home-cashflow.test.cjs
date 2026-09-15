@@ -126,12 +126,11 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
     if (previous && deps?.length === previous.deps.length && deps.every((value, i) => Object.is(value, previous.deps[i]))) return previous.value;
     const value = factory(); memoSlots[index] = { value, deps }; return value;
   };
+  h.deps['@/lib/dashboard-projection'].projectHomeInsight = () => {
+    insightProjections++;
+    return project().insight ?? null;
+  };
   h.deps['@/lib/dashboard-projection'].projectDashboard = request => {
-    if (request.surface === 'dashboard') {
-      assert.equal(request.includeInsights, true);
-      insightProjections++;
-      return project();
-    }
     projections++;
     assert.equal(request.surface, 'home');
     assert.equal(request.includeInsights, false);

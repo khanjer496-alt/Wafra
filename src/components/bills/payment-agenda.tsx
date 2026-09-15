@@ -1,5 +1,5 @@
 import { paymentAgendaCopy as copy } from '@/lib/reference-copy';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
@@ -26,7 +26,9 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
-  const groups = groupPaymentKinds(items, includePaid);
+  // Five filters and sorts over the agenda. Bills re-renders on every
+  // keystroke in its "add reminder" sheet; this must not run with them.
+  const groups = useMemo(() => groupPaymentKinds(items, includePaid), [items, includePaid]);
   return <View style={styles.root} testID="payment-agenda">
     {groups.map((group) => {
       const count = group.sections.reduce((sum, section) => sum + section.items.length, 0);

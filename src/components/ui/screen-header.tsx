@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -127,35 +127,39 @@ export function ScreenHeader({ mode = 'inline', ...props }: ScreenHeaderRenderer
   const inlineFallback = mode === 'inline' || Platform.OS === 'android' ||
     (!!props.subtitle && !!props.largeTitle);
 
+  const { title, subtitle, largeTitle, back, leading, actions } = props;
+  // `Stack.Screen` calls `navigation.setOptions` whenever this object's
+  // identity changes, and the native header re-renders with it. Screens
+  // build their header prop inline, so without this every scaffold render
+  // (keyboard toggles, store updates) rebuilt the native-stack header.
+  const nativeOptions = useMemo(() => ({
+    headerShown: true,
+    title,
+    headerLargeTitleEnabled: !!largeTitle,
+    headerTitle: subtitle
+      ? () => <NativeTitle title={title} subtitle={subtitle} />
+      : undefined,
+    headerLeft:
+      back || leading !== undefined
+        ? () => <HeaderLeading back={back} leading={leading} />
+        : undefined,
+    headerRight:
+      actions?.length
+        ? () => <HeaderActions actions={actions} />
+        : undefined,
+  }), [title, subtitle, largeTitle, back, leading, actions]);
+  const inlineOptions = useMemo(() => ({ headerShown: false, title }), [title]);
+
   if (inlineFallback) {
     return (
       <>
-        <Stack.Screen options={{ headerShown: false, title: props.title }} />
+        <Stack.Screen options={inlineOptions} />
         <InlineHeader {...props} />
       </>
     );
   }
 
-  return (
-    <Stack.Screen
-      options={{
-        headerShown: true,
-        title: props.title,
-        headerLargeTitleEnabled: !!props.largeTitle,
-        headerTitle: props.subtitle
-          ? () => <NativeTitle title={props.title} subtitle={props.subtitle} />
-          : undefined,
-        headerLeft:
-          props.back || props.leading !== undefined
-            ? () => <HeaderLeading back={props.back} leading={props.leading} />
-            : undefined,
-        headerRight:
-          props.actions?.length
-            ? () => <HeaderActions actions={props.actions} />
-            : undefined,
-      }}
-    />
-  );
+  return <Stack.Screen options={nativeOptions} />;
 }
 
 const styles = StyleSheet.create({

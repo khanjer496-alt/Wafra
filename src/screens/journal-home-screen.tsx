@@ -20,7 +20,7 @@ import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { projectDashboard } from '@/lib/dashboard-projection';
+import { projectDashboard, projectHomeInsight } from '@/lib/dashboard-projection';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { formatAmount } from '@/lib/format';
@@ -55,6 +55,9 @@ const copy = {
     income: 'الدخل', spent: 'الإنفاق', netNote: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك' },
 } as const;
+
+const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
+  a === b || JSON.stringify(a) === JSON.stringify(b);
 
 // A native reminder call cannot be cancelled when Home unmounts. New Home
 // instances join this manual-refresh lane before starting another one.
@@ -117,7 +120,13 @@ export default function JournalHomeScreen() {
   useEffect(() => {
     if (!focused) return;
     let alive = true;
-    void loadHomeWidgetPreferences().then((preferences) => { if (alive) setHomeWidgets(preferences); });
+    // Every return to this tab reloads the preference. Only publish a new
+    // object when something actually changed, so the tab switch itself does
+    // not re-render Home a second time.
+    void loadHomeWidgetPreferences().then((preferences) => {
+      if (!alive) return;
+      setHomeWidgets((current) => sameHomeWidgets(current, preferences) ? current : preferences);
+    });
     return () => { alive = false; };
   }, [focused]);
 
@@ -141,18 +150,22 @@ export default function JournalHomeScreen() {
   // twice before Android could feel responsive, even when no money changed.
   // A review expiring still invalidates the Home projection explicitly below.
   const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // The projection hides the categorise/unread prompts while a history
+  // import is running, so that transition has to invalidate it too.
+  const historyImportRunning = state.historyImport?.status === 'running';
   const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
     // Status/progress changes must not recompute the financial projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
-      state.ledgerMoney, state.marketId, period, projectionDay, hasPendingReview]);
+      state.ledgerMoney, state.marketId, period, projectionDay, hasPendingReview, historyImportRunning]);
   const payments = dashboard.upcoming.items;
-  const homeInsight = useMemo(() => projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight,
+  const insightVisible = homeWidgetVisible(homeWidgets, 'insight');
+  const homeInsight = useMemo(() => insightVisible ? projectHomeInsight({ state, period, now }) : null,
     // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
-      state.merchantOverrides, state.ledgerMoney, state.marketId, period, projectionDay]);
+    [insightVisible, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
+      state.ledgerMoney, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -260,7 +273,12 @@ export default function JournalHomeScreen() {
   const greeting = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
-  const dateLabel = now.toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  // Hermes' Intl date formatting with options is slow enough to notice on a
+  // screen that re-renders on every store update; the label changes by day.
+  const dateLabel = useMemo(
+    () => now.toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectionDay, language]);
 
   const renderWidget = (id: HomeWidgetId) => {
     if (!homeWidgetVisible(homeWidgets, id)) return null;

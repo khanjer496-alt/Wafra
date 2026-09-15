@@ -963,8 +963,30 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     case 'setPrivateMode':
     case 'setMonthStartDay':
       return false;
-    default:
-      return true;
+    default: {
+      // Every other action used to answer "yes", so renaming a merchant with
+      // "apply to existing", filing a bill alias or applying FX rates re-ran
+      // the full transfer graph — two whole-ledger walks — on every tap of
+      // the categorise screen. The same test `editTransaction` applies
+      // generalises: the graph can only change if a row was added or
+      // removed, or a row that was transfer-relevant before or after the
+      // change is not the same object. Store snapshots are immutable, so an
+      // untouched row is the same object.
+      if (reduced.transactions.length !== state.transactions.length) return true;
+      for (let index = 0; index < reduced.transactions.length; index += 1) {
+        const prior = state.transactions[index];
+        const after = reduced.transactions[index];
+        if (prior === after) continue;
+        // A row that moved, or one id replaced by another, is a reshaped
+        // ledger rather than an edited row. Say yes rather than reason about
+        // what pairing depends on order.
+        if (prior.id !== after.id) return true;
+        if (transactionNeedsTransferNormalization(prior) || transactionNeedsTransferNormalization(after)) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 }
 
@@ -1729,8 +1751,11 @@ const SYNTHETIC_DEMO_LEDGER = E2E_DEMO_LEDGER || SCREENMAP_DEMO_LEDGER;
 /**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
  *
- * Exported for the perf suite, which asserts the property the whole scheme
- * rests on: prepending a row leaves every existing body byte-identical.
+ * The reference serialization of the on-disk layout. ledger-persistence
+ * produces byte-identical bodies (and skips re-serializing a chunk whose row
+ * objects have not changed); this stays exported for the perf suite, which
+ * asserts the property the whole scheme rests on: prepending a row leaves
+ * every existing body byte-identical.
  */
 export function chunkTransactions(transactions: Transaction[]): string[] {
   const bodies: string[] = [];
@@ -1745,7 +1770,6 @@ function createAppLedgerPersistence(): LedgerPersistence {
     prefix: STORAGE_KEY,
     chunkSize: TX_CHUNK_SIZE,
     currentChunkOrder: TX_CHUNK_ORDER,
-    chunkTransactions,
     storage: stateStorage,
     migrateLegacyState,
   });
@@ -1987,12 +2011,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, hydrate, persistence]);
 
+  /**
+   * The highest revision a save has DURABLY committed.
+   *
+   * Import, review and progress writers persist immediately for durability;
+   * the render their dispatch causes then reached the debounce below, which
+   * wrote the identical snapshot again 700ms later — an extra encrypted
+   * transaction per history page and per capture. The timer still arms, but
+   * it checks here before writing, so a redundant save is dropped while a
+   * FAILED explicit save still leaves this behind and gets its retry.
+   */
+  const persistedRevision = useRef(-1);
   /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Captured before the write: a dispatch can land while it is in flight,
+    // and that newer revision is not the one this call makes durable.
+    const revision = snapshot === authoritativeState.current
+      ? authoritativeRevision.current
+      : -1;
+    const commit = (ok: boolean): boolean => {
+      if (ok && revision >= 0) {
+        persistedRevision.current = Math.max(persistedRevision.current, revision);
+      }
+      return ok;
+    };
     // Screenmap state exists only for screenshots and is intentionally
     // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
-    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
-    return persistence.save(snapshot).catch((error) => {
+    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(commit(true));
+    return persistence.save(snapshot).then(commit).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
     });
@@ -2003,6 +2049,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      // An explicit writer already made this exact revision durable.
+      if (persistedRevision.current === authoritativeRevision.current) return;
       persist(authoritativeState.current);
     }, SAVE_DEBOUNCE_MS);
   }, [state, persist]);
@@ -2553,24 +2601,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reviewTray: _reviewTray,
       hydrationReparseKey: _hydrationReparseKey,
       ...data
-    } = state;
+    } = authoritativeState.current;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });
-  }, [state]);
+  }, []);
 
   const restoreBackup = useCallback((json: string): boolean => {
     const restored = parseBackupForRestore(json);
     if (!restored) return false;
     // Older backups may still contain these fields. The current store answer
-    // wins regardless of what the file says.
+    // wins regardless of what the file says. Read from the authoritative
+    // snapshot: the rendered `state` is at most one batch behind it, and
+    // depending on it recreated this callback on every ledger change.
+    const current = authoritativeState.current;
     const safeState = {
       ...restored,
-      pro: state.pro,
-      founderPro: state.founderPro,
-      trialStartTs: state.trialStartTs,
-      reviewTray: state.reviewTray,
-      captureOptOut: state.captureOptOut,
-      localCaptureQualifications: state.localCaptureQualifications,
-      iosCaptureWarning: state.iosCaptureWarning,
+      pro: current.pro,
+      founderPro: current.founderPro,
+      trialStartTs: current.trialStartTs,
+      reviewTray: current.reviewTray,
+      captureOptOut: current.captureOptOut,
+      localCaptureQualifications: current.localCaptureQualifications,
+      iosCaptureWarning: current.iosCaptureWarning,
     };
     try {
       dispatch({ type: 'restore', state: safeState });
@@ -2579,16 +2630,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Rejected normalization leaves both the ledger and process preferences intact.
       return false;
     }
-  }, [
-    dispatch,
-    state.captureOptOut,
-    state.founderPro,
-    state.iosCaptureWarning,
-    state.localCaptureQualifications,
-    state.pro,
-    state.reviewTray,
-    state.trialStartTs,
-  ]);
+  }, [dispatch]);
 
   const loadDemoData = useCallback(() => {
     dispatch({

@@ -15,8 +15,7 @@ function harness(size=4,data=new Map()) {
  const storage={async getItem(k){return data.get(k)??null},async multiGet(keys){return keys.map(k=>[k,data.get(k)??null])},
  async multiSet(entries){if(fail){fail=false;throw Error('injected atomic failure')}calls.push(entries.map(e=>[...e]));for(const[k,v]of entries)data.set(k,v)},
  async multiRemove(keys){for(const k of keys)data.delete(k)},async destroy(){data.clear()}};
- const chunkTransactions=transactions=>{const out=[];for(let end=transactions.length;end>0;end-=size)out.push(JSON.stringify(transactions.slice(Math.max(0,end-size),end)));return out};
- const make=()=>createLedgerPersistence({prefix:KEY,chunkSize:size,currentChunkOrder:'oldest-first',chunkTransactions,storage,migrateLegacyState:async()=>false});
+ const make=()=>createLedgerPersistence({prefix:KEY,chunkSize:size,currentChunkOrder:'oldest-first',storage,migrateLegacyState:async()=>false});
  const read=()=>{const meta=JSON.parse(data.get(KEY));const chunks=Array.from({length:meta.txChunks},(_,i)=>JSON.parse(data.get(KEY+':tx:'+i)));if(meta.txChunkOrder==='oldest-first')chunks.reverse();return{meta,transactions:chunks.flat()}};
  return{p:make(),make,data,calls,read,failNext(){fail=true},chunksInLastWrite(){return calls.at(-1).filter(([key])=>key!==KEY)}};
 }

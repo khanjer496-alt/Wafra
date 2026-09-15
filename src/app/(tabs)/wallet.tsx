@@ -26,12 +26,13 @@ import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-s
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { cardFigure, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
@@ -115,7 +116,7 @@ export default function WalletScreen() {
   // Every tab that shows money the inbox produces can now go and refresh it.
   const { refreshing, onRefresh } = usePullToRefresh();
 
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -267,8 +268,19 @@ export default function WalletScreen() {
   );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
-    const figure = cardFigure(state, account, now);
     const due = dueByAccountId.get(account.id);
+    // The same answer `cardFigure` gives, from figures this screen has
+    // already computed once per ledger: an open statement, else the bank's
+    // outstanding quote, else zero owed for a credit card; the reliable
+    // balance for everything else. `cardFigure` re-walked the ledger per row.
+    const figure: { kind: 'owed' | 'balance' | 'unknown'; fils: number | null } =
+      account.cardType === 'credit'
+        ? { kind: 'owed', fils: due ? due.remainingFils
+          : account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+            ? Math.abs(account.snapshotFils) : 0 }
+        : (balances.balanceByAccountId[account.id] ?? null) !== null
+          ? { kind: 'balance', fils: balances.balanceByAccountId[account.id] ?? null }
+          : { kind: 'unknown', fils: null };
     const debtObserved = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
       || dueAccountIds.has(account.id);
     const figureFils = account.cardType === 'credit' && !debtObserved ? null
@@ -280,8 +292,7 @@ export default function WalletScreen() {
       : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
     return { account, figureFils, caption, freshness };
   // Captions also follow language; unrelated store metadata must not rescan rows.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dueByAccountId, dueAccountIds, language]);
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language]);
 
   const openingFils = openingText.trim() === ''
     ? 0

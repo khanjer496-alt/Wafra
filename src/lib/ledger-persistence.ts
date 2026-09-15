@@ -51,7 +51,6 @@ interface LedgerPersistenceOptions {
   prefix: string;
   chunkSize: number;
   currentChunkOrder: 'oldest-first';
-  chunkTransactions(transactions: Transaction[]): string[];
   storage: StateStorage;
   migrateLegacyState(prefix: string): Promise<boolean>;
 }
@@ -66,7 +65,6 @@ export function createLedgerPersistence({
   prefix,
   chunkSize,
   currentChunkOrder,
-  chunkTransactions,
   storage,
   migrateLegacyState,
 }: LedgerPersistenceOptions): LedgerPersistence {
@@ -75,6 +73,14 @@ export function createLedgerPersistence({
   let mode: Mode = 'blocked';
   let previousChunkCount = 0;
   let previousChunks: string[] = [];
+  /**
+   * The exact rows each body in `previousChunks` was serialized from, so a
+   * save can tell "this chunk is byte-identical" by comparing row identity
+   * instead of re-stringifying the whole ledger. Store snapshots are
+   * immutable, so an unchanged row is the same object; a chunk whose rows are
+   * all the same objects as last time has the same body.
+   */
+  let previousChunkRows: Transaction[][] = [];
   let previousTransactions: Transaction[] | null = null;
   let storedChunkOrder: ChunkOrder = currentChunkOrder;
   let lifecycleGeneration = 0;
@@ -95,12 +101,14 @@ export function createLedgerPersistence({
 
   const clearWriteCache = (): void => {
     previousChunks = [];
+    previousChunkRows = [];
     previousTransactions = null;
   };
 
   const resetWriteCache = (): void => {
     previousChunkCount = 0;
     previousChunks = [];
+    previousChunkRows = [];
     previousTransactions = null;
     storedChunkOrder = currentChunkOrder;
   };
@@ -153,6 +161,10 @@ export function createLedgerPersistence({
 
     previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
     previousChunks = corrupt ? [] : chunkBodies;
+    // Bodies read from disk are not paired with row objects (the migration
+    // above may rewrite rows), so the first save after a load still compares
+    // by body. Every save after that compares by identity.
+    previousChunkRows = [];
     storedChunkOrder = chunkOrder;
     previousTransactions = parsed.transactions ?? [];
     return parsed;
@@ -175,18 +187,41 @@ export function createLedgerPersistence({
       : transactionsChanged ? currentChunkOrder : storedChunkOrder;
     const layoutChanged = targetOrder !== storedChunkOrder;
     let chunks: [string, string][] | null = null;
+    let chunkRows: Transaction[][] = [];
     if (transactionsChanged || layoutChanged) {
+      // Serializing every chunk to find the changed ones was O(total bytes)
+      // of JSON.stringify on the JS thread per save — several megabytes for a
+      // large ledger on a one-row change, and once per page during history
+      // import. Reuse the previous body when the chunk holds exactly the same
+      // row objects in the same order; only a chunk with a new or replaced
+      // row is stringified.
+      const sameLayout = !layoutChanged && storedChunkOrder === targetOrder;
+      const bodyFor = (rows: Transaction[], index: number): string => {
+        const prior = sameLayout ? previousChunkRows[index] : undefined;
+        // `previousChunks[index]` is written in the same step as
+        // `previousChunkRows[index]`, but a body is what reaches the disk:
+        // never hand back an absent one on the strength of a row match.
+        if (prior && prior.length === rows.length && previousChunks[index] !== undefined) {
+          let same = true;
+          for (let i = 0; i < rows.length; i += 1) {
+            if (rows[i] !== prior[i]) { same = false; break; }
+          }
+          if (same) return previousChunks[index];
+        }
+        return JSON.stringify(rows);
+      };
+      chunks = [];
       if (targetOrder === currentChunkOrder) {
-        chunks = chunkTransactions(transactions).map(
-          (body, index): [string, string] => [chunkKey(index), body],
-        );
+        for (let end = transactions.length; end > 0; end -= chunkSize) {
+          const rows = transactions.slice(Math.max(0, end - chunkSize), end);
+          chunkRows.push(rows);
+          chunks.push([chunkKey(chunks.length), bodyFor(rows, chunks.length)]);
+        }
       } else {
-        chunks = [];
         for (let start = 0; start < transactions.length; start += chunkSize) {
-          chunks.push([
-            chunkKey(chunks.length),
-            JSON.stringify(transactions.slice(start, start + chunkSize)),
-          ]);
+          const rows = transactions.slice(start, start + chunkSize);
+          chunkRows.push(rows);
+          chunks.push([chunkKey(chunks.length), bodyFor(rows, chunks.length)]);
         }
       }
     }
@@ -213,6 +248,7 @@ export function createLedgerPersistence({
       if (chunks) {
         previousChunkCount = chunks.length;
         previousChunks = chunks.map(([, body]) => body);
+        previousChunkRows = chunkRows;
         storedChunkOrder = order;
       }
       previousTransactions = transactions;

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, FadeOutDown, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -109,8 +109,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToast(null);
   }, []);
 
+  // A fresh `{ show }` object per render re-rendered every `useToast()`
+  // consumer — and `toast` sits in the auto-import callback chain, so each
+  // "Imported 3 transactions" toast rebuilt the scan pipeline's callbacks and
+  // re-rendered every tab. `show` is already stable; keep the wrapper stable.
+  const context = useMemo(() => ({ show }), [show]);
+
+  // A toast that outlives the provider must not set state on it.
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
   return (
-    <ToastContext.Provider value={{ show }}>
+    <ToastContext.Provider value={context}>
       {children}
       {toast && (
         <Animated.View

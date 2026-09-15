@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   Platform,
   Pressable,
@@ -105,24 +105,27 @@ const AnimatedSpringPressable = ({
     if (disabled) pressed.value = 0;
   }, [disabled, pressed]);
 
-  const setPressed = (next: 0 | 1) => {
+  // Stable across renders: these are props on the Pressable, and this
+  // component wraps most rows in the app. Rebuilding them each render made
+  // every row's Pressable re-render whenever its list re-rendered.
+  const setPressed = useCallback((next: 0 | 1) => {
     if (disabled && next === 1) return;
     if (reducedMotion) {
       pressed.value = next;
       return;
     }
     pressed.value = withSpring(next, next === 1 ? PRESS_IN : PRESS_OUT);
-  };
+  }, [disabled, pressed, reducedMotion]);
 
-  const handlePressIn = (event: GestureResponderEvent) => {
+  const handlePressIn = useCallback((event: GestureResponderEvent) => {
     setPressed(1);
     onPressIn?.(event);
-  };
+  }, [onPressIn, setPressed]);
 
-  const handlePressOut = (event: GestureResponderEvent) => {
+  const handlePressOut = useCallback((event: GestureResponderEvent) => {
     setPressed(0);
     onPressOut?.(event);
-  };
+  }, [onPressOut, setPressed]);
 
   return (
     <AnimatedPressable

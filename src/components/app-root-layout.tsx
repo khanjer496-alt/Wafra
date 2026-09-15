@@ -13,6 +13,7 @@ import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { LedgerMoneyProvider } from '@/hooks/use-ledger-money';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { startMotionPreference } from '@/hooks/use-reduced-motion';
 import {
   observeEntitlement,
   refreshEntitlement,
@@ -211,14 +212,19 @@ export default function RootLayout() {
 
   useEffect(() => startRuntimePerformanceMonitor(), []);
 
+  // Ask the OS about Reduce Motion and the screen reader once, here, while
+  // the fonts are still loading. Both answers are app-wide and asynchronous,
+  // and every entrance animation holds its content still until the
+  // screen-reader one arrives — so resolving it before any screen mounts is
+  // the difference between Home appearing and Home appearing after a beat.
+  useEffect(() => startMotionPreference(), []);
+
   useEffect(() => {
     if (ready) {
       markLaunchPhase('fonts-ready');
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [ready]);
-
-  if (!ready) return null;
 
   const navTheme = {
     ...(dark ? DarkTheme : DefaultTheme),
@@ -232,8 +238,25 @@ export default function RootLayout() {
     },
   };
 
+  /*
+    `StoreProvider` mounts BEFORE the fonts are in memory, and only the UI
+    below waits for them.
+
+    It used to sit under an `if (!ready) return null`, which made the launch
+    strictly serial: eight typefaces had to decode before the provider existed,
+    and only then did the SecureStore key read, the SQLCipher open, the chunk
+    reads, the JSON parse and the migrations begin. Those are the slow half,
+    and they need no font. Starting them here overlaps them with the font load
+    instead, so the ledger is often ready by the first painted frame.
+
+    Nothing renders early: with `ready` false the provider's children are
+    null, so no screen can paint against a half-hydrated ledger, and the
+    splash still hides on `fonts-ready` exactly as before.
+  */
   return (
     <StoreProvider>
+      {!ready ? null : (
+      <>
       <BillingSync />
       <Direction>
       <PeriodProvider>
@@ -284,6 +307,8 @@ export default function RootLayout() {
       </ThemeProvider>
       </PeriodProvider>
       </Direction>
+      </>
+      )}
     </StoreProvider>
   );
 }

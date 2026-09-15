@@ -22,10 +22,14 @@ import { Keyboard, Platform } from 'react-native';
  * with the number: pad a scroll view so its fields can be scrolled clear, or
  * lift a sheet so it sits above the keys.
  */
-export function useKeyboardHeight(): number {
+export function useKeyboardHeight(enabled = true): number {
   const [height, setHeight] = useState(0);
 
   useEffect(() => {
+    // A screen that never reads the value must not subscribe: every scaffold
+    // was re-rendering its whole subtree on each keyboard show/hide for a
+    // number it then discarded.
+    if (!enabled) return;
     // iOS fires the "will" pair early enough to animate with the keyboard;
     // Android only reports a usable height on "did".
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -39,7 +43,7 @@ export function useKeyboardHeight(): number {
       show.remove();
       hide.remove();
     };
-  }, []);
+  }, [enabled]);
 
   return height;
 }

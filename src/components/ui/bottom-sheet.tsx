@@ -87,10 +87,17 @@ export function BottomSheet({
   const dragging = useSharedValue(false);
   const opened = useRef(false);
 
+  // Every caller passes an inline `onClose`, and a sheet that reads the store
+  // re-renders on every ledger update while open. Holding the callback in a
+  // ref keeps `finishDismiss`, the dismiss handlers and the pan gesture
+  // stable, so a background import does not rebuild the native gesture
+  // handler under the user's finger.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const finishDismiss = useCallback(() => {
     setMounted(false);
-    onClose();
-  }, [onClose]);
+    onCloseRef.current();
+  }, []);
 
   const requestDismiss = useCallback(() => {
     if (reducedMotion) {
