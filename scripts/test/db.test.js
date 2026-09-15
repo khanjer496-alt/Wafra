@@ -433,6 +433,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/review-promotion': require('./build/review-promotion'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
+    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
     // The REAL predicate, not a stub. It is what decides which rows a merchant
     // rule rewrites, and stubbing it here would let the store's blast radius
     // drift from the count the categorise screen prints beside the tap — the
@@ -1495,11 +1496,19 @@ function memoryStorage(initial = {}) {
 
 const ledgerModule = loadLedgerPersistenceExports();
 const LEDGER_KEY = 'wafra/state/v1';
+const testChunkTransactions = (transactions) => {
+  const chunks = [];
+  for (let end = transactions.length; end > 0; end -= 2) {
+    chunks.push(JSON.stringify(transactions.slice(Math.max(0, end - 2), end)));
+  }
+  return chunks;
+};
 const createPersistence = (memory, migrateLegacyState = async () => false) =>
   ledgerModule.createLedgerPersistence({
     prefix: LEDGER_KEY,
     chunkSize: 2,
     currentChunkOrder: 'oldest-first',
+    chunkTransactions: testChunkTransactions,
     storage: memory.adapter,
     migrateLegacyState,
   });
@@ -1731,6 +1740,44 @@ asyncSuites.push((async () => {
       JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'second' &&
         JSON.parse(memory.data.get(LEDGER_KEY)).txChunks === 1 &&
         memory.calls.filter((call) => call.op === 'set').length === 2);
+  }
+
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const rows = Array.from({ length: 6 }, (_, index) => ({
+      id: `history-${index}`,
+      title: `row-${index}`,
+    }));
+    const running = (transactions) => ({
+      ...snapshot('history-running', transactions),
+      historyImport: {
+        status: 'running', cursor: { beforeDateMs: 1, beforeId: 1 },
+        scanned: 500, found: 100, startedAt: 1, updatedAt: 2, error: null,
+      },
+    });
+    await persistence.save(running(rows));
+
+    const edited = [...rows];
+    edited[3] = { ...edited[3], title: 'healed' };
+    const originalStringify = JSON.stringify;
+    let transactionChunkSerializations = 0;
+    JSON.stringify = function(value, ...args) {
+      if (Array.isArray(value) && value.length > 0 &&
+          value.every((row) => row && typeof row === 'object' && /^history-/.test(row.id ?? ''))) {
+        transactionChunkSerializations += 1;
+      }
+      return originalStringify.call(JSON, value, ...args);
+    };
+    try {
+      await persistence.save(running(edited));
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    ok('one history-page heal serializes only the chunk containing changed row identities',
+      transactionChunkSerializations === 1,
+      `${transactionChunkSerializations} transaction chunks serialized`);
   }
 
   {
@@ -2889,6 +2936,55 @@ asyncSuites.push((async () => {
   const failed = { ...upgraded, hydrationReparseKey: 'obsolete' };
   try { h.migratePersistedState(failed, options); } catch { /* Expected. */ }
   ok('failed startup parsing never stamps a completed receipt', failed.hydrationReparseKey === 'obsolete');
+}
+
+{
+  let calls = 0;
+  const parser = {
+    PARSER_VERSION: 1000,
+    normalizeServiceName: () => null,
+    guessCategory: () => 'other',
+    parseSms: () => { calls++; return null; },
+  };
+  const androidRuntime = {
+    AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+    I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
+    Platform: { OS: 'android' },
+  };
+  const h = loadHydrationExports({
+    'react-native': androidRuntime,
+    '@/lib/sms-parser': parser,
+  });
+  const options = { reuseCompletedReparse: true };
+  const upgrading = h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 999,
+    hydrationReparseKey: JSON.stringify([2, 999, 'AE']),
+    transactions: [tx('android-parser-upgrade', { raw: 'retained source for migration' })],
+  }, options);
+  ok('Android parser upgrades do not synchronously reparse retained SMS during launch', calls === 0);
+  ok('Android hands the grammar receipt to durable history while parserVersion remains pending',
+    upgrading.parserVersion === 999 &&
+      upgrading.hydrationReparseKey === JSON.stringify([2, 1000, 'AE']));
+
+  const sameVersionNeedsLocalRepair = h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 1000,
+    hydrationReparseKey: 'missing-local-repair',
+    transactions: [tx('android-local-repair', { raw: 'retained source for local repair' })],
+  }, options);
+  ok('Android still runs a missing same-version local repair once', calls === 1 && !!sameVersionNeedsLocalRepair);
+
+  h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 999,
+    hydrationReparseKey: JSON.stringify([2, 999, 'AE']),
+    transactions: [tx('android-backup-repair', { raw: 'retained source in restored backup' })],
+  });
+  ok('backup-style migration still repairs retained SMS immediately on Android', calls === 2);
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

@@ -39,9 +39,16 @@ async function run(file, rows, reopenEvery = 0) {
     async multiRemove(keys) { for (const key of keys) data.delete(key); },
     async destroy() { data.clear(); },
   };
+  function chunkTransactions(transactions) {
+    const out = [];
+    for (let end = transactions.length; end > 0; end -= CHUNK_SIZE) {
+      out.push(JSON.stringify(transactions.slice(Math.max(0, end - CHUNK_SIZE), end)));
+    }
+    return out;
+  }
   const make = () => createLedgerPersistence({
     prefix: KEY, chunkSize: CHUNK_SIZE, currentChunkOrder: 'oldest-first',
-    storage, migrateLegacyState: async () => false,
+    chunkTransactions, storage, migrateLegacyState: async () => false,
   });
   let engine = make();
   await engine.load();

@@ -9,7 +9,7 @@ import { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } from '../b
 const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
-  { kind: 'history', id: '5a0da9b5d3a641d9958f3dfa37851afa', installedName: 'Wafra-History-v2-typed-date.signed', build: buildPagedHistoryShortcut, verify: verifyPagedHistoryShortcut },
+  { kind: 'history', id: 'bc30c7ae89d6494c9ef0aea1a666d72d', installedName: 'Wafra-History-v2-typed-date.signed', build: buildPagedHistoryShortcut, verify: verifyPagedHistoryShortcut },
   { kind: 'future', id: '822bcc1dd2964b9f887ef9b93601441d', installedName: 'Wafra Capture v2', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };

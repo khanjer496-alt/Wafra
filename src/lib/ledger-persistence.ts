@@ -51,6 +51,7 @@ interface LedgerPersistenceOptions {
   prefix: string;
   chunkSize: number;
   currentChunkOrder: 'oldest-first';
+  chunkTransactions(transactions: Transaction[]): string[];
   storage: StateStorage;
   migrateLegacyState(prefix: string): Promise<boolean>;
 }
@@ -65,6 +66,7 @@ export function createLedgerPersistence({
   prefix,
   chunkSize,
   currentChunkOrder,
+  chunkTransactions,
   storage,
   migrateLegacyState,
 }: LedgerPersistenceOptions): LedgerPersistence {
@@ -73,14 +75,6 @@ export function createLedgerPersistence({
   let mode: Mode = 'blocked';
   let previousChunkCount = 0;
   let previousChunks: string[] = [];
-  /**
-   * The exact rows each body in `previousChunks` was serialized from, so a
-   * save can tell "this chunk is byte-identical" by comparing row identity
-   * instead of re-stringifying the whole ledger. Store snapshots are
-   * immutable, so an unchanged row is the same object; a chunk whose rows are
-   * all the same objects as last time has the same body.
-   */
-  let previousChunkRows: Transaction[][] = [];
   let previousTransactions: Transaction[] | null = null;
   let storedChunkOrder: ChunkOrder = currentChunkOrder;
   let lifecycleGeneration = 0;
@@ -101,14 +95,12 @@ export function createLedgerPersistence({
 
   const clearWriteCache = (): void => {
     previousChunks = [];
-    previousChunkRows = [];
     previousTransactions = null;
   };
 
   const resetWriteCache = (): void => {
     previousChunkCount = 0;
     previousChunks = [];
-    previousChunkRows = [];
     previousTransactions = null;
     storedChunkOrder = currentChunkOrder;
   };
@@ -161,13 +153,45 @@ export function createLedgerPersistence({
 
     previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
     previousChunks = corrupt ? [] : chunkBodies;
-    // Bodies read from disk are not paired with row objects (the migration
-    // above may rewrite rows), so the first save after a load still compares
-    // by body. Every save after that compares by identity.
-    previousChunkRows = [];
     storedChunkOrder = chunkOrder;
     previousTransactions = parsed.transactions ?? [];
     return parsed;
+  };
+
+  /** Logical row range for one persisted chunk in either supported layout. */
+  const chunkRange = (length: number, index: number, order: ChunkOrder): [number, number] => {
+    if (order === 'newest-first') {
+      const start = index * chunkSize;
+      return [start, Math.min(length, start + chunkSize)];
+    }
+    const end = length - index * chunkSize;
+    return [Math.max(0, end - chunkSize), Math.max(0, end)];
+  };
+
+  /**
+   * Store snapshots are immutable. Before serialising a chunk, compare the row
+   * objects that would occupy it with the previous durable snapshot. This is a
+   * cheap O(n) reference walk and avoids JSON.stringify over the entire ledger
+   * when a history page healed only a narrow date window.
+   */
+  const chunkRowsUnchanged = (
+    transactions: Transaction[],
+    index: number,
+    order: ChunkOrder,
+  ): boolean => {
+    if (!previousTransactions || storedChunkOrder !== order) return false;
+    const [start, end] = chunkRange(transactions.length, index, order);
+    const [priorStart, priorEnd] = chunkRange(previousTransactions.length, index, order);
+    if (end - start !== priorEnd - priorStart) return false;
+    for (let offset = 0; offset < end - start; offset += 1) {
+      if (transactions[start + offset] !== previousTransactions[priorStart + offset]) return false;
+    }
+    return true;
+  };
+
+  const serializeChunk = (transactions: Transaction[], index: number, order: ChunkOrder): string => {
+    const [start, end] = chunkRange(transactions.length, index, order);
+    return JSON.stringify(transactions.slice(start, end));
   };
 
   /** Write one snapshot inside the module's already-serial operation. */
@@ -186,69 +210,50 @@ export function createLedgerPersistence({
       ? snapshot.historyImport.status === 'complete' ? currentChunkOrder : 'newest-first'
       : transactionsChanged ? currentChunkOrder : storedChunkOrder;
     const layoutChanged = targetOrder !== storedChunkOrder;
-    let chunks: [string, string][] | null = null;
-    let chunkRows: Transaction[][] = [];
-    if (transactionsChanged || layoutChanged) {
-      // Serializing every chunk to find the changed ones was O(total bytes)
-      // of JSON.stringify on the JS thread per save — several megabytes for a
-      // large ledger on a one-row change, and once per page during history
-      // import. Reuse the previous body when the chunk holds exactly the same
-      // row objects in the same order; only a chunk with a new or replaced
-      // row is stringified.
-      const sameLayout = !layoutChanged && storedChunkOrder === targetOrder;
-      const bodyFor = (rows: Transaction[], index: number): string => {
-        const prior = sameLayout ? previousChunkRows[index] : undefined;
-        // `previousChunks[index]` is written in the same step as
-        // `previousChunkRows[index]`, but a body is what reaches the disk:
-        // never hand back an absent one on the strength of a row match.
-        if (prior && prior.length === rows.length && previousChunks[index] !== undefined) {
-          let same = true;
-          for (let i = 0; i < rows.length; i += 1) {
-            if (rows[i] !== prior[i]) { same = false; break; }
-          }
-          if (same) return previousChunks[index];
-        }
-        return JSON.stringify(rows);
-      };
-      chunks = [];
-      if (targetOrder === currentChunkOrder) {
-        for (let end = transactions.length; end > 0; end -= chunkSize) {
-          const rows = transactions.slice(Math.max(0, end - chunkSize), end);
-          chunkRows.push(rows);
-          chunks.push([chunkKey(chunks.length), bodyFor(rows, chunks.length)]);
-        }
+    const needsChunks = transactionsChanged || layoutChanged;
+    const chunkCount = needsChunks ? Math.ceil(transactions.length / chunkSize) : previousChunkCount;
+    const order = needsChunks ? targetOrder : storedChunkOrder;
+    let nextChunks: string[] | null = null;
+    let changed: [string, string][] = [];
+
+    if (needsChunks) {
+      // A layout conversion changes every key's meaning, so serialize all chunks
+      // once. Ordinary immutable updates stay on the fast identity-diff path.
+      if (layoutChanged || !previousTransactions || previousChunks.length === 0) {
+        const bodies = order === currentChunkOrder
+          ? chunkTransactions(transactions)
+          : Array.from({ length: chunkCount }, (_, index) => serializeChunk(transactions, index, order));
+        nextChunks = bodies;
+        changed = bodies.flatMap((body, index) =>
+          previousChunks[index] === body ? [] : [[chunkKey(index), body] as [string, string]]);
       } else {
-        for (let start = 0; start < transactions.length; start += chunkSize) {
-          const rows = transactions.slice(start, start + chunkSize);
-          chunkRows.push(rows);
-          chunks.push([chunkKey(chunks.length), bodyFor(rows, chunks.length)]);
+        nextChunks = previousChunks.slice(0, chunkCount);
+        while (nextChunks.length < chunkCount) nextChunks.push('');
+        for (let index = 0; index < chunkCount; index += 1) {
+          if (chunkRowsUnchanged(transactions, index, order)) continue;
+          const body = serializeChunk(transactions, index, order);
+          nextChunks[index] = body;
+          if (previousChunks[index] !== body) changed.push([chunkKey(index), body]);
         }
       }
     }
-    const chunkCount = chunks ? chunks.length : previousChunkCount;
-    let order = chunks ? currentChunkOrder : storedChunkOrder;
-    if (chunks && targetOrder === 'newest-first') order = 'newest-first';
 
     try {
-      const changed = chunks
-        ? chunks.filter(([, body], index) => previousChunks[index] !== body)
-        : [];
       await storage.multiSet([
         [prefix, JSON.stringify({ ...meta, txChunks: chunkCount, txChunkOrder: order })],
         ...changed,
       ]);
-      if (chunks && previousChunkCount > chunks.length) {
+      if (needsChunks && previousChunkCount > chunkCount) {
         await storage.multiRemove(
           Array.from(
-            { length: previousChunkCount - chunks.length },
-            (_, index) => chunkKey(chunks.length + index),
+            { length: previousChunkCount - chunkCount },
+            (_, index) => chunkKey(chunkCount + index),
           ),
         );
       }
-      if (chunks) {
-        previousChunkCount = chunks.length;
-        previousChunks = chunks.map(([, body]) => body);
-        previousChunkRows = chunkRows;
+      if (nextChunks) {
+        previousChunkCount = chunkCount;
+        previousChunks = nextChunks;
         storedChunkOrder = order;
       }
       previousTransactions = transactions;

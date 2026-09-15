@@ -78,8 +78,7 @@ Next, on the iPhone (or on this Mac; Shortcuts syncs through iCloud):
   1. In Shortcuts, delete the installed "Wafra-History-v2-typed-date.signed".
   2. Open the signed file (AirDrop, Files, or double-click here) and tap Add Shortcut.
   3. In Wafra, run the history import again (Settings > iOS setup > History, or Continue).
-  4. When the first page is accepted, share the Shortcut > Copy iCloud Link, and
-     hand the link to the repository so the new record ID replaces 5a0da9b5… in
-     IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS, ios-paged-setup.ts,
-     scripts/release/ios-public-shortcut-check.mjs and eas.json.
+  4. When the first page is accepted, share the Shortcut > Copy iCloud Link, then run
+     bash scripts/refresh-history-shortcut-record.sh <current-id> <new-id>
+     and node scripts/release/ios-public-shortcut-check.mjs.
 NEXT

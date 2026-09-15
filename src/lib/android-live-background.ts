@@ -33,7 +33,7 @@ import {
 } from '@/lib/markets';
 import { isProActive } from '@/lib/purchases';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
-import type { AppState, ImportBatchInput } from '@/lib/types';
+import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
 
 export const ANDROID_LIVE_CAPTURE_TASK = 'WafraLiveCapture';
 const STORAGE_KEY = 'wafra/state/v1';
@@ -66,15 +66,19 @@ const createId = (prefix: 'acc' | 'tx' | 'due' | 'bill'): string => {
   return `${prefix}-bg-${Date.now()}-${idCounter}-${Math.floor(Math.random() * 1e6)}`;
 };
 
-// No `chunkTransactions` here any more: ledger-persistence serializes the
-// chunks itself, reusing a chunk's previous body when its row objects have not
-// changed, so a save no longer re-stringifies the whole ledger to find the one
-// that did. Headless capture appends a row at a time and gains the most from
-// it. The layout is byte-identical to what this function produced.
+const chunkTransactions = (transactions: Transaction[]): string[] => {
+  const bodies: string[] = [];
+  for (let end = transactions.length; end > 0; end -= TX_CHUNK_SIZE) {
+    bodies.push(JSON.stringify(transactions.slice(Math.max(0, end - TX_CHUNK_SIZE), end)));
+  }
+  return bodies;
+};
+
 const diskPersistence = createLedgerPersistence({
   prefix: STORAGE_KEY,
   chunkSize: TX_CHUNK_SIZE,
   currentChunkOrder: TX_CHUNK_ORDER,
+  chunkTransactions,
   storage: stateStorage,
   migrateLegacyState,
 });
