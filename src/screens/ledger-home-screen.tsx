@@ -227,46 +227,6 @@ function HistoryImportNotice({
 }
 
 /**
- * One aggregate doorway, never one warning per unrecognized message.
- *
- * The review tray is structured evidence only and none of it is ledger money.
- * Keeping this as a separate target under capture preserves the capture card's
- * existing contract: that card still syncs or finishes setup; this one reviews.
- */
-function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => void }) {
-  const theme = useTheme();
-  if (count === 0) return null;
-  const label = tf('reviewAlertsHomeCount', { count, s: count === 1 ? '' : 's' });
-
-  return (
-    <SpringPressable
-      accessibilityRole="button"
-      accessibilityLabel={`${t('reviewAlertsTitle')}. ${label}`}
-      accessibilityHint={t('reviewAlertsPrivacy')}
-      onPress={() => {
-        tapped();
-        onPress();
-      }}
-      scaleTo={0.985}
-      style={[
-        styles.reviewPrompt,
-        {
-          borderColor: theme.cardBorder,
-          backgroundColor: theme.backgroundElement,
-        },
-      ]}>
-      <View style={[styles.reviewPromptIcon, { backgroundColor: theme.goldSoft }]}>
-        <Icon name="alert" size={17} color={theme.warning} />
-      </View>
-      <ThemedText type="small" style={styles.reviewPromptCopy}>
-        {label}
-      </ThemedText>
-      <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-    </SpringPressable>
-  );
-}
-
-/**
  * The comparison, as a sentence rather than a signed number.
  *
  * A bare "+4,890" needs the reader to work out the sign convention before it
@@ -643,9 +603,6 @@ export default function LedgerHomeScreen() {
     });
     return () => subscription.remove();
   }, []);
-  const reviewAlertCount = state.reviewTray.pending.filter(
-    (item) => item.expiresAt > now.getTime(),
-  ).length;
   const [refreshing, setRefreshing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [entry, setEntry] = useState<Transaction | null>(null);
@@ -839,12 +796,12 @@ export default function LedgerHomeScreen() {
               .then(() => beginHistoryImport())}
           />
 
-          {/* Data-quality and review work is operational, not decoration: it stays visible even when Home is customized. */}
-          {(reviewAlertCount > 0 || dashboard.uncategorised.shouldPrompt || dashboard.unreadFormats.shouldPrompt) && (
+          {/* Home stays about money, not parser administration. Merchant and
+              unread-format prompts can directly improve the ledger; ambiguous
+              bank-alert review remains in the capture/settings workflow. */}
+          {(dashboard.uncategorised.shouldPrompt || dashboard.unreadFormats.shouldPrompt) && (
             <MotionReveal delay={125} distance={16} scaleFrom={0.975}>
-              {reviewAlertCount > 0 ? (
-                <ReviewAlertsPrompt count={reviewAlertCount} onPress={() => router.push('/review-alerts')} />
-              ) : dashboard.uncategorised.shouldPrompt ? (
+              {dashboard.uncategorised.shouldPrompt ? (
                 <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
               ) : dashboard.unreadFormats.shouldPrompt ? (
                 <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
@@ -993,26 +950,6 @@ const styles = StyleSheet.create({
   },
   historyImportCopy: { flex: 1, gap: 2 },
   historyImportRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
-  reviewPrompt: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.control,
-    marginTop: Spacing.one,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  reviewPromptIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reviewPromptCopy: { flex: 1 },
-
   heroSpendTarget: { minHeight: 48, justifyContent: 'center' },
   heroPanel: { paddingVertical: 12, marginTop: 0 },
   heroHeading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, marginBottom: 12 },

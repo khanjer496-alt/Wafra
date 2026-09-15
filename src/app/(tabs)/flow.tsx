@@ -13,6 +13,7 @@ import { SpendingTrends } from '@/components/spending/spending-trends';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { Button } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
@@ -25,13 +26,15 @@ import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/l
 import { assistantCopy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStore } from '@/lib/store';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 
@@ -60,6 +63,14 @@ export default function FlowScreen() {
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(() => internalTransferIds(state.transactions, state.accounts), [state.transactions, state.accounts]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
+  const foreign = useMemo(() => view === 'categories'
+    ? summarizeForeignActivity(
+        state.transactions,
+        (tx) => live.has(tx.accountId) && !internal.has(tx.id) && inPeriod(tx.date, period),
+        ledgerCurrencyCode(),
+      )
+    : null,
+    [view, state.transactions, period, live, internal]);
   const rows = useMemo(() => spendingCategoryRows(summary, state.budgets, period.mode === 'month'), [summary, state.budgets, period.mode]);
   const accountById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts]);
   const key = period.mode === 'month' ? period.key : monthKey(new Date());
@@ -113,6 +124,28 @@ export default function FlowScreen() {
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
         onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
       {view === 'categories' && <MerchantSpendingLink />}
+      {view === 'categories' && foreign && foreign.transactions.length > 0 && (
+        <Pressable
+          testID="foreign-spending-entry"
+          accessibilityRole="button"
+          accessibilityLabel={`${t('foreignSpending')}. ${formatAED(foreign.totalLocalFils)}`}
+          onPress={() => router.push('/currency')}
+          style={[styles.foreignEntry, { borderColor: theme.cardBorder }]}>
+          <View style={styles.foreignCopy}>
+            <ThemedText type="smallBold">{t('foreignSpending')}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">
+              {tf('foreignActivityCaption', {
+                count: foreign.transactions.length,
+                s: foreign.transactions.length === 1 ? '' : 's',
+                currencies: foreign.groups.length,
+                ending: foreign.groups.length === 1 ? 'y' : 'ies',
+              })}
+            </ThemedText>
+          </View>
+          <ThemedText type="smallBold" tabular>{formatAED(foreign.totalLocalFils)}</ThemedText>
+          <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+        </Pressable>
+      )}
       {view === 'activity' && <View style={styles.activity} testID="spending-activity">
         <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
@@ -173,6 +206,9 @@ export default function FlowScreen() {
 }
 const styles = StyleSheet.create({
   assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
+  foreignEntry: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
+  foreignCopy: { flex: 1, minWidth: 0, gap: 2 },
   activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
   empty: { paddingVertical: 24 }, categoryDetail: { gap: 16 },
   categoryHistory: { gap: 10 }, categoryBars: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 8 },

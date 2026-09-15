@@ -227,7 +227,7 @@ export default function ReviewAlertsScreen() {
   };
 
   const reviewAlertsHeader: ScreenHeaderProps = {
-    title: t('reviewAlertsTitle'),
+    title: words.reviewTitle,
     back: { label: t('back'), onPress: () => router.back() },
   };
 

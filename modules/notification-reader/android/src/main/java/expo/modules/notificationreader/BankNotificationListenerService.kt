@@ -3,6 +3,7 @@ package expo.modules.notificationreader
 import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -208,10 +209,28 @@ class BankNotificationListenerService : NotificationListenerService() {
       // Source-free wake-up only. The encrypted queue remains the source of
       // truth, and a backgrounded/killed JS runtime simply catches up on resume.
       NotificationReaderModule.notifyQueueChanged()
+      scheduleHeadlessCapture(sbn.postTime)
     } catch (_: Exception) {
       recordAdmission("exception", adcb)
       // Never crash the listener; a dropped notification is recoverable, a
       // dead listener is not.
+    }
+  }
+
+  private fun scheduleHeadlessCapture(observedAt: Long) {
+    // Android can temporarily mark a process as foreground-important while it
+    // delivers this listener callback even when no Wafra Activity is visible.
+    // Always issue the event wake; JS AppState is the authoritative UI check
+    // and exits immediately when the mounted app already owns the live drain.
+    try {
+      startService(
+        Intent()
+          .setClassName(packageName, LIVE_CAPTURE_SERVICE)
+          .putExtra("source", LIVE_CAPTURE_SOURCE)
+          .putExtra("observedAt", observedAt),
+      )
+    } catch (_: Exception) {
+      // The encrypted native row remains available for foreground recovery.
     }
   }
 
@@ -220,6 +239,9 @@ class BankNotificationListenerService : NotificationListenerService() {
     private val diagnosticLock = Any()
     private val admissionCounts = mutableMapOf<String, Int>()
     private val adcbAdmissionCounts = mutableMapOf<String, Int>()
+
+    private const val LIVE_CAPTURE_SERVICE = "expo.modules.smsreader.LiveCaptureHeadlessService"
+    private const val LIVE_CAPTURE_SOURCE = "push"
 
     private fun recordAdmission(stage: String, adcb: Boolean) = synchronized(diagnosticLock) {
       admissionCounts[stage] = (admissionCounts[stage] ?: 0) + 1

@@ -121,7 +121,10 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   const insets = { contentContainerStyle: {}, contentInset: { top: 0, bottom: 0 }, scrollIndicatorInsets: { top: 0, bottom: 0 } };
   h.deps['@/components/ui/screen-scaffold'].useScreenContentInsets = () => insets;
   h.deps['@/lib/period'].periodRange = () => '';
-  const Screen = load(path.join(root, 'src/app/transactions.tsx'), h.deps).default;
+  const Screen = load(path.join(root, 'src/app/transactions.tsx'), h.deps, {
+    requestAnimationFrame: callback => { callback(); return 1; },
+    cancelAnimationFrame() {},
+  }).default;
   const render = () => { react.begin(); return Screen(); };
   let tree = render(); const original = walk(tree).find(n => n.type === 'SectionList'); assert.ok(original);
   walk(tree).find(n => n.props?.inputMode === 'search').props.onChangeText('Cafe');
@@ -134,6 +137,16 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   const updated = walk(render()).find(n => n.type === 'SectionList');
   assert.notEqual(updated, original, 'committing filters must still refresh the results');
   assert.ok(updated.props.sections.flatMap(section => section.data).every(row => row.type === 'income'));
+});
+
+test('Android filter Apply dismisses the sheet before committing the expensive projection', () => {
+  const fs = require('fs');
+  const source = fs.readFileSync(path.join(root, 'src/app/transactions.tsx'), 'utf8');
+  const apply = source.match(/const applyFilters = useCallback\([\s\S]*?\n  \}, \[\]\);/)?.[0] ?? '';
+  assert.match(apply, /setSheetVisible\(false\)/);
+  assert.match(apply, /requestAnimationFrame\(commit\)/);
+  assert.ok(apply.indexOf('setSheetVisible(false)') < apply.indexOf('requestAnimationFrame(commit)'),
+    'Android must paint the sheet dismissal before the filter projection can run');
 });
 
 // The sheet used to reconcile the complete ledger once per selected entry and

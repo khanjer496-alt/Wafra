@@ -97,6 +97,7 @@ import {
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
+import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
 import {
@@ -1881,6 +1882,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         markLaunchPhase('ledger-load-complete');
         return true;
       }
+      // A killed-process SMS/push wake can be finishing a short encrypted write
+      // at the exact moment the user opens Wafra. Join that event-driven tail
+      // before reading so hydration never presents the snapshot from one write
+      // behind. This is a no-op when no background capture is running.
+      if (Platform.OS === 'android') await waitForAndroidBackgroundCaptureIdle();
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
       markLaunchPhase('ledger-read-complete');

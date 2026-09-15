@@ -292,7 +292,7 @@ const S = {
   genericUsePasteDate: { en: 'Use date added', ar: 'استخدم تاريخ الإضافة' },
   genericReviewCount: { en: 'Review {count} alert{s}', ar: 'راجع التنبيهات: {count}' },
   genericReviewSaveFailed: { en: 'Could not save these details for review. Try again.', ar: 'تعذر حفظ هذه التفاصيل للمراجعة. حاول مجدداً.' },
-  genericReviewTitle: { en: 'Review captured alert', ar: 'راجع التنبيه الملتقط' },
+  genericReviewTitle: { en: 'Check bank alert', ar: 'تحقق من تنبيه البنك' },
   genericReviewDetails: { en: 'Review details', ar: 'راجع التفاصيل' },
   genericUnverifiedIssuer: { en: 'Issuer not verified', ar: 'الجهة المرسلة غير متحققة' },
   genericStatement: { en: 'Card statement', ar: 'كشف البطاقة' },
@@ -324,17 +324,17 @@ const S = {
   genericOpenWallet: { en: 'Open wallet', ar: 'افتح المحفظة' },
   genericOpenBills: { en: 'Open bills', ar: 'افتح الفواتير' },
   genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
-  genericCompleteFields: { en: 'Confirm the amount, direction, account, category and date first.', ar: 'أكد المبلغ والاتجاه والحساب والتصنيف والتاريخ أولاً.' },
+  genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
   genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
   genericSourceChanged: { en: 'This alert changed or expired. Reopen it to review.', ar: 'تغير هذا التنبيه أو انتهت صلاحيته. افتحه مجدداً للمراجعة.' },
-  reviewAlertsTitle: { en: 'Alerts to review', ar: 'تنبيهات للمراجعة' },
+  reviewAlertsTitle: { en: 'Bank alerts needing help', ar: 'تنبيهات بنكية تحتاج مساعدتك' },
   reviewAlertsHomeCount: {
     en: '{count} alert{s} to review',
     ar: '{count} تنبيه مالي للمراجعة',
   },
   reviewAlertsSettingsCount: {
-    en: '{count} waiting for review',
-    ar: '{count} تنبيه قيد المراجعة',
+    en: '{count} could not be added automatically',
+    ar: 'تعذّرت إضافة {count} تلقائياً',
   },
   reviewAlertsNone: { en: 'Nothing waiting', ar: 'لا شيء قيد المراجعة' },
   reviewAlertsIntro: {
@@ -375,8 +375,8 @@ const S = {
   reviewAlertReview: { en: 'Check & add', ar: 'تحقق وأضف' },
   reviewAlertAdd: { en: 'Add to Wafra', ar: 'أضف إلى وفرة' },
   reviewAlertAddHint: {
-    en: 'Review the category, account, direction and date before adding it.',
-    ar: 'راجع التصنيف والحساب والاتجاه والتاريخ قبل إضافتها.',
+    en: "Fix only the detail Wafra couldn't determine, then add it.",
+    ar: 'حدّد فقط المعلومة التي لم تستطع وفرة معرفتها، ثم أضف العملية.',
   },
   reviewAlertAddTitle: { en: 'Review transaction', ar: 'مراجعة العملية' },
   reviewAlertAdded: { en: 'Transaction added', ar: 'تمت إضافة العملية' },
@@ -410,8 +410,8 @@ const S = {
   foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
   foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
   foreignSpendingSubtitle: {
-    en: 'Review what you paid abroad in the original and ledger currencies.',
-    ar: 'راجع ما دفعته خارج الدولة بالعملة الأصلية وعملة السجل.',
+    en: 'See foreign-currency spending in the original and ledger currencies.',
+    ar: 'اعرض الإنفاق بالعملات الأجنبية بالعملة الأصلية وعملة السجل.',
   },
   searchForeignSpending: { en: 'Search merchant or currency', ar: 'ابحث عن تاجر أو عملة' },
   foreignActivityCaption: {
