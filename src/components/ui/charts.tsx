@@ -77,6 +77,9 @@ export function CategoryDonut({
   centerLabel,
   centerValue,
   centerMeta,
+  accessibilityLabel,
+  selectedKey,
+  onPressCenter,
   onPressSlice,
 }: {
   slices: DonutSlice[];
@@ -85,6 +88,9 @@ export function CategoryDonut({
   centerLabel?: string;
   centerValue?: React.ReactNode;
   centerMeta?: string;
+  accessibilityLabel?: string;
+  selectedKey?: string | null;
+  onPressCenter?: () => void;
   /** Called with the slice's key on tap. Absent = donut is decorative. */
   onPressSlice?: (key: string) => void;
 }) {
@@ -93,7 +99,13 @@ export function CategoryDonut({
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - thickness / 2;
-  const r0 = r - thickness / 2;
+  // `r` is the track's centreline. A stroke extends half its width on BOTH
+  // sides, so a filled wedge must use those same outer/inner radii. The old
+  // path used `r` as its OUTER edge and `r - thickness / 2` as its inner edge,
+  // which painted every slice at half the requested thickness and left the
+  // neutral track visibly protruding around it like a heavy second ring.
+  const outerR = r + thickness / 2;
+  const innerR = r - thickness / 2;
   // Empty state: a plain track ring so the shape is still there.
   if (total <= 0) {
     return (
@@ -152,18 +164,19 @@ export function CategoryDonut({
       const s = a + Math.min(gap / 2, span / 3);
       const e = a + span - Math.min(gap / 2, span / 3);
       const large = e - s > Math.PI ? 1 : 0;
-      const x1 = cx + Math.cos(s) * r;
-      const y1 = cy + Math.sin(s) * r;
-      const x2 = cx + Math.cos(e) * r;
-      const y2 = cy + Math.sin(e) * r;
-      const x3 = cx + Math.cos(e) * r0;
-      const y3 = cy + Math.sin(e) * r0;
-      const x4 = cx + Math.cos(s) * r0;
-      const y4 = cy + Math.sin(s) * r0;
+      const x1 = cx + Math.cos(s) * outerR;
+      const y1 = cy + Math.sin(s) * outerR;
+      const x2 = cx + Math.cos(e) * outerR;
+      const y2 = cy + Math.sin(e) * outerR;
+      const x3 = cx + Math.cos(e) * innerR;
+      const y3 = cy + Math.sin(e) * innerR;
+      const x4 = cx + Math.cos(s) * innerR;
+      const y4 = cy + Math.sin(s) * innerR;
       // A filled ring wedge (outer arc → inner arc) so each slice carries its
       // own colour without a stroke join darkening it against its neighbour.
-      const d = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${large} 0 ${x4},${y4} Z`;
-      paths.push(<Path key={slice.key} d={d} fill={slice.color} pointerEvents="none" />);
+      const d = `M${x1},${y1} A${outerR},${outerR} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${innerR},${innerR} 0 ${large} 0 ${x4},${y4} Z`;
+      paths.push(<Path key={slice.key} d={d} fill={slice.color}
+        opacity={selectedKey && selectedKey !== slice.key ? 0.34 : 1} pointerEvents="none" />);
       a += span;
     }
   }
@@ -174,7 +187,7 @@ export function CategoryDonut({
     <View
       accessible
       accessibilityRole="image"
-      accessibilityLabel={totalLabel}
+      accessibilityLabel={accessibilityLabel ?? totalLabel}
       style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Pressable
         accessible={false}
@@ -200,7 +213,16 @@ export function CategoryDonut({
         </Svg>
       </Pressable>
       {(centerLabel || centerValue || centerMeta) && (
-        <View style={styles.donutCenter} pointerEvents="none">
+        <Pressable
+          accessible={false}
+          disabled={!onPressCenter}
+          onPress={onPressCenter}
+          style={[styles.donutCenter, {
+            // Keep the reset target wholly inside the hole so it never steals a
+            // slice tap. A vertical drag can still escape to the parent scroll.
+            width: Math.max(72, size - thickness * 2 - 22),
+            height: Math.max(72, size - thickness * 2 - 22),
+          }]}>
           {centerLabel && (
             <ThemedText type="nano" themeColor="textSecondary">
               {centerLabel}
@@ -210,9 +232,9 @@ export function CategoryDonut({
           {centerMeta && (
             <ThemedText type="nano" themeColor="textTertiary">
               {centerMeta}
-            </ThemedText>
-          )}
-        </View>
+              </ThemedText>
+            )}
+        </Pressable>
       )}
     </View>
   );
