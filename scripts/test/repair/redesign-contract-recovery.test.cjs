@@ -40,13 +40,12 @@ for(const language of ['en','ar']) {
   };
   assert.match(text(make(0)),/—/);assert.doesNotMatch(text(make(1)),/—/);assert.match(text(make(1)),/0\.00/);
  });
- test(`${language}: expanded balance details stack and preserve their callbacks`,()=>{
-  const h=createHarness({language,largeText:true,states:{0:true}});
-  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,duesTotalFils:100,cashOutTotalFils:20,cashOutCardPaymentsFils:10,cashOutAccountOutflowFils:10,currencies:[{currency:'USD'}],currenciesTotalFils:30,activeSourceCount:1,onOpenBills:()=>h.events.push(['bills']),onOpenCurrency:()=>h.events.push(['currency']),onAddAccount(){}});
-  const buttons=walk(tree).filter(n=>n.props.onPress);
-  assert.equal(buttons[0].props.accessibilityState.expanded,true);assert.ok(buttons[0].props.accessibilityLabel);
-  for(const b of buttons.slice(1))assert.equal(style(b).flexDirection,'column');
-  buttons[1].props.onPress();buttons[2].props.onPress();assert.deepEqual(h.events,[['bills'],['currency']]);
+ test(`${language}: balance overview stays focused on recorded account balances`,()=>{
+  const h=createHarness({language,largeText:true});
+  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,activeSourceCount:1,onAddAccount(){}});
+  assert.equal(walk(tree).filter(n=>n.props.onPress).length,0,'an existing account should not expose unrelated dues/cash-flow navigation inside the balance hero');
+  assert.match(text(tree),/1\.25/);
+  assert.match(text(tree),/Coverage fixture/);
  });
  test(`${language}: setup checklist exposes status and a usable hit target`,()=>{
   const h=createHarness({language});const C=h.local('@/components/ios-message-setup/checklist-row').ChecklistRow;

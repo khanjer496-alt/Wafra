@@ -147,7 +147,7 @@ export default function AssistantScreen() {
       ? executeAssistantTool(snapshot, contextRequest, answeredAt)
       : executeAssistantTool(snapshot, { tool: 'help', clarification: summary }, answeredAt);
     const answer: AssistantAnswer = contextRequest
-      ? { ...base, title: `Updated · ${base.title}`, body: `${summary} ${base.body}` }
+      ? { ...base, title: copy.correctionUpdatedTitle(base.title), body: `${summary} ${base.body}` }
       : base;
     const request = contextRequest ?? { tool: 'help' as const, clarification: summary };
     const id = ++nextId.current;
@@ -179,23 +179,27 @@ export default function AssistantScreen() {
     let summary: string;
     if (correction.kind === 'merchant-category') {
       setMerchantOverride(correction.merchant, correction.category, true, correction.direction);
-      summary = `Updated ${correction.merchant} to ${categoryLabel(correction.category, 'en')} for matching ${correction.direction} transactions.`;
+      summary = copy.correctionMerchantCategory(
+        correction.merchant,
+        categoryLabel(correction.category, 'en'),
+        correction.direction,
+      );
     } else if (correction.kind === 'transaction-category') {
       editTransaction(correction.transactionId, { category: correction.category });
-      summary = `Updated that transaction to ${categoryLabel(correction.category, 'en')}.`;
+      summary = copy.correctionTransactionCategory(categoryLabel(correction.category, 'en'));
     } else if (correction.kind === 'not-subscription') {
       setNotSubscription(correction.merchant, true);
-      summary = `Marked ${correction.merchant} as not a subscription.`;
+      summary = copy.correctionNotSubscription(correction.merchant);
     } else {
       const row = snapshot.transactions.find((transaction) => transaction.id === correction.transactionId);
-      if (!row) throw new Error('Correction target disappeared');
+      if (!row) throw new Error(copy.correctionTargetMissing);
       await resolveTransfers({
         ids: [row.id], ownership: correction.ownership,
         expectedFingerprints: { [row.id]: transferFingerprint(row) }, expectedGeneration: beforeGeneration,
       });
       summary = correction.ownership === 'own'
-        ? 'Marked that transaction as a transfer involving your own accounts.'
-        : 'Marked that transfer as involving an external party.';
+        ? copy.correctionTransferOwn
+        : copy.correctionTransferExternal;
     }
     appendCorrectionResult(clean, summary, beforeGeneration, now, contextRequest);
   };

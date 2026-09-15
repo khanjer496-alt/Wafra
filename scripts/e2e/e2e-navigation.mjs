@@ -410,7 +410,7 @@ const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
   'Wafra Pro', 'Bank-message region', 'Daily spend summary', 'System', 'Light', 'Dark',
-  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
 ]) {

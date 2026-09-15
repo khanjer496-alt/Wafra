@@ -63,8 +63,9 @@ ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitL
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
   /<SegmentedControl/.test(bills) && /large && styles\.stack/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
-ok('Wallet collapses overview facts to a vertical list',
-  /p\.largeText && styles\.stack/.test(walletOverview) && /detailRow, p\.largeText && styles\.stack/.test(walletOverview));
+ok('Wallet stacks its recorded-balance headline at accessibility text sizes',
+  /styles\.money, p\.largeText && styles\.stack/.test(walletOverview) &&
+    /stack: \{ flexDirection: 'column', alignItems: 'flex-start' \}/.test(walletOverview));
 ok('Bills uses the shared accessible sheet contract',
   /<BottomSheet/.test(bills) && !/<Modal/.test(bills) && /accessibilityLabel=\{t\('reminderName/.test(bills));
 ok('Wallet uses shared sheets and selected choice semantics',
@@ -121,7 +122,7 @@ ok('optional-plan choices expose the explanation to assistive technology',
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
   /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&
-  /onPress=\{p\.onOpenBills\}/.test(walletOverview) && /onPress=\{p\.onOpenCurrency\}/.test(walletOverview) &&
+  /const borderColor = accountInvalid \? theme\.expense : selected \? selected\.color : theme\.controlBorder/.test(addTransaction) &&
   /transferChoice[\s\S]{0,100}theme\.controlBorder/.test(addTransaction));
 
 const themedText = source('src/components/themed-text.tsx');
@@ -200,13 +201,13 @@ ok('Add groups associate stable labels and errors only through a web compatibili
     !/<View[^>]*aria-invalid=/.test(addTransaction));
 ok('Add invalid groups and fields announce adjacent localized errors politely',
   /const categoryInvalid = showValidation && !category/.test(addTransaction) &&
-    /const accountInvalid = showValidation && !accountId/.test(addTransaction) &&
-    /categoryInvalid && \([\s\S]*?accessibilityLiveRegion="polite"/.test(addTransaction) &&
-    /accountInvalid && \([\s\S]*?accessibilityLiveRegion="polite"/.test(addTransaction) &&
-    /invalid=\{amountInvalid\}/.test(addTransaction) &&
-    /errorText=\{amountInvalid \?/.test(addTransaction) &&
-    /invalid=\{reviewDateInvalid\}/.test(addTransaction) &&
-    /errorText=\{reviewDateInvalid \?/.test(addTransaction));
+  /const accountInvalid = showValidation && !accountId/.test(addTransaction) &&
+  /categoryInvalid && \([\s\S]*?accessibilityLiveRegion="polite"/.test(addTransaction) &&
+  /accountInvalid && \([\s\S]*?accessibilityLiveRegion="polite"/.test(addTransaction) &&
+  /invalid=\{amountInvalid\}/.test(addTransaction) &&
+  /errorText=\{amountInvalid \?/.test(addTransaction) &&
+  /reviewItem \? validReviewDate\(reviewDate\)/.test(addTransaction) &&
+  /event\.transactionDate\.evidence !== 'explicit' && hasRealDateChoice/.test(source('src/components/universal-review-fields.tsx')));
 
 ok('Spending categories provide localized spending and limit equivalents',
  /accessibilityLabel=\{`\$\{categoryLabel\(row\.category, language\)\}[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/.test(spendingOverview));
@@ -233,10 +234,10 @@ ok('Bills reminder entry exposes three labelled shared fields and a disabled Sav
     !/<TextInput/.test(bills) &&
     /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/.test(bills));
 
-ok('Wallet uses the typed inline scaffold header and labels both disclosures',
+ok('Wallet uses the typed inline scaffold header and labels its remaining disclosure',
   /const walletHeader: ScreenHeaderProps = \{/.test(wallet) &&
     /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/.test(wallet) &&
-    /accessibilityLabel=\{detailsLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: details \}\}/.test(walletOverview) &&
+    !/detailsLabel|expanded: details/.test(walletOverview) &&
     /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
 ok('Wallet starts its iOS inset scroller at the visible content origin',
   /const walletInsets = useScreenContentInsets\(\{ tabbed: true \}\)/.test(wallet) &&

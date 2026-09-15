@@ -116,13 +116,13 @@ export default function FlowScreen() {
       <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
-      {view === 'categories' && <View testID="spending-ask-wafra" style={styles.assistantAction}>
-        <Button label={assistantCopy.explain} variant="ghost" icon="spark"
-          onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
-      </View>}
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
-        onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
+        onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')}
+        assistantSlot={<View testID="spending-ask-wafra" style={styles.assistantAction}>
+          <Button label={assistantCopy.explain} variant="ghost" icon="spark"
+            onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+        </View>} />}
       {view === 'categories' && <MerchantSpendingLink />}
       {view === 'categories' && foreign && foreign.transactions.length > 0 && (
         <Pressable
@@ -157,10 +157,13 @@ export default function FlowScreen() {
         <Button label={w.allActivity} variant="outline" onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
       </View>}
       {view === 'trends' && analysis && <>
-        <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
-        <View testID="spending-ask-wafra" style={styles.assistantAction}>
-          <Button label={assistantCopy.explain} variant="ghost" icon="spark"
-            onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+        <View style={styles.trendsToolbar}>
+          <Button label={periodLabel(period)} variant="ghost" icon="calendar" inline style={styles.trendsToolbarButton}
+            onPress={() => setPeriodOpen(true)} />
+          <View testID="spending-ask-wafra" style={styles.trendsToolbarAction}>
+            <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline style={styles.trendsToolbarButton}
+              onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+          </View>
         </View>
         <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
           onMonth={(key) => setPeriod({ mode: 'month', key })}
@@ -206,6 +209,9 @@ export default function FlowScreen() {
 }
 const styles = StyleSheet.create({
   assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
+  trendsToolbar: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  trendsToolbarAction: { flex: 1, minWidth: 150 },
+  trendsToolbarButton: { minHeight: 44 },
   foreignEntry: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   foreignCopy: { flex: 1, minWidth: 0, gap: 2 },

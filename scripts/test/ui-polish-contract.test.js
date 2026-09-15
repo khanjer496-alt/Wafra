@@ -58,8 +58,8 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 
 // Payment/deletion safeguards are unchanged; the shared agenda owns detail navigation.
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
-// Payment type is now the outer hierarchy; status/date sections retain all rows.
-assert.match(agenda,/group\.sections\.map/);
+// Due timing is the outer hierarchy; each status/date section retains all rows.
+assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);

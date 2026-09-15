@@ -992,10 +992,28 @@ export function parseStatementLines(
     if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) previousBalance = figures?.balanceMinor ?? null;
     const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
     if (match) {
-      const explicitCurrency = /\s([A-Z]{3})\s+[\d,]+(?:\.\d{1,3})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
+      // Only treat the three-letter token before an amount as currency when
+      // it is actually a supported ISO currency. Merchant/location suffixes
+      // such as `PARKING RTA 4.00 DR` are common statement text and must not
+      // be mistaken for a foreign-currency marker just because they are three
+      // uppercase letters.
+      const explicitCurrencyToken = /\s([A-Z]{3})\s+[\d,]+(?:\.\d{1,3})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
         .exec(line)?.[1]?.toUpperCase();
+      const explicitCurrency = explicitCurrencyToken ? statementCurrency(explicitCurrencyToken) : null;
       const date = isoDate(match[1], dateOrder);
-      const merchant = match[2].replace(/\s+/g, ' ').trim();
+      let merchant = match[2].replace(/\s+/g, ' ').trim();
+      // AMOUNT_TOKEN is intentionally permissive enough to recognize global
+      // three-letter ISO codes. That also means the regex may temporarily eat
+      // an ordinary three-letter merchant/location suffix such as RTA or LLC.
+      // Put unrecognized tokens back into the description; recognized ISO
+      // currency evidence stays out of the merchant title.
+      if (explicitCurrencyToken) {
+        if (explicitCurrency) {
+          merchant = merchant.replace(new RegExp(`\\s*${explicitCurrencyToken}$`, 'i'), '').trim();
+        } else if (!new RegExp(`(?:^|\\s)${explicitCurrencyToken}$`, 'i').test(merchant)) {
+          merchant = `${merchant} ${explicitCurrencyToken}`.trim();
+        }
+      }
       const endDirection = /^(?:DR|CR|DEBIT|CREDIT)$/i.test(match[4] ?? '');
       const amountText = endDirection ? match[3] : match[4];
       const direction = (endDirection ? match[4] : match[3]).toUpperCase();
@@ -1016,13 +1034,13 @@ export function parseStatementLines(
         statementCurrency(descriptionWords.at(-2) ?? '') === null;
       const credit = direction === 'CR' || direction === 'CREDIT';
       if (
-        (!explicitCurrency || statementCurrency(explicitCurrency) === currency) && date && !balanceLabelled &&
+        (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
         amountFils !== null && merchant
       ) {
         push(date, merchant, amountFils, credit ? 'income' : 'expense', line);
       } else if (
         balanceLabelled && date && figures &&
-        (!explicitCurrency || statementCurrency(explicitCurrency) === currency)
+        (!explicitCurrency || explicitCurrency === currency)
       ) {
         // The label belongs to the balance; the charge is the figure before it,
         // which is where this row's description was made to end. Only reachable

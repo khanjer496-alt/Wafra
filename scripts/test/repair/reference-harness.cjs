@@ -137,6 +137,7 @@ function createHarness(options = {}) {
   deps['@/components/ui/tile']={AccountTile:({account,size=32})=>jsx('AccountIcon',{account,size}),CategoryTile:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/action-icon-button']={ActionIconButton:p=>jsx('Pressable',{...p,children:deps['@/components/ui/icon'].Icon({name:p.icon,size:20,color:theme.text})})};
   local('@/components/ui/segmented-control');local('@/components/ui/controls');local('@/components/ui/progress-bar');local('@/components/ui/text-field');
+  deps['@/components/ui/charts']={CategoryDonut:p=>jsx('CategoryDonut',p),useRamp:()=>['#1F6B52','#488269','#779E89','#A7BFAC','#C8D8C9'],useCategoricalPalette:()=>['#1F6B52','#B4503C','#A07B2A','#3B7A8C','#7A4E76'],ProgressBar:deps['@/components/ui/progress-bar'].ProgressBar,CompositionBar:p=>jsx('CompositionBar',p),PairedBars:p=>jsx('PairedBars',p),TrendCurve:p=>jsx('TrendCurve',p),HistoryStrip:p=>jsx('HistoryStrip',p)};
   deps['@/components/ui/period-pill']={SectionHeader:p=>jsx('SectionHeader',p)};
   for(const [module,name] of [['period-sheet','PeriodSheet'],['entry-detail-sheet','EntryDetailSheet'],['card-payment-sheet','CardPaymentSheet'],['bill-detail-sheet','BillDetailSheet'],
     ['card-detail-sheet','CardDetailSheet'],['transaction-filter-sheet','TransactionFilterSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
