@@ -553,8 +553,9 @@ export default function AddTransactionScreen() {
           const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
           return (
             <Pressable
+              testID="account-picker-trigger"
               accessibilityRole="button"
-              accessibilityLabel={selected ? `${tUi('account')}: ${selected.name}` : tUi('reviewAlertChooseAccount')}
+              accessibilityLabel={selected ? `${tUi('account')}: ${accountDisplayName(selected)}` : tUi('reviewAlertChooseAccount')}
               accessibilityHint={tUi('reviewAlertChooseAccount')}
               onPress={() => setAccountPickerOpen(true)}
               style={({ pressed }) => [
