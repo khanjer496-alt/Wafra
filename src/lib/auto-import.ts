@@ -39,6 +39,7 @@ import {
   trustedBankNotificationSender,
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
+import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
@@ -55,6 +56,10 @@ export interface AndroidNotificationImportDiagnostics {
   declined: number;
   ignored: number;
   unresolved: number;
+  unresolvedTrustedBank: number;
+  unresolvedFinancialCandidate: number;
+  unresolvedParserMiss: number;
+  unresolvedReviewRefusal: number;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
@@ -425,6 +430,93 @@ export type SourceFreeRefusedAlertDecision =
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
 
 /**
+ * A parsed notification from an unconfirmed Android package is strong enough
+ * to show the user a bounded Review proposal, but never strong enough to write
+ * money automatically. Reconstruct only structured parser facts; no raw source
+ * text or sender survives this boundary.
+ */
+function parsedFinancialCandidateReview(
+  parsed: ParsedSms,
+  observedAt: number,
+): SourceFreeReviewCandidate | null {
+  if (parsed.kind !== 'transaction' || !Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0) {
+    return null;
+  }
+  // This helper is reached only after the launch parser succeeded. That parser
+  // deliberately supports only the launch ledger packs here (AED/SAR), both of
+  // which are two-decimal currencies. Do not broaden this fallback into a
+  // general FX adapter for an unconfirmed app package.
+  if (parsed.currency !== 'AED' && parsed.currency !== 'SAR') return null;
+  const missingField = () => ({
+    value: null,
+    evidence: 'missing' as const,
+    alternatives: [],
+    spans: [],
+    issues: [],
+  });
+  const instrument = parsed.card
+    ? {
+        kind: parsed.card.kind === 'account' ? 'account' as const : 'card' as const,
+        last4: /^\d{4}$/.test(parsed.card.last4) ? parsed.card.last4 : null,
+      }
+    : null;
+  const amount = {
+    currency: parsed.currency,
+    minorUnits: String(parsed.amountFils),
+    exponent: 2,
+  };
+  const explicitAmount = {
+    value: amount,
+    evidence: 'explicit' as const,
+    alternatives: [],
+    spans: [],
+    issues: [],
+  };
+  const merchant = parsed.merchant.trim();
+  const event: UniversalBankEvent = {
+    version: 1,
+    decision: 'review',
+    family: parsed.transferHint
+      ? 'transfer'
+      : parsed.categoryGuess === 'cash-withdrawal'
+        ? 'cash-withdrawal'
+        : parsed.type === 'income'
+          ? 'unknown'
+          : 'purchase',
+    status: 'posted',
+    direction: parsed.type === 'income' ? 'credit' : 'debit',
+    amount: explicitAmount,
+    statementTotal: missingField(),
+    minimumDue: missingField(),
+    balance: missingField(),
+    creditLimit: missingField(),
+    merchant: merchant
+      ? { value: merchant, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
+      : missingField(),
+    transactionDate: parsed.date
+      ? { value: parsed.date, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
+      : missingField(),
+    dueDate: missingField(),
+    statementDate: missingField(),
+    instrument: instrument
+      ? { value: instrument, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
+      : missingField(),
+    observations: [{ role: 'transaction', field: explicitAmount }],
+    issues: [],
+  };
+  const prepared = prepareUniversalReviewAlert({
+    id: 'capture_probe_id_0001',
+    sourceKey: 'capture_probe_key_001',
+    observedAt,
+    channel: 'push',
+    event,
+  });
+  if (!prepared) return null;
+  const { id: _id, sourceKey: _sourceKey, ...candidate } = prepared;
+  return candidate;
+}
+
+/**
  * One source-free refusal policy shared by Android inbox capture and iOS local
  * capture. Source and sender are consumed only while inspecting; neither can
  * appear in the returned decision.
@@ -608,8 +700,9 @@ export async function scanInbox(
       packageName: string;
       sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate';
     },
+    parsedFallback?: SourceFreeReviewCandidate | null,
   ): Promise<SourceFreeRefusedAlertDecision> => {
-    const decision = inspectSourceFreeRefusedAlert({
+    let decision = inspectSourceFreeRefusedAlert({
       source: body,
       sender,
       observedAt: ts,
@@ -617,6 +710,9 @@ export async function scanInbox(
       session: launchSession,
       existingInspection,
     });
+    if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
+      decision = { kind: 'review', candidate: parsedFallback };
+    }
     if (decision.kind === 'declined') {
       declined.push({
         smsTs: ts,
@@ -897,6 +993,10 @@ export async function scanInbox(
         declined: 0,
         ignored: 0,
         unresolved: 0,
+        unresolvedTrustedBank: 0,
+        unresolvedFinancialCandidate: 0,
+        unresolvedParserMiss: 0,
+        unresolvedReviewRefusal: 0,
         acknowledgementPlanned: 0,
         acknowledged: 0,
       };
@@ -938,8 +1038,13 @@ export async function scanInbox(
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : parseLaunchAlert(source, sender, worldwide);
         const pushSource = { packageName: n.pkg, sourceClass } as const;
+        const parsedCandidateFallback = p && !autoAuthorized
+          ? parsedFinancialCandidateReview(p, n.ts)
+          : null;
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
-          ? await inspectRefused(source, n.ts, sender, 'push', worldwide, undefined, pushSource)
+          ? await inspectRefused(
+              source, n.ts, sender, 'push', worldwide, undefined, pushSource, parsedCandidateFallback,
+            )
           : null;
         const reviewed = refusal?.kind === 'review';
         let handled = false;
@@ -974,7 +1079,13 @@ export async function scanInbox(
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }
-        if (!handled && notificationImportStats) notificationImportStats.unresolved += 1;
+        if (!handled && notificationImportStats) {
+          notificationImportStats.unresolved += 1;
+          if (sourceClass === 'trusted-bank') notificationImportStats.unresolvedTrustedBank += 1;
+          else notificationImportStats.unresolvedFinancialCandidate += 1;
+          if (!p) notificationImportStats.unresolvedParserMiss += 1;
+          else notificationImportStats.unresolvedReviewRefusal += 1;
+        }
         // Claim the row only when Wafra has a durable/safe outcome. An
         // unresolved money-bearing bank notification used to be ACKed here even
         // though neither the ledger nor Review contained it, making the evidence

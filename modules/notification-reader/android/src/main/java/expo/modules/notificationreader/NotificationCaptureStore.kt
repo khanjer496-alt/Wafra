@@ -102,6 +102,19 @@ object NotificationCaptureStore {
     return retained.filter { it.ts >= cutoff }.sortedBy { it.ts }
   }
 
+  /**
+   * Source-free identities for targeted OEM re-extraction.
+   *
+   * Package + Android post time are the same immutable pair used to heal one
+   * retained notification in append(). Exposing only that pair lets the
+   * listener revisit a handful of still-visible queued rows after an extractor
+   * upgrade without walking every visible notification through the full
+   * capture/encryption path again.
+   */
+  @Synchronized
+  fun retainedIdentities(context: Context): Set<Pair<String, Long>> =
+    read(context, 0L).mapTo(mutableSetOf()) { row -> row.pkg to row.ts }
+
   @Synchronized
   fun acknowledge(context: Context, ids: Set<String>) {
     if (ids.isEmpty()) return

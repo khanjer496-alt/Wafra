@@ -140,6 +140,7 @@ function createHarness(options = {}) {
     upcoming:{items:state.bills.map(b=>({id:b.id,title:b.title,kind:'bill',amountFils:b.amountFils,daysLeft:b.dueDay-6,dateISO:`2026-09-0${b.dueDay}`,billId:b.id}))}})};
   local('@/components/themed-text');local('@/components/ui/icon');local('@/components/ui/money');local('@/components/ui/category-avatar');
   local('@/components/merchant-spending-link');
+  deps['@/components/ui/bank-avatar']={BankAvatar:p=>jsx('BankAvatar',p)};
   deps['@/components/ui/merchant-avatar']={MerchantAvatar:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/tile']={AccountTile:({account,size=32})=>jsx('AccountIcon',{account,size}),CategoryTile:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/action-icon-button']={ActionIconButton:p=>jsx('Pressable',{...p,children:deps['@/components/ui/icon'].Icon({name:p.icon,size:20,color:theme.text})})};

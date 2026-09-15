@@ -292,8 +292,27 @@ function hasUnsupportedRemainder(question: string): boolean {
   let rest = question;
   for (const [pattern] of CATEGORY_ALIASES) rest = rest.replace(new RegExp(pattern.source, 'g'), ' ');
   rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b/g, ' ');
-  const grammar = new Set(('how much money did do does i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn received receive more less minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes').split(' '));
+  const grammar = new Set(('how much money did do does i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone get got gets getting drop dropped blew blow burned burnt burn put many some any else then still ever').split(' '));
   return normalizeMerchantText(rest).split(' ').some((token) => token && !grammar.has(token) && !/^\d+$/.test(token));
+}
+
+/** Small Levenshtein for typo tolerance in short merchant names. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = new Array(b.length + 1);
+  let curr = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[b.length];
 }
 
 function resolveMerchant(phrase: string, rows: Transaction[]): { merchant?: string; candidates?: string[] } {
@@ -306,8 +325,24 @@ function resolveMerchant(phrase: string, rows: Transaction[]): { merchant?: stri
   if (literal.length === 1) return { merchant: literal[0] };
   const exact = titles.filter((title) => normalizeMerchantText(title) === normalized);
   if (exact.length === 1) return { merchant: exact[0] };
-  const candidates = exact.length ? exact : titles.filter((title) => containsPhrase(title, phrase));
-  return candidates.length === 1 ? { merchant: candidates[0] } : { candidates };
+  const containing = exact.length ? exact : titles.filter((title) => containsPhrase(title, phrase));
+  if (containing.length === 1) return { merchant: containing[0] };
+  if (containing.length > 1) return { candidates: containing };
+  // Typo tolerance: only for phrases long enough that a small edit distance is
+  // meaningful, and only when the top match is clearly ahead of the runner-up.
+  if (normalized.length < 4) return { candidates: [] };
+  const scored = titles.map((title) => {
+    const ntitle = normalizeMerchantText(title);
+    const distance = editDistance(normalized, ntitle);
+    const denom = Math.max(normalized.length, ntitle.length);
+    return { title, similarity: denom > 0 ? 1 - distance / denom : 0, distance };
+  }).filter(({ similarity, distance }) => similarity >= 0.78 || distance <= 2)
+    .sort((a, b) => b.similarity - a.similarity || a.distance - b.distance);
+  if (!scored.length) return { candidates: [] };
+  const [top, second] = scored;
+  const confident = !second || top.similarity - second.similarity >= 0.12;
+  if (confident && top.similarity >= 0.78) return { merchant: top.title };
+  return { candidates: scored.slice(0, 4).map((entry) => entry.title) };
 }
 
 const filterFields = ['accountIds', 'merchant', 'category', 'merchants', 'categories',
@@ -1015,7 +1050,7 @@ export function planAssistantQuestion(
   const limit = requestedLimit(q);
   if (limit !== undefined && (limit < 1 || limit > 10)) return clarification('Choose between 1 and 10 results.');
   const intentText = clauses[0].rest;
-  const isIncomeQuestion = /\b(?:income|salary|earned|received|receive|earn)\b/.test(intentText);
+  const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn)\b/.test(intentText);
   const net = /income minus spending|spen[dt] more than i earned|more than i earn|what.*net|net spending|net cashflow/.test(intentText);
   if (isIncomeQuestion && !net && /\b(?:spend|spent|spending|expenses?)\b/.test(intentText)) return clarification('Ask for income and spending separately, or ask for income minus spending.');
   const recurring = /\b(?:recurring|subscription|subscriptions|renewal|renewals)\b/.test(q) && /\b(?:change|changed|changes|increase|increased|decrease|decreased|compare)\b/.test(q);
@@ -1152,7 +1187,7 @@ export function planAssistantQuestion(
   if (isIncomeQuestion) return { tool: 'income-total', ...scoped };
   if (filters.merchant) return { tool: 'merchant-breakdown', ...scoped, merchant: filters.merchant };
   if (filters.category) return { tool: 'category-breakdown', ...scoped, category: filters.category };
-  if (/\b(?:spend|spent|spending|expense|expenses|purchase|purchases|paid|pay)\b|cost me/.test(q)) return { tool: 'spending-total', ...scoped };
+  if (/\b(?:spend|spent|spending|expense|expenses|purchase|purchases|paid|pay|bought|buy|buying|drop|dropped|blew|blow|burn|burned|burnt)\b|cost me/.test(q)) return { tool: 'spending-total', ...scoped };
   return { tool: 'help' };
 }
 

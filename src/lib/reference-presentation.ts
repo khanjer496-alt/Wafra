@@ -61,6 +61,8 @@ export interface PaymentAgendaItem {
   title: string;
   category: CategoryId;
   kind: 'card' | 'bill' | 'recurring';
+  /** Exact account when this obligation belongs to one (for example a card due). */
+  accountId?: string;
   /** Subscription identity comes from detection, not an entertainment/software guess. */
   group?: PaymentGroup;
   dateISO: string;

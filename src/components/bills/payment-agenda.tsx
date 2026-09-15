@@ -2,6 +2,7 @@ import { paymentAgendaCopy as copy } from '@/lib/reference-copy';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
+import { BankAvatar } from '@/components/ui/bank-avatar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
@@ -12,17 +13,19 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { groupPaymentKinds, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
+import type { Account } from '@/lib/types';
 
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
 };
 
 /** Payment type is the main hierarchy; dates and verified status stay beside each charge. */
-export function PaymentAgenda({ items, includePaid, onOpen }: {
-  items: readonly PaymentAgendaItem[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
+export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
+  items: readonly PaymentAgendaItem[]; accounts?: readonly Account[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
+  const accountById = new Map(accounts.map((account) => [account.id, account] as const));
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
@@ -52,11 +55,14 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
           {section.items.map((item) => {
             const date = item.paid ? `${item.kind === 'card' ? w.paidStatement : w.recorded} ${shortDate(item.dateISO)}`
               : item.daysLeft === 0 ? w.today : item.daysLeft === 1 ? w.tomorrow : shortDate(item.dateISO);
+            const cardAccount = item.kind === 'card' && item.accountId ? accountById.get(item.accountId) : undefined;
             return <Pressable key={item.id} accessibilityRole="button"
               accessibilityLabel={`${item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
               onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
                 { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-              <MerchantAvatar title={item.title} category={item.category} size={40} />
+              {cardAccount
+                ? <BankAvatar account={cardAccount} size={40} />
+                : <MerchantAvatar title={item.title} category={item.category} size={40} />}
               <View style={styles.content}>
                 <View style={[styles.top, large && styles.stack]}>
                   <ThemedText type="smallBold" style={styles.grow}>{item.title}</ThemedText>

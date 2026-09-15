@@ -76,6 +76,16 @@ test('ordinary notification drains are sweep-free and shade recovery is explicit
   const getCapturedBody = module.slice(getCaptured, readQueue);
   assert.ok(getCaptured >= 0 && readQueue > getCaptured);
   assert.doesNotMatch(getCapturedBody, /sweepOrRequestRebind|sweepConnected|Thread\.sleep/);
+  assert.match(getCapturedBody, /BankNotificationListenerService\.refreshQueuedVisible\(\)/,
+    'ordinary drains may refresh only rows already present in the encrypted queue');
+  const targetedStart = listener.indexOf('private fun refreshQueuedVisible()');
+  const targetedEnd = listener.indexOf('private fun queuedVisibleMatchCount()', targetedStart);
+  const targeted = listener.slice(targetedStart, targetedEnd);
+  assert.ok(targetedStart >= 0 && targetedEnd > targetedStart);
+  assert.match(targeted, /NotificationCaptureStore\.retainedIdentities\(this\)/);
+  assert.match(targeted, /queued\.contains\(notification\.packageName to notification\.postTime\)/);
+  assert.match(targeted, /capture\(notification, wakeAfterAppend = false\)/);
+  assert.doesNotMatch(targeted, /sweepActiveNotifications|requestRebind/);
   const explicitSweep = module.indexOf('AsyncFunction("sweepVisible")');
   assert.ok(explicitSweep >= 0 && explicitSweep < getCaptured);
   assert.match(module.slice(explicitSweep, getCaptured), /BankNotificationListenerService\.sweepOrRequestRebind\(context\)/);
@@ -95,6 +105,7 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(listener, /"adcbVisible" to active\.any/);
   assert.match(listener, /"adcbActiveCount" to active\.count/);
   assert.match(module, /"queuedCandidateCount" to queued/);
+  assert.match(module, /"queuedVisibleMatchCount" to queuedVisibleMatches/);
   assert.match(module, /"adcbAdmissionCounts"/);
   assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
   assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
@@ -222,6 +233,9 @@ test('every financial candidate reaches the parser but only trusted or confirmed
   assert.match(promotion, /item\.sourceClass === 'financial-candidate'/);
   assert.match(promotion, /learnedNotificationPackage/);
   assert.match(types, /trustedNotificationPackages: string\[\]/);
+  assert.match(scanner, /parsedFinancialCandidateReview\(p, n\.ts\)/);
+  assert.match(scanner, /decision\.kind === 'ignored' && decision\.reason === 'unrecognized' && parsedFallback/);
+  assert.match(scanner, /decision = \{ kind: 'review', candidate: parsedFallback \}/);
 });
 
 test('500 queued notification candidates process without touching SMS and ACK only after commit', async () => {
@@ -328,6 +342,10 @@ test('foreground notification drain is independent of SMS freshness and Settings
   assert.match(tester, /getAndroidNotificationImportDiagnostics\(\)/);
   assert.match(scanner, /acknowledgementPlanned/);
   assert.match(scanner, /unresolved/);
+  assert.match(scanner, /unresolvedTrustedBank/);
+  assert.match(scanner, /unresolvedFinancialCandidate/);
+  assert.match(scanner, /unresolvedParserMiss/);
+  assert.match(scanner, /unresolvedReviewRefusal/);
 });
 
 test('bank-app queue changes wake the foreground app without scanning SMS or the full shade', () => {

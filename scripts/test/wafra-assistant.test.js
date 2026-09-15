@@ -871,3 +871,79 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
   const repeated = runWafraAssistant(state, 'Compare last month', now, comparison.request);
   assert.deepEqual(repeated.answer.evidence, comparison.answer.evidence, 'repeating a resolved comparison must not drift to an adjacent 20-day range');
 }
+
+// Broader vocabulary and typo-tolerant merchant resolution must keep the
+// bounded grammar's promise: only supported filters land on a financial tool,
+// unresolved ones ask for clarification with concrete "did you mean" hints.
+{
+  // Broad category names may route to the category total, but narrower concepts
+  // must not silently inherit the whole category. We do not know which dining
+  // purchases were coffee/lunch/takeaway, or which transport purchases were fuel.
+  for (const question of [
+    'How much did I spend on coffee this month?',
+    'How much did I spend on lunch this month?',
+    'How much did I spend on takeaway this month?',
+    'How much did I spend on fuel this month?',
+    'How much did I spend on shoes this month?',
+    'How much did I spend on AI tools this month?',
+  ]) {
+    const answer = answerWafraQuestion(state, question, now);
+    assert.equal(answer.tool, 'help', `narrow concept must not broaden to a whole category: ${question}`);
+    assert.equal(answer.data, undefined);
+  }
+
+  // Casual spending verbs still route to the spending intent when no category
+  // is named, and to a category-breakdown when one is.
+  const burned = answerWafraQuestion(state, 'How much did I burn on food this month?', now);
+  assert.equal(burned.tool, 'category-breakdown');
+  assert.equal(burned.data.category, 'dining');
+  assert.equal(burned.data.totalFils, 5_000);
+  const dropped = answerWafraQuestion(state, 'How much did I drop this month?', now);
+  assert.equal(dropped.tool, 'spending-total');
+  assert.equal(dropped.data.totalFils, 6_000);
+
+  // "Take home" and "waste" carry semantics the ledger cannot prove. Do not
+  // reinterpret them as all income/all spending just because an amount exists.
+  for (const question of ['How much did I take home this month?', 'How much did I waste this month?']) {
+    const answer = answerWafraQuestion(state, question, now);
+    assert.equal(answer.tool, 'help', `subjective or narrower metric must clarify: ${question}`);
+    assert.equal(answer.data, undefined);
+  }
+  const earnings = answerWafraQuestion(state, 'How much earnings did I receive this month?', now);
+  assert.equal(earnings.tool, 'income-total');
+  assert.equal(earnings.data.totalFils, 20_000);
+
+  // Fuzzy merchant match: a small typo resolves to the recorded merchant.
+  const typo = answerWafraQuestion(state, 'How much did I spend at Talbat this month?', now);
+  assert.equal(typo.tool, 'merchant-breakdown');
+  assert.equal(typo.data.merchant, 'Talabat');
+  assert.equal(typo.data.totalFils, 5_000);
+
+  // Ambiguous or clearly-wrong merchant names still ask, never guess.
+  const ambiguous = answerWafraQuestion(state, 'How much did I spend at "Xyzzy"?', now);
+  assert.equal(ambiguous.tool, 'help', 'no match must not collapse into a spending total');
+  assert.equal(ambiguous.data, undefined);
+
+  // Two similar merchants: the fuzzy pass must surface both as candidates,
+  // not silently pick one.
+  const twins = { ...state, transactions: [
+    tx('twin-a', '2026-09-01', 'Karak House', 500),
+    tx('twin-b', '2026-09-02', 'Karak Home', 600),
+  ] };
+  const twinAnswer = answerWafraQuestion(twins, 'How much did I spend at "Karak Houm"?', now);
+  assert.equal(twinAnswer.tool, 'help');
+  assert.ok(twinAnswer.suggestions && twinAnswer.suggestions.length >= 2,
+    'ambiguous typo must offer both close matches as suggestions');
+
+  // The existing "unknown qualifier stays unresolved" rule must survive:
+  // unrecognised specifier words never become a broader answer.
+  for (const question of [
+    'How much online spending did I do this month?',
+    'How much cash did I spend this month?',
+    'What is my average transaction amount this month?',
+  ]) {
+    const answer = answerWafraQuestion(state, question, now);
+    assert.equal(answer.tool, 'help', `qualifier must not slip through: ${question}`);
+  }
+}
+console.log('✓ Ask Wafra broader vocabulary and typo-tolerant merchant resolution');

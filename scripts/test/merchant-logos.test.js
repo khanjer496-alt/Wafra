@@ -43,10 +43,10 @@ const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
 });
 const matches = {
   Careem: 'careem', 'Careem Food': 'careem', 'Careem Dubai': 'careem',
-  Talabat: 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
+  Talabat: 'talabat', 'Talabat sales': 'talabat', 'Talabat Business': 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
   Deliveroo: 'deliveroo', 'Carrefour': 'carrefour', 'CARREFOUR HYPER #004 DUBAI ARE': 'carrefour',
   'كارفور الشارقة': 'carrefour', 'Lulu Hypermarket': 'lulu', 'LuLu Hyper Market': 'lulu',
-  'لُولُو هايبرماركت': 'lulu', Spinneys: 'spinneys', 'Noon.com': 'noon', 'نون': 'noon',
+  'لُولُو هايبرماركت': 'lulu', Spinneys: 'spinneys', 'Noon.com': 'noon', 'Noon Send': 'noon', 'نون': 'noon',
   'Amazon.ae': 'amazon', 'Amazon Prime': 'amazon', 'أمازون': 'amazon',
   Netflix: 'netflix', 'NETFLIX.COM': 'netflix', 'Spotify Premium': 'spotify',
   'YouTube Premium': 'youtube', 'GOOGLE *YOUTUBE PREMIUM': 'youtube',
@@ -57,6 +57,7 @@ const matches = {
   Airbnb: 'airbnb', Claude: 'claude', Anthropic: 'claude', 'GitHub Copilot': 'github',
   Notion: 'notion', 'Discord Nitro': 'discord', 'Telegram Premium': 'telegram', Dropbox: 'dropbox',
   'RTA Nol Top-up': 'rta', 'ENOC Fuel': 'enoc', 'EPPCO': 'enoc', 'ADNOC Oasis': 'adnoc',
+  'Careem Pay Topup': 'careem',
   'du Home Internet': 'du', 'Etisalat Postpaid': 'etisalat', 'e& UAE': 'etisalat',
   'OSN+': 'osn', 'DEWA Bill': 'dewa', '  Ｃａｒｅｅｍ  ': 'careem',
 };
