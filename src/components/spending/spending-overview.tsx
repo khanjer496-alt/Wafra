@@ -1,6 +1,6 @@
 import { spendingCopy } from '@/lib/reference-copy';
-import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { CategoryDonut, useCategoricalPalette, type DonutSlice } from '@/components/ui/charts';
@@ -44,6 +44,9 @@ type Props = {
 /** Categories and their limits are ONE list. No repeated category chart below it. */
 export function SpendingOverview(p: Props) {
   const theme = useTheme(); const language = useLanguage(); const large = useLargeTextLayout();
+  const { width } = useWindowDimensions();
+  const donutSize = Math.round(Math.min(196, Math.max(180, width * 0.52)));
+  const donutThickness = donutSize <= 184 ? 20 : 22;
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
@@ -93,15 +96,7 @@ export function SpendingOverview(p: Props) {
     category: slice.key === '__tail' ? null : (slice.key as CategoryId),
     share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
   })), [slices, p.totalFils]);
-  // Held-slice state for the interactive donut. Tapping a real category slice
-  // opens its detail sheet (the same handler the row does); tapping any slice
-  // also swaps the center label from the period total to that slice's total
-  // for a moment, so the tap has a visible payload beyond the outward pop.
-  const [activeSlice, setActiveSlice] = useState<string | null>(null);
-  const activeItem = activeSlice ? legendItems.find((item) => item.key === activeSlice) ?? null : null;
-  const centerAmount = activeItem?.category !== undefined
-    ? (slices.find((s) => s.key === activeItem?.key)?.value ?? p.totalFils)
-    : p.totalFils;
+  const centerAmount = p.totalFils;
   return <View style={styles.root} testID="spending-categories">
     <View style={styles.hero}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
@@ -112,19 +107,14 @@ export function SpendingOverview(p: Props) {
       <View style={styles.donutWrap}>
         <CategoryDonut
           slices={slices}
-          size={224}
-          thickness={28}
-          centerLabel={activeItem ? activeItem.label.toUpperCase() : w.spent}
-          centerValue={<Money fils={centerAmount} type="subtitle" decimals={false}
-            color={activeItem?.color} />}
-          centerMeta={activeItem
-            ? spendingShareLabel(activeItem.share, language)
-            : p.periodLabel}
-          onPeekSlice={setActiveSlice}
+          size={donutSize}
+          thickness={donutThickness}
+          centerLabel={w.spent}
+          centerValue={<Money fils={centerAmount} type="subtitle" decimals={false} />}
+          centerMeta={p.periodLabel}
           onPressSlice={(key) => {
             // Only real category ids navigate to the detail sheet; the '__tail'
-            // aggregation has no single category to open, and its peek label
-            // still gets cleared by onPeekSlice(null) on press-out.
+            // aggregation has no single category to open.
             if (key !== '__tail') p.onCategory(key as CategoryId);
           }}
         />
@@ -132,7 +122,7 @@ export function SpendingOverview(p: Props) {
       {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {legendItems.map((item) => <View key={item.key} style={styles.legendItem}>
           {item.category !== null
-            ? <CategoryAvatar category={item.category} size={20} color={item.color} />
+            ? <CategoryAvatar category={item.category} size={18} color={item.color} />
             : <Icon name="receipt" size={16} color={item.color} strokeWidth={2} />}
           <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
           <ThemedText type="meta" tabular themeColor="textSecondary">{spendingShareLabel(item.share, language)}</ThemedText>
@@ -161,7 +151,7 @@ export function SpendingOverview(p: Props) {
         accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${moneyLabel(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
         style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-        <CategoryAvatar category={row.category} size={44} color={sliceColor} />
+        <CategoryAvatar category={row.category} size={36} color={sliceColor} />
         <View style={styles.categoryContent}>
           <View style={[styles.categoryTop, large && styles.stack]}>
             <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(row.category, language)}</ThemedText>
@@ -173,7 +163,7 @@ export function SpendingOverview(p: Props) {
             <Icon name="chevron-right" size={14} color={theme.textTertiary} />
           </View>
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <ProgressBar ratio={share} color={sliceColor} height={4} />
+            <ProgressBar ratio={share} color={sliceColor} height={3} />
           </View>
           {row.limitFils !== null && <>
             <View style={[styles.categoryBottom, large && styles.stack]}>
@@ -204,19 +194,19 @@ export function SpendingOverview(p: Props) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 12 },
-  hero: { paddingVertical: 12, gap: 12, alignItems: 'stretch' },
-  donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
+  root: { gap: 10 },
+  hero: { paddingVertical: 6, gap: 9, alignItems: 'stretch' },
+  donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
   heroNote: { textAlign: 'center' },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 8, justifyContent: 'center' },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '48%' },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 10, rowGap: 6, justifyContent: 'space-between' },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5, flexBasis: '47%', maxWidth: '47%' },
   legendLabel: { flexShrink: 1, minWidth: 0 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
-  categories: { gap: 0 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 0, borderTopWidth: 1 },
-  categoryContent: { flex: 1, minWidth: 0, gap: 7 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  categories: { gap: 0 }, category: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 0, borderTopWidth: 1 },
+  categoryContent: { flex: 1, minWidth: 0, gap: 5 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   categoryBottom: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0 }, caption: { fontSize: 12, lineHeight: 18 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
   empty: { paddingVertical: 24, gap: 12 },
