@@ -152,7 +152,7 @@ try {
   assert.ok(meta.accounts.length > 1, 'run against an explicitly seeded E2E demo export');
   await bootstrap.close();
 
-  async function contextFor(name, width = 390, mode = 'light', monthStartDay = 1) {
+  async function contextFor(name, width = 390, mode = 'light', monthStartDay = 1, overrides = {}) {
     const context = await browser.newContext({ viewport: { width, height: 844 }, locale: 'en-US',
       colorScheme: mode, reducedMotion: 'reduce' });
     await intercept(context, name);
@@ -161,12 +161,13 @@ try {
       localStorage.setItem(key, JSON.stringify(state));
       localStorage.setItem(key + ':tx:0', JSON.stringify(rows));
       localStorage.setItem('wafra/assistant-e2e-seeded', '1');
-    }, { key: STATE, rows: transactions, state: {
+    }, { key: STATE, rows: overrides.rows ?? transactions, state: {
       ...meta, language: 'en', languagePreference: 'en', themePreference: mode, captureOptOut: true,
       privateMode: true, dailySummary: false, monthStartDay, ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
       accounts: [{ id: 'ask-bank', name: 'Everyday account', kind: 'bank', openingFils: 0, color: '#166CA2' }],
       txChunks: 1, txChunkOrder: 'oldest-first', bills: [], cardDues: [], budgets: [], goals: [],
       notSubscriptions: [], merchantOverrides: {}, billAliases: {}, historyImport: null,
+      ...(overrides.state ?? {}),
     } });
     const page = await context.newPage(); page.setDefaultTimeout(12000);
     await page.clock.setFixedTime(new Date(NOW));
@@ -489,6 +490,41 @@ try {
         assert.match(await casualSubs.innerText(), /subscriptions?|active subscription/i);
         await shot(page, name);
         return { subs: subsText, due: dueText, mtd: mtdText };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('obligation-settlement-language')) {
+    const name = 'obligation-settlement-language';
+    const card = { id: 'ask-enbd', name: 'ENBD Credit Card', kind: 'card', cardType: 'credit', openingFils: 0,
+      color: '#166CA2', bankName: 'Emirates NBD', last4: '4110' };
+    const payment = tx('ask-enbd-payment', 'Card payment', 50000, 'other', '2026-09-10', {
+      type: 'income', accountId: card.id, isTransfer: true, cardPaymentSide: 'receipt',
+    });
+    const due = { id: 'ask-enbd-due', accountId: card.id, totalDueFils: 50000, minDueFils: 2500,
+      dueDate: '2026-09-25', paidFils: 0 };
+    const { context, page } = await contextFor(name, 390, 'light', 1, {
+      rows: [...transactions, payment],
+      state: { accounts: [{ id: 'ask-bank', name: 'Everyday account', kind: 'bank', openingFils: 0, color: '#166CA2' }, card],
+        cardDues: [due] },
+    });
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const settled = await ask(page, 'Did I settle enbd credit card ?');
+        const settledText = await settled.innerText();
+        assert.match(settledText, /settled/i);
+        assert.doesNotMatch(settledText, /clarify that|didn.t quite understand|not enough to answer safely/i);
+
+        const remaining = await ask(page, 'How much is left?');
+        const remainingText = await remaining.innerText();
+        assert.match(remainingText, /USD\s+0(?:\.00)?\b/);
+
+        await ask(page, 'Show the payments');
+        await evidence(page).waitFor({ state: 'visible' });
+        assert.match(await evidence(page).innerText(), /Card payment/i);
+        await shot(page, name);
+        return { settled: settledText, remaining: remainingText };
       });
     } finally { await context.close(); }
   }

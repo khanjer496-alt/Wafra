@@ -255,10 +255,13 @@ class NotificationReaderModule : Module() {
       if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
         return@AsyncFunction emptyList<Map<String, Any>>()
       }
-      // Heal only currently visible notifications that already exist in the
-      // encrypted queue. This is intentionally not sweepVisible(): unrelated
-      // shade notifications never enter the expensive extraction path here.
-      BankNotificationListenerService.refreshQueuedVisible()
+      // Ordinary drains read the encrypted queue exactly once. Re-extracting
+      // currently visible notifications here used to decrypt the same queue
+      // repeatedly (identity scan + one scan per visible match + final read),
+      // which produced multi-second foreground stalls on some AndroidKeyStore
+      // implementations even when JS ultimately had zero new rows to parse.
+      // Listener connect and explicit sweepVisible() retain the recovery path
+      // for visible notifications without putting it on every resume/read.
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
         val sourceClass = TrustedBankNotificationPackages.sourceClass(
           context,

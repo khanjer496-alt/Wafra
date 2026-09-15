@@ -810,6 +810,13 @@ function bodyOf(source, header) {
       /setTimeout\([\s\S]*?scheduler\.request\(\)[\s\S]*?ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport),
     'a fresh source-free resume should do no inbox work, and a stale one must not start it while Android restores the window');
 
+  ok('Android bank-app queue is not reopened on every quick resume without a change signal',
+    /ANDROID_NOTIFICATION_RECHECK_MS\s*=\s*30_000/.test(autoImport) &&
+      /!androidNotificationDrainRequired[\s\S]*?androidNotificationLastCheckedAt/.test(autoImport) &&
+      /NotificationReader\.addListener\('onQueueChanged',[\s\S]*?androidNotificationDrainRequired = true[\s\S]*?scheduler\.request\(\)/.test(autoImport) &&
+      /androidNotificationDrainRequired = false[\s\S]*?androidNotificationLastCheckedAt = Date\.now\(\)/.test(autoImport),
+    'no-change resumes should reuse the recent queue answer; a native queue edge must still force an immediate drain');
+
   const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
   ok('Android history repair also waits past the resume interaction window',
     /FOREGROUND_HISTORY_RESUME_GRACE_MS\s*=\s*2_000/.test(historyImport) &&
@@ -829,7 +836,34 @@ function bodyOf(source, header) {
       /await yieldForegroundTurn\(\)/.test(captureExecutor),
     'a completed native inbox read must give pending UI/input a turn before planning and reconciliation');
 
+  const store = stripComments(read('src/lib/store.tsx'));
+  ok('completed hydration maintenance is receipt-gated instead of walking the ledger every launch',
+    /HYDRATION_FINALIZE_VERSION\s*=\s*1/.test(store) &&
+      /finalizationReceiptCurrent/.test(store) &&
+      /finalizationReceiptCurrent\s*\?\s*paymentsRepaired\s*:\s*removeDeclinedTransactions/.test(store) &&
+      /finalizationReceiptCurrent[\s\S]*?\?\s*declinesRemoved\.transactions[\s\S]*?:\s*finalizeHydrationTransactions/.test(store),
+    'decline cleanup plus capture/payment reconciliation cost hundreds of ms on a 14k-row persisted ledger and must run only when its receipt is stale');
+
+  ok('build-262 ledgers can adopt the hydration-finalize receipt without one extra slow launch',
+    /legacyFinalizationReceipt/.test(store) &&
+      /hydrationReparseKey === exactReparseKey/.test(store) &&
+      /transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION/.test(store) &&
+      /Array\.isArray\(action\.state\.transferInternalIds\)/.test(store),
+    'the immediately previous build already persisted this exact maintenance under current parser and transfer receipts');
+
   const home = stripComments(read('src/screens/journal-home-screen.tsx'));
+  const settings = stripComments(read('src/app/settings.tsx'));
+  ok('Home never schedules category/parser cleanup scans after becoming usable',
+    /includeCleanupPrompts:\s*false/.test(home) &&
+      !/homeCleanupReady|setHomeCleanupReady/.test(home),
+    'uncategorisedMerchants and unreadFormatCount are full-history maintenance; dedicated screens own them, not Home');
+
+  ok('Settings renders cleanup routes without scanning the full ledger for badge counts',
+    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings) &&
+      /sortShopsSettingsDetail/.test(settings) &&
+      /improveAccuracySettingsDetail/.test(settings),
+    'opening Settings to change a toggle or send diagnostics must stay independent of transaction count');
+
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&
       (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&

@@ -175,6 +175,12 @@ export type StorageRecoveryState =
   | null;
 
 const STORAGE_KEY = 'wafra/state/v1';
+/**
+ * Version of launch-only persisted cleanup after parser/account migration.
+ * Bump when removeDeclinedTransactions, capture dedupe, or payment-flow
+ * reconciliation changes in a way that needs one full existing-ledger pass.
+ */
+export const HYDRATION_FINALIZE_VERSION = 1;
 
 const EMPTY_STATE: AppState = {
   hydrated: false,
@@ -679,6 +685,7 @@ export function migratePersistedState(
   // transforms is a change to link semantics.
   if (loadedTransactions && parsed.transactions !== loadedTransactions) {
     delete parsed.transferInternalIds;
+    delete parsed.hydrationFinalizeVersion;
   }
 
   return parsed;
@@ -1010,6 +1017,23 @@ function reduceState(state: AppState, action: Action): AppState {
         repairCardPaymentAccounts(accountsMerged),
       );
       if (action.type === 'hydrate') markLaunchPhase('ledger-repairs-complete');
+      const exactReparseKey = JSON.stringify([2, PARSER_VERSION, next.marketId]);
+      // Build 262 predates hydrationFinalizeVersion, but every state carrying
+      // BOTH of these exact receipts was already persisted after this same
+      // decline/dedupe/payment cleanup. Accept that one legacy shape so users do
+      // not pay another 700ms maintenance launch just to mint the new receipt.
+      // Restore/loadDemo never trust a receipt supplied by external state.
+      const legacyFinalizationReceipt = action.type === 'hydrate' &&
+        action.state.hydrationFinalizeVersion === undefined &&
+        action.state.hydrationReparseKey === exactReparseKey &&
+        action.state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+        Array.isArray(action.state.transferInternalIds);
+      const finalizationReceiptCurrent = action.type === 'hydrate' &&
+        (action.state.hydrationFinalizeVersion === HYDRATION_FINALIZE_VERSION ||
+          legacyFinalizationReceipt) &&
+        // Account/card repairs can rewrite transaction attribution. A receipt
+        // describes the rows that were persisted, so any rewrite invalidates it.
+        paymentsRepaired.transactions === next.transactions;
       // A declined transaction moved no money, and no rescan can take one
       // back: healing only ever adds information to a row, and a message the
       // parser now suppresses never reaches the import planner to be swept.
@@ -1018,12 +1042,17 @@ function reduceState(state: AppState, action: Action): AppState {
       // so nothing downstream ever sees a row this proves never happened.
       // Requires the market pack to be live, which setActiveMarket did above:
       // it re-parses stored SMS text.
-      const declinesRemoved = removeDeclinedTransactions(paymentsRepaired);
+      const declinesRemoved = finalizationReceiptCurrent
+        ? paymentsRepaired
+        : removeDeclinedTransactions(paymentsRepaired);
       if (action.type === 'hydrate') markLaunchPhase('ledger-declines-complete');
       const finalized = {
         ...declinesRemoved,
-        transactions: finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
+        transactions: finalizationReceiptCurrent
+          ? declinesRemoved.transactions
+          : finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
         cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
+        hydrationFinalizeVersion: HYDRATION_FINALIZE_VERSION,
       };
       if (action.type === 'hydrate') markLaunchPhase('ledger-finalize-complete');
       return finalized;
@@ -2577,6 +2606,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       trialStartTs: _trial,
       reviewTray: _reviewTray,
       hydrationReparseKey: _hydrationReparseKey,
+      hydrationFinalizeVersion: _hydrationFinalizeVersion,
       ...data
     } = authoritativeState.current;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });

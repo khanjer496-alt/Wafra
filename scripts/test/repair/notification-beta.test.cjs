@@ -91,9 +91,9 @@ test('ordinary notification drains are sweep-free and shade recovery is explicit
   const readQueue = module.indexOf('NotificationCaptureStore.read(context, sinceMs.toLong())');
   const getCapturedBody = module.slice(getCaptured, readQueue);
   assert.ok(getCaptured >= 0 && readQueue > getCaptured);
-  assert.doesNotMatch(getCapturedBody, /sweepOrRequestRebind|sweepConnected|Thread\.sleep/);
-  assert.match(getCapturedBody, /BankNotificationListenerService\.refreshQueuedVisible\(\)/,
-    'ordinary drains may refresh only rows already present in the encrypted queue');
+  assert.doesNotMatch(getCapturedBody,
+    /sweepOrRequestRebind|sweepConnected|refreshQueuedVisible|Thread\.sleep/,
+    'ordinary queue reads must not re-extract/decrypt visible notifications before reading');
   const targetedStart = listener.indexOf('private fun refreshQueuedVisible()');
   const targetedEnd = listener.indexOf('private fun queuedVisibleMatchCount()', targetedStart);
   const targeted = listener.slice(targetedStart, targetedEnd);

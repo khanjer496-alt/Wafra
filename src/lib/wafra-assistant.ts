@@ -1,10 +1,12 @@
+import { billsForMonth } from '@/lib/bills';
 import { CATEGORIES, categoryLabel } from '@/lib/categories';
-import { cardPaymentRows } from '@/lib/cards';
+import { cardPaymentRows, duePayments, dueWithStatus } from '@/lib/cards';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { formatAED as formatLedgerMoney, getMonthStartDay, monthEndISO, toISODate } from '@/lib/format';
 import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { checkedMinorSum } from '@/lib/ledger-money';
 import { leavingSoon, outgoingTotalFils } from '@/lib/leaving-soon';
+import { bankBrandForName } from '@/lib/markets';
 import {
   currentMonthPeriod,
   comparablePreviousPeriod,
@@ -23,7 +25,7 @@ import { findRecurringChanges, findUnusualCharges, findPossibleDuplicates, patte
 import { allocationsOf, amountInCategory } from '@/lib/splits';
 import { activeSubscriptions, detectSubscriptions, trueSubscriptions } from '@/lib/subscriptions';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
-import type { AppState, CategoryId, Transaction } from '@/lib/types';
+import type { Account, AppState, Bill, CategoryId, Transaction } from '@/lib/types';
 
 export type AssistantTool =
   | 'help'
@@ -46,8 +48,10 @@ export type AssistantTool =
   | 'possible-duplicates'
   | 'money-review'
   | 'historical-baseline'
+  | 'account-inventory'
   | 'top-accounts'
   | 'compare-accounts'
+  | 'obligation-status'
   | 'data-coverage';
 
 /**
@@ -88,7 +92,10 @@ export type AssistantToolRequest =
   | { tool: 'compare-accounts'; period: Period; leftAccountId: string; rightAccountId: string }
   | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'money-review' | 'data-coverage'; period: Period }))
   | { tool: 'subscriptions' }
-  | { tool: 'upcoming-payments'; withinDays?: number };
+  | { tool: 'upcoming-payments'; withinDays?: number }
+  | { tool: 'account-inventory'; accountKind?: 'all' | 'bank' | 'card' | 'credit-card' | 'debit-card'; bankName?: string }
+  | { tool: 'obligation-status'; obligation: 'card' | 'bill'; accountId?: string; billId?: string;
+    query: 'summary' | 'remaining' | 'payments' | 'paid-date' };
 
 export interface AssistantEvidence {
   label: string;
@@ -514,6 +521,139 @@ function normalizeAssistantSemanticLanguage(question: string): string {
     .replace(/\butilites\b/g, 'utilities');
 
   return text.replace(/\s+/g, ' ').trim();
+}
+
+type ObligationQuery = 'summary' | 'remaining' | 'payments' | 'paid-date';
+
+function obligationQueryFromQuestion(question: string): ObligationQuery | null {
+  const q = normalizeAssistantSemanticLanguage(normalize(question));
+  if (/\bwhen\b.*\b(?:pay|paid|payment|settle|settled|clear|cleared)\b|\bwhen did (?:that|it|this) get paid\b/.test(q)) {
+    return 'paid-date';
+  }
+  if (/\b(?:how much|what amount)\b.*\b(?:paid|payment|payments|pay toward|pay towards|toward|towards)\b|\b(?:show|list) (?:the )?payments\b|\bpayments? (?:did|have) i (?:make|made)\b/.test(q)) {
+    return 'payments';
+  }
+  if (/\b(?:how much|what)\b.*\b(?:left|remaining|outstanding|still owe|owed)\b|\b(?:remaining|outstanding) (?:amount|balance)\b|\bwhat do i still owe\b/.test(q)) {
+    return 'remaining';
+  }
+  if (/\b(?:did|have) i\b.*\b(?:pay|paid|settle|settled|clear|cleared|pay off|paid off)\b|\b(?:is|was)\b.*\b(?:paid|settled|cleared|outstanding)\b|\b(?:payment|repayment)\b.*\b(?:go through|went through|received|posted|successful)\b|\b(?:settled|paid|cleared)\??$/.test(q)) {
+    return 'summary';
+  }
+  return null;
+}
+
+function creditCards(state: AppState): Account[] {
+  return state.accounts.filter((account) => account.cardType === 'credit' && !account.archived);
+}
+
+function accountInventoryRequest(question: string): AssistantToolRequest | undefined {
+  const q = normalizeAssistantSemanticLanguage(normalize(question))
+    .replace(/\bccs\b/g, 'credit cards')
+    .replace(/\bcc\b/g, 'credit card');
+  const countQuestion = /\bhow many\b[^?!.]{0,80}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b[^?!.]{0,50}\b(?:do i have|i have|are there|have i got|have i)\b/.test(q)
+    || /\bhow many\b[^?!.]{0,80}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b/.test(q);
+  const listQuestion = /\b(?:what|which|show|list)\b[^?!.]{0,40}\b(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b[^?!.]{0,50}\b(?:do i have|i have|are mine|my)\b/.test(q)
+    || /\b(?:show|list)\s+(?:me\s+)?my\s+(?:accounts?|bank accounts?|cards?|credit cards?|debit cards?)\b/.test(q);
+  if (!countQuestion && !listQuestion) return undefined;
+
+  const accountKind: 'all' | 'bank' | 'card' | 'credit-card' | 'debit-card' = /\bcredit cards?\b/.test(q)
+    ? 'credit-card'
+    : /\bdebit cards?\b/.test(q)
+      ? 'debit-card'
+      : /\bcards?\b/.test(q)
+        ? 'card'
+        : /\bbank accounts?\b/.test(q)
+          ? 'bank'
+          : 'all';
+  const bankName = bankBrandForName(question)?.name;
+  return { tool: 'account-inventory', accountKind, ...(bankName ? { bankName } : {}) };
+}
+
+function accountChoiceLabel(account: Account): string {
+  return account.last4 && !account.name.includes(account.last4) ? `${account.name} · ${account.last4}` : account.name;
+}
+
+function cardReferenceCandidates(state: AppState, question: string): Account[] {
+  const cards = creditCards(state);
+  const q = normalizeMerchantText(question);
+  const queryBrand = bankBrandForName(question)?.name;
+  const digits = new Set(question.match(/\b\d{4}\b/g) ?? []);
+  const scored = cards.map((account) => {
+    let score = 0;
+    const name = normalizeMerchantText(account.name);
+    if (name.length >= 3 && containsPhrase(q, name)) score = Math.max(score, 100);
+    if (account.last4 && digits.has(account.last4)) score = Math.max(score, 110);
+    for (const network of ['visa', 'mastercard', 'master card', 'amex', 'american express']) {
+      if (containsPhrase(q, network) && containsPhrase(name, network)) score = Math.max(score, 75);
+    }
+    const accountBrand = bankBrandForName(account.bankName ?? account.name)?.name;
+    if (queryBrand && accountBrand && normalize(queryBrand) === normalize(accountBrand)) score = Math.max(score, 90);
+    if (account.bankName && containsPhrase(q, account.bankName)) score = Math.max(score, 95);
+    return { account, score };
+  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
+  if (!scored.length) return [];
+  const top = scored[0].score;
+  return scored.filter((item) => item.score === top).map((item) => item.account);
+}
+
+function billReferenceCandidates(state: AppState, question: string): Bill[] {
+  const q = normalizeMerchantText(question);
+  return state.bills.filter((bill) => {
+    const title = normalizeMerchantText(bill.title);
+    return title.length >= 2 && containsPhrase(q, title);
+  });
+}
+
+function planObligationQuestion(
+  state: AppState,
+  question: string,
+  previousRequest?: AssistantToolRequest | null,
+): AssistantToolRequest | undefined {
+  const query = obligationQueryFromQuestion(question);
+  if (!query) return undefined;
+  const prior = previousRequest?.tool === 'obligation-status' ? previousRequest : undefined;
+  const q = normalizeAssistantSemanticLanguage(normalize(question));
+
+  const merchantCardPayment = /\b(?:pay|paid)\b[^?!.]{0,80}\bat\b[^?!.]{0,60}\b(?:with|using) (?:my )?(?:credit )?card\b/.test(q);
+  const explicitCard = !merchantCardPayment && (
+    /\b(?:credit\s+card|card\s+(?:bill|statement|payment)|cc\b|(?:my|the)\s+statement\b)\b/.test(q) ||
+    /\b(?:settle|settled|clear|cleared|pay off|paid off|pay toward|pay towards|owe|left|remaining|outstanding)\b[^?!.]{0,48}\b(?:my |the )?(?:credit )?card\b/.test(q) ||
+    /\b(?:my |the )?(?:credit )?card\b[^?!.]{0,48}\b(?:paid|settled|cleared|outstanding|remaining)\b/.test(q) ||
+    /\bwhen did i pay (?:my |the )?(?:credit )?card\b/.test(q)
+  );
+  const cardMatches = cardReferenceCandidates(state, question);
+  const explicitBill = /\b(?:bill|utility|utilities)\b/.test(q);
+  const billMatches = billReferenceCandidates(state, question);
+
+  const usePriorCard = prior?.obligation === 'card' && !explicitBill && !cardMatches.length && !billMatches.length;
+  const usePriorBill = prior?.obligation === 'bill' && !explicitCard && !cardMatches.length && !billMatches.length;
+
+  if (explicitCard || cardMatches.length || usePriorCard) {
+    if (usePriorCard && prior?.accountId) return { ...prior, query };
+    const cards = creditCards(state);
+    const candidates = cardMatches.length ? cardMatches : explicitCard && cards.length === 1 ? cards : [];
+    if (candidates.length === 1) return { tool: 'obligation-status', obligation: 'card', accountId: candidates[0].id, query };
+    if (candidates.length > 1 || explicitCard && cards.length > 1) {
+      const choices = (candidates.length ? candidates : cards).slice(0, 4);
+      return clarification('I found more than one matching credit card. Which card do you mean?',
+        choices.map((account) => `Is ${accountChoiceLabel(account)} settled?`));
+    }
+    if (explicitCard && cards.length === 0) {
+      return clarification('I do not see a recorded credit card yet. Add or import the card first, then I can check its statement status.');
+    }
+  }
+
+  if (explicitBill || billMatches.length || usePriorBill) {
+    if (usePriorBill && prior?.billId) return { ...prior, query };
+    const candidates = billMatches.length ? billMatches : explicitBill && state.bills.length === 1 ? state.bills : [];
+    if (candidates.length === 1) return { tool: 'obligation-status', obligation: 'bill', billId: candidates[0].id, query };
+    if (candidates.length > 1 || explicitBill && state.bills.length > 1) {
+      const choices = (candidates.length ? candidates : state.bills).slice(0, 4);
+      return clarification('I found more than one matching bill. Which one do you mean?',
+        choices.map((bill) => `Did I pay ${bill.title}?`));
+    }
+  }
+  return undefined;
 }
 
 /** A bounded grammar: every meaningful token must be consumed, not ignored. */
@@ -987,6 +1127,13 @@ function answerScope(period: Period, now: Date): string {
   return periodLabel(period);
 }
 
+function displayISODate(value: string): string {
+  if (!validISODate(value)) return value;
+  return new Date(`${value}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  });
+}
+
 function fullMonthLabel(period: Period | null): string | null {
   if (!period || period.mode !== 'month') return null;
   const [year, month] = period.key.split('-').map(Number);
@@ -1040,9 +1187,198 @@ function executeAssistantToolResult(
       return {
         tool: request.tool,
         title: request.clarification ? 'Let’s clarify that' : 'What you can ask',
-        body: request.clarification ?? 'Ask Wafra about spending, income, merchants, categories, accounts/cards, historical monthly baselines, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
+        body: request.clarification ?? 'Ask Wafra about spending, income, merchants, categories, accounts/cards, card and bill status, historical monthly baselines, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
         suggestions: request.suggestions ?? ['How much did I spend?', 'Why did my spending change?', 'What payments are due soon?'],
       };
+
+    case 'account-inventory': {
+      const live = liveAccountIds(state.accounts);
+      const bankName = request.bankName;
+      const bankIdentity = bankName ? normalize(bankBrandForName(bankName)?.name ?? bankName) : null;
+      const matches = state.accounts.filter((account) => {
+        if (!live.has(account.id)) return false;
+        const kindMatches = request.accountKind === 'bank'
+          ? account.kind === 'bank'
+          : request.accountKind === 'card'
+            ? account.kind === 'card'
+            : request.accountKind === 'credit-card'
+              ? account.kind === 'card' && account.cardType === 'credit'
+              : request.accountKind === 'debit-card'
+                ? account.kind === 'card' && account.cardType === 'debit'
+                : true;
+        if (!kindMatches) return false;
+        if (!bankIdentity) return true;
+        const accountBank = bankBrandForName(account.bankName ?? account.name)?.name ?? account.bankName;
+        return !!accountBank && normalize(accountBank) === bankIdentity;
+      });
+      const singular = request.accountKind === 'credit-card' ? 'credit card'
+        : request.accountKind === 'debit-card' ? 'debit card'
+          : request.accountKind === 'card' ? 'card'
+            : request.accountKind === 'bank' ? 'bank account' : 'account';
+      const plural = `${singular}${singular.endsWith('account') ? 's' : 's'}`;
+      const label = matches.length === 1 ? singular : plural;
+      const bankPrefix = bankName ? `${bankName} ` : '';
+      return {
+        tool: request.tool,
+        title: bankName ? `${bankName} ${matches.length === 1 ? singular : plural}` : `Recorded ${matches.length === 1 ? singular : plural}`,
+        headline: `${matches.length} ${label}`,
+        body: matches.length
+          ? `I found ${matches.length} recorded ${bankPrefix}${label} in Wafra.`
+          : `I do not see any recorded ${bankPrefix}${plural} in Wafra.`,
+        facts: matches.slice(0, 10).map((account) => ({
+          label: accountChoiceLabel(account),
+          value: account.bankName ?? bankBrandForName(account.name)?.name ?? (account.kind === 'card' ? 'Card' : 'Account'),
+        })),
+        suggestions: matches.length > 1 && request.accountKind === 'credit-card'
+          ? ['Which card did I use most?', 'Did I settle my credit card?']
+          : ['Which account did I use most?', 'What payments are due soon?'],
+        data: { accountCount: matches.length, accountKind: request.accountKind ?? 'all', bankName: bankName ?? null },
+      };
+    }
+
+    case 'obligation-status': {
+      if (request.obligation === 'card') {
+        const account = state.accounts.find((item) => item.id === request.accountId && item.cardType === 'credit');
+        if (!account) return { tool: 'help', title: 'Let’s clarify that',
+          body: 'I cannot find that recorded credit card anymore. Choose a card from Accounts.' };
+        const due = state.cardDues.filter((item) => item.accountId === account.id)
+          .slice().sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
+        if (!due || due.totalDueFils <= 0) {
+          const snapshot = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+            ? [{ label: 'Latest bank outstanding', value: formatLedgerMoney(account.snapshotFils) }] : [];
+          return {
+            tool: request.tool,
+            title: 'Card status',
+            headline: 'Can’t confirm settlement',
+            meta: account.name,
+            body: `I do not have a recorded statement total for ${account.name}, so I cannot confirm whether it is settled.${snapshot.length ? ' I do have a bank-reported outstanding snapshot, but that is not the same as a statement settlement.' : ''}`,
+            facts: snapshot,
+            destination: '/bills',
+            suggestions: ['What payments are due soon?', 'What is my data coverage?'],
+            data: { obligationKind: 'card', settled: false, statementAvailable: false },
+          };
+        }
+
+        const status = dueWithStatus(state, due, now);
+        const payments = duePayments(state, due);
+        const paidFils = Math.max(0, due.totalDueFils - status.remainingFils);
+        const latestMatchedPaymentDate = payments[0]?.date;
+        const recordedSettlementDate = due.settledAt?.slice(0, 10) || undefined;
+        const latestPaymentDate = latestMatchedPaymentDate ?? recordedSettlementDate;
+        const settled = status.status === 'settled';
+        const paymentEvidence = payments.length ? [evidenceFor(state, now, 'Matched card payments', payments)] : undefined;
+        const dueLabel = displayISODate(due.dueDate);
+        const commonFacts = [
+          { label: 'Statement total', value: formatLedgerMoney(due.totalDueFils) },
+          { label: 'Recorded paid', value: formatLedgerMoney(paidFils) },
+          { label: 'Remaining', value: formatLedgerMoney(status.remainingFils) },
+          { label: 'Due date', value: dueLabel },
+          ...(latestPaymentDate ? [{ label: latestMatchedPaymentDate ? 'Latest matched payment' : 'Recorded payment date',
+            value: displayISODate(latestPaymentDate) }] : []),
+        ];
+
+        if (request.query === 'paid-date') {
+          return {
+            tool: request.tool,
+            title: 'Card payment timing',
+            headline: latestPaymentDate ? displayISODate(latestPaymentDate) : 'Payment date unavailable',
+            meta: `${account.name} · ${settled ? 'statement settled' : `${formatLedgerMoney(status.remainingFils)} remaining`}`,
+            body: latestPaymentDate
+              ? `${latestMatchedPaymentDate ? `The latest payment Wafra matched to ${account.name}'s latest statement` : `Wafra's recorded payment date for ${account.name}'s latest statement`} is ${displayISODate(latestPaymentDate)}. ${settled ? 'The recorded statement is settled.' : `${formatLedgerMoney(status.remainingFils)} is still remaining.`}`
+              : `I do not have a dated payment transaction matched to ${account.name}'s latest statement.`,
+            facts: commonFacts,
+            evidence: paymentEvidence,
+            destination: '/bills',
+            suggestions: ['How much is left?', 'Show the payments'],
+            data: { obligationKind: 'card', settled, statementAvailable: true, totalDueFils: due.totalDueFils,
+              paidFils, remainingFils: status.remainingFils, paymentCount: payments.length,
+              dueDate: due.dueDate, latestPaymentDate: latestPaymentDate ?? null },
+          };
+        }
+
+        if (request.query === 'payments') {
+          return {
+            tool: request.tool,
+            title: 'Card payments',
+            headline: formatLedgerMoney(paidFils),
+            meta: `${account.name} · ${payments.length} matched payment${payments.length === 1 ? '' : 's'} · latest statement`,
+            body: `Wafra has ${formatLedgerMoney(paidFils)} recorded against ${account.name}'s latest ${formatLedgerMoney(due.totalDueFils)} statement.${status.remainingFils ? ` ${formatLedgerMoney(status.remainingFils)} remains.` : ' The statement is settled.'}`,
+            facts: commonFacts,
+            evidence: paymentEvidence,
+            destination: '/bills',
+            suggestions: ['How much is left?', 'When did I pay it?'],
+            data: { obligationKind: 'card', settled, statementAvailable: true, totalDueFils: due.totalDueFils,
+              paidFils, remainingFils: status.remainingFils, paymentCount: payments.length,
+              dueDate: due.dueDate, latestPaymentDate: latestPaymentDate ?? null },
+          };
+        }
+
+        const headline = settled ? 'Settled' : `${formatLedgerMoney(status.remainingFils)} remaining`;
+        return {
+          tool: request.tool,
+          title: request.query === 'remaining' ? 'Card balance due' : 'Card status',
+          headline,
+          meta: `${account.name} · ${formatLedgerMoney(paidFils)} recorded paid of ${formatLedgerMoney(due.totalDueFils)} · due ${dueLabel}`,
+          body: settled
+            ? `${account.name}'s latest recorded statement is settled. Wafra records enough payment against the ${formatLedgerMoney(due.totalDueFils)} statement to bring its remaining amount to zero.`
+            : `${account.name}'s latest recorded statement is not fully settled. Wafra has ${formatLedgerMoney(paidFils)} recorded paid against ${formatLedgerMoney(due.totalDueFils)}, leaving ${formatLedgerMoney(status.remainingFils)} due.`,
+          facts: commonFacts,
+          evidence: paymentEvidence,
+          destination: '/bills',
+          suggestions: settled ? ['When did I pay it?', 'Show the payments'] : ['When did I last pay it?', 'Show the payments'],
+          data: { obligationKind: 'card', settled, statementAvailable: true, totalDueFils: due.totalDueFils,
+            paidFils, remainingFils: status.remainingFils, paymentCount: payments.length,
+            dueDate: due.dueDate, latestPaymentDate: latestPaymentDate ?? null },
+        };
+      }
+
+      const bill = state.bills.find((item) => item.id === request.billId);
+      if (!bill) return { tool: 'help', title: 'Let’s clarify that',
+        body: 'I cannot find that bill reminder anymore. Choose a bill from Bills.' };
+      const { live, internal } = ledgerScope(state);
+      const current = billsForMonth(state.bills, state.transactions, now, live, internal)
+        .find((item) => item.bill.id === bill.id);
+      if (!current) {
+        return {
+          tool: request.tool, title: 'Bill status', headline: 'Not due this month', meta: bill.title,
+          body: `${bill.title} is not scheduled in the current Wafra month.`, destination: '/bills',
+          suggestions: ['What payments are due soon?'],
+          data: { obligationKind: 'bill', paid: false, dueThisMonth: false, amountFils: bill.amountFils },
+        };
+      }
+      const paid = current.status === 'paid';
+      const remaining = paid ? 0 : bill.amountFils;
+      const dueDate = displayISODate(current.dueISO);
+      const facts = [
+        { label: 'Expected amount', value: formatLedgerMoney(bill.amountFils) },
+        { label: 'Remaining', value: formatLedgerMoney(remaining) },
+        { label: 'Due date', value: dueDate },
+      ];
+      if (request.query === 'paid-date') {
+        return {
+          tool: request.tool, title: 'Bill payment timing',
+          headline: paid ? 'Paid this month' : 'No paid status recorded', meta: bill.title,
+          body: paid
+            ? `${bill.title} is marked paid for the current Wafra month${current.autoReconciled ? ' from a matching recorded transaction' : ''}, but this reminder does not store an exact payment date.`
+            : `${bill.title} is not marked paid for the current Wafra month.`,
+          facts, destination: '/bills', suggestions: ['How much is left?', 'What payments are due soon?'],
+          data: { obligationKind: 'bill', paid, dueThisMonth: true, amountFils: bill.amountFils,
+            remainingFils: remaining, dueDate: current.dueISO, autoReconciled: !!current.autoReconciled },
+        };
+      }
+      return {
+        tool: request.tool, title: 'Bill status',
+        headline: paid ? 'Paid' : `${formatLedgerMoney(remaining)} due`,
+        meta: `${bill.title} · due ${dueDate}`,
+        body: paid
+          ? `${bill.title} is marked paid for the current Wafra month${current.autoReconciled ? ' from a matching recorded transaction' : ''}.`
+          : `${bill.title} is not marked paid for the current Wafra month. ${formatLedgerMoney(remaining)} is still due.`,
+        facts, destination: '/bills',
+        suggestions: paid ? ['When did I pay it?', 'What payments are due soon?'] : ['How much is left?', 'What payments are due soon?'],
+        data: { obligationKind: 'bill', paid, dueThisMonth: true, amountFils: bill.amountFils,
+          remainingFils: remaining, dueDate: current.dueISO, autoReconciled: !!current.autoReconciled },
+      };
+    }
 
     case 'data-coverage': {
       const accounts = selectedAccountIds(state, request);
@@ -1557,7 +1893,8 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
     }
   }
   const answer = executeAssistantToolResult(state, request, now);
-  if (request.tool === 'help' || request.tool === 'data-coverage') return answer;
+  if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status' ||
+      request.tool === 'account-inventory') return answer;
   if (request.tool === 'subscriptions' || request.tool === 'upcoming-payments') return {
     ...answer,
     body: `${answer.body} ${request.tool === 'subscriptions' ? 'These are estimates from recurring recorded charges; actual renewals may differ.' : 'Includes recorded bills and predicted recurring charges; amounts or dates may change.'}`,
@@ -1711,6 +2048,10 @@ export function planAssistantQuestion(
   let q = normalize(question);
   if (!q || q.length > 1000) return clarification('Ask one short question about your recorded spending, income, or payments.');
   if (/^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return { tool: 'help' };
+  const inventory = accountInventoryRequest(q);
+  if (inventory) return inventory;
+  const obligation = planObligationQuestion(state, q, previousRequest);
+  if (obligation) return obligation;
   const prior = previousRequest && 'period' in previousRequest ? previousRequest : undefined;
   if (/^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/.test(q)) {
     return prior ?? clarification('Ask about a spending or income period first, then show its matching transactions.');
@@ -1996,7 +2337,9 @@ export function runWafraAssistant(state: AppState, question: string, now = new D
   const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
     ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
   const answer = executeAssistantTool(state, request, now);
-  return { request, answer: answer.evidence?.length && /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ? { ...answer, showEvidence: true } : answer };
+  const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
+    request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
+  return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
 }
 
 /**
@@ -2028,6 +2371,12 @@ export function assistantFollowUpQuestions(request?: AssistantToolRequest): stri
   if (!request || request.tool === 'help') return ['How much did I spend?', 'What is my recorded history?'];
   if (request.tool === 'subscriptions') return ['Which recurring charges changed?', 'What payments are due soon?', 'Anything unusual?'];
   if (request.tool === 'upcoming-payments') return ['What subscriptions do I have?', 'Anything unusual?', 'How much did I spend?'];
+  if (request.tool === 'account-inventory') return request.accountKind === 'credit-card'
+    ? ['Which card did I use most?', 'Did I settle my credit card?', 'What payments are due soon?']
+    : ['Which account did I use most?', 'How much did I spend?', 'Anything unusual?'];
+  if (request.tool === 'obligation-status') return request.obligation === 'card'
+    ? ['How much is left?', 'When did I pay it?', 'Show the payments']
+    : ['How much is left?', 'When did I pay it?', 'What payments are due soon?'];
   if (!('period' in request)) return ['What is due in the next 7 days?', 'How much did I spend?'];
   const previous = previousScopeQuestion(request.period) ?? 'What about the previous period?';
   if (request.tool === 'data-coverage') return [previous, 'Show my largest purchases'];
