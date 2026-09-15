@@ -117,6 +117,12 @@ function sessionHarness(options = {}) {
       return engine.executeAssistantTool(...args);
     },
   };
+  h.deps['@/lib/assistant-language'] = {
+    interpretAssistantLanguage: async (...args) => {
+      calls.push({ kind: 'semantic', state: args[0], question: args[1], previous: args[2] });
+      return options.semanticQuestion ?? null;
+    },
+  };
   const globals = {
     Date: Clock,
     requestAnimationFrame: callback => { const id = ++nextFrame; frames.set(id, callback); return id; },
@@ -170,6 +176,12 @@ function sessionHarness(options = {}) {
       find(node => node.props?.testID === 'assistant-send').props.onPress();
       return render();
     },
+    submitAsync: async question => {
+      find(node => node.props?.testID === 'assistant-input').props.onChangeText(question);
+      render();
+      await find(node => node.props?.testID === 'assistant-send').props.onPress();
+      return render();
+    },
     dispose: () => { for (const item of slots) item.cleanup?.(); for (const cleanup of cleanups) cleanup(); moneyFormat.setMonthStartDay(1); },
   };
 }
@@ -191,6 +203,41 @@ function using(options, run) {
   const h = sessionHarness(options);
   try { return run(h); } finally { h.dispose(); }
 }
+async function usingAsync(options, run) {
+  const h = sessionHarness(options);
+  try { return await run(h); } finally { h.dispose(); }
+}
+
+test('generic language failures get one semantic rewrite, then deterministic local execution', async () => usingAsync({
+  state: { ...fixture, privateMode: false },
+  semanticQuestion: 'How much did I spend this month?',
+}, async h => {
+  h.render();
+  await h.submitAsync('gimme the money burn rn');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask', 'semantic', 'ask']);
+  assert.match(text(h.tree), /Spending/);
+  assert.match(text(h.tree), /gimme the money burn rn/);
+}));
+
+test('known local questions do not pay the semantic fallback cost', async () => usingAsync({
+  state: { ...fixture, privateMode: false },
+  semanticQuestion: 'How much did I spend this month?',
+}, async h => {
+  h.render();
+  await h.submitAsync('How much did I spend?');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+}));
+
+test('Private Mode keeps even unknown Ask Wafra language fully local', async () => usingAsync({
+  state: { ...fixture, privateMode: true },
+  semanticQuestion: 'How much did I spend this month?',
+}, async h => {
+  h.render();
+  await h.submitAsync('gimme the money burn rn');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+  const scaffold = h.find(node => node.type === 'Scaffold');
+  assert.match(text(scaffold.props.footer), /On-device/);
+}));
 
 test('finding proof and an older finding exploration retain that finding exact source and scope', () => using({ state: driverFixture }, h => {
   h.render(); h.submit('Why did my spending change from Emirates NBD account excluding rent?');

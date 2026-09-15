@@ -2401,6 +2401,26 @@ export function answerWafraQuestion(state: AppState, question: string, now = new
   return executeAssistantTool(state, planAssistantQuestion(state, question, now, previousRequest, defaultPeriod), now);
 }
 
+const GENERIC_LANGUAGE_CLARIFICATION =
+  'I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.';
+
+/**
+ * The remote language helper is deliberately a LAST language-only pass. A
+ * specific local refusal (unsupported calculation, unresolved merchant/date,
+ * ambiguous account, etc.) is already useful safety information and must not
+ * be broadened by a model into an easier question. Only the two generic
+ * "language not understood" outcomes are eligible.
+ */
+export function shouldTryAssistantSemanticFallback(
+  question: string,
+  request: AssistantToolRequest,
+): boolean {
+  if (request.tool !== 'help') return false;
+  const q = normalize(question);
+  if (!q || /^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return false;
+  return request.clarification === undefined || request.clarification === GENERIC_LANGUAGE_CLARIFICATION;
+}
+
 export function runWafraAssistant(state: AppState, question: string, now = new Date(), previousRequest?: AssistantToolRequest | null, defaultPeriod?: Period): { request: AssistantToolRequest; answer: AssistantAnswer } {
   const planned = planAssistantQuestion(state, question, now, previousRequest, defaultPeriod);
   const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);

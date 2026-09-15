@@ -270,6 +270,25 @@ ok('the feedback module has no persistence or logging surface',
 ok('no route logs anything at all',
   !/console\./.test(worker));
 
+// Ask Wafra's semantic fallback is language-only and has a hard anonymous cost
+// budget. In particular, there is nowhere in the schema to retain a question.
+const assistantLimitColumns = schema
+  .slice(schema.indexOf('CREATE TABLE IF NOT EXISTS assistant_ai_limits ('))
+  .split(/^\);$/m)[0]
+  .replace(/--[^\n]*/g, '');
+const assistantColumnNames = [...assistantLimitColumns.matchAll(/^\s*([a-z_][a-z0-9_]*)\s+(?:TEXT|INTEGER|REAL|BLOB)\b/gmi)]
+  .map((match) => match[1].toLowerCase());
+ok('assistant language fallback stores only anonymous budget counters',
+  /assistant_ai_limits/.test(schema) &&
+    JSON.stringify(assistantColumnNames) === JSON.stringify(['id', 'window_start', 'request_count']));
+ok('assistant language fallback is hard capped before Workers AI runs',
+  /url\.pathname === '\/v1\/assistant\/interpret'/.test(worker) &&
+    /overAssistantAiWindow\(env, 'day'/.test(worker) &&
+    /overAssistantAiWindow\(env, 'hour'/.test(worker) &&
+    /runAssistantLanguageModel\(env\.AI, request\)/.test(worker));
+ok('health sentinel includes the assistant AI budget table',
+  /SELECT id, window_start, request_count FROM assistant_ai_limits LIMIT 0/.test(worker));
+
 // The parser decides which leg of a card settlement a message is, because the
 // relay drops the wording the app used to re-read. Nothing here needs to know
 // the field by name — but it does need to keep passing fields it does not

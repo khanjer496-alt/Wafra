@@ -191,6 +191,16 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
   request_count INTEGER NOT NULL
 );
 
+-- Ask Wafra's optional language normalizer is deliberately public so Android
+-- does not need to pair with the iOS relay. Keep only two anonymous global
+-- counters (hour/day) to hard-bound Workers AI cost. No question, IP, device
+-- id, account name or other user-derived value is stored here.
+CREATE TABLE IF NOT EXISTS assistant_ai_limits (
+  id            TEXT PRIMARY KEY,
+  window_start  INTEGER NOT NULL,
+  request_count INTEGER NOT NULL
+);
+
 -- Upgrading a database created before these columns existed. SQLite has no
 -- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe. The
 -- Shortcut-retirement column is therefore owned by the tracked D1 migration;
