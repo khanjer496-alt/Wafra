@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
-import { CategoryDonut, useRamp, type DonutSlice } from '@/components/ui/charts';
+import { CategoryDonut, useCategoricalPalette, type DonutSlice } from '@/components/ui/charts';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -48,20 +48,21 @@ export function SpendingOverview(p: Props) {
     (p.filter === 'limited' ? row.limitFils !== null : row.limitFils === null));
   const health = (ratio: number | null) => ratio !== null && ratio > 1 ? theme.expenseGraphic
     : ratio !== null && ratio >= 0.85 ? theme.warningGraphic : theme.primary;
-  const ramp = useRamp();
+  const palette = useCategoricalPalette();
   const scheme = useColorScheme();
   const neutral = DataViz[scheme === 'dark' ? 'dark' : 'light'].neutral;
-  // The pie carries the top slices in the ramp, then a single neutral "Other"
-  // wedge for the tail so five distinct hues do not have to explain twelve
-  // categories. Colour keyed by category id, not row index, so a filter change
-  // on the list below does not repaint the pie.
+  const OTHER_LABEL = language === 'ar' ? 'أخرى' : 'Other';
+  // The pie carries the top slices in the multi-hue categorical palette, then a
+  // single neutral "Other" wedge for the tail so five distinct hues do not have
+  // to explain twelve categories. Colour keyed by category id, not row index,
+  // so a filter change on the list below does not repaint the pie.
   const donutColors = useMemo(() => {
     const map = new Map<CategoryId, string>();
     const ranked = [...p.rows].filter((row) => row.spentFils > 0);
-    const head = ranked.slice(0, ramp.length);
-    head.forEach((row, i) => map.set(row.category, ramp[i]!));
+    const head = ranked.slice(0, palette.length);
+    head.forEach((row, i) => map.set(row.category, palette[i]!));
     return map;
-  }, [p.rows, ramp]);
+  }, [p.rows, palette]);
   const slices: DonutSlice[] = useMemo(() => {
     const drawn: DonutSlice[] = [];
     let tail = 0;
@@ -71,9 +72,19 @@ export function SpendingOverview(p: Props) {
       if (color) drawn.push({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils, color });
       else tail += row.spentFils;
     }
-    if (tail > 0) drawn.push({ key: '__tail', label: w.breakdown, value: tail, color: neutral });
+    if (tail > 0) drawn.push({ key: '__tail', label: OTHER_LABEL, value: tail, color: neutral });
     return drawn;
-  }, [p.rows, donutColors, neutral, language, w.breakdown]);
+  }, [p.rows, donutColors, neutral, language, OTHER_LABEL]);
+  // Legend rows for the picture the donut is drawing: the same slices, in the
+  // same order, with the same colours and their share of the total. Uses the
+  // slices array rather than re-deriving from rows so the legend can never
+  // disagree with the pie.
+  const legendItems = useMemo(() => slices.map((slice) => ({
+    key: slice.key,
+    label: slice.label,
+    color: slice.color,
+    share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
+  })), [slices, p.totalFils]);
   return <View style={styles.root} testID="spending-categories">
     <View style={styles.hero}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
@@ -84,13 +95,20 @@ export function SpendingOverview(p: Props) {
       <View style={styles.donutWrap}>
         <CategoryDonut
           slices={slices}
-          size={216}
-          thickness={26}
+          size={224}
+          thickness={28}
           centerLabel={w.spent}
           centerValue={<Money fils={p.totalFils} type="subtitle" decimals={false} />}
           centerMeta={p.periodLabel}
         />
       </View>
+      {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        {legendItems.map((item) => <View key={item.key} style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+          <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
+          <ThemedText type="meta" tabular themeColor="textSecondary">{spendingShareLabel(item.share, language)}</ThemedText>
+        </View>)}
+      </View>}
       <ThemedText type="meta" themeColor="textSecondary" style={styles.heroNote}>{w.shareNote}</ThemedText>
     </View>
 
@@ -164,6 +182,10 @@ const styles = StyleSheet.create({
   hero: { paddingVertical: 12, gap: 12, alignItems: 'stretch' },
   donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
   heroNote: { textAlign: 'center' },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 8, justifyContent: 'center' },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '48%' },
+  legendDot: { width: 10, height: 10, borderRadius: 5 },
+  legendLabel: { flexShrink: 1, minWidth: 0 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },

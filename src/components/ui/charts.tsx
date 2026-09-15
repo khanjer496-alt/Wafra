@@ -24,6 +24,17 @@ export function useRamp(): readonly string[] {
   return DataViz[scheme === 'dark' ? 'dark' : 'light'].ramp;
 }
 
+/**
+ * A multi-hue palette for categorical pictures — a pie, a stacked area — where
+ * `useRamp`'s single-hue gradient would tell the reader "same series, different
+ * age" instead of "different categories". Muted and desaturated by design so
+ * the surface still belongs in Ledger & Light rather than a rainbow.
+ */
+export function useCategoricalPalette(): readonly string[] {
+  const scheme = useColorScheme();
+  return DataViz[scheme === 'dark' ? 'dark' : 'light'].categorical;
+}
+
 // There is deliberately no `useOutBarColor` here any more. It returned a muted
 // brown for the out bar in every month except the selected one, which made one
 // colour mean two things at once — series AND recency — and left the legend's
