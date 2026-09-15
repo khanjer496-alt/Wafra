@@ -1568,6 +1568,8 @@ const S = {
   parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   billRemindersDetected: { en: 'Bill reminders detected', ar: 'تم اكتشاف تذكيرات فواتير' },
   searchMerchants: { en: 'Search merchants or categories', ar: 'ابحث في المتاجر أو التصنيفات' },
+  searchAccounts: { en: 'Search accounts or last-four digits', ar: 'ابحث بالحساب أو آخر أربعة أرقام' },
+  searchLabel: { en: 'Search', ar: 'بحث' },
   remindDayBefore: { en: 'Remind me the day before', ar: 'ذكّرني قبل يوم' },
   cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
   transferBetweenMine: { en: 'Transfer between my accounts', ar: 'تحويل بين حساباتي' },

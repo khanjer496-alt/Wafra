@@ -36,5 +36,5 @@ assert.doesNotMatch(tabs, /withSpring|useSharedValue|entering=/);
 assert.match(tabs, /useLanguage/);
 assert.match(read('src/components/reference-home-summary.tsx'), /testID="home-spending-total"/);
 assert.match(read('src/components/spending/spending-overview.tsx'), /spendingShare/);
-assert.match(read('src/components/bills/payment-agenda.tsx'), /groupPaymentKinds/);
+assert.match(read('src/components/bills/payment-agenda.tsx'), /groupPaymentAgenda/);
 console.log(`Approved design: ${baseline.id}; original W-arrow assets, native/runtime fonts and newer tab content verified.`);

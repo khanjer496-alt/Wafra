@@ -1257,12 +1257,16 @@ export function useAutoImport(
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
       !state.onboarded || state.captureOptOut || !entitlementActive) return;
     let mounted = true;
+    let providerHintPending = false;
     const canScan = () => {
       const current = getStateSnapshot();
       return mounted && RNAppState.currentState === 'active' && current.hydrated &&
         current.onboarded && !current.captureOptOut && isProActive(current);
     };
     const scheduler = createInboxRefreshScheduler(async () => {
+      // Clear only when the queued source evidence actually enters the scan
+      // lane. A hint received while backgrounded must survive until resume.
+      providerHintPending = false;
       // A provider change can arrive after the running scan's last page.
       // Wait for its durable completion, then reread through the shared lane.
       const ongoing = importInFlight?.promise;
@@ -1273,13 +1277,23 @@ export function useAutoImport(
     // The native observer checks permission only when it starts. Recreate it
     // after a denied permission is restored; foreground checks stay available
     // while it is denied so returning from Settings can recover capture.
-    const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => scheduler.request());
+    const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => {
+      providerHintPending = true;
+      scheduler.request();
+    });
     const foreground = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') {
         if (resumeTimer !== null) {
           clearTimeout(resumeTimer);
           resumeTimer = null;
         }
+        return;
+      }
+      // Real provider evidence outranks the source-free freshness throttle. If
+      // it arrived while Wafra was backgrounded, re-arm the scheduler now that
+      // canScan() is true instead of silently stranding the pending edge.
+      if (providerHintPending) {
+        scheduler.request();
         return;
       }
       // A quick app switch after a completed scan has no new source evidence.

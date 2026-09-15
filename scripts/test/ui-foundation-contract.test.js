@@ -147,7 +147,7 @@ assert.match(screenScaffold, /paddingHorizontal: ScreenPadding/);
 const finalSheet = read('src/components/ui/bottom-sheet.tsx');
 assert.match(finalSheet, /dismissible: false; footer: React\.ReactElement/);
 assert.match(finalSheet, /onRequestClose=\{requestImplicitDismiss\}/);
-assert.match(finalSheet, /enabled\(dismissible && !reducedMotion\)/);
+assert.match(finalSheet, /enabled\(dismissible && !reducedMotion && Platform\.OS !== 'android'\)/);
 assert.match(finalSheet, /disabled=\{!dismissible\}/);
 assert.match(finalSheet, /onAccessibilityEscape=\{dismissible \? requestDismiss : undefined\}/);
 assert.match(finalSheet, /backgroundColor: theme\.scrim/);

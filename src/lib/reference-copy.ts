@@ -1,19 +1,19 @@
 /** Localized presentation vocabulary shared by the approved redesign. */
 
 export const paymentAgendaCopy = {
-  en: { overdue: 'Past due', 'expected-earlier': 'Expected earlier', soon: 'Due soon', later: 'Coming up', paid: 'Recently paid',
+  en: { overdue: 'Past due', 'expected-earlier': 'Expected earlier', soon: 'Next 7 days', later: 'Later', paid: 'Recently paid',
     estimate: 'Estimated', recorded: 'Paid · due', statement: 'Statement due', empty: 'Nothing coming up',
     emptyBody: 'Add a bill reminder or import your bank alerts. Wafra will show the dates it can verify.',
-    note: 'Reminders, not payments', noteBody: 'Wafra tracks what is due. Recording a payment does not move money.',
+    note: 'Reminders, not payments', noteBody: 'Marking something paid only updates Wafra. No payment is sent.',
     today: 'Today', tomorrow: 'Tomorrow', paidStatement: 'Paid statement · due',
     subscriptions: 'Subscriptions', utilities: 'Utilities & telecom', cards: 'Card payments', loans: 'Loan repayments', other: 'Other bills',
     subscriptionsHint: 'Recurring memberships and services', utilitiesHint: 'Electricity, water, phone and internet',
     emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.',
     emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.' },
-  ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'مستحقة قريباً', later: 'قادمة', paid: 'مدفوعة مؤخراً',
+  ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'خلال 7 أيام', later: 'لاحقاً', paid: 'مدفوعة مؤخراً',
     estimate: 'تقديري', recorded: 'مدفوعة · استحقاقها', statement: 'استحقاق الكشف', empty: 'لا توجد دفعات قادمة',
     emptyBody: 'أضف تذكيراً بفاتورة أو استورد تنبيهات البنك لعرض التواريخ المعروفة.',
-    note: 'تذكيرات وليست خدمة دفع', noteBody: 'تتابع وفرة الاستحقاقات. تسجيل الدفع لا ينقل الأموال.',
+    note: 'تذكيرات وليست خدمة دفع', noteBody: 'وضع علامة «مدفوع» يحدّث وفرة فقط. لا يتم إرسال أي دفعة.',
     today: 'اليوم', tomorrow: 'غداً', paidStatement: 'كشف مدفوع · استحقاقه',
     subscriptions: 'الاشتراكات', utilities: 'المرافق والاتصالات', cards: 'دفعات البطاقات', loans: 'أقساط القروض', other: 'فواتير أخرى',
     subscriptionsHint: 'العضويات والخدمات المتكررة', utilitiesHint: 'الكهرباء والمياه والهاتف والإنترنت',
@@ -60,13 +60,13 @@ export const spendingCopy = {
 } as const;
 
 export const spendingTrendsCopy = {
-  en: { cashflow: 'Income & spending', sixMonths: 'Six money months', income: 'Income', spending: 'Spending',
+  en: { cashflow: 'Income & spending', sixMonths: 'Six money months', income: 'Income', spending: 'Spending', net: 'Net',
     merchants: 'Top merchants', change: 'What changed', fewer: 'Less', more: 'More', vs: 'Compared with',
     noMerchants: 'Merchant trends will appear after you add spending.', noChange: 'No material category change for this comparison.',
     missingComparison: 'Choose a shorter period for a comparable view.', patterns: 'Spending by weekday',
     patternsNote: 'Recorded spending, excluding fixed commitments. This is not a forecast.',
     noData: 'No recorded activity', records: 'transactions', partial: 'The selected month may be incomplete.' },
-  ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق',
+  ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق', net: 'الصافي',
     merchants: 'أبرز التجار', change: 'ما الذي تغير', fewer: 'أقل', more: 'أكثر', vs: 'مقارنة مع',
     noMerchants: 'ستظهر اتجاهات التجار بعد إضافة المصروفات.', noChange: 'لا يوجد تغير كبير في الفئات لهذه المقارنة.',
     missingComparison: 'اختر فترة أقصر لعرض المقارنة.', patterns: 'الإنفاق حسب أيام الأسبوع',

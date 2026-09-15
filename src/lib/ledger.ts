@@ -1,6 +1,21 @@
 import type { Account, Transaction } from '@/lib/types';
 import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, reconciliationInternalIds, transferOwnership } from '@/lib/transfer-reconciliation';
 
+/**
+ * Human-readable account label with its last-four bank identifier appended
+ * as `·NNNN`, unless the name already ends with those four digits.
+ *
+ * Two identically-named cards ("FAB Credit Card") are only distinguishable by
+ * their last four, so the label carries them wherever a picker or a details
+ * row shows an account. Guards against double-appending — some entries store
+ * the digits inside `name` already ("FAB ·4821") — by returning `name` as is
+ * when it contains the full last-four sequence.
+ */
+export function accountDisplayName(account: Pick<Account, 'name' | 'last4'>): string {
+  if (!account.last4) return account.name;
+  return account.name.includes(account.last4) ? account.name : `${account.name} ·${account.last4}`;
+}
+
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
 export const UNASSIGNED_INCOME_ACCOUNT_ID = '__unassigned-income__';
