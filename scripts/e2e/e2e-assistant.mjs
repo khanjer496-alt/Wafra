@@ -429,6 +429,41 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('remaining-conversation-edge-cases')) {
+    const name = 'remaining-conversation-edge-cases';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const merchant = await ask(page, merchantQuestion);
+        assert.ok((await merchant.innerText()).includes(money(777)));
+
+        const lastYear = await ask(page, 'Same month last year');
+        assert.match(await lastYear.innerText(), /No recorded|transactions/i);
+        const twoMonths = await ask(page, 'Two months ago');
+        assert.match(await twoMonths.innerText(), /No recorded|transactions/i);
+
+        await newChat(page);
+        await ask(page, merchantQuestion);
+        const notSub = await ask(page, 'That is not a subscription');
+        assert.match(await notSub.innerText(), /Marked .* not a subscription|Updated/i);
+
+        await newChat(page);
+        await ask(page, 'How much did I spend this month?');
+        const ambiguous = await ask(page, 'That was dining');
+        assert.match(await ambiguous.innerText(), /choose one transaction|more than one .* transaction/i);
+        const choose = screen(page).getByRole('button', { name: 'Choose one transaction', exact: true });
+        assert.equal(await choose.count(), 1, 'ambiguous correction should offer a direct transaction-choice action');
+        await choose.click();
+        await evidence(page).waitFor({ state: 'visible' });
+        assert.ok(await evidence(page).getByTestId('assistant-evidence-row').count() > 1);
+        await shot(page, name);
+        return { lastYear: await lastYear.innerText(), twoMonths: await twoMonths.innerText() };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;
