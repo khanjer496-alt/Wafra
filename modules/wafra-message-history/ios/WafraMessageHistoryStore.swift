@@ -992,7 +992,7 @@ public final class WafraMessageHistoryStore {
     guard
       var decoded = decodeRecordFields(input),
       let receivedAt = decoded.object["receivedAt"] as? String,
-      let canonical = Self.normalizeShortcutInstant(receivedAt, now: nowProvider())
+      let canonical = Self.normalizeShortcutProducedInstant(receivedAt, now: nowProvider())
     else { return nil }
     decoded.object["receivedAt"] = canonical
     return decoded
@@ -1372,6 +1372,42 @@ public final class WafraMessageHistoryStore {
     // Carry the exact fraction as text: Date/formatter floating-point rounding
     // must never turn .001 into .000 or .999 into the following second.
     let canonical = String(wholeSeconds.dropLast()) + "." + (part(7) ?? "000") + "Z"
+    return validInstant(canonical, now: now) ? canonical : nil
+  }
+
+  /// Normalizes the exact custom date text produced by Apple Shortcuts.
+  ///
+  /// `Format Date` applies the phone's current locale, numbering system and
+  /// calendar even when its custom pattern looks ISO-like. That means the same
+  /// Message date may arrive as Arabic-Indic digits, an Umm al-Qura year, a
+  /// Buddhist year, or ordinary Gregorian ASCII. The strict adapter above is
+  /// kept deterministic for already-canonical producer text; this wrapper is
+  /// only for values that came directly from the local Shortcut, where Wafra
+  /// is running on the same phone with the same current locale/calendar.
+  public static func normalizeShortcutProducedInstant(
+    _ value: String,
+    now: Date,
+    locale: Locale = .autoupdatingCurrent,
+    calendar: Calendar = .autoupdatingCurrent,
+    timeZone: TimeZone = .autoupdatingCurrent
+  ) -> String? {
+    if let strict = normalizeShortcutInstant(value, now: now) { return strict }
+    guard !value.isEmpty, value.utf8.count <= 128 else { return nil }
+
+    let local = DateFormatter()
+    local.locale = locale
+    local.calendar = calendar
+    local.timeZone = timeZone
+    local.isLenient = false
+    local.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    guard let instant = local.date(from: value), local.string(from: instant) == value else {
+      return nil
+    }
+
+    let utc = ISO8601DateFormatter()
+    utc.timeZone = TimeZone(secondsFromGMT: 0)
+    utc.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let canonical = utc.string(from: instant)
     return validInstant(canonical, now: now) ? canonical : nil
   }
 
