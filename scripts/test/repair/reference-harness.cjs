@@ -68,11 +68,19 @@ function createHarness(options = {}) {
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
   for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  const harnessToday=options.now??new Date('2026-09-15T09:00:00Z');
   const deps={react,'react/jsx-runtime':runtime,'@/lib/assistant-copy':assistantCopy,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
     'expo-linear-gradient':{LinearGradient:p=>jsx('Gradient',p)},
     '@/hooks/use-theme':{useTheme:()=>theme},'@/hooks/use-language':{useLanguage:()=>lang},'@/hooks/use-large-text-layout':{useLargeTextLayout:()=>!!options.largeText},
     '@/hooks/use-ledger-money':{useLedgerMoney:()=>null},
+    // Bills/Wallet/Cards read "today" through this hook rather than freezing a
+    // Date at mount. ONE object for the harness's lifetime, because that is
+    // the contract the real hook keeps: it holds the Date in `useState` and
+    // only replaces it when the app is foregrounded. Handing back a fresh
+    // Date per call would invalidate every memo keyed on `now` on every
+    // render — which is what the render-cost tests exist to catch.
+    '@/hooks/use-today':{useToday:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
     '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},

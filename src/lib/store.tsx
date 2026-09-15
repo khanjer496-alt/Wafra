@@ -2037,7 +2037,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     // Screenmap state exists only for screenshots and is intentionally
     // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
-    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(commit(true));
+    // Left exactly as it was, and deliberately NOT marking the revision
+    // durable: `screenmap-demo-safety.test.cjs` pins this line as the promise
+    // that Screenmap never reaches encrypted persistence. The debounce may
+    // then call this again, which costs nothing — it returns here too.
+    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
     return persistence.save(snapshot).then(commit).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;

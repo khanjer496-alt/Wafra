@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
 
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
@@ -53,11 +54,15 @@ export default function TabsLayout() {
       <Tabs
         // Detaching native views alone does not stop hidden React consumers
         // processing each import update. Keep their state, but suspend hidden
-        // renders on both platforms: every tab subscribes to the whole store,
-        // so without this an iOS import page re-ran Bills' subscription
-        // detection and Wallet's balance breakdown behind the visible tab.
-        // CaptureOwner above remains live outside the tabs.
-        screenOptions={{ headerShown: false, freezeOnBlur: true }}
+        // Android renders. CaptureOwner above remains live outside the tabs.
+        //
+        // ANDROID ONLY, deliberately. Every tab subscribes to the whole store,
+        // so freezing iOS too would stop hidden tabs re-running their
+        // projections on each import page — but this navigator's behaviour is
+        // decided by measurement here (see detachInactiveScreens above), and
+        // there is none for iOS. `tab-render-cost.test.cjs` pins the negative
+        // for iOS and web; changing it needs a device pass first.
+        screenOptions={{ headerShown: false, freezeOnBlur: Platform.OS === 'android' }}
         tabBar={(props) => <WafraTabBar {...props} />}>
         <Tabs.Screen name="index" />
         <Tabs.Screen name="flow" />
