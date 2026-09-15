@@ -51,6 +51,12 @@ type BottomSheetCommonProps = {
   onClose: () => void;
   /** Caps label in the sheet header. */
   title: string;
+  /** Optional secondary line directly beneath the sheet title. */
+  subtitle?: string;
+  /** Optional visual identity shown before the title block. */
+  headerLeading?: React.ReactNode;
+  /** Keep the 44dp close target while allowing visually lighter sheets. */
+  closeVariant?: 'outline' | 'plain';
   children: React.ReactNode;
   testID?: string;
 };
@@ -70,6 +76,9 @@ export function BottomSheet({
   visible,
   onClose,
   title,
+  subtitle,
+  headerLeading,
+  closeVariant = 'outline',
   children,
   dismissible = true,
   footer,
@@ -277,9 +286,17 @@ export function BottomSheet({
                     />
                   ) : null}
                   <View style={styles.header}>
-                    <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
-                      {title}
-                    </ThemedText>
+                    {headerLeading}
+                    <View style={styles.headerCopy}>
+                      <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
+                        {title}
+                      </ThemedText>
+                      {subtitle ? (
+                        <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                          {subtitle}
+                        </ThemedText>
+                      ) : null}
+                    </View>
                     {dismissible ? (
                       <Pressable
                         accessibilityRole="button"
@@ -289,6 +306,7 @@ export function BottomSheet({
                         style={[
                           styles.close,
                           Platform.OS === 'android' && styles.androidClose,
+                          closeVariant === 'plain' && styles.closePlain,
                           { borderColor: theme.controlBorder },
                         ]}>
                         <Icon name="close" size={20} color={theme.textSecondary} />
@@ -331,7 +349,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   sheetBody: { flexShrink: 1, minHeight: 0 },
-  title: { flex: 1, minWidth: 0 },
+  headerCopy: { flex: 1, minWidth: 0, gap: 1 },
+  title: { minWidth: 0 },
   dragRegion: {
     flexShrink: 0,
     paddingTop: Spacing.two,
@@ -361,6 +380,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   androidClose: { width: 48, height: 48 },
+  closePlain: { borderWidth: 0 },
   scroll: { flexShrink: 1, minHeight: 0 },
   content: {
     gap: Spacing.four - 4,

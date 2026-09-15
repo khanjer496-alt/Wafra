@@ -149,7 +149,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     const exposed = new Set([...kt.matchAll(/(?:Async)?Function\("([a-zA-Z]+)"/g)].map((m) => m[1]));
     // Expo NativeModule supplies addListener for explicitly declared events;
     // it is not a hand-written Function in the module's Kotlin definition.
-    if (/Events\("[^"]+"\)/.test(kt)) exposed.add('addListener');
+    if (/Events\(/.test(kt)) exposed.add('addListener');
     const ts = read(`modules/${dir}/index.ts`);
     const jsName = ts.match(/requireOptionalNativeModule<[^>]+>\('([^']+)'\)/)?.[1];
     const expects = [...ts.matchAll(/^ {2}([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
