@@ -1566,10 +1566,10 @@ export default function SettingsScreen() {
           )}
           {linkRow(
             t('sortShops'),
-            unsorted.merchants.length > 0
+            unsorted.merchants.length + unsorted.paymentPurposes.length > 0
               ? tf('sortShopsCount', {
-                  count: unsorted.merchants.length,
-                  s: unsorted.merchants.length === 1 ? '' : 's',
+                  count: unsorted.merchants.length + unsorted.paymentPurposes.length,
+                  s: unsorted.merchants.length + unsorted.paymentPurposes.length === 1 ? '' : 's',
                 })
               : t('sortShopsNone'),
             () => router.push('/categorise'),

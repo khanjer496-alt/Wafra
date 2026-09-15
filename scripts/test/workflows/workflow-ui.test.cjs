@@ -66,11 +66,21 @@ test('review renders currency minor-unit exponents without truncating cents',()=
 });
 test('categorisation displays affected count and applies merchant rule only after selection',()=>{
  const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],rowCount:7},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
  assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(h.events,[]);
  const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('dining').label);
  assert.ok(picker,'category choice exists');picker.props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
+});
+test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
+ const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
+ const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:purpose.key}}),tree=h.renderScreen('categorise');
+ assert.ok(text(tree).includes('Fishbasket'));
+ assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('utilities').label);
+ assert.ok(picker,'purpose category choice exists');picker.props.onPress();
+ assert.ok(h.events.some(e=>e[0]==='setBillAlias'&&e[1]==='Fishbasket'&&e[2]==='consumer:4036'&&e[3]==='Fishbasket'&&e[4]==='utilities'&&e[5]===true));
+ assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
  const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{4:true}}),tree=h.renderScreen('onboarding');

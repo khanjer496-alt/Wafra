@@ -1,10 +1,11 @@
 /**
- * Sort merchants — the half of the accuracy problem only the user can answer.
+ * Improve categories — only the low-confidence cases the user can answer.
  *
  * `/accuracy` collects bank message FORMATS the parser could not read and
  * mails them to the developer, so the next release handles them. This screen
- * is for the opposite failure: the parser read the message perfectly, lifted
- * the right merchant name out of it, and has no idea what that merchant sells.
+ * is for the opposite failure: the parser read the message, but either cannot
+ * tell what a merchant sells OR knows this was a bank bill payment whose saved
+ * nickname is not reliable merchant identity.
  * No rule list will ever contain "AL BAIT ALHAMAWI SUP" — there are hundreds
  * of thousands of shops here — so there is no release that fixes it. One real
  * ledger carried 182 correctly-named transactions in `other`.
@@ -44,6 +45,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Row, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
@@ -56,19 +58,31 @@ import { categoryLabel, EXPENSE_CATEGORIES } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
-import { uncategorisedMerchants } from '@/lib/uncategorised';
+import { uncategorisedMerchants, type UncategorisedMerchant, type UncategorisedPaymentPurpose } from '@/lib/uncategorised';
 import type { CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+
+const INITIAL_VISIBLE_ITEMS = 12;
+
+type CategoriseItem =
+  | ({ kind: 'merchant' } & UncategorisedMerchant)
+  | ({ kind: 'payment-purpose' } & UncategorisedPaymentPurpose);
 
 export default function CategoriseScreen() {
   const theme = useTheme();
   const router = useRouter();
   const toast = useToast();
-  const { state, setMerchantOverride } = useStore();
+  const { state, setMerchantOverride, setBillAlias } = useStore();
   const words = workflowCopy(state.language);
 
   const summary = useMemo(() => uncategorisedMerchants(state), [state]);
-  const { merchants } = summary;
+  const items = useMemo<CategoriseItem[]>(() => [
+    // Payment aliases are the dangerous cases: a bank nickname can look like a
+    // merchant while actually being SEWA, Salik, internet, rent, etc. Put them
+    // first so the user fixes the cases where a name-based guess would be worst.
+    ...summary.paymentPurposes.map((item) => ({ ...item, kind: 'payment-purpose' as const })),
+    ...summary.merchants.map((item) => ({ ...item, kind: 'merchant' as const })),
+  ], [summary]);
 
   // Which merchant's chips are showing. Seeded to nothing rather than to the
   // first row so the screen opens as a readable list — the user gets to see
@@ -80,29 +94,37 @@ export default function CategoriseScreen() {
   // the end the list is empty and shows nothing about what just happened; this
   // is what lets the finished state say what the visit was worth.
   const [sortedRows, setSortedRows] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  const visibleItems = showAll ? items : items.slice(0, INITIAL_VISIBLE_ITEMS);
 
   const assign = useCallback(
-    (merchant: string, key: string, count: number, category: CategoryId) => {
+    (item: CategoriseItem, category: CategoryId) => {
       tapped();
-      // The next merchant on the CURRENT list, chosen before the store update
+      // The next item on the CURRENT list, chosen before the store update
       // removes this one — afterwards the index no longer means anything.
-      const at = merchants.findIndex((m) => m.key === key);
-      const next = at >= 0 ? merchants[at + 1] : undefined;
+      const at = items.findIndex((candidate) => candidate.key === item.key && candidate.kind === item.kind);
+      const next = at >= 0 ? items[at + 1] : undefined;
 
-      // `true`: past entries as well as future ones. See the header.
-      setMerchantOverride(merchant, category, true);
-      setSortedRows((n) => n + count);
-      setOpenKey(next ? next.key : null);
+      if (item.kind === 'payment-purpose') {
+        // Keep the bank's displayed nickname as the title unless the user later
+        // renames it in transaction details. The important learning here is the
+        // economic purpose, scoped to the bill identity rather than the name.
+        setBillAlias(item.sourceTitle, item.billIdentity, item.sourceTitle, category, true);
+      } else {
+        setMerchantOverride(item.merchant, category, true);
+      }
+      setSortedRows((n) => n + item.count);
+      setOpenKey(next && (showAll || at + 1 < INITIAL_VISIBLE_ITEMS) ? next.key : null);
       toast.show(
-        tf('categoriseAssigned', {
-          count,
-          ending: count === 1 ? 'y' : 'ies',
+        tf(item.kind === 'payment-purpose' ? 'categorisePurposeAssigned' : 'categoriseAssigned', {
+          count: item.count,
+          ending: item.count === 1 ? 'y' : 'ies',
           category: categoryLabel(category, state.language === 'ar' ? 'ar' : 'en'),
         }),
         { tone: 'success' },
       );
     },
-    [merchants, setMerchantOverride, state.language, toast],
+    [items, setBillAlias, setMerchantOverride, showAll, state.language, toast],
   );
 
   const categoriseHeader: ScreenHeaderProps = {
@@ -118,35 +140,41 @@ export default function CategoriseScreen() {
         scrollProps={{ showsVerticalScrollIndicator: false }}>
           <Section index={0} style={styles.intro}>
             <WorkflowHero title={words.sortTitle} body={words.sortBody} icon="cart"
-              facts={merchants.length > 0 ? [{ label: words.merchants, value: String(merchants.length) },
+              facts={items.length > 0 ? [{ label: words.merchants, value: String(items.length) },
                 { label: words.entries, value: String(summary.rowCount) }] : []} />
           </Section>
 
-          {merchants.map((m, i) => {
-            const open = openKey === m.key;
+          {visibleItems.map((item, i) => {
+            const open = openKey === item.key;
+            const label = item.kind === 'payment-purpose' ? item.sourceTitle : item.merchant;
             return (
-              <View key={m.key} style={[styles.merchantCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+              <View key={`${item.kind}:${item.key}`} style={[styles.merchantCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
                 <Row
-                  last={i === merchants.length - 1 && !open}
+                  last={i === visibleItems.length - 1 && !open}
                   onPress={() => {
                     tapped();
-                    setOpenKey(open ? null : m.key);
+                    setOpenKey(open ? null : item.key);
                   }}
-                  accessibilityLabel={tf('categoriseChooseA11y', { merchant: m.merchant })}
+                  accessibilityLabel={tf(item.kind === 'payment-purpose' ? 'categorisePurposeA11y' : 'categoriseChooseA11y', { merchant: label })}
                   style={styles.merchantRow}>
                   <View style={styles.merchantText}>
+                    {item.kind === 'payment-purpose' && (
+                      <ThemedText type="nano" style={{ color: theme.warning }}>
+                        {t('categorisePaymentPurpose')}
+                      </ThemedText>
+                    )}
                     <ThemedText type="smallBold">
-                      {m.merchant}
+                      {label}
                     </ThemedText>
                     <ThemedText type="meta" themeColor="textTertiary">
                       {tf('categoriseEntries', {
-                        count: m.count,
-                        ending: m.count === 1 ? 'y' : 'ies',
-                        date: shortDate(m.lastDate),
+                        count: item.count,
+                        ending: item.count === 1 ? 'y' : 'ies',
+                        date: shortDate(item.lastDate),
                       })}
                     </ThemedText>
                   </View>
-                  <Money fils={m.totalFils} />
+                  <Money fils={item.totalFils} />
                   <Icon
                     name={open ? 'chevron-down' : 'chevron-right'}
                     size={16}
@@ -160,10 +188,15 @@ export default function CategoriseScreen() {
                   // user genuinely cannot classify, and without it the last few
                   // rows of a long list are unfinishable.
                   <View style={styles.chips}>
+                    {item.kind === 'payment-purpose' && (
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.purposeHint}>
+                        {t('categorisePaymentPurposeHint')}
+                      </ThemedText>
+                    )}
                     <CategoryChips
                       categories={EXPENSE_CATEGORIES}
                       selected={null}
-                      onToggle={(id) => assign(m.merchant, m.key, m.count, id)}
+                      onToggle={(id) => assign(item, id)}
                       layout="wrap"
                     />
                   </View>
@@ -172,7 +205,21 @@ export default function CategoriseScreen() {
             );
           })}
 
-          {merchants.length === 0 && (
+          {!showAll && items.length > INITIAL_VISIBLE_ITEMS && (
+            <Button
+              variant="outline"
+              label={tf('categoriseShowAll', { count: items.length })}
+              onPress={() => setShowAll(true)}
+            />
+          )}
+          {showAll && items.length > INITIAL_VISIBLE_ITEMS && (
+            <Button variant="ghost" label={t('categoriseShowPriority')} onPress={() => {
+              setShowAll(false);
+              setOpenKey(null);
+            }} />
+          )}
+
+          {items.length === 0 && (
             <Section index={1} style={styles.empty}>
               <Icon name="check" size={26} color={theme.income} strokeWidth={2.1} />
               <ThemedText type="small">{t('categoriseDone')}</ThemedText>
@@ -210,7 +257,9 @@ const styles = StyleSheet.create({
   chips: {
     paddingTop: Spacing.two,
     paddingBottom: Spacing.three,
+    gap: Spacing.two,
   },
+  purposeHint: { paddingHorizontal: Spacing.one },
   empty: {
     alignItems: 'flex-start',
     gap: Spacing.two,

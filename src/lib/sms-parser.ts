@@ -319,8 +319,14 @@ export interface ParsedCard {
  * Etisalat bill-pay keeps the provider name; and “bill to pay” reminders are
  * obligations rather than posted transactions. Re-read Android history once
  * so already-imported parser-owned rows can be healed in place.
+ *
+ * 43: registered bank bill-payment nicknames stop inheriting merchant-wide
+ * category overrides. A name such as Fishbasket can be a saved bill nickname
+ * for one consumer reference and a real merchant elsewhere. Re-read history so
+ * those receipts return to safe bill-purpose handling, where user corrections
+ * are scoped by the privacy-safe bill identity instead of the displayed name.
  */
-export const PARSER_VERSION = 42;
+export const PARSER_VERSION = 43;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -4676,7 +4682,12 @@ function parseSmsInner(
     if (!amountFils) return null;
     const payee = billerPay[1].trim().replace(/\s{2,}/g, ' ');
     const merchant = normalizeServiceName(payee) ?? titleCase(payee);
-    const cat = categoryOf(payee, 'expense', overrides, merchant);
+    // A registered bill-pay nickname is not a merchant identity. Merchant-wide
+    // user overrides must never classify it: "Fishbasket" can be a nickname for
+    // SEWA here and a real restaurant on a card transaction elsewhere. Known
+    // provider vocabulary still resolves normally; learned bill purpose is
+    // applied later through the billIdentity-scoped alias layer.
+    const cat = categoryOf(payee, 'expense', undefined, merchant);
     const registeredUtility =
       !cat.pinned && cat.id === 'other' && /home\s*inet|home\s*internet|villa\s*bill|apt\s*home|off\s*home/i.test(payee);
     return {

@@ -21,7 +21,7 @@ function harness(rows = [], options = {}) {
       return ['card', 'bill', 'subscription'].filter(kind => !opts.kinds || opts.kinds.includes(kind)).map(kind => ({ kind })); } },
     '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']) },
     '@/lib/period': { inPeriod: (date) => { periodChecks += 1; return date === '2026-09-06'; }, isCurrentMonth: () => true },
-    '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [] }), worthPrompting: () => !!options.needsCategory },
+    '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }), worthPrompting: () => !!options.needsCategory },
   });
   return { project: (extra = {}) => projectDashboard({ state, period: {}, now: new Date(), ...extra }),
     counts: () => ({ insightCalls, periodChecks, ...calls }) };

@@ -42,7 +42,7 @@ function harness(options = {}) {
   const dashboard = {
     hero: { netFils: 941300, incomeFils: 1450000, expenseFils: 508700 }, live: true,
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
-    unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [] } },
+    unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
     upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
   };

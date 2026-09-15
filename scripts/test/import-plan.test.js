@@ -1578,6 +1578,33 @@ const DECLINE_SMS = [{
   ok('the lookup is trimmed and case-folded like setMerchantOverride',
     casedPlan.batch.transactions[0]?.category === 'groceries',
     casedPlan.batch.transactions[0]);
+
+  const nicknameReceipt = {
+    ...relayRow,
+    merchant: 'Fishbasket',
+    categoryGuess: 'other',
+    categoryDeliberate: false,
+    paymentFlowSide: 'receipt',
+    billIdentity: 'consumer:4036',
+    smsTs: TALABAT_TS + 3000,
+  };
+  const unsafeMerchantRulePlan = buildImportPlan([nicknameReceipt], {
+    ...overrideState,
+    merchantOverrides: { fishbasket: 'shopping' },
+    billAliases: {},
+  }, nicknameReceipt.smsTs);
+  ok('a relay bill-payment nickname ignores a merchant-wide override',
+    unsafeMerchantRulePlan.batch.transactions[0]?.category === 'other',
+    unsafeMerchantRulePlan.batch.transactions[0]);
+
+  const scopedBillRulePlan = buildImportPlan([nicknameReceipt], {
+    ...overrideState,
+    merchantOverrides: { fishbasket: 'shopping' },
+    billAliases: { 'consumer:4036|fishbasket': { title: 'Fishbasket', category: 'utilities' } },
+  }, nicknameReceipt.smsTs);
+  ok('the bill-identity rule still categorises that same nickname safely',
+    scopedBillRulePlan.batch.transactions[0]?.category === 'utilities',
+    scopedBillRulePlan.batch.transactions[0]);
 }
 
 /* Android is untouched: it already had the override applied during parsing,

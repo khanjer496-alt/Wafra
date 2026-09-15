@@ -859,6 +859,11 @@ export function buildImportPlan(
   const overrides = state.merchantOverrides ?? {};
   const billAliases = state.billAliases ?? {};
   const applyMerchantOverride = (p: ScannedSms): ScannedSms => {
+    // Bank bill-pay nicknames are not merchant identities. They are learned by
+    // the billIdentity-scoped alias pass below; a global merchant override here
+    // could turn a Fishbasket utility nickname and a real Fishbasket purchase
+    // into the same category.
+    if (p.paymentFlowSide === 'receipt') return p;
     if (p.raw !== undefined) return p;
     const hit = overrides[p.merchant.trim().toLowerCase()];
     if (!hit || hit === p.categoryGuess) return p;
