@@ -1,4 +1,3 @@
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
@@ -54,7 +53,6 @@ export default function AssistantScreen() {
   const params = useLocalSearchParams<{ question?: string }>();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const { fontScale, height } = useWindowDimensions();
@@ -392,7 +390,12 @@ export default function AssistantScreen() {
   return <>
     <ScreenScaffold testID="assistant-screen"
       keyboardAware={Platform.OS === 'ios'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      // ScreenScaffold owns this screen's header. `useHeaderHeight()` cannot be
+      // used here because the root stack starts with `headerShown: false`; on
+      // Android it throws before the first frame, leaving only the window
+      // background visible. The keyboard-avoiding view already lives below the
+      // native header on iOS, so no navigator-header offset is required.
+      keyboardVerticalOffset={0}
       scrollRef={scrollRef}
       contentStyle={composerHeight > 0 ? { paddingBottom: composerHeight + 12 } : undefined}
       scrollProps={{ keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
