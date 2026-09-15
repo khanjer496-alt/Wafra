@@ -236,6 +236,16 @@ export interface ScanInboxOptions {
   pageSize?: number;
   /** Exact old source hashes currently retained by the authoritative ledger/tray. */
   legacyReviewSourceKeys?: readonly string[];
+  /**
+   * Bound bank-app queue work for short headless Android wakes. Foreground
+   * drains omit this and keep the existing "read every retained row" behavior.
+   */
+  maxNotificationRows?: number;
+  /**
+   * False only for the event-driven SMS headless wake. Ordinary foreground
+   * scans keep draining both local sources exactly as before.
+   */
+  includeNotificationQueue?: boolean;
 }
 
 export interface ScanResult {
@@ -866,14 +876,19 @@ export async function scanInbox(
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
   const notificationReader = NotificationReader;
-  if ((inboxHistoryComplete || options.notificationOnly) && notificationReader &&
+  if (options.includeNotificationQueue !== false &&
+    (inboxHistoryComplete || options.notificationOnly) && notificationReader &&
     isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true) &&
     notificationReader?.isEnabled?.()) {
     try {
       // This queue has its own explicit acknowledgement. Always read every
       // retained row: using the ledger watermark here could strand an older
       // unacknowledged notification forever after a newer SMS advances it.
-      const captured = await notificationReader.getCaptured(0);
+      const retained = await notificationReader.getCaptured(0);
+      const notificationLimit = options.maxNotificationRows === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(1, Math.floor(options.maxNotificationRows));
+      const captured = retained.slice(0, notificationLimit);
       notificationImportStats = {
         attemptedAt: Date.now(),
         captured: captured.length,

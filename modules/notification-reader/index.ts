@@ -32,6 +32,8 @@ interface NotificationReaderModule {
   addListener?(event: 'onQueueChanged', listener: () => void): { remove(): void };
   isAvailable(): boolean;
   isEnabled(): boolean;
+  /** Source-free entitlement/admission lease, independent of Android Notification access. */
+  isAdmissionActive?(): boolean;
   hasSystemAccess(): boolean;
   /** Persist the app's tracking choice; disabling also erases queued alerts. */
   setCaptureEnabled(enabled: boolean, expiresAtMs: number): Promise<boolean>;

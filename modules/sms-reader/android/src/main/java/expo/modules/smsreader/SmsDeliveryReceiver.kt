@@ -28,6 +28,16 @@ class SmsDeliveryReceiver : BroadcastReceiver() {
       if (body.isEmpty() || SensitiveMessageFilter.shouldReject(body) ||
         !MONEY_RE.containsMatchIn(body)) return
       InstantAlert.post(context, address, body)
+      // Do not scan the inbox here. This broadcast is only the event edge that
+      // wakes one bounded headless pass when Wafra is not already foregrounded.
+      // If Android refuses the background service, the SMS remains in the inbox
+      // and the normal foreground importer recovers it on the next open.
+      val observedAt = parts.maxOfOrNull { it.timestampMillis } ?: System.currentTimeMillis()
+      LiveCaptureHeadlessService.schedule(
+        context,
+        LiveCaptureHeadlessService.SOURCE_SMS,
+        observedAt,
+      )
     } catch (_: Exception) {
       // Never crash on a delivery broadcast. A dropped alert is recovered by
       // the next inbox scan; a crash loop on every incoming SMS is not.
