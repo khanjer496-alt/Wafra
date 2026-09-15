@@ -348,8 +348,10 @@ export default function JournalHomeScreen() {
             <Icon name="chevron-right" size={16} color={theme.textSecondary} />
           </Pressable>
           {dashboard.uncategorised.shouldPrompt ? <Pressable onPress={() => router.push('/categorise')} accessibilityRole="button" style={styles.footerAction}>
-            <ThemedText type="meta">{tf('uncategorisedMerchantCount', { count: dashboard.uncategorised.summary.merchants.length,
-              s: dashboard.uncategorised.summary.merchants.length === 1 ? '' : 's' })}</ThemedText>
+            <ThemedText type="meta">{tf('uncategorisedMerchantCount', {
+              count: dashboard.uncategorised.summary.merchants.length + dashboard.uncategorised.summary.paymentPurposes.length,
+              s: dashboard.uncategorised.summary.merchants.length + dashboard.uncategorised.summary.paymentPurposes.length === 1 ? '' : 's',
+            })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
           : dashboard.unreadFormats?.shouldPrompt ? <Pressable onPress={() => router.push('/accuracy')} accessibilityRole="button" style={styles.footerAction}>
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,

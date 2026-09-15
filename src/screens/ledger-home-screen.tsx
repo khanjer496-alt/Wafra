@@ -516,7 +516,7 @@ function CategorisePrompt({
   const [dismissed, setDismissed] = useState(false);
   if (dismissed || !shouldPrompt) return null;
 
-  const count = summary.merchants.length;
+  const count = summary.merchants.length + summary.paymentPurposes.length;
   // The dismiss control is a sibling of the tappable area rather than a child
   // of it. Nesting a button inside a button gives a screen reader one target
   // with two actions and no way to say which is which, and the row has two

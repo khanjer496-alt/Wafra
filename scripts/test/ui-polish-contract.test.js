@@ -417,27 +417,47 @@ assert.doesNotMatch(task8Accuracy, /accuracyShareUncategorized/);
 const task8Categorise = read('src/app/categorise.tsx');
 assert.match(task8Categorise, /const \[openKey, setOpenKey\] = useState<string \| null>\(null\)/);
 assert.match(task8Categorise, /const \[sortedRows, setSortedRows\] = useState\(0\)/);
-assert.match(task8Categorise, /const at = merchants\.findIndex\(\(m\) => m\.key === key\)[\s\S]*?const next = at >= 0 \? merchants\[at \+ 1\] : undefined/);
-assert.match(task8Categorise, /setMerchantOverride\(merchant, category, true\)/);
-assert.match(task8Categorise, /setSortedRows\(\(n\) => n \+ count\)[\s\S]*?setOpenKey\(next \? next\.key : null\)/);
-for (const count of ['summary.rowCount', 'm.count', 'sortedRows']) {
+assert.match(task8Categorise, /const at = items\.findIndex\([\s\S]*?const next = at >= 0 \? items\[at \+ 1\] : undefined/);
+assert.match(task8Categorise, /setMerchantOverride\(item\.merchant, category, true\)/);
+assert.match(task8Categorise, /setBillAlias\(item\.sourceTitle, item\.billIdentity, item\.sourceTitle, category, true\)/);
+assert.match(task8Categorise, /INITIAL_VISIBLE_ITEMS = 12/);
+assert.match(task8Categorise, /summary\.paymentPurposes[\s\S]*?kind: 'payment-purpose'/);
+for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
   assert.ok(task8Categorise.includes(count), `Categorise lost ${count}`);
 }
 
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
-  'summarizeForeignActivity(', 'inPeriod(tx.date, period)', 'ledgerCurrency,',
-  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIds(', '<PeriodSheet', '<EntryDetailSheet',
+  'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
+  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIds(',
+  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
-const currencyScaffoldContent = task8Currency.match(
-  /<ScreenScaffold[\s\S]*?<PeriodPill[\s\S]*?<TextField/,
+assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,
+  'Foreign spending virtualizes its transaction history instead of mounting the whole ledger in a ScrollView');
+assert.match(task8Currency, /<FlatList[\s\S]*?ListHeaderComponent=\{listHeader\}/);
+assert.match(task8Currency, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task8Currency, /removeClippedSubviews=\{Platform\.OS === 'android'\}/);
+assert.doesNotMatch(task8Currency, /visibleTransactions\.map|summary\.transactions\.map/,
+  'hundreds of foreign charges must not be mounted eagerly');
+assert.match(task8Currency, /const INITIAL_CURRENCY_ROWS = 5/);
+assert.match(task8Currency, /summary\.groups\.slice\(0, INITIAL_CURRENCY_ROWS\)/);
+assert.match(task8Currency, /const percent = summary\.totalLocalFils > 0[\s\S]*?group\.localFils \/ summary\.totalLocalFils/);
+assert.match(task8Currency, /styles\.currencyTrack[\s\S]*?styles\.currencyFill/,
+  'currency impact stays a restrained Ledger & Light progress treatment rather than decorative cards');
+assert.match(task8Currency, /setSelectedCurrency\(\(current\) => current === currency \? null : currency\)/);
+assert.match(task8Currency, /transaction\.originalCurrency\?\.toUpperCase\(\) !== selectedCurrency/);
+const currencyHierarchy = task8Currency.match(
+  /<Money[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
 )?.[0] ?? '';
-assert.ok(currencyScaffoldContent.length > 0, 'Currency keeps PeriodPill before its optional search field');
+assert.ok(currencyHierarchy.length > 0,
+  'Currency hierarchy remains total → currencies → transactions/search');
 assert.match(task8Currency, /const showSearch = chargeCount >= 12/);
 assert.match(task8Currency, /<TextField[\s\S]*?label=\{t\('searchForeignSpending', language\)\}[\s\S]*?value=\{query\}[\s\S]*?onChangeText=\{setQuery\}/);
 assert.match(task8Currency, /leading=\{<Icon name="search"/);
-assert.match(task8Currency, /formatOriginalCurrency\(transaction\.originalAmountMinor![\s\S]*?formatAED\(transaction\.amountFils/,
+assert.match(task8Currency, /formatOriginalCurrency\([\s\S]*?item\.originalAmountMinor![\s\S]*?formatAED\(item\.amountFils/,
   'Foreign rows keep original and ledger amounts together');
+assert.doesNotMatch(task8Currency, /FadeInDown|Animated\.View/,
+  'data-heavy foreign spending should not delay Android readability with entrance animation');
 assert.doesNotMatch(task8Currency, /conversionQuality|bankQuoted|referenceRate|offlineEstimate/,
   'Foreign spending should not expose FX diagnostics as a primary page section');
 

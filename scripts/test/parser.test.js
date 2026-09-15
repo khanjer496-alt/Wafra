@@ -1032,17 +1032,20 @@ t('the owner nickname does not classify an ordinary Fishbasket card purchase',
   'Purchase of AED 125.00 at FISHBASKET with Credit Card ending 4821',
   { merchant: 'Fishbasket', category: 'other', type: 'expense', deliberate: false });
 
-const correctedFishbasket = parseSms(
+const globallyCorrectedFishbasket = parseSms(
   'Dear Customer, Your payment instructions of AED 125.00 to Fishbasket for consumer number 1234036 has been processed on 01/08/2026 18:27',
   { fishbasket: 'shopping' },
 );
-if (correctedFishbasket?.categoryGuess === 'shopping' && correctedFishbasket.categoryPinned === true) {
-  pass++; console.log('✓ the user category rule still outranks the corpus-backed biller hint');
+if (globallyCorrectedFishbasket?.categoryGuess === 'other' && globallyCorrectedFishbasket.categoryPinned !== true &&
+    globallyCorrectedFishbasket.paymentFlowSide === 'receipt' && globallyCorrectedFishbasket.billIdentity === 'consumer:4036') {
+  pass++; console.log('✓ a merchant-wide rule cannot classify a registered bill-payment nickname');
 } else {
-  fail++; console.log('✗ the user category rule still outranks the corpus-backed biller hint',
-    JSON.stringify(correctedFishbasket && {
-      category: correctedFishbasket.categoryGuess,
-      pinned: correctedFishbasket.categoryPinned,
+  fail++; console.log('✗ a merchant-wide rule cannot classify a registered bill-payment nickname',
+    JSON.stringify(globallyCorrectedFishbasket && {
+      category: globallyCorrectedFishbasket.categoryGuess,
+      pinned: globallyCorrectedFishbasket.categoryPinned,
+      flow: globallyCorrectedFishbasket.paymentFlowSide,
+      billIdentity: globallyCorrectedFishbasket.billIdentity,
     }));
 }
 
@@ -5043,13 +5046,22 @@ t('an expanded account-reference footer cannot replace a named seller',
 t('an unknown reference payee does not invent a utility bill',
   'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 ABO ALO NO.-8765. The available balance is AED 7,587.88.',
   { merchant: 'Abo Alo', category: 'other', amountFils: 193841 });
-for (const [title, message] of [
-  ['SEWA', 'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.'],
-  ['Homeinet', 'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 1234026 has been processed on 13/07/2026 22:01'],
-]) {
-  const corrected = parseSms(message, { [title.toLowerCase()]: 'other' });
-  ok(`a user-pinned Other category survives the ${title} biller default`,
+{
+  const corrected = parseSms(
+    'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',
+    { sewa: 'other' },
+  );
+  ok('a user-pinned Other category survives the SEWA direct-debit biller default',
     corrected?.categoryGuess === 'other' && corrected?.categoryPinned === true);
+}
+{
+  const corrected = parseSms(
+    'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 1234026 has been processed on 13/07/2026 22:01',
+    { homeinet: 'other' },
+  );
+  ok('a merchant-wide pin cannot override a registered Homeinet bill-payment nickname',
+    corrected?.categoryGuess === 'utilities' && corrected?.categoryPinned !== true &&
+      corrected?.paymentFlowSide === 'receipt' && corrected?.billIdentity === 'consumer:4026');
 }
 const dewaReminder = 'Your DEWA bill of AED 450.00 is due on 25/07/2026.';
 for (const suffix of [

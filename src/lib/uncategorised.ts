@@ -1,4 +1,5 @@
 import { readMerchantCategoryOverride } from '@/lib/categories';
+import { billAliasAppliesTo, billAliasKey, readBillAlias } from '@/lib/bill-alias';
 /**
  * The merchants the app knows by name but not by kind.
  *
@@ -68,10 +69,28 @@ export interface UncategorisedMerchant {
   lastDate: string;
 }
 
+/**
+ * A bank bill-payment nickname whose economic purpose is still unknown.
+ *
+ * Unlike a merchant, this is scoped by the bank's privacy-safe bill identity.
+ * "Fishbasket" can therefore mean Utilities for consumer •4036 without teaching
+ * Wafra that an unrelated card purchase at a real Fishbasket is a utility.
+ */
+export interface UncategorisedPaymentPurpose {
+  key: string;
+  sourceTitle: string;
+  billIdentity: string;
+  count: number;
+  totalFils: number;
+  lastDate: string;
+}
+
 /** The whole answer: the ranked list, plus what it is worth in total. */
 export interface UncategorisedSummary {
   /** Ranked — see `rank` below. Empty when there is nothing to assign. */
   merchants: UncategorisedMerchant[];
+  /** Registered bill payments that need a purpose, scoped to their bill identity. */
+  paymentPurposes: UncategorisedPaymentPurpose[];
   /** Rows that would be recategorised if every merchant here were assigned. */
   rowCount: number;
   /** What those rows add up to, in fils. */
@@ -168,9 +187,16 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
   // here is counted or totalled, because a candidate row is evidence that the
   // merchant needs a category, not a measure of what answering costs.
   const asked = new Set<string>();
+  const askedPurposes = new Map<string, { sourceTitle: string; billIdentity: string }>();
   for (const t of state.transactions) {
     if (isCandidate(t, state.merchantOverrides, live, internal)) {
       asked.add(t.title.trim().toLowerCase());
+    }
+    if (isPaymentPurposeCandidate(t, state.billAliases, live, internal)) {
+      const key = billAliasKey(t.title, t.billIdentity!);
+      if (key && !askedPurposes.has(key)) {
+        askedPurposes.set(key, { sourceTitle: t.title.trim(), billIdentity: t.billIdentity! });
+      }
     }
   }
 
@@ -210,6 +236,7 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
   }
 
   const merchants: UncategorisedMerchant[] = [];
+  const paymentPurposes: UncategorisedPaymentPurpose[] = [];
   let rowCount = 0;
   let totalFils = 0;
   for (const g of groups.values()) {
@@ -232,11 +259,55 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
     totalFils += g.totalFils;
   }
 
+  // Registered bank bill-pay receipts are a different question from merchants.
+  // Count through the exact predicate the bill-alias reducer uses so the number
+  // printed beside the choice is also the blast radius of that choice.
+  for (const [key, purpose] of askedPurposes) {
+    let count = 0;
+    let purposeTotal = 0;
+    let lastDate = '';
+    for (const transaction of state.transactions) {
+      if (!billAliasAppliesTo(transaction, purpose.sourceTitle, purpose.billIdentity)) continue;
+      count += 1;
+      purposeTotal += transaction.amountFils;
+      if (transaction.date > lastDate) lastDate = transaction.date;
+    }
+    if (count === 0) continue;
+    paymentPurposes.push({
+      key,
+      sourceTitle: purpose.sourceTitle,
+      billIdentity: purpose.billIdentity,
+      count,
+      totalFils: purposeTotal,
+      lastDate,
+    });
+    rowCount += count;
+    totalFils += purposeTotal;
+  }
+
   merchants.sort(
     (a, b) => b.totalFils - a.totalFils || b.count - a.count || a.key.localeCompare(b.key),
   );
+  paymentPurposes.sort(
+    (a, b) => b.totalFils - a.totalFils || b.count - a.count || a.key.localeCompare(b.key),
+  );
 
-  return { merchants, rowCount, totalFils };
+  return { merchants, paymentPurposes, rowCount, totalFils };
+}
+
+function isPaymentPurposeCandidate(
+  t: Transaction,
+  aliases: AppState['billAliases'] | undefined,
+  live: Set<string>,
+  internal: Set<string>,
+): boolean {
+  if (t.category !== 'other' || t.type !== 'expense') return false;
+  if (t.paymentFlowSide !== 'receipt' || !t.billIdentity) return false;
+  if (!billAliasKey(t.title, t.billIdentity)) return false;
+  if (!isSpending(t, live, internal) || t.isTransfer || t.cardPaymentSide !== undefined) return false;
+  if (t.userEdited || (t.splits && t.splits.length > 0)) return false;
+  if (readBillAlias(aliases, t.title, t.billIdentity)) return false;
+  return true;
 }
 
 /**
@@ -260,6 +331,9 @@ function isCandidate(
   // `overrideAppliesTo`. A merchant on the list whose tap moves nothing would
   // be an unanswerable question printed as "0 entries".
   if (t.cardPaymentSide !== undefined) return false;
+  // A registered bill-payment nickname is not a merchant identity. It belongs
+  // in the payment-purpose queue where a correction is scoped by billIdentity.
+  if (t.paymentFlowSide === 'receipt') return false;
   if (t.userEdited) return false;
   if (t.splits && t.splits.length > 0) return false;
 
@@ -337,6 +411,7 @@ export function overrideAppliesTo(
   if (t.type !== type) return false;
   if (t.isTransfer) return false;
   if (t.cardPaymentSide !== undefined) return false;
+  if (t.paymentFlowSide === 'receipt') return false;
   if (t.splits && t.splits.length > 0) return false;
   return true;
 }
@@ -351,5 +426,5 @@ export function overrideAppliesTo(
  * answer than showing them nothing.
  */
 export function worthPrompting(summary: UncategorisedSummary): boolean {
-  return summary.merchants.length >= CATEGORISE_PROMPT_THRESHOLD;
+  return summary.merchants.length + summary.paymentPurposes.length >= CATEGORISE_PROMPT_THRESHOLD;
 }
