@@ -262,11 +262,13 @@ export default function SettingsScreen() {
   const [instantAlerts, setInstantAlerts] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
   const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
+  const notifAvailable = Platform.OS === 'android' &&
+    isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   // The per-charge alert exists on both platforms by two different mechanisms
   // and on the web by neither, so the notification group's closing hairline
   // has to be drawn under whichever row is actually last.
   const legacyChargeAlertsAvailable = isLegacyShortcutCaptureActive(relay);
-  const chargeAlertsAvailable = instantAvailable || legacyChargeAlertsAvailable;
+  const chargeAlertsAvailable = instantAvailable || notifAvailable || legacyChargeAlertsAvailable;
 
   const refreshRelayStatus = useCallback(async (): Promise<void> => {
     const generation = ++relayStatusRefreshGeneration.current;
@@ -476,10 +478,15 @@ export default function SettingsScreen() {
 
   const toggleInstantAlerts = async (enabled: boolean) => {
     if (enabled) {
-      const receivesSms = await requestSmsDeliveryPermission();
-      if (!receivesSms) {
-        Alert.alert(t('instantAlertsSmsPermissionTitle'), t('instantAlertsSmsPermissionBody'));
-        return;
+      // Notification-only bank capture should not force RECEIVE_SMS just to
+      // let Wafra confirm an imported transaction. Ask for SMS delivery only
+      // when this device is actually using the SMS path.
+      if (smsGranted) {
+        const receivesSms = await requestSmsDeliveryPermission();
+        if (!receivesSms) {
+          Alert.alert(t('instantAlertsSmsPermissionTitle'), t('instantAlertsSmsPermissionBody'));
+          return;
+        }
       }
       // Android 13 needs the notification permission before anything can be
       // posted. Asking here rather than at delivery time means the failure is
@@ -541,14 +548,7 @@ export default function SettingsScreen() {
     await syncDailySummary({ ...state, dailySummary: true });
   };
 
-  /**
-   * Defaults ON, unlike Android's per-charge banner, and the asymmetry is
-   * deliberate: Android's is a heads-up over whatever is on screen, while this
-   * one is posted passively on a device that iOS setup only asked provisional
-   * authorization for — it lands quietly in Notification Center. Only an
-   * explicit stored `false` turns it off, so a user who never opens this screen
-   * still gets the alerts the relay was set up to deliver.
-   */
+  /** Per-charge Wafra alerts default on; the OS remains the final sound/banner control. */
   const [chargeAlerts, setChargeAlerts] = useState(true);
   /** Which region picker is open, if any. Only one can be. */
   const [regionSheet, setRegionSheet] = useState<'country' | 'language' | null>(null);
@@ -610,9 +610,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const notifAvailable = Platform.OS === 'android' &&
-    isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const instantAlertSourceReady = smsGranted || notifEnabled;
   const [notifDiagnostics, setNotifDiagnostics] = useState<NotificationReaderDiagnostics | null>(null);
   const [notifDiagnosticsBusy, setNotifDiagnosticsBusy] = useState(false);
   const refreshNotificationDiagnostics = useCallback(async () => {
@@ -669,6 +668,11 @@ export default function SettingsScreen() {
           if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(current)))) {
             throw new Error('notification_capture_unavailable');
           }
+          // The bank-listener grant lets Wafra READ bank-app notifications.
+          // A separate Android permission controls whether Wafra can show its
+          // own visible confirmation. Ask here, after the user explicitly
+          // enabled bank notifications — never on app launch.
+          await requestNotificationPermission().catch(() => false);
           refresh();
         } catch {
           if (wasOptedOut) await setCaptureOptOut(true).catch(() => {});
@@ -1471,18 +1475,18 @@ export default function SettingsScreen() {
             (next) => void toggleDailySummary(next),
             !chargeAlertsAvailable,
           )}
-          {instantAvailable &&
+          {(instantAvailable || notifAvailable) &&
             switchRow(
               t('alertEveryCharge'),
-              smsGranted
+              instantAlertSourceReady
                 ? instantAlerts
                   ? t('instantAlertsOn')
                   : t('instantAlertsOff')
-                : t('instantAlertsNeedSms'),
-              instantAlerts && smsGranted,
+                : t('instantAlertsNeedBankSource'),
+              instantAlerts && instantAlertSourceReady,
               (next) => {
-                if (!smsGranted) {
-                  Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
+                if (!instantAlertSourceReady) {
+                  Alert.alert(t('turnOnBankCaptureFirst'), t('turnOnBankCaptureFirstBody'));
                   return;
                 }
                 requestInstantAlertsChange(next);

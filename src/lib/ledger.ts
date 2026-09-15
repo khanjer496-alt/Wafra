@@ -11,9 +11,14 @@ export const isUnassignedIncome = (transaction: Transaction): boolean =>
   transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type === 'income';
 
 /** Account visibility is applied to totals, never to transfer identity. */
+let liveAccountIdsCache: { accounts: Account[]; value: Set<string> } | null = null;
+
 export function liveAccountIds(accounts: Account[]): Set<string> {
-  return new Set([UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID,
+  if (liveAccountIdsCache?.accounts === accounts) return liveAccountIdsCache.value;
+  const value = new Set([UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID,
     ...accounts.filter((account) => !account.archived).map((account) => account.id)]);
+  liveAccountIdsCache = { accounts, value };
+  return value;
 }
 
 export function isTransfer(transaction: Transaction): boolean {

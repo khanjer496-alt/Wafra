@@ -28,6 +28,8 @@ export interface CapturedNotification {
 }
 
 interface NotificationReaderModule {
+  /** Source-free hint that the encrypted native queue changed while JS is alive. */
+  addListener?(event: 'onQueueChanged', listener: () => void): { remove(): void };
   isAvailable(): boolean;
   isEnabled(): boolean;
   hasSystemAccess(): boolean;
@@ -38,6 +40,8 @@ interface NotificationReaderModule {
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;
   /** Explicit heavy recovery pass over notifications still visible in the shade. */
   sweepVisible(): Promise<boolean>;
+  /** Visible Wafra confirmation after a parsed notification is durably stored. */
+  postImportNotice?(title: string, body: string): boolean;
   /** Captured money-related notifications with ts >= sinceMs, oldest first. */
   getCaptured(sinceMs: number): Promise<CapturedNotification[]>;
   ackCaptured(ids: string[]): Promise<boolean>;

@@ -329,3 +329,38 @@ test('foreground notification drain is independent of SMS freshness and Settings
   assert.match(scanner, /acknowledgementPlanned/);
   assert.match(scanner, /unresolved/);
 });
+
+test('bank-app queue changes wake the foreground app without scanning SMS or the full shade', () => {
+  const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
+  const listener = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt');
+  const bridge = read('modules/notification-reader/index.ts');
+  const hook = read('src/hooks/use-auto-import.ts');
+  assert.match(module, /Events\("onQueueChanged"\)/);
+  assert.match(module, /sendEvent\("onQueueChanged", emptyMap<String, Any>\(\)\)/);
+  assert.match(listener, /NotificationReaderModule\.notifyQueueChanged\(\)/);
+  assert.match(bridge, /addListener\?\(event: 'onQueueChanged'/);
+  assert.match(hook, /NotificationReader\.addListener\('onQueueChanged'/);
+  const liveStart = hook.indexOf("NotificationReader.addListener('onQueueChanged'");
+  const liveWindow = hook.slice(Math.max(0, liveStart - 1800), liveStart + 900);
+  assert.match(liveWindow, /runAndroidNotificationDrain/);
+  assert.doesNotMatch(liveWindow, /sweepVisible|getInboxSms|hasSmsPermission/);
+});
+
+test('Wafra transaction alerts are visible and sounding rather than silent', () => {
+  const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
+  const bridge = read('modules/notification-reader/index.ts');
+  const instant = read('modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt');
+  const relay = read('src/lib/background-relay.ts');
+  const notifications = read('src/lib/notifications.ts');
+  assert.match(module, /IMPORT_NOTICE_CHANNEL_ID = "wafra-live-bank-transactions-v2"/);
+  assert.match(module, /NotificationManager\.IMPORTANCE_HIGH/);
+  assert.match(module, /enableVibration\(true\)/);
+  assert.match(bridge, /postImportNotice\?\(title: string, body: string\): boolean/);
+  assert.match(instant, /CHANNEL_ID = "instant-transactions-v2"/);
+  assert.match(instant, /NotificationManager\.IMPORTANCE_HIGH/);
+  assert.match(instant, /enableVibration\(true\)/);
+  assert.doesNotMatch(instant, /setSound\(null, null\)/);
+  assert.match(relay, /sound: 'default'/);
+  assert.match(relay, /interruptionLevel: 'active'/);
+  assert.match(notifications, /shouldPlaySound: true/);
+});
