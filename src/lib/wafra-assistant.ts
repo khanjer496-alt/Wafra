@@ -22,6 +22,7 @@ import { spendingChangeDrivers, type SpendingChangeDriver } from '@/lib/assistan
 import { findRecurringChanges, findUnusualCharges, findPossibleDuplicates, patternAnalysisCoverage, type AssistantPattern } from '@/lib/assistant-patterns';
 import { allocationsOf, amountInCategory } from '@/lib/splits';
 import { activeSubscriptions, detectSubscriptions, trueSubscriptions } from '@/lib/subscriptions';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
 export type AssistantTool =
@@ -43,6 +44,7 @@ export type AssistantTool =
   | 'recurring-changes'
   | 'unusual-charges'
   | 'possible-duplicates'
+  | 'money-review'
   | 'data-coverage';
 
 /**
@@ -78,7 +80,7 @@ export type AssistantToolRequest =
   | { tool: 'net-income-spending'; period: Period }
   | { tool: 'cash-outflow'; period: Period }
   | { tool: 'month-forecast'; period: Period }
-  | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'data-coverage'; period: Period }))
+  | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'money-review' | 'data-coverage'; period: Period }))
   | { tool: 'subscriptions' }
   | { tool: 'upcoming-payments'; withinDays?: number };
 
@@ -130,6 +132,13 @@ export interface AssistantAnswer {
   /** Structured, body-free numbers safe to pass to a future explanation model. */
   data?: Record<string, string | number | boolean | null>;
 }
+
+export type AssistantCorrectionPlan =
+  | { kind: 'merchant-category'; merchant: string; category: CategoryId; direction: 'income' | 'expense' }
+  | { kind: 'transaction-category'; transactionId: string; category: CategoryId }
+  | { kind: 'transfer-ownership'; transactionId: string; ownership: 'own' | 'external' }
+  | { kind: 'not-subscription'; merchant: string }
+  | { kind: 'clarification'; body: string; suggestions?: string[] };
 
 const normalize = (value: string) => value.trim().toLowerCase();
 
@@ -317,7 +326,7 @@ function hasUnsupportedRemainder(question: string): boolean {
   let rest = question;
   for (const [pattern] of CATEGORY_ALIASES) rest = rest.replace(new RegExp(pattern.source, 'g'), ' ');
   rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b/g, ' ');
-  const grammar = new Set(('how much money did do does i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those it all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less higher lower difference different minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone go up down get got gets getting drop dropped blew blow burned burnt burn put many some any else then still ever').split(' '));
+  const grammar = new Set(('how much money did do does should i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those it all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less higher lower difference different minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers weird odd suspicious review reviewing possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone go up down get got gets getting drop dropped blew blow burned burnt burn put many some any anything else then still ever').split(' '));
   return normalizeMerchantText(rest).split(' ').some((token) => token && !grammar.has(token) && !/^\d+$/.test(token));
 }
 
@@ -368,6 +377,90 @@ function resolveMerchant(phrase: string, rows: Transaction[]): { merchant?: stri
   const confident = !second || top.similarity - second.similarity >= 0.12;
   if (confident && top.similarity >= 0.78) return { merchant: top.title };
   return { candidates: scored.slice(0, 4).map((entry) => entry.title) };
+}
+
+function correctionCategory(text: string): CategoryId | undefined {
+  const normalized = normalize(text);
+  const beforeNegation = normalized.split(/\b(?:not|instead of|rather than)\b/)[0];
+  const before = categoriesFromQuestion(beforeNegation);
+  if (before.length === 1) return before[0];
+  const after = normalized.match(/\b(?:actually|instead|rather)\b[,:]?\s*(.*)$/)?.[1];
+  const afterCategories = after ? categoriesFromQuestion(after) : [];
+  return afterCategories.length === 1 ? afterCategories[0] : undefined;
+}
+
+function answerTransactionIds(answer?: AssistantAnswer): string[] {
+  if (!answer?.evidence?.length) return [];
+  return [...new Set(answer.evidence.flatMap((group) => group.transactionIds))];
+}
+
+/**
+ * Parse only explicit, high-confidence ledger corrections. This deliberately
+ * refuses ambiguous pronouns/multi-row evidence instead of guessing which row
+ * the user intended to change.
+ */
+export function planAssistantCorrection(
+  state: AppState,
+  question: string,
+  previousAnswer?: AssistantAnswer,
+): AssistantCorrectionPlan | undefined {
+  const q = normalize(question).replace(/[?!]+$/, '').trim();
+  if (!q) return undefined;
+
+  const explicitNotSubscription = q.match(/^(.+?)\s+(?:is|was)\s+not\s+(?:a\s+)?subscription\.?$/);
+  if (explicitNotSubscription && !/^(?:that|this|it)$/.test(explicitNotSubscription[1].trim())) {
+    const resolved = resolveMerchant(explicitNotSubscription[1].trim(), state.transactions);
+    if (resolved.merchant) return { kind: 'not-subscription', merchant: resolved.merchant };
+    return { kind: 'clarification', body: resolved.candidates?.length
+      ? `Several recorded merchants match “${explicitNotSubscription[1].trim()}”. Name the exact merchant.`
+      : `I could not find a recorded merchant matching “${explicitNotSubscription[1].trim()}”.` };
+  }
+
+  const evidenceIds = answerTransactionIds(previousAnswer);
+  const transferExternal = /^(?:that|this|it)\s+(?:is|was)\s+(?:not\s+my|an?\s+external|someone else(?:'s)?)\s+transfer\.?$/.test(q);
+  const transferOwn = /^(?:that|this|it)\s+(?:is|was)\s+(?:my\s+)?own\s+transfer\.?$|^(?:that|this|it)\s+(?:is|was)\s+(?:a\s+)?transfer\s+between\s+my\s+accounts\.?$/.test(q);
+  if (transferExternal || transferOwn) {
+    if (evidenceIds.length !== 1) return { kind: 'clarification',
+      body: 'That answer contains more than one transaction. Open the transactions behind it and choose the transfer you want to correct.' };
+    const row = state.transactions.find((transaction) => transaction.id === evidenceIds[0]);
+    if (!row || !isTransferCandidate(row)) return { kind: 'clarification',
+      body: 'The referenced transaction is not currently eligible for transfer ownership review.' };
+    return { kind: 'transfer-ownership', transactionId: row.id, ownership: transferOwn ? 'own' : 'external' };
+  }
+
+  const demonstrative = q.match(/^(?:that|this|it)\s+(?:was|is|should be|belongs? (?:in|to))\s+(.+)$/);
+  if (demonstrative) {
+    const category = correctionCategory(demonstrative[1]);
+    if (!category) return undefined;
+    if (evidenceIds.length !== 1) return { kind: 'clarification',
+      body: 'That answer contains more than one transaction. Name the merchant to correct all matching transactions, or open the transaction you mean.' };
+    const row = state.transactions.find((transaction) => transaction.id === evidenceIds[0]);
+    if (!row) return { kind: 'clarification', body: 'That transaction is no longer available.' };
+    if (row.splits?.length) return { kind: 'clarification',
+      body: 'That purchase is split across categories. Open the transaction to edit its split amounts rather than replacing the whole purchase category.' };
+    const meta = CATEGORIES.find((item) => item.id === category);
+    if (meta && meta.type !== row.type && category !== 'other') return { kind: 'clarification',
+      body: `${categoryLabel(category, 'en')} is a ${meta.type} category, but that transaction is recorded as ${row.type}.` };
+    return { kind: 'transaction-category', transactionId: row.id, category };
+  }
+
+  const merchantRule = q.match(/^(.+?)\s+(?:is|was|should be|belongs? (?:in|to))\s+(.+)$/);
+  if (merchantRule && !/^(?:what|which|why|how|when|where|who)\b/.test(merchantRule[1])) {
+    const category = correctionCategory(merchantRule[2]);
+    if (!category) return undefined;
+    const resolved = resolveMerchant(merchantRule[1].trim(), state.transactions);
+    if (!resolved.merchant) return { kind: 'clarification', body: resolved.candidates?.length
+      ? `Several recorded merchants match “${merchantRule[1].trim()}”. Name the exact merchant.`
+      : `I could not find a recorded merchant matching “${merchantRule[1].trim()}”.` };
+    const meta = CATEGORIES.find((item) => item.id === category);
+    const matchingRows = state.transactions.filter((row) => normalize(row.title) === normalize(resolved.merchant!));
+    const recordedTypes = [...new Set(matchingRows.map((row) => row.type))];
+    const direction = category === 'other' && recordedTypes.length === 1 ? recordedTypes[0] : meta?.type ?? 'expense';
+    if (!matchingRows.some((row) => row.type === direction)) return { kind: 'clarification',
+      body: `${resolved.merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en')} would not apply to those transactions.` };
+    return { kind: 'merchant-category', merchant: resolved.merchant, category, direction };
+  }
+  return undefined;
 }
 
 const filterFields = ['accountIds', 'merchant', 'category', 'merchants', 'categories',
@@ -544,6 +637,13 @@ function patternFinding(state: AppState, now: Date, pattern: AssistantPattern): 
   };
 }
 
+function reviewPatternFinding(state: AppState, now: Date, pattern: AssistantPattern): AssistantFinding {
+  const finding = patternFinding(state, now, pattern);
+  const kind = pattern.kind === 'possible-duplicate' ? 'Possible duplicate'
+    : pattern.kind === 'unusual-charge' ? 'Unusual purchase' : 'Recurring change';
+  return { ...finding, title: `${kind} · ${finding.title}` };
+}
+
 function groupedTotals<T extends string>(
   rows: Transaction[],
   key: (transaction: Transaction) => T,
@@ -622,6 +722,41 @@ function executeAssistantToolResult(
       return { tool: request.tool, title: 'Recorded history',
         body: `${coverage.recordCount} recorded transaction${coverage.recordCount === 1 ? '' : 's'} match this view in ${scope}, across ${coverage.accountCount} of ${coverage.totalAccounts} selected account${coverage.totalAccounts === 1 ? '' : 's'}. This describes the records available to Wafra, not complete financial coverage.`,
         coverage, data: { recordCount: coverage.recordCount, accountCount: coverage.accountCount, totalAccounts: coverage.totalAccounts } };
+    }
+    case 'money-review': {
+      const history = filterRows(spendingRows(state, { mode: 'all' }), request);
+      const duplicatePatterns = findPossibleDuplicates(history, spending, now);
+      const unusualPatterns = findUnusualCharges(history, spending, now);
+      const recurringPatterns = findRecurringChanges(history, spending, now, state.notSubscriptions);
+      const combined = [...duplicatePatterns, ...unusualPatterns, ...recurringPatterns];
+      const seen = new Set<string>();
+      const shown = combined.filter((pattern) => {
+        const key = [...pattern.transactionIds].sort().join('|');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 6);
+      const coverage = patternAnalysisCoverage(spending, now);
+      const counts = {
+        duplicateCount: duplicatePatterns.length,
+        unusualCount: unusualPatterns.length,
+        recurringChangeCount: recurringPatterns.length,
+      };
+      return {
+        tool: request.tool,
+        title: 'Things to review',
+        body: shown.length
+          ? `I found ${shown.length} recorded pattern${shown.length === 1 ? '' : 's'} worth reviewing in ${scope}: ${counts.duplicateCount} possible duplicate group${counts.duplicateCount === 1 ? '' : 's'}, ${counts.unusualCount} unusual purchase${counts.unusualCount === 1 ? '' : 's'}, and ${counts.recurringChangeCount} recurring charge change${counts.recurringChangeCount === 1 ? '' : 's'}. These are conservative signals, not proof that anything is wrong.`
+          : `I did not find a duplicate, unusual-purchase, or recurring-change candidate that met the conservative checks in ${scope}. That does not confirm every charge was expected or that the recorded history is complete.`,
+        findings: shown.map((pattern) => reviewPatternFinding(state, now, pattern)),
+        coverage: observedCoverage(state, spending, request, [
+          'Combined review checks duplicates, unusually large same-merchant charges, and recurring amount changes only when enough comparable history exists.',
+          'Split receipts and charges with conversion metadata may be excluded from pattern checks.',
+        ]),
+        suggestions: ['Show possible duplicate charges', 'Show unusual charges', 'Which recurring charges changed?'],
+        data: { ...counts, candidateCount: shown.length, additionalCandidates: combined.length > shown.length,
+          eligibleChargeCount: coverage.eligibleCount, skippedFxCount: coverage.skippedFxCount, skippedSplitCount: coverage.skippedSplitCount },
+      };
     }
     case 'recurring-changes':
     case 'unusual-charges':
@@ -725,15 +860,31 @@ function executeAssistantToolResult(
       // and overall comparison proof still include every scoped contribution.
       const drivers = featured.slice(0, 3).map(({ driver, dimension }) =>
         driverFinding(state, now, request, period, previous ?? period, driver, dimension));
+      const sameDirection = (driver: SpendingChangeDriver) => delta === 0 ? false : driver.deltaFils * delta > 0;
+      const primaryCategory = categoryDrivers.find(sameDirection);
+      const primaryMerchant = merchantDrivers.find(sameDirection);
+      const largestCurrent = [...spending].sort((a, b) => b.amountFils - a.amountFils || b.date.localeCompare(a.date))[0];
+      const purchaseDelta = analysis.currentCount - analysis.previousCount;
+      const purchaseCountSummary = purchaseDelta === 0
+        ? `There were ${analysis.currentCount} purchases in both periods.`
+        : `There were ${analysis.currentCount} purchases, ${Math.abs(purchaseDelta)} ${purchaseDelta > 0 ? 'more' : 'fewer'} than before.`;
+      const driverSummary = prior > 0 && delta !== 0
+        ? [primaryCategory ? `${categoryLabel(primaryCategory.key, 'en')} was the biggest category driver (${primaryCategory.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryCategory.deltaFils))})` : '',
+          primaryMerchant ? `${primaryMerchant.displayTitle ?? primaryMerchant.key} was the biggest merchant driver (${primaryMerchant.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryMerchant.deltaFils))})` : '']
+          .filter(Boolean).join('; ')
+        : '';
       return {
         tool: request.tool,
         title: 'Spending change',
         body: prior === 0
           ? `You spent ${formatLedgerMoney(current)} in ${scope}. I do not have enough earlier spending to make a reliable comparison.`
-          : `You spent ${formatLedgerMoney(current)} in ${scope}, ${pct}% ${delta >= 0 ? 'more' : 'less'} than ${previousScope}. There were ${analysis.currentCount} purchases, compared with ${analysis.previousCount}. Category and merchant changes are two views of the same spending; do not add them together.`,
+          : `You spent ${formatLedgerMoney(current)} in ${scope}, ${pct}% ${delta >= 0 ? 'more' : 'less'} than ${previousScope}. ${driverSummary ? `${driverSummary}. ` : ''}${purchaseCountSummary}${largestCurrent ? ` The largest recorded purchase was ${formatLedgerMoney(largestCurrent.amountFils)} at ${largestCurrent.title}.` : ''} Category and merchant drivers are two views of the same spending, so they should not be added together.`,
         facts: [
           { label: scope, value: formatLedgerMoney(current) },
           { label: previousScope ?? 'Previous period', value: formatLedgerMoney(prior) },
+          { label: 'Purchase count change', value: `${purchaseDelta >= 0 ? '+' : '−'}${Math.abs(purchaseDelta)}` },
+          ...(primaryMerchant ? [{ label: 'Top merchant driver', value: `${primaryMerchant.displayTitle ?? primaryMerchant.key} · ${primaryMerchant.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryMerchant.deltaFils))}` }] : []),
+          ...(largestCurrent ? [{ label: 'Largest current purchase', value: `${largestCurrent.title} · ${formatLedgerMoney(largestCurrent.amountFils)}` }] : []),
           ...categoryChanges.slice(0, 3).map((item) => ({
             label: `${categoryLabel(item.key)} change`,
             value: `${item.delta >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(item.delta))}`,
@@ -741,7 +892,8 @@ function executeAssistantToolResult(
         ],
         findings: previous ? drivers : [],
         data: { currentFils: current, previousFils: prior, deltaFils: delta, deltaPercent: pct,
-          currentCount: analysis.currentCount, previousCount: analysis.previousCount },
+          currentCount: analysis.currentCount, previousCount: analysis.previousCount, purchaseCountDelta: purchaseDelta,
+          largestPurchaseFils: largestCurrent?.amountFils ?? 0 },
       };
     }
 
@@ -934,7 +1086,7 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
     if ((request.tool === 'net-income-spending' || request.tool === 'cash-outflow') && hasContentFilter(request)) {
       return executeAssistantToolResult(state, clarification('This calculation supports account filters. Ask for spending or income separately to filter categories or merchants.'), now);
     }
-    if (['recurring-changes', 'unusual-charges', 'possible-duplicates'].includes(request.tool) && hasCategoryFilter(request)) {
+    if (['recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review'].includes(request.tool) && hasCategoryFilter(request)) {
       return executeAssistantToolResult(state, clarification('Charge patterns need whole purchases. Ask by merchant or account without category filters.'), now);
     }
   }
@@ -973,7 +1125,7 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
     const shown = [...spending].sort((a, b) => b.amountFils - a.amountFils || b.date.localeCompare(a.date))
       .slice(0, Math.max(1, Math.min(request.limit ?? 5, 10)));
     groups = [{ ...evidence('Largest purchases shown', shown), ordered: true }];
-  } else if (['recurring-changes', 'unusual-charges', 'possible-duplicates'].includes(request.tool)) {
+  } else if (['recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review'].includes(request.tool)) {
     const ids = new Set((answer.findings ?? []).flatMap((finding) => finding.evidence[0]?.transactionIds ?? []));
     groups = [evidenceFor(state, now, 'Charges to review', state.transactions.filter((row) => ids.has(row.id)))];
   } else groups = [evidence(request.tool === 'top-merchants' ? 'All spending used to rank merchants'
@@ -1099,6 +1251,7 @@ export function planAssistantQuestion(
   const recurring = /\b(?:recurring|subscription|subscriptions|renewal|renewals)\b/.test(q) && /\b(?:change|changed|changes|increase|increased|decrease|decreased|compare)\b/.test(q);
   const unusual = /\b(?:unusual|unusually|outlier|outliers)\b/.test(q);
   const duplicates = /\b(?:duplicate|duplicates|duplicated|charged twice|double charged)\b/.test(q);
+  const moneyReview = /\b(?:anything unusual|anything weird|anything odd|anything suspicious|anything i should review|what should i review|review my spending|review my transactions)\b/.test(q);
   const coverageQuestion = /\b(?:coverage|data gaps|missing imports|import status|import history|recorded history)\b/.test(q);
   const comparison = !net && !recurring && (contextualComparison || /\b(?:compare|more than|less than|higher|lower|increase|decrease|change|changed|difference|different|vs|versus)\b|why.*spend/.test(q));
   const upcoming = /\b(?:due|upcoming|bills?)\b/.test(q) && !/\b(?:paid|spent|did|last|previous)\b/.test(q);
@@ -1209,6 +1362,11 @@ export function planAssistantQuestion(
   if (comparison && /\b(?:more than|less than|vs|versus)\b/.test(q) && multipleDimensions && parsed.periods.length < 2) return clarification('Name two periods to compare the combined spending. Comparing individual categories, merchants, or accounts against each other is not supported yet.');
   if (recurring && /\b(?:increased?|decreased?|higher|lower|more|less)\b/.test(intentText)) return clarification('I can show recorded recurring changes in both directions. Ask which recurring charges changed.');
   if (coverageQuestion) return { tool: 'data-coverage', ...scoped };
+  if (moneyReview) {
+    if (isIncomeQuestion || net) return clarification('The combined review checks recorded spending. Ask about income separately.');
+    if (hasCategoryFilter(filters)) return clarification('The combined review needs whole purchases. Ask without a category filter, or review that category directly.');
+    return { tool: 'money-review', ...scoped };
+  }
   if (recurring || unusual || duplicates) {
     if ([recurring, unusual, duplicates].filter(Boolean).length > 1 || /\b(?:daily|average|forecast|projected|top|largest|biggest|net|cash out)\b/.test(q)) return clarification('Ask for one charge pattern at a time without a ranking, average, or forecast condition.');
     if (hasCategoryFilter(filters)) return clarification('Charge patterns need whole purchases. Ask by merchant or account without category filters.');
@@ -1282,7 +1440,7 @@ export function latestAssistantContext(requests: AssistantToolRequest[]): Assist
 export function suggestedAssistantQuestions(state: AppState, period = currentMonthPeriod(), now = new Date()): string[] {
   const rows = spendingRows(state, period);
   const topCategory = groupedCategoryTotals(rows)[0]?.key;
-  const suggestions = ['How much did I spend?', 'What are my largest purchases?'];
+  const suggestions = ['How much did I spend?', 'Anything unusual?', 'What are my largest purchases?'];
   if (period.mode !== 'all' && topCategory) suggestions.push(`Why did my ${categoryLabel(topCategory, 'en').toLowerCase()} spending change?`);
   if (rows.some((row) => amountInCategory(row, 'rent') > 0)) suggestions.push('How much did I spend excluding rent?');
   if (rows.length >= 3) suggestions.push('Which recurring charges changed?');
@@ -1297,6 +1455,7 @@ export function assistantFollowUpQuestions(request?: AssistantToolRequest): stri
   if (!('period' in request)) return ['What is due in the next 7 days?', 'How much did I spend?'];
   if (request.tool === 'data-coverage') return ['What about last month?', 'Show my largest purchases'];
   if (request.tool === 'income-total') return ['What about last month?', 'Show those transactions'];
+  if (request.tool === 'money-review') return ['Show possible duplicate charges', 'Show unusual charges', 'Which recurring charges changed?'];
   if (['recurring-changes', 'unusual-charges', 'possible-duplicates'].includes(request.tool)) return ['What about last month?', 'Show those transactions'];
   if (request.tool === 'merchant-breakdown' || request.tool === 'category-breakdown') {
     return ['What about last month?', 'Why did it change?', 'Show those transactions'];

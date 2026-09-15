@@ -345,6 +345,31 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('conversation-correction')) {
+    const name = 'conversation-correction';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const before = await ask(page, 'How much did I spend on groceries this month?');
+        assert.ok((await before.innerText()).includes(money(GROCERY_TOTAL)));
+
+        const corrected = await ask(page, `${JSON.stringify(MERCHANT)} should be groceries`);
+        const correctedText = await corrected.innerText();
+        assert.match(correctedText, /Updated/i);
+        assert.ok(correctedText.includes(money(GROCERY_TOTAL + 777)), correctedText);
+        assert.equal(await turns(page).count(), 2, 'assistant-led ledger edit should preserve the visible conversation');
+        assert.match(await turns(page).first().innerText(), /ledger has changed/i,
+          'the pre-correction answer must be visibly stale rather than silently rewritten');
+
+        const after = await ask(page, 'How much did I spend on groceries this month?');
+        assert.ok((await after.innerText()).includes(money(GROCERY_TOTAL + 777)));
+        await shot(page, name);
+        return { corrected: correctedText, totalMinor: GROCERY_TOTAL + 777 };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;

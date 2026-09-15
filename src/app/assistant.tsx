@@ -16,15 +16,17 @@ import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
+import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 import {
-  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, runWafraAssistant, suggestedAssistantQuestions,
-  type AssistantAnswer, type AssistantFinding, type AssistantToolRequest,
+  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant, suggestedAssistantQuestions,
+  type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
 const MAX_TURNS = 12;
@@ -53,7 +55,8 @@ export default function AssistantScreen() {
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const { fontScale, height } = useWindowDimensions();
-  const { state, getStateSnapshot, getStateGeneration } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, editTransaction, resolveTransfers,
+    setMerchantOverride, setNotSubscription } = useStore();
   const { period } = usePeriod();
   const periodKey = JSON.stringify(period);
   const generation = getStateGeneration();
@@ -77,6 +80,7 @@ export default function AssistantScreen() {
   const [inputHeight, setInputHeight] = useState(minInputHeight);
   const currentTurns = turns.filter((turn) => turn.generation === generation);
   const latest = currentTurns.at(-1);
+  const correctionContextTurn = [...currentTurns].reverse().find((turn) => turn.answer.tool !== 'help');
   const conversationContext = latestAssistantContext(currentTurns.map((turn) => turn.request));
   const contextPeriod = conversationContext && 'period' in conversationContext ? conversationContext.period : period;
   const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [], [state, period]);
@@ -126,12 +130,92 @@ export default function AssistantScreen() {
     if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(result.answer.title + '. ' + result.answer.body);
   };
 
-  const ask = (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
+  const appendCorrectionResult = (
+    clean: string,
+    summary: string,
+    beforeGeneration: number,
+    answeredAt: Date,
+    contextRequest?: AssistantToolRequest,
+  ) => {
+    const snapshot = getStateSnapshot();
+    const currentGeneration = getStateGeneration();
+    // This generation change was caused by the correction the user just asked
+    // for. Preserve the transcript, but keep the old input references so those
+    // earlier answers visibly become stale rather than silently changing.
+    previousGeneration.current = currentGeneration;
+    const base = contextRequest
+      ? executeAssistantTool(snapshot, contextRequest, answeredAt)
+      : executeAssistantTool(snapshot, { tool: 'help', clarification: summary }, answeredAt);
+    const answer: AssistantAnswer = contextRequest
+      ? { ...base, title: `Updated · ${base.title}`, body: `${summary} ${base.body}` }
+      : base;
+    const request = contextRequest ?? { tool: 'help' as const, clarification: summary };
+    const id = ++nextId.current;
+    needsScroll.current = true;
+    setTurns((current) => {
+      const rebased = current.filter((turn) => turn.generation === beforeGeneration)
+        .map((turn) => ({ ...turn, generation: currentGeneration }));
+      return [...rebased.slice(-(MAX_TURNS - 1)), {
+        id, generation: currentGeneration, question: clean, request, answer,
+        answeredAt, inputs: ledgerInputs(snapshot),
+      }];
+    });
+    setQuestion('');
+    setInputHeight(minInputHeight);
+    setEvidenceSelection(null);
+    setError(null);
+    setToday(toISODate(answeredAt));
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(answer.title + '. ' + answer.body);
+  };
+
+  const applyCorrection = async (
+    clean: string,
+    correction: Exclude<AssistantCorrectionPlan, { kind: 'clarification' }>,
+    snapshot: AppState,
+    now: Date,
+  ) => {
+    const beforeGeneration = getStateGeneration();
+    const contextRequest = correctionContextTurn?.request ?? conversationContext;
+    let summary: string;
+    if (correction.kind === 'merchant-category') {
+      setMerchantOverride(correction.merchant, correction.category, true, correction.direction);
+      summary = `Updated ${correction.merchant} to ${categoryLabel(correction.category, 'en')} for matching ${correction.direction} transactions.`;
+    } else if (correction.kind === 'transaction-category') {
+      editTransaction(correction.transactionId, { category: correction.category });
+      summary = `Updated that transaction to ${categoryLabel(correction.category, 'en')}.`;
+    } else if (correction.kind === 'not-subscription') {
+      setNotSubscription(correction.merchant, true);
+      summary = `Marked ${correction.merchant} as not a subscription.`;
+    } else {
+      const row = snapshot.transactions.find((transaction) => transaction.id === correction.transactionId);
+      if (!row) throw new Error('Correction target disappeared');
+      await resolveTransfers({
+        ids: [row.id], ownership: correction.ownership,
+        expectedFingerprints: { [row.id]: transferFingerprint(row) }, expectedGeneration: beforeGeneration,
+      });
+      summary = correction.ownership === 'own'
+        ? 'Marked that transaction as a transfer involving your own accounts.'
+        : 'Marked that transfer as involving an external party.';
+    }
+    appendCorrectionResult(clean, summary, beforeGeneration, now, contextRequest);
+  };
+
+  const ask = async (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
     const clean = value.trim().slice(0, 1000);
     const snapshot = getStateSnapshot();
     if (!clean || !snapshot.hydrated || generation !== getStateGeneration()) return;
     const now = new Date();
     try {
+      const correction = usePrevious ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer) : undefined;
+      if (correction?.kind === 'clarification') {
+        const request: AssistantToolRequest = { tool: 'help', clarification: correction.body, suggestions: correction.suggestions };
+        appendAnswer(clean, { request, answer: executeAssistantTool(snapshot, request, now) }, snapshot, now);
+        return;
+      }
+      if (correction) {
+        await applyCorrection(clean, correction, snapshot, now);
+        return;
+      }
       const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? conversationContext : null, period);
       appendAnswer(clean, result, snapshot, now);
     } catch {
