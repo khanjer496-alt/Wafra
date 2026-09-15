@@ -11,9 +11,11 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Chip, Toggle } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
+import { TextField } from '@/components/ui/text-field';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
@@ -57,6 +59,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [accountSearch, setAccountSearch] = useState('');
   /**
    * The merchant-rule question, frozen at the moment Save was pressed.
    *
@@ -353,16 +357,30 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             <ThemedText type="meta" themeColor="textTertiary">
               {t('account')}
             </ThemedText>
-            <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {state.accounts.map((a) => (
-                <Chip
-                  key={a.id}
-                  label={a.name}
-                  active={accountId === a.id}
-                  onPress={() => setAccountId(a.id)}
-                />
-              ))}
-            </ScrollView>
+            {(() => {
+              const selected = state.accounts.find((a) => a.id === accountId) ?? null;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={selected ? `${t('account')}: ${selected.name}` : t('account')}
+                  onPress={() => setAccountPickerOpen(true)}
+                  style={({ pressed }) => [
+                    styles.accountTrigger,
+                    {
+                      borderColor: selected ? selected.color : theme.controlBorder,
+                      backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                    },
+                  ]}>
+                  {selected ? <>
+                    <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
+                    <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{selected.name}</ThemedText>
+                  </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
+                    {t('account')}
+                  </ThemedText>}
+                  <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+                </Pressable>
+              );
+            })()}
           </View>
 
           <View style={styles.transferRow}>
@@ -559,6 +577,50 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           )}
         />
       )}
+      <BottomSheet
+        visible={accountPickerOpen}
+        onClose={() => { setAccountPickerOpen(false); setAccountSearch(''); }}
+        title={t('account')}
+        testID="entry-detail-account-picker">
+        <View style={styles.pickerContent}>
+          <TextField
+            label={t('account')}
+            value={accountSearch}
+            onChangeText={setAccountSearch}
+            placeholder={t('account')}
+            autoCorrect={false}
+          />
+          <View style={styles.pickerList}>
+            {state.accounts
+              .filter((a) => {
+                const needle = accountSearch.trim().toLocaleLowerCase();
+                return !needle || a.name.toLocaleLowerCase().includes(needle);
+              })
+              .map((a) => {
+                const active = accountId === a.id;
+                return (
+                  <Pressable
+                    key={a.id}
+                    accessibilityRole="radio"
+                    accessibilityLabel={a.name}
+                    accessibilityState={{ checked: active }}
+                    onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
+                    style={({ pressed }) => [
+                      styles.pickerRow,
+                      {
+                        borderColor: theme.cardBorder,
+                        backgroundColor: active ? `${a.color}22` : pressed ? theme.backgroundSelected : 'transparent',
+                      },
+                    ]}>
+                    <View style={[styles.accountDot, { backgroundColor: a.color }]} />
+                    <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{a.name}</ThemedText>
+                    {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
+                  </Pressable>
+                );
+              })}
+          </View>
+        </View>
+      </BottomSheet>
     </BottomSheet>
   );
 }
@@ -626,4 +688,28 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
   },
+  accountTrigger: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three - 2,
+    paddingVertical: Spacing.two,
+    borderRadius: Radius.control,
+    borderWidth: 1.5,
+  },
+  accountTriggerName: { flex: 1, minWidth: 0 },
+  accountDot: { width: 10, height: 10, borderRadius: 5 },
+  pickerContent: { gap: Spacing.three - 2, maxHeight: 480 },
+  pickerList: { gap: 0 },
+  pickerRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three - 4,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pickerRowName: { flex: 1, minWidth: 0 },
 });
