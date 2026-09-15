@@ -1,5 +1,5 @@
 import { spendingCopy } from '@/lib/reference-copy';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
@@ -88,6 +88,15 @@ export function SpendingOverview(p: Props) {
     category: slice.key === '__tail' ? null : (slice.key as CategoryId),
     share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
   })), [slices, p.totalFils]);
+  // Held-slice state for the interactive donut. Tapping a real category slice
+  // opens its detail sheet (the same handler the row does); tapping any slice
+  // also swaps the center label from the period total to that slice's total
+  // for a moment, so the tap has a visible payload beyond the outward pop.
+  const [activeSlice, setActiveSlice] = useState<string | null>(null);
+  const activeItem = activeSlice ? legendItems.find((item) => item.key === activeSlice) ?? null : null;
+  const centerAmount = activeItem?.category !== undefined
+    ? (slices.find((s) => s.key === activeItem?.key)?.value ?? p.totalFils)
+    : p.totalFils;
   return <View style={styles.root} testID="spending-categories">
     <View style={styles.hero}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
@@ -100,9 +109,19 @@ export function SpendingOverview(p: Props) {
           slices={slices}
           size={224}
           thickness={28}
-          centerLabel={w.spent}
-          centerValue={<Money fils={p.totalFils} type="subtitle" decimals={false} />}
-          centerMeta={p.periodLabel}
+          centerLabel={activeItem ? activeItem.label.toUpperCase() : w.spent}
+          centerValue={<Money fils={centerAmount} type="subtitle" decimals={false}
+            color={activeItem?.color} />}
+          centerMeta={activeItem
+            ? spendingShareLabel(activeItem.share, language)
+            : p.periodLabel}
+          onPeekSlice={setActiveSlice}
+          onPressSlice={(key) => {
+            // Only real category ids navigate to the detail sheet; the '__tail'
+            // aggregation has no single category to open, and its peek label
+            // still gets cleared by onPeekSlice(null) on press-out.
+            if (key !== '__tail') p.onCategory(key as CategoryId);
+          }}
         />
       </View>
       {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">

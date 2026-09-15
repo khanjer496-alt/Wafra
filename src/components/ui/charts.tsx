@@ -3,12 +3,15 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   FadeIn,
   ReduceMotion,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withSpring,
 } from 'react-native-reanimated';
-import Svg, { Circle, Line, Path } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path } from 'react-native-svg';
+
+const AnimatedG = Animated.createAnimatedComponent(G);
 
 import { ThemedText } from '@/components/themed-text';
 import { rampColor } from '@/components/ui/data-viz';
@@ -56,6 +59,64 @@ export interface DonutSlice {
   color: string;
 }
 
+const DONUT_POP_PX = 6;
+const DONUT_POP_SPRING = { damping: 18, stiffness: 260, mass: 0.7, reduceMotion: ReduceMotion.System } as const;
+
+/**
+ * One animated slice of the donut. Owns its `pressed` shared value and pops
+ * outward along its own radial direction on press-in, springing back on
+ * release. The Path stays static; the wrapping AnimatedG carries the transform,
+ * so per-frame work is one matrix update per pressed slice on the UI thread —
+ * the JS thread never wakes up during the animation.
+ */
+function DonutSlice({
+  d,
+  fill,
+  midAngle,
+  onPress,
+  onPressIn,
+  onPressOut,
+}: {
+  d: string;
+  fill: string;
+  midAngle: number;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+}) {
+  const reduced = useReducedMotion();
+  const pressed = useSharedValue(0);
+  // The direction from centre to slice centroid — the axis the slice pops
+  // along, so 'the visible bit grows outward' rather than a jarring uniform
+  // scale that also drags the inner edge into the label.
+  const dx = Math.cos(midAngle);
+  const dy = Math.sin(midAngle);
+  const animatedProps = useAnimatedProps(() => ({
+    transform: [
+      { translateX: dx * DONUT_POP_PX * pressed.value },
+      { translateY: dy * DONUT_POP_PX * pressed.value },
+    ],
+  }));
+  const interactive = onPress || onPressIn || onPressOut;
+  return (
+    <AnimatedG animatedProps={animatedProps}>
+      <Path
+        d={d}
+        fill={fill}
+        onPressIn={interactive ? () => {
+          pressed.value = reduced ? 1 : withSpring(1, DONUT_POP_SPRING);
+          onPressIn?.();
+        } : undefined}
+        onPressOut={interactive ? () => {
+          pressed.value = reduced ? 0 : withSpring(0, DONUT_POP_SPRING);
+          onPressOut?.();
+        } : undefined}
+        onPress={onPress}
+      />
+    </AnimatedG>
+  );
+}
+
 /**
  * A ringed donut with a hollow center for a headline figure. The ring is drawn
  * as separate SVG arcs so each slice can carry its own colour without becoming
@@ -63,6 +124,11 @@ export interface DonutSlice {
  * the donut owns the shape. When there is only one non-empty slice we still
  * draw it as a full ring rather than a crescent, since a lone crescent reads as
  * "a piece is missing" rather than "one category".
+ *
+ * Slices are interactive: `onPressSlice` fires on tap, and each slice pops out
+ * radially while pressed via a Reanimated shared value driving the SVG group's
+ * transform on the UI thread — no per-frame JS work, no reflow, no interference
+ * with a list scrolling beneath.
  */
 export function CategoryDonut({
   slices,
@@ -71,6 +137,8 @@ export function CategoryDonut({
   centerLabel,
   centerValue,
   centerMeta,
+  onPressSlice,
+  onPeekSlice,
 }: {
   slices: DonutSlice[];
   size?: number;
@@ -78,6 +146,11 @@ export function CategoryDonut({
   centerLabel?: string;
   centerValue?: React.ReactNode;
   centerMeta?: string;
+  /** Called with the slice's key on tap. Absent = donut is decorative. */
+  onPressSlice?: (key: string) => void;
+  /** Called on press-in (finger down) and press-out (finger up or drag out).
+   *  Useful for peek-in-the-center effects where the label follows the touch. */
+  onPeekSlice?: (key: string | null) => void;
 }) {
   const theme = useTheme();
   const total = slices.reduce((s, x) => s + Math.max(0, x.value), 0);
@@ -153,11 +226,16 @@ export function CategoryDonut({
       const y4 = cy + Math.sin(s) * r0;
       // A filled ring wedge (outer arc → inner arc) so each slice carries its
       // own colour without a stroke join darkening it against its neighbour.
+      const d = `M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${large} 0 ${x4},${y4} Z`;
       paths.push(
-        <Path
+        <DonutSlice
           key={slice.key}
-          d={`M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${large} 0 ${x4},${y4} Z`}
+          d={d}
           fill={slice.color}
+          midAngle={(s + e) / 2}
+          onPress={onPressSlice ? () => onPressSlice(slice.key) : undefined}
+          onPressIn={onPeekSlice ? () => onPeekSlice(slice.key) : undefined}
+          onPressOut={onPeekSlice ? () => onPeekSlice(null) : undefined}
         />,
       );
       a += span;
