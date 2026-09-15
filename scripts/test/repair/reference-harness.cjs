@@ -136,7 +136,7 @@ function createHarness(options = {}) {
   deps['@/lib/leaving-soon']={daysPhrase:n=>lang==='ar'?`خلال ${n} أيام`:`In ${n} days`};
   deps['@/lib/dashboard-projection']={projectDashboard:()=>({hero:{...summary,netFils:summary.incomeFils-summary.expenseFils},live:true,
     activityRows:state.transactions.filter(tx=>tx.date.slice(0,7)==='2026-09').slice(0,4),accountById:new Map(state.accounts.map(a=>[a.id,a])),internalTransactionIds:new Set(),
-    unreadFormats:{count:0,shouldPrompt:false},uncategorised:{shouldPrompt:false,summary:{merchants:[]}},
+    unreadFormats:{count:0,shouldPrompt:false},uncategorised:{shouldPrompt:false,summary:{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0}},
     upcoming:{items:state.bills.map(b=>({id:b.id,title:b.title,kind:'bill',amountFils:b.amountFils,daysLeft:b.dueDay-6,dateISO:`2026-09-0${b.dueDay}`,billId:b.id}))}})};
   local('@/components/themed-text');local('@/components/ui/icon');local('@/components/ui/money');local('@/components/ui/category-avatar');
   local('@/components/merchant-spending-link');

@@ -96,6 +96,7 @@ const names = (s) => uncategorisedMerchants(s).merchants.map((m) => m.merchant);
 
 eq('an empty ledger produces an empty list', uncategorisedMerchants(state([])), {
   merchants: [],
+  paymentPurposes: [],
   rowCount: 0,
   totalFils: 0,
 });
@@ -108,7 +109,7 @@ eq(
       tx({ category: 'dining', title: 'Pizza Hut' }),
     ]),
   ),
-  { merchants: [], rowCount: 0, totalFils: 0 },
+  { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 },
 );
 
 ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategorisedMerchants(state([]))));
@@ -141,6 +142,40 @@ ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategori
   });
   eq('the summary totals every row on the list', [out.rowCount, out.totalFils], [9, 96300]);
   ok('three merchants clears the prompt floor', worthPrompting(out));
+}
+
+/* ── Bank bill-payment nicknames are purposes, not merchants ────────────── */
+{
+  const fishBill = tx({
+    title: 'Fishbasket', amountFils: 1216800, paymentFlowSide: 'receipt',
+    billIdentity: 'consumer:4036',
+  });
+  const realFishbasket = tx({ title: 'Fishbasket', amountFils: 8500 });
+  const otherBill = tx({
+    title: 'Fishbasket', amountFils: 31395, paymentFlowSide: 'receipt',
+    billIdentity: 'consumer:4026',
+  });
+  const out = uncategorisedMerchants(state([fishBill, realFishbasket, otherBill], { billAliases: {} }));
+
+  eq('a bill-pay nickname is not merged with a real merchant of the same name',
+    [out.merchants.length, out.paymentPurposes.length], [1, 2]);
+  eq('ordinary Fishbasket remains a merchant question', out.merchants[0].count, 1);
+  eq('same nickname with different bill identities stays separate',
+    out.paymentPurposes.map((item) => item.billIdentity).sort(), ['consumer:4026', 'consumer:4036']);
+  ok('purpose keys are identity scoped rather than bare merchant names',
+    out.paymentPurposes.every((item) => item.key.includes('|fishbasket')));
+
+  const learned = uncategorisedMerchants(state([fishBill, realFishbasket], {
+    billAliases: { 'consumer:4036|fishbasket': { title: 'Fishbasket', category: 'utilities' } },
+  }));
+  eq('a learned bill purpose disappears without hiding the real merchant',
+    [learned.paymentPurposes.length, learned.merchants.map((m) => m.merchant)], [0, ['Fishbasket']]);
+
+  const unsafe = uncategorisedMerchants(state([
+    tx({ title: 'Mystery payment', paymentFlowSide: 'receipt', billIdentity: undefined }),
+  ], { billAliases: {} }));
+  eq('a bill payment without safe identity never creates a global merchant rule',
+    [unsafe.merchants.length, unsafe.paymentPurposes.length], [0, 0]);
 }
 
 {
@@ -224,6 +259,8 @@ ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategori
   ok('a flagged transfer is not spending and is left alone', !applies({ isTransfer: true }));
   ok('a card-payment leg is not spending and is left alone',
     !applies({ cardPaymentSide: 'debit' }));
+  ok('a registered bill-payment nickname never takes a merchant-wide rule',
+    !applies({ paymentFlowSide: 'receipt', billIdentity: 'consumer:4036' }));
   ok('a hand-split row keeps the category pinned to its largest part',
     !applies({
       splits: [

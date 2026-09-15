@@ -89,7 +89,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   // bank-alert/settings workflow, so they must not suppress unrelated cleanup
   // prompts such as merchant categorisation or unread formats here.
   const uncategorisedSummary = historyImportBusy
-    ? { merchants: [], rowCount: 0, totalFils: 0 }
+    ? { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }
     : uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
   const hideUnreadPrompt = historyImportBusy || (homeOnly && uncategorised.shouldPrompt);

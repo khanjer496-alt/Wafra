@@ -41,10 +41,11 @@ function createWorkflowHarness(options={}) {
  Object.assign(store,{storageFailure:null,storageRecoveryState:null,hydrationFailed:false});
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'}}],canSelectMarket:()=>true});
- d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],rowCount:0},overrideAppliesTo:()=>false};
+ d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
+ d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
  d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};

@@ -419,19 +419,29 @@ const S = {
     ar: '{count} عملية · {currencies} عملة',
   },
   foreignConvertedTotal: {
-    en: '{currency} total after conversion',
-    ar: 'الإجمالي بعملة {currency} بعد التحويل',
+    en: 'Spent in foreign currencies',
+    ar: 'الإنفاق بالعملات الأجنبية',
   },
   foreignOriginalsKept: {
-    en: 'Original amounts stay beside every {currency} conversion.',
-    ar: 'يبقى المبلغ الأصلي بجانب كل تحويل إلى {currency}.',
+    en: 'Original amounts stay beside the ledger amount on every charge.',
+    ar: 'يبقى المبلغ الأصلي بجانب مبلغ السجل في كل عملية.',
   },
-  currencyBreakdown: { en: 'Currency breakdown', ar: 'تفصيل العملات' },
+  currencyBreakdown: { en: 'Currencies', ar: 'العملات' },
+  foreignCurrencyOriginalSummary: {
+    en: '{amount} · {count} charge{s}',
+    ar: '{amount} · {count} عملية',
+  },
+  foreignCurrencyFilter: {
+    en: '{currency} · {count} charge{s}',
+    ar: '{currency} · {count} عملية',
+  },
+  foreignSeeAllCurrencies: { en: 'See all {count}', ar: 'عرض كل العملات · {count}' },
+  foreignShowFewerCurrencies: { en: 'Show fewer currencies', ar: 'عرض عملات أقل' },
   conversionQuality: { en: 'Conversion quality', ar: 'جودة التحويل' },
   bankQuoted: { en: 'Bank quoted', ar: 'حسب البنك' },
   referenceRate: { en: 'Reference rate', ar: 'سعر مرجعي' },
   offlineEstimate: { en: 'Offline estimate', ar: 'تقدير دون اتصال' },
-  foreignRecent: { en: 'Recent foreign charges', ar: 'أحدث العمليات الأجنبية' },
+  foreignRecent: { en: 'Transactions', ar: 'العمليات' },
   noForeignActivity: {
     en: 'No foreign-currency charges in this period.',
     ar: 'لا توجد عمليات بعملة أجنبية في هذه الفترة.',
@@ -656,12 +666,12 @@ const S = {
   // without this row a user who sorts down to two merchants is locked out of
   // the screen mid-job and left fixing rows one at a time — the exact chore
   // the screen exists to replace.
-  sortShops: { en: 'Sort your shops', ar: 'صنّف متاجرك' },
+  sortShops: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
   sortShopsCount: {
-    en: '{count} shop{s} with no category yet',
-    ar: '{count} متجر بلا تصنيف حتى الآن',
+    en: '{count} item{s} need your input',
+    ar: '{count} حالات تحتاج إدخالك',
   },
-  sortShopsNone: { en: 'Every shop has a category', ar: 'كل متجر له تصنيف' },
+  sortShopsNone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   improveAccuracyHint: {
     en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
     ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
@@ -753,7 +763,7 @@ const S = {
   // rows the parser read perfectly: the shop's name is right, and no rule list
   // will ever know what "AL BAIT ALHAMAWI SUP" sells. Only the user knows, so
   // the app asks them once per shop instead of shipping another release.
-  categoriseMerchants: { en: 'Sort merchants', ar: 'تصنيف المتاجر' },
+  categoriseMerchants: { en: 'Improve categories', ar: 'تحسين التصنيفات' },
   categoriseIntro: {
     en: 'Wafra reads the shop name off your bank alert but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
     ar: 'تقرأ وفرة اسم المتجر من تنبيه البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
@@ -770,14 +780,35 @@ const S = {
     en: '{count} entr{ending} moved to {category}',
     ar: 'نُقلت {count} عملية إلى {category}',
   },
+  categorisePurposeAssigned: {
+    en: '{count} matching entr{ending} moved to {category}. Wafra will remember this bill reference.',
+    ar: 'نُقلت {count} دفعة مطابقة إلى {category}. سيتذكر وفرة مرجع هذه الفاتورة.',
+  },
+  categorisePaymentPurpose: {
+    en: 'BANK PAYMENT · PURPOSE UNKNOWN',
+    ar: 'دفعة بنكية · الغرض غير معروف',
+  },
+  categorisePaymentPurposeHint: {
+    en: 'This is the name saved in your bank, not necessarily the real biller. Choose what the payment was for. Wafra remembers only this bill reference — not every transaction with this name.',
+    ar: 'هذا هو الاسم المحفوظ في البنك وليس بالضرورة اسم المفوتر الحقيقي. اختر غرض الدفعة. سيتذكر وفرة مرجع هذه الفاتورة فقط، وليس كل عملية تحمل الاسم نفسه.',
+  },
+  categorisePurposeA11y: {
+    en: 'Choose what the bank payment {merchant} was for',
+    ar: 'اختر غرض الدفعة البنكية {merchant}',
+  },
+  categoriseShowAll: {
+    en: 'Review all {count}',
+    ar: 'عرض كل الحالات: {count}',
+  },
+  categoriseShowPriority: { en: 'Show priority items only', ar: 'عرض الحالات الأهم فقط' },
   categoriseChooseA11y: {
     en: 'Choose a category for {merchant}',
     ar: 'اختر تصنيفاً لـ {merchant}',
   },
-  categoriseDone: { en: 'Every merchant is sorted', ar: 'تم تصنيف كل المتاجر' },
+  categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   categoriseDoneBody: {
-    en: 'Nothing is sitting in Other with a shop name behind it. New shops turn up here as you spend at them.',
-    ar: 'لم يبق شيء في «أخرى» خلفه اسم متجر. ستظهر المتاجر الجديدة هنا عند الإنفاق فيها.',
+    en: 'Confident matches are handled automatically. New unclear merchants or bank-payment nicknames will appear here only when Wafra cannot classify them safely.',
+    ar: 'يتعامل وفرة تلقائياً مع الحالات الواضحة. لن تظهر هنا إلا المتاجر أو أسماء دفعات البنك التي لا يمكن تصنيفها بأمان.',
   },
   categoriseDoneCount: {
     en: 'You sorted {count} entr{ending} just now.',
@@ -786,16 +817,16 @@ const S = {
   // The Home prompt. Same floor and the same reasoning as the unread-formats
   // row above it: below three merchants this says nothing at all.
   uncategorisedMerchantCount: {
-    en: '{count} merchant{s} with no category',
-    ar: '{count} متجر بلا تصنيف',
+    en: '{count} item{s} need your input',
+    ar: '{count} حالات تحتاج إدخالك',
   },
   uncategorisedMerchantHint: {
     en: 'One tap files every entry from that shop, past and future.',
     ar: 'ضغطة واحدة تصنّف كل عمليات المتجر، السابقة والقادمة.',
   },
   categoriseMerchantsA11y: {
-    en: 'Sort {count} merchants that have no category',
-    ar: 'تصنيف {count} متجر بلا تصنيف',
+    en: 'Review {count} unclear categories',
+    ar: 'راجع {count} تصنيفات غير واضحة',
   },
   spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
   cardSpentThisMonth: {
