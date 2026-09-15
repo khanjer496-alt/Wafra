@@ -1414,7 +1414,6 @@ function ktSources(dir) {
   )?.[0] || '';
   ok('Accuracy renders a local-capture-aware iOS source-retention state',
     /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(accuracyScreen) &&
-      /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(settings) &&
       /noFormats === 'ios-local'[\s\S]*?'formatsNotKeptIosLocal'/.test(accuracyScreen) &&
       /processed Message text is not retained in the ledger/.test(settingsAccuracyRow) &&
       /pending records expire after 30 days/.test(settingsAccuracyRow) &&

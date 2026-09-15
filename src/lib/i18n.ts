@@ -711,9 +711,17 @@ const S = {
     ar: '{count} حالات تحتاج إدخالك',
   },
   sortShopsNone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
+  sortShopsSettingsDetail: {
+    en: 'Review unclear merchant and bank-payment categories',
+    ar: 'راجع تصنيفات المتاجر ودفعات البنك غير الواضحة',
+  },
   improveAccuracyHint: {
     en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
     ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
+  },
+  improveAccuracySettingsDetail: {
+    en: 'Review bank-message formats Wafra could not read confidently',
+    ar: 'راجع صيغ الرسائل البنكية التي لم يقرأها وفرة بثقة',
   },
   couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
   noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },

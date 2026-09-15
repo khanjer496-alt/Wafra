@@ -58,7 +58,9 @@ test('headless JS processes only a tiny event window and uses the normal durable
 
   assert.match(autoImport, /maxNotificationRows\?: number/);
   assert.match(autoImport, /includeNotificationQueue\?: boolean/);
-  assert.match(autoImport, /retained\.slice\(0, notificationLimit\)/);
+  assert.match(autoImport,
+    /retained[\s\S]*?filter\(\(row\) => !unresolvedNotificationIdsThisSession\.has\(row\.id\)\)[\s\S]*?slice\(0, notificationLimit\)/,
+    'headless/foreground queue bounds apply after same-session unresolved rows are skipped');
 });
 
 test('background capture and foreground StoreProvider never become competing ledger owners', () => {

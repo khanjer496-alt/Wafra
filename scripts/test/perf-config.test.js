@@ -852,6 +852,18 @@ function bodyOf(source, header) {
     'the immediately previous build already persisted this exact maintenance under current parser and transfer receipts');
 
   const home = stripComments(read('src/screens/journal-home-screen.tsx'));
+  const settings = stripComments(read('src/app/settings.tsx'));
+  ok('Home never schedules category/parser cleanup scans after becoming usable',
+    /includeCleanupPrompts:\s*false/.test(home) &&
+      !/homeCleanupReady|setHomeCleanupReady/.test(home),
+    'uncategorisedMerchants and unreadFormatCount are full-history maintenance; dedicated screens own them, not Home');
+
+  ok('Settings renders cleanup routes without scanning the full ledger for badge counts',
+    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings) &&
+      /sortShopsSettingsDetail/.test(settings) &&
+      /improveAccuracySettingsDetail/.test(settings),
+    'opening Settings to change a toggle or send diagnostics must stay independent of transaction count');
+
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&
       (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&

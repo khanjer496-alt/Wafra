@@ -92,7 +92,6 @@ export default function JournalHomeScreen() {
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
-  const [homeCleanupReady, setHomeCleanupReady] = useState(false);
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -134,20 +133,12 @@ export default function JournalHomeScreen() {
 
   useEffect(() => {
     if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
-    // Mark Home usable from the first committed ledger frame. Cleanup prompts
-    // walk the full ledger and are not part of the money the user came to see,
-    // so keep them off the first render and wait for the interaction queue.
+    // Mark Home usable from the first committed ledger frame. Category/parser
+    // cleanup is intentionally NOT scheduled from Home: both dedicated tools
+    // remain available in Settings, and a large ledger must not pay multiple
+    // full-history scans a moment after the first frame just to render a prompt.
     markLaunchPhase('first-usable-home');
-    if (homeCleanupReady) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const task = InteractionManager.runAfterInteractions(() => {
-      timer = setTimeout(() => setHomeCleanupReady(true), 900);
-    });
-    return () => {
-      task.cancel();
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [focused, homeCleanupReady, privacyGateCleared, state.hydrated, state.onboarded]);
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
   useEffect(() => {
     if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
     // The insight is lower priority again. Its Home variant deliberately skips
@@ -174,25 +165,22 @@ export default function JournalHomeScreen() {
   // twice before Android could feel responsive, even when no money changed.
   // A review expiring still invalidates the Home projection explicitly below.
   const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  // The projection hides the categorise/unread prompts while a history
-  // import is running, so that transition has to invalidate it too.
-  // dashboard-projection.ts still reads state.historyImport for
-  // historyImportBusy, which gates uncategorisedSummary and hideUnreadPrompt;
-  // homeCleanupReady is an additional focus gate, not a replacement for it.
-  const historyImportRunning = state.historyImport?.status === 'running';
   const dashboard = useMemo(() => projectDashboard({
     state,
     period,
     now,
     surface: 'home',
     includeInsights: false,
-    includeCleanupPrompts: homeCleanupReady,
+    // Cleanup counts are useful only when the user chooses the cleanup tool.
+    // Keeping them off Home makes the normal navigation path O(current period)
+    // rather than O(full ledger) on a 10k+ row history.
+    includeCleanupPrompts: false,
   }),
     // Status/progress changes must not recompute the financial projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
-      state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language, homeCleanupReady,
-      state.ledgerMoney, state.marketId, period, projectionDay, historyImportRunning]);
+      state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
+      state.ledgerMoney, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const homeInsight = useMemo(() =>

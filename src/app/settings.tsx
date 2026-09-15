@@ -58,8 +58,6 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useAutoImport } from '@/hooks/use-auto-import';
-import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
-import { uncategorisedMerchants } from '@/lib/uncategorised';
 import {
   clearBackgroundRelayRows,
   getChargeAlertPreference,
@@ -185,24 +183,6 @@ export default function SettingsScreen() {
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
-  // Both scans walk every transaction. Keyed on the rows rather than the
-  // whole store, so a toggle on this very screen does not re-run them.
-  const formats = useMemo(() => unreadFormatCount(state),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions]);
-  // Home only offers the categorise prompt above a floor, so a user who sorts
-  // their way down to two merchants loses the only route to the screen with
-  // the job half done. This row is the permanent way in, and it stays visible
-  // at zero to say so.
-  const unsorted = useMemo(() => uncategorisedMerchants(state),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, state.merchantOverrides, state.notSubscriptions]);
-  // A count of 0 is not a verdict on every device — see noFormatsReason().
-  const noFormats = noFormatsReason({
-    relayPlatform: isRelayPlatform(),
-    localCaptureAvailable: isCaptureAvailable(),
-    privateMode: state.privateMode,
-  });
   const version = Constants.expoConfig?.version ?? '1.0.0';
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
@@ -1436,24 +1416,12 @@ export default function SettingsScreen() {
           )}
           {linkRow(
             t('sortShops'),
-            unsorted.merchants.length + unsorted.paymentPurposes.length > 0
-              ? tf('sortShopsCount', {
-                  count: unsorted.merchants.length + unsorted.paymentPurposes.length,
-                  s: unsorted.merchants.length + unsorted.paymentPurposes.length === 1 ? '' : 's',
-                })
-              : t('sortShopsNone'),
+            t('sortShopsSettingsDetail'),
             () => router.push('/categorise'),
           )}
           {linkRow(
             t('improveAccuracy'),
-            formats > 0
-              ? tf('unreadFormatsCount', {
-                  count: formats,
-                  s: formats === 1 ? '' : 's',
-                })
-              : noFormats === 'none-found'
-                ? t('noUnrecognized')
-                : t('formatsNotKeptRow'),
+            t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
           )}
           <SectionHeader title={t('dataHeader')} />
