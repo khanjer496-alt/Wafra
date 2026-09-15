@@ -29,6 +29,7 @@ import {
   inspectGenericBankEventForReview,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import {
   inspectUnparsedLaunchAlert,
   normalizeUnparsedLaunchTemplate,
@@ -39,6 +40,9 @@ import {
   trustedBankNotificationSender,
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
+import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
@@ -57,12 +61,38 @@ export interface AndroidNotificationImportDiagnostics {
   ignored: number;
   unresolved: number;
   unresolvedTrustedBank: number;
+  unresolvedVerifiedFinance: number;
   unresolvedFinancialCandidate: number;
   unresolvedParserMiss: number;
   unresolvedReviewRefusal: number;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
+
+const FINANCIAL_APP_LABEL_RE = /\b(?:bank|banking|banque|banco|banca|credit\s*union|finance|financial|mobile\s*money|wallet)\b|بنك|مصرف|محفظة|बैंक/iu;
+const KNOWN_FINTECH_LABEL_RE = /\b(?:revolut|wise|monzo|n26|paypal|venmo|cash\s*app|cashapp|klarna|stc\s*pay|mada\s*pay)\b/iu;
+
+/**
+ * Strong local identity for an unseen Play-installed finance app.
+ *
+ * This is deliberately based on the installed app's Android label rather than
+ * the notification title/body, which any app can author. A known bank sender
+ * alias is strongest; otherwise explicit banking/finance wording in the app's
+ * own label is enough to let a confident posted parser result auto-import.
+ */
+const verifiedFinancialAppSender = (appLabel: string): string | null => {
+  const label = appLabel.normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!label) return null;
+  const candidates = [
+    label,
+    label.replace(/\b(?:mobile|personal|digital|online)\s+(?:banking|bank)\b/giu, '').trim(),
+    label.replace(/\b(?:mobile|banking|bank|app)\b/giu, '').trim(),
+  ].filter((value, index, all) => value.length >= 2 && all.indexOf(value) === index);
+  const registered = candidates.find((candidate) =>
+    detectLaunchMarketFromSender(candidate) !== null || hasUniversalInstitutionSender(candidate));
+  if (registered) return registered;
+  return FINANCIAL_APP_LABEL_RE.test(label) || KNOWN_FINTECH_LABEL_RE.test(label) ? label : null;
+};
 
 let latestAndroidNotificationImportDiagnostics: AndroidNotificationImportDiagnostics | null = null;
 
@@ -429,6 +459,10 @@ export type SourceFreeRefusedAlertDecision =
   | { kind: 'review'; candidate: SourceFreeReviewCandidate }
   | { kind: 'ignored'; reason: 'promotion' | 'non-financial' | 'unrecognized' };
 
+const isPromotionalBankPush = (source: string): boolean =>
+  /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(source) &&
+  !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(source);
+
 /**
  * A parsed notification from an unconfirmed Android package is strong enough
  * to show the user a bounded Review proposal, but never strong enough to write
@@ -442,11 +476,8 @@ function parsedFinancialCandidateReview(
   if (parsed.kind !== 'transaction' || !Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0) {
     return null;
   }
-  // This helper is reached only after the launch parser succeeded. That parser
-  // deliberately supports only the launch ledger packs here (AED/SAR), both of
-  // which are two-decimal currencies. Do not broaden this fallback into a
-  // general FX adapter for an unconfirmed app package.
-  if (parsed.currency !== 'AED' && parsed.currency !== 'SAR') return null;
+  const money = ledgerMoneySpec(parsed.currency);
+  if (!money) return null;
   const missingField = () => ({
     value: null,
     evidence: 'missing' as const,
@@ -461,9 +492,9 @@ function parsedFinancialCandidateReview(
       }
     : null;
   const amount = {
-    currency: parsed.currency,
+    currency: money.currency,
     minorUnits: String(parsed.amountFils),
-    exponent: 2,
+    exponent: money.exponent,
   };
   const explicitAmount = {
     value: amount,
@@ -516,6 +547,80 @@ function parsedFinancialCandidateReview(
   return candidate;
 }
 
+const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
+  'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment',
+]);
+
+/**
+ * Convert one source-grounded worldwide event into the same structured row the
+ * legacy launch parser emits. This is intentionally stricter than Review:
+ * transfers, unknown direction/status, ambiguous money and statement/bill facts
+ * remain review-only. Currency comes from ISO metadata, never a country default.
+ */
+function parsedUniversalPosting(
+  event: UniversalBankEvent,
+  source: string,
+  overrides: Record<string, import('@/lib/types').CategoryId>,
+  market?: string | null,
+): ParsedSms | null {
+  if (event.decision !== 'review' || event.status !== 'posted' ||
+      (event.direction !== 'debit' && event.direction !== 'credit') ||
+      !AUTOMATIC_UNIVERSAL_FAMILIES.has(event.family) ||
+      event.amount.evidence !== 'explicit' || !event.amount.value) return null;
+
+  if ((event.family === 'refund' && event.direction !== 'credit') ||
+      (event.family !== 'refund' && event.direction !== 'debit')) return null;
+
+  const spec = ledgerMoneySpec(event.amount.value.currency);
+  if (!spec || spec.exponent !== event.amount.value.exponent ||
+      !/^[1-9]\d{0,39}$/.test(event.amount.value.minorUnits)) return null;
+  let minor: bigint;
+  try { minor = BigInt(event.amount.value.minorUnits); } catch { return null; }
+  if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+
+  const type = event.direction === 'credit' ? 'income' : 'expense';
+  const suggestion = suggestUniversalCategory(event, {
+    type,
+    overrides,
+    market: market ?? undefined,
+  });
+  const explicitMerchant = event.merchant.evidence === 'explicit'
+    ? event.merchant.value?.trim() ?? ''
+    : '';
+  const fallbackTitle = event.family === 'refund' ? 'Refund'
+    : event.family === 'cash-withdrawal' ? 'ATM withdrawal'
+      : event.family === 'fee' ? 'Bank fee'
+        : event.family === 'utility' ? 'Utility payment'
+          : event.family === 'recurring-payment' ? 'Recurring payment'
+            : 'Card purchase';
+  const merchant = suggestion.merchant || explicitMerchant || fallbackTitle;
+  const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+  const card = instrument?.last4
+    ? {
+        last4: instrument.last4,
+        kind: instrument.kind === 'account' ? 'account' as const : 'unknown' as const,
+      }
+    : null;
+  return {
+    kind: 'transaction',
+    type,
+    amountFils: Number(minor),
+    currency: spec.currency,
+    merchant,
+    date: event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null,
+    dueDay: null,
+    minDueFils: null,
+    card,
+    reference: null,
+    transferHint: false,
+    snapshotFils: null,
+    snapshotKind: null,
+    categoryGuess: suggestion.category,
+    categoryDeliberate: !suggestion.needsReview,
+    raw: source,
+  };
+}
+
 /**
  * One source-free refusal policy shared by Android inbox capture and iOS local
  * capture. Source and sender are consumed only while inspecting; neither can
@@ -534,9 +639,7 @@ export function inspectSourceFreeRefusedAlert(input: {
   // A generic amount detector can read "Get AED 50 cashback on your next
   // purchase" as a posted purchase. The launch parser already refused it;
   // never turn a bank-app offer into an actionable spending review.
-  if (input.channel === 'push' &&
-    /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(input.source) &&
-    !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(input.source)) {
+  if (input.channel === 'push' && isPromotionalBankPush(input.source)) {
     return { kind: 'ignored', reason: 'promotion' };
   }
   if (!hasBankAlertMoneyHint(input.source) &&
@@ -846,9 +949,10 @@ export async function scanInbox(
       // the bank's own savings pot rather than a shop, and money moving to the
       // bank's own brand name is moving inside your own bank.
       const worldwide = inspectWorldwide(sms.body, sms.address);
-      // A globally identified issuer must never be interpreted as an AED/SAR
-      // foreign-card purchase merely because that launch pack is active. The
-      // routed alert remains review-only until its own bank/template gates pass.
+      // Global SMS sender IDs stay review-first. Sender strings are useful
+      // issuer evidence, but unlike an Android package identity they are not a
+      // device-installed trust anchor. UAE/Saudi retain their mature automatic
+      // parser; other markets use the sanitized worldwide Review path below.
       const p = parseLaunchAlert(sms.body, sms.address, worldwide);
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
@@ -994,6 +1098,7 @@ export async function scanInbox(
         ignored: 0,
         unresolved: 0,
         unresolvedTrustedBank: 0,
+        unresolvedVerifiedFinance: 0,
         unresolvedFinancialCandidate: 0,
         unresolvedParserMiss: 0,
         unresolvedReviewRefusal: 0,
@@ -1006,37 +1111,66 @@ export async function scanInbox(
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
-        const sourceClass = n.sourceClass;
-        if (sourceClass !== 'trusted-bank' && sourceClass !== 'financial-candidate') continue;
+        const nativeSourceClass = n.sourceClass;
+        if (nativeSourceClass !== 'trusted-bank' && nativeSourceClass !== 'play-finance' &&
+            nativeSourceClass !== 'financial-candidate') continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
-        // The curated package list is stronger issuer evidence, not a permanent
-        // support list. Any financial candidate is still sent through the real
-        // transaction parser below. What package provenance controls is whether
-        // a parser result may be written automatically on first sight.
-        //
-        // Native can prove only "Google Play app + financial-looking
-        // notification" for an unknown package. A chat/shopping app can satisfy
-        // that description, so sourceClass (or a spoofable package/title string)
-        // cannot safely authorize a ledger write. The first confident event from
-        // a genuinely new bank goes to Review; confirming it learns the package,
-        // and future confident events auto-import without a new app release.
+        // Unknown Play apps enter native capture only after financial-context and
+        // money gates. Before forcing a first-transaction Review, also verify the
+        // INSTALLED app's own Android label. A recognized bank alias or explicit
+        // banking/finance identity is stronger than notification copy and can
+        // authorize a confident parser result immediately. Truly ambiguous apps
+        // remain review-first and may still be learned from an explicit user
+        // confirmation.
+        const verifiedSender = nativeSourceClass === 'financial-candidate'
+          ? verifiedFinancialAppSender(n.appLabel ?? '')
+          : null;
+        const sourceClass = nativeSourceClass === 'financial-candidate' && verifiedSender
+          ? 'play-finance' as const
+          : nativeSourceClass;
         const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoAuthorized = sourceClass === 'trusted-bank' || learned;
-        // An unconfirmed arbitrary package name never gets to impersonate a
-        // bank merely by choosing a convincing Android package/title string.
-        const sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ? `${n.pkg} ${n.title}` : '');
+        const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
+          (learned ? `${n.pkg} ${n.title}` : '');
+        if (isPromotionalBankPush(source)) {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          notificationIds.add(n.id);
+          if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
+            await yieldToUi();
+            resetParseYieldState(notificationYield);
+          }
+          continue;
+        }
         const worldwide = inspectWorldwide(
           source,
           sender,
         );
-        // Every admitted financial candidate reaches the parser. Curated
-        // packages keep their exact market pin; everything else uses only the
-        // message's own market/money evidence until its package is confirmed.
-        const p = trustedMarket === 'AE' || trustedMarket === 'SA'
+        // Every admitted financial candidate reaches the parser. UAE/Saudi keep
+        // their mature regional grammar as a fast path. A curated, locally
+        // verified Play-finance, or previously confirmed package from any other
+        // country may then use the universal structured parser in native ISO
+        // currency. Only genuinely ambiguous app identity remains Review-first.
+        const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : parseLaunchAlert(source, sender, worldwide);
+        const universalEvent = !launchParsed && autoAuthorized
+          ? inspectGenericBankEventForReview(source, sender)
+          : null;
+        const routedMarket = trustedMarket ??
+          (worldwide?.route.decision === 'single' ? worldwide.route.market : null);
+        const universalParsed = universalEvent
+          ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
+          : null;
+        const parsedCurrencies = new Set(parsed.map((row) => row.currency));
+        const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
+        const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
+        const p = launchParsed ?? (
+          universalParsed && (!requiredCurrency || universalParsed.currency === requiredCurrency)
+            ? universalParsed
+            : null
+        );
         const pushSource = { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
@@ -1082,6 +1216,7 @@ export async function scanInbox(
         if (!handled && notificationImportStats) {
           notificationImportStats.unresolved += 1;
           if (sourceClass === 'trusted-bank') notificationImportStats.unresolvedTrustedBank += 1;
+          else if (sourceClass === 'play-finance') notificationImportStats.unresolvedVerifiedFinance += 1;
           else notificationImportStats.unresolvedFinancialCandidate += 1;
           if (!p) notificationImportStats.unresolvedParserMiss += 1;
           else notificationImportStats.unresolvedReviewRefusal += 1;

@@ -44,6 +44,8 @@ for (const platform of ['ios', 'android']) {
       const calls = [];
       h.deps['@/lib/wafra-assistant'] = {
         suggestedAssistantQuestions: () => [], assistantFollowUpQuestions: () => [],
+        latestAssistantContext: () => undefined, planAssistantCorrection: () => undefined,
+        executeAssistantTool: () => ({ tool: 'spending-total', title: 'Answer', body: 'A local answer' }),
         runWafraAssistant: (_state, question) => {
           calls.push(question);
           return { answer: { tool: 'spending-total', title: 'Answer', body: 'A local answer' }, request: { tool: 'spending-total', period: { mode: 'month', key: '2026-09' } } };

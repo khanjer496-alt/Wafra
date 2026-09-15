@@ -30,7 +30,11 @@ import {
   MARKETS,
   withMarketPackForParsing,
 } from '@/lib/markets';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { interpretBankAlert } from '@/lib/bank-alert-interpreter';
+import { inspectUniversalAlert } from '@/lib/alert-market-detection';
+import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
+import { inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
 import { normalizeUnparsedLaunchTemplate } from '@/lib/unparsed-launch-alert';
@@ -303,6 +307,24 @@ function pdfPasswordFailure(error: unknown): 'pdf_password_required' | 'pdf_pass
 
 function statementCurrencyForMarket(market: string): 'AED' | 'SAR' {
   return market === 'SA' ? 'SAR' : 'AED';
+}
+
+function statementCurrencyForRequest(
+  req: Request,
+  legacyMarket: string,
+): { currency: string } | { error: true } {
+  const rawCurrency = req.headers.get('x-wafra-ledger-currency');
+  const rawExponent = req.headers.get('x-wafra-ledger-exponent');
+  // Backwards compatibility for already-shipped clients. Current builds always
+  // send the ledger's explicit ISO denomination and never infer it from country.
+  if (rawCurrency === null && rawExponent === null) {
+    return { currency: statementCurrencyForMarket(legacyMarket) };
+  }
+  if (rawCurrency === null || rawExponent === null) return { error: true };
+  const spec = ledgerMoneySpec(rawCurrency);
+  const exponent = Number(rawExponent);
+  if (!spec || !Number.isInteger(exponent) || spec.exponent !== exponent) return { error: true };
+  return { currency: spec.currency };
 }
 
 /**
@@ -1489,6 +1511,13 @@ export default {
           : null;
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
+      const universalInspection = !isTest
+        ? inspectUniversalAlert({ source: text, sender: sender ?? '' })
+        : null;
+      const routedGlobalMarket = universalInspection?.route.decision === 'single' &&
+        universalInspection.route.market !== 'AE' && universalInspection.route.market !== 'SA'
+        ? universalInspection.route.market
+        : null;
       // Choose UAE/Saudi from this alert's sender/currency evidence. The
       // paired device market is only a fallback for older formats without
       // explicit evidence; it must not turn SAR into AED on an en-US phone.
@@ -1500,25 +1529,28 @@ export default {
       // rules (islamic / ownPot / brand) never fire without it.
       const parsedMarket = isTest
         ? device.market
-        : detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
-      const interpretation = !isTest && sender
+        : routedGlobalMarket ?? detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
+      const interpretation = !isTest && !routedGlobalMarket && sender
         ? interpretBankAlert({
             source: text,
             sender,
             market: parsedMarket as 'AE' | 'SA',
           })
         : null;
-      const parsedWithoutSender = !isTest && !sender
+      const parsedWithoutSender = !isTest && !routedGlobalMarket && !sender
         ? withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () => parseSms(text))
         : null;
       const parsed = interpretation?.outcome === 'parsed'
         ? interpretation.parsed
         : parsedWithoutSender;
       const review = interpretation?.outcome === 'review' ? interpretation.review : null;
+      const universalReview = !parsed && !review && !isTest
+        ? sanitizeUniversalReviewEvent(inspectGenericBankEventForReview(text, sender ?? ''))
+        : null;
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
       // from the sender, and most of them are none of our business.
-      if (!parsed && !isTest && !review) return empty(204);
+      if (!parsed && !isTest && !review && !universalReview) return empty(204);
 
       const receivedAt = new Date(
         isTest ? Date.now() : resolveReceivedAt(body?.receivedAt, Date.now()),
@@ -1548,13 +1580,23 @@ export default {
           device.requestSecret,
           `review-template:${sender ?? ''}:${normalizeUnparsedLaunchTemplate(text)}`,
         ));
-        return {
-          relayReview: true as const,
-          id: `ari1_${sourceDigest}`,
-          sourceKey: `arc1_${sourceDigest}`,
-          templateKey: `art1_${templateDigest}`,
-          review,
-        };
+        return review
+          ? {
+              relayReview: true as const,
+              reviewKind: 'launch' as const,
+              id: `ari1_${sourceDigest}`,
+              sourceKey: `arc1_${sourceDigest}`,
+              templateKey: `art1_${templateDigest}`,
+              review,
+            }
+          : {
+              relayReview: true as const,
+              reviewKind: 'universal' as const,
+              id: `ari1_${sourceDigest}`,
+              sourceKey: `arc1_${sourceDigest}`,
+              templateKey: `art1_${templateDigest}`,
+              event: universalReview!,
+            };
       })();
       const rowWithReceipt = {
         ...row,
@@ -1734,6 +1776,8 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/import/pdf') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      const requestedMoney = statementCurrencyForRequest(req, device.market);
+      if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       if (req.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/pdf') {
         return json({ error: 'pdf_required' }, 415);
       }
@@ -1759,7 +1803,7 @@ export default {
       try {
         extracted = await extractPdfStatementRows(
           incoming.bytes,
-          statementCurrencyForMarket(device.market),
+          requestedMoney.currency,
           pdfPassword(req),
         );
       } catch (error) {
@@ -1815,6 +1859,8 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/import/csv') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      const requestedMoney = statementCurrencyForRequest(req, device.market);
+      if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
       if (!CSV_CONTENT_TYPES.has(contentType)) return json({ error: 'csv_required' }, 415);
       const incoming = await readBytes(req, MAX_CSV_BYTES);
@@ -1825,7 +1871,7 @@ export default {
       try {
         parsed = parseStatementCsv(
           decodeCsv(incoming.bytes),
-          statementCurrencyForMarket(device.market),
+          requestedMoney.currency,
           MAX_IMPORT_ROWS,
         );
       } catch (error) {

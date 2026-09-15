@@ -162,6 +162,11 @@ ok('direct CSV upload requires admin scope, an allowed media type, and a byte ca
     /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
     /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
     /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+ok('current statement uploads use explicit ISO ledger money instead of device country',
+  /x-wafra-ledger-currency/.test(worker) && /x-wafra-ledger-exponent/.test(worker) &&
+    /ledgerMoneySpec\(rawCurrency\)/.test(worker) && /spec\.exponent !== exponent/.test(worker) &&
+    /extractPdfStatementRows\([\s\S]{0,140}requestedMoney\.currency/.test(worker) &&
+    /parseStatementCsv\([\s\S]{0,140}requestedMoney\.currency/.test(worker));
 ok('forwarded attachments share aggregate attachment and row ceilings',
   /const MAX_EMAIL_ATTACHMENTS = 8/.test(worker) &&
     /let importedRows = 0/.test(worker) &&

@@ -1,5 +1,6 @@
 import type { AppState } from '@/lib/types';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -19,6 +20,8 @@ const nonnegative: Check = (value) => integer(value) && (value as number) >= 0;
 const positive: Check = (value) => integer(value) && (value as number) > 0;
 const finitePositive: Check = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
 const category: Check = (value) => typeof value === 'string' && categoryIds.has(value);
+const ledgerCurrency: Check = (value) => typeof value === 'string' &&
+  value === value.trim().toUpperCase() && ledgerMoneySpec(value) !== null;
 const oneOf = (...values: unknown[]): Check => (value) => values.includes(value);
 const optional = (row: RecordValue, checks: Record<string, Check>): boolean =>
   Object.entries(checks).every(([key, check]) => row[key] === undefined || check(row[key]));
@@ -132,7 +135,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
     marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
     themePreference: oneOf('system', 'light', 'dark'),
-    onboardingCurrencyEvidence: oneOf(null, 'AED', 'SAR'),
+    onboardingCurrencyEvidence: (v) => v === null || ledgerCurrency(v),
     onboardingProfile: (v) => v === null || onboardingProfile(v),
     onboardingPlan: (v) => v === null || (record(v) && required(v, {
       goalIds: arrayOf(oneOf('emergency', 'travel', 'home')),

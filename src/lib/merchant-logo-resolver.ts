@@ -20,7 +20,10 @@ type BrandfetchSearchResult = {
   claimed?: unknown;
   brandId?: unknown;
 };
-const CACHE_PREFIX = 'wafra:merchant-logo:v3:';
+// v4 invalidates negative results produced by the old exact/core-only matcher.
+// Descriptors such as "Cloudflare San Francisco" used to be cached as misses
+// even when Brandfetch returned Cloudflare as the first claimed brand.
+const CACHE_PREFIX = 'wafra:merchant-logo:v4:';
 const POSITIVE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
 const SEARCH_TIMEOUT_MS = 4_000;
@@ -36,10 +39,17 @@ const PAYMENT_PREFIX = /^(?:(?:pos|purchase|card purchase|debit card purchase|cr
 const PROCESSOR_PREFIX = /^(?:paypal|stripe|square|sq|sumup|adyen|opn|2c2p|tst|sp)\s*[*:/-]\s*/iu;
 const GENERIC_ONLY = /^(?:shop|store|market|restaurant|cafe|coffee|payment|purchase|merchant|online|retail|supermarket|grocery|food|services?|trading|general trading)$/iu;
 const NON_MERCHANT_ONLY = /^(?:(?:incoming|outgoing|bank|own|internal)?\s*(?:money\s+)?transfer|(?:atm|cash)\s+withdrawal|(?:credit\s+)?card\s+payment|payment\s+(?:received|sent)|salary|cash\s+deposit|refund|reversal)$/iu;
-const DESCRIPTOR_WORDS = new Set([
-  'app', 'business', 'cafe', 'coffee', 'company', 'co', 'food', 'general', 'grocery', 'groceries',
-  'hypermarket', 'inc', 'llc', 'ltd', 'market', 'online', 'pay', 'payment', 'payments', 'restaurant',
-  'sales', 'send', 'service', 'services', 'shop', 'store', 'supermarket', 'topup', 'trading',
+const SAFE_BRAND_DESCRIPTOR_WORDS = new Set([
+  'app', 'business', 'co', 'company', 'inc', 'llc', 'ltd', 'online', 'pay', 'payment', 'payments',
+  'sales', 'send', 'service', 'services', 'topup',
+]);
+const NON_LOCATION_SUFFIX_WORDS = new Set([
+  'bakery', 'barber', 'barbershop', 'beauty', 'cafe', 'cafeteria', 'charity', 'clinic', 'club',
+  'construction', 'contracting', 'cooperative', 'credit', 'design', 'donation', 'employee', 'exchange',
+  'foundation', 'garage', 'grocery', 'gym', 'hospital', 'hotel', 'insurance', 'laundry', 'market',
+  'medical', 'pharmacy', 'plumbing', 'rail', 'restaurant', 'salon', 'school', 'secret', 'services',
+  'shop', 'society', 'spa', 'store', 'supermarket', 'tailoring', 'trading', 'transfer', 'university',
+  'unknown',
 ]);
 
 function normalized(value: string): string {
@@ -88,7 +98,26 @@ function cacheKey(name: string): string {
 }
 
 function brandCore(value: string): string {
-  return normalized(value).split(' ').filter(token => token && !DESCRIPTOR_WORDS.has(token)).join(' ');
+  return normalized(value).split(' ').filter(token => token && !SAFE_BRAND_DESCRIPTOR_WORDS.has(token)).join(' ');
+}
+
+/**
+ * Card descriptors often append the acquiring city to a real brand name.
+ * Brandfetch already ranks the intended brand first in cases such as
+ * "Cloudflare San Francisco", "Clemta Lewes" and "TorBox Sheridan". We can
+ * safely use that signal without maintaining a worldwide city list, provided
+ * the result is claimed, first-ranked, and the suffix does not look like a
+ * different type of business ("Apple Cafe", "Tamara Restaurant", etc.).
+ */
+function likelyLocationSuffix(query: string, brandName: string): boolean {
+  const queryTokens = normalized(query).split(' ').filter(Boolean);
+  const brandTokens = normalized(brandName).split(' ').filter(Boolean);
+  if (brandTokens.length === 0 || queryTokens.length <= brandTokens.length) return false;
+  if (!brandTokens.every((token, index) => queryTokens[index] === token)) return false;
+  const suffix = queryTokens.slice(brandTokens.length);
+  if (suffix.length === 0 || suffix.length > 3) return false;
+  return suffix.every(token =>
+    /^[\p{L}][\p{L}'’-]*$/u.test(token) && !NON_LOCATION_SUFFIX_WORDS.has(token));
 }
 
 function safeCachedValue(value: unknown): RemoteMerchantLogo | null | undefined {
@@ -151,7 +180,11 @@ async function writeCached(candidate: string, value: RemoteMerchantLogo | null, 
   }
 }
 
-function scoredSearchResult(candidate: string, result: BrandfetchSearchResult): { value: RemoteMerchantLogo; score: number } | null {
+function scoredSearchResult(
+  candidate: string,
+  result: BrandfetchSearchResult,
+  rank: number,
+): { value: RemoteMerchantLogo; score: number } | null {
   if (typeof result.name !== 'string' || typeof result.domain !== 'string') return null;
   const logoUrl = verifiedLogoUrl(result.domain);
   if (!logoUrl) return null;
@@ -163,7 +196,12 @@ function scoredSearchResult(candidate: string, result: BrandfetchSearchResult): 
   const core = brandCore(candidate);
   const resultCore = brandCore(result.name);
   const claimed = result.claimed === true;
-  let score = exact ? 100 : compact && claimed ? 94 : core && core === resultCore && claimed ? 90 : 0;
+  const locationSuffix = claimed && rank === 0 && likelyLocationSuffix(candidate, result.name);
+  let score = exact ? 100
+    : compact && claimed ? 94
+      : core && core === resultCore && claimed ? 90
+        : locationSuffix ? 88
+          : 0;
   if (!score) return null;
   if (claimed) score += 4;
   const confidence = Math.min(0.99, score / 105);
@@ -205,7 +243,7 @@ async function searchBrandfetch(candidate: string, generation: number): Promise<
       const raw = await response.json();
       if (!Array.isArray(raw)) return undefined;
       const ranked = raw
-        .map(result => scoredSearchResult(candidate, result as BrandfetchSearchResult))
+        .map((result, index) => scoredSearchResult(candidate, result as BrandfetchSearchResult, index))
         .filter((value): value is { value: RemoteMerchantLogo; score: number } => value !== null)
         .sort((a, b) => b.score - a.score);
       return ranked[0]?.value ?? null;

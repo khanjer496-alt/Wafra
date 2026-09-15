@@ -56,7 +56,7 @@ test('explanation envelopes keep local evidence and structured identifiers local
 });
 
 test('local-analysis scopes validate arrays and retain explicit exclusions', () => {
-  for (const tool of ['spending-total', 'compare-periods', 'recurring-changes', 'unusual-charges', 'possible-duplicates', 'data-coverage']) {
+  for (const tool of ['spending-total', 'compare-periods', 'recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review', 'data-coverage']) {
     assert.equal(boundary.isAssistantToolRequest({ tool, period,
       categories: ['dining', 'groceries'], excludedCategories: ['groceries'],
       merchants: ['Cedar', 'Coffee'], excludedMerchants: ['Coffee'],

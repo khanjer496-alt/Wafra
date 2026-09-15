@@ -5,6 +5,8 @@ const path = require('node:path');
 const {
   answerWafraQuestion,
   executeAssistantTool,
+  latestAssistantContext,
+  planAssistantCorrection,
   planAssistantQuestion,
 } = require('./build/wafra-assistant');
 const {
@@ -45,6 +47,57 @@ const now = new Date('2026-09-20T12:00:00Z');
   const answer = executeAssistantTool(state, comparison, now);
   assert.equal(answer.data.currentFils, 5_000);
   assert.equal(answer.data.previousFils, 2_000);
+}
+
+{
+  const talabat = planAssistantQuestion(state, 'How much did I spend at Talabat?', now);
+  const why = planAssistantQuestion(state, 'Why did it increase?', now, talabat);
+  assert.equal(why.tool, 'compare-periods');
+  assert.equal(why.merchant, 'Talabat', 'pronoun follow-up must retain the merchant scope');
+  const whyAnswer = executeAssistantTool(state, why, now);
+  assert.equal(whyAnswer.data.currentFils, 5_000);
+  assert.equal(whyAnswer.data.previousFils, 2_000);
+
+  const bareWhy = planAssistantQuestion(state, 'Why?', now, talabat);
+  assert.equal(bareWhy.tool, 'compare-periods');
+  assert.equal(bareWhy.merchant, 'Talabat');
+
+  const againstLastMonth = planAssistantQuestion(state, 'How does that compare to last month?', now, talabat);
+  assert.equal(againstLastMonth.tool, 'compare-periods');
+  assert.deepEqual(againstLastMonth.period, { mode: 'range', from: '2026-09-01', to: '2026-09-20' });
+  assert.deepEqual(againstLastMonth.comparisonPeriod, { mode: 'range', from: '2026-08-01', to: '2026-08-20' });
+  assert.equal(againstLastMonth.merchant, 'Talabat');
+
+  const lastMonth = planAssistantQuestion(state, 'How much last month?', now, talabat);
+  assert.equal(lastMonth.tool, 'merchant-breakdown');
+  assert.equal(lastMonth.period.key, '2026-08');
+  assert.equal(lastMonth.merchant, 'Talabat');
+
+  const groceries = planAssistantQuestion(state, 'What about groceries?', now, talabat);
+  assert.equal(groceries.tool, 'category-breakdown');
+  assert.equal(groceries.category, 'groceries');
+  assert.equal(groceries.merchant, undefined, 'switching subject must not intersect the prior merchant');
+
+  const backToMerchant = planAssistantQuestion(state, 'And Talabat?', now, groceries);
+  assert.equal(backToMerchant.tool, 'merchant-breakdown');
+  assert.equal(backToMerchant.merchant, 'Talabat');
+  assert.equal(backToMerchant.category, undefined, 'switching subject must not retain the prior category');
+
+  const explicitOverall = planAssistantQuestion(state, 'Why did my spending change?', now, talabat);
+  assert.equal(explicitOverall.tool, 'compare-periods');
+  assert.equal(explicitOverall.merchant, undefined, 'explicit overall wording must override conversational merchant context');
+
+  const explicitTotal = planAssistantQuestion(state, 'How much did I spend?', now, talabat);
+  assert.equal(explicitTotal.tool, 'spending-total');
+  assert.equal(explicitTotal.merchant, undefined, 'a complete new question must not inherit the prior merchant');
+
+  const explicitIncome = planAssistantQuestion(state, 'How much income did I receive?', now, talabat);
+  assert.equal(explicitIncome.tool, 'income-total');
+  assert.equal(explicitIncome.merchant, undefined, 'explicit income wording must not inherit a spending merchant');
+
+  const clarificationTurn = { tool: 'help', clarification: 'Choose a merchant.' };
+  assert.deepEqual(latestAssistantContext([talabat, clarificationTurn]), talabat,
+    'a clarification must not erase the last substantive conversation scope');
 }
 
 {
@@ -158,6 +211,36 @@ const now = new Date('2026-09-20T12:00:00Z');
   assert.equal(answer.data.previousFils, 2_000);
   assert.equal(answer.data.deltaPercent, 200);
   assert.ok(answer.facts.some((fact) => fact.label === 'Dining change'));
+  assert.ok(answer.facts.some((fact) => fact.label === 'Top merchant driver' && /Talabat/.test(fact.value)));
+  assert.ok(answer.facts.some((fact) => fact.label === 'Largest current purchase' && /Talabat/.test(fact.value)));
+  assert.match(answer.body, /Dining was the biggest category driver/i);
+  assert.match(answer.body, /Talabat was the biggest merchant driver/i);
+  assert.match(answer.body, /largest recorded purchase/i);
+}
+
+{
+  const onePurchase = executeAssistantTool(state,
+    { tool: 'largest-purchases', period: { mode: 'month', key: '2026-09' }, limit: 1 }, now);
+  assert.deepEqual(planAssistantCorrection(state, 'That was groceries, not dining.', onePurchase), {
+    kind: 'transaction-category', transactionId: 'sep-food-1', category: 'groceries',
+  });
+  assert.deepEqual(planAssistantCorrection(state, 'Talabat should be groceries', onePurchase), {
+    kind: 'merchant-category', merchant: 'Talabat', category: 'groceries', direction: 'expense',
+  });
+  const multi = answerWafraQuestion(state, 'How much did I spend at Talabat?', now);
+  assert.equal(planAssistantCorrection(state, 'That was groceries.', multi).kind, 'clarification',
+    'a pronoun correction must not choose between multiple evidenced transactions');
+  assert.deepEqual(planAssistantCorrection(state, 'Talabat is not a subscription', multi), {
+    kind: 'not-subscription', merchant: 'Talabat',
+  });
+  const transfer = { ...tx('transfer-one', '2026-09-08', 'Transfer to savings', 1_500, 'other'),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source' } };
+  const transferState = { ...state, transactions: [...state.transactions, transfer] };
+  const transferAnswer = { tool: 'spending-total', title: 'Transfer', body: '',
+    evidence: [{ label: 'Transfer', transactionIds: [transfer.id], totalFils: transfer.amountFils, accountNames: ['Everyday'] }] };
+  assert.deepEqual(planAssistantCorrection(transferState, 'This is my own transfer', transferAnswer), {
+    kind: 'transfer-ownership', transactionId: transfer.id, ownership: 'own',
+  });
 }
 
 {
@@ -788,6 +871,15 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
     }
     assert.match(answer.coverage.notes.join(' '), /split|conversion/i);
   }
+  const review = answerWafraQuestion(local, 'Anything unusual?', now);
+  assert.equal(review.tool, 'money-review');
+  assert.ok(review.data.duplicateCount >= 1);
+  assert.ok(review.data.unusualCount >= 1);
+  assert.ok(review.data.recurringChangeCount >= 1);
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Possible duplicate ·')));
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Unusual purchase ·')));
+  assert.ok(review.findings.some((finding) => finding.title.startsWith('Recurring change ·')));
+  assert.match(review.body, /not proof that anything is wrong/i);
   assert.equal(answerWafraQuestion(local, 'Which recurring charges changed at Local service?', now).data.candidateCount, 1);
   assert.equal(answerWafraQuestion(local, 'Which recurring charges changed excluding Local service?', now).data.candidateCount, 0);
   assert.equal(answerWafraQuestion(local, 'Show unusual dining charges', now).tool, 'help', 'patterns may not compare allocated split amounts to full-charge history');
@@ -891,6 +983,14 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
     assert.equal(answer.tool, 'help', `narrow concept must not broaden to a whole category: ${question}`);
     assert.equal(answer.data, undefined);
   }
+  const coffeeClarification = answerWafraQuestion(state, 'How much did I spend on coffee this month?', now);
+  assert.match(coffeeClarification.body, /without guessing/i);
+  assert.ok(coffeeClarification.suggestions.includes('How much did I spend on dining?'));
+
+  const accountClarification = answerWafraQuestion(state, 'How much did I spend from my current account?', now);
+  assert.equal(accountClarification.tool, 'help');
+  assert.ok(accountClarification.suggestions.some((item) => /Everyday account/.test(item)),
+    'unknown account wording should offer exact local account names instead of a dead end');
 
   // Casual spending verbs still route to the spending intent when no category
   // is named, and to a category-breakdown when one is.

@@ -107,9 +107,12 @@ const notificationReader = {
       'net.bnpparibas.mescomptes',
       'ae.hsbc.hsbcuae',
       'com.adcb.nexgen',
+      'com.barclays.android.barclaysmobilebanking',
+      'com.hdfcbank.android.now',
     ]);
     return notificationRows.map((row) => ({
-      sourceClass: trusted.has(row.pkg) ? 'trusted-bank' : 'financial-candidate',
+      sourceClass: row.sourceClass ?? (trusted.has(row.pkg) ? 'trusted-bank' : 'financial-candidate'),
+      appLabel: row.appLabel ?? row.title ?? '',
       ...row,
     }));
   },
@@ -216,8 +219,78 @@ const { scanInbox } = require('./build/auto-import.js');
       acknowledgedNotifications[0] === 'notification-row-0001',
     JSON.stringify(acknowledgedNotifications));
 
+  // Global Android bank-app capture is not a UAE/Saudi-only feature. Exact
+  // curated package identity or a strong installed-app banking identity may
+  // auto-import a source-grounded posting when its native currency matches the
+  // ledger. Only truly ambiguous packages remain Review-first.
   inboxRows = [];
   receivedRows = [];
+  markets.setLedgerCurrency('EUR', 2);
+  notificationRows = [{
+    id: 'bnp-eur-push-global-01',
+    pkg: 'net.bnpparibas.mescomptes',
+    title: 'BNP Paribas',
+    text: 'Paiement par carte débité de EUR 9,99 chez PRIVATE-CAFE',
+    ts: NOW + 5_100,
+  }];
+  const bnpGlobal = await scanInbox(0, {}, undefined, 'fr-FR', { notificationOnly: true });
+  ok('trusted BNP Android push auto-imports in a matching EUR ledger',
+    bnpGlobal.parsed.length === 1 && bnpGlobal.reviewCandidates.length === 0 &&
+      bnpGlobal.parsed[0]?.currency === 'EUR' && bnpGlobal.parsed[0]?.amountFils === 999 &&
+      bnpGlobal.parsed[0]?.merchant === 'PRIVATE-CAFE',
+    JSON.stringify(bnpGlobal));
+  await bnpGlobal.commit();
+
+  markets.setLedgerCurrency('GBP', 2);
+  notificationRows = [{
+    id: 'barclays-gbp-global-01',
+    pkg: 'com.barclays.android.barclaysmobilebanking',
+    title: 'Barclays',
+    text: 'Your card ending 1234 was charged GBP 12.34 at TESCO.',
+    ts: NOW + 5_150,
+  }];
+  const barclaysGlobal = await scanInbox(0, {}, undefined, 'en-GB', { notificationOnly: true });
+  ok('trusted Barclays Android push auto-imports in a matching GBP ledger',
+    barclaysGlobal.parsed.length === 1 && barclaysGlobal.reviewCandidates.length === 0 &&
+      barclaysGlobal.parsed[0]?.currency === 'GBP' && barclaysGlobal.parsed[0]?.amountFils === 1234,
+    JSON.stringify(barclaysGlobal));
+  await barclaysGlobal.commit();
+
+  markets.setLedgerCurrency('JPY', 0);
+  notificationRows = [{
+    id: 'learned-jpy-global-0001',
+    pkg: 'com.example.jpbank',
+    appLabel: 'JP Bank',
+    title: 'JP Bank',
+    text: 'Card purchase JPY 2400 at LOCAL CAFE.',
+    ts: NOW + 5_175,
+  }];
+  const learnedJpy = await scanInbox(0, {}, undefined, 'ja-JP', { notificationOnly: true });
+  ok('an unseen Play bank app with strong installed identity auto-imports zero-decimal JPY',
+    learnedJpy.parsed.length === 1 && learnedJpy.reviewCandidates.length === 0 &&
+      learnedJpy.parsed[0]?.currency === 'JPY' && learnedJpy.parsed[0]?.amountFils === 2400,
+    JSON.stringify(learnedJpy));
+  await learnedJpy.commit();
+
+  markets.setLedgerCurrency('KWD', 3);
+  notificationRows = [{
+    id: 'learned-kwd-global-0001',
+    pkg: 'com.example.kwbank',
+    appLabel: 'Kuwait Bank',
+    title: 'Kuwait Bank',
+    text: 'تم خصم KWD ١٢٫٣٤٥ لشراء بالبطاقة لدى LOCAL CAFE',
+    ts: NOW + 5_190,
+  }];
+  const learnedKwd = await scanInbox(0, {}, undefined, 'ar-KW', { notificationOnly: true });
+  ok('an unseen Play bank app with strong installed identity auto-imports three-decimal KWD',
+    learnedKwd.parsed.length === 1 && learnedKwd.reviewCandidates.length === 0 &&
+      learnedKwd.parsed[0]?.currency === 'KWD' && learnedKwd.parsed[0]?.amountFils === 12345,
+    JSON.stringify(learnedKwd));
+  await learnedKwd.commit();
+
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+
   notificationRows = [{
     id: 'adcb-notification-format-0001',
     pkg: 'com.adcb.nexgen',
@@ -242,6 +315,7 @@ const { scanInbox } = require('./build/auto-import.js');
   notificationRows = [{
     id: 'hostile-notification-0001',
     pkg: 'com.example.chat',
+    appLabel: 'Friends Chat',
     title: 'Friends',
     text: 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234',
     ts: NOW + 5_500,
@@ -259,18 +333,18 @@ const { scanInbox } = require('./build/auto-import.js');
   notificationRows = [{
     id: 'noncurated-adib-0001',
     pkg: 'com.example.adibmobile',
+    appLabel: 'ADIB',
     title: 'ADIB',
     text: 'Purchase of AED 61.25 at CARREFOUR with Debit Card ending 1234',
     ts: NOW + 5_750,
   }];
   const nonCuratedBank = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
-  ok('a non-curated bank is parsed but its first transaction is reviewed before package trust is learned',
-    nonCuratedBank.parsed.length === 0 && nonCuratedBank.reviewCandidates.length === 1 &&
-      nonCuratedBank.reviewCandidates[0]?.sourcePackage === 'com.example.adibmobile' &&
-      nonCuratedBank.reviewCandidates[0]?.sourceClass === 'financial-candidate',
+  ok('a non-curated bank with strong installed app identity auto-imports on first sight',
+    nonCuratedBank.parsed.length === 1 && nonCuratedBank.reviewCandidates.length === 0 &&
+      nonCuratedBank.parsed[0]?.amountFils === 6125 && nonCuratedBank.parsed[0]?.merchant === 'Carrefour',
     JSON.stringify(nonCuratedBank));
   await nonCuratedBank.commit();
-  ok('the first non-curated bank review is acknowledged only after the normal commit boundary',
+  ok('the first non-curated bank transaction is acknowledged only after the normal commit boundary',
     acknowledgedNotifications.includes('noncurated-adib-0001'),
     JSON.stringify(acknowledgedNotifications));
 
@@ -281,11 +355,8 @@ const { scanInbox } = require('./build/auto-import.js');
     text: 'Purchase of AED 62.50 at CARREFOUR with Debit Card ending 1234',
     ts: NOW + 5_900,
   }];
-  const learnedBank = await scanInbox(0, {}, undefined, 'en-AE', {
-    notificationOnly: true,
-    learnedNotificationPackages: ['com.example.adibmobile'],
-  });
-  ok('after one confirmation the same non-curated bank auto-posts future confident transactions',
+  const learnedBank = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('the same non-curated verified bank keeps auto-posting future confident transactions',
     learnedBank.parsed.length === 1 && learnedBank.reviewCandidates.length === 0 &&
       learnedBank.parsed[0]?.amountFils === 6250 && learnedBank.parsed[0]?.merchant === 'Carrefour',
     JSON.stringify(learnedBank));
@@ -319,7 +390,7 @@ const { scanInbox } = require('./build/auto-import.js');
     { id: 'hsbc-uae-otp-0000001', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE',
       text: 'OTP 123456 for an AED 42.00 card transaction.', ts: NOW + 9_000 },
     { id: 'hsbc-eg-imitator-0001', pkg: 'com.htsu.hsbcpersonalbanking',
-      title: hsbcTitle, text: hsbcPurchase, ts: NOW + 10_000 },
+      appLabel: 'Generic Alerts', title: hsbcTitle, text: hsbcPurchase, ts: NOW + 10_000 },
   ];
   const inboxReadsBeforePush = inboxReadCursors.length;
   const hsbcOnly = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
@@ -479,6 +550,14 @@ const { scanInbox } = require('./build/auto-import.js');
     body: `BNP Paribas: Paiement par carte débité de EUR ${index + 1},00 chez STORE-${index}`,
     date: NOW - 100_000 + index,
   }));
+  notificationRows = [{
+    id: 'unknown-global-review-0001',
+    pkg: 'com.example.globalbank',
+    appLabel: 'Generic Alerts',
+    title: 'Global Bank',
+    text: 'Card purchase EUR 77.00 at NEW SHOP',
+    ts: NOW + 5_600,
+  }];
   const boundedNewest = await scanInbox(0, {}, undefined, 'fr-FR');
   ok('the bounded review window keeps a newer push over older inbox history',
     boundedNewest.reviewCandidates.length === 50 &&

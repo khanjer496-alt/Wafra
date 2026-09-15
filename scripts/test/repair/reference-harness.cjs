@@ -96,7 +96,7 @@ function createHarness(options = {}) {
     '@/components/ui/platform-symbol':{PlatformSymbol:p=>p.fallback},
     '@/hooks/use-auto-import':{usePullToRefresh:()=>({refreshing:false,onRefresh:()=>events.push(['refresh'])}),useAutoImport:()=>({captureState:'waiting-for-alert',needsPermission:false,runAutoImport:async()=>events.push(['refresh'])})},
     '@/lib/auto-import':{isSmsScanningAvailable:()=>false,openSmsPermissionSettings:async()=>{}},
-    '@/lib/fx':{buildReferenceFxUpdates:async()=>[]},'@/lib/fx-summary':{summarizeForeignActivity:()=>({groups:[]})},
+    '@/lib/fx':{buildReferenceFxUpdates:async()=>[]},'@/lib/fx-summary':{summarizeForeignActivity:()=>({groups:[],transactions:[],totalLocalFils:0})},
     '@/lib/cash-flow':{summarizeCashOutflow:()=>({totalFils:536000,cardPaymentsFils:0,accountOutflowFils:536000})},
     '@/components/lock-gate':{usePrivacyGateCleared:()=>true},'@/lib/purchases':{isProActive:()=>true},
     '@/lib/notifications':{syncPaymentReminders:async()=>{}},'@/lib/reminders':{reminderScheduleInputsChanged:(before,after)=>before!==after},'@/lib/launch-performance':{markLaunchPhase(){}},

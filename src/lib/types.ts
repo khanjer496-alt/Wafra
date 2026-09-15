@@ -612,7 +612,8 @@ export interface AppState {
   /** Source-free first-run choices and resume position. */
   onboardingProfile: OnboardingProfile | null;
   /** Local currency explicitly observed in an imported bank alert. */
-  onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
+  /** ISO currency proven by captured money before deferred onboarding finalizes. */
+  onboardingCurrencyEvidence: string | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */
   merchantOverrides: Record<string, CategoryId>;
   /**
@@ -767,7 +768,8 @@ export interface ImportBatchInput {
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
   /** Supported local currency explicitly observed in this bank-alert batch. */
-  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  /** ISO ledger currency proven by the imported rows, independent of parser country pack. */
+  confirmedLedgerCurrency?: string;
   /**
    * True only when Android completed a scan from the beginning of the SMS
    * inbox for the current parser. Incremental scans must never set this: an
