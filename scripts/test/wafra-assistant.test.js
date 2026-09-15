@@ -9,6 +9,7 @@ const {
   planAssistantCorrection,
   planAssistantQuestion,
   runWafraAssistant,
+  shouldTryAssistantSemanticFallback,
 } = require('./build/wafra-assistant');
 const {
   buildAssistantExplanationEnvelope,
@@ -415,8 +416,16 @@ const now = new Date('2026-09-20T12:00:00Z');
 {
   const nonsense = answerWafraQuestion(state, 'What is my favorite colour?', now);
   assert.equal(nonsense.tool, 'help', 'unknown questions must not silently become a spending answer');
+  assert.equal(shouldTryAssistantSemanticFallback('What is my favorite colour?',
+    planAssistantQuestion(state, 'What is my favorite colour?', now)), true);
   const capabilities = answerWafraQuestion(state, 'What can you do?', now);
   assert.equal(capabilities.tool, 'help');
+  assert.equal(shouldTryAssistantSemanticFallback('What can you do?',
+    planAssistantQuestion(state, 'What can you do?', now)), false);
+  const unsupported = planAssistantQuestion(state, 'Should I spend more than 500 AED?', now);
+  assert.equal(unsupported.tool, 'help');
+  assert.equal(shouldTryAssistantSemanticFallback('Should I spend more than 500 AED?', unsupported), false,
+    'specific local safety refusals must never be broadened by the model');
   assert.equal(isAssistantToolRequest({ tool: 'help' }), true);
 }
 
@@ -1419,6 +1428,36 @@ console.log('✓ Ask Wafra account and card inventory');
   assert.equal(when.tool, 'obligation-status');
   assert.equal(when.data.latestPaymentDate, '2026-09-18');
   assert.equal(answerWafraQuestion(cardState, 'When did I pay the card?', now).data.latestPaymentDate, '2026-09-18');
+
+  // After a ranking answer, conversational references such as “this card”
+  // should resolve to the card Wafra just showed first. The requested month
+  // also has to select that statement instead of silently checking the newest.
+  const fabTop = { ...card, id: 'fab-top', name: 'FAB Credit Card ·3749', bankName: 'FAB', last4: '3749' };
+  const otherCard = { ...card, id: 'other-card', name: 'ADCB Credit Card ·2518', bankName: 'ADCB', last4: '2518' };
+  const rankedState = {
+    ...cardState,
+    accounts: [account, fabTop, otherCard],
+    transactions: [
+      { ...tx('fab-spend', '2026-09-05', 'Merchant A', 8_000), accountId: fabTop.id },
+      { ...tx('adcb-spend', '2026-09-06', 'Merchant B', 2_000), accountId: otherCard.id },
+      { ...payment, id: 'fab-sep-payment', accountId: fabTop.id },
+    ],
+    cardDues: [
+      { ...due, id: 'fab-sep-due', accountId: fabTop.id, dueDate: '2026-09-25' },
+      { ...due, id: 'fab-oct-due', accountId: fabTop.id, dueDate: '2026-10-25', totalDueFils: 7_000 },
+    ],
+  };
+  const rankedContext = planAssistantQuestion(rankedState, 'Which card did I use most?', now);
+  assert.equal(rankedContext.tool, 'top-accounts');
+  const contextualStatus = runWafraAssistant(
+    rankedState, 'Did u settle this card for September?', now, rankedContext,
+  );
+  assert.equal(contextualStatus.request.tool, 'obligation-status');
+  assert.equal(contextualStatus.request.accountId, fabTop.id);
+  assert.equal(contextualStatus.request.monthKey, '2026-09');
+  assert.equal(contextualStatus.answer.data.settled, true);
+  assert.equal(contextualStatus.answer.data.dueDate, '2026-09-25');
+  assert.match(contextualStatus.answer.body, /statement due in September 2026 is settled/i);
 
   const context = planAssistantQuestion(cardState, 'Did I settle ENBD card?', now);
   const follow = planAssistantQuestion(cardState, 'How much is left?', now, context);

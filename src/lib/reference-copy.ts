@@ -9,7 +9,8 @@ export const paymentAgendaCopy = {
     subscriptions: 'Subscriptions', utilities: 'Utilities & telecom', cards: 'Card payments', loans: 'Loan repayments', other: 'Other bills',
     subscriptionsHint: 'Recurring memberships and services', utilitiesHint: 'Electricity, water, phone and internet',
     emptySubscriptions: 'No subscription renewals to show.', emptyUtilities: 'No utility bills to show.',
-    emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.' },
+    emptyCards: 'No credit-card payments to show.', emptyLoans: 'No loan repayments to show.', emptyOther: 'No other bills to show.',
+    showMore: (count: number) => `Show ${count} more` },
   ar: { overdue: 'متأخرة', 'expected-earlier': 'كانت متوقعة سابقاً', soon: 'خلال 7 أيام', later: 'لاحقاً', paid: 'مدفوعة مؤخراً',
     estimate: 'تقديري', recorded: 'مدفوعة · استحقاقها', statement: 'استحقاق الكشف', empty: 'لا توجد دفعات قادمة',
     emptyBody: 'أضف تذكيراً بفاتورة أو استورد تنبيهات البنك لعرض التواريخ المعروفة.',
@@ -18,7 +19,8 @@ export const paymentAgendaCopy = {
     subscriptions: 'الاشتراكات', utilities: 'المرافق والاتصالات', cards: 'دفعات البطاقات', loans: 'أقساط القروض', other: 'فواتير أخرى',
     subscriptionsHint: 'العضويات والخدمات المتكررة', utilitiesHint: 'الكهرباء والمياه والهاتف والإنترنت',
     emptySubscriptions: 'لا توجد تجديدات اشتراكات لعرضها.', emptyUtilities: 'لا توجد فواتير مرافق لعرضها.',
-    emptyCards: 'لا توجد دفعات بطاقات ائتمانية لعرضها.', emptyLoans: 'لا توجد أقساط قروض لعرضها.', emptyOther: 'لا توجد فواتير أخرى لعرضها.' },
+    emptyCards: 'لا توجد دفعات بطاقات ائتمانية لعرضها.', emptyLoans: 'لا توجد أقساط قروض لعرضها.', emptyOther: 'لا توجد فواتير أخرى لعرضها.',
+    showMore: (count: number) => `عرض ${count} أخرى` },
 };
 
 export const accountGroupsCopy = {
@@ -39,7 +41,7 @@ export const spendingCopy = {
     details: 'View transactions', newLimit: 'New category limit', search: 'Search spending', allActivity: 'View all spending',
     noResults: 'No matching expenses', searchHint: 'Search by merchant or account',
     summaryNote: 'Only categories with a limit are included below.', used: 'used', month: 'This period',
-    breakdown: 'Where it went', share: 'of spending', shareNote: 'Each category’s share of total spending', budgetUsed: 'of limit used',
+    breakdown: 'Where it went', share: 'of spending', shareNote: 'Each category’s share of total spending', otherCategories: 'Other categories', budgetUsed: 'of limit used',
     lastSixMonths: 'Last 6 months', average: 'Avg', latest: 'Latest', vs: 'vs', askWafra: 'Ask Wafra',
     aboveAverage: (percent: number) => `Current total is ${percent}% above the 6-month average.`,
     belowAverage: (percent: number) => `Current total is ${percent}% below the 6-month average.`,
@@ -52,7 +54,7 @@ export const spendingCopy = {
     details: 'عرض العمليات', newLimit: 'حد إنفاق جديد', search: 'البحث في المصروفات', allActivity: 'عرض كل المصروفات',
     noResults: 'لا توجد مصروفات مطابقة', searchHint: 'ابحث باسم التاجر أو الحساب',
     summaryNote: 'يشمل المؤشر أدناه الفئات التي لها حد فقط.', used: 'مستخدم', month: 'هذه الفترة',
-    breakdown: 'أين أنفقت', share: 'من الإنفاق', shareNote: 'حصة كل فئة من إجمالي الإنفاق', budgetUsed: 'من الحد مستخدم',
+    breakdown: 'أين أنفقت', share: 'من الإنفاق', shareNote: 'حصة كل فئة من إجمالي الإنفاق', otherCategories: 'فئات أخرى', budgetUsed: 'من الحد مستخدم',
     lastSixMonths: 'آخر ٦ أشهر', average: 'المتوسط', latest: 'الأحدث', vs: 'مقابل', askWafra: 'اسأل وفرة',
     aboveAverage: (percent: number) => `الإجمالي الحالي أعلى من متوسط ٦ أشهر بنسبة ${percent}٪.`,
     belowAverage: (percent: number) => `الإجمالي الحالي أقل من متوسط ٦ أشهر بنسبة ${percent}٪.`,

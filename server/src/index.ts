@@ -76,6 +76,14 @@ import {
   sendWakePush,
   type PushEnv,
 } from './push';
+import {
+  ASSISTANT_AI_PER_DAY,
+  ASSISTANT_AI_PER_HOUR,
+  MAX_ASSISTANT_LANGUAGE_BODY_BYTES,
+  runAssistantLanguageModel,
+  validateAssistantLanguageRequest,
+  type AssistantAiBinding,
+} from './assistant-interpreter';
 
 interface DiagnosticEmailBinding {
   send(message: {
@@ -94,6 +102,8 @@ interface DiagnosticEmailBinding {
 
 export interface Env extends PushEnv {
   DB: D1Database;
+  /** Optional Workers AI binding. Missing means language fallback is disabled. */
+  AI?: AssistantAiBinding;
   /** Optional Cloudflare Email Service binding for final-test diagnostic copies. */
   DIAGNOSTIC_EMAIL?: DiagnosticEmailBinding;
   /** Verified destination mailbox that receives tester diagnostic attachments. */
@@ -553,6 +563,38 @@ async function overFeedbackWindow(env: Env, bucket: string, ceiling: number): Pr
        request_count = CASE
          WHEN feedback_limits.window_start = excluded.window_start
          THEN feedback_limits.request_count + 1
+         ELSE 1
+       END,
+       window_start = excluded.window_start
+     RETURNING request_count`,
+  )
+    .bind(bucket, windowStart)
+    .first<{ request_count: number }>();
+  return (row?.request_count ?? ceiling + 1) > ceiling;
+}
+
+/**
+ * Hard public budget for the language normalizer. The endpoint has no device
+ * bearer because Android users otherwise could never use it, so two anonymous
+ * GLOBAL fixed windows bound cost without storing an IP, device id, question,
+ * or fingerprint. The daily ceiling is deliberately conservative versus the
+ * Workers AI free allocation; exceeding either window fails closed with 429.
+ */
+async function overAssistantAiWindow(
+  env: Env,
+  bucket: 'hour' | 'day',
+  windowSeconds: number,
+  ceiling: number,
+): Promise<boolean> {
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  const windowStart = Math.floor(nowSeconds / windowSeconds) * windowSeconds;
+  const row = await env.DB.prepare(
+    `INSERT INTO assistant_ai_limits (id, window_start, request_count)
+     VALUES (?1, ?2, 1)
+     ON CONFLICT(id) DO UPDATE SET
+       request_count = CASE
+         WHEN assistant_ai_limits.window_start = excluded.window_start
+         THEN assistant_ai_limits.request_count + 1
          ELSE 1
        END,
        window_start = excluded.window_start
@@ -1086,6 +1128,26 @@ export default {
   ): Promise<Response> {
     const url = new URL(req.url);
     if (!secureTransport(url)) return json({ error: 'https_required' }, 400);
+
+    // ── Ask Wafra language normalization ────────────────────────────────
+    // Public by design so Android does not have to pair with the iOS relay.
+    // It receives a CLIENT-REDACTED question, never a ledger or bank message,
+    // persists none of it, and can only rewrite language. The phone still
+    // resolves entities and calculates every financial answer locally.
+    if (req.method === 'POST' && url.pathname === '/v1/assistant/interpret') {
+      if (!env.AI) return json({ error: 'assistant_ai_unavailable' }, 503);
+      const incoming = await readBody(req, MAX_ASSISTANT_LANGUAGE_BODY_BYTES);
+      if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+      let parsed: unknown;
+      try { parsed = JSON.parse(incoming.text); } catch { return json({ error: 'bad_request' }, 400); }
+      const request = validateAssistantLanguageRequest(parsed);
+      if (!request) return json({ error: 'bad_request' }, 400);
+      if (await overAssistantAiWindow(env, 'day', 86_400, ASSISTANT_AI_PER_DAY) ||
+          await overAssistantAiWindow(env, 'hour', 3_600, ASSISTANT_AI_PER_HOUR)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      return json(await runAssistantLanguageModel(env.AI, request));
+    }
 
     // ── Pairing: the app posts its X25519 public key, gets a bearer token ──
     //
@@ -2272,6 +2334,9 @@ export default {
         await env.DB.prepare('SELECT push_sent_at FROM push_registrations LIMIT 0').all();
         await env.DB.prepare(
           'SELECT device_id, generation FROM automation_generations LIMIT 0',
+        ).all();
+        await env.DB.prepare(
+          'SELECT id, window_start, request_count FROM assistant_ai_limits LIMIT 0',
         ).all();
       } catch {
         // The exception text can name internals, and this endpoint is public.

@@ -1,5 +1,5 @@
 import { spendingCopy } from '@/lib/reference-copy';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
@@ -17,6 +17,7 @@ import { DataViz } from '@/constants/theme';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { limitedCategorySummary, spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import type { CategoryId } from '@/lib/types';
 
@@ -45,8 +46,8 @@ type Props = {
 export function SpendingOverview(p: Props) {
   const theme = useTheme(); const language = useLanguage(); const large = useLargeTextLayout();
   const { width } = useWindowDimensions();
-  const donutSize = Math.round(Math.min(196, Math.max(180, width * 0.52)));
-  const donutThickness = donutSize <= 184 ? 20 : 22;
+  const donutSize = Math.round(Math.min(184, Math.max(164, width * 0.46)));
+  const donutThickness = donutSize <= 170 ? 15 : 16;
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
@@ -59,7 +60,7 @@ export function SpendingOverview(p: Props) {
   const palette = useCategoricalPalette();
   const scheme = useColorScheme();
   const neutral = DataViz[scheme === 'dark' ? 'dark' : 'light'].neutral;
-  const OTHER_LABEL = language === 'ar' ? 'أخرى' : 'Other';
+  const [selectedSliceKey, setSelectedSliceKey] = useState<string | null>(null);
   // The pie carries the top slices in the multi-hue categorical palette, then a
   // single neutral "Other" wedge for the tail so five distinct hues do not have
   // to explain twelve categories. Colour keyed by category id, not row index,
@@ -80,23 +81,46 @@ export function SpendingOverview(p: Props) {
       if (color) drawn.push({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils, color });
       else tail += row.spentFils;
     }
-    if (tail > 0) drawn.push({ key: '__tail', label: OTHER_LABEL, value: tail, color: neutral });
+    if (tail > 0) drawn.push({ key: '__tail', label: w.otherCategories, value: tail, color: neutral });
     return drawn;
-  }, [p.rows, donutColors, neutral, language, OTHER_LABEL]);
+  }, [p.rows, donutColors, neutral, language, w.otherCategories]);
   // Legend rows for the picture the donut is drawing: the same slices, in the
   // same order, with the same colours and their share of the total. Uses the
   // slices array rather than re-deriving from rows so the legend can never
   // disagree with the pie. `category` is null for the __tail wedge, and the
   // legend renders it as a generic receipt glyph rather than pretending the
   // aggregation is a real category id.
-  const legendItems = useMemo(() => slices.map((slice) => ({
-    key: slice.key,
-    label: slice.label,
-    color: slice.color,
-    category: slice.key === '__tail' ? null : (slice.key as CategoryId),
-    share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
-  })), [slices, p.totalFils]);
-  const centerAmount = p.totalFils;
+  const legendItems = useMemo(() => [...slices]
+    .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key))
+    .map((slice) => ({
+      key: slice.key,
+      label: slice.label,
+      color: slice.color,
+      category: slice.key === '__tail' ? null : (slice.key as CategoryId),
+      share: p.totalFils > 0 ? slice.value / p.totalFils : 0,
+    })), [slices, p.totalFils]);
+  const selectedSlice = selectedSliceKey ? slices.find((slice) => slice.key === selectedSliceKey) ?? null : null;
+  const centerAmount = selectedSlice?.value ?? p.totalFils;
+  const centerShare = selectedSlice && p.totalFils > 0 ? selectedSlice.value / p.totalFils : null;
+  const currency = moneySpec?.currency ?? ledgerCurrencyDisplay();
+  const compactAmount = useMemo(() => {
+    const exponent = moneySpec?.exponent ?? 2;
+    const major = Math.abs(centerAmount) / (10 ** exponent);
+    // Four/five-digit totals still fit comfortably in the hole and are more
+    // useful shown exactly. Compact only the genuinely wide figures that caused
+    // the original overflow (hundreds of thousands and above).
+    if (major < 100_000) return moneySpec
+      ? formatMinorUnits(Math.round(Math.abs(centerAmount)), moneySpec)
+      : formatAED(Math.abs(centerAmount)).replace(/^\S+\s+/, '');
+    const unit = major >= 1_000_000_000 ? 1_000_000_000 : major >= 1_000_000 ? 1_000_000 : 1000;
+    const suffix = unit === 1_000_000_000 ? 'B' : unit === 1_000_000 ? 'M' : 'k';
+    const scaled = major / unit;
+    const maximumFractionDigits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+    return `${new Intl.NumberFormat(language === 'ar' ? 'ar-AE' : 'en', {
+      maximumFractionDigits,
+      minimumFractionDigits: 0,
+    }).format(scaled)}${suffix}`;
+  }, [centerAmount, language, moneySpec]);
   return <View style={styles.root} testID="spending-categories">
     <View style={styles.hero}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
@@ -109,22 +133,39 @@ export function SpendingOverview(p: Props) {
           slices={slices}
           size={donutSize}
           thickness={donutThickness}
-          centerLabel={w.spent}
-          centerValue={<Money fils={centerAmount} type="subtitle" decimals={false} />}
-          centerMeta={p.periodLabel}
+          centerLabel={selectedSlice?.label ?? w.spent}
+          centerValue={<View accessible accessibilityRole="text"
+            accessibilityLabel={`${currency} ${moneySpec
+              ? formatMinorUnits(Math.round(Math.abs(centerAmount)), moneySpec)
+              : formatAED(Math.abs(centerAmount)).replace(/^\S+\s+/, '')}`}
+            style={styles.centerMoney}>
+            <ThemedText type="micro" themeColor="textSecondary">{currency}</ThemedText>
+            <ThemedText type="subtitle" tabular numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
+              {compactAmount}
+            </ThemedText>
+          </View>}
+          centerMeta={centerShare === null ? p.periodLabel : `${spendingShareLabel(centerShare, language)} ${w.share}`}
+          accessibilityLabel={selectedSlice
+            ? `${selectedSlice.label}. ${moneyLabel(centerAmount)}. ${spendingShareLabel(centerShare ?? 0, language)} ${w.share}`
+            : `${w.spent}. ${moneyLabel(centerAmount)}. ${p.periodLabel}`}
+          selectedKey={selectedSlice?.key ?? null}
+          onPressCenter={selectedSlice ? () => setSelectedSliceKey(null) : undefined}
           onPressSlice={(key) => {
-            // Only real category ids navigate to the detail sheet; the '__tail'
-            // aggregation has no single category to open.
-            if (key !== '__tail') p.onCategory(key as CategoryId);
+            // The chart is for quick inspection; the complete list below owns
+            // navigation. Keeping a ring tap local also avoids a tiny segment
+            // unexpectedly opening a sheet while the user is trying to scroll.
+            setSelectedSliceKey((current) => current === key ? null : key);
           }}
         />
       </View>
       {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {legendItems.map((item) => <View key={item.key} style={styles.legendItem}>
-          {item.category !== null
-            ? <CategoryAvatar category={item.category} size={18} color={item.color} />
-            : <Icon name="receipt" size={16} color={item.color} strokeWidth={2} />}
-          <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
+          <View style={styles.legendIdentity}>
+            {item.category !== null
+              ? <CategoryAvatar category={item.category} size={18} color={item.color} />
+              : <Icon name="receipt" size={16} color={item.color} strokeWidth={2} />}
+            <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
+          </View>
           <ThemedText type="meta" tabular themeColor="textSecondary">{spendingShareLabel(item.share, language)}</ThemedText>
         </View>)}
       </View>}
@@ -195,11 +236,13 @@ export function SpendingOverview(p: Props) {
 }
 const styles = StyleSheet.create({
   root: { gap: 10 },
-  hero: { paddingVertical: 6, gap: 9, alignItems: 'stretch' },
-  donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 2 },
+  hero: { paddingVertical: 4, gap: 8, alignItems: 'stretch' },
+  donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 0 },
+  centerMoney: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 5, maxWidth: '100%' },
   heroNote: { textAlign: 'center' },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 10, rowGap: 6, justifyContent: 'space-between' },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5, flexBasis: '47%', maxWidth: '47%' },
+  legend: { gap: 5, paddingHorizontal: 6 },
+  legendItem: { minHeight: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  legendIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7 },
   legendLabel: { flexShrink: 1, minWidth: 0 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },

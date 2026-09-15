@@ -1,5 +1,5 @@
 import { paymentAgendaCopy as copy } from '@/lib/reference-copy';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { BankAvatar } from '@/components/ui/bank-avatar';
@@ -20,6 +20,11 @@ import {
 } from '@/lib/reference-presentation';
 import type { Account } from '@/lib/types';
 
+// A long imported history can produce many recurring candidates. Rendering
+// every MerchantAvatar/row into one ScrollView on the first Bills mount blocks
+// the JS/UI hand-off even when the underlying analysis is already cached.
+const PAYMENT_AGENDA_PAGE_SIZE = 24;
+
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
 };
@@ -38,6 +43,10 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
+  const [renderLimit, setRenderLimit] = useState(PAYMENT_AGENDA_PAGE_SIZE);
+  useEffect(() => {
+    setRenderLimit(PAYMENT_AGENDA_PAGE_SIZE);
+  }, [selectedGroup, includePaid]);
   // Filtering and date grouping both scan/sort the agenda. Bills re-renders on
   // every keystroke in its reminder sheet, so keep the approved date-first
   // redesign while avoiding repeated ledger-derived work on unrelated renders.
@@ -48,6 +57,22 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
     () => groupPaymentAgenda(visibleItems, includePaid),
     [visibleItems, includePaid],
   );
+  const totalCount = useMemo(
+    () => sections.reduce((sum, section) => sum + section.items.length, 0),
+    [sections],
+  );
+  // Preserve the approved urgency/date order and take only the first page
+  // across sections. Past-due and next-seven-days rows therefore always win
+  // over a long tail of later estimated renewals.
+  const limitedSections = useMemo(() => {
+    let remaining = renderLimit;
+    return sections.map((section) => {
+      if (remaining <= 0) return { ...section, items: [] };
+      const items = section.items.slice(0, remaining);
+      remaining -= items.length;
+      return { ...section, items };
+    }).filter((section) => section.items.length > 0);
+  }, [sections, renderLimit]);
   const emptyFor = (key: PaymentGroup): string => key === 'subscriptions'
     ? w.emptySubscriptions
     : key === 'utilities'
@@ -58,9 +83,10 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
           ? w.emptyLoans
           : w.emptyOther;
   const visibleCount = useMemo(
-    () => sections.reduce((sum, section) => sum + section.items.length, 0),
-    [sections],
+    () => limitedSections.reduce((sum, section) => sum + section.items.length, 0),
+    [limitedSections],
   );
+  const hiddenCount = Math.max(0, totalCount - visibleCount);
   return <View style={styles.root} testID="payment-agenda">
     {visibleCount === 0 && selectedGroup && <View style={styles.emptyState}>
       <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
@@ -70,7 +96,7 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
         {emptyFor(selectedGroup)}
       </ThemedText>
     </View>}
-    {sections.map((section) => <View key={section.key} style={styles.section} testID={`bills-${section.key}`}>
+    {limitedSections.map((section) => <View key={section.key} style={styles.section} testID={`bills-${section.key}`}>
       <View style={styles.sectionHeading}>
         <ThemedText type="smallBold" themeColor={section.key === 'overdue' ? 'expense' : 'textSecondary'}>
           {w[section.key]}
@@ -114,6 +140,17 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
         </Pressable>;
       })}
     </View>)}
+    {hiddenCount > 0 && <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={w.showMore(hiddenCount)}
+      onPress={() => setRenderLimit((current) => current + PAYMENT_AGENDA_PAGE_SIZE)}
+      style={({ pressed }) => [styles.showMore, {
+        borderColor: theme.cardBorder,
+        backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+      }]}>
+      <ThemedText type="smallBold">{w.showMore(hiddenCount)}</ThemedText>
+      <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+    </Pressable>}
     {visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
   </View>;
 }
@@ -128,5 +165,7 @@ const styles = StyleSheet.create({
   emptyState: { minHeight: 112, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
   emptyIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   empty: { textAlign: 'center', maxWidth: 280 },
+  showMore: { minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
   notice: { paddingVertical: 8, lineHeight: 20 },
 });

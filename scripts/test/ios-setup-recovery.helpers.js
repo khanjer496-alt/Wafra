@@ -151,7 +151,13 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' },
         trackGrowthEvent() {},
       },
-      '@/lib/onboarding': { onboardingLandingPath: () => '/' },
+      '@/lib/onboarding': {
+        onboardingLandingPath: () => '/',
+        onboardingInsightKeys: () => ({
+          title: 'onboardInsightOverviewTitle',
+          body: 'onboardInsightOverviewBody',
+        }),
+      },
       '@/lib/store': { useStore: () => store },
       '../../modules/wafra-message-history': historyAvailable ? native : {},
     }).default;

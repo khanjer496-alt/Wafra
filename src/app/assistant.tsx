@@ -15,6 +15,7 @@ import { Fonts, Radius } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
+import { interpretAssistantLanguage } from '@/lib/assistant-language';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
@@ -26,7 +27,8 @@ import { useStore } from '@/lib/store';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 import {
-  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant, suggestedAssistantQuestions,
+  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
+  shouldTryAssistantSemanticFallback, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
@@ -235,7 +237,19 @@ export default function AssistantScreen() {
         await applyCorrection(clean, correction, snapshot, now);
         return;
       }
-      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? conversationContext : null, period);
+      const previous = usePrevious ? contextRequest ?? conversationContext : null;
+      let result = runWafraAssistant(snapshot, clean, now, previous, period);
+      if (!snapshot.privateMode && shouldTryAssistantSemanticFallback(clean, result.request)) {
+        const canonical = await interpretAssistantLanguage(snapshot, clean, previous);
+        // A model is only a language normalizer. It never gets to turn one
+        // generic local failure into another generic answer, and a ledger
+        // replacement while the request was in flight invalidates the result.
+        if (generation !== getStateGeneration()) return;
+        if (canonical && canonical !== clean) {
+          const interpreted = runWafraAssistant(snapshot, canonical, now, previous, period);
+          if (interpreted.request.tool !== 'help') result = interpreted;
+        }
+      }
       appendAnswer(clean, result, snapshot, now);
     } catch {
       // Keep the question available to edit; financial records never enter logs.
@@ -374,7 +388,9 @@ export default function AssistantScreen() {
             <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
             <Icon name="chevron-down" size={12} color={theme.textSecondary} />
           </Pressable>
-          <ThemedText type="meta" themeColor="textSecondary">{`${ledgerCurrencyCode()} · ${copy.localShort}`}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {`${ledgerCurrencyCode()} · ${state.privateMode ? copy.localShort : copy.localCalculationsShort}`}
+          </ThemedText>
         </View>
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
         <View style={styles.inputRow}>

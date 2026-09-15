@@ -876,6 +876,21 @@ function bodyOf(source, header) {
       /projectDashboardInsight\(state, period, now\)/.test(home) &&
       !/surface: 'dashboard', includeInsights: true/.test(home),
     'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
+
+  const bills = stripComments(read('src/app/(tabs)/bills.tsx'));
+  ok('the first Android Bills frame does not synchronously run recurring detection',
+    /useState\(Platform\.OS !== 'android'\)/.test(bills) &&
+      /InteractionManager\.runAfterInteractions/.test(bills) &&
+      (bills.match(/requestAnimationFrame/g) ?? []).length >= 2 &&
+      /recurringReady\s*\?\s*detectSubscriptions/.test(bills),
+    'Bills is lazy-mounted on the navigation tap; full-ledger recurrence work must start only after the tab has painted');
+
+  const paymentAgenda = stripComments(read('src/components/bills/payment-agenda.tsx'));
+  ok('Bills renders long agendas progressively instead of mounting every row at once',
+    /PAYMENT_AGENDA_PAGE_SIZE\s*=\s*24/.test(paymentAgenda) &&
+      /section\.items\.slice\(0, remaining\)/.test(paymentAgenda) &&
+      /setRenderLimit\(\(current\) => current \+ PAYMENT_AGENDA_PAGE_SIZE\)/.test(paymentAgenda),
+    'large imported histories can create many recurring rows; the ScrollView must keep first mount bounded');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
