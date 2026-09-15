@@ -36,6 +36,154 @@ export function useRamp(): readonly string[] {
 
 export { ProgressBar } from '@/components/ui/progress-bar';
 
+/* ── Donut ───────────────────────────────────────────────────────────── */
+
+export interface DonutSlice {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+/**
+ * A ringed donut with a hollow center for a headline figure. The ring is drawn
+ * as separate SVG arcs so each slice can carry its own colour without becoming
+ * a series that fights the category rows underneath — the rows own the labels,
+ * the donut owns the shape. When there is only one non-empty slice we still
+ * draw it as a full ring rather than a crescent, since a lone crescent reads as
+ * "a piece is missing" rather than "one category".
+ */
+export function CategoryDonut({
+  slices,
+  size = 200,
+  thickness = 22,
+  centerLabel,
+  centerValue,
+  centerMeta,
+}: {
+  slices: DonutSlice[];
+  size?: number;
+  thickness?: number;
+  centerLabel?: string;
+  centerValue?: React.ReactNode;
+  centerMeta?: string;
+}) {
+  const theme = useTheme();
+  const total = slices.reduce((s, x) => s + Math.max(0, x.value), 0);
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - thickness / 2;
+  const r0 = r - thickness / 2;
+  // Empty state: a plain track ring so the shape is still there.
+  if (total <= 0) {
+    return (
+      <View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={t('noSpendingComposition')}
+        style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size} height={size}>
+          <Circle cx={cx} cy={cy} r={r} stroke={theme.track} strokeWidth={thickness} fill="none" />
+        </Svg>
+        {(centerLabel || centerValue || centerMeta) && (
+          <View style={styles.donutCenter} pointerEvents="none">
+            {centerLabel && (
+              <ThemedText type="nano" themeColor="textSecondary">
+                {centerLabel}
+              </ThemedText>
+            )}
+            {centerValue}
+            {centerMeta && (
+              <ThemedText type="nano" themeColor="textTertiary">
+                {centerMeta}
+              </ThemedText>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+  // A single non-empty slice draws as a full ring; the other slices contribute
+  // zero and never claim an arc of their own.
+  const nonEmpty = slices.filter((s) => s.value > 0);
+  const drawRingOnly = nonEmpty.length === 1;
+  // Small gap in radians so segments read as separate but no gap is ever
+  // wider than the slice itself. Skipped when only one slice is drawn.
+  const gap = drawRingOnly ? 0 : Math.PI / 180 * 1.2;
+  let a = -Math.PI / 2; // 12 o'clock start
+  const paths: React.ReactElement[] = [];
+  if (drawRingOnly) {
+    const only = nonEmpty[0]!;
+    paths.push(
+      <Circle
+        key={only.key}
+        cx={cx}
+        cy={cy}
+        r={r}
+        stroke={only.color}
+        strokeWidth={thickness}
+        fill="none"
+      />,
+    );
+  } else {
+    for (const slice of slices) {
+      if (slice.value <= 0) continue;
+      const span = (slice.value / total) * Math.PI * 2;
+      const s = a + Math.min(gap / 2, span / 3);
+      const e = a + span - Math.min(gap / 2, span / 3);
+      const large = e - s > Math.PI ? 1 : 0;
+      const x1 = cx + Math.cos(s) * r;
+      const y1 = cy + Math.sin(s) * r;
+      const x2 = cx + Math.cos(e) * r;
+      const y2 = cy + Math.sin(e) * r;
+      const x3 = cx + Math.cos(e) * r0;
+      const y3 = cy + Math.sin(e) * r0;
+      const x4 = cx + Math.cos(s) * r0;
+      const y4 = cy + Math.sin(s) * r0;
+      // A filled ring wedge (outer arc → inner arc) so each slice carries its
+      // own colour without a stroke join darkening it against its neighbour.
+      paths.push(
+        <Path
+          key={slice.key}
+          d={`M${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${large} 0 ${x4},${y4} Z`}
+          fill={slice.color}
+        />,
+      );
+      a += span;
+    }
+  }
+  const totalLabel = nonEmpty
+    .map((s) => `${s.label}, ${Math.round((s.value / total) * 100)}%`)
+    .join('. ');
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={totalLabel}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size}>
+        <Circle cx={cx} cy={cy} r={r} stroke={theme.track} strokeWidth={thickness} fill="none" />
+        {paths}
+      </Svg>
+      {(centerLabel || centerValue || centerMeta) && (
+        <View style={styles.donutCenter} pointerEvents="none">
+          {centerLabel && (
+            <ThemedText type="nano" themeColor="textSecondary">
+              {centerLabel}
+            </ThemedText>
+          )}
+          {centerValue}
+          {centerMeta && (
+            <ThemedText type="nano" themeColor="textTertiary">
+              {centerMeta}
+            </ThemedText>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 /* ── Composition bar ─────────────────────────────────────────────────── */
 
 export interface CompositionSegment {
@@ -480,5 +628,12 @@ const styles = StyleSheet.create({
   },
   historyBar: {
     width: 16,
+  },
+  donutCenter: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    maxWidth: '78%',
   },
 });

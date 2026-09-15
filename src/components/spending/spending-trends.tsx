@@ -16,6 +16,15 @@ import { formatMinorUnits } from '@/lib/ledger-money';
 import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
+/** Compact axis label — 12.4k, 1.2M — for the peak reference on the trends chart. */
+function shortAmount(fils: number): string {
+  const value = Math.round(fils / 100); // fils → currency units
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
+  return `${value}`;
+}
+
 export type MonthFlow = { key: string; incomeFils: number; expenseFils: number };
 type Props = {
   months: readonly MonthFlow[];
@@ -40,7 +49,7 @@ export function SpendingTrends(p: Props) {
   const { width, fontScale } = useWindowDimensions();
   // Six labels must fit at the actual width and text size. When they cannot,
   // every month remains available in a wrapping detail list, not hidden.
-  const showAllTrendLabels = !large && (Math.min(width, 800) - 104) / 6 >= (lang === 'ar' ? 58 : 32) * fontScale;
+  const showAllTrendLabels = !large && (Math.min(width, 800) - 146) / 6 >= (lang === 'ar' ? 58 : 32) * fontScale;
   const w = copy[lang === 'ar' ? 'ar' : 'en']; const [patterns, setPatterns] = useState(false);
   const max = Math.max(1, ...p.months.flatMap((m) => [m.incomeFils, m.expenseFils]));
   const selected = p.months.find((m) => m.key === p.selectedKey);
@@ -55,31 +64,90 @@ export function SpendingTrends(p: Props) {
     </View>
   ) : <ThemedText type="meta" themeColor="textSecondary">— {w.noData}</ThemedText>;
   const weekdayMax = Math.max(1, ...p.weekdays);
+  // Selected-month net & delta let a Trends viewer read "is this month up or
+  // down and by how much" in the same look as the bars. Compare with the
+  // immediately previous month in the same six-month window, so a selection at
+  // the far left has no comparison and the chip stays hidden rather than
+  // showing an implausible +100%.
+  const selectedIndex = p.months.findIndex((m) => m.key === p.selectedKey);
+  const previous = selectedIndex > 0 ? p.months[selectedIndex - 1] : null;
+  const selectedNet = selected ? selected.incomeFils - selected.expenseFils : 0;
+  const previousExpense = previous?.expenseFils ?? 0;
+  const deltaFils = selected && previous ? selected.expenseFils - previousExpense : 0;
+  const deltaPct = selected && previous && previousExpense > 0
+    ? Math.round((deltaFils / previousExpense) * 100) : null;
   return <View style={styles.root} testID="spending-trends">
     <View style={[styles.panel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <ThemedText type="heading">{w.cashflow}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
-      <View style={styles.chart}>
-        {p.months.map((month) => <Pressable key={month.key} accessibilityRole="button"
-          aria-selected={month.key === p.selectedKey}
-          accessibilityState={{ selected: month.key === p.selectedKey }}
-          accessibilityLabel={monthDescription(month)}
-          onPress={() => p.onMonth(month.key)} style={styles.column}>
-          <View style={[styles.barPair, { borderBottomColor: theme.cardBorder }]}>
-            <View style={[styles.bar, { height: `${month.incomeFils / max * 100}%`, backgroundColor: theme.primary }]} />
-            <View style={[styles.bar, { height: `${month.expenseFils / max * 100}%`, backgroundColor: theme.expenseGraphic, opacity: month.key === p.selectedKey ? 1 : 0.55 }]} />
+      <View style={styles.chartWrap}>
+        <View style={styles.axis} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max)}</ThemedText>
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max / 2)}</ThemedText>
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>0</ThemedText>
+        </View>
+        <View style={styles.chartBody}>
+          <View style={styles.grid} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none">
+            <View style={[styles.gridline, { backgroundColor: theme.cardBorder }]} />
+            <View style={[styles.gridline, { backgroundColor: theme.cardBorder, opacity: 0.6 }]} />
+            <View style={[styles.gridline, { backgroundColor: theme.cardBorderStrong }]} />
           </View>
-          {showAllTrendLabels && <ThemedText type="meta" themeColor={month.key === p.selectedKey ? 'text' : 'textSecondary'}
-            style={styles.month}>{monthLabel(month.key, true).split(' ')[0]}</ThemedText>}
-        </Pressable>)}
+          <View style={styles.chart}>
+            {p.months.map((month) => {
+              const isSelected = month.key === p.selectedKey;
+              const inH = Math.max(month.incomeFils > 0 ? 3 : 0, month.incomeFils / max * 100);
+              const outH = Math.max(month.expenseFils > 0 ? 3 : 0, month.expenseFils / max * 100);
+              return <Pressable key={month.key} accessibilityRole="button"
+                aria-selected={isSelected}
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={monthDescription(month)}
+                onPress={() => p.onMonth(month.key)} style={styles.column}>
+                <View style={[styles.barPair, isSelected && { backgroundColor: theme.backgroundSelected, borderRadius: 6 }]}>
+                  <View style={[styles.bar, styles.barIn, { height: `${inH}%`, backgroundColor: theme.primary, opacity: isSelected || month.incomeFils === 0 ? 1 : 0.85 }]} />
+                  <View style={[styles.bar, styles.barOut, { height: `${outH}%`, backgroundColor: theme.expenseGraphic, opacity: isSelected || month.expenseFils === 0 ? 1 : 0.7 }]} />
+                </View>
+                {showAllTrendLabels && <View style={styles.monthLabel}>
+                  <ThemedText type="nano" themeColor={isSelected ? 'text' : 'textTertiary'}>{monthLabel(month.key, true).split(' ')[0]}</ThemedText>
+                  <View style={[styles.nowTick, { backgroundColor: isSelected ? theme.text : 'transparent' }]} />
+                </View>}
+              </Pressable>;
+            })}
+          </View>
+        </View>
       </View>
       <View style={styles.legend}>
         <View style={styles.legendItem}><View style={[styles.dot, { backgroundColor: theme.primary }]} /><ThemedText type="meta">{w.income}</ThemedText></View>
         <View style={styles.legendItem}><View style={[styles.dot, { backgroundColor: theme.expenseGraphic }]} /><ThemedText type="meta">{w.spending}</ThemedText></View>
       </View>
-      {selected && <View style={[styles.selected, { backgroundColor: theme.backgroundSelected }]} accessibilityLiveRegion="polite">
-        <ThemedText type="smallBold">{monthLabel(selected.key)}</ThemedText>
-        {monthFigures(selected)}
+      {selected && <View style={[styles.selected, { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder }]} accessibilityLiveRegion="polite">
+        <View style={styles.selectedHead}>
+          <ThemedText type="smallBold">{monthLabel(selected.key)}</ThemedText>
+          {deltaPct !== null && <View style={[styles.deltaChip, {
+            backgroundColor: theme.background,
+            borderColor: deltaFils > 0 ? theme.expenseSoftBorder : theme.primaryBorder,
+          }]}>
+            <Icon name={deltaFils > 0 ? 'arrow-up' : 'arrow-down'} size={12}
+              color={deltaFils > 0 ? theme.expenseGraphic : theme.primary} />
+            <ThemedText type="meta" tabular themeColor={deltaFils > 0 ? 'expense' : 'income'}>
+              {Math.abs(deltaPct)}% {deltaFils > 0 ? w.more : w.fewer}
+            </ThemedText>
+          </View>}
+        </View>
+        <View style={styles.selectedFigures}>
+          <View style={styles.selectedFigure}>
+            <ThemedText type="nano" themeColor="textTertiary">{w.income}</ThemedText>
+            <Money fils={selected.incomeFils} type="smallBold" />
+          </View>
+          <View style={styles.selectedFigure}>
+            <ThemedText type="nano" themeColor="textTertiary">{w.spending}</ThemedText>
+            <Money fils={selected.expenseFils} type="smallBold" color={theme.expense} />
+          </View>
+          <View style={styles.selectedFigure}>
+            <ThemedText type="nano" themeColor="textTertiary">{w.net}</ThemedText>
+            <Money fils={selectedNet} type="smallBold" sign="auto"
+              color={selectedNet < 0 ? theme.expense : theme.income} />
+          </View>
+        </View>
       </View>}
       {!showAllTrendLabels && <View style={styles.monthDetails} testID="cashflow-month-details">
         {p.months.map((month) => <Pressable key={month.key} testID={`cashflow-detail-${month.key}`}
@@ -147,11 +215,28 @@ const styles = StyleSheet.create({
   monthFigure: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   monthDetails: { gap: 12 }, monthDetail: { minHeight: 48, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
   root: { gap: 24 }, panel: { paddingVertical: 18, gap: 12 },
-  chart: { flexDirection: 'row', gap: 6, marginTop: 8 }, column: { flex: 1, minWidth: 0, gap: 8, minHeight: 150 },
-  barPair: { height: 140, alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'center', gap: 4, borderBottomWidth: 1 },
-  bar: { width: '32%', borderTopLeftRadius: 2, borderTopRightRadius: 2 }, month: { textAlign: 'center', fontSize: 12, lineHeight: 18 },
+  chartWrap: { flexDirection: 'row', gap: 8, marginTop: 8, alignItems: 'flex-start' },
+  axis: { width: 34, height: 172, justifyContent: 'space-between', alignItems: 'flex-end' },
+  axisLabel: { textAlign: 'right' },
+  chartBody: { flex: 1, minWidth: 0, position: 'relative' },
+  grid: { position: 'absolute', left: 0, right: 0, top: 0, height: 172, justifyContent: 'space-between' },
+  gridline: { height: StyleSheet.hairlineWidth },
+  chart: { flexDirection: 'row', gap: 4 },
+  column: { flex: 1, minWidth: 0, gap: 6 },
+  barPair: { height: 172, alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'center', gap: 3, paddingHorizontal: 3, paddingBottom: 2 },
+  bar: { width: '36%' },
+  barIn: { borderTopLeftRadius: 4, borderTopRightRadius: 4 },
+  barOut: { borderTopLeftRadius: 4, borderTopRightRadius: 4 },
+  monthLabel: { alignItems: 'center', gap: 2 },
+  nowTick: { width: 12, height: 2, borderRadius: 1 },
+  month: { textAlign: 'center', fontSize: 12, lineHeight: 18 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 }, legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 }, selected: { paddingVertical: 12, gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  selected: { paddingVertical: 12, paddingHorizontal: 14, gap: 10, borderWidth: 1, borderRadius: 12 },
+  selectedHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  selectedFigures: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  selectedFigure: { gap: 2, minWidth: 84 },
+  deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
   section: { gap: 10 }, group: { overflow: 'hidden', },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, paddingVertical: 16 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
   grow: { flex: 1, minWidth: 100, gap: 4 }, change: { alignItems: 'flex-end', gap: 4 },

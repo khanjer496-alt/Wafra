@@ -1,8 +1,9 @@
 import { spendingCopy } from '@/lib/reference-copy';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { CategoryDonut, useRamp, type DonutSlice } from '@/components/ui/charts';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -10,7 +11,9 @@ import { Button } from '@/components/ui/controls';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
+import { DataViz } from '@/constants/theme';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -45,15 +48,50 @@ export function SpendingOverview(p: Props) {
     (p.filter === 'limited' ? row.limitFils !== null : row.limitFils === null));
   const health = (ratio: number | null) => ratio !== null && ratio > 1 ? theme.expenseGraphic
     : ratio !== null && ratio >= 0.85 ? theme.warningGraphic : theme.primary;
+  const ramp = useRamp();
+  const scheme = useColorScheme();
+  const neutral = DataViz[scheme === 'dark' ? 'dark' : 'light'].neutral;
+  // The pie carries the top slices in the ramp, then a single neutral "Other"
+  // wedge for the tail so five distinct hues do not have to explain twelve
+  // categories. Colour keyed by category id, not row index, so a filter change
+  // on the list below does not repaint the pie.
+  const donutColors = useMemo(() => {
+    const map = new Map<CategoryId, string>();
+    const ranked = [...p.rows].filter((row) => row.spentFils > 0);
+    const head = ranked.slice(0, ramp.length);
+    head.forEach((row, i) => map.set(row.category, ramp[i]!));
+    return map;
+  }, [p.rows, ramp]);
+  const slices: DonutSlice[] = useMemo(() => {
+    const drawn: DonutSlice[] = [];
+    let tail = 0;
+    for (const row of p.rows) {
+      if (row.spentFils <= 0) continue;
+      const color = donutColors.get(row.category);
+      if (color) drawn.push({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils, color });
+      else tail += row.spentFils;
+    }
+    if (tail > 0) drawn.push({ key: '__tail', label: w.breakdown, value: tail, color: neutral });
+    return drawn;
+  }, [p.rows, donutColors, neutral, language, w.breakdown]);
   return <View style={styles.root} testID="spending-categories">
-    <View style={styles.overview}>
+    <View style={styles.hero}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
         <ThemedText type="smallBold">{w.spent}</ThemedText>
         <View style={styles.periodRight}><ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
           <Icon name="chevron-down" size={15} color={theme.textSecondary} /></View>
       </Pressable>
-      <Money fils={p.totalFils} type="amount" />
-      <ThemedText type="meta" themeColor="textSecondary">{w.shareNote}</ThemedText>
+      <View style={styles.donutWrap}>
+        <CategoryDonut
+          slices={slices}
+          size={216}
+          thickness={26}
+          centerLabel={w.spent}
+          centerValue={<Money fils={p.totalFils} type="subtitle" decimals={false} />}
+          centerMeta={p.periodLabel}
+        />
+      </View>
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.heroNote}>{w.shareNote}</ThemedText>
     </View>
 
     <ThemedText type="heading">{w.breakdown}</ThemedText>
@@ -70,23 +108,28 @@ export function SpendingOverview(p: Props) {
       {rows.map((row) => {
         const share = spendingShare(row.spentFils, p.totalFils);
         const shareLabel = spendingShareLabel(share, language);
+        const sliceColor = donutColors.get(row.category) ?? neutral;
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
         accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${moneyLabel(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
         style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-        <CategoryAvatar category={row.category} size={44} />
+        <View style={styles.categoryAvatarWrap}>
+          <CategoryAvatar category={row.category} size={44} />
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+            style={[styles.categoryDot, { backgroundColor: sliceColor, borderColor: theme.background }]} />
+        </View>
         <View style={styles.categoryContent}>
           <View style={[styles.categoryTop, large && styles.stack]}>
             <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(row.category, language)}</ThemedText>
             <Money fils={row.spentFils} type="smallBold" />
           </View>
           <View style={styles.categoryBottom}>
-            <ThemedText type="meta" tabular style={{ color: theme.primary }} testID={`spending-share-${row.category}`}>
+            <ThemedText type="meta" tabular style={{ color: sliceColor }} testID={`spending-share-${row.category}`}>
               {shareLabel} {w.share}</ThemedText>
             <Icon name="chevron-right" size={14} color={theme.textTertiary} />
           </View>
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <ProgressBar ratio={share} color={theme.primary} height={4} />
+            <ProgressBar ratio={share} color={sliceColor} height={4} />
           </View>
           {row.limitFils !== null && <>
             <View style={[styles.categoryBottom, large && styles.stack]}>
@@ -117,12 +160,17 @@ export function SpendingOverview(p: Props) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 12 }, overview: { paddingVertical: 12, gap: 8 },
+  root: { gap: 12 },
+  hero: { paddingVertical: 12, gap: 12, alignItems: 'stretch' },
+  donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
+  heroNote: { textAlign: 'center' },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
   categories: { gap: 0 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 0, borderTopWidth: 1 },
+  categoryAvatarWrap: { position: 'relative' },
+  categoryDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   categoryContent: { flex: 1, minWidth: 0, gap: 7 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   categoryBottom: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0 }, caption: { fontSize: 12, lineHeight: 18 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
