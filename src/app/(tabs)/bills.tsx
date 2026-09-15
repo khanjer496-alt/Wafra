@@ -10,9 +10,10 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
+import { BillsSegmentControl, type BillsSegment } from '@/components/bills/bills-segment-control';
 import { PaymentAgenda } from '@/components/bills/payment-agenda';
-import { SegmentedControl } from '@/components/ui/segmented-control';
-import type { PaymentAgendaItem } from '@/lib/reference-presentation';
+import { Money } from '@/components/ui/money';
+import { paymentGroupFor, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -105,8 +106,8 @@ export default function BillsScreen() {
   const key = monthKey(now);
   const todayISO = toISODate(now);
 
-  const [agendaView, setAgendaView] = useState<'upcoming' | 'all'>('upcoming');
-  const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
+  const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
+  const words = { unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
@@ -230,10 +231,42 @@ export default function BillsScreen() {
       items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, title: sub.title, category: sub.category,
         kind: 'recurring', dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now),
         group: sub.group === 'subscription' ? 'subscriptions' : undefined,
-        amountFils: charge.amountFils, estimated: true, paid: false });
+        amountFils: charge.amountFils, estimated: charge.estimated, paid: false });
     }
     return items;
   }, [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
+
+  const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
+    if (agendaView === 'subscriptions') return 'subscriptions';
+    if (agendaView === 'utilities') return 'utilities';
+    if (agendaView === 'cards') return 'cards';
+    return undefined;
+  }, [agendaView]);
+  const visibleAgendaItems = useMemo(
+    () => selectedAgendaGroup
+      ? agendaItems.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
+      : agendaItems,
+    [agendaItems, selectedAgendaGroup],
+  );
+  const includePaidAgenda = agendaView !== 'upcoming';
+  const summary = useMemo(() => {
+    const openItems = visibleAgendaItems.filter((item) => !item.paid);
+    const label = agendaView === 'subscriptions'
+      ? t('billsSubscriptionsTotal')
+      : agendaView === 'utilities'
+        ? t('billsUtilitiesTotal')
+        : agendaView === 'cards'
+          ? t('billsCardsTotal')
+          : agendaView === 'all'
+            ? t('billsAllTotal')
+            : t('billsUpcomingTotal');
+    return {
+      label,
+      totalFils: openItems.reduce((sum, item) => sum + item.amountFils, 0),
+      count: openItems.length,
+      estimated: openItems.filter((item) => item.estimated).length,
+    };
+  }, [agendaView, visibleAgendaItems]);
 
   // Everything the detail sheet needs about the tapped subscription: its raw
   // charges (newest first), which cards paid it, first charge, lifetime total.
@@ -399,7 +432,7 @@ export default function BillsScreen() {
 
   const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
     // Keep the paid statement's result visible after the last open due settles.
-    setAgendaView('all');
+    setAgendaView('cards');
     setConfirmation({
       question: tf('payAccountTitle', { name: accName }),
       body: tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
@@ -553,9 +586,33 @@ export default function BillsScreen() {
         }
         contentStyle={largeText && styles.headerLarge}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <SegmentedControl label={t('billsTitle')} value={agendaView} onChange={setAgendaView}
-          segments={[{ value: 'upcoming', label: words.upcoming }, { value: 'all', label: words.all }]} />
-        <PaymentAgenda items={agendaItems} accounts={state.accounts} includePaid={agendaView === 'all'} onOpen={(item) => {
+        <BillsSegmentControl segment={agendaView} onChange={setAgendaView} />
+        <View
+          accessible
+          accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', { count: summary.count, s: summary.count === 1 ? '' : 's' })}`}
+          style={[styles.summary, { borderColor: theme.cardBorder }]}>
+          <ThemedText type="micro" themeColor="textSecondary" style={styles.summaryLabel}>
+            {summary.label}
+          </ThemedText>
+          <Money fils={summary.totalFils} type="display" decimals />
+          <View style={styles.summaryMeta}>
+            <ThemedText type="meta" themeColor="textSecondary">
+              {tf('billsSummaryPayments', { count: summary.count, s: summary.count === 1 ? '' : 's' })}
+            </ThemedText>
+            {summary.estimated > 0 && <>
+              <ThemedText type="meta" themeColor="textTertiary">·</ThemedText>
+              <ThemedText type="meta" style={{ color: theme.gold }}>
+                {tf('billsSummaryEstimated', { count: summary.estimated })}
+              </ThemedText>
+            </>}
+          </View>
+        </View>
+        <PaymentAgenda
+          items={visibleAgendaItems}
+          accounts={state.accounts}
+          includePaid={includePaidAgenda}
+          group={selectedAgendaGroup}
+          onOpen={(item) => {
           if (item.kind === 'card') {
             const id = item.id.slice(5);
             const due = state.cardDues.find((due) => due.id === id);
@@ -891,6 +948,15 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
+  summary: {
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    gap: Spacing.one,
+  },
+  summaryLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
+  summaryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   referenceGroup: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },
   duesBlock: {

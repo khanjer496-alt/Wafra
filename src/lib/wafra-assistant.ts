@@ -45,6 +45,9 @@ export type AssistantTool =
   | 'unusual-charges'
   | 'possible-duplicates'
   | 'money-review'
+  | 'historical-baseline'
+  | 'top-accounts'
+  | 'compare-accounts'
   | 'data-coverage';
 
 /**
@@ -80,6 +83,9 @@ export type AssistantToolRequest =
   | { tool: 'net-income-spending'; period: Period }
   | { tool: 'cash-outflow'; period: Period }
   | { tool: 'month-forecast'; period: Period }
+  | { tool: 'historical-baseline'; period: Period; baseline: 'highest-month' | 'typical-month' | 'closest-month' }
+  | { tool: 'top-accounts'; period: Period; accountKind?: 'all' | 'bank' | 'card'; limit?: number }
+  | { tool: 'compare-accounts'; period: Period; leftAccountId: string; rightAccountId: string }
   | { tool: 'recurring-changes' | 'unusual-charges' | 'possible-duplicates' | 'money-review' | 'data-coverage'; period: Period }))
   | { tool: 'subscriptions' }
   | { tool: 'upcoming-payments'; withinDays?: number };
@@ -196,7 +202,7 @@ function calendarMonth(month: number, year: number): Period {
 }
 
 interface ParsedPeriods { periods: Period[]; rest: string; error?: string }
-function parsePeriods(question: string, now: Date): ParsedPeriods {
+function parsePeriods(question: string, now: Date, state?: AppState): ParsedPeriods {
   const found: { index: number; period: Period }[] = [];
   let rest = question;
   let error: string | undefined;
@@ -243,6 +249,37 @@ function parsePeriods(question: string, now: Date): ParsedPeriods {
     const from = new Date(now); from.setDate(from.getDate() - days + 1);
     return range(toISODate(from), toISODate(now));
   });
+  consume(/\b(?:last|past)\s+(\d+)\s+weeks?\b/g, (m) => {
+    const weeks = Number(m[1]);
+    if (weeks < 1 || weeks > 12) return null;
+    const from = new Date(now); from.setDate(from.getDate() - weeks * 7 + 1);
+    return range(toISODate(from), toISODate(now));
+  });
+  consume(/\bfirst half of (?:this|the current) month\b/g, () => {
+    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return range(`${key}-01`, `${key}-15`);
+  });
+  consume(/\bsecond half of (?:this|the current) month\b/g, () => {
+    if (now.getDate() < 16) return null;
+    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return range(`${key}-16`, toISODate(now));
+  });
+  const paydayRange = (before: boolean): Period | null => {
+    if (!state) return null;
+    const reporting = currentMonthPeriod(now);
+    const salaryDates = incomeRows(state, reporting)
+      .filter((row) => row.category === 'salary' && row.date <= toISODate(now))
+      .map((row) => row.date).sort();
+    const payday = salaryDates.at(-1);
+    if (!payday) return null;
+    if (!before) return range(payday, toISODate(now));
+    const start = periodStartISO(reporting, state.transactions);
+    const endDate = new Date(`${payday}T12:00:00Z`); endDate.setUTCDate(endDate.getUTCDate() - 1);
+    const end = toISODate(endDate);
+    return start && start <= end ? range(start, end) : null;
+  };
+  consume(/\b(?:since payday|since my (?:last )?(?:salary|paycheck|pay cheque)(?: came in| arrived)?)\b/g, () => paydayRange(false));
+  consume(/\b(?:before payday|before my (?:last )?(?:salary|paycheck|pay cheque)(?: came in| arrived)?)\b/g, () => paydayRange(true));
   consume(/\b(?:today|yesterday|this month|current month|last month|previous month|this year|current year|last year|previous year|all time|ever|since i started|past week|last week)\b/g, (m) => {
     const phrase = m[0];
     if (/all time|ever|since/.test(phrase)) return { mode: 'all' };
@@ -263,7 +300,7 @@ function parsePeriods(question: string, now: Date): ParsedPeriods {
     const year = m[2] ? Number(m[2]) : month > now.getMonth() ? now.getFullYear() - 1 : now.getFullYear();
     return calendarMonth(month, year);
   });
-  if (/\b(?:before|after|since|until|between|quarter|fortnight|weekend|weeks|months|years|next|tomorrow|week|during)\b|\d[/-]\d|\b\d{4}\b/.test(rest)) {
+  if (/\b(?:before|after|since|until|between|quarter|fortnight|weekend|weeks|months|years|next|tomorrow|week|during|payday|paycheck)\b|\d[/-]\d|\b\d{4}\b/.test(rest)) {
     error = 'I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31.';
   }
   return { periods: found.sort((a, b) => a.index - b.index).map((item) => item.period), rest, error };
@@ -695,6 +732,60 @@ function groupedCategoryMerchants(
     .sort((a, b) => b.totalFils - a.totalFils || b.count - a.count);
 }
 
+function filtersWithoutAccounts(filters: AssistantFilters): AssistantFilters {
+  const next = copyFilters(filters);
+  delete next.accountIds;
+  delete next.excludedAccountIds;
+  return next;
+}
+
+interface MonthlySpendingGroup {
+  key: string;
+  rows: Transaction[];
+  totalFils: number;
+}
+
+function monthlySpendingGroups(state: AppState, filters: AssistantFilters): MonthlySpendingGroup[] {
+  const rows = filterRows(spendingRows(state, { mode: 'all' }), filters)
+    .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date));
+  const groups = new Map<string, Transaction[]>();
+  for (const row of rows) {
+    const key = row.date.slice(0, 7);
+    const current = groups.get(key) ?? [];
+    current.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.entries()].map(([key, monthRows]) => ({ key, rows: monthRows, totalFils: total(monthRows) }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function medianInteger(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[middle];
+  return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+}
+
+function accountName(state: AppState, id: string): string {
+  return state.accounts.find((account) => account.id === id)?.name ?? 'Unknown account';
+}
+
+function accountSpendingGroups(state: AppState, period: Period, filters: AssistantFilters, kind: 'all' | 'bank' | 'card' = 'all') {
+  const contentFilters = filtersWithoutAccounts(filters);
+  const live = liveAccountIds(state.accounts);
+  const eligible = new Set(state.accounts.filter((account) => live.has(account.id) &&
+    (kind === 'all' || kind === 'card' ? kind === 'all' || account.kind === 'card' : account.kind === 'bank'))
+    .map((account) => account.id));
+  const rows = filterRows(spendingRows(state, period), contentFilters).filter((row) => eligible.has(row.accountId));
+  const groups = new Map<string, Transaction[]>();
+  for (const row of rows) {
+    const current = groups.get(row.accountId) ?? [];
+    current.push(row); groups.set(row.accountId, current);
+  }
+  return [...groups.entries()].map(([id, accountRows]) => ({ id, rows: accountRows, totalFils: total(accountRows) }))
+    .sort((a, b) => b.totalFils - a.totalFils || accountName(state, a.id).localeCompare(accountName(state, b.id)));
+}
+
 function executeAssistantToolResult(
   state: AppState,
   request: AssistantToolRequest,
@@ -711,7 +802,7 @@ function executeAssistantToolResult(
       return {
         tool: request.tool,
         title: request.clarification ? 'Let’s clarify that' : 'What you can ask',
-        body: request.clarification ?? 'Ask Wafra about spending, income, merchants, categories, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
+        body: request.clarification ?? 'Ask Wafra about spending, income, merchants, categories, accounts/cards, historical monthly baselines, subscriptions, upcoming payments, cash outflow, period comparisons, daily averages, largest purchases, or a month forecast.',
         suggestions: request.suggestions ?? ['How much did I spend?', 'Why did my spending change?', 'What payments are due soon?'],
       };
 
@@ -894,6 +985,84 @@ function executeAssistantToolResult(
         data: { currentFils: current, previousFils: prior, deltaFils: delta, deltaPercent: pct,
           currentCount: analysis.currentCount, previousCount: analysis.previousCount, purchaseCountDelta: purchaseDelta,
           largestPurchaseFils: largestCurrent?.amountFils ?? 0 },
+      };
+    }
+
+    case 'historical-baseline': {
+      const months = monthlySpendingGroups(state, request);
+      const currentRows = filterRows(spendingRows(state, period), request);
+      const currentTotal = total(currentRows);
+      if (!months.length) return { tool: request.tool, title: 'Spending history',
+        body: 'I do not have recorded spending history for that scope yet.', data: { monthsAnalyzed: 0, currentFils: currentTotal } };
+      if (request.baseline === 'highest-month') {
+        const highest = [...months].sort((a, b) => b.totalFils - a.totalFils || b.key.localeCompare(a.key))[0];
+        return {
+          tool: request.tool, title: 'Highest recorded month',
+          body: `${highest.key} has the highest recorded monthly spending for this scope at ${formatLedgerMoney(highest.totalFils)} across ${months.length} month${months.length === 1 ? '' : 's'} with recorded spending. Months with no recorded transactions are not treated as zero.`,
+          facts: [{ label: 'Highest month', value: `${highest.key} · ${formatLedgerMoney(highest.totalFils)}` },
+            { label: 'Current selection', value: formatLedgerMoney(currentTotal) }],
+          data: { monthsAnalyzed: months.length, baselineFils: highest.totalFils, currentFils: currentTotal, monthKey: highest.key },
+        };
+      }
+      if (request.baseline === 'typical-month') {
+        const currentStart = periodStartISO(period, state.transactions) ?? toISODate(now);
+        const priorMonths = months.filter((month) => month.key < currentStart.slice(0, 7)).slice(-12);
+        if (priorMonths.length < 3) return { tool: request.tool, title: 'Typical recorded month',
+          body: `I only have ${priorMonths.length} earlier month${priorMonths.length === 1 ? '' : 's'} with recorded spending for this scope. I need at least 3 earlier recorded months before calling a monthly level typical.`,
+          data: { monthsAnalyzed: priorMonths.length, currentFils: currentTotal, baselineFils: null } };
+        const typical = medianInteger(priorMonths.map((month) => month.totalFils));
+        const delta = checkedMinorSum([currentTotal, -typical]);
+        return {
+          tool: request.tool, title: 'Typical recorded month',
+          body: `The median across the ${priorMonths.length} most recent earlier months with recorded spending is ${formatLedgerMoney(typical)}. Your selected period is ${formatLedgerMoney(currentTotal)}, ${formatLedgerMoney(Math.abs(delta))} ${delta >= 0 ? 'above' : 'below'} that recorded median. Months with no recorded transactions are excluded rather than assumed to be zero.`,
+          facts: [{ label: 'Recorded monthly median', value: formatLedgerMoney(typical) },
+            { label: 'Selected period', value: formatLedgerMoney(currentTotal) }],
+          data: { monthsAnalyzed: priorMonths.length, baselineFils: typical, currentFils: currentTotal, deltaFils: delta },
+        };
+      }
+      const currentStart = periodStartISO(period, state.transactions) ?? toISODate(now);
+      const earlier = months.filter((month) => month.key < currentStart.slice(0, 7));
+      if (!earlier.length) return { tool: request.tool, title: 'Closest earlier month',
+        body: 'I do not have an earlier recorded month for that scope to compare with this amount.',
+        data: { monthsAnalyzed: months.length, currentFils: currentTotal, baselineFils: null } };
+      const closest = [...earlier].sort((a, b) => Math.abs(a.totalFils - currentTotal) - Math.abs(b.totalFils - currentTotal) || b.key.localeCompare(a.key))[0];
+      return {
+        tool: request.tool, title: 'Closest earlier month',
+        body: `${closest.key} is the earlier recorded month closest to your selected period: ${formatLedgerMoney(closest.totalFils)} versus ${formatLedgerMoney(currentTotal)} now. This is the nearest recorded monthly total, not a claim that the histories are complete.`,
+        facts: [{ label: closest.key, value: formatLedgerMoney(closest.totalFils) },
+          { label: 'Selected period', value: formatLedgerMoney(currentTotal) }],
+        data: { monthsAnalyzed: earlier.length, baselineFils: closest.totalFils, currentFils: currentTotal,
+          deltaFils: checkedMinorSum([currentTotal, -closest.totalFils]), monthKey: closest.key },
+      };
+    }
+
+    case 'top-accounts': {
+      const groups = accountSpendingGroups(state, period, request, request.accountKind ?? 'all');
+      const limit = Math.max(1, Math.min(request.limit ?? 5, 10));
+      const shown = groups.slice(0, limit);
+      const kind = request.accountKind === 'card' ? 'card' : request.accountKind === 'bank' ? 'account' : 'account/card';
+      return {
+        tool: request.tool, title: `Top ${kind}${kind === 'account/card' ? 's' : 's'}`,
+        body: shown.length ? `${accountName(state, shown[0].id)} has the most recorded spending in ${scope} at ${formatLedgerMoney(shown[0].totalFils)}.`
+          : `I do not see recorded spending on matching ${kind}s in ${scope}.`,
+        facts: shown.map((group) => ({ label: accountName(state, group.id), value: formatLedgerMoney(group.totalFils) })),
+        data: { accountCount: groups.length, spendingFils: checkedMinorSum(groups.map((group) => group.totalFils)) },
+      };
+    }
+
+    case 'compare-accounts': {
+      const contentFilters = filtersWithoutAccounts(request);
+      const rows = filterRows(spendingRows(state, period), contentFilters);
+      const leftRows = rows.filter((row) => row.accountId === request.leftAccountId);
+      const rightRows = rows.filter((row) => row.accountId === request.rightAccountId);
+      const left = total(leftRows), right = total(rightRows);
+      const delta = checkedMinorSum([left, -right]);
+      const leftName = accountName(state, request.leftAccountId), rightName = accountName(state, request.rightAccountId);
+      return {
+        tool: request.tool, title: 'Account comparison',
+        body: `${leftName} recorded ${formatLedgerMoney(left)} of spending in ${scope}; ${rightName} recorded ${formatLedgerMoney(right)}. ${delta === 0 ? 'They are equal in this view.' : `${delta > 0 ? leftName : rightName} is higher by ${formatLedgerMoney(Math.abs(delta))}.`}`,
+        facts: [{ label: leftName, value: formatLedgerMoney(left) }, { label: rightName, value: formatLedgerMoney(right) }],
+        data: { leftFils: left, rightFils: right, deltaFils: delta },
       };
     }
 
@@ -1125,6 +1294,25 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
     const shown = [...spending].sort((a, b) => b.amountFils - a.amountFils || b.date.localeCompare(a.date))
       .slice(0, Math.max(1, Math.min(request.limit ?? 5, 10)));
     groups = [{ ...evidence('Largest purchases shown', shown), ordered: true }];
+  } else if (request.tool === 'historical-baseline') {
+    const history = filterRows(spendingRows(state, { mode: 'all' }), request);
+    const monthKey = typeof answer.data?.monthKey === 'string' ? answer.data.monthKey : undefined;
+    const typicalKeys = request.baseline === 'typical-month'
+      ? new Set(monthlySpendingGroups(state, request)
+        .filter((month) => month.key < (periodStartISO(period, state.transactions) ?? toISODate(now)).slice(0, 7))
+        .slice(-12).map((month) => month.key)) : null;
+    const proof = monthKey ? history.filter((row) => row.date.startsWith(monthKey))
+      : typicalKeys ? history.filter((row) => typicalKeys.has(row.date.slice(0, 7))) : history;
+    groups = [evidenceFor(state, now, monthKey ? `Recorded spending in ${monthKey}` : 'Recorded months used for baseline', proof)];
+  } else if (request.tool === 'top-accounts') {
+    const rankingRows = accountSpendingGroups(state, period, request, request.accountKind ?? 'all').flatMap((group) => group.rows);
+    groups = [evidence('All spending used to rank accounts', rankingRows)];
+  } else if (request.tool === 'compare-accounts') {
+    const rows = filterRows(spendingRows(state, period), filtersWithoutAccounts(request));
+    groups = [
+      evidence(accountName(state, request.leftAccountId), rows.filter((row) => row.accountId === request.leftAccountId)),
+      evidence(accountName(state, request.rightAccountId), rows.filter((row) => row.accountId === request.rightAccountId)),
+    ];
   } else if (['recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review'].includes(request.tool)) {
     const ids = new Set((answer.findings ?? []).flatMap((finding) => finding.evidence[0]?.transactionIds ?? []));
     groups = [evidenceFor(state, now, 'Charges to review', state.transactions.filter((row) => ids.has(row.id)))];
@@ -1140,7 +1328,12 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
   const scope = dates.from ? `${dates.from} to ${dates.to}` : `through ${dates.to}`;
   const previousDates = request.tool === 'compare-periods' ? groups[1] : undefined;
   const comparisonScope = previousDates ? ` Comparison: ${previousDates.from} to ${previousDates.to}.` : '';
-  return { ...answer, body: `${answer.body} ${qualifier ? `${qualifier} ` : ''}Period: ${scope}.${comparisonScope} Based on recorded transactions; missing imports may change these figures.`, evidence: groups, coverage: answer.coverage ?? observedCoverage(state, request.tool === 'income-total' ? income : request.tool === 'net-income-spending' ? [...income, ...spending] : spending, request, request.tool === 'compare-periods' && !groups[1]?.transactionIds.length ? ['No earlier spending records match the comparison. A zero recorded baseline cannot establish a complete spending change.'] : []) };
+  const coverageRows = request.tool === 'historical-baseline'
+    ? filterRows(spendingRows(state, { mode: 'all' }), request)
+    : request.tool === 'compare-accounts' ? groups.flatMap((group) => state.transactions.filter((row) => group.transactionIds.includes(row.id)))
+      : request.tool === 'income-total' ? income : request.tool === 'net-income-spending' ? [...income, ...spending] : spending;
+  const scopeLabel = request.tool === 'historical-baseline' ? 'Reference period' : 'Period';
+  return { ...answer, body: `${answer.body} ${qualifier ? `${qualifier} ` : ''}${scopeLabel}: ${scope}.${comparisonScope} Based on recorded transactions; missing imports may change these figures.`, evidence: groups, coverage: answer.coverage ?? observedCoverage(state, coverageRows, request, request.tool === 'compare-periods' && !groups[1]?.transactionIds.length ? ['No earlier spending records match the comparison. A zero recorded baseline cannot establish a complete spending change.'] : []) };
 }
 
 interface NamedClause { rest: string; merchants: string[]; accounts: string[]; error?: AssistantToolRequest }
@@ -1244,7 +1437,7 @@ export function planAssistantQuestion(
   }
   const limit = requestedLimit(q);
   if (limit !== undefined && (limit < 1 || limit > 10)) return clarification('Choose between 1 and 10 results.');
-  const intentText = clauses[0].rest;
+  const intentText = clauses[0].rest.replace(/\b(?:since|before)\s+(?:my\s+)?(?:last\s+)?(?:salary|payday|paycheck|pay cheque)(?:\s+(?:came in|arrived))?\b/g, ' ');
   const isIncomeQuestion = /\b(?:income|salary|earned|earning|earnings|received|receiving|receives|receive|earn)\b/.test(intentText);
   const net = /income minus spending|spen[dt] more than i earned|more than i earn|what.*net|net spending|net cashflow/.test(intentText);
   if (isIncomeQuestion && !net && /\b(?:spend|spent|spending|expenses?)\b/.test(intentText)) return clarification('Ask for income and spending separately, or ask for income minus spending.');
@@ -1253,13 +1446,17 @@ export function planAssistantQuestion(
   const duplicates = /\b(?:duplicate|duplicates|duplicated|charged twice|double charged)\b/.test(q);
   const moneyReview = /\b(?:anything unusual|anything weird|anything odd|anything suspicious|anything i should review|what should i review|review my spending|review my transactions)\b/.test(q);
   const coverageQuestion = /\b(?:coverage|data gaps|missing imports|import status|import history|recorded history)\b/.test(q);
+  const highestMonthQuestion = /\b(?:highest|biggest|most expensive)\s+(?:recorded\s+)?(?:spending\s+)?month\b|\bhighest monthly\b/.test(q);
+  const typicalMonthQuestion = /\b(?:normal|typical|usual)\b.*\b(?:month|monthly|spend|spending)\b|\bmonthly median\b/.test(q);
+  const closestMonthQuestion = /\bwhen did i last spend (?:about )?this much\b|\blast time i spent (?:about )?this much\b|\bclosest earlier month\b/.test(q);
+  const accountRankingQuestion = /\b(?:which|what)\s+(?:bank\s+)?(?:account|card)\b.*\b(?:most|highest)\b|\btop\s+(?:accounts?|cards?)\b/.test(q);
   const comparison = !net && !recurring && (contextualComparison || /\b(?:compare|more than|less than|higher|lower|increase|decrease|change|changed|difference|different|vs|versus)\b|why.*spend/.test(q));
   const upcoming = /\b(?:due|upcoming|bills?)\b/.test(q) && !/\b(?:paid|spent|did|last|previous)\b/.test(q);
   const subscriptions = !recurring && /\b(?:subscriptions?|recurring charges?|renewals?)\b/.test(q) && !/\b(?:paid|spent|did|last|previous|change|changed|increase|decrease|compare)\b/.test(q);
   if (upcoming || subscriptions) {
     if (/\b(?:this week|next week|next month)\b/.test(q)) return clarification('Use a specific upcoming window, such as payments due within the next 7 days.');
     const windowless = q.replace(/\b(?:next|within)\s+\d+\s+days?\b/g, ' ');
-    const futurePeriods = parsePeriods(windowless, now);
+    const futurePeriods = parsePeriods(windowless, now, state);
     if (rawClauses.length > 1 || clauses.some((clause) => clause.accounts.length || clause.merchants.length) ||
       futurePeriods.error || futurePeriods.periods.length || categoriesFromQuestion(q).length || Object.keys(filters).length || /\bat\b/.test(q)) {
       return clarification('I can show the overall upcoming payments or active subscriptions. A filtered historical view is not supported for those estimates.');
@@ -1276,7 +1473,7 @@ export function planAssistantQuestion(
   }
   if (/\bbills?\b/.test(q)) return clarification('I can show upcoming bills. For past spending, name a merchant or category and a date range.');
   if (!recurring && /\b(?:recurring|subscriptions?|renewals?)\b/.test(q)) return clarification('Ask which recurring charges changed, or show active subscription estimates.');
-  const parsed = parsePeriods(q, now);
+  const parsed = parsePeriods(q, now, state);
   if (parsed.error) return clarification(parsed.error);
   if (parsed.periods.length > (comparison ? 2 : 1)) return clarification('Ask about one date range, or compare two clearly named periods.');
   let period = parsed.periods[0] ?? (followUp ? prior?.period : undefined) ?? defaultPeriod ?? currentMonthPeriod(now);
@@ -1291,7 +1488,7 @@ export function planAssistantQuestion(
     comparisonPeriod = relativePrevious ? reuseEarlier ? earlier : comparablePreviousPeriod(prior.period, now, state.transactions) ?? parsed.periods[0] : parsed.periods[0];
     if (relativePrevious) period = comparisonPrimaryPeriod({ tool: 'compare-periods', period: prior.period }, now, state);
   }
-  const parsedClauses = clauses.map((clause) => ({ ...clause, rest: parsePeriods(clause.rest, now).rest }));
+  const parsedClauses = clauses.map((clause) => ({ ...clause, rest: parsePeriods(clause.rest, now, state).rest }));
   for (let index = 0; index < parsedClauses.length; index++) {
     const clause = parsedClauses[index];
     // Remaining at/from phrases are unresolved merchant names, including partial
@@ -1338,6 +1535,25 @@ export function planAssistantQuestion(
   }
   q = parsedClauses.map((clause) => clause.rest).join(' ').replace(/\s+/g, ' ').trim();
   if (parsed.periods.length) q = q.replace(/\b(?:in|on|for|during)\s+(?:the\s*)?(?=[?!.]|$)/g, ' ');
+  let baselineText = q;
+  for (const [pattern] of CATEGORY_ALIASES) baselineText = baselineText.replace(new RegExp(pattern.source, 'g'), ' ');
+  baselineText = baselineText.replace(/\s+/g, ' ');
+  const cleanedHighestMonthQuestion = highestMonthQuestion || /\b(?:highest|biggest|most expensive)\s+(?:recorded\s+)?(?:spending\s+)?month\b|\bhighest monthly\b/.test(baselineText);
+  const cleanedTypicalMonthQuestion = typicalMonthQuestion || /\b(?:normal|typical|usual)\b.*\b(?:month|monthly|spend|spending)\b|\bmonthly median\b/.test(baselineText);
+  if (cleanedHighestMonthQuestion || cleanedTypicalMonthQuestion || closestMonthQuestion) {
+    const baseline = cleanedHighestMonthQuestion ? 'highest-month' : cleanedTypicalMonthQuestion ? 'typical-month' : 'closest-month';
+    return { tool: 'historical-baseline', period, ...filters, baseline };
+  }
+  if (comparison && filters.accountIds?.length === 2 && !includedMerchants(filters).length && !includedCategories(filters).length) {
+    const [leftAccountId, rightAccountId] = filters.accountIds;
+    const content = filtersWithoutAccounts(filters);
+    return { tool: 'compare-accounts', period, ...content, leftAccountId, rightAccountId };
+  }
+  if (accountRankingQuestion) {
+    const accountKind = /\bcards?\b/.test(q) ? 'card' : /\bbank\s+accounts?\b/.test(q) ? 'bank' : 'all';
+    const content = filtersWithoutAccounts(filters);
+    return { tool: 'top-accounts', period, ...content, accountKind, ...(limit ? { limit } : {}) };
+  }
   if (/\b(?:my|the|a|an)\s+(?:\w+\s+)?(?:account|card)\b|\b(?:account|card)\s+\d+\b/.test(q) && !/left my account/.test(q)) {
     return accountClarification(state);
   }
@@ -1454,6 +1670,8 @@ export function assistantFollowUpQuestions(request?: AssistantToolRequest): stri
   if (!request || request.tool === 'help') return ['How much did I spend?', 'What is my recorded history?'];
   if (!('period' in request)) return ['What is due in the next 7 days?', 'How much did I spend?'];
   if (request.tool === 'data-coverage') return ['What about last month?', 'Show my largest purchases'];
+  if (request.tool === 'historical-baseline') return ['What is my highest month?', 'When did I last spend this much?', 'Show those transactions'];
+  if (request.tool === 'top-accounts' || request.tool === 'compare-accounts') return ['Show those transactions', 'What about last month?', 'Anything unusual?'];
   if (request.tool === 'income-total') return ['What about last month?', 'Show those transactions'];
   if (request.tool === 'money-review') return ['Show possible duplicate charges', 'Show unusual charges', 'Which recurring charges changed?'];
   if (['recurring-changes', 'unusual-charges', 'possible-duplicates'].includes(request.tool)) return ['What about last month?', 'Show those transactions'];

@@ -12,7 +12,13 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
-import { groupPaymentKinds, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
+import {
+  groupPaymentAgenda,
+  groupPaymentKinds,
+  paymentGroupFor,
+  type PaymentAgendaItem,
+  type PaymentGroup,
+} from '@/lib/reference-presentation';
 import type { Account } from '@/lib/types';
 
 const groupIcons: Record<PaymentGroup, IconName> = {
@@ -20,8 +26,12 @@ const groupIcons: Record<PaymentGroup, IconName> = {
 };
 
 /** Payment type is the main hierarchy; dates and verified status stay beside each charge. */
-export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
-  items: readonly PaymentAgendaItem[]; accounts?: readonly Account[]; includePaid: boolean; onOpen: (item: PaymentAgendaItem) => void;
+export function PaymentAgenda({ items, accounts = [], includePaid, group: selectedGroup, onOpen }: {
+  items: readonly PaymentAgendaItem[];
+  accounts?: readonly Account[];
+  includePaid: boolean;
+  group?: PaymentGroup;
+  onOpen: (item: PaymentAgendaItem) => void;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
@@ -31,12 +41,28 @@ export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
   // Five filters and sorts over the agenda. Bills re-renders on every
   // keystroke in its "add reminder" sheet; this must not run with them.
-  const groups = useMemo(() => groupPaymentKinds(items, includePaid), [items, includePaid]);
+  const groups = useMemo(() => selectedGroup
+    ? [{
+        key: selectedGroup,
+        sections: groupPaymentAgenda(items.filter((item) => paymentGroupFor(item) === selectedGroup), includePaid),
+      }]
+    : groupPaymentKinds(items, includePaid), [selectedGroup, items, includePaid]);
+  const emptyFor = (key: PaymentGroup): string => key === 'subscriptions'
+    ? w.emptySubscriptions
+    : key === 'utilities'
+      ? w.emptyUtilities
+      : key === 'cards'
+        ? w.emptyCards
+        : key === 'loans'
+          ? w.emptyLoans
+          : w.emptyOther;
+  const visibleCount = useMemo(() => groups.reduce((sum, itemGroup) =>
+    sum + itemGroup.sections.reduce((sectionSum, section) => sectionSum + section.items.length, 0), 0), [groups]);
   return <View style={styles.root} testID="payment-agenda">
     {groups.map((group) => {
       const count = group.sections.reduce((sum, section) => sum + section.items.length, 0);
       return <View key={group.key} style={styles.section} testID={`bills-${group.key}`}>
-        <View style={styles.sectionHeading}>
+        {!selectedGroup && <View style={styles.sectionHeading}>
           <View style={styles.sectionIcon}>
             <Icon name={groupIcons[group.key]} size={20} color={theme.textSecondary} /></View>
           <View style={styles.grow}>
@@ -46,9 +72,15 @@ export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
                 {group.key === 'subscriptions' ? w.subscriptionsHint : w.utilitiesHint}</ThemedText>}
           </View>
           <ThemedText type="meta" tabular themeColor="textTertiary">{count}</ThemedText>
-        </View>
-        {count === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>
-          {group.key === 'subscriptions' ? w.emptySubscriptions : w.emptyUtilities}</ThemedText>}
+        </View>}
+        {count === 0 && <View style={styles.emptyState}>
+          <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
+            <Icon name={groupIcons[group.key]} size={20} color={theme.textSecondary} />
+          </View>
+          <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>
+            {emptyFor(group.key)}
+          </ThemedText>
+        </View>}
         {group.sections.map((section) => <View key={section.key}>
           <ThemedText type="meta" themeColor={section.key === 'overdue' ? 'expense' : 'textSecondary'} style={styles.statusHeading}>
             {w[section.key]}</ThemedText>
@@ -80,7 +112,7 @@ export function PaymentAgenda({ items, accounts = [], includePaid, onOpen }: {
         </View>)}
       </View>;
     })}
-    <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>
+    {visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
   </View>;
 }
 const styles = StyleSheet.create({
@@ -91,6 +123,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 72, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   content: { flex: 1, minWidth: 0, gap: 5 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   grow: { flex: 1, minWidth: 0, gap: 3 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
-  stack: { flexDirection: 'column', alignItems: 'flex-start' }, empty: { paddingVertical: 12 },
+  stack: { flexDirection: 'column', alignItems: 'flex-start' },
+  emptyState: { minHeight: 112, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  emptyIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  empty: { textAlign: 'center', maxWidth: 280 },
   notice: { paddingVertical: 8, lineHeight: 20 },
 });

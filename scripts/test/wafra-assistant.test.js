@@ -931,9 +931,81 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
     assert.equal(answerWafraQuestion(local, question, now).tool, 'help', question);
   }
   const second = { ...account, name: 'Travel', id: 'travel' };
-  assert.equal(answerWafraQuestion({ ...local, accounts: [account, second] }, 'Compare Everyday account and Travel account', now).tool, 'help');
+  const accountComparison = answerWafraQuestion({ ...local, accounts: [account, second] }, 'Compare Everyday account and Travel account', now);
+  assert.equal(accountComparison.tool, 'compare-accounts');
+  assert.equal(accountComparison.data.leftFils, 15_000);
+  assert.equal(accountComparison.data.rightFils, 0);
   const special = { ...state, transactions: [tx('without-title', '2026-09-04', 'Shop Without Borders', 100)] };
   assert.equal(answerWafraQuestion(special, 'How much did I spend at "Shop Without Borders"?', now).data.totalFils, 100);
+}
+
+// Historical baselines are calculated only when asked and never infer zero-spend
+// months from gaps in imported history.
+{
+  const history = { ...state, transactions: [
+    tx('jun', '2026-06-05', 'Market', 1_000, 'groceries'),
+    tx('jul', '2026-07-05', 'Market', 3_000, 'groceries'),
+    tx('aug', '2026-08-05', 'Market', 2_000, 'groceries'),
+    tx('sep', '2026-09-05', 'Market', 5_000, 'groceries'),
+  ] };
+  const highest = answerWafraQuestion(history, 'Is this my highest month?', now);
+  assert.equal(highest.tool, 'historical-baseline');
+  assert.equal(highest.data.monthKey, '2026-09');
+  assert.equal(highest.data.baselineFils, 5_000);
+  assert.equal(answerWafraQuestion(history, 'Is this my highest grocery month?', now).tool, 'historical-baseline');
+
+  const typical = answerWafraQuestion(history, 'What is my normal monthly spending?', now);
+  assert.equal(typical.tool, 'historical-baseline');
+  assert.equal(typical.data.monthsAnalyzed, 3);
+  assert.equal(typical.data.baselineFils, 2_000);
+  assert.equal(typical.data.currentFils, 5_000);
+
+  const similar = answerWafraQuestion(history, 'When did I last spend this much?', now);
+  assert.equal(similar.tool, 'historical-baseline');
+  assert.equal(similar.data.monthKey, '2026-07');
+  assert.equal(similar.data.baselineFils, 3_000);
+}
+
+// Natural date phrases resolve locally to exact ranges. Payday language depends
+// on an observed Salary row and never guesses a payday from locale or profile.
+{
+  const salaryLater = { ...state, transactions: [
+    tx('salary-later', '2026-09-10', 'Salary', 20_000, 'salary', 'income'),
+    tx('before-pay', '2026-09-05', 'Market', 1_000, 'groceries'),
+    tx('after-pay', '2026-09-12', 'Market', 2_000, 'groceries'),
+  ] };
+  const twoWeeks = planAssistantQuestion(state, 'How much did I spend in the last 2 weeks?', now);
+  assert.deepEqual(twoWeeks.period, { mode: 'range', from: '2026-09-07', to: '2026-09-20' });
+  const firstHalf = planAssistantQuestion(state, 'How much did I spend in the first half of this month?', now);
+  assert.deepEqual(firstHalf.period, { mode: 'range', from: '2026-09-01', to: '2026-09-15' });
+  const sincePayday = answerWafraQuestion(salaryLater, 'How much did I spend since payday?', now);
+  assert.equal(sincePayday.data.totalFils, 2_000);
+  assert.equal(sincePayday.evidence[0].from, '2026-09-10');
+  const beforePayday = answerWafraQuestion(salaryLater, 'How much did I spend before my salary came in?', now);
+  assert.equal(beforePayday.data.totalFils, 1_000);
+  assert.equal(beforePayday.evidence[0].to, '2026-09-09');
+}
+
+// Account/card questions rank or compare exact local accounts without exposing
+// account ids in user-visible answer data.
+{
+  const savings = { ...account, id: 'savings', name: 'Savings' };
+  const card = { ...account, id: 'visa', name: 'Visa', kind: 'card', cardType: 'credit' };
+  const local = { ...state, accounts: [account, savings, card], transactions: [
+    { ...tx('everyday-row', '2026-09-03', 'Cafe', 5_000), accountId: account.id },
+    { ...tx('savings-row', '2026-09-04', 'Market', 8_000, 'groceries'), accountId: savings.id },
+    { ...tx('card-row', '2026-09-05', 'Restaurant', 10_000, 'dining'), accountId: card.id },
+  ] };
+  const ranked = answerWafraQuestion(local, 'Which card did I use most for dining?', now);
+  assert.equal(ranked.tool, 'top-accounts');
+  assert.equal(ranked.facts[0].label, 'Visa');
+  assert.equal(ranked.facts[0].value.includes('100'), true);
+
+  const compared = answerWafraQuestion(local, 'Compare Everyday account and Savings account', now);
+  assert.equal(compared.tool, 'compare-accounts');
+  assert.equal(compared.data.leftFils, 5_000);
+  assert.equal(compared.data.rightFils, 8_000);
+  assert.equal(compared.evidence.length, 2);
 }
 
 {

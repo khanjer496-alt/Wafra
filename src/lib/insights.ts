@@ -209,6 +209,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
+  options: { includeRecurringAnalysis?: boolean } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
@@ -413,13 +414,16 @@ export function buildInsights(
     });
   }
 
-  // Subscription load + price increases (true subscriptions only — rent and
-  // utilities are fixed commitments, not cancellable services)
-  const subs = activeSubscriptions(
-    trueSubscriptions(
-      detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
-    ),
-  );
+  // Subscription detection groups and orders the complete historical ledger.
+  // Full analytics/Bills still request it, but Home's tiny optional insight
+  // card must never trigger that heavy history job just after launch.
+  const subs = options.includeRecurringAnalysis === false
+    ? []
+    : activeSubscriptions(
+        trueSubscriptions(
+          detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
+        ),
+      );
   if (subs.length >= 2) {
     const monthly = subscriptionsMonthlyTotal(subs);
     if (isMonthMode && current.incomeFils > 0 && monthly / current.incomeFils >= 0.08) {
