@@ -58,7 +58,7 @@ import {
   type IosMessageSetupProgress,
 } from '@/lib/ios-message-onboarding';
 import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
-import { onboardingLandingPath } from '@/lib/onboarding';
+import { onboardingInsightKeys, onboardingLandingPath } from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { canFinishIosMessageSetup, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
@@ -108,6 +108,7 @@ export default function IosSetupScreen() {
   const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
+  const onboardingInsight = onboardingInsightKeys(state.onboardingProfile?.focus ?? null);
   // The History Shortcut returns through `wafra://ios-setup?section=history`,
   // which cannot carry the onboarding query, and a deep link into the mounted
   // route replaces its params. First-run state is durable in the store, so
@@ -1008,6 +1009,15 @@ export default function IosSetupScreen() {
               </ChecklistRow>
             </View>
           )}
+          {fromOnboarding && setupComplete && (
+            <Block style={styles.completionReveal}>
+              <ThemedText type="smallBold">{t('onboardCompleteAutomaticTitle')}</ThemedText>
+              <ThemedText type="small">{t(onboardingInsight.title)}</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">
+                {t(onboardingInsight.body)}
+              </ThemedText>
+            </Block>
+          )}
           {error && (
             <View accessibilityLiveRegion="polite">
               <Block tone="expense">
@@ -1114,6 +1124,7 @@ const styles = StyleSheet.create({
   checklist: { gap: Spacing.two },
   hints: { marginTop: Spacing.one },
   progress: { gap: Spacing.one },
+  completionReveal: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
     paddingHorizontal: ScreenPadding, paddingVertical: 12,

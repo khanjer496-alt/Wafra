@@ -239,7 +239,7 @@ test('iOS return-marker persistence failure prevents manual success', async () =
   assert.equal(h.ledger.onboarded, false);
 });
 
-test('Android capture clears the manual choice durably before reading history', async () => {
+test('Android capture clears the manual choice, saves the reveal checkpoint, then completes from the final action', async () => {
   const gate = deferred();
   const h = actions({ optOut: true, setCaptureOptOut: () => gate.promise });
   const pending = h.startScan();
@@ -250,10 +250,19 @@ test('Android capture clears the manual choice durably before reading history', 
   gate.resolve(); await pending;
   assert.equal(h.ledger.captureOptOut, false);
   assert.equal(h.ui.outcome, 'automatic');
+  assert.equal(h.ui.step, 'complete');
+  assert.equal(h.ledger.onboarded, false, 'Configured capture is revealed before onboarding is completed');
+  assert.equal(calls(h, 'ensureDurable').length, 1, 'The reveal checkpoint is durable');
+  assert.equal(calls(h, 'committed').length, 0);
   before(h, 'requestSmsPermission', 'capture-write-start');
   before(h, 'capture-write-durable', 'beginHistoryImport');
-  before(h, 'beginHistoryImport', 'setOnboarded');
-  before(h, 'ensureDurable', 'committed');
+  before(h, 'beginHistoryImport', 'ensureDurable');
+
+  await h.runSetupAction(() => h.openWafra());
+  assert.equal(h.ledger.onboarded, true);
+  assert.equal(calls(h, 'ensureDurable').length, 2, 'Final completion persists onboarded=true separately');
+  assert.equal(calls(h, 'committed').length, 1);
+  assert.deepEqual(calls(h, 'replace'), [['replace', '/']]);
   remainsEmpty(h);
 });
 
@@ -450,18 +459,32 @@ test('the real overlay stays visible through a failed completion save and its re
 });
 
 test('automatic capture final-save failure retains the overlay and rendered Retry saves without another permission or history scan', async () => {
-  const firstSave = deferred();
+  const finalSave = deferred();
   const retrySave = deferred();
   let saves = 0;
-  const h = actions({ optOut: true, ensureDurable: () => ++saves === 1 ? firstSave.promise : retrySave.promise });
-  const pending = h.runSetupAction(h.beginCapture);
-  await flush();
+  const h = actions({
+    optOut: true,
+    ensureDurable: () => {
+      saves += 1;
+      if (saves === 1) return Promise.resolve();
+      if (saves === 2) return finalSave.promise;
+      return retrySave.promise;
+    },
+  });
+  await h.runSetupAction(h.beginCapture);
   assert.equal(calls(h, 'requestSmsPermission').length, 1);
   assert.equal(calls(h, 'beginHistoryImport').length, 1);
   assert.equal(h.ledger.captureOptOut, false);
+  assert.equal(h.ledger.onboarded, false);
+  assert.equal(h.ui.outcome, 'automatic');
+  assert.equal(h.ui.step, 'complete');
+  assert.equal(saves, 1, 'Automatic setup first saves its reveal checkpoint');
+
+  const pending = h.runSetupAction(() => h.openWafra());
+  await flush();
   assert.equal(h.ledger.onboarded, true);
   assert.equal(h.isOverlayVisible(), true, 'Automatic completion stays covered until its final write is durable');
-  firstSave.reject(new Error('synthetic automatic completion save failure'));
+  finalSave.reject(new Error('synthetic automatic completion save failure'));
   await pending;
   assert.equal(h.isOverlayVisible(), true, 'The save failure stays visible after the onboarded dispatch');
   assert.equal(h.isBackDisabled(), true);
@@ -475,7 +498,7 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   assert.equal(buttons[0].props.disabled, false);
   buttons[0].props.onPress();
   await flush();
-  assert.equal(saves, 2, 'The real rendered action retries only persistence');
+  assert.equal(saves, 3, 'The real rendered action retries only the final persistence');
   assert.equal(calls(h, 'requestSmsPermission').length, 1);
   assert.equal(calls(h, 'beginHistoryImport').length, 1);
   assert.deepEqual(calls(h, 'capture-write-start'), [['capture-write-start', false]]);

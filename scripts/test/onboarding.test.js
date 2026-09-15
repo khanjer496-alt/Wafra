@@ -289,7 +289,7 @@ const moneyPreviewSource = fs.readFileSync(
 
 ok(
   'value-first onboarding precedes optional planning without forcing a country',
-  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview', 'privacy']") &&
+  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview']") &&
     gateSource.includes("const PLAN_STEPS: readonly Step[] = ['goals', 'budget']") &&
     gateSource.includes('FOCUS_PRESETS.map') &&
     gateSource.includes('TRACKING_PRESETS.map') &&
@@ -412,14 +412,14 @@ ok(
   );
 }
 ok(
-  'onboarding uses real scan and import results rather than fake personalization delays',
-  /progress\.scanned/.test(gateSource) &&
-    /progress\.found/.test(gateSource) &&
-    /discoveredResult\.tx/.test(gateSource) &&
+  'onboarding never invents scan progress and only reveals real imported results',
+  /discoveredResult\.tx/.test(gateSource) &&
     /discoveredResult\.accounts/.test(gateSource) &&
     /discoveredResult\.bills/.test(gateSource) &&
     /state\.transactions\.length/.test(gateSource) &&
     /state\.bills\.length \+ state\.cardDues\.length/.test(gateSource) &&
+    !/const \[progress\] = useState\(\{ scanned: 0, found: 0 \}\)/.test(gateSource) &&
+    !/activeStep === 'scanning'/.test(gateSource) &&
     // The navigation guard only re-enables controls; it cannot manufacture
     // scan progress or import results. Any other timer still fails this gate.
     !/\bset(?:Timeout|Interval)\s*\(/.test(gateSource.replace(
@@ -438,8 +438,11 @@ ok(
     /progressSteps=\{personalizing/.test(gateSource),
 );
 ok(
-  'value is shown before privacy and capture, and Pro appears only after real activity exists',
+  'value flows directly into contextual capture trust, and Pro appears only after real activity exists',
   /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'privacy'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
+    /activeStep === 'preview'[\s\S]*?onPress=\{showCapture\}/.test(gateSource) &&
+    !/const showPrivacy\s*=/.test(gateSource) &&
+    /testID="onboarding-context-trust"/.test(gateSource) &&
     /discoveredResult && discoveredResult\.tx > 0[\s\S]*?onboardProPreviewAction/.test(gateSource) &&
     /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
 );
@@ -452,8 +455,8 @@ ok(
     /\{t\(trackingOutcomeKey\)\}/.test(gateSource),
 );
 ok(
-  'Android automatic completion records the automatic outcome synchronously',
-  /await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
+  'Android automatic setup persists a reveal checkpoint before final completion',
+  /await beginHistoryImport\(\)[\s\S]*?saveJourney\('complete'\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setCompletionOutcome\('automatic'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
     /outcome: outcomeOverride \?\? completionOutcome/.test(gateSource),
 );
 ok(
@@ -488,9 +491,18 @@ ok(
     /const beginCapture = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource),
 );
 ok(
-  'Android opens Home after durable setup instead of blocking on inbox parsing',
-  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
-    !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource),
+  'Android stages the background history import, shows the reveal, and never blocks onboarding on inbox parsing',
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource) &&
+    /automaticCompletion[\s\S]*?openWafra\(\)/.test(gateSource),
+);
+ok(
+  'Android resumes the configured automatic reveal after a restart instead of sending the user backward',
+  /pendingAutomaticReveal[\s\S]*?state\.onboardingProfile\?\.stage === 'complete'[\s\S]*?state\.historyImport !== null[\s\S]*?state\.captureOptOut === false[\s\S]*?setCompletionOutcome\('automatic'\)[\s\S]*?setStep\('complete'\)/.test(gateSource),
+);
+ok(
+  'iPhone onboarding shows a personalized completion reveal before leaving setup',
+  /fromOnboarding && setupComplete[\s\S]*?onboardCompleteAutomaticTitle[\s\S]*?onboardingInsight\.title[\s\S]*?onboardingInsight\.body/.test(iosSource),
 );
 ok(
   'denied SMS onboarding can retry or open the exact app settings',
