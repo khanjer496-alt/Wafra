@@ -129,6 +129,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
     notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,
+    hydrationFinalizeVersion: nonnegative,
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,

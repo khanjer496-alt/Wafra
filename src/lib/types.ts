@@ -642,6 +642,13 @@ export interface AppState {
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
   /**
+   * Receipt proving launch-only declined-row cleanup plus persisted capture/payment
+   * reconciliation completed under the current hydration finalizer. This is
+   * deliberately separate from parser and transfer receipts so routine relaunches
+   * do not walk the entire ledger for maintenance that already persisted.
+   */
+  hydrationFinalizeVersion?: number;
+  /**
    * Receipt proving the persisted transaction/account graph was normalized by
    * the current transfer matcher before it was saved. Missing/older values
    * fail safe by rebuilding once on hydration.

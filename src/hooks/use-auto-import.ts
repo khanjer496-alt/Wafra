@@ -73,6 +73,13 @@ import SmsReader from '../../modules/sms-reader';
 /** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
 let androidNotificationAccessPromptShown = false;
+// A quick app switch must not reopen/decrypt the unchanged Android bank-app
+// queue on every resume. Native `onQueueChanged` edges make fresh rows drain
+// immediately while Wafra is alive; the bounded recheck is only a safety net
+// for OEMs that suspend/drop that source-free event in background.
+const ANDROID_NOTIFICATION_RECHECK_MS = 30_000;
+let androidNotificationDrainRequired = true;
+let androidNotificationLastCheckedAt = 0;
 
 type IosCaptureWarningFacts = Pick<
   IosCaptureWarningState,
@@ -1133,12 +1140,16 @@ export function useAutoImport(
     const current = getStateSnapshot();
     if (!current.hydrated || !current.onboarded || current.captureOptOut ||
       !isProActive(current) || !hasBankNotificationAccess()) return;
+    if (!androidNotificationDrainRequired &&
+        Date.now() - androidNotificationLastCheckedAt < ANDROID_NOTIFICATION_RECHECK_MS) return;
 
     await syncAndroidNotificationAdmission(current).catch(() => {});
     const operation = captureExecutor.execute('notification-only')
       .then<AutoImportOutcome>((outcome) => {
         if (outcome.kind === 'not-hydrated') return 'not-hydrated';
         if (outcome.kind === 'needs-setup') return 'needs-setup';
+        androidNotificationDrainRequired = false;
+        androidNotificationLastCheckedAt = Date.now();
         if (outcome.kind === 'imported') {
           postAndroidImportNotice(outcome.transactionIds);
           return 'imported';
@@ -1213,7 +1224,10 @@ export function useAutoImport(
     }, canDrain);
     let subscription: { remove(): void } | null = null;
     try {
-      subscription = NotificationReader.addListener('onQueueChanged', () => scheduler.request());
+      subscription = NotificationReader.addListener('onQueueChanged', () => {
+        androidNotificationDrainRequired = true;
+        scheduler.request();
+      });
     } catch {
       scheduler.dispose();
       return;
