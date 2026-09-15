@@ -878,12 +878,21 @@ function bodyOf(source, header) {
     'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
 
   const bills = stripComments(read('src/app/(tabs)/bills.tsx'));
+  const subscriptions = stripComments(read('src/lib/subscriptions.ts'));
   ok('the first Android Bills frame does not synchronously run recurring detection',
-    /useState\(Platform\.OS !== 'android'\)/.test(bills) &&
+    /androidRecurring/.test(bills) &&
       /InteractionManager\.runAfterInteractions/.test(bills) &&
       (bills.match(/requestAnimationFrame/g) ?? []).length >= 2 &&
-      /recurringReady\s*\?\s*detectSubscriptions/.test(bills),
+      /detectSubscriptionsCooperatively\(/.test(bills) &&
+      /Platform\.OS === 'android'[\s\S]*?androidRecurring \?\? \[\]/.test(bills),
     'Bills is lazy-mounted on the navigation tap; full-ledger recurrence work must start only after the tab has painted');
+
+  ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
+    /function\* subscriptionDetectionWorker/.test(subscriptions) &&
+      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*4/.test(subscriptions) &&
+      /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
+      /setTimeout\(runSlice, 0\)/.test(subscriptions),
+    'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
 
   const paymentAgenda = stripComments(read('src/components/bills/payment-agenda.tsx'));
   ok('Bills renders long agendas progressively instead of mounting every row at once',

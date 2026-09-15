@@ -49,6 +49,7 @@ import {
   activeSubscriptions,
   billCommitments,
   detectSubscriptions,
+  detectSubscriptionsCooperatively,
   daysUntilNext,
   fixedCommitments,
   otherCommitments,
@@ -123,30 +124,7 @@ export default function BillsScreen() {
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
-  // Recurrence detection walks the complete ledger and can produce a large
-  // agenda. On Android the Bills tab is lazy-mounted on the first tap, so doing
-  // that work inside the navigation render makes the tap itself feel frozen.
-  // Paint the card/manual-bill truth first, then join recurrence after two
-  // frames once the tab is visibly on screen. iOS keeps the existing eager path
-  // until it has its own device measurements.
-  const [recurringReady, setRecurringReady] = useState(Platform.OS !== 'android');
-  useEffect(() => {
-    if (Platform.OS !== 'android' || recurringReady) return;
-    let firstFrame: number | null = null;
-    let secondFrame: number | null = null;
-    const task = InteractionManager.runAfterInteractions(() => {
-      firstFrame = requestAnimationFrame(() => {
-        secondFrame = requestAnimationFrame(() => {
-          startTransition(() => setRecurringReady(true));
-        });
-      });
-    });
-    return () => {
-      task.cancel();
-      if (firstFrame !== null) cancelAnimationFrame(firstFrame);
-      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
-    };
-  }, [recurringReady]);
+  const [androidRecurring, setAndroidRecurring] = useState<Subscription[] | null>(null);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -191,6 +169,42 @@ export default function BillsScreen() {
     () => internalTransferIds(state.transactions, state.accounts),
     [state.transactions, state.accounts],
   );
+  // Recurrence detection walks the complete ledger. Delaying that synchronous
+  // walk by two frames fixed the navigation render but merely moved the stall:
+  // on a large Android ledger the tab painted, then froze while the deferred
+  // scan monopolised JS. Keep the fast first paint, then drive the exact same
+  // detector cooperatively in ~4 ms slices. A ledger change cancels the old
+  // worker rather than letting stale recurring rows land afterwards.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    let cancelled = false;
+    let firstFrame: number | null = null;
+    let secondFrame: number | null = null;
+    setAndroidRecurring(null);
+    const task = InteractionManager.runAfterInteractions(() => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => {
+          void detectSubscriptionsCooperatively(
+            state.transactions,
+            state.notSubscriptions,
+            now,
+            liveAccounts,
+            internal,
+            () => cancelled,
+          ).then((value) => {
+            if (cancelled || value === null) return;
+            startTransition(() => setAndroidRecurring(value));
+          });
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+      if (firstFrame !== null) cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [state.transactions, state.notSubscriptions, now, liveAccounts, internal]);
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.
@@ -203,10 +217,10 @@ export default function BillsScreen() {
     [rows, selectedReminderId],
   );
   const detected = useMemo(
-    () => recurringReady
-      ? detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal)
-      : [],
-    [recurringReady, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
+    () => Platform.OS === 'android'
+      ? androidRecurring ?? []
+      : detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
+    [androidRecurring, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
   const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
   const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);

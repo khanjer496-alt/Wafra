@@ -258,21 +258,56 @@ let subscriptionDetectionCache: {
   value: Subscription[];
 } | null = null;
 
-export function detectSubscriptions(
+function cachedSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] | null {
+  return subscriptionDetectionCache?.transactions === transactions &&
+      subscriptionDetectionCache.notSubscriptions === notSubscriptions &&
+      subscriptionDetectionCache.todayKey === todayKey &&
+      subscriptionDetectionCache.liveAccounts === liveAccounts &&
+      subscriptionDetectionCache.internalTransfers === internalTransfers
+    ? subscriptionDetectionCache.value
+    : null;
+}
+
+function cacheSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts: Set<string> | undefined,
+  internalTransfers: Set<string> | undefined,
+  value: Subscription[],
+): Subscription[] {
+  subscriptionDetectionCache = {
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    value,
+  };
+  return value;
+}
+
+/**
+ * The recurrence projection is deliberately expressed as a cooperative worker.
+ * A 15k-row imported ledger is normal on Android, and running the complete scan
+ * in one React render can hold the JS thread long enough for the first Bills tap
+ * to look frozen. The synchronous public API drives this worker to completion
+ * for existing callers/tests; Android Bills drives the same worker in short
+ * slices so navigation and touch handling keep getting turns.
+ */
+function* subscriptionDetectionWorker(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
   today: Date = new Date(),
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-): Subscription[] {
-  const todayKey = toISODate(today);
-  if (subscriptionDetectionCache?.transactions === transactions &&
-      subscriptionDetectionCache.notSubscriptions === notSubscriptions &&
-      subscriptionDetectionCache.todayKey === todayKey &&
-      subscriptionDetectionCache.liveAccounts === liveAccounts &&
-      subscriptionDetectionCache.internalTransfers === internalTransfers) {
-    return subscriptionDetectionCache.value;
-  }
+): Generator<void, Subscription[], void> {
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
   // Persisted/store transaction order is newest-first. Remember whether this
@@ -281,12 +316,15 @@ export function detectSubscriptions(
   // the old comparator path.
   let newestFirst = true;
   for (let index = 1; index < transactions.length; index += 1) {
+    if ((index & 127) === 0) yield;
     if (transactions[index - 1].date < transactions[index].date) {
       newestFirst = false;
       break;
     }
   }
-  for (const t of transactions) {
+  for (let index = 0; index < transactions.length; index += 1) {
+    if ((index & 127) === 0) yield;
+    const t = transactions[index];
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
     const k = providerTitle.toLowerCase();
@@ -303,6 +341,7 @@ export function detectSubscriptions(
 
   const subs: Subscription[] = [];
   for (const txs of groups.values()) {
+    yield;
     if (newestFirst) txs.reverse();
     else txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const title = txs[txs.length - 1].title;
@@ -315,7 +354,9 @@ export function detectSubscriptions(
 
     // Collapse same-day duplicates (split payments) into one charge.
     const charges: Transaction[] = [];
-    for (const t of txs) {
+    for (let index = 0; index < txs.length; index += 1) {
+      if (index > 0 && (index & 127) === 0) yield;
+      const t = txs[index];
       const prev = charges[charges.length - 1];
       if (prev && prev.date === t.date) prev.amountFils += t.amountFils;
       else charges.push({ ...t });
@@ -375,6 +416,7 @@ export function detectSubscriptions(
 
     const gaps: number[] = [];
     for (let i = 1; i < cadenceCharges.length; i++) {
+      if ((i & 127) === 0) yield;
       gaps.push(daysBetween(cadenceCharges[i - 1].date, cadenceCharges[i].date));
     }
 
@@ -491,15 +533,108 @@ export function detectSubscriptions(
   }
 
   subs.sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
-  subscriptionDetectionCache = {
+  return subs;
+}
+
+export function detectSubscriptions(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] {
+  const todayKey = toISODate(today);
+  const cached = cachedSubscriptionDetection(
     transactions,
     notSubscriptions,
     todayKey,
     liveAccounts,
     internalTransfers,
-    value: subs,
-  };
-  return subs;
+  );
+  if (cached) return cached;
+
+  const worker = subscriptionDetectionWorker(
+    transactions,
+    notSubscriptions,
+    today,
+    liveAccounts,
+    internalTransfers,
+  );
+  let step = worker.next();
+  while (!step.done) step = worker.next();
+  return cacheSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    step.value,
+  );
+}
+
+const SUBSCRIPTION_DETECTION_SLICE_MS = 4;
+
+/**
+ * Same answer as detectSubscriptions(), but never intentionally monopolises a
+ * foreground JS turn. Returning null means the caller invalidated this exact
+ * ledger snapshot while it was being analysed.
+ */
+export function detectSubscriptionsCooperatively(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+  cancelled: () => boolean = () => false,
+): Promise<Subscription[] | null> {
+  const todayKey = toISODate(today);
+  const cached = cachedSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+  );
+  if (cached) return Promise.resolve(cached);
+
+  const worker = subscriptionDetectionWorker(
+    transactions,
+    notSubscriptions,
+    today,
+    liveAccounts,
+    internalTransfers,
+  );
+
+  return new Promise((resolve) => {
+    const runSlice = () => {
+      if (cancelled()) {
+        resolve(null);
+        return;
+      }
+      const startedAt = Date.now();
+      let step = worker.next();
+      while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
+        if (cancelled()) {
+          resolve(null);
+          return;
+        }
+        step = worker.next();
+      }
+      if (step.done) {
+        resolve(cacheSubscriptionDetection(
+          transactions,
+          notSubscriptions,
+          todayKey,
+          liveAccounts,
+          internalTransfers,
+          step.value,
+        ));
+        return;
+      }
+      setTimeout(runSlice, 0);
+    };
+    runSlice();
+  });
 }
 
 /** Monthly-equivalent total of what is still charging (stopped ones cost nothing). */
