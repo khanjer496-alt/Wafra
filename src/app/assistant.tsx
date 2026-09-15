@@ -75,6 +75,7 @@ export default function AssistantScreen() {
   const [evidenceSelection, setEvidenceSelection] = useState<{ turnId: number; findingId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [today, setToday] = useState(() => toISODate(new Date()));
+  const [composerHeight, setComposerHeight] = useState(0);
   const minInputHeight = Math.max(48, Math.ceil(22 * fontScale) + 24);
   const maxInputHeight = Math.max(minInputHeight, Math.min(160, height * 0.25));
   const [inputHeight, setInputHeight] = useState(minInputHeight);
@@ -84,7 +85,10 @@ export default function AssistantScreen() {
   const conversationContext = latestAssistantContext(currentTurns.map((turn) => turn.request));
   const contextPeriod = conversationContext && 'period' in conversationContext ? conversationContext.period : period;
   const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [], [state, period]);
-  const followUps = latest?.answer.suggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []);
+  const latestSuggestions = latest?.answer.suggestions?.length &&
+    (latest.request.tool !== 'help' || latest.request.suggestions?.length)
+    ? latest.answer.suggestions : undefined;
+  const followUps = latestSuggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []);
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));
@@ -147,7 +151,7 @@ export default function AssistantScreen() {
       ? executeAssistantTool(snapshot, contextRequest, answeredAt)
       : executeAssistantTool(snapshot, { tool: 'help', clarification: summary }, answeredAt);
     const answer: AssistantAnswer = contextRequest
-      ? { ...base, title: copy.correctionUpdatedTitle(base.title), body: `${summary} ${base.body}` }
+      ? { ...base, title: `Updated · ${base.title}`, body: `${summary} ${base.body}` }
       : base;
     const request = contextRequest ?? { tool: 'help' as const, clarification: summary };
     const id = ++nextId.current;
@@ -179,27 +183,23 @@ export default function AssistantScreen() {
     let summary: string;
     if (correction.kind === 'merchant-category') {
       setMerchantOverride(correction.merchant, correction.category, true, correction.direction);
-      summary = copy.correctionMerchantCategory(
-        correction.merchant,
-        categoryLabel(correction.category, 'en'),
-        correction.direction,
-      );
+      summary = `Updated ${correction.merchant} to ${categoryLabel(correction.category, 'en')} for matching ${correction.direction} transactions.`;
     } else if (correction.kind === 'transaction-category') {
       editTransaction(correction.transactionId, { category: correction.category });
-      summary = copy.correctionTransactionCategory(categoryLabel(correction.category, 'en'));
+      summary = `Updated that transaction to ${categoryLabel(correction.category, 'en')}.`;
     } else if (correction.kind === 'not-subscription') {
       setNotSubscription(correction.merchant, true);
-      summary = copy.correctionNotSubscription(correction.merchant);
+      summary = `Marked ${correction.merchant} as not a subscription.`;
     } else {
       const row = snapshot.transactions.find((transaction) => transaction.id === correction.transactionId);
-      if (!row) throw new Error(copy.correctionTargetMissing);
+      if (!row) throw new Error('Correction target disappeared');
       await resolveTransfers({
         ids: [row.id], ownership: correction.ownership,
         expectedFingerprints: { [row.id]: transferFingerprint(row) }, expectedGeneration: beforeGeneration,
       });
       summary = correction.ownership === 'own'
-        ? copy.correctionTransferOwn
-        : copy.correctionTransferExternal;
+        ? 'Marked that transaction as a transfer involving your own accounts.'
+        : 'Marked that transfer as involving an external party.';
     }
     appendCorrectionResult(clean, summary, beforeGeneration, now, contextRequest);
   };
@@ -338,13 +338,17 @@ export default function AssistantScreen() {
       keyboardAware={Platform.OS === 'ios'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
       scrollRef={scrollRef}
+      contentStyle={composerHeight > 0 ? { paddingBottom: composerHeight + 12 } : undefined}
       scrollProps={{ keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
         onContentSizeChange: scrollToLatest, onLayout: scrollToLatest }}
       header={{ title: copy.title,
         back: { label: copy.back, onPress: () => router.canGoBack() ? router.back() : router.replace('/') },
         actions: currentTurns.length > 0 ? [{ label: copy.newChat, onPress: resetConversation }] : [],
       }}
-      footer={<View testID="assistant-composer" style={[styles.composer, {
+      footer={<View testID="assistant-composer" onLayout={(event) => {
+        const next = Math.ceil(event.nativeEvent.layout.height);
+        if (next !== composerHeight) setComposerHeight(next);
+      }} style={[styles.composer, {
         borderColor: theme.cardBorder,
         marginBottom: Platform.OS === 'android' ? Math.max(0, keyboardHeight - insets.bottom) : 0,
       }]}>
@@ -355,7 +359,7 @@ export default function AssistantScreen() {
             <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
             <Icon name="chevron-down" size={12} color={theme.textSecondary} />
           </Pressable>
-          <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyCode()}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{`${ledgerCurrencyCode()} · ${copy.localShort}`}</ThemedText>
         </View>
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
         <View style={styles.inputRow}>
@@ -374,7 +378,6 @@ export default function AssistantScreen() {
             <Icon name="arrow-up" size={20} color={theme.onPrimary} />
           </Pressable>
         </View>
-        <ThemedText type="meta" themeColor="textTertiary">{copy.local}</ThemedText>
       </View>}>
       {currentTurns.length === 0 ? <View style={styles.hero}>
         <ThemedText type="heading">{copy.heading}</ThemedText>
@@ -402,7 +405,10 @@ export default function AssistantScreen() {
         <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'}
           style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
           <ThemedText type="micro" themeColor="primary">{turn.answer.title}</ThemedText>
-          <ThemedText selectable>{turn.answer.body}</ThemedText>
+          {turn.answer.headline ? <>
+            <ThemedText type="heading" tabular selectable>{turn.answer.headline}</ThemedText>
+            {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
+          </> : <ThemedText selectable>{turn.answer.body}</ThemedText>}
           {turn.answer.facts?.length ? <View style={styles.facts}>
             {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
               <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
@@ -424,7 +430,7 @@ export default function AssistantScreen() {
           </>}
         </View>
       </View>)}
-      {currentTurns.length > 0 && followUps.length > 0 ? <View style={styles.quickFollowUps}>
+      {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.quickFollowUps}>
         {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
           style={[styles.followUpChip, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
           <ThemedText type="meta" style={styles.followUpText}>{item}</ThemedText>
@@ -444,20 +450,20 @@ const styles = StyleSheet.create({
   suggestion: { minHeight: 48, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.control,
     paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   suggestionText: { flex: 1, minWidth: 0 },
-  answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 14, gap: 12 },
-  turn: { gap: 8, paddingTop: 4 },
+  answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 12, gap: 8 },
+  turn: { gap: 6, paddingTop: 2 },
   questionBubble: { alignSelf: 'flex-end', maxWidth: '90%', borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.control, paddingHorizontal: 12, paddingVertical: 10 },
-  facts: { gap: 8 },
+  facts: { gap: 6 },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1, minWidth: 0 },
   factValue: { flexShrink: 1 },
   quickFollowUps: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  followUpChip: { minHeight: 44, maxWidth: '100%', flexShrink: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
+  followUpChip: { minHeight: 40, maxWidth: '100%', flexShrink: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
   followUpText: { flexShrink: 1, minWidth: 0 },
-  composer: { gap: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  composer: { gap: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth },
   context: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   period: { minHeight: 44, flexShrink: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },

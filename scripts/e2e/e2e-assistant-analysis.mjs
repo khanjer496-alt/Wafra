@@ -299,7 +299,7 @@ try {
         assert.ok(!previous.text.includes('2026-09-20') && !previous.text.includes('990'), 'future purchases cannot enter an earlier baseline');
         await close(evidence(page));
         const coverage = answer.getByTestId('assistant-coverage');
-        await click(coverage.getByRole('button', { name: 'Data used', exact: true }));
+        await click(coverage.getByRole('button', { name: 'Coverage', exact: true }));
         const coverageText = await coverage.innerText();
         assert.match(coverageText, /import is paused.*more records may remain/i);
         assert.match(coverageText, /Recorded activity: 2026-/);

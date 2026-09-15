@@ -100,6 +100,84 @@ const now = new Date('2026-09-20T12:00:00Z');
     'a clarification must not erase the last substantive conversation scope');
 }
 
+// Conversation-smoothing regressions from real Ask Wafra usage: recorded
+// identities beat vocabulary, relative periods advance from the current turn,
+// and zero results do not advertise empty evidence.
+{
+  const visa = { ...account, id: 'visa-card', name: 'Visa', kind: 'card', cardType: 'credit' };
+  const mastercard = { ...account, id: 'master-card', name: 'Mastercard', kind: 'card', cardType: 'credit' };
+  const local = { ...state, accounts: [account, visa, mastercard], transactions: [
+    ...state.transactions,
+    { ...tx('jul-food', '2026-07-05', 'Talabat', 1_500), accountId: account.id },
+    { ...tx('noon-web', '2026-09-08', 'NOON.COM', 12_000, 'shopping'), accountId: visa.id },
+    { ...tx('noon-minutes', '2026-09-09', 'Noon Minutes', 3_000, 'groceries'), accountId: mastercard.id },
+    { ...tx('visa-a', '2026-09-10', 'Cafe A', 1_000), accountId: visa.id },
+    { ...tx('visa-b', '2026-09-11', 'Cafe B', 1_000), accountId: visa.id },
+    { ...tx('mc-a', '2026-09-12', 'Large shop', 9_000, 'shopping'), accountId: mastercard.id },
+  ] };
+
+  assert.equal(planAssistantQuestion(local, 'How much did I spend on NOON.COM?', now).tool, 'merchant-breakdown');
+  assert.equal(planAssistantQuestion(local, 'How much did I spend on Talbat?', now).merchant, 'Talabat');
+  assert.equal(planAssistantQuestion(local, 'How much did I spend on dining?', now).tool, 'category-breakdown');
+  const noon = answerWafraQuestion(local, 'How much did I spend on Noon?', now);
+  assert.equal(noon.tool, 'help');
+  assert.ok(noon.suggestions.some((item) => item.includes('NOON.COM')) && noon.suggestions.some((item) => item.includes('Noon Minutes')));
+  const priorMerchant = planAssistantQuestion(local, 'How much did I spend at Talabat?', now);
+  const noonFollowUp = answerWafraQuestion(local, 'What about Noon?', now, priorMerchant);
+  assert.equal(noonFollowUp.tool, 'help');
+  assert.ok(noonFollowUp.suggestions.some((item) => item.includes('Noon Minutes')),
+    'ambiguous merchant follow-ups should offer recorded merchant choices instead of generic help');
+
+  const accounts = planAssistantQuestion(local, 'Compare Visa with Mastercard', now);
+  assert.equal(accounts.tool, 'compare-accounts');
+  assert.equal(accounts.leftAccountId, visa.id, 'account comparison preserves the order in the question');
+  assert.equal(accounts.rightAccountId, mastercard.id);
+  assert.equal(accounts.category, undefined, 'the recorded Visa account must outrank the Government category alias');
+
+  const talabat = planAssistantQuestion(local, 'How much did I spend at Talabat this month?', now);
+  const august = planAssistantQuestion(local, 'What about last month?', now, talabat);
+  assert.equal(august.period.key, '2026-08');
+  const july = planAssistantQuestion(local, 'What about last month?', now, august);
+  assert.equal(july.period.key, '2026-07', 'repeating last month advances from the current conversation period');
+  const beforeThat = planAssistantQuestion(local, 'And before that?', now, august);
+  assert.equal(beforeThat.period.key, '2026-07');
+  const { assistantFollowUpQuestions } = require('./build/wafra-assistant');
+  assert.match(assistantFollowUpQuestions(august)[0], /July 2026/, 'quick reply must not suggest the same relative month again');
+
+  const noTalabat = answerWafraQuestion(local, 'How much did I spend at Talabat June 2026?', now);
+  assert.equal(noTalabat.data.transactionCount, 0);
+  assert.match(noTalabat.body, /No recorded Talabat transactions/i);
+  assert.equal(noTalabat.evidence, undefined, 'zero results do not expose an empty View transactions action');
+
+  const countRanking = answerWafraQuestion(local, 'Which card did I use most often?', now);
+  assert.equal(countRanking.tool, 'top-accounts');
+  assert.equal(countRanking.data.metric, 'count');
+  assert.equal(countRanking.facts[0].label, 'Visa');
+
+  const augustHighest = answerWafraQuestion(local, 'Was August my highest month?', now);
+  assert.equal(augustHighest.tool, 'historical-baseline');
+  assert.equal(augustHighest.data.selectedIsHighest, false);
+  assert.match(augustHighest.body, /^No\./);
+}
+
+{
+  const natural = { ...state, transactions: [
+    ...state.transactions,
+    tx('salary-natural', '2026-09-10', 'Salary', 20_000, 'salary', 'income'),
+    tx('natural-before', '2026-09-04', 'Market', 1_000, 'groceries'),
+    tx('natural-after', '2026-09-12', 'Market', 2_000, 'groceries'),
+  ] };
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend over the last 2 weeks?', now).period,
+    { mode: 'range', from: '2026-09-07', to: '2026-09-20' });
+  assert.deepEqual(planAssistantQuestion(natural, 'How much did I spend first half this month?', now).period,
+    { mode: 'range', from: '2026-09-01', to: '2026-09-15' });
+  assert.equal(answerWafraQuestion(natural, 'How much did I spend after salary?', now).data.totalFils >= 2_000, true);
+  assert.equal(planAssistantQuestion(natural, 'How much did I spend this week?', now).tool, 'spending-total');
+  assert.equal(planAssistantQuestion(natural, 'How much did I spend month to date?', now).tool, 'spending-total');
+  assert.equal(planAssistantQuestion(natural, 'How much did I spend in the past fortnight?', now).tool, 'spending-total');
+  assert.equal(planAssistantQuestion(natural, 'How much did I spend since September 5?', now).tool, 'spending-total');
+}
+
 {
   const answer = executeAssistantTool(state, { tool: 'largest-purchases', period: { mode: 'month', key: '2026-09' }, limit: 2 }, now);
   assert.deepEqual(answer.evidence[0].transactionIds, ['sep-food-1', 'sep-food-2'], 'proof must match the purchases shown, not every expense');
@@ -570,8 +648,8 @@ console.log('✓ Wafra Assistant global hardening edge cases');
   assert.equal(result.evidence[0].totalFils, 7_000);
   const net = answerWafraQuestion(state, 'Income minus spending', now);
   assert.deepEqual(net.evidence.map((group) => [group.label, group.totalFils]), [['Income', 20_000], ['Spending', 6_000]]);
-  assert.match(net.body, /Based on recorded transactions/);
-  assert.match(net.body, /missing imports/i);
+  assert.ok(net.coverage?.notes.some((note) => /import|recorded/i.test(note)),
+    'coverage caveats stay available without repeating them inside every answer body');
   assert.equal(JSON.stringify(buildAssistantExplanationEnvelope('Explain', result)).includes('split-evidence'), false,
     'exact transaction evidence stays out of the optional explanation envelope');
 }
@@ -808,7 +886,7 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
   assert.deepEqual(again.answer.evidence, exclusion.answer.evidence);
   const empty = runWafraAssistant(local, 'How much rent spending excluding rent?', now);
   assert.equal(empty.answer.data.totalFils, 0, 'exclusions win, even against a sole inclusion');
-  assert.deepEqual(empty.answer.evidence[0].transactionIds, []);
+  assert.equal(empty.answer.evidence, undefined, 'zero-result answers do not expose empty transaction evidence');
 }
 
 {
@@ -1019,7 +1097,7 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
 {
   const cash = executeAssistantTool(state, { tool: 'cash-outflow', period: { mode: 'month', key: '2026-09' }, excludedAccountIds: ['bank-1'] }, now);
   assert.equal(cash.data.totalFils, 0);
-  assert.deepEqual(cash.evidence[0].transactionIds, []);
+  assert.equal(cash.evidence, undefined);
   const stamp = Date.parse('2026-08-31T23:59:30Z');
   const local = { ...state, transactions: [
     { ...tx('boundary-before', '2026-08-31', 'Market', 1_000), ts: stamp },
