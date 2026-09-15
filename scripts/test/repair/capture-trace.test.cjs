@@ -36,3 +36,10 @@ test('public APK builds default tracing off and Play bundles refuse it', () => {
   assert.ok(workflow.includes("github.event.inputs.capture_trace == 'true' && '1' || '0'"));
   assert.ok(workflow.includes("github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'"));
 });
+test('manual APK builds compile the selected workflow ref instead of silently substituting main', () => {
+  const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/build-apk.yml'), 'utf8');
+  const checkout = workflow.match(/- uses: actions\/checkout@v4(?:\n\s+with:\n(?:\s+[^\n]+\n)*)?/m)?.[0] ?? '';
+  assert.ok(checkout, 'release workflow must check out source before building');
+  assert.doesNotMatch(checkout, /\bref:\s*main\b/,
+    'dispatching a review-branch APK must not compile main under the branch run');
+});

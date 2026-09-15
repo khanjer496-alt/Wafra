@@ -4,8 +4,11 @@ name: Build Android APK
 # and building on every push to the working branch burned the whole allowance
 # in a month — after which nothing builds at all until the reset.
 #
-# CI guards every main push. Full APK/AAB builds are explicit requests from
-# main, not a side effect of routine development or repository cleanup.
+# CI guards every main push. Full APK/AAB builds are explicit manual requests,
+# not a side effect of routine development or repository cleanup. The selected
+# workflow ref is also the source ref: dispatching from `main` builds `main`,
+# while an explicitly selected review branch can produce an isolated candidate
+# without silently substituting `main` underneath it.
 on:
   workflow_dispatch:
     inputs:
@@ -74,8 +77,6 @@ jobs:
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Refuse diagnostic tracing in a Play bundle
         if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'

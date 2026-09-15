@@ -61,12 +61,12 @@ function harness(options = {}) {
 test('empty-review page saves only the ledger/cursor, after a UI yield', async () => {
   const h = harness();
   assert.equal(await h.commit(), true);
-  assert.deepEqual(h.events, ['yield', 'plan', 'ledger', 'mark', 'ack']);
+  assert.deepEqual(h.events, ['yield', 'plan', 'yield', 'ledger', 'mark', 'ack']);
 });
 test('review candidates retain their required durability before ledger planning', async () => {
   const h = harness({ reviews: [{ id: 'review' }] });
   await h.commit();
-  assert.deepEqual(h.events, ['review', 'yield', 'plan', 'ledger', 'mark', 'ack']);
+  assert.deepEqual(h.events, ['review', 'yield', 'plan', 'yield', 'ledger', 'mark', 'ack']);
 });
 test('source-identity migration is NOT skipped when the review list is empty', async () => {
   const h = harness({ bindings: [{ legacyId: 'old', id: 'new' }] });
@@ -91,12 +91,12 @@ test('review write failure cannot advance ledger or acknowledge captured message
 test('ledger write failure cannot acknowledge captured messages', async () => {
   const h = harness({ ledgerFailure: true });
   await assert.rejects(h.commit(), /ledger write failed/);
-  assert.deepEqual(h.events, ['yield', 'plan', 'ledger']);
+  assert.deepEqual(h.events, ['yield', 'plan', 'yield', 'ledger']);
 });
 test('pause during durable write leaves the native queue unacknowledged', async () => {
   const h = harness({ pauseOnWrite: true });
   assert.equal(await h.commit(), true);
-  assert.deepEqual(h.events, ['yield', 'plan', 'ledger', 'mark']);
+  assert.deepEqual(h.events, ['yield', 'plan', 'yield', 'ledger', 'mark']);
 });
 test('currency-market rejection cannot stage, write, or acknowledge', async () => {
   const h = harness({ market: 'SA', marketAllowed: false });
