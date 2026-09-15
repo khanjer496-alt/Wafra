@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 12 September 2026_
+_Last updated: 15 September 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasidaapps LLC** ("Wafra", "we", "us").
@@ -170,15 +170,20 @@ store biometric templates.
 
 ## Other network activity
 
-- **Automatic logos:** 112 merchant logos are bundled with the app. Additional
-  reviewed merchant identities and supported bank identities are matched
-  locally to fixed brand domains. Their artwork may load from Brandfetch's
-  image CDN, which receives the requested brand domain and the device's network
-  address. Transaction titles, unknown institution names, amounts, account
-  tails and Message text are not sent to a logo search API. Unknown names use
-  a local fallback. Older local-only opt-outs also block these image requests.
-  Legacy name caches are ignored for unknown identities and removed by Erase
-  all data; image bitmap caching remains managed by the platform image library.
+- **Automatic logos:** 112 merchant logos are bundled with the app and supported
+  launch-market banks are matched locally to fixed bank domains. For other
+  merchant or bank identities, when online features are enabled, Wafra may use
+  Brandfetch's Brand Search API. Merchant lookup first removes payment prefixes,
+  amounts, account/card tails, URLs and common terminal/location suffixes. Bank
+  lookup uses the institution name and rejects labels containing account/card
+  tails. Wafra accepts only a high-confidence name match and then loads artwork
+  from Brandfetch's image CDN. Brandfetch therefore receives the cleaned merchant
+  or institution name for those searches, the requested brand domain and the
+  device's network address. Wafra does not send the transaction amount,
+  account/card number or bank Message text as part of logo lookup. Searches and
+  misses are cached to reduce repeated requests. Older local-only opt-outs block
+  both name searches and image requests. Logo caches are removed by Erase all
+  data; image bitmap caching remains managed by the platform image library.
 
 - **Purchases:** when store billing is configured, Apple or Google processes
   the payment and RevenueCat manages an anonymous subscription entitlement.
