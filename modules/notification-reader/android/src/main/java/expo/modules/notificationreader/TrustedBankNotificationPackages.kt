@@ -61,6 +61,20 @@ object TrustedBankNotificationPackages {
   private fun playInstalled(context: Context, packageName: String): Boolean =
     CAPTURE_ENABLED && installer(context, packageName) == "com.android.vending"
 
+  /**
+   * The user-visible label Android itself shows for this installed package.
+   * This is package metadata, not notification text. It gives JS a second
+   * identity surface for previously unseen banks without persisting any raw
+   * financial content or making a network request to Play.
+   */
+  fun applicationLabel(context: Context, packageName: String): String = try {
+    val info = context.packageManager.getApplicationInfo(packageName, 0)
+    context.packageManager.getApplicationLabel(info).toString().trim()
+      .take(MAX_APPLICATION_LABEL_CHARS)
+  } catch (_: Exception) {
+    ""
+  }
+
   fun isTrusted(context: Context, packageName: String): Boolean =
     CAPTURE_ENABLED && markets.containsKey(packageName)
 
@@ -83,4 +97,6 @@ object TrustedBankNotificationPackages {
     if (!playInstalled(context, packageName)) return null
     return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null
   }
+
+  private const val MAX_APPLICATION_LABEL_CHARS = 120
 }

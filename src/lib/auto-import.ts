@@ -29,6 +29,7 @@ import {
   inspectGenericBankEventForReview,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import {
   inspectUnparsedLaunchAlert,
   normalizeUnparsedLaunchTemplate,
@@ -40,7 +41,7 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { pinnedLedgerCurrencyCode } from '@/lib/markets';
+import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
@@ -60,12 +61,38 @@ export interface AndroidNotificationImportDiagnostics {
   ignored: number;
   unresolved: number;
   unresolvedTrustedBank: number;
+  unresolvedVerifiedFinance: number;
   unresolvedFinancialCandidate: number;
   unresolvedParserMiss: number;
   unresolvedReviewRefusal: number;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
+
+const FINANCIAL_APP_LABEL_RE = /\b(?:bank|banking|banque|banco|banca|credit\s*union|finance|financial|mobile\s*money|wallet)\b|بنك|مصرف|محفظة|बैंक/iu;
+const KNOWN_FINTECH_LABEL_RE = /\b(?:revolut|wise|monzo|n26|paypal|venmo|cash\s*app|cashapp|klarna|stc\s*pay|mada\s*pay)\b/iu;
+
+/**
+ * Strong local identity for an unseen Play-installed finance app.
+ *
+ * This is deliberately based on the installed app's Android label rather than
+ * the notification title/body, which any app can author. A known bank sender
+ * alias is strongest; otherwise explicit banking/finance wording in the app's
+ * own label is enough to let a confident posted parser result auto-import.
+ */
+const verifiedFinancialAppSender = (appLabel: string): string | null => {
+  const label = appLabel.normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!label) return null;
+  const candidates = [
+    label,
+    label.replace(/\b(?:mobile|personal|digital|online)\s+(?:banking|bank)\b/giu, '').trim(),
+    label.replace(/\b(?:mobile|banking|bank|app)\b/giu, '').trim(),
+  ].filter((value, index, all) => value.length >= 2 && all.indexOf(value) === index);
+  const registered = candidates.find((candidate) =>
+    detectLaunchMarketFromSender(candidate) !== null || hasUniversalInstitutionSender(candidate));
+  if (registered) return registered;
+  return FINANCIAL_APP_LABEL_RE.test(label) || KNOWN_FINTECH_LABEL_RE.test(label) ? label : null;
+};
 
 let latestAndroidNotificationImportDiagnostics: AndroidNotificationImportDiagnostics | null = null;
 
@@ -1071,6 +1098,7 @@ export async function scanInbox(
         ignored: 0,
         unresolved: 0,
         unresolvedTrustedBank: 0,
+        unresolvedVerifiedFinance: 0,
         unresolvedFinancialCandidate: 0,
         unresolvedParserMiss: 0,
         unresolvedReviewRefusal: 0,
@@ -1083,27 +1111,29 @@ export async function scanInbox(
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
         const trustedMarket = trustedBankNotificationMarket(n.pkg);
-        const sourceClass = n.sourceClass;
-        if (sourceClass !== 'trusted-bank' && sourceClass !== 'financial-candidate') continue;
+        const nativeSourceClass = n.sourceClass;
+        if (nativeSourceClass !== 'trusted-bank' && nativeSourceClass !== 'play-finance' &&
+            nativeSourceClass !== 'financial-candidate') continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const source = `${n.title} ${n.text}`.trim();
-        // The curated package list is stronger issuer evidence, not a permanent
-        // support list. Any financial candidate is still sent through the real
-        // transaction parser below. What package provenance controls is whether
-        // a parser result may be written automatically on first sight.
-        //
-        // Native can prove only "Google Play app + financial-looking
-        // notification" for an unknown package. A chat/shopping app can satisfy
-        // that description, so sourceClass (or a spoofable package/title string)
-        // cannot safely authorize a ledger write. The first confident event from
-        // a genuinely new bank goes to Review; confirming it learns the package,
-        // and future confident events auto-import without a new app release.
+        // Unknown Play apps enter native capture only after financial-context and
+        // money gates. Before forcing a first-transaction Review, also verify the
+        // INSTALLED app's own Android label. A recognized bank alias or explicit
+        // banking/finance identity is stronger than notification copy and can
+        // authorize a confident parser result immediately. Truly ambiguous apps
+        // remain review-first and may still be learned from an explicit user
+        // confirmation.
+        const verifiedSender = nativeSourceClass === 'financial-candidate'
+          ? verifiedFinancialAppSender(n.appLabel ?? '')
+          : null;
+        const sourceClass = nativeSourceClass === 'financial-candidate' && verifiedSender
+          ? 'play-finance' as const
+          : nativeSourceClass;
         const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoAuthorized = sourceClass === 'trusted-bank' || learned;
-        // An unconfirmed arbitrary package name never gets to impersonate a
-        // bank merely by choosing a convincing Android package/title string.
-        const sender = trustedBankNotificationSender(n.pkg) ?? (autoAuthorized ? `${n.pkg} ${n.title}` : '');
+        const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
+          (learned ? `${n.pkg} ${n.title}` : '');
         if (isPromotionalBankPush(source)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           notificationIds.add(n.id);
@@ -1118,10 +1148,10 @@ export async function scanInbox(
           sender,
         );
         // Every admitted financial candidate reaches the parser. UAE/Saudi keep
-        // their mature regional grammar as a fast path. A trusted/previously
-        // confirmed package from any other country then gets the universal
-        // structured parser in its native ISO currency. First-seen unknown apps
-        // never use this automatic path; they remain Review-first.
+        // their mature regional grammar as a fast path. A curated, locally
+        // verified Play-finance, or previously confirmed package from any other
+        // country may then use the universal structured parser in native ISO
+        // currency. Only genuinely ambiguous app identity remains Review-first.
         const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : parseLaunchAlert(source, sender, worldwide);
@@ -1186,6 +1216,7 @@ export async function scanInbox(
         if (!handled && notificationImportStats) {
           notificationImportStats.unresolved += 1;
           if (sourceClass === 'trusted-bank') notificationImportStats.unresolvedTrustedBank += 1;
+          else if (sourceClass === 'play-finance') notificationImportStats.unresolvedVerifiedFinance += 1;
           else notificationImportStats.unresolvedFinancialCandidate += 1;
           if (!p) notificationImportStats.unresolvedParserMiss += 1;
           else notificationImportStats.unresolvedReviewRefusal += 1;
