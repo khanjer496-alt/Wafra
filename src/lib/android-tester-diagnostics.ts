@@ -161,6 +161,10 @@ function fitDiagnostic(report: Record<string, unknown>): Record<string, unknown>
 export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Record<string, unknown>> {
   if (Platform.OS !== 'android') throw new Error('tester_diagnostic_android_only');
   const now = Date.now();
+  // Snapshot responsiveness before diagnostic generation starts doing its own
+  // bounded ledger/inbox analysis. Otherwise a slow support export measures
+  // itself and reports that pause as ordinary app jank.
+  const runtimeBeforeDiagnostic = getRuntimePerformanceSnapshot();
   const buildVersion = Constants.expoConfig?.version ?? '1.0.0';
   const ledger = ledgerSourceDiagnostics(state);
   const feedbackCoverage = buildFeedbackPayload({
@@ -333,7 +337,7 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
     },
     performance: {
       launch: getLaunchMetrics(),
-      runtimeJs: getRuntimePerformanceSnapshot(),
+      runtimeJs: runtimeBeforeDiagnostic,
       dataScale: {
         accounts: state.accounts.length,
         transactions: state.transactions.length,

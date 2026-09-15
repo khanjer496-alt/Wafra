@@ -97,6 +97,17 @@ export interface UncategorisedSummary {
   totalFils: number;
 }
 
+// Store snapshots are immutable. Home, Categorise and other surfaces often ask
+// the same question in one session; do the two full-ledger passes once per
+// financial snapshot instead of once per screen mount.
+let uncategorisedCache: {
+  transactions: AppState['transactions'];
+  accounts: AppState['accounts'];
+  merchantOverrides: AppState['merchantOverrides'];
+  billAliases: AppState['billAliases'];
+  value: UncategorisedSummary;
+} | null = null;
+
 /**
  * Below this many merchants, Home says nothing.
  *
@@ -180,6 +191,14 @@ export const CATEGORISE_PROMPT_THRESHOLD = 3;
  * entries" over a tap that rewrote five.
  */
 export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
+  if (
+    uncategorisedCache?.transactions === state.transactions &&
+    uncategorisedCache.accounts === state.accounts &&
+    uncategorisedCache.merchantOverrides === state.merchantOverrides &&
+    uncategorisedCache.billAliases === state.billAliases
+  ) {
+    return uncategorisedCache.value;
+  }
   const live = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, state.accounts);
 
@@ -292,7 +311,15 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
     (a, b) => b.totalFils - a.totalFils || b.count - a.count || a.key.localeCompare(b.key),
   );
 
-  return { merchants, paymentPurposes, rowCount, totalFils };
+  const value = { merchants, paymentPurposes, rowCount, totalFils };
+  uncategorisedCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    merchantOverrides: state.merchantOverrides,
+    billAliases: state.billAliases,
+    value,
+  };
+  return value;
 }
 
 function isPaymentPurposeCandidate(

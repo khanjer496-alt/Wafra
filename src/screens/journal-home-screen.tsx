@@ -89,6 +89,7 @@ export default function JournalHomeScreen() {
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
+  const [homeCleanupReady, setHomeCleanupReady] = useState(false);
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -124,15 +125,27 @@ export default function JournalHomeScreen() {
 
   useEffect(() => {
     if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
-    // Mark Home usable from the first committed ledger frame. Historical insight
-    // analysis is optional decoration and must not sit in front of navigation or
-    // touch handling on a large ledger. Let initial interactions settle, then
-    // give Android one extra quiet beat before doing that full-ledger analysis.
+    // Mark Home usable from the first committed ledger frame. Cleanup prompts
+    // walk the full ledger and are not part of the money the user came to see,
+    // so keep them off the first render and wait for the interaction queue.
     markLaunchPhase('first-usable-home');
-    if (homeAnalysisReady) return;
+    if (homeCleanupReady) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const task = InteractionManager.runAfterInteractions(() => {
-      timer = setTimeout(() => setHomeAnalysisReady(true), 250);
+      timer = setTimeout(() => setHomeCleanupReady(true), 900);
+    });
+    return () => {
+      task.cancel();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [focused, homeCleanupReady, privacyGateCleared, state.hydrated, state.onboarded]);
+  useEffect(() => {
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
+    // The insight is lower priority again. Its Home variant deliberately skips
+    // subscription detection; Bills owns that full historical analysis.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => setHomeAnalysisReady(true), 1_800);
     });
     return () => {
       task.cancel();
@@ -152,11 +165,18 @@ export default function JournalHomeScreen() {
   // twice before Android could feel responsive, even when no money changed.
   // A review expiring still invalidates the Home projection explicitly below.
   const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
+  const dashboard = useMemo(() => projectDashboard({
+    state,
+    period,
+    now,
+    surface: 'home',
+    includeInsights: false,
+    includeCleanupPrompts: homeCleanupReady,
+  }),
     // Status/progress changes must not recompute the financial projection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
-      state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
+      state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language, homeCleanupReady,
       state.ledgerMoney, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');

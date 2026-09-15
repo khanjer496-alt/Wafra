@@ -491,104 +491,69 @@ export function migratePersistedState(
 
   markLaunchPhase('ledger-overrides-complete');
   if (parsed.transactions) {
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
-      t.userEdited
-        ? t
-        : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-          ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-          : t,
-    );
-    // Income mis-filed into spending categories (a Talabat payout is
-    // revenue, not dining): re-file as business/salary.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) =>
-      t.userEdited
-        ? t
-        : t.source === 'sms' &&
-            t.type === 'income' &&
-            !['salary', 'business', 'other'].includes(t.category)
-          ? { ...t, category: 'business' as const }
-          : t,
-    );
-    // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
-    // clearly and group as one subscription.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
-      if (t.userEdited || t.source !== 'sms') return t;
+    // Hydration used to walk the complete ledger once for every historical
+    // repair below. On a real 15k-row phone that meant seven full JS passes
+    // before Home could render. Keep the exact same ordered semantics, but run
+    // all row-local transforms inside one identity-preserving pass.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (original) => {
+      if (original.userEdited || original.source !== 'sms') return original;
+      let t = original;
+
+      if (/^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)) {
+        t = { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const };
+      }
+
+      // Income mis-filed into spending categories (a Talabat payout is
+      // revenue, not dining): re-file as business/salary.
+      if (t.type === 'income' && !['salary', 'business', 'other'].includes(t.category)) {
+        t = { ...t, category: 'business' as const };
+      }
+
+      // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
+      // clearly and group as one subscription.
       const canonical = normalizeServiceName(t.title);
-      return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-    });
-    // Parser versions before T215 filed anonymous incoming money as
-    // Business (or even retained a spending category). Structural titles mean
-    // no payer was identified. Refile only those exact SMS rows.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
-      if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.type !== 'income' ||
-        (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
-        t.category === 'salary' ||
-        t.category === 'other' ||
-        (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
-      ) {
-        return t;
-      }
-      return { ...t, category: 'other' as const };
-    });
-    // Older imports marked every inward remittance as a transfer. An unpaired
-    // arrival is real income; only ledger pairing can prove own-account motion.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
-      if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.type !== 'income' ||
-        t.title !== 'Inward remittance' ||
-        t.isTransfer !== true
-      ) {
-        return t;
-      }
-      const { isTransfer: _stale, ...income } = t;
-      return income;
-    });
+      if (canonical && canonical !== t.title) t = { ...t, title: canonical };
 
-    // ATM rows have always carried this exact structural title. Releases
-    // before parser v17 could file the machine's mall/street address under a
-    // merchant category, so repair every parser-owned expense rather than
-    // only rows currently in Other. Hand edits remain authoritative.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
+      // Parser versions before T215 filed anonymous incoming money as
+      // Business (or even retained a spending category). Structural titles mean
+      // no payer was identified. Refile only those exact SMS rows.
       if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.isTransfer ||
-        t.type !== 'expense' ||
-        t.title !== 'ATM withdrawal'
+        t.type === 'income' &&
+        (t.title === 'Incoming transfer' || t.title === 'Inward remittance') &&
+        t.category !== 'salary' &&
+        t.category !== 'other' &&
+        !(t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
       ) {
-        return t;
+        t = { ...t, category: 'other' as const };
       }
-      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
-      const category = guessCategory(
-        t.title,
-        t.type,
-        parsed.merchantOverrides,
-        t.title,
-      );
-      return category !== t.category ? { ...t, category } : t;
-    });
 
-    // Re-file rows stuck in Other: each parser release widens the merchant
-    // vocabulary, so imported-as-Other rows get another chance without
-    // needing a rescan. User overrides still win.
-    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (t) => {
-      if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.isTransfer ||
-        t.category !== 'other' ||
-        t.type !== 'expense'
-      ) {
-        return t;
+      // Older imports marked every inward remittance as a transfer. An unpaired
+      // arrival is real income; only ledger pairing can prove own-account motion.
+      if (t.type === 'income' && t.title === 'Inward remittance' && t.isTransfer === true) {
+        const { isTransfer: _stale, ...income } = t;
+        t = income;
       }
-      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
-      const guessed = guessCategory(t.title, t.type, undefined, t.title);
-      return guessed !== 'other' ? { ...t, category: guessed } : t;
+
+      // ATM rows have always carried this exact structural title. Releases
+      // before parser v17 could file the machine's mall/street address under a
+      // merchant category, so repair every parser-owned expense rather than
+      // only rows currently in Other. Hand edits remain authoritative.
+      if (!t.isTransfer && t.type === 'expense' && t.title === 'ATM withdrawal' &&
+          !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
+        const category = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+        if (category !== t.category) t = { ...t, category };
+      }
+
+      // Re-file rows stuck in Other: each parser release widens the merchant
+      // vocabulary, so imported-as-Other rows get another chance without
+      // needing a rescan. User overrides still win.
+      if (!t.isTransfer && t.category === 'other' && t.type === 'expense' &&
+          !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
+        const guessed = guessCategory(t.title, t.type, undefined, t.title);
+        if (guessed !== 'other') t = { ...t, category: guessed };
+      }
+
+      return t;
     });
 
     markLaunchPhase('ledger-row-transforms-complete');
