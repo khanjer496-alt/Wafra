@@ -51,7 +51,7 @@ class BankNotificationListenerService : NotificationListenerService() {
     }
   }
 
-  private fun capture(sbn: StatusBarNotification) {
+  private fun capture(sbn: StatusBarNotification, wakeAfterAppend: Boolean = true) {
     val adcb = sbn.packageName == "com.adcb.nexgen" || sbn.packageName == "com.adcb.bank"
     try {
       if (sbn.packageName == packageName) return
@@ -208,12 +208,48 @@ class BankNotificationListenerService : NotificationListenerService() {
       recordAdmission("appendSucceeded", adcb)
       // Source-free wake-up only. The encrypted queue remains the source of
       // truth, and a backgrounded/killed JS runtime simply catches up on resume.
-      NotificationReaderModule.notifyQueueChanged()
-      scheduleHeadlessCapture(sbn.postTime)
+      if (wakeAfterAppend) {
+        NotificationReaderModule.notifyQueueChanged()
+        scheduleHeadlessCapture(sbn.postTime)
+      }
     } catch (_: Exception) {
       recordAdmission("exception", adcb)
       // Never crash the listener; a dropped notification is recoverable, a
       // dead listener is not.
+    }
+  }
+
+  /**
+   * Refresh only Android notifications that already have an encrypted queue
+   * identity. This keeps ordinary drains self-healing after an extractor
+   * upgrade without putting the full notification shade back on the hot path.
+   */
+  private fun refreshQueuedVisible(): Int {
+    val queued = try { NotificationCaptureStore.retainedIdentities(this) }
+    catch (_: Exception) { return 0 }
+    if (queued.isEmpty()) return 0
+    val active = try { activeNotifications?.toList() ?: emptyList() }
+    catch (_: Exception) { return 0 }
+    var matched = 0
+    for (notification in active) {
+      if (!queued.contains(notification.packageName to notification.postTime)) continue
+      matched += 1
+      // The current getCaptured() call is already going to drain the queue.
+      // Do not recursively schedule another JS/headless drain for a repaired row.
+      capture(notification, wakeAfterAppend = false)
+    }
+    return matched
+  }
+
+  /** Source-free count only; performs no extraction or queue mutation. */
+  private fun queuedVisibleMatchCount(): Int {
+    val queued = try { NotificationCaptureStore.retainedIdentities(this) }
+    catch (_: Exception) { return 0 }
+    if (queued.isEmpty()) return 0
+    val active = try { activeNotifications?.toList() ?: emptyList() }
+    catch (_: Exception) { return 0 }
+    return active.count { notification ->
+      queued.contains(notification.packageName to notification.postTime)
     }
   }
 
@@ -262,6 +298,12 @@ class BankNotificationListenerService : NotificationListenerService() {
 
     /** A user returning from Settings may enable capture after the listener connected. */
     fun sweepConnected() { connected?.sweepActiveNotifications() }
+
+    /** Cheap ordinary-drain repair for rows already in the encrypted queue. */
+    fun refreshQueuedVisible(): Int = connected?.refreshQueuedVisible() ?: 0
+
+    /** Source-free diagnostic count for exact queued rows still visible. */
+    fun queuedVisibleMatchCount(): Int = connected?.queuedVisibleMatchCount() ?: 0
 
     /**
      * Foreground recovery for OEMs that granted access but later killed the
