@@ -21,6 +21,7 @@ type TransactionFilterOptions = {
   period: Period;
   live: Set<string>;
   internal: Set<string>;
+  corroborating: Set<string>;
 };
 type TransactionFilterProjection = {
   filtered: Transaction[];
@@ -135,6 +136,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (filters.categories.size > 0 && !touchesCategories(row, filters.categories)) continue;
     if (filters.minFils && row.amountFils < filters.minFils) continue;
     if (query && !search.includes(query)) continue;
+    if (options.corroborating.has(row.id)) continue;
     filtered.push(row);
     const counts = countsInTotals(row, options.live, options.internal);
     if (!counts) {

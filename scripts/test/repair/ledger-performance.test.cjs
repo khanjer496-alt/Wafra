@@ -146,3 +146,49 @@ test('running history import may use the store provisional transfer receipt', ()
   };
   assert.deepEqual([...ledger.internalTransferIdsForState(state)], ['pending-out']);
 });
+
+test('FAB complementary transfer alerts collapse to one displayed event without full reconciliation', () => {
+  const fabAccounts = [{ id: 'fab', name: 'FAB ·0002', kind: 'bank', bankName: 'FAB', last4: '0002' }];
+  const transfer = (id, form, at, reference = 'FABREF984512') => ({
+    id,
+    type: 'expense',
+    ts: at,
+    date: '2026-09-15',
+    amountFils: 56_500,
+    accountId: 'fab',
+    title: form === 'transfer-detail' ? 'Outgoing transfer' : 'Outward remittance',
+    category: 'other',
+    source: 'sms',
+    smsKey: `s${at}-${id}`,
+    captureInstrument: { last4: '0002', kind: 'account', bankIdentity: 'FAB' },
+    transferEvidence: {
+      version: 1, currency: 'AED', attribution: 'source', sourceBank: 'FAB',
+      reference, postingForm: form,
+    },
+  });
+  const detail = transfer('detail', 'transfer-detail', start);
+  const confirmation = transfer('confirmation', 'remittance-debit', start + 30_000);
+  const noise = Array.from({ length: 14_761 }, (_, i) => ({
+    id: `ordinary-${i}`, type: 'expense', date: '2026-09-01', amountFils: 100 + i,
+    accountId: 'fab', title: 'Shop', category: 'other', source: 'sms',
+  }));
+  const state = { transactions: [detail, confirmation, ...noise], accounts: fabAccounts };
+  const first = ledger.corroboratingTransferIdsForState(state);
+  const second = ledger.corroboratingTransferIdsForState(state);
+  assert.equal(first, second, 'same immutable ledger reuses the cheap display projection');
+  assert.deepEqual([...first], ['confirmation']);
+
+  const ambiguous = {
+    transactions: [detail, transfer('detail-2', 'transfer-detail', start + 10_000), confirmation],
+    accounts: fabAccounts,
+  };
+  assert.deepEqual([...ledger.corroboratingTransferIdsForState(ambiguous)], [],
+    'two possible primaries fail closed instead of hiding a real transfer');
+
+  const contradicted = {
+    transactions: [detail, transfer('other-ref', 'remittance-debit', start + 30_000, 'DIFFERENT984512')],
+    accounts: fabAccounts,
+  };
+  assert.deepEqual([...ledger.corroboratingTransferIdsForState(contradicted)], [],
+    'different bank references are two events, not a display duplicate');
+});

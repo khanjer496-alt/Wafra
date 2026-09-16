@@ -26,6 +26,7 @@ function original(rows, filters, o, language) {
     if (filters.datePreset === 'lastMonth' && k !== last) return false;
     if (filters.datePreset === '3months' && (k < three || k > o.currentKey)) return false;
     if (filters.datePreset === 'custom' && ((filters.dateFrom && t.date < filters.dateFrom) || (filters.dateTo && t.date > filters.dateTo))) return false;
+    if (o.corroborating.has(t.id)) return false;
     return !query || t.title.toLowerCase().includes(query) || getCategory(t.category).label.toLowerCase().includes(query) || categoryLabel(t.category, language).toLowerCase().includes(query);
   });
   if (filters.sort === 'largest') list.sort((a, b) => b.amountFils - a.amountFils);
@@ -48,7 +49,7 @@ const rows = Array.from({ length: 12000 }, (_, i) => ({ id: 'row-' + i,
   accountId: i % 11 ? 'active' : 'hidden', source: i % 4 ? 'sms' : 'manual', isTransfer: i % 29 === 0,
   ...(i % 31 === 0 ? { splits: [{ category: 'dining', amountFils: 5000 }, { category: 'groceries', amountFils: 5000 + i % 500 }] } : {}),
 })).sort((a, b) => b.date.localeCompare(a.date));
-const o = { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'all' }, live: new Set(['active']), internal: new Set(['row-23']) };
+const o = { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'all' }, live: new Set(['active']), internal: new Set(['row-23']), corroborating: new Set() };
 for (const language of ['en', 'ar']) for (const salaryDay of [1, 25]) {
   test(`${language}/${salaryDay}: indexed filters preserve exact order, splits, exclusions and totals`, () => {
     setMonthStartDay(salaryDay);
@@ -91,6 +92,29 @@ test('credit-card repayment stays visible but contributes zero to day and result
   assert.equal(result.totalShown, -101_900, 'repayment must not change the result total');
   assert.equal(result.days[0].totalFils, -101_900, 'repayment must not change Day total');
   assert.equal(result.excluded.transfers, 1, 'repayment is visible as excluded transfer activity');
+});
+
+test('secondary bank confirmation is hidden while the canonical transfer remains visible', () => {
+  setMonthStartDay(1);
+  const canonical = {
+    id: 'fab-transfer', title: 'Outgoing transfer', amountFils: 56_500,
+    category: 'other', type: 'expense', date: '2026-09-15', accountId: 'active', source: 'sms', isTransfer: true,
+  };
+  const secondary = { ...canonical, id: 'fab-remittance', title: 'Outward remittance' };
+  const options = {
+    ...o,
+    live: new Set(['active']),
+    internal: new Set(['fab-transfer', 'fab-remittance']),
+    corroborating: new Set(['fab-remittance']),
+  };
+  const result = projectTransactionFilter(
+    createTransactionFilterIndex([canonical, secondary], 'en'),
+    { ...defaults, datePreset: 'all' },
+    options,
+  );
+  assert.deepEqual(result.filtered.map(row => row.id), ['fab-transfer']);
+  assert.equal(result.excluded.transfers, 1);
+  assert.equal(result.totalShown, 0);
 });
 
 test('records a repeat-filter benchmark without asserting phone performance or flaky wall-clock budgets', () => {

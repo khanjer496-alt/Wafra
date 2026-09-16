@@ -341,6 +341,28 @@ function* subscriptionDetectionWorker(
 
   const subs: Subscription[] = [];
   for (const txs of groups.values()) {
+    // A single observation can never satisfy the recurrence rules below, even
+    // for a known subscription provider. Skip it before yielding into the
+    // expensive per-merchant cadence path. Large imported ledgers contain
+    // thousands of one-off merchants; yielding once for every impossible group
+    // turns a bounded scan into seconds of timer churn on Android.
+    if (txs.length < 2) continue;
+
+    // Unknown ordinary merchants need two intervals (three charges). With only
+    // two observations the only groups that can possibly qualify are known
+    // subscription providers or bill-like categories, whose existing rule uses
+    // a single interval. This is a conservative prefilter: checking ANY row for
+    // a bill-like category cannot drop a group whose latest row would qualify.
+    if (txs.length === 2) {
+      const knownTwoChargeProvider = KNOWN_SUBSCRIPTION_MERCHANTS.test(txs[0].title);
+      const billLikeTwoChargeGroup = txs.some((transaction) =>
+        transaction.category === 'utilities' ||
+        transaction.category === 'telecom' ||
+        transaction.category === 'rent' ||
+        transaction.category === 'loan');
+      if (!knownTwoChargeProvider && !billLikeTwoChargeGroup) continue;
+    }
+
     yield;
     if (newestFirst) txs.reverse();
     else txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
