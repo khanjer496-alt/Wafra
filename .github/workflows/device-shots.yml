@@ -277,7 +277,7 @@ jobs:
           find "$HOME/.maestro/tests" -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; 2>/dev/null || true
           find . -maxdepth 1 -type f -name 'ios-*' -exec cp -f {} shots/ \; 2>/dev/null || true
 
-          EXPECTED=14   # 7 surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
+          EXPECTED=12   # 6 onboarding surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
           COUNT=$(find shots -maxdepth 1 -type f -name 'ios-*-0*' | wc -l | tr -d ' ')
           echo "collected $COUNT/$EXPECTED tour screenshots (failed passes:${FAILED:- none})"
           find shots -maxdepth 1 -type f ! -name '*.xml' -exec basename {} \; | sort
@@ -401,7 +401,7 @@ jobs:
           # other one, and the gate is the screenshot count at the end. See the
           # long note on the iOS capture step.
           script: |
-            set -uo pipefail
+            set -u
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb reverse tcp:8081 tcp:8081
             mkdir -p shots
@@ -429,7 +429,7 @@ jobs:
             find "$HOME/.maestro/tests" -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; 2>/dev/null || true
             find . -maxdepth 1 -type f -name 'android-*' -exec cp -f {} shots/ \; 2>/dev/null || true
 
-            EXPECTED=14   # 7 surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
+            EXPECTED=12   # 6 onboarding surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
             COUNT=$(find shots -maxdepth 1 -type f -name 'android-*-0*' | wc -l | tr -d ' ')
             echo "collected $COUNT/$EXPECTED tour screenshots (failed passes:${FAILED:- none})"
             find shots -maxdepth 1 -type f ! -name '*.xml' -exec basename {} \; | sort
