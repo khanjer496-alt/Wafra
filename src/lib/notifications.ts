@@ -15,7 +15,10 @@ import { Platform } from 'react-native';
 import { buildDailySummary } from '@/lib/daily-summary';
 import { toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
+import { detectSubscriptionsCooperatively, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 const CHANNEL_ID = 'payment-reminders';
@@ -142,9 +145,31 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
     });
   }
 
+  // Recurrence detection is a complete-ledger analysis. On a 10k-20k row
+  // Android ledger the synchronous detector can monopolise Hermes for seconds
+  // immediately after Home becomes visible, which looks exactly like a launch
+  // freeze. Bills already uses the cooperative detector; reminder setup must do
+  // the same because it runs automatically once per app launch.
+  let detectedSubscriptions: readonly Subscription[] | undefined;
+  if (Platform.OS === 'android') {
+    const startedAt = Date.now();
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internalTransfers = internalTransferIdsForState(state);
+    const detected = await detectSubscriptionsCooperatively(
+      state.transactions,
+      state.notSubscriptions,
+      now,
+      liveAccounts,
+      internalTransfers,
+    );
+    recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
+    if (detected === null) return;
+    detectedSubscriptions = detected;
+  }
+
   await Notifications.cancelAllScheduledNotificationsAsync();
 
-  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS)) {
+  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS, detectedSubscriptions)) {
     await Notifications.scheduleNotificationAsync({
       content: { title: n.title, body: n.body },
       trigger: {

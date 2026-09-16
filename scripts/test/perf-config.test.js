@@ -919,6 +919,22 @@ function bodyOf(source, header) {
       !/surface: 'dashboard', includeInsights: true/.test(home),
     'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
 
+  const notifications = stripComments(read('src/lib/notifications.ts'));
+  const reminders = stripComments(read('src/lib/reminders.ts'));
+  ok('automatic Android reminder setup never runs synchronous full-ledger recurrence detection',
+    /detectSubscriptionsCooperatively\(/.test(notifications) &&
+      /recordRuntimeOperation\('reminder-projection'/.test(notifications) &&
+      /buildPaymentReminders\(state, now, MAX_REMINDERS, detectedSubscriptions\)/.test(notifications) &&
+      /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*2_500/.test(autoImport) &&
+      /setTimeout\(resolve, SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
+      /syncPaymentReminders\(current\)/.test(autoImport),
+    'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
+
+  ok('reminder planning accepts a precomputed recurrence projection',
+    /detectedSubscriptions\?: readonly Subscription\[\]/.test(reminders) &&
+      /detectedSubscriptions[\s\S]*?detectSubscriptions\(/.test(reminders),
+    'the cooperative Android caller must be able to supply the exact recurrence result without the pure planner rescanning synchronously');
+
   const bills = stripComments(read('src/app/(tabs)/bills.tsx'));
   const subscriptions = stripComments(read('src/lib/subscriptions.ts'));
   const cards = stripComments(read('src/lib/cards.ts'));
@@ -934,7 +950,7 @@ function bodyOf(source, header) {
 
   ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
     /function\* subscriptionDetectionWorker/.test(subscriptions) &&
-      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*4/.test(subscriptions) &&
+      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*2/.test(subscriptions) &&
       /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
       /setTimeout\(runSlice, 0\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');

@@ -22,6 +22,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { projectDashboard, projectDashboardInsight } from '@/lib/dashboard-projection';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { formatAmount } from '@/lib/format';
@@ -195,7 +196,7 @@ export default function JournalHomeScreen() {
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const homeInsight = useMemo(() =>
     homeAnalysisReady && insightWidgetVisible
-      ? projectDashboardInsight(state, period, now)
+      ? measureRuntimeOperation('home-insight', () => projectDashboardInsight(state, period, now))
       : null,
     // Capture/progress state must not restart historical analysis. The optional
     // insight is computed only after Home is already interactive and only while
