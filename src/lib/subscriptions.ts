@@ -594,7 +594,10 @@ export function detectSubscriptions(
   );
 }
 
-const SUBSCRIPTION_DETECTION_SLICE_MS = 4;
+// 120 Hz leaves ~8.3 ms for the entire frame. Keep recurrence maintenance to
+// roughly a quarter of that budget so rendering/input still have headroom on
+// large ledgers while the cooperative worker is active.
+const SUBSCRIPTION_DETECTION_SLICE_MS = 2;
 
 /**
  * Same answer as detectSubscriptions(), but never intentionally monopolises a

@@ -27,7 +27,9 @@ export type RuntimeOperationTag =
   | 'ask-transfer-scope'
   | 'ask-execute'
   | 'ask-evidence'
-  | 'bills-projection';
+  | 'bills-projection'
+  | 'reminder-projection'
+  | 'home-insight';
 
 export interface RuntimeOperationSnapshot {
   count: number;

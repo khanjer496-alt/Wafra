@@ -130,6 +130,10 @@ const shouldSkipFreshAndroidResumeScan = (now = Date.now()): boolean =>
 // grace period. A real new SMS received while backgrounded is still picked up
 // after this bounded delay (or immediately by a provider event/pull refresh).
 const ANDROID_RESUME_SCAN_GRACE_MS = 1_500;
+// Payment-reminder recurrence analysis is useful background maintenance, not
+// launch-critical work. Keep it away from Home's first usable interaction
+// window; the projection itself also yields in 2 ms slices on Android.
+const SESSION_REMINDER_SYNC_GRACE_MS = 2_500;
 
 /**
  * Android provider access is a process-wide fact, not a screen-local one.
@@ -1441,10 +1445,13 @@ export function useAutoImport(
       void (async () => {
         try {
           await enableRelayBackgroundSync();
+          await new Promise<void>((resolve) => setTimeout(resolve, SESSION_REMINDER_SYNC_GRACE_MS));
+          const current = getStateSnapshot();
+          if (!current.hydrated || !current.onboarded) return;
           // Never prompt on launch. Reminder/instant-alert surfaces ask only
           // after the user explicitly enables them; this call is a no-op when
           // notification authorization has not already been granted.
-          await syncPaymentReminders(state);
+          await syncPaymentReminders(current);
         } catch {
           // Reminders are best-effort; the ledger does not depend on them.
         }

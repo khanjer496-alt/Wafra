@@ -26,7 +26,7 @@ import { openDues } from '@/lib/cards';
 import { formatAED, shiftISO } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
-import { daysUntilNext, detectSubscriptions } from '@/lib/subscriptions';
+import { daysUntilNext, detectSubscriptions, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 export type ReminderKind = 'bill' | 'card' | 'subscription';
@@ -79,6 +79,7 @@ export function buildPaymentReminders(
   state: AppState,
   now: Date,
   limit = MAX_REMINDERS,
+  detectedSubscriptions?: readonly Subscription[],
 ): PaymentReminder[] {
   const pending: PaymentReminder[] = [];
   const add = (
@@ -164,13 +165,16 @@ export function buildPaymentReminders(
 
   // Subscriptions: the day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(
-    state.transactions,
-    state.notSubscriptions,
-    now,
-    liveAccounts,
-    internal,
-  )) {
+  const subscriptions = detectedSubscriptions
+    ? [...detectedSubscriptions]
+    : detectSubscriptions(
+        state.transactions,
+        state.notSubscriptions,
+        now,
+        liveAccounts,
+        internal,
+      );
+  for (const sub of subscriptions) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     // An on-demand top-up has no due date. It belongs in Fixed so the user can
     // see the recurring cash requirement, but predicting a day would create a

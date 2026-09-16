@@ -5017,6 +5017,15 @@ eq('analytics: the category trend follows the split too',
       subsForRem && subRem.length === 1 &&
         subRem[0].dateISO === fmt.shiftISO(subsForRem.nextExpectedISO, -1),
       JSON.stringify(subRem.map((r) => r.dateISO)));
+    const precomputedSubRem = remind.buildPaymentReminders(
+      remState({ transactions: subTxs }),
+      febNow,
+      remind.MAX_REMINDERS,
+      subsForRem ? [subsForRem] : [],
+    );
+    eq('reminders: precomputed recurrence produces the same notification plan',
+      precomputedSubRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })),
+      subRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })));
     ok('reminders: a merchant already tracked as a bill is not reminded twice',
       remind.buildPaymentReminders(
         remState({ transactions: subTxs, bills: [mkRemBill('Netflix', 5)] }), febNow,
