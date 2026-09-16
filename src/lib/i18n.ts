@@ -1927,6 +1927,16 @@ const S = {
     en: 'Bank-alert capture is ready. Open Wafra and the view you chose will be waiting.',
     ar: 'التقاط تنبيهات البنك جاهز. افتح وفرة وستجد الصورة التي اخترتها بانتظارك.',
   },
+  onboardNotificationsTitle: {
+    en: 'Stay ahead of your money',
+    ar: 'ابقَ على اطلاع بأموالك',
+  },
+  onboardNotificationsBody: {
+    en: 'Get alerts for upcoming bills, card payments, and your daily spending summary.',
+    ar: 'احصل على تنبيهات للفواتير القادمة ودفعات البطاقات وملخص إنفاقك اليومي.',
+  },
+  onboardNotificationsEnable: { en: 'Enable notifications', ar: 'تفعيل الإشعارات' },
+  onboardNotificationsNotNow: { en: 'Not now', ar: 'ليس الآن' },
   onboardSummaryGoals: { en: 'Savings goals', ar: 'أهداف الادخار' },
   onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
   onboardSummaryMonth: { en: 'Money month', ar: 'الشهر المالي' },
