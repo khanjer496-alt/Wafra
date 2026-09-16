@@ -925,7 +925,7 @@ function bodyOf(source, header) {
     /detectSubscriptionsCooperatively\(/.test(notifications) &&
       /recordRuntimeOperation\('reminder-projection'/.test(notifications) &&
       /buildPaymentReminders\(state, now, MAX_REMINDERS, detectedSubscriptions\)/.test(notifications) &&
-      /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*2_500/.test(autoImport) &&
+      /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*8_000/.test(autoImport) &&
       /setTimeout\(resolve, SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
       /syncPaymentReminders\(current\)/.test(autoImport),
     'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
@@ -962,10 +962,19 @@ function bodyOf(source, header) {
       /billLikeTwoChargeGroup/.test(subscriptions),
     'a large imported ledger has thousands of one-off merchants; they must not each consume a cooperative timer turn');
 
-  ok('Bills stops recurrence work when the tab loses focus',
-    /useIsFocused/.test(bills) && /if \(Platform\.OS !== 'android' \|\| !focused\) return/.test(bills) &&
-      /\[focused, state\.transactions/.test(bills),
-    'a frozen/detached Bills tab must not keep a cooperative ledger scan competing with the screen the user opened next');
+  ok('Bills never restarts recurrence from row zero on tab churn',
+    /UPCOMING_RECURRENCE_IDLE_MS\s*=\s*4_000/.test(bills) &&
+      /needsRecurrenceNow/.test(bills) &&
+      /agendaView === 'cards'/.test(bills) &&
+      /subscriptionDetectionInFlight/.test(subscriptions) &&
+      /if \(existing\) return existing\.promise/.test(subscriptions) &&
+      /callers simply ignore the eventual value/.test(read('src/lib/subscriptions.ts')),
+    'one immutable ledger snapshot must own one cooperative recurrence job; focus changes may ignore the result but must not cancel/restart the underlying scan');
+
+  ok('default Upcoming does not start recurrence in the navigation-critical window',
+    /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
+      /agendaView === 'subscriptions' \|\| agendaView === 'utilities' \|\| agendaView === 'all'/.test(bills),
+    'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',
     /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
