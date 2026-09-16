@@ -192,9 +192,9 @@
       },
       "revenueCatAndroidKey": "",
       "revenueCatIosKey": "",
-      "privacyPolicyUrl": "",
-      "termsOfUseUrl": "",
-      "supportUrl": ""
+      "privacyPolicyUrl": "https://wafra-app-azg.pages.dev/privacy/",
+      "termsOfUseUrl": "https://wafra-app-azg.pages.dev/terms/",
+      "supportUrl": "https://wafra-app-azg.pages.dev/support/"
     }
   }
 }
