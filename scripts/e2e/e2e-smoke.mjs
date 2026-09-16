@@ -378,7 +378,7 @@ ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length=
 ok('Trends includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
 await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
-await tapText(page,'Edit limits',800);
+await tapText(page,'Edit monthly limit',800);
 ok('Category limit editor remains reachable',!!(await visibleText(page,/MONTHLY LIMIT/i)));
 ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i)));
 // Opening the limit editor already closes the category detail sheet.

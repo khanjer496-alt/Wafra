@@ -1458,7 +1458,7 @@ function ktSources(dir) {
 
   ok('the budget editor derives the live-account and internal-transfer sets',
     /liveAccountIds\(state\.accounts\)/.test(sheet) &&
-      /internalTransferIds\(state\.transactions, state\.accounts\)/.test(sheet));
+      /internalTransferIdsForState\(state\)/.test(sheet));
   ok('every spend figure in the budget editor applies both exclusions',
     calls === 2 &&
       flat.includes('spentInMonthForCategory(state.transactions,key,picked,liveAccounts,internal)') &&
@@ -1624,7 +1624,7 @@ function ktSources(dir) {
 for (const rel of ['src/app/cards.tsx']) {
   const screen = read(rel);
   ok(`${rel} derives the internal-transfer set`,
-    /internalTransferIds\(state\.transactions, state\.accounts\)/.test(screen));
+    /internalTransferIdsForState\(state\)/.test(screen));
   ok(`${rel} excludes own-account moves from per-account spend`,
     /isSpending\(\w+, undefined, internal\)/.test(screen),
     screen.match(/isSpending\([^)]*\)/g));
@@ -1633,7 +1633,7 @@ for (const rel of ['src/app/cards.tsx']) {
 {
   const statement = read('src/components/card-payment-sheet.tsx');
   ok('credit-card statement activity uses canonical spending rather than a hand-written transfer check',
-    /internalTransferIds\(state\.transactions, state\.accounts\)/.test(statement) &&
+    /internalTransferIdsForState\(state\)/.test(statement) &&
       /isSpending\(t, undefined, internal\)/.test(statement) &&
       !/t\.isTransfer \|\| t\.type !== 'expense'/.test(code(statement)),
     'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
@@ -1691,7 +1691,7 @@ for (const rel of ['src/app/cards.tsx']) {
     const flat = text.replace(/\s/g, '');
     ok(`${rel} derives the live-account and internal-transfer sets`,
       /liveAccountIds\(state\.accounts\)/.test(text) &&
-        /internalTransferIds\(state\.transactions, ?state\.accounts\)/.test(text));
+        /internalTransferIdsForState\(state\)/.test(text));
     ok(`${rel} threads both sets into its subscription/export call`,
       flat.includes(callNeedle), rel);
   }
