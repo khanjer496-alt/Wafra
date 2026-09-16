@@ -1392,6 +1392,13 @@ console.log('✓ Ask Wafra broader vocabulary and typo-tolerant merchant resolut
 }
 console.log('✓ Ask Wafra account and card inventory');
 
+{
+  const greeting = runWafraAssistant(state, 'Hi', now);
+  assert.equal(greeting.request.tool, 'help');
+  assert.equal(shouldTryAssistantSemanticFallback('Hi', greeting.request), false, 'a greeting is local UI help, not an AI fallback');
+}
+console.log('✓ Ask Wafra greeting stays instant and local');
+
 // Obligation/status questions must use statement/bill accounting rather than
 // falling through to generic spending language. A "settled" answer requires
 // recorded statement coverage plus enough payment allocation to reach zero.
@@ -1413,6 +1420,40 @@ console.log('✓ Ask Wafra account and card inventory');
     assert.match(answer.headline, /settled/i, question);
     assert.equal(answer.destination, '/bills');
   }
+
+  for (const question of ['Have I paid all my credit cards this month?', 'My credit cards have I settled them?']) {
+    const answer = answerWafraQuestion(cardState, question, now);
+    assert.equal(answer.tool, 'credit-card-settlement-summary', question);
+    assert.equal(answer.data.cardCount, 1, question);
+    assert.equal(answer.data.settledCount, 1, question);
+    assert.equal(answer.data.allSettled, true, question);
+    assert.match(answer.headline, /all 1 settled/i, question);
+    assert.equal(answer.destination, '/bills');
+  }
+  assert.equal(isAssistantToolRequest({ tool: 'credit-card-settlement-summary', monthKey: '2026-09' }), true);
+  assert.equal(isAssistantToolRequest({ tool: 'credit-card-settlement-summary', monthKey: 'September' }), false);
+
+  const secondCardForSummary = { ...card, id: 'summary-card-2', name: 'ADCB Credit Card ·2518', bankName: 'ADCB', last4: '2518' };
+  const secondDueForSummary = { ...due, id: 'summary-due-2', accountId: secondCardForSummary.id, totalDueFils: 8_000 };
+  const partialSecondPayment = { ...payment, id: 'summary-payment-2', accountId: secondCardForSummary.id, amountFils: 3_000 };
+  const multiCardSummaryState = {
+    ...cardState, accounts: [account, card, secondCardForSummary],
+    transactions: [...cardState.transactions, partialSecondPayment],
+    cardDues: [due, secondDueForSummary],
+  };
+  const multiSummary = answerWafraQuestion(multiCardSummaryState, 'Have I paid all my credit cards this month?', now);
+  assert.equal(multiSummary.tool, 'credit-card-settlement-summary');
+  assert.equal(multiSummary.data.cardCount, 2);
+  assert.equal(multiSummary.data.settledCount, 1);
+  assert.equal(multiSummary.data.unsettledCount, 1);
+  assert.equal(multiSummary.data.remainingFils, 5_000);
+  assert.equal(multiSummary.data.allSettled, false);
+  assert.ok(multiSummary.facts.some((fact) => /2518/.test(fact.label) && /50|5,000|remaining/i.test(fact.value)));
+
+  const unknownSummary = answerWafraQuestion({ ...cardState, accounts: [account, card, secondCardForSummary] },
+    'Have I settled all my credit cards this month?', now);
+  assert.equal(unknownSummary.data.unknownCount, 1);
+  assert.equal(unknownSummary.data.allSettled, false, 'missing statement coverage must never be treated as settled');
 
   const remaining = answerWafraQuestion(cardState, 'How much is left on ENBD?', now);
   assert.equal(remaining.tool, 'obligation-status');

@@ -52,6 +52,7 @@ export type AssistantTool =
   | 'top-accounts'
   | 'compare-accounts'
   | 'obligation-status'
+  | 'credit-card-settlement-summary'
   | 'data-coverage';
 
 /**
@@ -95,7 +96,8 @@ export type AssistantToolRequest =
   | { tool: 'upcoming-payments'; withinDays?: number }
   | { tool: 'account-inventory'; accountKind?: 'all' | 'bank' | 'card' | 'credit-card' | 'debit-card'; bankName?: string }
   | { tool: 'obligation-status'; obligation: 'card' | 'bill'; accountId?: string; billId?: string; monthKey?: string;
-    query: 'summary' | 'remaining' | 'payments' | 'paid-date' };
+    query: 'summary' | 'remaining' | 'payments' | 'paid-date' }
+  | { tool: 'credit-card-settlement-summary'; monthKey?: string };
 
 export interface AssistantEvidence {
   label: string;
@@ -657,6 +659,26 @@ function billReferenceCandidates(state: AppState, question: string): Bill[] {
     const title = normalizeMerchantText(bill.title);
     return title.length >= 2 && containsPhrase(q, title);
   });
+}
+
+function planCreditCardSettlementSummaryQuestion(
+  state: AppState,
+  question: string,
+  now = new Date(),
+): AssistantToolRequest | undefined {
+  const q = normalizeAssistantSemanticLanguage(normalize(question));
+  // Collective card-settlement questions are a different question from a
+  // single-card obligation. Resolve them locally so natural phrasing such as
+  // “Have I paid all my credit cards this month?” never falls through to the
+  // language model or asks the user to choose one card at a time.
+  const pluralCards = /\b(?:all\s+|every\s+|each\s+)?(?:my\s+)?credit cards\b|\b(?:my\s+)?credit cards\b.*\bthem\b/.test(q);
+  const settlementLanguage = /\b(?:paid|pay|settled|settle|cleared|clear|paid off|settle(?:d)?|unpaid|outstanding)\b/.test(q);
+  const collectiveStatus = /\b(?:all|every|each|them|which|any)\b/.test(q) || /\bcredit cards\b/.test(q);
+  // “Paid at X with my credit cards” is merchant spending, not statement status.
+  const merchantPurchase = /\b(?:paid|pay)\b[^?!.]{0,80}\bat\b[^?!.]{0,80}\bwith\b/.test(q);
+  if (!pluralCards || !settlementLanguage || !collectiveStatus || merchantPurchase) return undefined;
+  const monthKey = obligationMonthKey(state, question, now);
+  return { tool: 'credit-card-settlement-summary', ...(monthKey ? { monthKey } : {}) };
 }
 
 function planObligationQuestion(
@@ -1298,6 +1320,54 @@ function executeAssistantToolResult(
           ? ['Which card did I use most?', 'Did I settle my credit card?']
           : ['Which account did I use most?', 'What payments are due soon?'],
         data: { accountCount: matches.length, accountKind: request.accountKind ?? 'all', bankName: bankName ?? null },
+      };
+    }
+
+    case 'credit-card-settlement-summary': {
+      const cards = creditCards(state);
+      const statementMonth = request.monthKey
+        ? fullMonthLabel({ mode: 'month', key: request.monthKey }) ?? request.monthKey
+        : null;
+      if (!cards.length) return {
+        tool: request.tool, title: 'Credit card status', headline: 'No recorded credit cards',
+        body: 'I do not see any active recorded credit cards in Wafra.', destination: '/bills',
+        suggestions: ['Show me my credit cards', 'What payments are due soon?'],
+        data: { cardCount: 0, statementCount: 0, settledCount: 0, unsettledCount: 0, unknownCount: 0, remainingFils: 0, allSettled: false },
+      };
+      const details = cards.map((account) => {
+        const due = state.cardDues.filter((item) => item.accountId === account.id &&
+          (!request.monthKey || item.dueDate.slice(0, 7) === request.monthKey))
+          .slice().sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
+        if (!due || due.totalDueFils <= 0) return { account, due: null, settled: false, remainingFils: null as number | null };
+        const status = dueWithStatus(state, due, now);
+        return { account, due, settled: status.status === 'settled', remainingFils: status.remainingFils as number | null };
+      });
+      const known = details.filter((item) => item.due !== null);
+      const settledCount = known.filter((item) => item.settled).length;
+      const unsettledCount = known.length - settledCount;
+      const unknownCount = details.length - known.length;
+      const remainingFils = checkedMinorSum(known.map((item) => item.remainingFils ?? 0));
+      const allSettled = details.length > 0 && unsettledCount === 0 && unknownCount === 0;
+      const scopeText = statementMonth ? ` for ${statementMonth}` : '';
+      const headline = allSettled
+        ? `All ${details.length} settled`
+        : unknownCount > 0
+          ? `${settledCount} settled · ${unsettledCount} due · ${unknownCount} unconfirmed`
+          : `${unsettledCount} of ${details.length} still due`;
+      const body = allSettled
+        ? `All ${details.length} recorded credit-card statements${scopeText} are settled based on Wafra's recorded statement totals and matched payments.`
+        : `Across ${details.length} recorded credit cards${scopeText}, ${settledCount} ${settledCount === 1 ? 'is' : 'are'} settled, ${unsettledCount} ${unsettledCount === 1 ? 'still has' : 'still have'} an amount due${unknownCount ? `, and ${unknownCount} ${unknownCount === 1 ? 'does' : 'do'} not have a recorded statement total to confirm` : ''}.`;
+      return {
+        tool: request.tool, title: 'Credit card status', headline,
+        meta: statementMonth ?? 'Latest recorded statements', body,
+        facts: details.map((item) => ({
+          label: accountChoiceLabel(item.account),
+          value: item.due === null ? 'No statement recorded'
+            : item.settled ? 'Settled' : `${formatLedgerMoney(item.remainingFils ?? 0)} remaining`,
+        })),
+        destination: '/bills',
+        suggestions: ['What payments are due soon?', 'Which card did I use most?', 'Show me my credit cards'],
+        data: { cardCount: details.length, statementCount: known.length, settledCount, unsettledCount, unknownCount, remainingFils, allSettled },
       };
     }
 
@@ -1964,7 +2034,7 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
   }
   const answer = executeAssistantToolResult(state, request, now);
   if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status' ||
-      request.tool === 'account-inventory') return answer;
+      request.tool === 'credit-card-settlement-summary' || request.tool === 'account-inventory') return answer;
   if (request.tool === 'subscriptions' || request.tool === 'upcoming-payments') return {
     ...answer,
     body: `${answer.body} ${request.tool === 'subscriptions' ? 'These are estimates from recurring recorded charges; actual renewals may differ.' : 'Includes recorded bills and predicted recurring charges; amounts or dates may change.'}`,
@@ -2117,9 +2187,11 @@ export function planAssistantQuestion(
 ): AssistantToolRequest {
   let q = normalize(question);
   if (!q || q.length > 1000) return clarification('Ask one short question about your recorded spending, income, or payments.');
-  if (/^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return { tool: 'help' };
+  if (/^(?:hi|hello|hey|hey wafra|help|what can (?:you|wafra) do|what can i ask|how does this work)[!?.]*$/.test(q)) return { tool: 'help' };
   const inventory = accountInventoryRequest(q);
   if (inventory) return inventory;
+  const cardSettlementSummary = planCreditCardSettlementSummaryQuestion(state, q, now);
+  if (cardSettlementSummary) return cardSettlementSummary;
   const obligation = planObligationQuestion(state, q, previousRequest, now);
   if (obligation) return obligation;
   const prior = previousRequest && 'period' in previousRequest ? previousRequest : undefined;
@@ -2417,7 +2489,7 @@ export function shouldTryAssistantSemanticFallback(
 ): boolean {
   if (request.tool !== 'help') return false;
   const q = normalize(question);
-  if (!q || /^(?:help|what can (?:you|wafra) do|what can i ask|how does this work)\??$/.test(q)) return false;
+  if (!q || /^(?:hi|hello|hey|hey wafra|help|what can (?:you|wafra) do|what can i ask|how does this work)[!?.]*$/.test(q)) return false;
   return request.clarification === undefined || request.clarification === GENERIC_LANGUAGE_CLARIFICATION;
 }
 
@@ -2464,6 +2536,7 @@ export function assistantFollowUpQuestions(request?: AssistantToolRequest): stri
   if (request.tool === 'account-inventory') return request.accountKind === 'credit-card'
     ? ['Which card did I use most?', 'Did I settle my credit card?', 'What payments are due soon?']
     : ['Which account did I use most?', 'How much did I spend?', 'Anything unusual?'];
+  if (request.tool === 'credit-card-settlement-summary') return ['What payments are due soon?', 'Which card did I use most?', 'Show me my credit cards'];
   if (request.tool === 'obligation-status') return request.obligation === 'card'
     ? ['How much is left?', 'When did I pay it?', 'Show the payments']
     : ['How much is left?', 'When did I pay it?', 'What payments are due soon?'];

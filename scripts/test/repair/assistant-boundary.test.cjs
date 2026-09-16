@@ -28,6 +28,8 @@ test('provider plans cannot silently drop a filter or accept malformed account s
     { tool: 'obligation-status', obligation: 'card', query: 'summary' },
     { tool: 'obligation-status', obligation: 'card', accountId: 'card', billId: 'bill', query: 'summary' },
     { tool: 'obligation-status', obligation: 'bill', billId: 'bill', query: 'maybe-paid' },
+    { tool: 'credit-card-settlement-summary', monthKey: 'September' },
+    { tool: 'credit-card-settlement-summary', monthKey: '2026-09', extra: true },
     { tool: 'help', clarification: 'A provider must not supply local clarification copy.' },
   ]) assert.equal(boundary.isAssistantToolRequest(request), false, JSON.stringify(request));
 });
@@ -52,6 +54,8 @@ test('valid combined filters and income categories survive the boundary', () => 
     { tool: 'top-accounts', period, accountKind: 'card', category: 'dining', metric: 'count', limit: 3 },
     { tool: 'obligation-status', obligation: 'card', accountId: 'credit-card', query: 'remaining' },
     { tool: 'obligation-status', obligation: 'bill', billId: 'utility-bill', query: 'paid-date' },
+    { tool: 'credit-card-settlement-summary' },
+    { tool: 'credit-card-settlement-summary', monthKey: '2026-09' },
   ]) assert.equal(boundary.isAssistantToolRequest(request), true, JSON.stringify(request));
 });
 

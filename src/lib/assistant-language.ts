@@ -148,6 +148,7 @@ function restoreCanonicalQuestion(
 
 function semanticSubject(request?: AssistantToolRequest | null): AssistantSemanticSubject | undefined {
   if (!request) return undefined;
+  if (request.tool === 'credit-card-settlement-summary') return 'card';
   if (request.tool === 'obligation-status') return request.obligation;
   if (request.tool === 'account-inventory') {
     return request.accountKind?.includes('card') ? 'card' : 'account';
