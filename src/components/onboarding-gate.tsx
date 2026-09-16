@@ -1319,6 +1319,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  grow: { flex: 1, minWidth: 0 },
   hidden: { ...StyleSheet.absoluteFillObject, opacity: 0 },
   root: { flex: 1, alignItems: 'center', backgroundColor: night.background },
   loadingRoot: {
