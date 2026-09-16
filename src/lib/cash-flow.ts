@@ -1,5 +1,5 @@
 import { cardPaymentRows } from '@/lib/cards';
-import { internalTransferIds, liveAccountIds, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import { inPeriod, type PeriodLike } from '@/lib/period';
 import type { Account, AppState } from '@/lib/types';
 import { transferOwnership } from '@/lib/transfer-reconciliation';
@@ -41,7 +41,7 @@ export function summarizeCashOutflow(
   scope: CashOutflowScope = {},
 ): CashOutflowSummary {
   const live = scope.live ?? liveAccountIds(state.accounts);
-  const internal = scope.internal ?? internalTransferIds(state.transactions, state.accounts);
+  const internal = scope.internal ?? internalTransferIdsForState(state);
   const accountById = new Map(state.accounts.map((account) => [account.id, account] as const));
   // Keep the canonical ROW, not just its id. Legacy ledgers may still hold
   // both settlement sides; cardPaymentRows derives the debit-side cash date

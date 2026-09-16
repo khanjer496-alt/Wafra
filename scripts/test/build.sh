@@ -67,7 +67,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases markets i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-filter capture-trace \
-         launch-performance launch-benchmark \
+         launch-performance launch-benchmark runtime-performance \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \

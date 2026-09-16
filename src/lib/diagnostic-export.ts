@@ -6,7 +6,7 @@ import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { getLaunchMetrics } from '@/lib/launch-performance';
-import { countsInTotals, internalTransferIds, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_VERSION } from '@/lib/sms-parser';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
@@ -50,7 +50,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   await diagnosticYield();
   assertDiagnosticContinues(active);
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   const transfers = reconcileTransfers(state.transactions, state.accounts);
   const accounts = new Map(state.accounts.map(account => [account.id, account]));
   const sourceCounts = new Map<string, number>();

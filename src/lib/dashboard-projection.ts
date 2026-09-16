@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInCashflowTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
@@ -63,7 +63,7 @@ export function projectDashboardInsight(
   dismissedInsightId?: string | null,
 ): Insight | null {
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   return buildInsights(
     state.transactions,
     state.budgets,
@@ -90,7 +90,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   } = request;
   const homeOnly = request.surface === 'home';
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;

@@ -15,7 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy } from '@/lib/assistant-copy';
-import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
 import { periodLabel, periodRange } from '@/lib/period';
@@ -42,7 +42,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
   const [view, setView] = useState<'spending' | 'received' | 'all'>(income ? 'received' : 'spending');
   const [entry, setEntry] = useState<Transaction | null>(null); const [periodOpen, setPeriodOpen] = useState(false);
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(() => internalTransferIds(state.transactions, state.accounts), [state.transactions, state.accounts]);
+  const internal = internalTransferIdsForState(state);
   const accountById = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
   const summary = useMemo(() => projectMerchantSpending(state.transactions, merchant, period, live, internal),
     // monthKey reads the StoreProvider's active salary-day setting.

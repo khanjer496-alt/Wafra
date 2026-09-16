@@ -25,7 +25,7 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { formatAED, shiftISO } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { daysUntilNext, detectSubscriptions } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
@@ -103,7 +103,7 @@ export function buildPaymentReminders(
   // the same pair — a charge on an archived card would otherwise reconcile a
   // bill to "Paid" and silence its reminder while the money is still owed.
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   // Bills: the day before, and the day itself.
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));

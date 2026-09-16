@@ -15,7 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { topMerchants, type MerchantStat } from '@/lib/analytics';
 import { formatAED } from '@/lib/format';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { checkedMinorSum } from '@/lib/ledger-money';
 import { merchantSpendingHref, merchantSpendingKey } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
@@ -48,7 +48,7 @@ export default function MerchantsScreen() {
   const [query, setQuery] = useState(''); const [periodOpen, setPeriodOpen] = useState(false);
   const needle = useDeferredValue(query.trim().toLowerCase());
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(() => internalTransferIds(state.transactions, state.accounts), [state.transactions, state.accounts]);
+  const internal = internalTransferIdsForState(state);
   // One ledger pass, independent of keystrokes and import-progress events.
   const merchants = useMemo(() => topMerchants(state.transactions, period, Number.MAX_SAFE_INTEGER, live, internal),
     // monthKey reads the StoreProvider's active salary-day setting.

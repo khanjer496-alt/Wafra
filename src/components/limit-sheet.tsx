@@ -9,7 +9,7 @@ import { SectionHeader } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, formatAmount, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
@@ -70,10 +70,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * from the same inflated months.
    */
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
 
   const spent = useMemo(
     () =>

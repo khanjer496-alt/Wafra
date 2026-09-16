@@ -29,7 +29,7 @@ import { TesterDiagnosticsControl } from '@/components/tester-diagnostics-contro
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState as RNAppState,
@@ -82,7 +82,7 @@ import {
   recordFounderTap,
 } from '@/lib/founder-pro';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyDisplay, marketCurrencyCode } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
@@ -769,7 +769,7 @@ export default function SettingsScreen() {
     // stretch an "all time" report back to its date and print on it as a
     // reimbursable expense.
     const liveAccounts = liveAccountIds(state.accounts);
-    const internal = internalTransferIds(state.transactions, state.accounts);
+    const internal = internalTransferIdsForState(state);
     const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
     const currentMonth = monthKey(new Date());
     const from =

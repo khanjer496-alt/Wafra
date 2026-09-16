@@ -45,7 +45,8 @@ import {
   toISODate,
   totalAsShown,
 } from '@/lib/format';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
   activeSubscriptions,
   billCommitments,
@@ -172,10 +173,7 @@ export default function BillsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
   // Recurrence detection walks the complete ledger. Delaying that synchronous
   // walk by two frames fixed the navigation render but merely moved the stall:
   // on a large Android ledger the tab painted, then froze while the deferred
@@ -191,6 +189,7 @@ export default function BillsScreen() {
     const task = InteractionManager.runAfterInteractions(() => {
       firstFrame = requestAnimationFrame(() => {
         secondFrame = requestAnimationFrame(() => {
+          const projectionStartedAt = Date.now();
           void detectSubscriptionsCooperatively(
             state.transactions,
             state.notSubscriptions,
@@ -199,6 +198,7 @@ export default function BillsScreen() {
             internal,
             () => cancelled,
           ).then((value) => {
+            recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
             if (cancelled || value === null) return;
             startTransition(() => setAndroidRecurring(value));
           });

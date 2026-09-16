@@ -62,7 +62,7 @@ import {
   PARSER_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
-import { countsInTotals, internalTransferIds, primeInternalTransferIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -2897,7 +2897,7 @@ export function netWorthAtDate(state: AppState, dateISO: string): number {
   // the arriving side, which the bank words like ordinary income and which
   // therefore carries no transfer flag of its own.
   const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
     if (!countsInTotals(t, live, internal)) continue;

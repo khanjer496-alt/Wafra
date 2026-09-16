@@ -1,5 +1,12 @@
-import type { Account, Transaction } from '@/lib/types';
-import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, reconciliationInternalIds, transferOwnership } from '@/lib/transfer-reconciliation';
+import type { Account, AppState, Transaction } from '@/lib/types';
+import {
+  isTransferCandidate,
+  isUnassignedTransferAccount,
+  reconcileTransfers,
+  reconciliationInternalIds,
+  transferOwnership,
+  TRANSFER_NORMALIZATION_VERSION,
+} from '@/lib/transfer-reconciliation';
 
 /**
  * Human-readable account label with its last-four bank identifier appended
@@ -135,6 +142,12 @@ export function isInboundTransfer(transaction: Transaction): boolean {
  * establish a bank identity. New callers should supply the full account list.
  */
 let internalIdsCache: { transactions: Transaction[]; accounts: Account[]; value: Set<string> } | null = null;
+let persistedInternalIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  ids: string[];
+  value: Set<string>;
+} | null = null;
 
 /**
  * Seed the analytics cache from the exact durable reconciliation receipt.
@@ -159,5 +172,48 @@ export function internalTransferIds(
   const accountRows = Array.isArray(accounts) ? accounts : [];
   const value = reconciliationInternalIds(reconcileTransfers(transactions, accountRows));
   if (Array.isArray(accounts)) internalIdsCache = { transactions, accounts, value };
+  return value;
+}
+
+/**
+ * Fast UI/analytics path for a complete AppState snapshot.
+ *
+ * The store persists the exact reconciliation result together with a semantic
+ * version and primes the in-memory cache after every authoritative dispatch.
+ * Rebuilding the complete transfer graph from a 10k-20k row ledger on a tab
+ * press is therefore redundant work and can hold React Native's JS thread for
+ * seconds. Use the durable receipt when it describes this snapshot; fall back
+ * to full reconciliation only for old/restored states that do not have one.
+ *
+ * While an Android history import is running the store deliberately exposes a
+ * provisional receipt for UI calculations. It is not stamped as final until
+ * import completion, but it is the same snapshot the rest of the UI uses.
+ */
+export function internalTransferIdsForState(
+  state: Pick<AppState,
+    'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion' | 'historyImport'>,
+): Set<string> {
+  const ids = state.transferInternalIds;
+  const receiptUsable = Array.isArray(ids) && (
+    state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+    state.historyImport?.status === 'running'
+  );
+  if (!receiptUsable) return internalTransferIds(state.transactions, state.accounts);
+  if (persistedInternalIdsCache?.transactions === state.transactions &&
+      persistedInternalIdsCache.accounts === state.accounts &&
+      persistedInternalIdsCache.ids === ids) {
+    return persistedInternalIdsCache.value;
+  }
+  const value = new Set(ids);
+  persistedInternalIdsCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    ids,
+    value,
+  };
+  // Keep the legacy array-identity cache hot for callers that still only have
+  // transactions/accounts. This makes mixed old/new call sites converge on the
+  // same O(1) result instead of unexpectedly rebuilding the graph later.
+  internalIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
   return value;
 }

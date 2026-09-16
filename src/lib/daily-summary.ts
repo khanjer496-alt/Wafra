@@ -20,7 +20,7 @@
  */
 import { formatAED, monthKey } from '@/lib/format';
 import { tf } from '@/lib/i18n';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import type { AppState, Transaction } from '@/lib/types';
 
 /** Rows named individually before the rest collapse into "+N more". */
@@ -43,7 +43,7 @@ export interface DailySummary {
  */
 export function buildDailySummary(state: AppState, dayISO: string): DailySummary | null {
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   const rows: Transaction[] = [];
   let totalFils = 0;

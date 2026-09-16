@@ -11,7 +11,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { dueWithStatus, duePaidFils, duePayments } from '@/lib/cards';
 import { formatAED, formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
-import { internalTransferIds, isSpending } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import type { CardDue } from '@/lib/types';
@@ -87,7 +87,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     // What this card has been charged in the current month, which is the
     // figure the next statement is being built from.
     const key = monthKey(now);
-    const internal = internalTransferIds(state.transactions, state.accounts);
+    const internal = internalTransferIdsForState(state);
     let monthFils = 0;
     let charges = 0;
     for (const t of state.transactions) {
