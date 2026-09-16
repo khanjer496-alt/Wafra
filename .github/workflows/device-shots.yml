@@ -326,68 +326,23 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Prebuild Android project
-        run: npx expo prebuild --platform android --no-install
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      - name: Download the already-built release APK
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-shots-${{ hashFiles('package-lock.json') }}
-          restore-keys: gradle-shots-
-
-      - name: Build the debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
-        working-directory: android
+          name: wafra-apk
+          path: apk
+          github-token: ${{ github.token }}
+          run-id: 35131504187
 
       - name: Install Maestro
         run: |
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
-      - name: Start the JS bundler
-        run: |
-          npx expo start --dev-client --port 8081 > /tmp/metro.log 2>&1 &
-          # Poll rather than pull in wait-on: one less network dependency in a
-          # job that already downloads a toolchain, and the failure is legible.
-          for i in $(seq 1 60); do
-            curl -sf http://127.0.0.1:8081/status && break
-            sleep 2
-          done
-          curl -sf http://127.0.0.1:8081/status || { cat /tmp/metro.log; exit 1; }
-
-      # Same reasoning as the iOS job's warm-up step — the debug APK holds no
-      # JS and pulls it from Metro on first launch, and a cold bundle of this
-      # dependency graph takes far longer than Maestro's 7-second default
-      # assertion timeout. Doing it here means the emulator's first launch hits
-      # a warm server. Best-effort; the tour's own 240s first wait is the
-      # backstop.
-      - name: Warm the Metro bundle
-        run: |
-          set -uo pipefail
-          URL='http://127.0.0.1:8081/.expo/.virtual-metro-entry.bundle?platform=android&dev=true&minify=false&runModule=true'
-          START=$(date +%s)
-          if curl -sSf --max-time 900 -o /tmp/warm.bundle "$URL"; then
-            echo "bundled in $(( $(date +%s) - START ))s, $(wc -c < /tmp/warm.bundle) bytes"
-          else
-            echo "::warning::Metro warm-up failed; the tour's own 240s first wait now has to cover the cold bundle."
-            tail -60 /tmp/metro.log || true
-          fi
 
       - name: Boot the emulator and capture
         uses: reactivecircus/android-emulator-runner@v2
@@ -402,8 +357,7 @@ jobs:
           # long note on the iOS capture step.
           script: |
             set -u
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb reverse tcp:8081 tcp:8081
+            adb install -r apk/wafra.apk
             mkdir -p shots
             FAILED=""
             for scheme in dark light; do
