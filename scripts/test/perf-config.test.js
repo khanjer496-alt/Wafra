@@ -897,6 +897,13 @@ function bodyOf(source, header) {
       /setTimeout\(runSlice, 0\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
 
+  ok('recurrence detection drops impossible one-off/two-off merchant groups before yielding cadence work',
+    /if \(txs\.length < 2\) continue/.test(subscriptions) &&
+      /if \(txs\.length === 2\)/.test(subscriptions) &&
+      /knownTwoChargeProvider/.test(subscriptions) &&
+      /billLikeTwoChargeGroup/.test(subscriptions),
+    'a large imported ledger has thousands of one-off merchants; they must not each consume a cooperative timer turn');
+
   ok('Bills stops recurrence work when the tab loses focus',
     /useIsFocused/.test(bills) && /if \(Platform\.OS !== 'android' \|\| !focused\) return/.test(bills) &&
       /\[focused, state\.transactions/.test(bills),
