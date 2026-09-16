@@ -90,9 +90,9 @@ function sessionHarness(options = {}) {
   h.deps['expo-router'].useFocusEffect = callback => react.useEffect(() => focused ? callback() : undefined, [callback, focused]);
   h.deps['@react-navigation/elements'] = { useHeaderHeight: () => 90 };
   h.deps['@/hooks/use-keyboard-height'] = { useKeyboardHeight: () => 0 };
-  h.deps['react-native'].Platform.OS = 'ios';
+  h.deps['react-native'].Platform.OS = options.platform ?? 'ios';
   h.deps['react-native'].AccessibilityInfo = { announceForAccessibility() {} };
-  h.deps['react-native'].Keyboard = { dismiss() {} };
+  h.deps['react-native'].Keyboard = { dismiss() {}, isVisible: () => false };
   h.deps['react-native'].useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1 });
   h.deps['react-native'].AppState = { addEventListener: (_event, callback) => {
     nativeListeners.add(callback);
@@ -113,6 +113,10 @@ function sessionHarness(options = {}) {
     runWafraAssistant: (...args) => {
       calls.push({ kind: 'ask', state: args[0], question: args[1], now: args[2], previous: args[3], period: args[4] });
       return engine.runWafraAssistant(...args);
+    },
+    runWafraAssistantCooperatively: async (...args) => {
+      calls.push({ kind: 'ask-cooperative', state: args[0], question: args[1], now: args[2], previous: args[3], period: args[4] });
+      return engine.runWafraAssistantCooperatively(...args);
     },
     executeAssistantTool: (...args) => {
       calls.push({ kind: 'refresh', state: args[0], request: args[1], now: args[2] });
@@ -277,6 +281,26 @@ test('Ask Wafra direct controls restore tap haptics', () => using({ state: fixtu
   const period = h.find(node => node.props?.accessibilityLabel?.startsWith('Change reporting period:'));
   period.props.onPress();
   assert.equal(h.haptics.length, before + 2, 'period control should register a tap');
+}));
+
+test('Android Send paints the pending turn before ledger interpretation starts', async () => usingAsync({
+  state: fixture,
+  platform: 'android',
+}, async h => {
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('Check');
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-send').props.onPress();
+  h.render();
+  assert.ok(h.find(node => node.props?.testID === 'assistant-pending-turn'), 'the tap must become visible immediately');
+  assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
+  assert.equal(h.calls.length, 0, 'no ledger interpretation may run in the press turn');
+  h.flushFrames();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  h.render();
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask-cooperative']);
+  assert.equal(h.find(node => node.props?.testID === 'assistant-pending-turn'), undefined);
+  assert.equal(h.turns().length, 1);
 }));
 
 test('known local questions do not pay the semantic fallback cost', async () => usingAsync({

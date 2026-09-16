@@ -879,6 +879,9 @@ function bodyOf(source, header) {
 
   const bills = stripComments(read('src/app/(tabs)/bills.tsx'));
   const subscriptions = stripComments(read('src/lib/subscriptions.ts'));
+  const cards = stripComments(read('src/lib/cards.ts'));
+  const assistant = stripComments(read('src/lib/wafra-assistant.ts'));
+  const assistantScreen = stripComments(read('src/app/assistant.tsx'));
   ok('the first Android Bills frame does not synchronously run recurring detection',
     /androidRecurring/.test(bills) &&
       /InteractionManager\.runAfterInteractions/.test(bills) &&
@@ -893,6 +896,31 @@ function bodyOf(source, header) {
       /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
       /setTimeout\(runSlice, 0\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
+
+  ok('Bills stops recurrence work when the tab loses focus',
+    /useIsFocused/.test(bills) && /if \(Platform\.OS !== 'android' \|\| !focused\) return/.test(bills) &&
+      /\[focused, state\.transactions/.test(bills),
+    'a frozen/detached Bills tab must not keep a cooperative ledger scan competing with the screen the user opened next');
+
+  ok('Bills does not compute recently-paid card history for the default Upcoming view',
+    /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
+      /needsPaidCards \? recentlySettledDues\(state, now\) : \[\]/.test(bills),
+    'recent settled statements are invisible on Upcoming and must not block the first Bills tap');
+
+  ok('card statement allocation is cached once per card and immutable ledger snapshot',
+    /let allocationCache:/.test(cards) && /sameInputs\(allocationCache, state\)/.test(cards) &&
+      /allocationCache\.byAccount\.get\(accountId\)/.test(cards),
+    'Bills history and card detail must not replay the same payment allocation once per statement');
+
+  ok('Ask Wafra paints Android Send state before interpreting the ledger',
+    /Platform\.OS === 'android'[\s\S]*?new Promise<void>\(\(resolve\) => requestAnimationFrame/.test(assistantScreen) &&
+      /runWafraAssistantCooperatively/.test(assistantScreen),
+    'the input must clear and pending turn must paint before any large-ledger calculation starts');
+
+  ok('Ask Wafra suggestions never run recurrence detection just to choose a chip',
+    /state\.bills\.length > 0 \|\| state\.cardDues\.length > 0/.test(assistant) &&
+      !/suggestedAssistantQuestions[\s\S]{0,1800}leavingSoon\(/.test(assistant.slice(assistant.indexOf('export function suggestedAssistantQuestions'))),
+    'opening the Assistant should not trigger subscription analysis before the user asks a question');
 
   const paymentAgenda = stripComments(read('src/components/bills/payment-agenda.tsx'));
   ok('Bills renders long agendas progressively instead of mounting every row at once',

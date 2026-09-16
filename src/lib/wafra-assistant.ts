@@ -23,7 +23,13 @@ import {
 import { spendingChangeDrivers, type SpendingChangeDriver } from '@/lib/assistant-spending-analysis';
 import { findRecurringChanges, findUnusualCharges, findPossibleDuplicates, patternAnalysisCoverage, type AssistantPattern } from '@/lib/assistant-patterns';
 import { allocationsOf, amountInCategory } from '@/lib/splits';
-import { activeSubscriptions, detectSubscriptions, trueSubscriptions } from '@/lib/subscriptions';
+import {
+  activeSubscriptions,
+  detectSubscriptions,
+  detectSubscriptionsCooperatively,
+  trueSubscriptions,
+  type Subscription,
+} from '@/lib/subscriptions';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import type { Account, AppState, Bill, CategoryId, Transaction } from '@/lib/types';
 
@@ -748,7 +754,7 @@ function hasUnsupportedRemainder(question: string): boolean {
   let rest = question;
   for (const [pattern] of CATEGORY_ALIASES) rest = rest.replace(new RegExp(pattern.source, 'g'), ' ');
   rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b/g, ' ');
-  const grammar = new Set(('how much money did do does should i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those it all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less higher lower difference different minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers weird odd suspicious review reviewing possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone go up down get got gets getting drop dropped blew blow burned burnt burn put many some any anything else then still ever').split(' '));
+  const grammar = new Set(('how much money did do does should i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those it all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less higher lower difference different minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers weird odd suspicious review reviewing possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone go up down get got gets getting use used drop dropped blew blow burned burnt burn put many some any anything else then still ever').split(' '));
   return normalizeMerchantText(rest).split(' ').some((token) => token && !grammar.has(token) && !/^\d+$/.test(token));
 }
 
@@ -771,12 +777,63 @@ function editDistance(a: string, b: string): number {
   return prev[b.length];
 }
 
+interface AssistantMerchantIndex {
+  transactions: Transaction[];
+  /** Long names first, matching the previous extraction precedence. */
+  titles: string[];
+  /** Alphabetical/canonical order retained for fuzzy-resolution tie behaviour. */
+  resolutionTitles: string[];
+  rank: Map<string, number>;
+  byToken: Map<string, string[]>;
+}
+
+let assistantMerchantIndex: AssistantMerchantIndex | null = null;
+
+function merchantIndex(rows: Transaction[]): AssistantMerchantIndex {
+  if (assistantMerchantIndex?.transactions === rows) return assistantMerchantIndex;
+  const uniqueTitles = [...new Set(rows.map((row) => row.title.trim()).filter(Boolean))];
+  const titles = [...uniqueTitles]
+    .sort((x, y) => y.length - x.length || x.localeCompare(y));
+  const resolutionTitles = [...new Map([...uniqueTitles].sort()
+    .map((title) => [normalize(title), title])).values()];
+  const rank = new Map(titles.map((title, index) => [title, index] as const));
+  const byToken = new Map<string, string[]>();
+  for (const title of titles) {
+    const tokens = new Set(normalizeMerchantText(title).split(' ').filter(Boolean));
+    for (const token of tokens) {
+      const bucket = byToken.get(token);
+      if (bucket) bucket.push(title);
+      else byToken.set(token, [title]);
+    }
+  }
+  assistantMerchantIndex = { transactions: rows, titles, resolutionTitles, rank, byToken };
+  return assistantMerchantIndex;
+}
+
+/**
+ * Candidate recorded titles that could literally occur in this clause.
+ *
+ * `extractNamedClause` used to test EVERY distinct merchant against EVERY chat
+ * message. On a 15k-row ledger, even "check" or "how much did I spend?" paid
+ * for thousands of normalisations and regexes before the Send tap could clear
+ * the composer. Literal phrase containment requires at least one shared token,
+ * so this index removes impossible merchants without changing the matching
+ * rule that makes the final decision.
+ */
+function merchantTitlesInText(rows: Transaction[], text: string): string[] {
+  const index = merchantIndex(rows);
+  const candidates = new Set<string>();
+  for (const token of new Set(normalizeMerchantText(text).split(' ').filter(Boolean))) {
+    for (const title of index.byToken.get(token) ?? []) candidates.add(title);
+  }
+  return [...candidates].sort((a, b) => (index.rank.get(a) ?? 0) - (index.rank.get(b) ?? 0));
+}
+
 function resolveMerchant(phrase: string, rows: Transaction[]): { merchant?: string; candidates?: string[] } {
   const normalized = normalizeMerchantText(phrase);
   // Collapse exactly the same identity as filterRows and spending drivers:
   // outside whitespace and casing. Punctuation and branch suffixes stay distinct.
-  const titles = [...new Map([...new Set(rows.map((tx) => tx.title.trim()).filter(Boolean))].sort()
-    .map((title) => [normalize(title), title])).values()];
+  const titles = merchantIndex(rows).resolutionTitles;
   const literal = titles.filter((title) => normalize(title) === normalize(phrase));
   if (literal.length === 1) return { merchant: literal[0] };
   const exact = titles.filter((title) => normalizeMerchantText(title) === normalized);
@@ -1012,9 +1069,12 @@ function invalidFilters(state: AppState, filters: AssistantFilters): string | un
   if ([...includedCategories(filters), ...(filters.excludedCategories ?? [])].some((id) => !CATEGORIES.some((item) => item.id === id))) {
     return 'I could not identify every category. Use a category name shown in Transactions.';
   }
-  const titles = new Set(state.transactions.map((row) => normalize(row.title)));
-  if ([...includedMerchants(filters), ...(filters.excludedMerchants ?? [])].some((name) => !titles.has(normalize(name)))) {
-    return 'I could not identify every merchant. Use its exact name from Transactions.';
+  const merchantFilters = [...includedMerchants(filters), ...(filters.excludedMerchants ?? [])];
+  if (merchantFilters.length > 0) {
+    const titles = new Set(merchantIndex(state.transactions).titles.map(normalize));
+    if (merchantFilters.some((name) => !titles.has(normalize(name)))) {
+      return 'I could not identify every merchant. Use its exact name from Transactions.';
+    }
   }
   return undefined;
 }
@@ -1262,12 +1322,19 @@ function executeAssistantToolResult(
   state: AppState,
   request: AssistantToolRequest,
   now = new Date(),
+  derived?: { detectedSubscriptions?: readonly Subscription[] },
 ): AssistantAnswer {
   const period = 'period' in request ? comparisonPrimaryPeriod(request, now, state) : currentMonthPeriod(now);
   const scope = answerScope(period, now);
   const filters = 'period' in request ? request : {};
-  const spending = filterRows(spendingRows(state, period), filters);
-  const income = filterRows(incomeRows(state, period), filters);
+  const noSpending = new Set<AssistantTool>([
+    'help', 'account-inventory', 'credit-card-settlement-summary', 'obligation-status',
+    'data-coverage', 'subscriptions', 'upcoming-payments', 'income-total', 'cash-outflow',
+  ]);
+  const spending = noSpending.has(request.tool) ? [] : filterRows(spendingRows(state, period), filters);
+  const income = request.tool === 'income-total' || request.tool === 'net-income-spending'
+    ? filterRows(incomeRows(state, period), filters)
+    : [];
 
   switch (request.tool) {
     case 'help':
@@ -1593,7 +1660,9 @@ function executeAssistantToolResult(
     case 'subscriptions': {
       const { live, internal } = ledgerScope(state);
       const subs = activeSubscriptions(trueSubscriptions(
-        detectSubscriptions(state.transactions, state.notSubscriptions, now, live, internal),
+        derived?.detectedSubscriptions
+          ? [...derived.detectedSubscriptions]
+          : detectSubscriptions(state.transactions, state.notSubscriptions, now, live, internal),
       )).sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
       const monthly = checkedMinorSum(subs.map((item) => item.monthlyEquivalentFils));
       return {
@@ -1915,7 +1984,12 @@ function executeAssistantToolResult(
 
     case 'upcoming-payments': {
       const withinDays = Math.max(1, Math.min(request.withinDays ?? 30, 90));
-      const items = leavingSoon(state, now, { withinDays });
+      const items = leavingSoon(state, now, {
+        withinDays,
+        ...(derived?.detectedSubscriptions
+          ? { detectedSubscriptions: derived.detectedSubscriptions }
+          : {}),
+      });
       const amount = outgoingTotalFils(items);
       return {
         tool: request.tool,
@@ -2021,18 +2095,23 @@ function executeAssistantToolResult(
 }
 
 /** Execute locally, then attach the exact rows used by that calculation. */
-export function executeAssistantTool(state: AppState, request: AssistantToolRequest, now = new Date()): AssistantAnswer {
+export function executeAssistantTool(
+  state: AppState,
+  request: AssistantToolRequest,
+  now = new Date(),
+  derived?: { detectedSubscriptions?: readonly Subscription[] },
+): AssistantAnswer {
   if ('period' in request) {
     const error = invalidFilters(state, request);
-    if (error) return executeAssistantToolResult(state, clarification(error), now);
+    if (error) return executeAssistantToolResult(state, clarification(error), now, derived);
     if ((request.tool === 'net-income-spending' || request.tool === 'cash-outflow') && hasContentFilter(request)) {
-      return executeAssistantToolResult(state, clarification('This calculation supports account filters. Ask for spending or income separately to filter categories or merchants.'), now);
+      return executeAssistantToolResult(state, clarification('This calculation supports account filters. Ask for spending or income separately to filter categories or merchants.'), now, derived);
     }
     if (['recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review'].includes(request.tool) && hasCategoryFilter(request)) {
-      return executeAssistantToolResult(state, clarification('Charge patterns need whole purchases. Ask by merchant or account without category filters.'), now);
+      return executeAssistantToolResult(state, clarification('Charge patterns need whole purchases. Ask by merchant or account without category filters.'), now, derived);
     }
   }
-  const answer = executeAssistantToolResult(state, request, now);
+  const answer = executeAssistantToolResult(state, request, now, derived);
   if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status' ||
       request.tool === 'credit-card-settlement-summary' || request.tool === 'account-inventory') return answer;
   if (request.tool === 'subscriptions' || request.tool === 'upcoming-payments') return {
@@ -2107,6 +2186,32 @@ export function executeAssistantTool(state: AppState, request: AssistantToolRequ
   };
 }
 
+/**
+ * Execute recurrence-backed chat tools without monopolising a foreground turn.
+ * All other deterministic tools retain the normal synchronous path.
+ */
+export async function executeAssistantToolCooperatively(
+  state: AppState,
+  request: AssistantToolRequest,
+  now = new Date(),
+  cancelled: () => boolean = () => false,
+): Promise<AssistantAnswer | null> {
+  if (request.tool !== 'subscriptions' && request.tool !== 'upcoming-payments') {
+    return executeAssistantTool(state, request, now);
+  }
+  const { live, internal } = ledgerScope(state);
+  const detected = await detectSubscriptionsCooperatively(
+    state.transactions,
+    state.notSubscriptions,
+    now,
+    live,
+    internal,
+    cancelled,
+  );
+  if (detected === null || cancelled()) return null;
+  return executeAssistantTool(state, request, now, { detectedSubscriptions: detected });
+}
+
 interface NamedClause { rest: string; merchants: string[]; accounts: string[]; error?: AssistantToolRequest }
 
 /** Protect recorded identities before date/category vocabulary is interpreted. */
@@ -2162,7 +2267,15 @@ function extractNamedClause(state: AppState, text: string, question: string, exc
     rest = `${rest.slice(0, match.start)} accountselection ${rest.slice(match.end)}`;
   }
   rest = rest.replace(/\baccountselection\b/g, ' ');
-  const titles = [...new Set(state.transactions.map((row) => row.title.trim()).filter(Boolean))].sort((x, y) => y.length - x.length);
+  // Most questions contain only Wafra's own grammar ("how much did I spend?",
+  // "check", "what is due soon?"). None of those words can suddenly become a
+  // recorded merchant, so building the 15k-row merchant index before answering
+  // them is pure latency. Explicit merchant syntax still wins even when the
+  // merchant itself is a common word (for example "spending at Pay"). Unknown
+  // vocabulary also gets the identity lookup so bare follow-ups like
+  // "What about Talabat?" retain their existing behaviour.
+  const shouldScanMerchantTitles = /\b(?:at|from|on)\s+\S/.test(rest) || hasUnsupportedRemainder(rest);
+  const titles = shouldScanMerchantTitles ? merchantTitlesInText(state.transactions, rest) : [];
   for (const title of titles) {
     if (!containsPhrase(rest, title)) continue;
     // Category/income words are semantic unless explicitly introduced as a merchant.
@@ -2504,6 +2617,26 @@ export function runWafraAssistant(state: AppState, question: string, now = new D
   return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
 }
 
+/** Android interaction path: identical planning/presentation, cooperative only where recurrence is required. */
+export async function runWafraAssistantCooperatively(
+  state: AppState,
+  question: string,
+  now = new Date(),
+  previousRequest?: AssistantToolRequest | null,
+  defaultPeriod?: Period,
+  cancelled: () => boolean = () => false,
+): Promise<{ request: AssistantToolRequest; answer: AssistantAnswer } | null> {
+  const planned = planAssistantQuestion(state, question, now, previousRequest, defaultPeriod);
+  const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);
+  const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
+    ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
+  const answer = await executeAssistantToolCooperatively(state, request, now, cancelled);
+  if (answer === null || cancelled()) return null;
+  const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
+    request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
+  return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
+}
+
 /**
  * Keep a clarification turn from erasing the last useful conversational scope.
  * The screen caps history at 12 turns, so this is a tiny bounded scan and runs
@@ -2523,7 +2656,12 @@ export function suggestedAssistantQuestions(state: AppState, period = currentMon
   if (period.mode !== 'all' && topCategory) suggestions.push(`Why did my ${categoryLabel(topCategory, 'en').toLowerCase()} spending change?`);
   if (rows.some((row) => amountInCategory(row, 'rent') > 0)) suggestions.push('How much did I spend excluding rent?');
   if (rows.length >= 3) suggestions.push('Which recurring charges changed?');
-  if (suggestions.length < 5 && leavingSoon(state, now, { withinDays: 30 }).length) suggestions.push('What payments are due soon?');
+  // Suggestions are navigation hints, not analysis. Never run subscription
+  // detection merely to decide whether to display a question chip; that made
+  // opening Ask Wafra itself compete with the first Send tap on large ledgers.
+  if (suggestions.length < 5 && (state.bills.length > 0 || state.cardDues.length > 0)) {
+    suggestions.push('What payments are due soon?');
+  }
   suggestions.push('How much income did I receive?', 'What is my recorded history?');
   return suggestions.slice(0, 5);
 }

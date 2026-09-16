@@ -28,7 +28,7 @@ import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 import {
   assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
-  shouldTryAssistantSemanticFallback, suggestedAssistantQuestions,
+  runWafraAssistantCooperatively, shouldTryAssistantSemanticFallback, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
@@ -226,12 +226,8 @@ export default function AssistantScreen() {
 
   const ask = async (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
     const clean = value.trim().slice(0, 1000);
-    const snapshot = getStateSnapshot();
-    if (!clean || !snapshot.hydrated || sendingRef.current) return;
-    const startGeneration = getStateGeneration();
-    const renderIsCurrent = generation === startGeneration;
-    if (!renderIsCurrent) previousGeneration.current = startGeneration;
-    const now = new Date();
+    const initialSnapshot = getStateSnapshot();
+    if (!clean || !initialSnapshot.hydrated || sendingRef.current) return;
     sendingRef.current = true;
     setIsSending(true);
     setPendingQuestion(clean);
@@ -239,6 +235,19 @@ export default function AssistantScreen() {
     setError(null);
     Keyboard.dismiss();
     try {
+      // Android must get a committed frame before any ledger interpretation.
+      // Without this yield, state updates above are batched with the synchronous
+      // local engine: on a large history the text stays in the field and the
+      // Send button looks dead until all calculation has already finished.
+      if (Platform.OS === 'android') {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const snapshot = getStateSnapshot();
+      if (!snapshot.hydrated) throw new Error('Ledger changed while sending');
+      const startGeneration = getStateGeneration();
+      const renderIsCurrent = generation === startGeneration;
+      if (!renderIsCurrent) previousGeneration.current = startGeneration;
+      const now = new Date();
       const correction = usePrevious && renderIsCurrent
         ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer)
         : undefined;
@@ -252,7 +261,17 @@ export default function AssistantScreen() {
         return;
       }
       const previous = usePrevious && renderIsCurrent ? contextRequest ?? conversationContext : null;
-      const result = runWafraAssistant(snapshot, clean, now, previous, period);
+      const result = Platform.OS === 'android'
+        ? await runWafraAssistantCooperatively(
+            snapshot,
+            clean,
+            now,
+            previous,
+            period,
+            () => startGeneration !== getStateGeneration(),
+          )
+        : runWafraAssistant(snapshot, clean, now, previous, period);
+      if (result === null) return;
       if (!snapshot.privateMode && shouldTryAssistantSemanticFallback(clean, result.request)) {
         // Local parsing always wins the interaction frame. The AI layer is only
         // a language repair pass, so it must never make Send wait on a network

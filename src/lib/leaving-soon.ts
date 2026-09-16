@@ -40,6 +40,13 @@ export interface Outgoing {
   billId?: string;
 }
 
+type LeavingSoonOptions = {
+  withinDays?: number;
+  kinds?: OutgoingKind[];
+  /** Exact recurrence projection supplied by a cooperative caller. */
+  detectedSubscriptions?: readonly Subscription[];
+};
+
 /**
  * Everything with a date on it, in one list: card statements, fixed bills and
  * detected subscriptions.
@@ -51,7 +58,7 @@ export interface Outgoing {
 export function leavingSoon(
   state: AppState,
   today: Date,
-  opts: { withinDays?: number; kinds?: OutgoingKind[] } = {},
+  opts: LeavingSoonOptions = {},
 ): Outgoing[] {
   const withinDays = opts.withinDays ?? 9;
   const kinds = new Set<OutgoingKind>(opts.kinds ?? ['card', 'bill', 'subscription']);
@@ -116,7 +123,9 @@ export function leavingSoon(
 
   if (kinds.has('subscription')) {
     const subs = activeSubscriptions(
-      detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
+      opts.detectedSubscriptions
+        ? [...opts.detectedSubscriptions]
+        : detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
     );
     for (const sub of subs) {
       // Frequent prepaid top-ups are real commitments without a schedule.
