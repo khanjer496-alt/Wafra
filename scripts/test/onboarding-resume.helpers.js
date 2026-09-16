@@ -26,6 +26,7 @@ class EffectHarness {
     this.ui = { ready: false, failed: false, step: 'welcome', plan: null, personalizing: false,
       focus: null, tracking: null };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
+    this.notificationDecisionMade = { current: false };
     this.routes = []; this.reads = 0; this.loader = async () => ({ returnToOnboarding: false });
     this.router = { replace: path => this.routes.push(path) };
   }
@@ -33,11 +34,13 @@ class EffectHarness {
     Object.assign(this.input, update);
     const context = { ...this.input, Platform: { OS: 'ios' }, router: this.router,
       resumeHandled: this.resumeHandled, previouslyOnboarded: this.previouslyOnboarded,
+      notificationDecisionMade: this.notificationDecisionMade,
       DEFAULT_ONBOARDING_PLAN, onboardingResumeDestination,
       setPlan: value => { this.ui.plan = value; },
       setPersonalizing: value => { this.ui.personalizing = value; },
       setFocus: value => { this.ui.focus = value; },
       setTracking: value => { this.ui.tracking = value; },
+      setPendingOpen: () => {},
       setStep: value => { this.ui.step = value; },
       setResumeReady: value => { this.ui.ready = value; },
       setResumeFailed: value => { this.ui.failed = value; },

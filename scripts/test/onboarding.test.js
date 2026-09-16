@@ -282,8 +282,12 @@ const iosControllerSource = fs.readFileSync(
   path.join(__dirname, '../../src/lib/ios-capture-setup.ts'),
   'utf8',
 );
-const moneyPreviewSource = fs.readFileSync(
-  path.join(__dirname, '../../src/components/onboarding/money-preview.tsx'),
+const aliveScenesSource = fs.readFileSync(
+  path.join(__dirname, '../../src/components/onboarding/alive-scenes.tsx'),
+  'utf8',
+);
+const onboardingBankExamplesSource = fs.readFileSync(
+  path.join(__dirname, '../../src/lib/onboarding-bank-examples.ts'),
   'utf8',
 );
 
@@ -291,8 +295,8 @@ ok(
   'value-first onboarding precedes optional planning without forcing a country',
   gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview']") &&
     gateSource.includes("const PLAN_STEPS: readonly Step[] = ['goals', 'budget']") &&
-    gateSource.includes('FOCUS_PRESETS.map') &&
-    gateSource.includes('TRACKING_PRESETS.map') &&
+    gateSource.includes('<FocusChooser value={focus} onChange={chooseFocus}') &&
+    gateSource.includes('<TrackingChooser value={tracking} onChange={chooseTracking}') &&
     gateSource.includes('setOnboardingPlan(plan)') &&
     !gateSource.includes('setMarket(plan.answers.marketId)') &&
     !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
@@ -309,15 +313,32 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'welcome embeds an explicitly labeled interactive example without ledger or setup writes',
-  /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
-    /onboardSampleMessage/.test(moneyPreviewSource) &&
-    /onboardSampleNote/.test(moneyPreviewSource) &&
-    /setRevealed/.test(moneyPreviewSource) &&
-    /activeStep === 'welcome'[\s\S]*?<MoneyPreview reducedMotion=\{reducedMotion\}[\s\S]*?onboardChooseStart/.test(gateSource) &&
-    !/exampleVisible|SetupIllustration/.test(gateSource) &&
-    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(moneyPreviewSource) &&
-    !/function points\(/.test(gateSource),
+  'welcome uses real Wafra identity and market-aware bank examples without ledger writes',
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+    /WafraMark/.test(aliveScenesSource) &&
+    /onboardingBankRegion/.test(aliveScenesSource) &&
+    /verifiedLogoUrl/.test(aliveScenesSource) &&
+    /activeStep === 'welcome'[\s\S]*?<WelcomeMoneyScene[\s\S]*?onboardChooseStart/.test(gateSource) &&
+    /US:[\s\S]*GB:[\s\S]*FR:[\s\S]*DE:[\s\S]*IN:[\s\S]*QA:[\s\S]*KW:/.test(onboardingBankExamplesSource) &&
+    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(aliveScenesSource) &&
+    !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
+);
+ok(
+  'welcome money reveal transforms the same bank rows instead of rendering a duplicate before-and-after card stack',
+  /function RevealRow/.test(aliveScenesSource) &&
+    /useSharedValue/.test(aliveScenesSource) &&
+    /withDelay/.test(aliveScenesSource) &&
+    /withTiming/.test(aliveScenesSource) &&
+    /onboardSceneFromAlerts/.test(aliveScenesSource) &&
+    /onboardSceneToLedger/.test(aliveScenesSource) &&
+    !/function AlertSlip/.test(aliveScenesSource) &&
+    !/styles\.organizeRail|styles\.ledgerRow/.test(aliveScenesSource),
+);
+ok(
+  'successful completion keeps Wafra identity and editorial result strips instead of a generic success card',
+  /failedCompletion \|\| smsDenied[\s\S]{0,220}<Icon name="alert"[\s\S]{0,220}<WafraMark size=\{42\}/.test(gateSource) &&
+    /resultCard:[\s\S]{0,420}borderTopWidth:[\s\S]{0,120}borderBottomWidth:/.test(gateSource) &&
+    !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
 );
 ok(
   'capture choice is presented as two explicit accessible start modes',
@@ -447,12 +468,13 @@ ok(
     /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
 );
 ok(
-  'tracking choice changes the value explanation instead of collecting a dead survey answer',
-  /const trackingOutcomeKey: StringKey = tracking === 'none'/.test(gateSource) &&
-    /tracking === 'bank-apps'/.test(gateSource) &&
-    /tracking === 'spreadsheet'/.test(gateSource) &&
-    /tracking === 'finance-app'/.test(gateSource) &&
-    /\{t\(trackingOutcomeKey\)\}/.test(gateSource),
+  'tracking choice changes a real product scene instead of collecting a dead survey answer',
+  /<TrackingChooser value=\{tracking\} onChange=\{chooseTracking\} marketId=\{state\.marketId\}/.test(gateSource) &&
+    /id: 'bank-apps'/.test(aliveScenesSource) &&
+    /id: 'spreadsheet'/.test(aliveScenesSource) &&
+    /id: 'finance-app'/.test(aliveScenesSource) &&
+    /id: 'none'/.test(aliveScenesSource) &&
+    /onboardTrackingOneView/.test(aliveScenesSource),
 );
 ok(
   'Android automatic setup persists a reveal checkpoint before final completion',
