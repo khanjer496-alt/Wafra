@@ -36,6 +36,7 @@ function harness(options = {}) {
     hydrated: options.hydrated ?? true, onboarded: true, language,
     captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
     trialStartTs: options.trialStartTs ?? 0,
+    founderPro: options.founderPro ?? false,
     transactions: options.empty ? [] : transactions, accounts: [account], budgets: [], bills: [], cardDues: [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
@@ -96,7 +97,8 @@ function harness(options = {}) {
     '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },
     '@/lib/store': { useStore: () => ({ state, getStateSnapshot: () => state, applyFxUpdates() {},
-      setCaptureOptOut: async (value) => events.push(['optOut', value]), beginHistoryImport: async () => events.push(['resume']) }) },
+      setCaptureOptOut: async (value) => events.push(['optOut', value]), beginHistoryImport: async () => events.push(['resume']),
+      unlockFounderPro: async () => { state.founderPro = true; events.push(['founder']); } }) },
   };
   for (const [module, name] of [['period-sheet', 'PeriodSheet'], ['entry-detail-sheet', 'EntryDetailSheet'],
     ['card-payment-sheet', 'CardPaymentSheet'], ['bill-detail-sheet', 'BillDetailSheet']]) {
@@ -139,7 +141,11 @@ function harness(options = {}) {
   dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
-  const { default: Home } = load(path.join(root, 'src/screens/journal-home-screen.tsx'), dependencies);
+  const { default: Home } = load(
+    path.join(root, 'src/screens/journal-home-screen.tsx'),
+    dependencies,
+    { process: { env: { EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: options.founderUnlock ? '1' : '0' } } },
+  );
   let tabTree = null;
   if (options.render) {
     const interpolate = (v, a, b) => b[0] + (v-a[0])/(a[1]-a[0])*(b[1]-b[0]);
