@@ -22,6 +22,7 @@ import { sanitizeParserTemplate } from '@/lib/parser-research';
 import { getRuntimePerformanceSnapshot } from '@/lib/runtime-performance';
 import { bankProfileForSender, PARSER_VERSION } from '@/lib/sms-parser';
 import { getStorageFailures } from '@/lib/storage-diagnostics';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 
 const SAMPLE_LIMIT_PER_OUTCOME = 6;
@@ -68,6 +69,7 @@ function ledgerSourceDiagnostics(state: AppState) {
     repeatedSourceIdentities += 1;
     repeatedRows += count - 1;
   }
+  const otherRows = state.transactions.filter((row) => row.category === 'other');
 
   return {
     sourceIdentityCounts,
@@ -84,6 +86,21 @@ function ledgerSourceDiagnostics(state: AppState) {
         row.transferEvidence?.explicitOwn === true && row.isTransfer !== true).length,
       categoryCounts: countBy(state.transactions.map((row) => row.category)),
       transactionTypeCounts: countBy(state.transactions.map((row) => row.type)),
+      // "Other" is not synonymous with a parser miss. Transfer/remittance and
+      // settlement rows deliberately live there, while parser coverage below
+      // separately reports purchases whose category was actually unresolved.
+      // Keep this source-free breakdown so a support file can tell those cases
+      // apart without exposing any merchant, amount or account identity.
+      otherBreakdown: {
+        rows: otherRows.length,
+        expense: otherRows.filter((row) => row.type === 'expense').length,
+        income: otherRows.filter((row) => row.type === 'income').length,
+        transferCandidates: otherRows.filter(isTransferCandidate).length,
+        confirmedOwnTransfers: otherRows.filter((row) => transferOwnership(row) === 'own').length,
+        unresolvedTransfers: otherRows.filter((row) => transferOwnership(row) === 'unknown').length,
+        cardPaymentRows: otherRows.filter((row) => row.cardPaymentSide !== undefined).length,
+        billPaymentRows: otherRows.filter((row) => row.paymentFlowSide !== undefined).length,
+      },
     },
   };
 }

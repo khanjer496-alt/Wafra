@@ -21,7 +21,7 @@ import { categoryLabel, getCategory } from '@/lib/categories';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { summarizeForeignActivity, type CurrencyActivity } from '@/lib/fx-summary';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 import { inPeriod } from '@/lib/period';
@@ -65,10 +65,7 @@ export default function CurrencyScreen() {
 
   const ledgerCurrency = ledgerCurrencyCode();
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
   const summary = useMemo(
     () =>
       summarizeForeignActivity(

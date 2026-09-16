@@ -18,7 +18,7 @@ import { Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
-import { internalTransferIds, isSpending } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
@@ -117,10 +117,7 @@ export default function CardsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cards, state.accounts, state.transactions],
   );
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
   /**
    * This month's spend per card.
    *

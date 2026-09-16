@@ -26,7 +26,7 @@ import { CATEGORIES } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { internalTransferIds, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
@@ -175,10 +175,7 @@ export default function TransactionsScreen() {
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),

@@ -8,8 +8,15 @@
 export const Platform: { OS: 'ios' | 'android' | 'web' } = { OS: 'ios' };
 
 // Scheduling tests can switch lifecycle state without replacing scanner logic.
-export const AppState: { currentState: 'active' | 'background' | 'inactive' | null } = {
+export const AppState: {
+  currentState: 'active' | 'background' | 'inactive' | null;
+  addEventListener: (
+    _event: 'change',
+    _listener: (state: 'active' | 'background' | 'inactive' | null) => void,
+  ) => { remove(): void };
+} = {
   currentState: 'active',
+  addEventListener: () => ({ remove() {} }),
 };
 
 export const Linking = {

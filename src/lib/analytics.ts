@@ -1,6 +1,6 @@
 import { isFixedCommitment } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { countsInTotals, internalTransferIds, isSpending } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import {
   comparablePreviousPeriod,
   inPeriod,
@@ -150,7 +150,7 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   // account being retired, and pairing over the live set alone meant hiding
   // that account restored the arrival to the series as fresh money. Whether an
   // account is shown is a separate question, asked below on `live`.
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   return keys.map((key) => {
     let fils = opening;

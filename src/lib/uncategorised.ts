@@ -25,7 +25,7 @@ import { billAliasAppliesTo, billAliasKey, readBillAlias } from '@/lib/bill-alia
  * in) has to be reachable from `scripts/test`, and anything importing a native
  * module is not.
  */
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import {
   isDeliberateOtherTitle,
 } from '@/lib/sms-parser';
@@ -200,7 +200,7 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
     return uncategorisedCache.value;
   }
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   // Pass 1 — WHICH MERCHANTS ARE WORTH ASKING ABOUT. Candidacy only; nothing
   // here is counted or totalled, because a candidate row is evidence that the

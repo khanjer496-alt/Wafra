@@ -3,10 +3,15 @@ import { CATEGORIES, categoryLabel } from '@/lib/categories';
 import { cardPaymentRows, duePayments, dueWithStatus } from '@/lib/cards';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { formatAED as formatLedgerMoney, getMonthStartDay, monthEndISO, toISODate } from '@/lib/format';
-import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { checkedMinorSum } from '@/lib/ledger-money';
 import { leavingSoon, outgoingTotalFils } from '@/lib/leaving-soon';
 import { bankBrandForName } from '@/lib/markets';
+import {
+  measureRuntimeOperation,
+  measureRuntimeOperationAsync,
+  recordRuntimeOperation,
+} from '@/lib/runtime-performance';
 import {
   currentMonthPeriod,
   comparablePreviousPeriod,
@@ -175,20 +180,128 @@ const normalizeMerchantText = (value: string) => value
   .trim()
   .replace(/\s+/g, ' ');
 
-function ledgerScope(state: AppState) {
+interface AssistantLedgerCache {
+  transactions: Transaction[];
+  accounts: Account[];
+  transferInternalIds?: string[];
+  monthStartDay: number;
+  live: Set<string>;
+  internal: Set<string>;
+  spendingAll?: Transaction[];
+  incomeAll?: Transaction[];
+  spendingByPeriod: Map<string, Transaction[]>;
+  incomeByPeriod: Map<string, Transaction[]>;
+}
+
+let assistantLedgerCache: AssistantLedgerCache | null = null;
+
+function cachedLedger(state: AppState): AssistantLedgerCache {
+  if (assistantLedgerCache?.transactions === state.transactions &&
+      assistantLedgerCache.accounts === state.accounts &&
+      assistantLedgerCache.transferInternalIds === state.transferInternalIds &&
+      assistantLedgerCache.monthStartDay === state.monthStartDay) {
+    return assistantLedgerCache;
+  }
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
-  return { live, internal };
+  const internal = measureRuntimeOperation('ask-transfer-scope', () => internalTransferIdsForState(state));
+  assistantLedgerCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    transferInternalIds: state.transferInternalIds,
+    monthStartDay: state.monthStartDay,
+    live,
+    internal,
+    spendingByPeriod: new Map(),
+    incomeByPeriod: new Map(),
+  };
+  return assistantLedgerCache;
+}
+
+function ledgerScope(state: AppState) {
+  const cached = cachedLedger(state);
+  return { live: cached.live, internal: cached.internal };
+}
+
+function allSpendingRows(state: AppState): Transaction[] {
+  const cached = cachedLedger(state);
+  if (!cached.spendingAll) {
+    cached.spendingAll = state.transactions.filter((tx) => isSpending(tx, cached.live, cached.internal));
+  }
+  return cached.spendingAll;
+}
+
+function allIncomeRows(state: AppState): Transaction[] {
+  const cached = cachedLedger(state);
+  if (!cached.incomeAll) {
+    cached.incomeAll = state.transactions.filter((tx) => isIncome(tx, cached.live, cached.internal));
+  }
+  return cached.incomeAll;
+}
+
+const ASSISTANT_PREP_SLICE_MS = 4;
+
+/**
+ * Build the two whole-ledger projections Ask Wafra reuses without monopolising
+ * Android's JS thread. The first question after a ledger mutation pays this
+ * once in <=~4 ms slices; later questions reuse the immutable-array cache.
+ */
+async function prepareAssistantLedgerCooperatively(
+  state: AppState,
+  cancelled: () => boolean,
+): Promise<boolean> {
+  const cached = cachedLedger(state);
+  const merchantReady = assistantMerchantIndex?.transactions === state.transactions;
+  if (cached.spendingAll && cached.incomeAll && merchantReady) return !cancelled();
+
+  const spending: Transaction[] = [];
+  const income: Transaction[] = [];
+  const uniqueTitles = new Set<string>();
+  let sliceStartedAt = Date.now();
+  for (let index = 0; index < state.transactions.length; index += 1) {
+    if (cancelled()) return false;
+    const row = state.transactions[index];
+    if (isSpending(row, cached.live, cached.internal)) spending.push(row);
+    if (isIncome(row, cached.live, cached.internal)) income.push(row);
+    const title = row.title.trim();
+    if (title) uniqueTitles.add(title);
+    if (Date.now() - sliceStartedAt >= ASSISTANT_PREP_SLICE_MS) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      sliceStartedAt = Date.now();
+    }
+  }
+  if (cancelled()) return false;
+  cached.spendingAll = spending;
+  cached.incomeAll = income;
+  if (!merchantReady) assistantMerchantIndex = buildMerchantIndex(state.transactions, [...uniqueTitles]);
+  return true;
+}
+
+function periodCacheKey(period: Period): string {
+  return period.mode === 'all' ? 'all' : JSON.stringify(period);
 }
 
 function spendingRows(state: AppState, period: Period): Transaction[] {
-  const { live, internal } = ledgerScope(state);
-  return state.transactions.filter((tx) => inPeriod(tx.date, period) && isSpending(tx, live, internal));
+  const cached = cachedLedger(state);
+  const key = periodCacheKey(period);
+  const existing = cached.spendingByPeriod.get(key);
+  if (existing) return existing;
+  const rows = period.mode === 'all'
+    ? allSpendingRows(state)
+    : allSpendingRows(state).filter((tx) => inPeriod(tx.date, period));
+  cached.spendingByPeriod.set(key, rows);
+  return rows;
 }
 
 function incomeRows(state: AppState, period: Period): Transaction[] {
-  const { live, internal } = ledgerScope(state);
-  return state.transactions.filter((tx) => inPeriod(tx.date, period) && isIncome(tx, live, internal));
+  const cached = cachedLedger(state);
+  const key = periodCacheKey(period);
+  const existing = cached.incomeByPeriod.get(key);
+  if (existing) return existing;
+  const rows = period.mode === 'all'
+    ? allIncomeRows(state)
+    : allIncomeRows(state).filter((tx) => inPeriod(tx.date, period));
+  cached.incomeByPeriod.set(key, rows);
+  return rows;
 }
 
 function total(rows: Transaction[]): number {
@@ -789,9 +902,7 @@ interface AssistantMerchantIndex {
 
 let assistantMerchantIndex: AssistantMerchantIndex | null = null;
 
-function merchantIndex(rows: Transaction[]): AssistantMerchantIndex {
-  if (assistantMerchantIndex?.transactions === rows) return assistantMerchantIndex;
-  const uniqueTitles = [...new Set(rows.map((row) => row.title.trim()).filter(Boolean))];
+function buildMerchantIndex(rows: Transaction[], uniqueTitles: string[]): AssistantMerchantIndex {
   const titles = [...uniqueTitles]
     .sort((x, y) => y.length - x.length || x.localeCompare(y));
   const resolutionTitles = [...new Map([...uniqueTitles].sort()
@@ -806,7 +917,13 @@ function merchantIndex(rows: Transaction[]): AssistantMerchantIndex {
       else byToken.set(token, [title]);
     }
   }
-  assistantMerchantIndex = { transactions: rows, titles, resolutionTitles, rank, byToken };
+  return { transactions: rows, titles, resolutionTitles, rank, byToken };
+}
+
+function merchantIndex(rows: Transaction[]): AssistantMerchantIndex {
+  if (assistantMerchantIndex?.transactions === rows) return assistantMerchantIndex;
+  const uniqueTitles = [...new Set(rows.map((row) => row.title.trim()).filter(Boolean))];
+  assistantMerchantIndex = buildMerchantIndex(rows, uniqueTitles);
   return assistantMerchantIndex;
 }
 
@@ -2111,7 +2228,8 @@ export function executeAssistantTool(
       return executeAssistantToolResult(state, clarification('Charge patterns need whole purchases. Ask by merchant or account without category filters.'), now, derived);
     }
   }
-  const answer = executeAssistantToolResult(state, request, now, derived);
+  const answer = measureRuntimeOperation('ask-execute', () =>
+    executeAssistantToolResult(state, request, now, derived));
   if (request.tool === 'help' || request.tool === 'data-coverage' || request.tool === 'obligation-status' ||
       request.tool === 'credit-card-settlement-summary' || request.tool === 'account-inventory') return answer;
   if (request.tool === 'subscriptions' || request.tool === 'upcoming-payments') return {
@@ -2119,6 +2237,7 @@ export function executeAssistantTool(
     body: `${answer.body} ${request.tool === 'subscriptions' ? 'These are estimates from recurring recorded charges; actual renewals may differ.' : 'Includes recorded bills and predicted recurring charges; amounts or dates may change.'}`,
     destination: '/bills',
   };
+  const evidenceStartedAt = Date.now();
   const period = comparisonPrimaryPeriod(request, now, state);
   const evidence = (label: string, rows: Transaction[], value = period) => evidenceFor(state, now, label, rows, value);
   const spending = filterRows(spendingRows(state, period), request);
@@ -2177,13 +2296,15 @@ export function executeAssistantTool(
     : request.tool === 'compare-accounts' ? groups.flatMap((group) => state.transactions.filter((row) => group.transactionIds.includes(row.id)))
       : request.tool === 'income-total' ? income : request.tool === 'net-income-spending' ? [...income, ...spending] : spending;
   const evidenceGroups = groups.filter((group) => group.transactionIds.length > 0);
-  return {
+  const result = {
     ...answer,
     ...(evidenceGroups.length ? { evidence: evidenceGroups } : {}),
     coverage: answer.coverage ?? observedCoverage(state, coverageRows, request,
       request.tool === 'compare-periods' && !previousDates?.transactionIds.length
         ? ['No earlier spending records match the comparison. A zero recorded baseline cannot establish a complete spending change.'] : []),
   };
+  recordRuntimeOperation('ask-evidence', Date.now() - evidenceStartedAt);
+  return result;
 }
 
 /**
@@ -2587,14 +2708,17 @@ export function answerWafraQuestion(state: AppState, question: string, now = new
 }
 
 export function runWafraAssistant(state: AppState, question: string, now = new Date(), previousRequest?: AssistantToolRequest | null, defaultPeriod?: Period): { request: AssistantToolRequest; answer: AssistantAnswer } {
-  const planned = planAssistantQuestion(state, question, now, previousRequest, defaultPeriod);
-  const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);
-  const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
-    ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
-  const answer = executeAssistantTool(state, request, now);
-  const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
-    request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
-  return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
+  return measureRuntimeOperation('ask-total', () => {
+    const planned = measureRuntimeOperation('ask-plan', () =>
+      planAssistantQuestion(state, question, now, previousRequest, defaultPeriod));
+    const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);
+    const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
+      ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
+    const answer = executeAssistantTool(state, request, now);
+    const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
+      request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
+    return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
+  });
 }
 
 /** Android interaction path: identical planning/presentation, cooperative only where recurrence is required. */
@@ -2606,15 +2730,22 @@ export async function runWafraAssistantCooperatively(
   defaultPeriod?: Period,
   cancelled: () => boolean = () => false,
 ): Promise<{ request: AssistantToolRequest; answer: AssistantAnswer } | null> {
-  const planned = planAssistantQuestion(state, question, now, previousRequest, defaultPeriod);
-  const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);
-  const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
-    ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
-  const answer = await executeAssistantToolCooperatively(state, request, now, cancelled);
-  if (answer === null || cancelled()) return null;
-  const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
-    request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
-  return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
+  return measureRuntimeOperationAsync('ask-total', async () => {
+    // Build the immutable snapshot index in short slices before planning. This
+    // removes the last whole-ledger scans from the foreground interaction turn
+    // while keeping every final calculation deterministic and local.
+    if (!await prepareAssistantLedgerCooperatively(state, cancelled)) return null;
+    const planned = measureRuntimeOperation('ask-plan', () =>
+      planAssistantQuestion(state, question, now, previousRequest, defaultPeriod));
+    const comparisonPeriod = effectiveComparisonPeriod(planned, now, state);
+    const request: AssistantToolRequest = planned.tool === 'compare-periods' && comparisonPeriod
+      ? { ...planned, period: comparisonPrimaryPeriod(planned, now, state), comparisonPeriod } : planned;
+    const answer = await executeAssistantToolCooperatively(state, request, now, cancelled);
+    if (answer === null || cancelled()) return null;
+    const revealEvidence = /^(?:show (?:me )?(?:(?:those|the|matching) )?(?:transactions|txn|txns|them|those)|choose (?:one|a) transaction)[?!.]?$/i.test(question.trim()) ||
+      request.tool === 'obligation-status' && /^(?:show|list) (?:the )?payments[?!.]?$/i.test(question.trim());
+    return { request, answer: answer.evidence?.length && revealEvidence ? { ...answer, showEvidence: true } : answer };
+  });
 }
 
 /**

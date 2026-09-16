@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const ledger = require('../build/ledger');
-const { reconcileTransfers } = require('../build/transfer-reconciliation');
+const { reconcileTransfers, TRANSFER_NORMALIZATION_VERSION } = require('../build/transfer-reconciliation');
 const day = 86400000;
 const start = Date.UTC(2026, 0, 1, 12);
 const accounts = [
@@ -112,4 +112,37 @@ test('12,000 repeated evidence collisions stay bounded and fail closed', () => {
   assert.equal(ledger.internalTransferIds(rows, accounts).size, 0);
   assert.equal(reconcileTransfers(rows, accounts).pendingIds.size, rows.length);
   assert.ok(performance.now() - began < 5000, 'bounded evidence-index scans must avoid quadratic repeated-amount work');
+});
+
+test('current persisted transfer receipt bypasses graph reconciliation for UI totals', () => {
+  const rows = Array.from({ length: 12000 }, (_, i) => row(`receipt-${i}`, i % 2 ? 'income' : 'expense', start));
+  const state = {
+    transactions: rows,
+    accounts,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: ['receipt-1', 'receipt-7'],
+    historyImport: { status: 'complete' },
+  };
+  const first = ledger.internalTransferIdsForState(state);
+  const second = ledger.internalTransferIdsForState(state);
+  assert.equal(first, second, 'same immutable snapshot should reuse the receipt-backed Set');
+  assert.deepEqual([...first].sort(), ['receipt-1', 'receipt-7']);
+
+  const stale = ledger.internalTransferIdsForState({
+    ...state,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION - 1,
+    transferInternalIds: ['invented-id'],
+  });
+  assert.equal(stale.has('invented-id'), false, 'an old receipt must never override live reconciliation');
+});
+
+test('running history import may use the store provisional transfer receipt', () => {
+  const state = {
+    transactions: [row('pending-out', 'expense', start)],
+    accounts,
+    transferNormalizationVersion: undefined,
+    transferInternalIds: ['pending-out'],
+    historyImport: { status: 'running' },
+  };
+  assert.deepEqual([...ledger.internalTransferIdsForState(state)], ['pending-out']);
 });

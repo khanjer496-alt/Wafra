@@ -3,7 +3,7 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
 import { t, tf } from '@/lib/i18n';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 
 import {
   activeSubscriptions,
@@ -67,7 +67,7 @@ export function leavingSoon(
   // them once; `internalTransferIds` is identity-cached, so this is free when
   // another screen has already asked for the same arrays.
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   if (kinds.has('card')) {
     for (const { due, daysLeft, remainingFils, stale } of openDues(state, today)) {

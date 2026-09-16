@@ -29,7 +29,7 @@ import { formatAED, formatCompactAED, monthKey, monthLabel, shiftMonthKey } from
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
 import { summarizeMonth } from '@/lib/insights';
-import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -64,7 +64,7 @@ export default function FlowScreen() {
   useEffect(() => { setFilter('all'); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(() => internalTransferIds(state.transactions, state.accounts), [state.transactions, state.accounts]);
+  const internal = internalTransferIdsForState(state);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
