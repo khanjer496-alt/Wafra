@@ -211,6 +211,11 @@ curl --fail --show-error https://<production-relay>/v1/health
 - [x] Bundle ID, build number, icon, background-notification plugin, SQLCipher,
   SecureStore, local authentication, restore-purchase UI, and the iOS setup
   flow exist.
+- [x] Visible notification consent is contextual rather than a cold-launch
+  prompt. Fresh iPhone installs keep Daily Summary off until the user chooses
+  **Enable notifications** after onboarding; Settings reconciles the switch
+  against the current iOS authorization state. Shortcut/local capture remains
+  independent of visible-notification permission.
 - [ ] Decide export-compliance treatment with counsel. The app implements
   X25519/HKDF/AES-GCM in addition to OS cryptography, so do not blindly set
   `ios.config.usesNonExemptEncryption` to `false`. Answer App Store Connect's
@@ -415,33 +420,47 @@ Official references: [new personal-account testing requirements](https://support
 
 ## Physical-device evidence gates
 
-### iPhone: silent/locked capture
+### iPhone: local Message automation and locked-device capture
 
-Use a production-signed TestFlight build, production relay/D1, published public
-Shortcut, production Expo project, enhanced push token, and production APNs.
-Simulator results and source inspection do not satisfy this gate.
+Use a production-signed TestFlight build and the exact public Shortcuts records
+embedded in that build. The shipping capture path is local: Apple's Message
+automation invokes Wafra's App Intent, which stages the Message in Wafra's
+protected local queue for on-device parsing. The old relay/D1/APNs path is not a
+prerequisite for this gate. Simulator results and source inspection do not
+satisfy it.
 
-- [ ] Record device model, iOS version, app version/build, commit SHA, relay
-  deployment ID, EAS project ID, and timestamp/time zone.
-- [ ] Clean-install the public Shortcut and create a Message personal
-  automation restricted to real supported bank senders, set to run
-  immediately.
-- [ ] With Wafra in the background/closed but **not force-quit**, lock the
-  phone, receive a consented real bank alert, wait for Shortcut + relay + APNs,
-  enable airplane mode before opening Wafra, and prove the already staged
-  structured row is present.
-- [ ] Prove raw body absence from D1 and production logs without copying the
-  raw alert into the evidence package.
-- [ ] Reboot, unlock once, repeat the locked-phone test, and confirm the
-  after-first-unlock encrypted inbox works.
-- [ ] Force-quit, receive an alert, document that silent wake may stop, reopen,
-  and prove foreground recovery imports the queued row. Product copy must match
-  this limitation.
-- [ ] Test APNs token refresh, disabled notifications, expired/invalid token,
-  offline queueing, duplicate Shortcut retry, queue ack, disconnect, erase,
-  and abandoned queue expiry.
-- [ ] Repeat with biometric lock enabled and verify background staging does not
-  bypass the foreground ledger lock.
+- [ ] Record device model, iOS version, app version/build, commit SHA, EAS
+  project ID, Shortcut IDs, and timestamp/time zone.
+- [ ] From a clean install, complete the new onboarding and install the exact
+  Future Capture Shortcut from inside Wafra. Create the Message personal
+  automation exactly as the in-app guide states: leave **Sender empty**, run
+  immediately, and run the Wafra Shortcut. Do not invent a bank Contact just to
+  satisfy Apple's sender picker.
+- [ ] Verify the optional PiP setup guide can help during the Shortcuts handoff
+  on a supported iPhone, and that setup remains fully usable when PiP is
+  unavailable or dismissed.
+- [ ] With Wafra backgrounded/closed, lock the phone and receive a consented
+  supported real bank alert. Reopen Wafra and prove exactly one transaction is
+  committed from the protected local queue without a network dependency.
+- [ ] Prove the raw Message body is absent from analytics, logs, URLs,
+  clipboard, notifications, and network traffic. Inspect queue cleanup after a
+  durable ledger result without preserving the real bank text in evidence.
+- [ ] Reboot, unlock once, repeat the locked-phone test, and verify the
+  encrypted local queue still stages and drains correctly.
+- [ ] Force-quit and repeat. Record the actual iOS/Shortcuts behavior and make
+  product copy match it; do not infer background guarantees from simulator or
+  foreground success.
+- [ ] Test duplicate Shortcut delivery, malformed/non-financial Message input,
+  queue warning/recovery, capture opt-out, erase-everything, Pro entitlement
+  expiry, and biometric lock. Each path must preserve local-only guarantees and
+  must not duplicate ledger rows.
+- [ ] On iOS 26+, test History Import independently: install the exact History
+  Shortcut, import a bounded real/synthetic history set, review it in Wafra,
+  prove durable save before source cleanup, and verify cancel/retry/relaunch.
+- [ ] Test the separate visible-notification choice: **Enable notifications**
+  shows Apple's permission sheet; **Not now** still completes onboarding;
+  denial leaves Daily Summary off; later enabling Daily Summary from Settings
+  requests permission in context; bill/card reminders work after authorization.
 
 ### Android: capture and permission policy
 

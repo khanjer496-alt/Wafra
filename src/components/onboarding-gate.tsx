@@ -30,6 +30,11 @@ import {
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
 import {
+  cancelDailySummary,
+  requestVisibleNotificationPermission,
+  syncDailySummary,
+} from '@/lib/notifications';
+import {
   GROWTH_PLACEMENTS,
   trackGrowthEvent,
 } from '@/lib/growth-funnel';
@@ -266,6 +271,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setOnboardingPlan,
     setOnboardingProfile,
     setCaptureOptOut,
+    setDailySummary,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
   const [focus, setFocus] = useState<OnboardingFocus | null>(null);
@@ -294,6 +300,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [finishSaveFailed, setFinishSaveFailed] = useState(false);
   const requestedFirstEntry = useRef(false);
   const requestedDestination = useRef<'/pro' | undefined>(undefined);
+  const notificationDecisionMade = useRef(false);
+  const [pendingOpen, setPendingOpen] = useState<{
+    addFirstEntry: boolean;
+    destination?: '/pro';
+    outcomeOverride?: CompletionOutcome;
+  } | null>(null);
   const startedEventSent = useRef(false);
 
   useEffect(() => () => {
@@ -347,6 +359,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setPlan({ ...DEFAULT_ONBOARDING_PLAN, goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds] });
       setPersonalizing(false);
       setResumeFailed(false);
+      notificationDecisionMade.current = false;
+      setPendingOpen(null);
     }
     previouslyOnboarded.current = state.onboarded;
     // These routes own their own handoff. Returning normally to the root must
@@ -677,6 +691,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     destination?: '/pro',
     outcomeOverride?: CompletionOutcome,
   ) => {
+    // Ask only after the user has seen Wafra's value/capture result and has
+    // chosen to enter the app. This keeps Apple's native permission sheet out
+    // of cold launch and out of the Shortcut setup itself, while still making
+    // the notification choice part of a fresh iPhone setup.
+    if (Platform.OS === 'ios' && !notificationDecisionMade.current) {
+      requestedFirstEntry.current = addFirstEntry;
+      requestedDestination.current = destination;
+      setPendingOpen({ addFirstEntry, destination, outcomeOverride });
+      return;
+    }
     setFinishing(true);
     requestedFirstEntry.current = addFirstEntry;
     requestedDestination.current = destination;
@@ -700,6 +724,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setCompletionOutcome('failed');
       setStep('complete');
     }
+  };
+
+  const finishNotificationChoice = async (enable: boolean) => {
+    const pending = pendingOpen;
+    if (!pending) return;
+    let granted = false;
+    if (enable) {
+      granted = await requestVisibleNotificationPermission().catch(() => false);
+    }
+    setDailySummary(granted);
+    if (granted) {
+      // Schedule tonight immediately; later ledger refreshes keep it current.
+      await syncDailySummary({ ...state, dailySummary: true }).catch(() => {});
+    } else {
+      await cancelDailySummary().catch(() => {});
+    }
+    notificationDecisionMade.current = true;
+    setPendingOpen(null);
+    await openWafra(pending.addFirstEntry, pending.destination, pending.outcomeOverride);
   };
 
   /**
@@ -1341,7 +1384,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       </View>
 
                       <View style={styles.captureActions}>
-                        {finishSaveFailed ? <Button wrapLabel label={t('storageRecoveryRetry')}
+                        {pendingOpen ? <View style={styles.notificationOffer}>
+                          <View style={styles.notificationOfferHead}>
+                            <View style={styles.firstInsightIcon}>
+                              <Icon name="phone" size={20} color={night.primary} />
+                            </View>
+                            <View style={styles.valueStepCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t('onboardNotificationsTitle')}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t('onboardNotificationsBody')}</ThemedText>
+                            </View>
+                          </View>
+                          <Button wrapLabel label={t('onboardNotificationsEnable')}
+                            onPress={() => void runSetupAction(() => finishNotificationChoice(true))}
+                            disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
+                          <Button wrapLabel variant="ghost" label={t('onboardNotificationsNotNow')}
+                            onPress={() => void runSetupAction(() => finishNotificationChoice(false))}
+                            disabled={setupBusy} labelColor={night.text} />
+                        </View> : finishSaveFailed ? <Button wrapLabel label={t('storageRecoveryRetry')}
                           onPress={() => void runSetupAction(() => openWafra(requestedFirstEntry.current, requestedDestination.current))}
                           disabled={setupBusy} labelColor={night.onPrimary} style={styles.primaryButton} />
                         : completionOutcome === 'manual' && !automaticCompletion ? <>
@@ -1711,6 +1770,16 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.one,
   },
   proPreviewCopy: { gap: 3 },
+  notificationOffer: {
+    width: '100%',
+    gap: Spacing.two,
+    padding: 14,
+    borderRadius: Radius.control,
+    borderWidth: 1,
+    borderColor: night.primaryBorder,
+    backgroundColor: night.backgroundElement,
+  },
+  notificationOfferHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   learnMoreButton: { marginTop: Spacing.two },
   learnMoreContent: { gap: Spacing.three },
   learnMoreText: { color: night.textSecondary, fontSize: 14, lineHeight: 21 },

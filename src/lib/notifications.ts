@@ -74,6 +74,38 @@ export function notificationsAllowed(status: Notifications.NotificationPermissio
   );
 }
 
+/** Read the OS state without prompting. Used by UI that must never claim an
+ * alert is enabled when this phone cannot deliver it. */
+export async function notificationDeliveryAllowed(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  return notificationsAllowed(await Notifications.getPermissionsAsync());
+}
+
+/**
+ * Ask specifically for user-visible iPhone notifications.
+ *
+ * This is deliberately separate from the quiet/provisional authorization used
+ * by older background-delivery code. A user who explicitly taps "Enable
+ * notifications" after onboarding is asking for banners/sounds, so a
+ * provisional grant must be upgraded rather than silently treated as enough.
+ */
+export async function requestVisibleNotificationPermission(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  if (Platform.OS !== 'ios') return requestNotificationPermission();
+  configureHandler();
+  const current = await Notifications.getPermissionsAsync();
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED) return true;
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.DENIED) return false;
+  const asked = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: true,
+      allowBadge: false,
+      allowSound: true,
+    },
+  });
+  return asked.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED || asked.granted;
+}
+
 /**
  * Ask for full notification permission, unless delivery already works.
  *
