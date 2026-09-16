@@ -355,7 +355,7 @@ jobs:
           # Deliberately no `set -e`: one failed appearance must not cost the
           # other one, and the gate is the screenshot count at the end. See the
           # long note on the iOS capture step.
-          script: bash scripts/capture-onboarding-android.sh
+          script: bash scripts/capture-onboarding-adb.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
