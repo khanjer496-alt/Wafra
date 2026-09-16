@@ -2,7 +2,9 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert/strict');
 const root = require('path').join(__dirname, '../..');
-const ts = require(root + '/node_modules/typescript');
+const ts = require(require.resolve('typescript', {
+  paths: [root, require('path').resolve(root, '../..')],
+}));
 const { onboardingResumeDestination, DEFAULT_ONBOARDING_PLAN } = require('./build/onboarding');
 const source = fs.readFileSync(root + '/src/components/onboarding-gate.tsx', 'utf8');
 const tree = ts.createSourceFile('gate.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
