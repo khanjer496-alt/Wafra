@@ -20,7 +20,13 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { MoneyPreview } from '@/components/onboarding/money-preview';
+import {
+  CaptureMarketScene,
+  FocusChooser,
+  PersonalizedProductPreview,
+  TrackingChooser,
+  WelcomeMoneyScene,
+} from '@/components/onboarding/alive-scenes';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
@@ -44,9 +50,7 @@ import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   BUDGET_PRESETS,
   DEFAULT_ONBOARDING_PLAN,
-  FOCUS_PRESETS,
   GOAL_PRESETS,
-  TRACKING_PRESETS,
   onboardingInsightKeys,
   onboardingLandingPath,
   onboardingResumeDestination,
@@ -807,22 +811,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const failedCompletion =
     activeStep === 'complete' && !automaticCompletion && completionOutcome === 'failed';
   const insight = onboardingInsightKeys(focus);
-  const outcomeKey: StringKey = focus === 'spending'
-    ? 'onboardOutcomeSpending'
-    : focus === 'bills'
-      ? 'onboardOutcomeBills'
-      : focus === 'cashflow'
-        ? 'onboardOutcomeCashflow'
-        : 'onboardOutcomeOverview';
-  const trackingOutcomeKey: StringKey = tracking === 'none'
-    ? 'onboardOutcomeTrackingNone'
-    : tracking === 'bank-apps'
-      ? 'onboardOutcomeTrackingBankApps'
-      : tracking === 'spreadsheet'
-        ? 'onboardOutcomeTrackingSpreadsheet'
-        : tracking === 'finance-app'
-          ? 'onboardOutcomeTrackingFinanceApp'
-          : 'onboardOutcomeBody';
   const landingLabel = focus === 'spending'
     ? t('onboardOpenSpending')
     : focus === 'bills'
@@ -866,7 +854,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {t('onboardWelcomeBody')}
                 </ThemedText>
               </View>
-              <MoneyPreview reducedMotion={reducedMotion} />
+              <WelcomeMoneyScene marketId={state.marketId} reducedMotion={reducedMotion} />
               <View style={styles.welcomeActions}>
                 <Button wrapLabel
                   label={t('onboardChooseStart')}
@@ -906,18 +894,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
                       </View>
-                      <View style={styles.choiceList} testID="onboarding-focus-options">
-                        {FOCUS_PRESETS.map((preset) => (
-                          <SelectionRow
-                            key={preset.id}
-                            title={t(preset.titleKey)}
-                            detail={t(preset.detailKey)}
-                            icon={preset.icon}
-                            selected={focus === preset.id}
-                            onPress={() => chooseFocus(preset.id)}
-                          />
-                        ))}
-                      </View>
+                      <FocusChooser value={focus} onChange={chooseFocus} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -942,18 +919,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardTrackingBody')}</ThemedText>
                       </View>
-                      <View style={styles.choiceList} testID="onboarding-tracking-options">
-                        {TRACKING_PRESETS.map((preset) => (
-                          <SelectionRow
-                            key={preset.id}
-                            title={t(preset.titleKey)}
-                            detail={t(preset.detailKey)}
-                            icon={preset.icon}
-                            selected={tracking === preset.id}
-                            onPress={() => chooseTracking(preset.id)}
-                          />
-                        ))}
-                      </View>
+                      <TrackingChooser value={tracking} onChange={chooseTracking} marketId={state.marketId} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -974,37 +940,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardPersonalizedBody')}</ThemedText>
                       </View>
-                      <View style={styles.personalizedBadge}>
-                        <Icon name="spark" size={15} color={night.primary} />
-                        <ThemedText style={styles.personalizedBadgeText}>{t('onboardBasedOnAnswers')}</ThemedText>
-                      </View>
-                      <View style={styles.valuePreview} testID="onboarding-value-preview">
-                        <View style={styles.valueStep}>
-                          <View style={styles.valueStepIcon}><Icon name="mail" size={20} color={night.primary} /></View>
-                          <View style={styles.valueStepCopy}>
-                            <ThemedText style={styles.valueStepTitle}>{t('onboardSampleBefore')}</ThemedText>
-                            <ThemedText style={styles.choiceDetail}>{t(trackingOutcomeKey)}</ThemedText>
-                          </View>
-                        </View>
-                        <View style={styles.valueConnector} />
-                        <View style={styles.valueStep}>
-                          <View style={styles.valueStepIcon}><Icon name="check" size={20} color={night.primary} /></View>
-                          <View style={styles.valueStepCopy}>
-                            <ThemedText style={styles.valueStepTitle}>{t('onboardSampleAfter')}</ThemedText>
-                            <ThemedText style={styles.choiceDetail}>{t('onboardPreviewFooter')}</ThemedText>
-                          </View>
-                        </View>
-                        <View style={styles.valueConnector} />
-                        <View style={[styles.valueStep, styles.valueStepFinal]}>
-                          <View style={[styles.valueStepIcon, styles.valueStepIconFinal]}>
-                            <Icon name={focus === 'bills' ? 'receipt' : focus === 'cashflow' ? 'trend' : focus === 'overview' ? 'wallet' : 'chart'} size={20} color={night.onPrimary} />
-                          </View>
-                          <View style={styles.valueStepCopy}>
-                            <ThemedText style={styles.valueStepTitle}>{t(insight.title)}</ThemedText>
-                            <ThemedText style={styles.choiceDetail}>{t(outcomeKey)}</ThemedText>
-                          </View>
-                        </View>
-                      </View>
+                      <PersonalizedProductPreview focus={focus} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t(Platform.OS === 'web' ? 'onboardChooseStart' : 'onboardConnectMyMoney')}
@@ -1169,6 +1105,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
                       </View>
+                      {Platform.OS !== 'web' && <CaptureMarketScene marketId={state.marketId} />}
                       {Platform.OS !== 'web' && <View style={styles.contextTrustCard} testID="onboarding-context-trust">
                         {([
                           ['lock', 'onboardPrivacyLocalTitle', Platform.OS === 'ios' ? 'onboardCapturePrivacyIos' : 'onboardCapturePrivacyAndroid'],
@@ -1257,14 +1194,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         <View
                           style={[
                             styles.completeMark,
-                            (failedCompletion || smsDenied) && { backgroundColor: night.warning },
+                            (failedCompletion || smsDenied) && styles.completeMarkWarning,
                           ]}>
-                          <Icon
-                            name={failedCompletion || smsDenied ? 'alert' : 'check'}
-                            size={30}
-                            color={night.onPrimary}
-                            strokeWidth={2.1}
-                          />
+                          {failedCompletion || smsDenied
+                            ? <Icon name="alert" size={28} color={night.onPrimary} strokeWidth={2.1} />
+                            : <WafraMark size={42} color={night.primary} />}
                         </View>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
                           {t(
@@ -1621,26 +1555,29 @@ const styles = StyleSheet.create({
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 21 },
   completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
   completeMark: {
-    width: 62,
-    height: 62,
-    borderRadius: 22,
-    backgroundColor: night.primary,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    borderWidth: 1,
+    borderColor: night.primaryBorder,
+    backgroundColor: night.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  completeMarkWarning: { backgroundColor: night.warning, borderColor: night.warning },
   resultCard: {
     width: '100%',
-    minHeight: 88,
+    minHeight: 96,
     flexDirection: 'row',
     alignItems: 'stretch',
     marginTop: Spacing.two,
-    paddingVertical: 12,
-    borderRadius: Radius.sheet,
-    borderCurve: 'continuous',
-    backgroundColor: night.primarySoft,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: night.cardBorderStrong,
   },
   resultCell: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.one },
-  resultNumber: { color: night.primary, fontFamily: Fonts.monoSemi, fontSize: 28, fontVariant: ['tabular-nums'] },
+  resultNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 30, fontVariant: ['tabular-nums'] },
   resultLabel: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 11, textAlign: 'center' },
   resultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
   valuePreview: {
@@ -1720,28 +1657,24 @@ const styles = StyleSheet.create({
   },
   contextTrustCard: {
     marginTop: Spacing.three,
-    borderRadius: Radius.sheet,
-    borderWidth: 1,
-    borderColor: night.cardBorder,
-    backgroundColor: night.backgroundElement,
-    paddingHorizontal: 14,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: night.cardBorderStrong,
   },
   contextTrustRow: {
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: night.cardBorder,
   },
   contextTrustIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: night.primarySoft,
   },
   contextTrustTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13, lineHeight: 18 },
   contextTrustBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17 },
@@ -1750,11 +1683,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    padding: 14,
-    borderRadius: Radius.control,
-    borderWidth: 1,
-    borderColor: night.primaryBorder,
-    backgroundColor: night.backgroundElement,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: night.cardBorderStrong,
   },
   firstInsightIcon: {
     width: 38,
