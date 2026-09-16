@@ -26,7 +26,12 @@ import { CATEGORIES } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { internalTransferIdsForState, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
+import {
+  corroboratingTransferIdsForState,
+  internalTransferIdsForState,
+  liveAccountIds,
+  UNASSIGNED_INCOME_ACCOUNT_ID,
+} from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
@@ -176,6 +181,7 @@ export default function TransactionsScreen() {
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
+  const corroborating = corroboratingTransferIdsForState(state);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -204,7 +210,8 @@ export default function TransactionsScreen() {
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal }), [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
+    live: liveAccounts, internal, corroborating }),
+  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded } = projection;

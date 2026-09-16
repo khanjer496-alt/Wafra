@@ -1,5 +1,7 @@
 import type { Account, AppState, Transaction } from '@/lib/types';
+import { bankIdentityForName } from '@/lib/markets';
 import {
+  isTransferEvidence,
   isTransferCandidate,
   isUnassignedTransferAccount,
   reconcileTransfers,
@@ -148,6 +150,11 @@ let persistedInternalIdsCache: {
   ids: string[];
   value: Set<string>;
 } | null = null;
+let corroboratingDisplayIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  value: Set<string>;
+} | null = null;
 
 /**
  * Seed the analytics cache from the exact durable reconciliation receipt.
@@ -215,5 +222,113 @@ export function internalTransferIdsForState(
   // transactions/accounts. This makes mixed old/new call sites converge on the
   // same O(1) result instead of unexpectedly rebuilding the graph later.
   internalIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
+  return value;
+}
+
+/**
+ * Secondary bank alerts that corroborate an already-recorded transfer.
+ *
+ * FAB can emit both a transfer-detail alert and an outward-remittance debit for
+ * the same movement. The reconciliation engine intentionally keeps both source
+ * rows so the ledger preserves the bank evidence, but rendering both makes one
+ * transfer look like two transactions. Rebuilding the complete transfer graph
+ * just to hide that confirmation would undo the large-ledger performance work,
+ * so this is the same narrow issuer rule expressed as a cheap, cached display
+ * projection: exact account + exact money + opposite posting forms + <=90 sec,
+ * with reference contradictions and ambiguous multi-matches failing closed.
+ */
+export function corroboratingTransferIdsForState(
+  state: Pick<AppState, 'transactions' | 'accounts'>,
+): Set<string> {
+  if (corroboratingDisplayIdsCache?.transactions === state.transactions &&
+      corroboratingDisplayIdsCache.accounts === state.accounts) {
+    return corroboratingDisplayIdsCache.value;
+  }
+
+  type Candidate = {
+    id: string;
+    at: number;
+    form: 'transfer-detail' | 'remittance-debit';
+    smsKey?: string;
+    reference?: string;
+  };
+  const accounts = new Map(state.accounts.map((account) => [account.id, account] as const));
+  const groups = new Map<string, Candidate[]>();
+  const sourceTime = (transaction: Transaction): number | undefined => {
+    if (typeof transaction.ts === 'number' && Number.isSafeInteger(transaction.ts) && transaction.ts >= 0) {
+      return transaction.ts;
+    }
+    const match = typeof transaction.smsKey === 'string' ? /^s(\d{10,16})-/.exec(transaction.smsKey) : null;
+    const parsed = match ? Number(match[1]) : NaN;
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+  };
+  for (const transaction of state.transactions) {
+    if (transaction.type !== 'expense' || transaction.userEdited ||
+        !Number.isSafeInteger(transaction.amountFils) || transaction.amountFils <= 0) continue;
+    const evidence = isTransferEvidence(transaction.transferEvidence) ? transaction.transferEvidence : undefined;
+    const form = evidence?.postingForm;
+    if (evidence?.attribution !== 'source' ||
+        (form !== 'transfer-detail' && form !== 'remittance-debit')) continue;
+    const account = accounts.get(transaction.accountId);
+    if (!account || (account.kind !== 'bank' && !(account.kind === 'card' && account.cardType === 'debit'))) continue;
+    const accountBank = account.bankName ? bankIdentityForName(account.bankName) : undefined;
+    const sourceBank = evidence.sourceBank ? bankIdentityForName(evidence.sourceBank) : undefined;
+    const captureBank = transaction.captureInstrument?.bankIdentity
+      ? bankIdentityForName(transaction.captureInstrument.bankIdentity)
+      : undefined;
+    const banks = [accountBank, sourceBank, captureBank].filter((bank): bank is string => !!bank);
+    if (!banks.length || banks.some((bank) => bank !== 'fab')) continue;
+    if (transaction.captureInstrument?.kind === 'credit' ||
+        (account.last4 && transaction.captureInstrument?.last4 &&
+          account.last4 !== transaction.captureInstrument.last4)) continue;
+    const at = sourceTime(transaction);
+    if (at === undefined) continue;
+    const key = JSON.stringify([
+      transaction.accountId,
+      transaction.amountFils,
+      transaction.originalCurrency ?? null,
+      transaction.originalAmountMinor ?? null,
+    ]);
+    const bucket = groups.get(key) ?? [];
+    bucket.push({
+      id: transaction.id,
+      at,
+      form,
+      ...(transaction.smsKey ? { smsKey: transaction.smsKey } : {}),
+      ...(evidence.reference ? { reference: evidence.reference } : {}),
+    });
+    groups.set(key, bucket);
+  }
+
+  const value = new Set<string>();
+  const WINDOW_MS = 90_000;
+  const MAX_SCAN = 64;
+  for (const bucket of groups.values()) {
+    bucket.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+    const matches = new Map<string, string[]>();
+    let left = 0;
+    for (const entry of bucket) {
+      while (left < bucket.length && bucket[left].at < entry.at - WINDOW_MS) left += 1;
+      const candidates: string[] = [];
+      let scanned = 0;
+      for (let otherIndex = left;
+        otherIndex < bucket.length && bucket[otherIndex].at <= entry.at + WINDOW_MS;
+        otherIndex += 1) {
+        const other = bucket[otherIndex];
+        if (++scanned > MAX_SCAN) { candidates.length = 0; break; }
+        if (entry.id === other.id || entry.form === other.form ||
+            (entry.smsKey && other.smsKey && entry.smsKey === other.smsKey) ||
+            (entry.reference && other.reference && entry.reference !== other.reference)) continue;
+        candidates.push(other.id);
+      }
+      matches.set(entry.id, candidates);
+    }
+    for (const entry of bucket) {
+      if (entry.form !== 'remittance-debit') continue;
+      const candidates = matches.get(entry.id) ?? [];
+      if (candidates.length === 1 && matches.get(candidates[0])?.length === 1) value.add(entry.id);
+    }
+  }
+  corroboratingDisplayIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
   return value;
 }
