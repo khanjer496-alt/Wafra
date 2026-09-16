@@ -355,50 +355,7 @@ jobs:
           # Deliberately no `set -e`: one failed appearance must not cost the
           # other one, and the gate is the screenshot count at the end. See the
           # long note on the iOS capture step.
-          script: |
-            set -u
-            adb install -r apk/wafra.apk
-            mkdir -p shots
-            FAILED=""
-            for scheme in dark light; do
-              echo "::group::$scheme"
-              if [ "$scheme" = dark ]; then adb shell "cmd uimode night yes"; else adb shell "cmd uimode night no"; fi
-              maestro test \
-                -e APP_ID=app.wafra.android \
-                -e SHOT_PREFIX="android-$scheme" \
-                --format junit --output "shots/android-$scheme.xml" \
-                --test-output-dir "shots/maestro-android-$scheme" \
-                .maestro/tour.yaml || FAILED="$FAILED $scheme"
-              adb exec-out screencap -p > "shots/android-$scheme-99-final-screen.png" || true
-              echo "::endgroup::"
-            done
-
-            # `mv ./*.png shots/` used to live here and moved nothing: Maestro
-            # writes takeScreenshot output into
-            # <test-output-dir>/<session>/<flow>/takeScreenshot/, never the
-            # working directory. This job would have uploaded no images even on
-            # a fully passing tour. All three locations are searched because
-            # Maestro is installed unpinned — see the iOS job for the full note.
-            find shots -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; || true
-            find "$HOME/.maestro/tests" -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; 2>/dev/null || true
-            find . -maxdepth 1 -type f -name 'android-*' -exec cp -f {} shots/ \; 2>/dev/null || true
-
-            EXPECTED=12   # 6 onboarding surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
-            COUNT=$(find shots -maxdepth 1 -type f -name 'android-*-0*' | wc -l | tr -d ' ')
-            echo "collected $COUNT/$EXPECTED tour screenshots (failed passes:${FAILED:- none})"
-            find shots -maxdepth 1 -type f ! -name '*.xml' -exec basename {} \; | sort
-
-            if [ "$COUNT" -eq 0 ]; then
-              echo "::error::the tour produced no screenshots at all. Start with shots/android-*-99-final-screen.png and shots/maestro-android-*/**/screen-hierarchy/."
-              exit 1
-            fi
-            if [ "$COUNT" -lt "$EXPECTED" ]; then
-              echo "::error::only $COUNT of $EXPECTED screenshots were captured. See shots/maestro-android-*/**/commands.json for which step failed and why."
-              exit 1
-            fi
-            if [ -n "$FAILED" ]; then
-              echo "::warning::every screenshot landed, but Maestro reported a failure on:$FAILED"
-            fi
+          script: bash scripts/capture-onboarding-android.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
