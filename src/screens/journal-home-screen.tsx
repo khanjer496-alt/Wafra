@@ -79,7 +79,15 @@ export default function JournalHomeScreen() {
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
-  const { state, getStateSnapshot, getStateGeneration, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
+  const {
+    state,
+    getStateSnapshot,
+    getStateGeneration,
+    applyFxUpdates,
+    setCaptureOptOut,
+    beginHistoryImport,
+    unlockFounderPro,
+  } = useStore();
   const { period } = usePeriod();
   // Restores can change denomination while all three figures stay identical.
   // Make it a prop so compiled children cannot retain ambient currency text.
@@ -309,6 +317,14 @@ export default function JournalHomeScreen() {
           : status === 'migration-retry' ? 'captureIosMigrationRetry'
             : status === 'needs-automation' ? 'captureIosNeedsAutomation' : 'captureIosOff');
   const healthy = status === 'waiting-for-alert' || status === 'first-alert-captured';
+  const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+  const unlockFounder = founderUnlockEnabled && !state.founderPro
+    ? () => {
+        void unlockFounderPro()
+          .then(() => toast.show('Founder Pro unlocked'))
+          .catch(() => toast.show('Founder Pro could not be saved', { tone: 'error' }));
+      }
+    : undefined;
   const greeting = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
@@ -372,7 +388,8 @@ export default function JournalHomeScreen() {
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
-          onSpending={() => router.push('/flow')} />
+          onSpending={() => router.push('/flow')}
+          onFounderUnlock={unlockFounder} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {moneyPicture
