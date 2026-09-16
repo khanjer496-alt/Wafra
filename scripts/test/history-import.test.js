@@ -82,16 +82,20 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     /scanned: page\.scannedCount/.test(historyHookSource) &&
       /found: page\.parsed\.length \+ page\.reviewCandidates\.length/.test(historyHookSource),
   );
-  // Each page is one provider sort, one whole-app render and one forced
-  // encrypted write, so the page size multiplies all three; 100-row pages made
-  // a 20k inbox hundreds of full-ledger commits. The gap is one idle window,
-  // not a throttle on the parser, which already yields per frame-sized slice.
   ok(
-    'foreground history uses bounded pages and a real UI gap between them',
-    /HISTORY_IMPORT_PAGE_SIZE = 500/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
-      /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
+    'foreground history uses small pages while background keeps throughput',
+    /BACKGROUND_HISTORY_PAGE_SIZE = 500/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE = 64/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_GAP_MS = 650/.test(historyHookSource) &&
+      /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
+  );
+  ok(
+    'returning to Wafra pauses history instead of silently restarting it',
+    /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000/.test(historyHookSource) &&
+      /progress\.scanned > 0/.test(historyHookSource) &&
+      /if \(next !== 'active'\) return;[\s\S]*?historyBackground\.cancel\(\)/.test(historyHookSource) &&
+      !/FOREGROUND_HISTORY_RESUME_GRACE_MS/.test(historyHookSource),
   );
   ok(
     'tab touch-down reserves foreground JS time before navigation renders',
@@ -107,8 +111,8 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       /blockedUntil = Math\.max\(blockedUntil, now \+ quietMs\)/.test(prioritySource),
   );
   ok(
-    'intermediate history pages defer exact transfer reconciliation until completion',
-    /historyStillRunning[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
+    'intermediate history pages defer every full-ledger repair until completion',
+    /if \(historyStillRunning\)[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
       fs.readFileSync(path.join(__dirname, '../../src/lib/ledger-import.ts'), 'utf8'),
     ) &&
       /next\.historyImport\?\.status === 'running'/.test(storeSource),
