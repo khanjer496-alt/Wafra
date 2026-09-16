@@ -194,15 +194,16 @@ export default function JournalHomeScreen() {
       state.ledgerMoney, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
+  const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   const homeInsight = useMemo(() =>
-    homeAnalysisReady && insightWidgetVisible
+    homeAnalysisReady && insightWidgetVisible && !historyAnalysisBlocked
       ? measureRuntimeOperation('home-insight', () => projectDashboardInsight(state, period, now))
       : null,
     // Capture/progress state must not restart historical analysis. The optional
     // insight is computed only after Home is already interactive and only while
     // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [homeAnalysisReady, insightWidgetVisible, state.transactions, state.accounts, state.budgets,
+    [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
       state.notSubscriptions, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'

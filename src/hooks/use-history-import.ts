@@ -21,12 +21,12 @@ import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority'
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 500;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
-// Resuming the window is not idle time. Give Android a usable frame/input
-// window before parser-migration maintenance restarts; subsequent pages retain
-// the normal 500ms cooperative gap.
-const FOREGROUND_HISTORY_RESUME_GRACE_MS = 2_000;
+const BACKGROUND_HISTORY_PAGE_SIZE = 500;
+const FOREGROUND_HISTORY_PAGE_SIZE = 64;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 650;
+// Only a genuinely new first-history job may auto-start in the foreground.
+// A saved job never restarts merely because Android restored the Activity.
+const FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -69,7 +69,8 @@ export function useHistoryImport(): void {
       // Keep pages small and leave a real idle window between them so Hermes
       // cannot monopolize a CPU core while the user is navigating. Background
       // execution retains the zero-delay fast path.
-      if (RNAppState.currentState === 'active') {
+      const foreground = RNAppState.currentState === 'active';
+      if (foreground) {
         await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -82,7 +83,7 @@ export function useHistoryImport(): void {
         {
           cursor,
           maxInboxPages: 1,
-          pageSize: HISTORY_IMPORT_PAGE_SIZE,
+          pageSize: foreground ? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE,
           legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
         },
       );
@@ -159,18 +160,16 @@ export function useHistoryImport(): void {
 
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
-    // Hydration already does substantial ledger normalization. Starting parser
-    // migration in the same commit makes a cold/recreated launch look frozen
-    // even though the history job itself yields between pages. Give the first
-    // usable screen the same grace period as a foreground resume.
+    const progress = getStateSnapshot().historyImport;
+    if (!progress || progress.status !== 'paused' || progress.scanned > 0 || progress.error) return;
     const timer = setTimeout(() => {
       void run().catch(() => {
         // The coordinator has persisted a body-free failure. Home and Settings
         // own recovery; a failed cursor must not be marked complete to unblock UI.
       });
-    }, FOREGROUND_HISTORY_RESUME_GRACE_MS);
+    }, FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS);
     return () => clearTimeout(timer);
-  }, [run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
+  }, [getStateSnapshot, run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -180,29 +179,14 @@ export function useHistoryImport(): void {
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next !== 'active') {
-        if (resumeTimer !== null) {
-          clearTimeout(resumeTimer);
-          resumeTimer = null;
-        }
-        return;
-      }
-      const progress = getStateSnapshot().historyImport;
-      if (progress?.status !== 'paused' && progress?.status !== 'running') return;
-      if (resumeTimer !== null) clearTimeout(resumeTimer);
-      resumeTimer = setTimeout(() => {
-        resumeTimer = null;
-        const latest = getStateSnapshot().historyImport;
-        if (RNAppState.currentState !== 'active' ||
-          (latest?.status !== 'paused' && latest?.status !== 'running')) return;
-        void run().catch(() => {});
-      }, FOREGROUND_HISTORY_RESUME_GRACE_MS);
+      if (next !== 'active') return;
+      // The visible app always wins over maintenance. If history was running
+      // while Wafra was away, stop its native lease at the next safe page
+      // boundary and leave the durable progress paused for the explicit
+      // Continue control.
+      historyBackground.cancel();
     });
-    return () => {
-      if (resumeTimer !== null) clearTimeout(resumeTimer);
-      subscription.remove();
-    };
-  }, [getStateSnapshot, run]);
+    return () => subscription.remove();
+  }, []);
 }

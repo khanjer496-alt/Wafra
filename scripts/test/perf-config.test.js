@@ -860,14 +860,15 @@ function bodyOf(source, header) {
     'no-change resumes should reuse the recent queue answer; a native queue edge must still force an immediate drain');
 
   const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
-  ok('Android history repair also waits past the resume interaction window',
-    /FOREGROUND_HISTORY_RESUME_GRACE_MS\s*=\s*2_000/.test(historyImport) &&
-      /const timer = setTimeout/.test(historyImport) &&
-      /setTimeout\([\s\S]*?void run\(\)[\s\S]*?FOREGROUND_HISTORY_RESUME_GRACE_MS\)/.test(historyImport),
-    'parser migration is maintenance work and must not start or restart in the first launch/resume frames');
+  ok('Android history repair never auto-restarts when the user returns to Wafra',
+    /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS\s*=\s*8_000/.test(historyImport) &&
+      /progress\.scanned > 0/.test(historyImport) &&
+      /if \(next !== 'active'\) return;[\s\S]*?historyBackground\.cancel\(\)/.test(historyImport),
+    'a saved history job may auto-start only on the genuine first run; Activity resume belongs to UI/input and pauses maintenance');
 
   ok('history planning and commit both honor the foreground navigation lease',
-    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
+    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*650/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*64/.test(historyImport) &&
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
       (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');

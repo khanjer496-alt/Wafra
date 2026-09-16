@@ -191,13 +191,14 @@ export const applyMaterializedImportBatch = (
   const dues = mergeImportedCardDues(state.cardDues, batch.newDues, accounts);
   const bills = mergeImportedBills(state.bills, batch.newBills);
   const existing = applyHealUpdates(state.transactions, batch.updates);
-  const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
+  const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
+  const pageState: AppState = {
     ...state,
     ...(batch.importMoney && !state.ledgerMoney && changesImportMoney(batch)
       ? { ledgerMoney: batch.importMoney } : {}),
     onboardingCurrencyEvidence:
       batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
-    transactions: [...batch.transactions, ...existing],
+    transactions: sortTransactions([...batch.transactions, ...existing]),
     accounts,
     accountHints: { ...state.accountHints, ...batch.newHints },
     cardDues: dues,
@@ -208,32 +209,24 @@ export const applyMaterializedImportBatch = (
     // proof that one new alert was imported. This distinction matters when a
     // backup is restored while an incremental capture is already in flight.
     parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
-  }));
-  const repaired = repairDuplicateStatements(merged);
-  const retained = reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions));
-  const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
+  };
 
-  // First-history import arrives in bounded durable pages. Rebuilding the
-  // complete transfer graph after every page makes foreground history scale
-  // with (pages × ledger size) and pins Hermes while the user is trying to use
-  // the app. Intermediate pages therefore keep the last safe transfer-id
-  // snapshot only for provisional UI accounting and deliberately DROP the
-  // durable normalization receipt. The final page runs the exact full-ledger
-  // reconciliation below and restores a current receipt. If the process dies
-  // mid-history, hydration sees the missing receipt and fails safe by doing one
-  // exact reconciliation before trusting the ledger again.
+  // Intermediate first-history pages are already source-deduped by the import
+  // planner. Re-running every whole-ledger repair after each page makes the
+  // foreground cost scale as pages × ledger size and can pin Hermes for
+  // seconds on a 10k+ row ledger. Keep the page durable and provisionally
+  // sorted here; the final page performs the exact canonical repair once.
   if (historyStillRunning) {
     return {
-      ...repaired,
-      cardDues:
-        repaired === merged
-          ? merged.cardDues
-          : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
-      transactions: sortTransactions(retained),
+      ...pageState,
       transferNormalizationVersion: undefined,
       transferInternalIds: state.transferInternalIds ?? [],
     };
   }
+
+  const merged = repairCardPaymentAccounts(mergeDuplicateAccounts(pageState));
+  const repaired = repairDuplicateStatements(merged);
+  const retained = reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions));
   // Reconcile the rows this import actually STORES. Reconciling `retained`
   // instead classified against the pre-normalization graph, where a row with
   // explicit own-ownership may still seed the absorption step it is excluded
