@@ -197,9 +197,9 @@ function sources(dir = SRC) {
     ['backup and restore', /backupJson[\s\S]*restoreFromFile/],
     ['CSV and PDF exports', /exportCsv[\s\S]*setReportScopeSheet\(true\)/],
     ['internal launch export', /isInternalLaunchDiagnosticsEnabled\(\)[\s\S]*exportLaunchMetrics/],
-    ['theme', /<SegmentedControl[\s\S]*onChange=\{setThemePreference\}/],
-    ['market', /setRegionSheet\('country'\)/],
-    ['language', /setRegionSheet\('language'\)/],
+    ['appearance', /setPreferenceSheet\('appearance'\)/],
+    ['ledger currency', /setCurrencySheetVisible\(true\)/],
+    ['language', /setPreferenceSheet\('language'\)/],
     ['feedback', /router\.push\('\/feedback'\)/],
     ['public links', /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]*configuredPublicUrl\('termsOfUseUrl'\)[\s\S]*configuredPublicUrl\('supportUrl'\)/],
     ['founder brand gate', /isFounderUnlockBuild\(\)[\s\S]*onFounderLogoTap\(\)[\s\S]*<WafraMark/],
@@ -211,11 +211,11 @@ function sources(dir = SRC) {
   ok(`Settings retains its complete capability inventory (${settingsInventory.length})`,
     missingSettingsInventory.length === 0, missingSettingsInventory.join(' | '));
 
-  ok('region rows never mutate settings directly, and worldwide money has no dead parser picker',
+  ok('appearance, language and ledger currency open explicit controls instead of mutating rows directly',
     !/cycleMarket|cycleLanguage/.test(settings) &&
-      /<ChoiceSheet[\s\S]{0,400}title=\{t\('parserPack'\)\}/.test(settings) &&
-      /<ChoiceSheet[\s\S]{0,400}title=\{t\('language'\)\}/.test(settings) &&
-      /hasGlobalLedger \? \([\s\S]{0,500}<Row(?: last)?>[\s\S]{0,500}globalParserPackDetail/.test(settings));
+      /<ChoiceSheet[\s\S]{0,500}visible=\{preferenceSheet === 'appearance'\}[\s\S]{0,500}options=\{appearanceChoices\}/.test(settings) &&
+      /<ChoiceSheet[\s\S]{0,500}visible=\{preferenceSheet === 'language'\}[\s\S]{0,500}options=\{languageChoices\}/.test(settings) &&
+      /<LedgerCurrencySheet[\s\S]{0,400}visible=\{currencySheetVisible\}/.test(settings));
 
   /**
    * And the picker may not be an alert.
@@ -232,28 +232,14 @@ function sources(dir = SRC) {
   ok('the region pickers are drawn, not delegated to Alert',
     !/const chooseMarket|const chooseLanguage|const chooseExpenseReportPeriod/.test(settings));
 
-  // Every pack in MARKETS has to be offered, or the picker is a cycle with
-  // extra steps: naming one country and cycling to "the other" is the same
-  // silent mutation in a sheet.
-  ok('the country picker offers every pack rather than the next one',
-    /MARKETS\.map\(/.test(settings) && !/MARKETS\[\(i \+ 1\)/.test(settings));
+  ok('ledger currency opens a real picker rather than cycling the value',
+    /setCurrencySheetVisible\(true\)/.test(settings) &&
+      /<LedgerCurrencySheet[\s\S]{0,400}onSelect=\{setLedgerMoney\}/.test(settings));
 
-  /**
-   * And a pack it cannot apply says so on the row.
-   *
-   * `setActiveMarket` refuses a pack denominated differently from money the
-   * ledger already holds, because switching would RELABEL every stored figure
-   * rather than convert it — the same 125,050 fils printing "AED 1,250.50"
-   * and then "SAR 1,250.50" — and there is no rate offline that could convert
-   * a ledger of hand-entered amounts and statement balances. The refusal is
-   * right; a refusal the user cannot see is not. `setMarket` changing nothing
-   * is exactly as informative as the alert that never opened, so the picker
-   * has to ask `canSelectMarket` BEFORE the tap and put the reason on the row.
-   */
-  ok('a country pack the ledger will not accept is refused visibly, not silently',
-    /canSelectMarket\(/.test(settings) &&
-      /disabled: !allowed/.test(settings) &&
-      /tf\('marketPinned'/.test(settings));
+  ok('ledger currency becomes visibly locked once money exists instead of silently relabelling it',
+    /const ledgerCurrencyLocked = ledgerStateHasMoney\(state\)/.test(settings) &&
+      /ledgerCurrencyLocked \? \([\s\S]{0,700}ledgerCurrencyPermanentHint/.test(settings) &&
+      /<Icon name="lock"/.test(settings));
 
   ok('both languages are named in the language picker',
     /LANGUAGE_NAMES = \{ en: 'English', ar: '[^']+' \}/.test(settings) &&
