@@ -46,7 +46,7 @@ import {
   totalAsShown,
 } from '@/lib/format';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
-import { recordRuntimeOperation } from '@/lib/runtime-performance';
+import { measureRuntimeOperation, recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
   activeSubscriptions,
   billCommitments,
@@ -162,7 +162,7 @@ export default function BillsScreen() {
 
   // Card projections read accounts, transactions and statements, not the
   // frequently changing import-progress or review-status fields.
-  const dues = useMemo(() => openDues(state, now),
+  const dues = useMemo(() => measureRuntimeOperation('bills-open-dues', () => openDues(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
   const selectedDue = useMemo(
@@ -174,11 +174,13 @@ export default function BillsScreen() {
   // historical card settlement just to immediately filter those rows away.
   // Cards/All compute it when the user actually asks for that history.
   const needsPaidCards = agendaView === 'cards' || agendaView === 'all';
-  const paidCards = useMemo(() => needsPaidCards ? recentlySettledDues(state, now) : [],
+  const paidCards = useMemo(() => needsPaidCards
+    ? measureRuntimeOperation('bills-paid-cards', () => recentlySettledDues(state, now))
+    : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = internalTransferIdsForState(state);
+  const internal = measureRuntimeOperation('bills-transfer-scope', () => internalTransferIdsForState(state));
   // Recurrence detection walks the complete ledger. It is useful on Upcoming,
   // but it is not required to make Bills usable. Never start that historical
   // job in the same interaction window as the first tab paint. Explicit
@@ -238,7 +240,10 @@ export default function BillsScreen() {
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.
   const rows = useMemo(
-    () => billsForMonth(state.bills, state.transactions, now, liveAccounts, internal),
+    () => measureRuntimeOperation(
+      'bills-manual',
+      () => billsForMonth(state.bills, state.transactions, now, liveAccounts, internal),
+    ),
     [state.bills, state.transactions, now, liveAccounts, internal],
   );
   const selectedReminder = useMemo(
@@ -276,7 +281,7 @@ export default function BillsScreen() {
     [state.bills],
   );
 
-  const agendaItems = useMemo<PaymentAgendaItem[]>(() => {
+  const agendaItems = useMemo<PaymentAgendaItem[]>(() => measureRuntimeOperation('bills-agenda-items', () => {
     const accountNames = new Map(state.accounts.map((a) => [a.id, a.name]));
     const items: PaymentAgendaItem[] = dues.map(({ due, daysLeft, remainingFils }) => ({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
@@ -304,7 +309,7 @@ export default function BillsScreen() {
         amountFils: charge.amountFils, estimated: charge.estimated, paid: false });
     }
     return items;
-  }, [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
+  }), [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
 
   const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
     if (agendaView === 'subscriptions') return 'subscriptions';

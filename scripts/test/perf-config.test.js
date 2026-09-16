@@ -979,8 +979,16 @@ function bodyOf(source, header) {
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',
     /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
-      /needsPaidCards \? recentlySettledDues\(state, now\) : \[\]/.test(bills),
+      /needsPaidCards[\s\S]*?bills-paid-cards[\s\S]*?recentlySettledDues\(state, now\)[\s\S]*?: \[\]/.test(bills),
     'recent settled statements are invisible on Upcoming and must not block the first Bills tap');
+
+  const billsLogic = stripComments(read('src/lib/bills.ts'));
+  ok('manual bill reconciliation is cached across Home and Bills for one immutable ledger/day',
+    /let billsForMonthCache:/.test(billsLogic) &&
+      /billsForMonthCache\.transactions === transactions/.test(billsLogic) &&
+      /billsForMonthCache\.bills === bills/.test(billsLogic) &&
+      /return billsForMonthCache\.value\.slice\(\)/.test(billsLogic),
+    'Home already computes card/bill upcoming data; opening Bills must reuse that result rather than retokenize the full ledger');
 
   ok('card statement allocation is cached once per card and immutable ledger snapshot',
     /let allocationCache:/.test(cards) && /sameInputs\(allocationCache, state\)/.test(cards) &&
@@ -998,11 +1006,20 @@ function bodyOf(source, header) {
     'opening the Assistant should not trigger subscription analysis before the user asks a question');
 
   const paymentAgenda = stripComments(read('src/components/bills/payment-agenda.tsx'));
+  const referencePresentation = stripComments(read('src/lib/reference-presentation.ts'));
   ok('Bills renders long agendas progressively instead of mounting every row at once',
     /PAYMENT_AGENDA_PAGE_SIZE\s*=\s*24/.test(paymentAgenda) &&
+      /groupPaymentAgendaWindow\(visibleItems, includePaid, renderLimit\)/.test(paymentAgenda) &&
       /section\.items\.slice\(0, remaining\)/.test(paymentAgenda) &&
       /setRenderLimit\(\(current\) => current \+ PAYMENT_AGENDA_PAGE_SIZE\)/.test(paymentAgenda),
     'large imported histories can create many recurring rows; the ScrollView must keep first mount bounded');
+
+  ok('Bills bounds agenda sorting to the visible window before React receives recurrence results',
+    /export function groupPaymentAgendaWindow/.test(referencePresentation) &&
+      /kept\.length === boundedLimit/.test(referencePresentation) &&
+      /kept\.splice\(low, 0, item\)/.test(referencePresentation) &&
+      /if \(kept\.length > boundedLimit\) kept\.pop\(\)/.test(referencePresentation),
+    'pagination after fully sorting every recurring candidate still leaves the expensive synchronous work on the JS thread');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
