@@ -389,7 +389,7 @@ await tapTab(page, 'Bills');
 ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
 await agenda.waitFor({state:'visible'});
-ok('Agenda states that recording a payment does not move money',/Recording a payment does not move money/.test(await agenda.innerText()));
+ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));
 await tapText(page,'All',600);
 const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
 ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));
