@@ -340,7 +340,7 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
   const row=rows[0];ok('Spending offers a category to inspect',!!row);
   if(row){
     const want=money(row.label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]||'');
-    await tapLabel(page,row.label);await tapText(page,'View activity',1500);
+    await tapLabel(page,row.label);await tapText(page,'View transactions',1500);
     ok('Category detail opens a scoped expense ledger', /category=/.test(page.url())&&/type=expense/.test(page.url()));
     const aggregate = page.getByTestId('transactions-net-total');
     let total;
