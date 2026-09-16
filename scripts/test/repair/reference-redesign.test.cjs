@@ -38,6 +38,23 @@ test('paid items appear only in All, regardless of their past due date',()=>{
  const items=[bill('paid',-2,{paid:true}),bill('open',0)];assert.equal(projection.groupPaymentAgenda(items,false).flatMap(g=>g.items).length,1);assert.equal(projection.groupPaymentAgenda(items,true).at(-1).key,'paid');
 });
 test('agenda sorting does not rewrite dates, amounts or its input array',()=>{const items=[bill('later',8),bill('today',0)];const before=JSON.stringify(items);projection.groupPaymentAgenda(items,true);assert.equal(JSON.stringify(items),before)});
+test('bounded agenda window preserves full ordering and exact hidden counts',()=>{
+ const items=[bill('late-c',12),bill('soon-c',5),bill('today',0),bill('soon-a',2),bill('late-a',8),bill('soon-b',3),bill('paid',-2,{paid:true})];
+ const full=projection.groupPaymentAgenda(items,true);
+ const window=projection.groupPaymentAgendaWindow(items,true,2);
+ assert.deepEqual(plain(window.map(g=>[g.key,g.totalCount,g.items.map(x=>x.id)])),[
+  ['soon',4,['today','soon-a']],['later',2,['late-a','late-c']],['paid',1,['paid']],
+ ]);
+ for(const section of window){const expected=full.find(group=>group.key===section.key);assert.deepEqual(plain(section.items),plain(expected.items.slice(0,2)));}
+ assert.equal(window.reduce((sum,section)=>sum+section.totalCount,0),items.length);
+});
+test('bounded agenda window does not retain paid rows when paid history is hidden',()=>{
+ const items=[bill('paid',-2,{paid:true}),bill('open',0),...Array.from({length:50},(_,i)=>bill('later-'+i,8+i))];
+ const window=projection.groupPaymentAgendaWindow(items,false,3);
+ assert.equal(window.some(section=>section.key==='paid'),false);
+ assert.equal(window.reduce((sum,section)=>sum+section.totalCount,0),51);
+ assert.ok(window.every(section=>section.items.length<=3));
+});
 
 test('all four real tab components execute in both themes and languages, standard and large text',()=>{
  for(const theme of ['light','dark'])for(const language of ['en','ar'])for(const largeText of [false,true])for(const screen of ['home','flow','bills','wallet']){const h=createHarness({theme,language,largeText});assert.ok(walk(h.render(screen)).length>20);assert.equal(h.events.filter(e=>e[0]!=='state').length,0,'render must not write money or navigate');}

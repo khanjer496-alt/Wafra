@@ -12,8 +12,9 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
-  groupPaymentAgenda,
+  groupPaymentAgendaWindow,
   paymentGroupFor,
   type PaymentAgendaItem,
   type PaymentGroup,
@@ -47,18 +48,22 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
   useEffect(() => {
     setRenderLimit(PAYMENT_AGENDA_PAGE_SIZE);
   }, [selectedGroup, includePaid]);
-  // Filtering and date grouping both scan/sort the agenda. Bills re-renders on
-  // every keystroke in its reminder sheet, so keep the approved date-first
-  // redesign while avoiding repeated ledger-derived work on unrelated renders.
+  // Filtering and date grouping both scan the agenda. Keep only the rows that
+  // can enter this rendered window; fully sorting a large recurrence result and
+  // discarding everything after row 24 can freeze the JS thread exactly when
+  // the cooperative detector finishes.
   const visibleItems = useMemo(() => selectedGroup
     ? items.filter((item) => paymentGroupFor(item) === selectedGroup)
     : items, [selectedGroup, items]);
   const sections = useMemo(
-    () => groupPaymentAgenda(visibleItems, includePaid),
-    [visibleItems, includePaid],
+    () => measureRuntimeOperation(
+      'bills-agenda-window',
+      () => groupPaymentAgendaWindow(visibleItems, includePaid, renderLimit),
+    ),
+    [visibleItems, includePaid, renderLimit],
   );
   const totalCount = useMemo(
-    () => sections.reduce((sum, section) => sum + section.items.length, 0),
+    () => sections.reduce((sum, section) => sum + section.totalCount, 0),
     [sections],
   );
   // Preserve the approved urgency/date order and take only the first page

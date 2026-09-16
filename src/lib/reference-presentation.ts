@@ -81,6 +81,18 @@ export function paymentGroupFor(item: Pick<PaymentAgendaItem, 'kind' | 'category
   return item.category === 'loan' ? 'loans' : 'other';
 }
 
+const PAYMENT_AGENDA_SECTION_ORDER: AgendaSection[] = ['overdue', 'expected-earlier', 'soon', 'later', 'paid'];
+
+const paymentAgendaSectionFor = (item: PaymentAgendaItem): AgendaSection =>
+  item.paid ? 'paid'
+    : item.daysLeft < 0 ? (item.estimated ? 'expected-earlier' : 'overdue')
+      : item.daysLeft <= 7 ? 'soon' : 'later';
+
+const comparePaymentAgendaItems = (key: AgendaSection) =>
+  (a: PaymentAgendaItem, b: PaymentAgendaItem): number =>
+    (key === 'paid' ? b.dateISO.localeCompare(a.dateISO) : a.dateISO.localeCompare(b.dateISO)) ||
+      a.id.localeCompare(b.id);
+
 /** Separate what a payment is before showing when it is due. */
 export function groupPaymentKinds(items: readonly PaymentAgendaItem[], includePaid: boolean) {
   const order: PaymentGroup[] = ['subscriptions', 'utilities', 'cards', 'loans', 'other'];
@@ -89,16 +101,78 @@ export function groupPaymentKinds(items: readonly PaymentAgendaItem[], includePa
   })).filter((group) => group.sections.length > 0 || group.key === 'subscriptions' || group.key === 'utilities');
 }
 export function groupPaymentAgenda(items: readonly PaymentAgendaItem[], includePaid: boolean) {
-  const order: AgendaSection[] = ['overdue', 'expected-earlier', 'soon', 'later', 'paid'];
-  const groups = new Map(order.map((key) => [key, [] as PaymentAgendaItem[]]));
+  const groups = new Map(PAYMENT_AGENDA_SECTION_ORDER.map((key) => [key, [] as PaymentAgendaItem[]]));
   for (const item of items) {
     if (item.paid && !includePaid) continue;
-    const key: AgendaSection = item.paid ? 'paid'
-      : item.daysLeft < 0 ? (item.estimated ? 'expected-earlier' : 'overdue')
-        : item.daysLeft <= 7 ? 'soon' : 'later';
+    const key = paymentAgendaSectionFor(item);
     groups.get(key)!.push(item);
   }
-  return order.map((key) => ({ key, items: groups.get(key)!.sort((a, b) =>
-    (key === 'paid' ? b.dateISO.localeCompare(a.dateISO) : a.dateISO.localeCompare(b.dateISO)) || a.id.localeCompare(b.id))
+  return PAYMENT_AGENDA_SECTION_ORDER.map((key) => ({
+    key,
+    items: groups.get(key)!.sort(comparePaymentAgendaItems(key)),
   })).filter((group) => group.items.length > 0);
+}
+
+export interface PaymentAgendaWindowSection {
+  key: AgendaSection;
+  /** Only the highest-priority rows needed for the current rendered window. */
+  items: PaymentAgendaItem[];
+  /** Full section cardinality, including rows intentionally not materialised. */
+  totalCount: number;
+}
+
+/**
+ * Bounded agenda projection for the Bills ScrollView.
+ *
+ * `groupPaymentAgenda()` is the right primitive for exports/tests that need the
+ * complete ordered list. It is the wrong primitive for a screen that renders
+ * 24 rows: after recurrence detection completed, the old path allocated every
+ * candidate into buckets and fully sorted all of them, then immediately threw
+ * almost all of those sorted arrays away. That synchronous render happens on
+ * the JS thread and can turn a cooperative background scan into a visible
+ * freeze when its result lands.
+ *
+ * Keep only the best `limit` rows per section while scanning. The screen still
+ * knows the exact hidden count and preserves the same ordering, while work and
+ * retained arrays are bounded by the number of rows the user can actually see.
+ */
+export function groupPaymentAgendaWindow(
+  items: readonly PaymentAgendaItem[],
+  includePaid: boolean,
+  limit: number,
+): PaymentAgendaWindowSection[] {
+  const boundedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+  const groups = new Map(PAYMENT_AGENDA_SECTION_ORDER.map((key) => [key, {
+    items: [] as PaymentAgendaItem[],
+    totalCount: 0,
+  }]));
+
+  for (const item of items) {
+    if (item.paid && !includePaid) continue;
+    const key = paymentAgendaSectionFor(item);
+    const group = groups.get(key)!;
+    group.totalCount += 1;
+    if (boundedLimit === 0) continue;
+
+    const compare = comparePaymentAgendaItems(key);
+    const kept = group.items;
+    // Once full, a row that sorts after the current worst cannot enter the
+    // visible window. Avoid an insertion/splice for the usual long-tail case.
+    if (kept.length === boundedLimit && compare(item, kept[kept.length - 1]) >= 0) continue;
+
+    let low = 0;
+    let high = kept.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (compare(item, kept[mid]) < 0) high = mid;
+      else low = mid + 1;
+    }
+    kept.splice(low, 0, item);
+    if (kept.length > boundedLimit) kept.pop();
+  }
+
+  return PAYMENT_AGENDA_SECTION_ORDER.map((key) => {
+    const group = groups.get(key)!;
+    return { key, items: group.items, totalCount: group.totalCount };
+  }).filter((group) => group.totalCount > 0);
 }

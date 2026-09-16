@@ -60,10 +60,11 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 
 // Payment/deletion safeguards are unchanged; the shared agenda owns detail navigation.
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
-// The Bills tabs choose payment type; due timing remains the outer hierarchy,
-// and each status/date section retains all matching rows.
+// The Bills tabs choose payment type; due timing remains the outer hierarchy.
+// Only the current render window is ordered eagerly so a large recurrence
+// result cannot stall the JS thread before most rows are discarded.
 assert.match(agenda,/const visibleItems = useMemo\([\s\S]*?paymentGroupFor\(item\) === selectedGroup[\s\S]*?\[selectedGroup, items\]/);
-assert.match(agenda,/const sections = useMemo\([\s\S]*?groupPaymentAgenda\(visibleItems, includePaid\)[\s\S]*?\[visibleItems, includePaid\]/);
+assert.match(agenda,/const sections = useMemo\([\s\S]*?groupPaymentAgendaWindow\(visibleItems, includePaid, renderLimit\)[\s\S]*?\[visibleItems, includePaid, renderLimit\]/);
 assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);

@@ -79,6 +79,22 @@ export interface BillWithStatus {
   autoReconciled?: boolean;
 }
 
+// Home already projects the user's manual bills for the Upcoming card before
+// the Bills tab is opened. On a large imported ledger, recomputing that exact
+// answer on the navigation tap means tokenising/scanning the complete history
+// once per bill again. Store snapshots are immutable and live/internal scope
+// sets are identity-cached, so these references + money day are an exact cache
+// key rather than a heuristic.
+let billsForMonthCache: {
+  bills: Bill[];
+  transactions: Transaction[];
+  key: string;
+  day: string;
+  live?: Set<string>;
+  internal?: Set<string>;
+  value: BillWithStatus[];
+} | null = null;
+
 function normalize(s: string): string {
   return s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
@@ -272,6 +288,17 @@ export function billsForMonth(
 ): BillWithStatus[] {
   const key = monthKey(today);
   const todayISO = toISODate(today);
+  if (billsForMonthCache &&
+      billsForMonthCache.bills === bills &&
+      billsForMonthCache.transactions === transactions &&
+      billsForMonthCache.key === key &&
+      billsForMonthCache.day === todayISO &&
+      billsForMonthCache.live === live &&
+      billsForMonthCache.internal === internal) {
+    // The result is a shared projection. Return a shallow copy so a caller
+    // sorting/splicing its own list cannot poison the next screen's cache hit.
+    return billsForMonthCache.value.slice();
+  }
 
   /**
    * The bills that fall due inside THIS money month, and where.
@@ -347,5 +374,6 @@ export function billsForMonth(
 
   const rank: Record<BillStatus, number> = { overdue: 0, 'due-soon': 1, upcoming: 2, paid: 3 };
   rows.sort((a, b) => rank[a.status] - rank[b.status] || a.daysLeft - b.daysLeft);
-  return rows;
+  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows };
+  return rows.slice();
 }

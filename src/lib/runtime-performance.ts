@@ -28,6 +28,12 @@ export type RuntimeOperationTag =
   | 'ask-execute'
   | 'ask-evidence'
   | 'bills-projection'
+  | 'bills-open-dues'
+  | 'bills-paid-cards'
+  | 'bills-transfer-scope'
+  | 'bills-manual'
+  | 'bills-agenda-items'
+  | 'bills-agenda-window'
   | 'reminder-projection'
   | 'home-insight';
 
