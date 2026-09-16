@@ -249,14 +249,39 @@ function recurringProviderTitle(transaction: Transaction): string {
   return title;
 }
 
-let subscriptionDetectionCache: {
+type SubscriptionDetectionKey = {
   transactions: Transaction[];
   notSubscriptions: string[];
   todayKey: string;
   liveAccounts?: Set<string>;
   internalTransfers?: Set<string>;
-  value: Subscription[];
-} | null = null;
+};
+
+type SubscriptionDetectionCacheEntry = SubscriptionDetectionKey & { value: Subscription[] };
+type SubscriptionDetectionInFlight = SubscriptionDetectionKey & { promise: Promise<Subscription[]> };
+
+// A single-entry cache let an unrelated caller evict Bills' projection, so
+// switching tabs could restart a 15k-row scan even though the ledger had not
+// changed. Keep a tiny identity-keyed LRU instead. Store snapshots are immutable,
+// so these references are an exact semantic key and need no O(n) fingerprint.
+const SUBSCRIPTION_CACHE_MAX = 4;
+let subscriptionDetectionCache: SubscriptionDetectionCacheEntry[] = [];
+let subscriptionDetectionInFlight: SubscriptionDetectionInFlight[] = [];
+
+function sameDetectionKey(
+  entry: SubscriptionDetectionKey,
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): boolean {
+  return entry.transactions === transactions &&
+    entry.notSubscriptions === notSubscriptions &&
+    entry.todayKey === todayKey &&
+    entry.liveAccounts === liveAccounts &&
+    entry.internalTransfers === internalTransfers;
+}
 
 function cachedSubscriptionDetection(
   transactions: Transaction[],
@@ -265,13 +290,12 @@ function cachedSubscriptionDetection(
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
 ): Subscription[] | null {
-  return subscriptionDetectionCache?.transactions === transactions &&
-      subscriptionDetectionCache.notSubscriptions === notSubscriptions &&
-      subscriptionDetectionCache.todayKey === todayKey &&
-      subscriptionDetectionCache.liveAccounts === liveAccounts &&
-      subscriptionDetectionCache.internalTransfers === internalTransfers
-    ? subscriptionDetectionCache.value
-    : null;
+  const index = subscriptionDetectionCache.findIndex((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  if (index < 0) return null;
+  const [entry] = subscriptionDetectionCache.splice(index, 1);
+  subscriptionDetectionCache.push(entry);
+  return entry.value;
 }
 
 function cacheSubscriptionDetection(
@@ -282,14 +306,17 @@ function cacheSubscriptionDetection(
   internalTransfers: Set<string> | undefined,
   value: Subscription[],
 ): Subscription[] {
-  subscriptionDetectionCache = {
+  subscriptionDetectionCache = subscriptionDetectionCache.filter((entry) =>
+    !sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  subscriptionDetectionCache.push({
     transactions,
     notSubscriptions,
     todayKey,
     liveAccounts,
     internalTransfers,
     value,
-  };
+  });
+  if (subscriptionDetectionCache.length > SUBSCRIPTION_CACHE_MAX) subscriptionDetectionCache.shift();
   return value;
 }
 
@@ -620,7 +647,11 @@ export function detectSubscriptionsCooperatively(
     liveAccounts,
     internalTransfers,
   );
-  if (cached) return Promise.resolve(cached);
+  if (cached) return Promise.resolve(cancelled() ? null : cached);
+
+  const existing = subscriptionDetectionInFlight.find((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  if (existing) return existing.promise.then((value) => cancelled() ? null : value);
 
   const worker = subscriptionDetectionWorker(
     transactions,
@@ -630,19 +661,14 @@ export function detectSubscriptionsCooperatively(
     internalTransfers,
   );
 
-  return new Promise((resolve) => {
+  // One shared projection per immutable ledger snapshot. A tab losing focus no
+  // longer aborts the underlying worker and makes the next visit start from row
+  // zero; callers simply ignore the eventual value when their own view is gone.
+  const promise = new Promise<Subscription[]>((resolve) => {
     const runSlice = () => {
-      if (cancelled()) {
-        resolve(null);
-        return;
-      }
       const startedAt = Date.now();
       let step = worker.next();
       while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
-        if (cancelled()) {
-          resolve(null);
-          return;
-        }
         step = worker.next();
       }
       if (step.done) {
@@ -659,7 +685,19 @@ export function detectSubscriptionsCooperatively(
       setTimeout(runSlice, 0);
     };
     runSlice();
+  }).finally(() => {
+    subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry.promise !== promise);
   });
+
+  subscriptionDetectionInFlight.push({
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    promise,
+  });
+  return promise.then((value) => cancelled() ? null : value);
 }
 
 /** Monthly-equivalent total of what is still charging (stopped ones cost nothing). */

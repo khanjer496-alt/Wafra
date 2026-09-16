@@ -214,7 +214,11 @@ const EMPTY_STATE: AppState = {
   founderPro: false,
   privateMode: false,
   captureOptOut: false,
-  dailySummary: true,
+  // iPhone notifications start off. Onboarding turns this on only after the
+  // user explicitly grants visible notification permission; Android keeps its
+  // existing default because this launch fix is specific to the iOS consent
+  // gap and should not silently change Android behaviour.
+  dailySummary: Platform.OS === 'ios' ? false : true,
   trialStartTs: 0,
   marketId: '',
   language: '',

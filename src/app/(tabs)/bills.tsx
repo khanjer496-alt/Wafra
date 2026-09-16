@@ -91,6 +91,8 @@ export function recurringChargePresentation(sub: Subscription): { amountFils: nu
   };
 }
 
+const UPCOMING_RECURRENCE_IDLE_MS = 4_000;
+
 export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
@@ -111,6 +113,9 @@ export default function BillsScreen() {
   const now = useToday();
   const key = monthKey(now);
   const todayISO = toISODate(now);
+  // Recurrence is day-based. Reusing the same Date for the whole day prevents
+  // every Android foreground/resume from invalidating a full-ledger projection.
+  const recurrenceToday = useMemo(() => new Date(`${todayISO}T12:00:00`), [todayISO]);
 
   const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
   const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
@@ -174,44 +179,61 @@ export default function BillsScreen() {
     [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
-  // Recurrence detection walks the complete ledger. Delaying that synchronous
-  // walk by two frames fixed the navigation render but merely moved the stall:
-  // on a large Android ledger the tab painted, then froze while the deferred
-  // scan monopolised JS. Keep the fast first paint, then drive the exact same
-  // detector cooperatively in ~4 ms slices. A ledger change cancels the old
-  // worker rather than letting stale recurring rows land afterwards.
+  // Recurrence detection walks the complete ledger. It is useful on Upcoming,
+  // but it is not required to make Bills usable. Never start that historical
+  // job in the same interaction window as the first tab paint. Explicit
+  // Subscriptions/Utilities/All requests start it immediately after paint; the
+  // default Upcoming view only warms it after an idle grace period. A shared
+  // detector in subscriptions.ts means reminders/Bills join one job instead of
+  // racing duplicate scans, and leaving the tab no longer throws completed work
+  // away and restarts from row zero next time.
   useEffect(() => {
-    if (Platform.OS !== 'android' || !focused) return;
+    setAndroidRecurring(null);
+  }, [state.transactions, state.notSubscriptions, state.accounts, state.transferInternalIds, todayISO]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !focused || androidRecurring !== null || agendaView === 'cards') return;
     let cancelled = false;
+    let delay: ReturnType<typeof setTimeout> | null = null;
     let firstFrame: number | null = null;
     let secondFrame: number | null = null;
-    setAndroidRecurring(null);
-    const task = InteractionManager.runAfterInteractions(() => {
-      firstFrame = requestAnimationFrame(() => {
-        secondFrame = requestAnimationFrame(() => {
-          const projectionStartedAt = Date.now();
-          void detectSubscriptionsCooperatively(
-            state.transactions,
-            state.notSubscriptions,
-            now,
-            liveAccounts,
-            internal,
-            () => cancelled,
-          ).then((value) => {
-            recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
-            if (cancelled || value === null) return;
-            startTransition(() => setAndroidRecurring(value));
+    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+
+    const startProjection = () => {
+      if (cancelled) return;
+      task = InteractionManager.runAfterInteractions(() => {
+        firstFrame = requestAnimationFrame(() => {
+          secondFrame = requestAnimationFrame(() => {
+            const projectionStartedAt = Date.now();
+            void detectSubscriptionsCooperatively(
+              state.transactions,
+              state.notSubscriptions,
+              recurrenceToday,
+              liveAccounts,
+              internal,
+              () => cancelled,
+            ).then((value) => {
+              recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
+              if (cancelled || value === null) return;
+              startTransition(() => setAndroidRecurring(value));
+            });
           });
         });
       });
-    });
+    };
+
+    const needsRecurrenceNow = agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
+    if (needsRecurrenceNow) startProjection();
+    else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
+
     return () => {
       cancelled = true;
-      task.cancel();
+      if (delay !== null) clearTimeout(delay);
+      task?.cancel();
       if (firstFrame !== null) cancelAnimationFrame(firstFrame);
       if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
-  }, [focused, state.transactions, state.notSubscriptions, now, liveAccounts, internal]);
+  }, [agendaView, androidRecurring, focused, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.

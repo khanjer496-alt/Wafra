@@ -65,6 +65,7 @@ import {
 } from '@/lib/background-relay';
 import {
   cancelDailySummary,
+  notificationDeliveryAllowed,
   requestNotificationPermission,
   syncDailySummary,
 } from '@/lib/notifications';
@@ -234,6 +235,7 @@ export default function SettingsScreen() {
   }, []);
 
   const [instantAlerts, setInstantAlerts] = useState(false);
+  const [notificationDeliveryEnabled, setNotificationDeliveryEnabled] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
   const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
   const notifAvailable = Platform.OS === 'android' &&
@@ -512,15 +514,36 @@ export default function SettingsScreen() {
     }
     const granted = await requestNotificationPermission();
     if (!granted) {
+      setNotificationDeliveryEnabled(false);
+      setDailySummary(false);
       Alert.alert(t('notificationsOff'), t('notificationsOffBody'));
       return;
     }
+    setNotificationDeliveryEnabled(true);
     setDailySummary(true);
     // Schedule from the state we are about to have, not the one in this
     // closure: the dispatch above has not re-rendered yet, and syncDailySummary
     // returns early on a false flag.
     await syncDailySummary({ ...state, dailySummary: true });
   };
+
+  // A stored preference is not an OS grant. In particular, older builds
+  // defaulted Daily Summary to true before iOS had ever shown its permission
+  // sheet. Reconcile whenever Settings is focused so the switch can never claim
+  // ON while the phone will deliver nothing.
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void notificationDeliveryAllowed()
+      .then((allowed) => {
+        if (!active) return;
+        setNotificationDeliveryEnabled(allowed);
+        if (!allowed && getStateSnapshot().dailySummary) setDailySummary(false);
+      })
+      .catch(() => {
+        if (active) setNotificationDeliveryEnabled(false);
+      });
+    return () => { active = false; };
+  }, [getStateSnapshot, setDailySummary]));
 
   /** Per-charge Wafra alerts default on; the OS remains the final sound/banner control. */
   const [chargeAlerts, setChargeAlerts] = useState(true);
@@ -1323,8 +1346,8 @@ export default function SettingsScreen() {
           <SectionHeader title={t('settingsNotificationsHeader')} />
           {switchRow(
             t('dailySummarySetting'),
-            state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
-            state.dailySummary,
+            state.dailySummary && notificationDeliveryEnabled ? t('dailySummaryOn') : t('dailySummaryOff'),
+            state.dailySummary && notificationDeliveryEnabled,
             (next) => void toggleDailySummary(next),
             !chargeAlertsAvailable,
           )}

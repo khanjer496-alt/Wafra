@@ -133,7 +133,7 @@ const ANDROID_RESUME_SCAN_GRACE_MS = 1_500;
 // Payment-reminder recurrence analysis is useful background maintenance, not
 // launch-critical work. Keep it away from Home's first usable interaction
 // window; the projection itself also yields in 2 ms slices on Android.
-const SESSION_REMINDER_SYNC_GRACE_MS = 2_500;
+const SESSION_REMINDER_SYNC_GRACE_MS = 8_000;
 
 /**
  * Android provider access is a process-wide fact, not a screen-local one.
