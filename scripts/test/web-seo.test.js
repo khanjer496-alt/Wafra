@@ -73,6 +73,15 @@ ok(
     !/<strong>Private mode<\/strong>[\s\S]{0,220}Leave message access off/.test(landing),
 );
 
+ok(
+  'the landing scrolls in the document so in-page hash links move the viewport',
+  /min-height: 100dvh/.test(css) && !/overflow-y:\s*auto/.test(css),
+);
+ok(
+  'the landing links to dedicated privacy, terms and support pages',
+  ['/privacy/', '/terms/', '/support/'].every((route) => landing.includes(`href="${route}"`)),
+);
+
 try {
   const placeholder = spawnSync(process.execPath, [finalizer, output], {
     cwd: root,
