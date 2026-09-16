@@ -14,7 +14,6 @@ import { Fonts, Radius } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { interpretAssistantLanguage } from '@/lib/assistant-language';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
@@ -28,7 +27,7 @@ import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 import {
   assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
-  shouldTryAssistantSemanticFallback, suggestedAssistantQuestions,
+  runWafraAssistantCooperatively, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
@@ -226,12 +225,8 @@ export default function AssistantScreen() {
 
   const ask = async (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
     const clean = value.trim().slice(0, 1000);
-    const snapshot = getStateSnapshot();
-    if (!clean || !snapshot.hydrated || sendingRef.current) return;
-    const startGeneration = getStateGeneration();
-    const renderIsCurrent = generation === startGeneration;
-    if (!renderIsCurrent) previousGeneration.current = startGeneration;
-    const now = new Date();
+    const initialSnapshot = getStateSnapshot();
+    if (!clean || !initialSnapshot.hydrated || sendingRef.current) return;
     sendingRef.current = true;
     setIsSending(true);
     setPendingQuestion(clean);
@@ -239,6 +234,19 @@ export default function AssistantScreen() {
     setError(null);
     Keyboard.dismiss();
     try {
+      // Android must get a committed frame before any ledger interpretation.
+      // Without this yield, state updates above are batched with the synchronous
+      // local engine: on a large history the text stays in the field and the
+      // Send button looks dead until all calculation has already finished.
+      if (Platform.OS === 'android') {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const snapshot = getStateSnapshot();
+      if (!snapshot.hydrated) throw new Error('Ledger changed while sending');
+      const startGeneration = getStateGeneration();
+      const renderIsCurrent = generation === startGeneration;
+      if (!renderIsCurrent) previousGeneration.current = startGeneration;
+      const now = new Date();
       const correction = usePrevious && renderIsCurrent
         ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer)
         : undefined;
@@ -252,32 +260,17 @@ export default function AssistantScreen() {
         return;
       }
       const previous = usePrevious && renderIsCurrent ? contextRequest ?? conversationContext : null;
-      const result = runWafraAssistant(snapshot, clean, now, previous, period);
-      if (!snapshot.privateMode && shouldTryAssistantSemanticFallback(clean, result.request)) {
-        // Local parsing always wins the interaction frame. The AI layer is only
-        // a language repair pass, so it must never make Send wait on a network
-        // round trip. Show the safe local clarification immediately, then
-        // upgrade that exact turn in place only if a high-confidence rewrite
-        // arrives while the same ledger generation is still active.
-        const turnId = appendAnswer(clean, result, snapshot, now);
-        void interpretAssistantLanguage(snapshot, clean, previous).then((canonical) => {
-          if (!canonical || canonical === clean || startGeneration !== getStateGeneration()) return;
-          const latestSnapshot = getStateSnapshot();
-          if (!latestSnapshot.hydrated) return;
-          const interpreted = runWafraAssistant(latestSnapshot, canonical, now, previous, period);
-          if (interpreted.request.tool === 'help') return;
-          const currentGeneration = getStateGeneration();
-          needsScroll.current = true;
-          setTurns((current) => current.map((turn) =>
-            turn.id === turnId && turn.generation === currentGeneration
-              ? { ...turn, request: interpreted.request, answer: interpreted.answer, inputs: ledgerInputs(latestSnapshot) }
-              : turn));
-        }).catch(() => {
-          // The local clarification is already on screen; a language-helper
-          // timeout/failure must not surface as an app error or block input.
-        });
-        return;
-      }
+      const result = Platform.OS === 'android'
+        ? await runWafraAssistantCooperatively(
+            snapshot,
+            clean,
+            now,
+            previous,
+            period,
+            () => startGeneration !== getStateGeneration(),
+          )
+        : runWafraAssistant(snapshot, clean, now, previous, period);
+      if (result === null) return;
       appendAnswer(clean, result, snapshot, now);
     } catch {
       // Restore the draft when submission fails; financial records never enter logs.
@@ -432,7 +425,7 @@ export default function AssistantScreen() {
             <Icon name="chevron-down" size={12} color={theme.textSecondary} />
           </Pressable>
           <ThemedText type="meta" themeColor="textSecondary">
-            {`${ledgerCurrencyCode()} · ${state.privateMode ? copy.localShort : copy.localCalculationsShort}`}
+            {`${ledgerCurrencyCode()} · ${copy.localShort}`}
           </ThemedText>
         </View>
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}

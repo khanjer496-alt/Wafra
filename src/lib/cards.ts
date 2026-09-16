@@ -100,6 +100,7 @@ let paymentsCache: {
   /** Rows that could be a card payment for SOME card; see cardPaymentsOf. */
   candidates: Transaction[];
 } | null = null;
+let allocationCache: (CardInputs & { byAccount: Map<string, Map<string, Allocation>> }) | null = null;
 let activityCache: { transactions: Transaction[]; byAccount: Map<string, string> } | null = null;
 
 export function estimatedMinimumFils(totalFils: number): number {
@@ -953,7 +954,7 @@ interface Allocation {
  *    statement the user marked paid accepts payments up to the day they
  *    marked it.
  */
-function allocatePayments(
+function computePaymentAllocations(
   state: AppState,
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
@@ -1013,6 +1014,42 @@ function allocatePayments(
     for (const id of s.dueIds) allocated.set(id, { paidFils: s.paidFils, payments: s.rows });
   }
   return allocated;
+}
+
+function allocatePayments(
+  state: AppState,
+  accountId: string,
+  /** Included even when absent from state — callers may hold a due directly. */
+  target?: CardDue,
+): Map<string, Allocation> {
+  // Statement allocation is a per-card answer, not a per-statement answer.
+  // `recentlySettledDues` asks about every recent statement, while `openDues`
+  // and card detail ask about the current one. Before this cache every one of
+  // those calls rebuilt the same statement timeline and replayed the same
+  // canonical payment rows. A real imported ledger can have years of statements
+  // on one card, so opening Bills multiplied one expensive card calculation by
+  // the number of statements it had ever seen.
+  //
+  // Store snapshots are immutable. Reusing by the three source-array identities
+  // is therefore exact until any account, transaction or due changes. An
+  // out-of-store target is deliberately excluded: callers holding a synthetic
+  // or not-yet-persisted due need that target folded into their private answer.
+  const cacheable = target === undefined || state.cardDues.includes(target);
+  if (!cacheable) return computePaymentAllocations(state, accountId, target);
+
+  if (!allocationCache || !sameInputs(allocationCache, state)) {
+    allocationCache = {
+      accounts: state.accounts,
+      transactions: state.transactions,
+      cardDues: state.cardDues,
+      byAccount: new Map(),
+    };
+  }
+  const hit = allocationCache.byAccount.get(accountId);
+  if (hit) return hit;
+  const value = computePaymentAllocations(state, accountId);
+  allocationCache.byAccount.set(accountId, value);
+  return value;
 }
 
 /**

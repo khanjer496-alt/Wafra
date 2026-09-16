@@ -111,8 +111,6 @@ ok(
   compatibilityDate >= '2026-08-04' ||
     /^\s*compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"[^\]]*\]/m.test(toml),
 );
-ok('Workers AI is explicitly bound for Ask Wafra language fallback',
-  /\[ai\][\s\S]*?binding\s*=\s*"AI"/.test(toml));
 
 ok('the deploy runbook exists', fs.existsSync(path.join(root, 'DEPLOY.md')));
 

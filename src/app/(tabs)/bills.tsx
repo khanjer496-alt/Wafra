@@ -1,4 +1,5 @@
 import React, { startTransition, useEffect, useMemo, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import {
   InteractionManager,
   Platform,
@@ -93,6 +94,7 @@ export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
+  const focused = useIsFocused();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStore();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
@@ -161,9 +163,14 @@ export default function BillsScreen() {
     () => dues.find(({ due }) => due.id === selectedDueId) ?? null,
     [dues, selectedDueId],
   );
-  const paidCards = useMemo(() => recentlySettledDues(state, now),
+  // Recently-paid history is invisible in the default Upcoming view (and in
+  // the subscription/utility filters). Do not make the first Bills tap replay
+  // historical card settlement just to immediately filter those rows away.
+  // Cards/All compute it when the user actually asks for that history.
+  const needsPaidCards = agendaView === 'cards' || agendaView === 'all';
+  const paidCards = useMemo(() => needsPaidCards ? recentlySettledDues(state, now) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, state.cardDues, now]);
+    [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
     () => internalTransferIds(state.transactions, state.accounts),
@@ -176,7 +183,7 @@ export default function BillsScreen() {
   // detector cooperatively in ~4 ms slices. A ledger change cancels the old
   // worker rather than letting stale recurring rows land afterwards.
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || !focused) return;
     let cancelled = false;
     let firstFrame: number | null = null;
     let secondFrame: number | null = null;
@@ -204,7 +211,7 @@ export default function BillsScreen() {
       if (firstFrame !== null) cancelAnimationFrame(firstFrame);
       if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
-  }, [state.transactions, state.notSubscriptions, now, liveAccounts, internal]);
+  }, [focused, state.transactions, state.notSubscriptions, now, liveAccounts, internal]);
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.

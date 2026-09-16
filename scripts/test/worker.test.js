@@ -168,7 +168,7 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
 const ALL_TABLES = [
   'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
-  'admin_deletion_receipts', 'feedback', 'feedback_limits', 'assistant_ai_limits',
+  'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
 /** Every byte the database holds, for the "nothing readable is stored" checks. */
@@ -2634,82 +2634,6 @@ const CARD_PAYMENT_DEBIT =
           .prepare(`SELECT COUNT(*) AS n FROM feedback WHERE dispatch_status = 'skipped_no_consent'`)
           .get().n === 12);
     }
-  }
-
-  /* ═════════════ Ask Wafra: redacted language-only Workers AI ═════════════
-   *
-   * No device pairing or ledger is involved. This route is public so Android
-   * can use it, therefore it gets a hard anonymous budget and the Worker must
-   * never persist the sentence it sends to Workers AI.
-   */
-  {
-    const calls = [];
-    const ai = {
-      run: async (model, input) => {
-        calls.push({ model, input });
-        return { response: {
-          supported: true,
-          confidence: 'high',
-          canonicalQuestion: 'did i settle __WAFRA_ACCOUNT_1__ for september?',
-        } };
-      },
-    };
-    const env = { DB: makeDb(), AI: ai };
-    const request = {
-      v: 1,
-      question: 'did u clear __WAFRA_ACCOUNT_1__ for september?',
-      context: { previousTool: 'top-accounts', previousSubject: 'card', language: 'en' },
-    };
-    const res = await call(env, 'POST', '/v1/assistant/interpret', { body: request });
-    const body = await res.json();
-    ok('assistant AI: a redacted language question is normalized',
-      res.status === 200 && body.supported === true && body.confidence === 'high' &&
-        body.canonicalQuestion === 'did i settle __WAFRA_ACCOUNT_1__ for september?');
-    ok('assistant AI: the language model gets only redacted language/context',
-      calls.length === 1 && calls[0].model === '@cf/meta/llama-3.3-70b-instruct-fp8-fast' &&
-        JSON.stringify(calls[0].input).includes('__WAFRA_ACCOUNT_1__') &&
-        !JSON.stringify(calls[0].input).includes('2518'));
-    ok('assistant AI: Cloudflare JSON Mode prevents free-form model prose',
-      calls[0].input.response_format?.type === 'json_object');
-    ok('assistant AI: no question or model output is persisted',
-      !dumpDb(env.DB).includes('did u clear') && !dumpDb(env.DB).includes('september'));
-
-    const missing = await call({ DB: makeDb() }, 'POST', '/v1/assistant/interpret', { body: request });
-    ok('assistant AI: missing binding disables fallback instead of failing finance features',
-      missing.status === 503 && (await missing.json()).error === 'assistant_ai_unavailable');
-
-    const malformed = await call(env, 'POST', '/v1/assistant/interpret', {
-      body: { ...request, question: 'line one\nline two' },
-    });
-    ok('assistant AI: malformed language payload is refused before inference', malformed.status === 400);
-
-    const invented = {
-      DB: makeDb(),
-      AI: { run: async () => ({ response: {
-        supported: true, confidence: 'high', canonicalQuestion: 'did i settle __WAFRA_ACCOUNT_1__ in 2026?',
-      } }) },
-    };
-    const inventedRes = await call(invented, 'POST', '/v1/assistant/interpret', { body: request });
-    const inventedBody = await inventedRes.json();
-    ok('assistant AI: a model cannot invent a digit/date absent from the question',
-      inventedRes.status === 200 && inventedBody.supported === false && inventedBody.confidence === 'low');
-
-    const limited = {
-      DB: makeDb(),
-      AI: { run: async () => ({ response: {
-        supported: true, confidence: 'high', canonicalQuestion: request.question,
-      } }) },
-    };
-    let refusal = -1;
-    for (let i = 0; i < 60; i++) {
-      const attempt = await call(limited, 'POST', '/v1/assistant/interpret', { body: request });
-      if (attempt.status === 429) { refusal = i; break; }
-    }
-    ok('assistant AI: the public inference route has a hard hourly cost ceiling',
-      refusal === 50, `first refusal at ${refusal}`);
-    const limitRow = limited.DB.handle.prepare("SELECT * FROM assistant_ai_limits WHERE id = 'hour'").get();
-    ok('assistant AI: limiter row contains only anonymous counter metadata',
-      !!limitRow && !('question' in limitRow) && !('device_id' in limitRow) && !('ip' in limitRow));
   }
 
   /* ═════════════════ Routing, and the scheduled sweep ═════════════════ */
