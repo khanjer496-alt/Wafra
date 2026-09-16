@@ -123,13 +123,6 @@ function sessionHarness(options = {}) {
       return engine.executeAssistantTool(...args);
     },
   };
-  h.deps['@/lib/assistant-language'] = {
-    interpretAssistantLanguage: async (...args) => {
-      calls.push({ kind: 'semantic', state: args[0], question: args[1], previous: args[2] });
-      if (options.semanticInterpreter) return options.semanticInterpreter(...args);
-      return options.semanticQuestion ?? null;
-    },
-  };
   const globals = {
     Date: Clock,
     requestAnimationFrame: callback => { const id = ++nextFrame; frames.set(id, callback); return id; },
@@ -215,60 +208,15 @@ async function usingAsync(options, run) {
   try { return await run(h); } finally { h.dispose(); }
 }
 
-test('generic language failures get one semantic rewrite, then deterministic local execution', async () => usingAsync({
+test('unknown wording stays local and returns deterministic help', async () => usingAsync({
   state: { ...fixture, privateMode: false },
-  semanticQuestion: 'How much did I spend this month?',
 }, async h => {
   h.render();
   await h.submitAsync('gimme the money burn rn');
-  assert.deepEqual(h.calls.map(call => call.kind), ['ask', 'semantic', 'ask']);
-  assert.match(text(h.tree), /Spending/);
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+  assert.match(text(h.tree), /didn.t quite understand/i);
   assert.match(text(h.tree), /gimme the money burn rn/);
 }));
-
-test('semantic fallback never blocks the local reply and upgrades the same turn in place', async () => {
-  let resolveSemantic;
-  const semantic = new Promise(resolve => { resolveSemantic = resolve; });
-  await usingAsync({
-    state: { ...fixture, privateMode: false },
-    semanticInterpreter: () => semantic,
-  }, async h => {
-    h.render();
-    h.submit('gimme the money burn rn');
-    h.render();
-    assert.equal(h.turns().length, 1, 'a safe local clarification renders without waiting for the model');
-    assert.match(text(h.tree), /didn.t quite understand/i);
-    assert.equal(h.find(node => node.props?.testID === 'assistant-pending-turn'), undefined);
-    assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
-    assert.equal(h.find(node => node.props?.testID === 'assistant-send').props.disabled, true, 'empty composer is disabled, not a model-loading lock');
-    assert.equal(h.calls.filter(call => call.kind === 'semantic').length, 1);
-    resolveSemantic('How much did I spend this month?');
-    await new Promise(resolve => setTimeout(resolve, 0));
-    h.render();
-    assert.equal(h.turns().length, 1, 'language repair replaces the existing turn rather than adding chatter');
-    assert.match(text(h.tree), /Spending/);
-  });
-});
-
-test('a background language upgrade cannot cross a ledger generation replacement', async () => {
-  let resolveSemantic;
-  const semantic = new Promise(resolve => { resolveSemantic = resolve; });
-  await usingAsync({
-    state: { ...fixture, privateMode: false },
-    semanticInterpreter: () => semantic,
-  }, async h => {
-    h.render();
-    h.submit('gimme the money burn rn');
-    h.render();
-    assert.equal(h.turns().length, 1);
-    h.patchState({ transactions: [transaction(9_000)] });
-    h.setGeneration(2);
-    resolveSemantic('How much did I spend this month?');
-    await new Promise(resolve => setTimeout(resolve, 0));
-    h.render();
-    assert.equal(h.turns().length, 0, 'ledger replacement clears the old local answer and rejects its late AI upgrade');
-  });
-});
 
 test('Ask Wafra direct controls restore tap haptics', () => using({ state: fixture }, h => {
   h.render();
@@ -303,18 +251,16 @@ test('Android Send paints the pending turn before ledger interpretation starts',
   assert.equal(h.turns().length, 1);
 }));
 
-test('known local questions do not pay the semantic fallback cost', async () => usingAsync({
+test('known local questions execute once on-device', async () => usingAsync({
   state: { ...fixture, privateMode: false },
-  semanticQuestion: 'How much did I spend this month?',
 }, async h => {
   h.render();
   await h.submitAsync('How much did I spend?');
   assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
 }));
 
-test('Private Mode keeps even unknown Ask Wafra language fully local', async () => usingAsync({
+test('Private Mode keeps unknown Ask Wafra language fully local', async () => usingAsync({
   state: { ...fixture, privateMode: true },
-  semanticQuestion: 'How much did I spend this month?',
 }, async h => {
   h.render();
   await h.submitAsync('gimme the money burn rn');

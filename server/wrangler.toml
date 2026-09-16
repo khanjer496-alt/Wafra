@@ -22,12 +22,6 @@ database_name = "wafra"
 # placeholder, so the failure is a sentence rather than a Cloudflare API error.
 database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
-# Ask Wafra uses this only as a language normalizer after the local parser says
-# it could not understand the wording. The client sends a redacted question;
-# account resolution and every financial calculation remain on the phone.
-[ai]
-binding = "AI"
-
 # Best-effort email copy of privacy-safe Android tester diagnostics.
 [[send_email]]
 name = "DIAGNOSTIC_EMAIL"

@@ -9,7 +9,6 @@ const {
   planAssistantCorrection,
   planAssistantQuestion,
   runWafraAssistant,
-  shouldTryAssistantSemanticFallback,
 } = require('./build/wafra-assistant');
 const {
   buildAssistantExplanationEnvelope,
@@ -416,16 +415,10 @@ const now = new Date('2026-09-20T12:00:00Z');
 {
   const nonsense = answerWafraQuestion(state, 'What is my favorite colour?', now);
   assert.equal(nonsense.tool, 'help', 'unknown questions must not silently become a spending answer');
-  assert.equal(shouldTryAssistantSemanticFallback('What is my favorite colour?',
-    planAssistantQuestion(state, 'What is my favorite colour?', now)), true);
   const capabilities = answerWafraQuestion(state, 'What can you do?', now);
   assert.equal(capabilities.tool, 'help');
-  assert.equal(shouldTryAssistantSemanticFallback('What can you do?',
-    planAssistantQuestion(state, 'What can you do?', now)), false);
   const unsupported = planAssistantQuestion(state, 'Should I spend more than 500 AED?', now);
   assert.equal(unsupported.tool, 'help');
-  assert.equal(shouldTryAssistantSemanticFallback('Should I spend more than 500 AED?', unsupported), false,
-    'specific local safety refusals must never be broadened by the model');
   assert.equal(isAssistantToolRequest({ tool: 'help' }), true);
 }
 
@@ -1395,7 +1388,6 @@ console.log('✓ Ask Wafra account and card inventory');
 {
   const greeting = runWafraAssistant(state, 'Hi', now);
   assert.equal(greeting.request.tool, 'help');
-  assert.equal(shouldTryAssistantSemanticFallback('Hi', greeting.request), false, 'a greeting is local UI help, not an AI fallback');
 }
 console.log('✓ Ask Wafra greeting stays instant and local');
 
