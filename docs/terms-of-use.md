@@ -1,11 +1,6 @@
 # Wafra Terms of Use
 
-_Last updated: 12 September 2026_
-
-> **Launch draft — needs counsel review and one legal decision before publishing.**
-> The support contact has been supplied by the publisher. The governing-law
-> clause remains unresolved; it should not be guessed from where the company
-> was formed or where a user happens to live.
+_Last updated: 16 September 2026_
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
 for Android and iOS published by **Nasidaapps LLC** ("we", "us").
@@ -120,7 +115,11 @@ transactions.
 
 ## Governing law
 
-These terms are governed by the laws of `[[GOVERNING LAW — PUBLISHER/COUNSEL TO CONFIRM]]`.
+These terms are governed by the laws of the State of Wyoming, without regard to
+its conflict-of-laws rules. The state and federal courts located in Wyoming have
+exclusive jurisdiction over disputes arising from these terms or the app, and
+you and Nasidaapps LLC consent to the personal jurisdiction and venue of those
+courts.
 
 ## Contact
 
