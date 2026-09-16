@@ -24,6 +24,8 @@ type Props = {
   onSettings: () => void;
   onIncome: () => void;
   onSpending: () => void;
+  /** Internal builds only: tapping the Wafra wordmark grants durable Founder Pro. */
+  onFounderUnlock?: () => void;
 };
 
 /** One period, three reconciled figures. Account balances belong in Accounts. */
@@ -32,9 +34,22 @@ export function ReferenceHomeSummary(p: Props) {
   const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
   const netColor = p.netFils < 0 ? p.theme.expense : p.netFils > 0 ? p.theme.income : p.theme.text;
   const currency = p.moneySpec.currency;
+  const wordmark = <><WafraMark size={28} /><ThemedText type="title">Wafra</ThemedText></>;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.header}>
-      <View style={styles.wordmark}><WafraMark size={28} /><ThemedText type="title">Wafra</ThemedText></View>
+      {p.onFounderUnlock ? (
+        <Pressable
+          testID="founder-unlock-logo"
+          accessibilityRole="button"
+          accessibilityLabel="Unlock Founder Pro"
+          hitSlop={8}
+          onPress={p.onFounderUnlock}
+          style={({ pressed }) => [styles.wordmark, { opacity: pressed ? 0.65 : 1 }]}>
+          {wordmark}
+        </Pressable>
+      ) : (
+        <View style={styles.wordmark}>{wordmark}</View>
+      )}
       <Pressable accessibilityRole="button" accessibilityLabel={w.add} onPress={p.onAdd}
         style={({ pressed }) => [styles.headerAction, { opacity: pressed ? 0.65 : 1 }]}>
         <Icon name="plus" size={22} color={p.theme.primary} />

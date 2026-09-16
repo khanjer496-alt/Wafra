@@ -102,6 +102,48 @@ const SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION = [
   'src/screens/journal-home-screen.tsx',
 ];
 
+// ---------------------------------------------------------------------------
+// 120 Hz capability: keep it in Expo config so clean EAS/prebuilds preserve it.
+// ---------------------------------------------------------------------------
+
+{
+  const appConfig = stripComments(read('app.config.js'));
+  // The plugin deliberately stores generated native source inside JS template
+  // strings. `stripComments` would treat `//` inside those strings as real JS
+  // comments and erase the rest of the generated Kotlin from this inspection.
+  const highRefresh = read('modules/wafra-high-refresh/plugin/index.js');
+
+  ok('the high-refresh native plugin is part of every Expo prebuild',
+    /\.\/modules\/wafra-high-refresh\/plugin/.test(appConfig) &&
+      /plugins:\s*\[\.\.\.withPagedPlugins, highRefreshPlugin\]/.test(appConfig),
+    'a native-only edit is lost by clean EAS/prebuild; the plugin has to be registered in app.config.js');
+
+  ok('iOS clean builds keep the ProMotion opt-in',
+    /CADisableMinimumFrameDurationOnPhone/.test(highRefresh) &&
+      /next\.modResults\[IOS_PROMOTION_KEY\]\s*=\s*true/.test(highRefresh),
+    'without CADisableMinimumFrameDurationOnPhone, supported iPhones can remain capped below ProMotion refresh rates');
+
+  ok('Android 14+ tells the scheduler Wafra intends to render at 120 fps',
+    /Build\.VERSION\.SDK_INT\s*>=\s*Build\.VERSION_CODES\.UPSIDE_DOWN_CAKE/.test(highRefresh) &&
+      /120f/.test(highRefresh) &&
+      /params\.preferredRefreshRate\s*=\s*targetRate/.test(highRefresh),
+    'preferredRefreshRate is the window-level hint; do not switch display modes just to request refresh rate');
+
+  ok('older Android versions request an actual supported refresh rate',
+    /defaultDisplay\.supportedRefreshRates/.test(highRefresh) &&
+      /minByOrNull/.test(highRefresh),
+    'before Android 14 preferredRefreshRate must match a supported rate, so hard-coding 120 can be ignored on 90/144 Hz devices');
+
+  ok('Android 15+ keeps high-refresh interactions compatible with idle power saving',
+    /Build\.VERSION_CODES\.VANILLA_ICE_CREAM/.test(highRefresh) &&
+      /window\.setFrameRatePowerSavingsBalanced\(true\)/.test(highRefresh),
+    'finance screens are often static; allowing refresh-rate balancing avoids holding the panel high while nothing moves');
+
+  ok('high-refresh support does not force a display resolution/mode',
+    !/preferredDisplayModeId/.test(highRefresh),
+    'Wafra only needs a frame-rate preference; changing the display mode can also change resolution');
+}
+
 // New Spending components do not run a delayed entering sequence.
 for (const rel of ['src/app/(tabs)/flow.tsx', 'src/components/spending/spending-overview.tsx', 'src/components/spending/spending-trends.tsx']) {
  const src=stripComments(read(rel));

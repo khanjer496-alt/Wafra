@@ -23,6 +23,17 @@ test('settings and explicit manual entry remain working visible quick actions', 
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Settings').props.onPress();
   assert.deepEqual(h.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
 });
+test('Founder logo unlock exists only in founder-enabled internal builds', async () => {
+  const production = harness();
+  assert.equal(walk(production.tree).some((node) => node.props.testID === 'founder-unlock-logo'), false);
+
+  const internal = harness({ founderUnlock: true, founderPro: false });
+  const logo = walk(internal.tree).find((node) => node.props.testID === 'founder-unlock-logo');
+  assert.ok(logo);
+  logo.props.onPress();
+  await Promise.resolve();
+  assert.ok(internal.events.some((event) => event[0] === 'founder'));
+});
 test('activity search and full bills remain reachable without duplicate Accounts shortcuts', () => {
   const h = harness();
   for (const node of walk(h.tree)) {
