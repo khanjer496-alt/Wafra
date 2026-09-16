@@ -205,6 +205,14 @@ assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRa
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
 assert.match(overview,/accessibilityLabel=\{`\$\{categoryLabel[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/);
+assert.match(overview,/function categoryPaletteIndex\(/,
+  'Spending list gives tail categories a stable visible accent instead of the donut neutral');
+assert.match(overview,/donutColors\.get\(row\.category\) \?\?[\s\S]*?palette\[categoryPaletteIndex\(row\.category, palette\.length\)\]/,
+  'categories collapsed into the donut Other wedge still use readable categorical ink in the list');
+assert.doesNotMatch(overview,/const sliceColor = donutColors\.get\(row\.category\) \?\? neutral/,
+  'dark-mode tail rows must never reuse the near-background donut neutral');
+assert.match(overview,/trackColor=\{scheme === 'dark' \? theme\.cardBorderStrong : theme\.track\}/,
+  'thin category progress tracks keep enough dark-mode contrast');
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);

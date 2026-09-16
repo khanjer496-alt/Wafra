@@ -25,6 +25,22 @@ export type CategoryFilter = 'all' | 'limited' | 'unlimited';
 
 export { spendingCopy } from '@/lib/reference-copy';
 
+/**
+ * The donut deliberately collapses the long tail into one neutral "Other"
+ * wedge. The list must not inherit that neutral colour: in dark mode the
+ * neutral is intentionally close to the surface colour and becomes almost
+ * invisible when used as text/icon ink. Give every real category a stable,
+ * readable categorical accent instead.
+ */
+function categoryPaletteIndex(category: CategoryId, paletteSize: number): number {
+  if (paletteSize <= 1) return 0;
+  let hash = 0;
+  for (let index = 0; index < category.length; index += 1) {
+    hash = (hash * 31 + category.charCodeAt(index)) >>> 0;
+  }
+  return hash % paletteSize;
+}
+
 type Props = {
   periodLabel: string;
   totalFils: number;
@@ -187,7 +203,8 @@ export function SpendingOverview(p: Props) {
       {rows.map((row) => {
         const share = spendingShare(row.spentFils, p.totalFils);
         const shareLabel = spendingShareLabel(share, language);
-        const sliceColor = donutColors.get(row.category) ?? neutral;
+        const sliceColor = donutColors.get(row.category) ??
+          palette[categoryPaletteIndex(row.category, palette.length)] ?? theme.primary;
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
         accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${moneyLabel(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
@@ -201,16 +218,17 @@ export function SpendingOverview(p: Props) {
           <View style={styles.categoryBottom}>
             <ThemedText type="meta" tabular style={{ color: sliceColor }} testID={`spending-share-${row.category}`}>
               {shareLabel} {w.share}</ThemedText>
-            <Icon name="chevron-right" size={14} color={theme.textTertiary} />
+            <Icon name="chevron-right" size={14} color={theme.textSecondary} />
           </View>
           <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <ProgressBar ratio={share} color={sliceColor} height={3} />
+            <ProgressBar ratio={share} color={sliceColor} height={3}
+              trackColor={scheme === 'dark' ? theme.cardBorderStrong : theme.track} />
           </View>
           {row.limitFils !== null && <>
             <View style={[styles.categoryBottom, large && styles.stack]}>
               <ThemedText type="meta" themeColor={row.remainingFils! < 0 ? 'expense' : 'textSecondary'} style={styles.caption}>
                 {moneyLabel(Math.abs(row.remainingFils!))} {row.remainingFils! < 0 ? w.over : w.left}</ThemedText>
-              <ThemedText type="meta" tabular themeColor="textTertiary" style={styles.caption}>
+              <ThemedText type="meta" tabular themeColor="textSecondary" style={styles.caption}>
                 {Math.round(row.ratio! * 100)}% {w.budgetUsed}</ThemedText>
             </View>
           </>}
