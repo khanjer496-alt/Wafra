@@ -13,6 +13,11 @@ for scheme in dark light; do
     adb shell "cmd uimode night no"
   fi
 
+  adb shell pm clear app.wafra.android >/dev/null 2>&1 || true
+  adb shell monkey -p app.wafra.android -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+  sleep 6
+  adb exec-out screencap -p > "shots/android-$scheme-00-direct-launch.png" || true
+
   maestro test \
     -e APP_ID=app.wafra.android \
     -e SHOT_PREFIX="android-$scheme" \
