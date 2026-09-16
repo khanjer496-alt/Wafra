@@ -95,14 +95,27 @@ check('social card', fs.existsSync(path.join(outputDir, 'wafra-social.png')));
 check('home product image', fs.existsSync(path.join(outputDir, 'wafra-app-home.png')));
 check('bills product image', fs.existsSync(path.join(outputDir, 'wafra-app-bills.png')));
 
-const privatePages = findHtmlFiles(outputDir).filter((file) => file !== 'index.html');
+const htmlPages = findHtmlFiles(outputDir).filter((file) => file !== 'index.html');
+const publicPages = ['privacy/index.html', 'terms/index.html', 'support/index.html'];
+const privatePages = htmlPages.filter((file) => !publicPages.includes(file) && file !== '404.html');
 check(
-  'every non-root HTML route is noindex',
-  privatePages.length > 0 &&
-  privatePages.every((file) => /name="robots" content="noindex, nofollow, noarchive"/.test(read(file))),
+  'dedicated public legal and support pages',
+  publicPages.every((file) => fs.existsSync(path.join(outputDir, file)) && /name="robots" content="index, follow"/.test(read(file))),
 );
 check(
-  'non-root app routes retain JavaScript',
+  'public pages are static and cross-linked',
+  publicPages.every((file) => !/<script\b/i.test(read(file)) && ['/privacy/', '/terms/', '/support/'].every((route) => read(file).includes(`href="${route}"`))),
+);
+check(
+  'custom 404 is noindex',
+  fs.existsSync(path.join(outputDir, '404.html')) && /name="robots" content="noindex, nofollow, noarchive"/.test(read('404.html')) && /That page is not here/.test(read('404.html')),
+);
+check(
+  'every private app route is noindex',
+  privatePages.length > 0 && privatePages.every((file) => /name="robots" content="noindex, nofollow, noarchive"/.test(read(file))),
+);
+check(
+  'private app routes retain JavaScript',
   privatePages.every((file) => /<script\b[^>]*\bsrc=/.test(read(file))),
 );
 
