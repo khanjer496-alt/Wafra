@@ -98,6 +98,7 @@ import {
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
+import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
 import {
@@ -120,6 +121,7 @@ import {
   normalizeIosCaptureWarningState,
   normalizeLocalCaptureQualifications,
   type Account,
+  type AndroidCaptureSources,
   type AppState,
   type Bill,
   type BillAlias,
@@ -771,6 +773,7 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
+  | { type: 'setAndroidCaptureSources'; sources: AndroidCaptureSources }
   | { type: 'recordIosCaptureWarning'; warning: IosCaptureWarningState }
   | { type: 'clearIosCaptureWarning'; expectedWarningId: string | null }
   | { type: 'setHistoryImport'; progress: HistoryImportProgress }
@@ -1376,6 +1379,8 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
+    case 'setAndroidCaptureSources':
+      return { ...state, androidCaptureSources: action.sources };
     case 'recordStatementCoverage': {
       const duplicate = state.statementCoverage.find((item) =>
         item.sourceKey === action.entry.sourceKey && item.startDate === action.entry.startDate &&
@@ -1529,6 +1534,7 @@ interface StoreValue {
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
+  setAndroidCaptureSources: (sources: AndroidCaptureSources) => Promise<void>;
   recordIosCaptureWarning: (input: IosCaptureWarningState) => { durable: Promise<void> };
   clearIosCaptureWarning: (
     expectedWarningId: string | null,
@@ -2477,6 +2483,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Capture preference could not be saved');
   }, [dispatch, persist]);
 
+  const setAndroidCaptureSources = useCallback(async (sources: AndroidCaptureSources) => {
+    if (Platform.OS !== 'android') return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const { default: reader } = await import('../../modules/notification-reader');
+    if (reader?.isAvailable() === true) {
+      const anySource = sources.sms || sources.notifications;
+      const expiresAt = anySource
+        ? bankNotificationAdmissionExpiresAt(authoritativeState.current)
+        : 0;
+      const configured = reader.setSourceConfiguration
+        ? await reader.setSourceConfiguration(sources.notifications, expiresAt)
+        : await reader.setCaptureEnabled(sources.notifications, sources.notifications ? expiresAt : 0);
+      if (!configured) throw new Error('Android capture sources could not be configured');
+    }
+    const next = dispatch({ type: 'setAndroidCaptureSources', sources });
+    const written = await persist(next);
+    if (!written) throw new Error('Android capture sources could not be saved');
+  }, [dispatch, persist]);
+
   const recordIosCaptureWarning = useCallback((input: IosCaptureWarningState) => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -2785,6 +2813,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setAndroidCaptureSources,
       recordIosCaptureWarning,
       clearIosCaptureWarning,
       setHistoryImportProgress,
@@ -2849,6 +2878,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setAndroidCaptureSources,
       recordIosCaptureWarning,
       clearIosCaptureWarning,
       setHistoryImportProgress,

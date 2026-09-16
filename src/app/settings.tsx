@@ -84,6 +84,7 @@ import {
 } from '@/lib/founder-pro';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
 import { ledgerCurrencyDisplay, marketCurrencyCode } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
@@ -149,6 +150,7 @@ export default function SettingsScreen() {
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
+    setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
     setUiLanguage,
@@ -368,10 +370,12 @@ export default function SettingsScreen() {
   const toggleSms = async (enabled: boolean) => {
     if (!enabled) {
       try {
-        // This is the immediate in-app off switch. Android cannot revoke its
-        // own runtime permission, so the durable preference is the barrier;
-        // system settings are offered as the optional second layer.
-        await setCaptureOptOut(true);
+        // Android cannot revoke READ_SMS itself, so the durable source choice
+        // is the real in-app barrier. Keep bank-app notifications alive when
+        // the user selected that independent source.
+        const currentSources = resolvedAndroidCaptureSources(getStateSnapshot());
+        await setAndroidCaptureSources({ ...currentSources, sms: false });
+        if (!currentSources.notifications) await setCaptureOptOut(true);
       } catch {
         Alert.alert(t('capturePreferenceFailed'));
         return;
@@ -395,6 +399,8 @@ export default function SettingsScreen() {
     setSmsGranted(granted);
     if (granted) {
       try {
+        const currentSources = resolvedAndroidCaptureSources(getStateSnapshot());
+        await setAndroidCaptureSources({ ...currentSources, sms: true });
         await setCaptureOptOut(false);
       } catch {
         Alert.alert(t('capturePreferenceFailed'));
@@ -608,17 +614,28 @@ export default function SettingsScreen() {
   };
 
   const [notifEnabled, setNotifEnabled] = useState(false);
-  const instantAlertSourceReady = smsGranted || notifEnabled;
+  const selectedAndroidSources = resolvedAndroidCaptureSources(state);
+  const smsSourceReady = smsGranted && selectedAndroidSources.sms;
+  const instantAlertSourceReady = smsSourceReady || notifEnabled;
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
-      try { setNotifEnabled(notifAvailable && NotificationReader?.isEnabled() === true); }
+      try {
+        const selected = resolvedAndroidCaptureSources(getStateSnapshot());
+        setNotifEnabled(notifAvailable && selected.notifications &&
+          NotificationReader?.isEnabled() === true &&
+          NotificationReader?.hasSystemAccess?.() === true);
+      }
       catch { setNotifEnabled(false); }
     };
     refresh();
-    if (notifAvailable && !state.captureOptOut && proActive) {
-      void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(getStateSnapshot()))
-        .then(refresh).catch(() => {});
+    if (notifAvailable && selectedAndroidSources.notifications && !state.captureOptOut && proActive) {
+      const reader = NotificationReader;
+      const expiresAt = bankNotificationAdmissionExpiresAt(getStateSnapshot());
+      const configure = reader?.setSourceConfiguration
+        ? reader.setSourceConfiguration(true, expiresAt)
+        : reader?.setCaptureEnabled(true, expiresAt);
+      void configure?.then(refresh).catch(() => {});
     }
     const subscription = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
@@ -636,10 +653,9 @@ export default function SettingsScreen() {
         try {
           // A canceled system permission flow must leave a prior global
           // opt-out intact. Resume only after the OS confirms this grant.
+          const sources = resolvedAndroidCaptureSources(current);
+          await setAndroidCaptureSources({ ...sources, notifications: true });
           if (wasOptedOut) await setCaptureOptOut(false);
-          if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(current)))) {
-            throw new Error('notification_capture_unavailable');
-          }
           // The bank-listener grant lets Wafra READ bank-app notifications.
           // A separate Android permission controls whether Wafra can show its
           // own visible confirmation. Ask here, after the user explicitly
@@ -654,7 +670,8 @@ export default function SettingsScreen() {
       })();
     });
     return () => subscription.remove();
-  }, [getStateSnapshot, notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
+  }, [getStateSnapshot, notifAvailable, proActive, setAndroidCaptureSources,
+    setCaptureOptOut, state.androidCaptureSources?.notifications, state.captureOptOut]);
   const onNotificationAccess = () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader) {
@@ -1252,8 +1269,8 @@ export default function SettingsScreen() {
           {isSmsScanningAvailable() &&
             switchRow(
               t('readBankSms'),
-              t(smsGranted && !state.captureOptOut ? 'smsGrantedLocal' : 'smsOffNoImport'),
-              smsGranted && !state.captureOptOut,
+              t(smsSourceReady ? 'smsGrantedLocal' : 'smsOffNoImport'),
+              smsSourceReady,
               toggleSms,
             )}
           {state.historyImport && state.historyImport.status !== 'complete' ? (

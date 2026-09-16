@@ -44,6 +44,10 @@ import {
 } from '@/lib/capture';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { installAndroidLiveCaptureLedger } from '@/lib/android-live-background';
+import {
+  androidNotificationCaptureEnabled,
+  androidSmsCaptureEnabled,
+} from '@/lib/android-capture-sources';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
@@ -622,12 +626,22 @@ export function useAutoImport(
     if (Platform.OS !== 'android') return;
     const { default: reader } = await import('../../modules/notification-reader');
     if (!reader?.setCaptureEnabled) return;
-    const enabled = current.hydrated && current.onboarded &&
-      !current.captureOptOut && isProActive(current);
-    await reader.setCaptureEnabled(
-      enabled,
-      enabled ? bankNotificationAdmissionExpiresAt(current) : 0,
-    );
+    const smsEnabled = androidSmsCaptureEnabled(current);
+    const notificationEnabled = androidNotificationCaptureEnabled(current);
+    const leaseEnabled = current.hydrated && current.onboarded &&
+      (smsEnabled || notificationEnabled) && isProActive(current);
+    const expiresAt = leaseEnabled ? bankNotificationAdmissionExpiresAt(current) : 0;
+    if (reader.setSourceConfiguration) {
+      await reader.setSourceConfiguration(notificationEnabled && leaseEnabled, expiresAt);
+    } else {
+      // Older native builds cannot represent SMS-only as a separate lease.
+      // Prefer not capturing notifications the user disabled; foreground SMS
+      // still works until the native update provides source separation.
+      await reader.setCaptureEnabled(
+        notificationEnabled && leaseEnabled,
+        notificationEnabled && leaseEnabled ? expiresAt : 0,
+      );
+    }
   }, []);
   const sharedAccessUnavailable = React.useSyncExternalStore(
     subscribeSmsAccess,
@@ -880,7 +894,13 @@ export function useAutoImport(
       // on.
       if (state.captureOptOut) return 'unavailable';
       if (!isCaptureAvailable()) return 'unavailable';
-      if (historyRunning && Platform.OS === 'android' && !hasBankNotificationAccess()) {
+      const smsSourceEnabled = Platform.OS !== 'android' || androidSmsCaptureEnabled(state);
+      const notificationSourceEnabled = Platform.OS === 'android' && androidNotificationCaptureEnabled(state);
+      if (Platform.OS === 'android' && !smsSourceEnabled && !notificationSourceEnabled) {
+        return 'unavailable';
+      }
+      if (historyRunning && Platform.OS === 'android' &&
+        !(notificationSourceEnabled && hasBankNotificationAccess())) {
         return 'history-import-running';
       }
       let outcome: Awaited<ReturnType<typeof captureExecutor.execute>> | null = null;
@@ -919,15 +939,17 @@ export function useAutoImport(
           reviewAlerts: (local?.reviews ?? 0) + (supplementalSummary?.reviewAlerts ?? 0),
         };
       } else if (isSmsScanningAvailable()) {
-        let granted = await hasSmsPermission();
-        const notificationAccess = hasBankNotificationAccess();
-        if (!granted && !notificationAccess && interactive) granted = await requestSmsPermission();
+        let granted = smsSourceEnabled ? await hasSmsPermission() : false;
+        const notificationAccess = notificationSourceEnabled && hasBankNotificationAccess();
+        if (smsSourceEnabled && !granted && !notificationAccess && interactive) {
+          granted = await requestSmsPermission();
+        }
         if (historyRunning && granted && !notificationAccess) return 'history-import-running';
         if (!granted && !notificationAccess) {
-          setSharedSmsAccessUnavailable(true);
-          setNeedsPermission(true);
+          setSharedSmsAccessUnavailable(smsSourceEnabled);
+          setNeedsPermission(smsSourceEnabled);
           setCaptureState('off');
-          if (interactive) {
+          if (interactive && smsSourceEnabled) {
             toast.show(t('smsAccessOff'), {
               tone: 'warning',
               actions: [{
@@ -939,7 +961,7 @@ export function useAutoImport(
           return 'no-permission';
         }
         notificationOnly = !granted || Boolean(historyRunning && notificationAccess);
-        setNeedsPermission(!granted);
+        setNeedsPermission(smsSourceEnabled && !granted);
         setCaptureState('waiting-for-alert');
       }
 
@@ -950,7 +972,7 @@ export function useAutoImport(
           if (!isSmsInboxAccessError(error)) throw error;
           setSharedSmsAccessUnavailable(true);
           setNeedsPermission(true);
-          if (hasBankNotificationAccess()) {
+          if (notificationSourceEnabled && hasBankNotificationAccess()) {
             // A restricted SMS provider must not strand the independent,
             // encrypted bank-app queue or advance the SMS cursor.
             notificationOnly = true;
@@ -1143,7 +1165,8 @@ export function useAutoImport(
 
     const current = getStateSnapshot();
     if (!current.hydrated || !current.onboarded || current.captureOptOut ||
-      !isProActive(current) || !hasBankNotificationAccess()) return;
+      !androidNotificationCaptureEnabled(current) || !isProActive(current) ||
+      !hasBankNotificationAccess()) return;
     if (!androidNotificationDrainRequired &&
         Date.now() - androidNotificationLastCheckedAt < ANDROID_NOTIFICATION_RECHECK_MS) return;
 
@@ -1173,7 +1196,7 @@ export function useAutoImport(
   // path never reads the SMS inbox, so it is cheap and bypasses SMS freshness.
   useEffect(() => {
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
-      !state.onboarded || state.captureOptOut || !entitlementActive) return;
+      !state.onboarded || !androidNotificationCaptureEnabled(state) || !entitlementActive) return;
     let mounted = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = () => {
@@ -1203,6 +1226,7 @@ export function useAutoImport(
       subscription.remove();
     };
   }, [entitlementActive, runAndroidNotificationDrain, state.captureOptOut,
+    state.androidCaptureSources?.notifications,
     state.hydrated, state.onboarded, watchForeground]);
 
   // Truly live bank-app capture while Wafra is already open. The native
@@ -1212,13 +1236,13 @@ export function useAutoImport(
   // full notification-shade scan is performed.
   useEffect(() => {
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
-      !state.onboarded || state.captureOptOut || !entitlementActive ||
+      !state.onboarded || !androidNotificationCaptureEnabled(state) || !entitlementActive ||
       !NotificationReader?.addListener) return;
     let mounted = true;
     const canDrain = () => {
       const current = getStateSnapshot();
       return mounted && RNAppState.currentState === 'active' && current.hydrated &&
-        current.onboarded && !current.captureOptOut && isProActive(current) &&
+        current.onboarded && androidNotificationCaptureEnabled(current) && isProActive(current) &&
         hasBankNotificationAccess();
     };
     const scheduler = createInboxRefreshScheduler(async () => {
@@ -1242,6 +1266,7 @@ export function useAutoImport(
       scheduler.dispose();
     };
   }, [entitlementActive, getStateSnapshot, runAndroidNotificationDrain, state.captureOptOut,
+    state.androidCaptureSources?.notifications,
     state.hydrated, state.onboarded, watchForeground]);
 
   /**
@@ -1273,13 +1298,13 @@ export function useAutoImport(
 
   useEffect(() => {
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
-      !state.onboarded || state.captureOptOut || !entitlementActive) return;
+      !state.onboarded || !androidSmsCaptureEnabled(state) || !entitlementActive) return;
     let mounted = true;
     let providerHintPending = false;
     const canScan = () => {
       const current = getStateSnapshot();
       return mounted && RNAppState.currentState === 'active' && current.hydrated &&
-        current.onboarded && !current.captureOptOut && isProActive(current);
+        current.onboarded && androidSmsCaptureEnabled(current) && isProActive(current);
     };
     const scheduler = createInboxRefreshScheduler(async () => {
       // Clear only when the queued source evidence actually enters the scan
@@ -1341,6 +1366,7 @@ export function useAutoImport(
   // the native inbox observer, the AppState listener and the scheduler every
   // ~500ms for the whole of a history import.
   }, [entitlementActive, getStateSnapshot, needsPermission, state.captureOptOut,
+    state.androidCaptureSources?.sms,
     state.hydrated, state.onboarded, watchForeground]);
 
   // The native signal carries no source data and is only a foreground hint.

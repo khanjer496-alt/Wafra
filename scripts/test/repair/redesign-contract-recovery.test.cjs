@@ -57,23 +57,20 @@ for(const language of ['en','ar']) {
   }
   assert.equal(h.events.length,4);
  });
- test(`${language}: inline first-run example stays optional and never writes the ledger`,()=>{
+ test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
   // focus + tracking added two useState slots ahead of resumeReady; slot 4 now
   // represents the hydrated/resume-ready gate in this source-executed harness.
-  const h=createWorkflowHarness({language,state:{onboarded:false},states:{4:true}}),tree=h.renderScreen('onboarding');
-  const label=h.deps['@/lib/i18n'].t('onboardSampleAction');
-  assert.ok(walk(tree).some(n=>n.props.testID==='onboarding-example'));
-  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===h.deps['@/lib/i18n'].t('onboardChooseStart')));
-  assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('onboardSampleNote')));
-  const button=walk(tree).find(n=>n.props.onPress&&n.props.accessibilityLabel===label);assert.ok(button);
-  assert.deepEqual(h.events,[]);button.props.onPress();
-  assert.equal(h.events.length,1);assert.equal(h.events[0][0],'state');assert.equal(h.events[0][2](false),true);
-  const demo=createWorkflowHarness({language,states:{0:false}}),preview=demo.deps['@/components/onboarding/money-preview'].MoneyPreview({reducedMotion:true});
-  const reveal=walk(preview).find(n=>n.props.onPress);assert.equal(reveal.props.accessibilityHint,demo.deps['@/lib/i18n'].t('onboardSampleNote'));reveal.props.onPress();
-  assert.equal(demo.events.length,1);assert.deepEqual(demo.events[0].slice(0,2),['state',0]);
-  assert.equal(demo.events[0][2](false),true);assert.equal(demo.events[0][2](true),false);
-  const shown=createWorkflowHarness({language,states:{0:true}}),shownTree=shown.deps['@/components/onboarding/money-preview'].MoneyPreview({reducedMotion:true});
-  assert.match(text(shownTree),/24\.50/);assert.deepEqual(shown.events,[]);
+  const h=createWorkflowHarness({language,state:{onboarded:false},states:{4:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
+  const scene=walk(tree).find(n=>n.props.testID==='onboarding-market-money-scene');assert.ok(scene);
+  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===t('onboardChooseStart')));
+  // Region-aware examples come from the market pack, not an invented partner list.
+  for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(scene).includes(bank),bank);
+  assert.match(text(scene),/120\.00/);
+  assert.match(text(scene),/7,062\.00/);
+  assert.ok(text(scene).includes(t('onboardSceneOrganized')));
+  // Nothing inside the scene is pressable, so the example cannot reach the store.
+  assert.ok(!walk(scene).some(n=>n.props.onPress));
+  assert.deepEqual(h.events,[]);
  });
 }
 test('centralized reference translations have equal, nonempty EN/AR keys',()=>{
@@ -81,6 +78,6 @@ test('centralized reference translations have equal, nonempty EN/AR keys',()=>{
  assert.equal(Object.keys(tables).length,5);
  for(const[name,table]of Object.entries(tables)){
   assert.deepEqual(Object.keys(table.en).sort(),Object.keys(table.ar).sort(),name);
-  for(const value of Object.values(table.ar))assert.match(value,/[\u0600-\u06ff]/);
+  for(const value of Object.values(table.ar))assert.match(typeof value==='function'?value(2):value,/[\u0600-\u06ff]/);
  }
 });

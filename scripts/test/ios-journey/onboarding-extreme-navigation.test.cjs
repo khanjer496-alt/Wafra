@@ -13,7 +13,7 @@ const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node
   ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const text = node => Array.isArray(node) ? node.map(text).join(' ') : node && typeof node === 'object'
   ? text(node.props?.children) : typeof node === 'string' || typeof node === 'number' ? String(node) : '';
-const profile = (stage, focus = 'spending', tracking = 'bank-apps') => ({ v: 1, stage, focus, tracking, startedAt: 123 });
+const profile = (stage, focus = 'spending', tracking = 'bank-apps', intention = 'control') => ({ v: 1, stage, focus, tracking, intention, startedAt: 123 });
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -60,6 +60,8 @@ async function gate(options = {}) {
   const record = (name, value) => events.push([name, value === undefined ? undefined : clone(value)]);
   const slot = create => { const index = cursor++; return slots[index] ?? (slots[index] = create()); };
   const react = {
+    useMemo: compute => compute(),
+    useCallback: callback => callback,
     useRef: value => slot(() => ({ current: value })),
     useState(initial) { const s = slot(() => ({ value: typeof initial === 'function' ? initial() : initial }));
       return [s.value, value => { if (mounted) s.value = typeof value === 'function' ? value(s.value) : value; }]; },
@@ -90,21 +92,38 @@ async function gate(options = {}) {
     setOnboardingProfile(value) { ledger = { ...ledger, onboardingProfile: clone(value) }; record('profile', value); },
     setOnboardingPlan(value) { ledger = { ...ledger, onboardingPlan: clone(value) }; },
     setOnboarded() { ledger = { ...ledger, onboarded: true }; record('onboarded'); },
+    setDailySummary(value) { ledger = { ...ledger, dailySummary: value }; record('dailySummary', value); },
     async setCaptureOptOut(value) {
       await call('setCaptureOptOut', value);
       ledger = { ...ledger, captureOptOut: value }; durable = clone(ledger);
     },
+    async setAndroidCaptureSources(value) {
+      await call('setAndroidCaptureSources', value);
+      ledger = { ...ledger, androidCaptureSources: clone(value) }; durable = clone(ledger);
+    },
     async ensureDurable() { await call('ensureDurable'); durable = clone(ledger); },
     beginHistoryImport: () => call('beginHistoryImport'),
   };
-  const animation = { duration: () => ({}) };
+  const animation = { duration: () => animation, delay: () => animation };
   const dependencies = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6' }, View: 'View', Pressable: 'Pressable',
-      ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
+    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', Pressable: 'Pressable',
+      AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
       Linking: { openSettings: () => call('openSettings') } },
-    'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View', ScrollView: 'Animated.ScrollView' },
-      FadeIn: animation, FadeInDown: animation },
+    'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View', ScrollView: 'Animated.ScrollView', createAnimatedComponent: component => component },
+      FadeIn: animation, FadeInDown: animation, Easing: { out: easing => easing, inOut: easing => easing, cubic: value => value, sin: value => value, linear: value => value },
+      useSharedValue: value => ({ value }), useAnimatedStyle: build => build(), withTiming: value => value,
+      withDelay: (_delay, value) => value, withSpring: value => value, withRepeat: value => value, interpolate: () => 0, interpolateColor: () => 'transparent' },
+    'expo-linear-gradient': { LinearGradient: 'LinearGradient' },
+    'expo-image': { Image: 'Image' }, 'expo-localization': { getLocales: () => [{ regionCode: 'AE' }] },
+    '@/lib/verified-logo-identities': { verifiedLogoUrl: () => null },
+    '@/lib/onboarding-bank-examples': load(path.join(root, 'src/lib/onboarding-bank-examples.ts'), {
+      '@/lib/markets': { MARKETS: [{ id: 'AE', currency: { code: 'AED' }, banks: [
+        { name: 'Emirates NBD', domain: 'emiratesnbd.com', color: '#2B4C9B' }, { name: 'FAB', domain: 'bankfab.com', color: '#00A3E0' },
+        { name: 'ADCB', domain: 'adcb.com', color: '#E4032E' }] }] } }),
+    '@/lib/onboarding-alert-examples': load(path.join(root, 'src/lib/onboarding-alert-examples.ts'), {
+      '@/components/ui/icon.types': {},
+    }),
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'expo-status-bar': { StatusBar: 'StatusBar' },
     'expo-router': { useRouter: () => router, usePathname: () => input.pathname, useGlobalSearchParams: () => input.params },
     '@/hooks/use-language': { useLanguage: () => language },
@@ -112,10 +131,12 @@ async function gate(options = {}) {
     '@/components/storage-recovery': { StorageRecovery: 'StorageRecovery' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/bottom-sheet': { BottomSheet: 'BottomSheet' },
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' }, '@/components/ui/controls': { Button: 'Button' },
-    '@/components/ui/icon': { Icon: 'Icon' }, '@/components/onboarding/money-preview': { MoneyPreview: 'MoneyPreview' },
+    '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/wafra-logo': { WafraMark: 'WafraMark' }, '@/constants/theme': theme,
-    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true) },
+    '@/lib/auto-import': { isSmsScanningAvailable: () => true, requestSmsPermission: () => call('requestSmsPermission', undefined, true), hasSmsPermission: () => call('hasSmsPermission', undefined, false), hasBankNotificationSystemAccess: () => options.notificationAccess ?? false, openBankNotificationAccessSettings: () => call('openBankNotificationAccessSettings', undefined, true) },
     '@/lib/haptics': { committed: () => record('committed'), tapped() {} },
+    '@/lib/notifications': { cancelDailySummary: () => call('cancelDailySummary'), syncDailySummary: () => call('syncDailySummary'),
+      requestVisibleNotificationPermission: () => call('requestVisibleNotificationPermission', undefined, false) },
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'test' }, trackGrowthEvent() {} },
     '@/lib/i18n': translate, '@/lib/onboarding': onboarding,
     '@/lib/ios-message-onboarding': {
@@ -127,7 +148,13 @@ async function gate(options = {}) {
     '@/lib/relay': { getRelayConfigStrict: () => call('getRelayConfigStrict', undefined, null), unpairDevice: value => call('unpairDevice', value) },
     '@/lib/shortcut-cleanup': { openShortcutsApp: () => call('openShortcutsApp') },
     '@/lib/store': { useStore: () => store },
+    '../../modules/notification-reader': { __esModule: true, default: {
+      setCaptureEnabled: (_enabled, _expiresAt) => call('notificationSetCaptureEnabled', undefined, true),
+    } },
+    '@/lib/trusted-bank-notification-packages': { bankNotificationAdmissionExpiresAt: () => 1_900_000_000_000 },
   };
+  // The choosers are real source: the journey below picks options through their radio semantics.
+  dependencies['@/components/onboarding/alive-scenes'] = load(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), dependencies);
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
@@ -178,8 +205,9 @@ module.exports = { gate, profile };
 
 if (require.main === module) {
 const stageHeading = { welcome: 'onboardHeadline', focus: 'onboardFocusTitle', tracking: 'onboardTrackingTitle',
-  preview: 'onboardOutcomeTitle', privacy: 'onboardPrivacyTitle', capture: 'onboardCaptureTitleIos' };
-const at = (h, stage) => assert.ok(h.text().includes(h.t(stageHeading[stage])), `Expected ${stage}; ${h.text()}`);
+  intention: 'onboardIntentionTitle', preview: 'onboardPersonalizedTitle', capture: 'onboardCaptureTitleIos' };
+const normalizeVisible = value => String(value).replace(/\s+/g, ' ').trim();
+const at = (h, stage) => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t(stageHeading[stage]))), `Expected ${stage}; ${h.text()}`);
 const calls = (h, name) => h.events.filter(event => event[0] === name);
 
 for (const language of ['en', 'ar']) {
@@ -189,14 +217,17 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.control('continueWord').disabled, true);
     await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
     assert.equal(h.control('continueWord').disabled, true);
-    await h.choose(2); await h.press('continueWord'); at(h, 'preview');
-    await h.press('continueWord'); at(h, 'privacy');
-    await h.press('onboardPrivacyContinue'); at(h, 'capture');
-    for (const stage of ['privacy', 'preview', 'tracking', 'focus', 'welcome']) { await h.press('onboardBack'); at(h, stage); }
+    await h.choose(2); await h.press('continueWord'); at(h, 'intention');
+    assert.equal(h.control('continueWord').disabled, true);
+    await h.choose(3); await h.press('continueWord'); at(h, 'preview');
+    await h.press('onboardConnectMyMoney'); at(h, 'capture');
+    for (const stage of ['preview', 'intention', 'tracking', 'focus', 'welcome']) { await h.press('onboardBack'); at(h, stage); }
     await h.press('onboardChooseStart'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
-    await h.press('continueWord'); await h.press('continueWord'); await h.press('onboardPrivacyContinue'); at(h, 'capture');
-    assert.equal(h.state.onboardingProfile.focus, 'bills'); assert.equal(h.state.onboardingProfile.tracking, 'spreadsheet');
+    await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
+    await h.press('continueWord'); await h.press('onboardConnectMyMoney'); at(h, 'capture');
+    assert.equal(h.state.onboardingProfile.focus, 'bills'); assert.equal(h.state.onboardingProfile.tracking, 'finance-app');
+    assert.equal(h.state.onboardingProfile.intention, 'build-buffer');
     assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
     assert.deepEqual(h.state.transactions, []); assert.equal(calls(h, 'setCaptureOptOut').length, 0);
   });
@@ -211,6 +242,14 @@ for (const stage of Object.keys(stageHeading)) {
   });
 }
 
+test('legacy saved privacy stage resumes at the integrated preview', async () => {
+  const h = await gate({ profile: profile('privacy') });
+  at(h, 'preview');
+  assert.equal(h.state.onboardingProfile.startedAt, 123);
+  assert.deepEqual(h.routes, []);
+  assert.equal(calls(h, 'beginHistoryImport').length, 0);
+});
+
 test('manual selection survives a cold restart without forcing the questionnaire again', async () => {
   const h = await gate({ profile: profile('capture') });
   await h.press('onboardManualChoiceIos');
@@ -224,13 +263,25 @@ test('manual selection survives a cold restart without forcing the questionnaire
   assert.equal(restarted.state.captureOptOut, true); assert.equal(restarted.state.onboarded, false);
 });
 
+test('welcome animates in without Reduce Motion and still exposes the market scene and start control', async () => {
+  const h = await gate({ reducedMotion: false });
+  at(h, 'welcome');
+  assert.ok(walk(h.tree).some(node => node.props?.testID === 'onboarding-market-money-scene'));
+  await h.press('onboardChooseStart'); at(h, 'focus');
+  await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
+  await h.choose(0); await h.press('continueWord'); at(h, 'intention');
+  await h.choose(0); await h.press('continueWord'); at(h, 'preview');
+  assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
+});
+
 test('setup Back returns to capture and preserves the selected first landing view', async () => {
   const h = await gate({ profile: profile('capture', 'bills') });
   await h.press('onboardAutomaticChoiceIos'); assert.equal(h.input.pathname, '/ios-setup');
   h.input.pendingSetup = true; await h.route('/ios-setup', { fromOnboarding: '1' });
   h.input.pendingSetup = false; await h.route('/'); at(h, 'capture');
   assert.equal(h.state.onboardingProfile.focus, 'bills');
-  await h.press('onboardBack'); at(h, 'privacy');
+  // Since the personalized reveal, capture returns straight to the preview; privacy is folded into capture.
+  await h.press('onboardBack'); at(h, 'preview');
 });
 
 for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta']) {
@@ -322,6 +373,8 @@ test('manual completion cannot leave on a failed profile/ledger save; Retry pres
   const h = await gate({ profile: profile('capture'), services: { ensureDurable: async () => { throw new Error('synthetic profile save failure'); } } });
   await h.press('onboardManualChoiceIos');
   const finish = h.control('onboardAddFirstEntry'); finish.onPress(); finish.onPress(); await h.flush();
+  // iOS asks about notifications once before the durable completion write.
+  await h.press('onboardNotificationsNotNow');
   assert.equal(calls(h, 'ensureDurable').length, 1); assert.deepEqual(h.routes, []);
   assert.ok(h.text().includes(h.t('onboardFinishSaveFailedTitle')));
   assert.equal(h.control('onboardBack').disabled, true);
@@ -337,6 +390,7 @@ for (const [focus, label, destination] of [['spending', 'onboardOpenSpending', '
   test(`manual finish opens the selected ${focus} view only after durable completion`, async () => {
     const save = deferred(); const h = await gate({ profile: profile('capture', focus), services: { ensureDurable: () => save.promise } });
     await h.press('onboardManualChoiceIos'); h.control(label).onPress(); await h.flush();
+    await h.press('onboardNotificationsNotNow');
     assert.deepEqual(h.routes, []); assert.equal(calls(h, 'committed').length, 0);
     save.resolve(); await h.flush();
     assert.deepEqual(h.routes, [['replace', destination]]); assert.equal(h.durable.onboarded, true);
@@ -372,10 +426,12 @@ test('six full Back/Next cycles preserve the latest answers without starting cap
     await h.press('onboardChooseStart');
     await h.choose(cycle % 4); await h.press('continueWord');
     await h.choose((cycle + 1) % 4); await h.press('continueWord');
-    await h.press('continueWord'); await h.press('onboardPrivacyContinue'); at(h, 'capture');
+    await h.choose((cycle + 2) % 4); await h.press('continueWord');
+    await h.press('onboardConnectMyMoney'); at(h, 'capture');
     assert.equal(h.state.onboardingProfile.focus, ['spending', 'bills', 'cashflow', 'overview'][cycle % 4]);
-    assert.equal(h.state.onboardingProfile.tracking, ['none', 'bank-apps', 'spreadsheet', 'finance-app'][(cycle + 1) % 4]);
-    for (const stage of ['privacy', 'preview', 'tracking', 'focus', 'welcome']) {
+    assert.equal(h.state.onboardingProfile.tracking, ['bank-apps', 'spreadsheet', 'finance-app', 'none'][(cycle + 1) % 4]);
+    assert.equal(h.state.onboardingProfile.intention, ['control', 'spend-intentionally', 'stay-ahead', 'build-buffer'][(cycle + 2) % 4]);
+    for (const stage of ['preview', 'intention', 'tracking', 'focus', 'welcome']) {
       await h.press('onboardBack'); at(h, stage);
       assert.equal(h.state.onboardingProfile.stage, stage);
     }
@@ -386,7 +442,7 @@ test('six full Back/Next cycles preserve the latest answers without starting cap
 
 test('a completion callback reaches completion without replaying the saved setup redirect', async () => {
   const h = await gate({ profile: profile('capture'), pendingSetup: true, params: { onboarding: 'complete' } });
-  assert.ok(h.text().includes(h.t('onboardCompleteTitle')));
+  assert.ok(h.text().includes(h.t('onboardCompleteAutomaticTitle')));
   assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
   await h.press('onboardBack'); at(h, 'capture');
   assert.equal(h.input.params.onboarding, undefined);
@@ -397,7 +453,7 @@ test('failed-save Retry preserves the explicitly selected Pro destination after 
   const h = await gate({ profile: profile('capture'), params: { onboarding: 'complete' },
     ledger: { transactions: [{ id: 'synthetic-imported-entry' }] },
     services: { ensureDurable: async () => { throw new Error('synthetic save failure'); } } });
-  await h.press('onboardProPreviewAction');
+  await h.press('onboardProPreviewAction'); await h.press('onboardNotificationsNotNow');
   assert.deepEqual(h.routes, []); assert.ok(h.text().includes(h.t('onboardFinishSaveFailedTitle')));
   delete h.services.ensureDurable;
   await h.press('storageRecoveryRetry');
@@ -408,9 +464,10 @@ test('ordinary profile save failure cannot be turned into a successful final com
   const h = await gate({ profile: profile('focus'), services: {
     setCaptureOptOut: async () => { throw new Error('synthetic encrypted persistence failure'); },
   } });
-  await h.choose(0); await h.press('continueWord'); await h.choose(0);
+  await h.choose(0); await h.press('continueWord'); await h.choose(0); await h.press('continueWord');
+  await h.choose(0);
   await h.setFailure({ operation: 'write', message: 'synthetic profile persistence failure' });
-  await h.press('continueWord'); await h.press('continueWord'); await h.press('onboardPrivacyContinue');
+  await h.press('continueWord'); await h.press('onboardConnectMyMoney');
   await h.press('onboardManualChoiceIos');
   assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
   assert.equal(calls(h, 'committed').length, 0);

@@ -292,15 +292,15 @@ const onboardingBankExamplesSource = fs.readFileSync(
 );
 
 ok(
-  'value-first onboarding precedes optional planning without forcing a country',
-  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview']") &&
-    gateSource.includes("const PLAN_STEPS: readonly Step[] = ['goals', 'budget']") &&
+  'first-run personalization is one integrated journey without the optional goals/budget wizard',
+  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
     gateSource.includes('<FocusChooser value={focus} onChange={chooseFocus}') &&
     gateSource.includes('<TrackingChooser value={tracking} onChange={chooseTracking}') &&
-    gateSource.includes('setOnboardingPlan(plan)') &&
-    !gateSource.includes('setMarket(plan.answers.marketId)') &&
-    !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
-    !gateSource.includes('plan.goals.forEach(addGoal)'),
+    gateSource.includes('<IntentionChooser value={intention} onChange={chooseIntention}') &&
+    !gateSource.includes('PLAN_STEPS') &&
+    !gateSource.includes("activeStep === 'goals'") &&
+    !gateSource.includes("activeStep === 'budget'") &&
+    !gateSource.includes('onboardPersonalizeOptional'),
 );
 ok(
   'starter-plan copy waits for real income instead of implying country support',
@@ -324,15 +324,15 @@ ok(
     !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
 );
 ok(
-  'welcome money reveal transforms the same bank rows instead of rendering a duplicate before-and-after card stack',
-  /function RevealRow/.test(aliveScenesSource) &&
-    /useSharedValue/.test(aliveScenesSource) &&
-    /withDelay/.test(aliveScenesSource) &&
-    /withTiming/.test(aliveScenesSource) &&
-    /onboardSceneFromAlerts/.test(aliveScenesSource) &&
-    /onboardSceneToLedger/.test(aliveScenesSource) &&
-    !/function AlertSlip/.test(aliveScenesSource) &&
-    !/styles\.organizeRail|styles\.ledgerRow/.test(aliveScenesSource),
+  'welcome money reveal drops real regional alerts and their bank logos independently',
+  /function PosterAlertCard/.test(aliveScenesSource) &&
+    /card\.value = withDelay[\s\S]*?withSpring/.test(aliveScenesSource) &&
+    /logo\.value = withDelay[\s\S]*?withSpring/.test(aliveScenesSource) &&
+    /translateY:[\s\S]*?-155/.test(aliveScenesSource) &&
+    /translateY:[\s\S]*?-72/.test(aliveScenesSource) &&
+    /onboardingAlertExamples/.test(aliveScenesSource) &&
+    /onboardSceneAlertsToPicture/.test(aliveScenesSource) &&
+    !/function MessageParse|function Token/.test(aliveScenesSource),
 );
 ok(
   'successful completion keeps Wafra identity and editorial result strips instead of a generic success card',
@@ -341,23 +341,27 @@ ok(
     !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
 );
 ok(
-  'capture choice is presented as two explicit accessible start modes',
-  /<StartOption automatic disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
-    /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
-    /accessibilityRole="button"/.test(gateSource) &&
-    /onboardAutomaticChoice/.test(gateSource) &&
-    /onboardManualChoice/.test(gateSource),
+  'Android capture exposes SMS, bank-app notifications, either, both, or manual',
+  /onPress=\{\(\) => void runSetupAction\(startScan\)\}/.test(gateSource) &&
+    /onPress=\{\(\) => void runSetupAction\(connectAndroidNotifications\)\}/.test(gateSource) &&
+    /finishAndroidCapture/.test(gateSource) &&
+    /onboardCaptureContinueBoth/.test(gateSource) &&
+    /onboardCaptureContinueOne/.test(gateSource) &&
+    /onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource),
 );
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
-  /Platform\.OS !== 'web' && \([\s\S]{0,180}<StartOption automatic disabled=/.test(gateSource) &&
+  /Platform\.OS === 'android' \?/.test(gateSource) &&
+    /\) : Platform\.OS === 'ios' \? \(/.test(gateSource) &&
     /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
 );
 ok(
-  'capture options are equally weighted and notification beta setup remains outside first run',
+  'Android notification capture is a first-class source while neither automatic source is visually recommended',
   !/styles\.startOptionFeatured|recommendedPill|t\('recommended'\)/.test(gateSource) &&
-    !/NotificationReader|alsoReadNotifs|notifNoteOnboard/.test(gateSource),
+    /NotificationReader/.test(gateSource) &&
+    /androidNotificationReady/.test(gateSource) &&
+    /androidSmsReady/.test(gateSource),
 );
 ok(
   'first-run gate exempts guided history routes only on iOS',
@@ -405,10 +409,9 @@ ok(
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
 ok(
-  'iOS onboarding has exactly two primary choices and puts full details behind Learn more',
-  (gateSource.match(/<StartOption/g) ?? []).length === 2 &&
-    /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
-    /<Pressable[\s\S]{0,420}onPress=\{\(\) => void runSetupAction\(continueManually\)\}[\s\S]{0,260}onboardManualChoiceIos/.test(gateSource) &&
+  'iOS onboarding keeps one automatic CTA, one manual fallback, and full details behind Learn more',
+  /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
+    /onboardManualChoiceIos/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
     /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&
     !iosVisibleCopy.includes(universalSenderLabel) &&
@@ -449,20 +452,19 @@ ok(
     )),
 );
 ok(
-  'first run waits for encrypted hydration and separates value-funnel progress from optional planning',
+  'first run waits for encrypted hydration and exposes one integrated journey progress bar',
   /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
     /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
     /JOURNEY_STEPS\.includes\(activeStep\)/.test(gateSource) &&
-    /PLAN_STEPS\.includes\(activeStep\)/.test(gateSource) &&
-    /progressSteps=\{personalizing/.test(gateSource),
+    !/PLAN_STEPS|personalizing/.test(gateSource),
 );
 ok(
-  'value flows directly into contextual capture trust, and Pro appears only after real activity exists',
-  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'privacy'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
+  'value flows through personal intention into preview and contextual capture trust',
+  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'intention'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
     /activeStep === 'preview'[\s\S]*?onPress=\{showCapture\}/.test(gateSource) &&
-    !/const showPrivacy\s*=/.test(gateSource) &&
+    !/activeStep === 'privacy'/.test(gateSource) &&
     /testID="onboarding-context-trust"/.test(gateSource) &&
     /discoveredResult && discoveredResult\.tx > 0[\s\S]*?onboardProPreviewAction/.test(gateSource) &&
     /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
@@ -477,8 +479,9 @@ ok(
     /onboardTrackingOneView/.test(aliveScenesSource),
 );
 ok(
-  'Android automatic setup persists a reveal checkpoint before final completion',
-  /await beginHistoryImport\(\)[\s\S]*?saveJourney\('complete'\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setCompletionOutcome\('automatic'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+  'Android source setup persists readiness before explicit final completion',
+  /await beginHistoryImport\(\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setAndroidSmsReady\(true\)/.test(gateSource) &&
+    /const finishAndroidCapture = async[\s\S]*?saveJourney\('complete'\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setCompletionOutcome\('automatic'\)/.test(gateSource) &&
     /outcome: outcomeOverride \?\? completionOutcome/.test(gateSource),
 );
 ok(
@@ -495,12 +498,13 @@ ok(
     /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
 );
 ok(
-  'completion copy matches automatic, manual, denied, and failed outcomes',
+  'completion copy distinguishes automatic, manual and failed outcomes while SMS denial stays inline',
   /type CompletionOutcome = 'automatic' \| 'manual' \| 'denied' \| 'failed'/.test(gateSource) &&
-    /setCompletionOutcome\('denied'\)/.test(gateSource) &&
     /setCompletionOutcome\('failed'\)/.test(gateSource) &&
     /onboardCompleteManualBody/.test(gateSource) &&
-    /onboardCompleteNeedsAttentionBody/.test(gateSource),
+    /onboardCompleteNeedsAttentionBody/.test(gateSource) &&
+    /onboardSmsDeniedInline/.test(gateSource) &&
+    !/setCompletionOutcome\('denied'\)/.test(gateSource),
 );
 ok(
   'the no-SMS onboarding choice durably opts out before completion',
@@ -513,10 +517,10 @@ ok(
     /const beginCapture = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource),
 );
 ok(
-  'Android stages the background history import, shows the reveal, and never blocks onboarding on inbox parsing',
-  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+  'Android stages history without inbox parsing and waits for explicit source-selection completion',
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setAndroidSmsReady\(true\)/.test(gateSource) &&
     !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource) &&
-    /automaticCompletion[\s\S]*?openWafra\(\)/.test(gateSource),
+    /const finishAndroidCapture = async[\s\S]*?setStep\('complete'\)/.test(gateSource),
 );
 ok(
   'Android resumes the configured automatic reveal after a restart instead of sending the user backward',

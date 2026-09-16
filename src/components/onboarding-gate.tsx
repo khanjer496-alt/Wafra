@@ -3,6 +3,7 @@ import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AppState as RNAppState,
   Linking,
   Platform,
   Pressable,
@@ -19,19 +20,25 @@ import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import {
   CaptureMarketScene,
   FocusChooser,
+  IntentionChooser,
+  OnboardingAtmosphere,
   PersonalizedProductPreview,
   TrackingChooser,
+  WafraTile,
   WelcomeMoneyScene,
 } from '@/components/onboarding/alive-scenes';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import {
+  hasBankNotificationSystemAccess,
+  hasSmsPermission,
   isSmsScanningAvailable,
+  openBankNotificationAccessSettings,
   requestSmsPermission,
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
@@ -48,32 +55,26 @@ import { t, tf, type StringKey } from '@/lib/i18n';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
-  BUDGET_PRESETS,
-  DEFAULT_ONBOARDING_PLAN,
-  GOAL_PRESETS,
   onboardingInsightKeys,
   onboardingLandingPath,
   onboardingResumeDestination,
-  type OnboardingBudgetId,
-  type OnboardingGoalId,
 } from '@/lib/onboarding';
+import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
-import type { OnboardingFocus, OnboardingTracking } from '@/lib/types';
+import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
+import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'intention'
   | 'preview'
-  | 'privacy'
-  | 'goals'
-  | 'budget'
   | 'capture'
   | 'complete';
-const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview'];
-const PLAN_STEPS: readonly Step[] = ['goals', 'budget'];
+const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview'];
 const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
@@ -136,67 +137,6 @@ function StartOption({
         <ThemedText style={styles.startOptionBody}>{body}</ThemedText>
       </View>
       <Icon name="chevron-right" size={18} color={automatic ? night.primary : night.textTertiary} />
-    </Pressable>
-  );
-}
-
-function SelectionRow({
-  title,
-  detail,
-  icon,
-  selected,
-  onPress,
-  role = 'radio',
-  hint,
-}: {
-  title: string;
-  detail: string;
-  icon: IconName;
-  selected: boolean;
-  onPress: () => void;
-  role?: AccessibilityRole;
-  hint?: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole={role}
-      accessibilityLabel={`${title}. ${detail}`}
-      accessibilityHint={hint}
-      accessibilityState={{ checked: selected }}
-      aria-checked={selected}
-      onPress={() => {
-        tapped();
-        onPress();
-      }}
-      style={({ pressed }) => [
-        styles.choice,
-        {
-          backgroundColor: selected ? night.primarySoft : night.backgroundElement,
-          borderColor: selected ? night.primary : night.cardBorder,
-          opacity: pressed ? 0.82 : 1,
-        },
-      ]}>
-      <View
-        style={[
-          styles.choiceIcon,
-          { backgroundColor: selected ? night.primary : night.backgroundSelected },
-        ]}>
-        <Icon name={icon} size={19} color={selected ? night.onPrimary : night.textSecondary} />
-      </View>
-      <View style={styles.choiceCopy}>
-        <ThemedText style={styles.choiceTitle}>{title}</ThemedText>
-        <ThemedText style={styles.choiceDetail}>{detail}</ThemedText>
-      </View>
-      <View
-        style={[
-          styles.selectionMark,
-          {
-            backgroundColor: selected ? night.primary : 'transparent',
-            borderColor: selected ? night.primary : night.cardBorderStrong,
-          },
-        ]}>
-        {selected && <Icon name="check" size={13} color={night.onPrimary} strokeWidth={2.2} />}
-      </View>
     </Pressable>
   );
 }
@@ -272,27 +212,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     beginHistoryImport,
     ensureDurable,
     setOnboarded,
-    setOnboardingPlan,
     setOnboardingProfile,
     setCaptureOptOut,
+    setAndroidCaptureSources,
     setDailySummary,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
   const [focus, setFocus] = useState<OnboardingFocus | null>(null);
   const [tracking, setTracking] = useState<OnboardingTracking | null>(null);
-  const [personalizing, setPersonalizing] = useState(false);
+  const [intention, setIntention] = useState<OnboardingIntention | null>(null);
   const [resumeReady, setResumeReady] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
   const [resumeAttempt, setResumeAttempt] = useState(0);
   const resumeHandled = useRef(false);
   const previouslyOnboarded = useRef(false);
-  const [plan, setPlan] = useState(() => ({
-    ...DEFAULT_ONBOARDING_PLAN,
-    goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds],
-  }));
-  const [goalLimitAnnounced, setGoalLimitAnnounced] = useState(false);
   const [result, setResult] = useState<{ tx: number; accounts: number; bills: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
+  const [androidSmsReady, setAndroidSmsReady] = useState(false);
+  const [androidNotificationReady, setAndroidNotificationReady] = useState(false);
+  const [awaitingNotificationAccess, setAwaitingNotificationAccess] = useState(false);
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
   const [learnMoreVisible, setLearnMoreVisible] = useState(false);
@@ -330,15 +268,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const saveJourney = (
-    stage: 'welcome' | 'focus' | 'tracking' | 'preview' | 'privacy' | 'capture' | 'complete',
+    stage: 'welcome' | 'focus' | 'tracking' | 'intention' | 'preview' | 'capture' | 'complete',
     nextFocus: OnboardingFocus | null = focus,
     nextTracking: OnboardingTracking | null = tracking,
+    nextIntention: OnboardingIntention | null = intention,
   ) => {
     setOnboardingProfile({
       v: 1,
       stage,
       focus: nextFocus,
       tracking: nextTracking,
+      intention: nextIntention,
       startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
     });
   };
@@ -360,9 +300,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setStep('welcome');
       setFocus(null);
       setTracking(null);
-      setPlan({ ...DEFAULT_ONBOARDING_PLAN, goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds] });
-      setPersonalizing(false);
+      setIntention(null);
       setResumeFailed(false);
+      setAndroidSmsReady(false);
+      setAndroidNotificationReady(false);
+      setAwaitingNotificationAccess(false);
       notificationDecisionMade.current = false;
       setPendingOpen(null);
     }
@@ -379,10 +321,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (state.onboardingProfile) {
       setFocus(state.onboardingProfile.focus);
       setTracking(state.onboardingProfile.tracking);
-    }
-    if (state.onboardingPlan) {
-      setPlan({ ...state.onboardingPlan, goalIds: [...state.onboardingPlan.goalIds] });
-      setPersonalizing(true);
+      setIntention(state.onboardingProfile.intention ?? null);
     }
     if (state.onboarded) {
       resumeHandled.current = true;
@@ -416,7 +355,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         });
         resumeHandled.current = true;
         if (destination === 'ios-setup') router.replace('/ios-setup?fromOnboarding=1');
-        else setStep(destination);
+        else setStep(destination === 'privacy' ? 'preview' : destination);
         setResumeReady(true);
         setResumeFailed(false);
       } catch {
@@ -492,8 +431,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const chooseIntention = (id: OnboardingIntention) => {
+    setIntention(id);
+    saveJourney('intention', focus, tracking, id);
+  };
+
   const showValuePreview = () => {
-    if (!focus || !tracking || !beginStepTransition()) return;
+    if (!focus || !tracking || !intention || !beginStepTransition()) return;
     saveJourney('preview');
     setStep('preview');
     trackGrowthEvent('onboarding_value_previewed', {
@@ -514,64 +458,89 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setStep('capture');
   };
 
-  const chooseGoal = (id: OnboardingGoalId) => {
-    setGoalLimitAnnounced(false);
-    setPlan((current) => {
-      if (current.goalIds.includes(id)) {
-        return { ...current, goalIds: current.goalIds.filter((goalId) => goalId !== id) };
-      }
-      if (current.goalIds.length >= 2) {
-        setGoalLimitAnnounced(true);
-        return current;
-      }
-      return { ...current, goalIds: [...current.goalIds, id] };
-    });
-  };
-
-  const finishPreferences = () => {
-    if (!beginStepTransition()) return;
-    setOnboardingPlan(plan);
-    setPersonalizing(false);
-    saveJourney('capture');
-    setStep('capture');
-  };
-
   const startScan = async () => {
     setSmsDenied(false);
-    trackGrowthEvent('capture_setup_started', { focus, tracking });
+    trackGrowthEvent('capture_setup_started', { focus, tracking, source: 'sms' });
     let granted = false;
     try {
       granted = await requestSmsPermission();
     } catch {
-      trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
-      setCompletionOutcome('failed');
-      saveJourney('complete');
-      setStep('complete');
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, source: 'sms', outcome: 'failed' });
+      setSmsDenied(true);
       return;
     }
     if (!granted) {
-      trackGrowthEvent('capture_permission_denied', { focus, tracking, outcome: 'denied' });
+      trackGrowthEvent('capture_permission_denied', { focus, tracking, source: 'sms', outcome: 'denied' });
       setSmsDenied(true);
-      setCompletionOutcome('denied');
-      saveJourney('complete');
-      setStep('complete');
       return;
     }
-    trackGrowthEvent('capture_permission_granted', { focus, tracking, outcome: 'automatic' });
+    trackGrowthEvent('capture_permission_granted', { focus, tracking, source: 'sms', outcome: 'automatic' });
     try {
-      // A user may return from the manual completion screen and choose
-      // automatic capture instead. Clear the durable opt-out before the first
-      // read so setup cannot report success over a permanently blocked pipe.
+      await setAndroidCaptureSources({
+        sms: true,
+        notifications: androidNotificationReady || state.androidCaptureSources?.notifications === true,
+      });
       await setCaptureOptOut(false);
       await beginHistoryImport();
-      saveJourney('complete');
-      // Save the configured-capture checkpoint before the reveal. The final
-      // Open Wafra action still owns the durable onboarded=true transition.
       await ensureDurable();
+      setAndroidSmsReady(true);
+    } catch {
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, source: 'sms', outcome: 'failed' });
+      setSmsDenied(true);
+    }
+  };
+
+  const enableAndroidNotificationAdmission = React.useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== 'android' || !NotificationReader?.setCaptureEnabled) return false;
+    const expiresAt = bankNotificationAdmissionExpiresAt(state);
+    if (expiresAt <= Date.now()) return false;
+    try {
+      return NotificationReader.setSourceConfiguration
+        ? await NotificationReader.setSourceConfiguration(true, expiresAt)
+        : await NotificationReader.setCaptureEnabled(true, expiresAt);
+    } catch {
+      return false;
+    }
+  }, [state.pro, state.founderPro, state.trialStartTs]);
+
+  const connectAndroidNotifications = async () => {
+    if (Platform.OS !== 'android') return;
+    trackGrowthEvent('capture_setup_started', { focus, tracking, source: 'bank-notifications' });
+    await setAndroidCaptureSources({
+      sms: androidSmsReady || state.androidCaptureSources?.sms === true,
+      notifications: true,
+    });
+    await setCaptureOptOut(false);
+    const admitted = await enableAndroidNotificationAdmission();
+    if (!admitted) {
+      trackGrowthEvent('capture_setup_failed', { focus, tracking, source: 'bank-notifications' });
+      return;
+    }
+    if (hasBankNotificationSystemAccess()) {
+      setAndroidNotificationReady(true);
+      setAwaitingNotificationAccess(false);
+      return;
+    }
+    setAwaitingNotificationAccess(true);
+    const opened = await openBankNotificationAccessSettings();
+    if (!opened) setAwaitingNotificationAccess(false);
+  };
+
+  const finishAndroidCapture = async () => {
+    if (Platform.OS !== 'android' || (!androidSmsReady && !androidNotificationReady)) return;
+    try {
+      await setAndroidCaptureSources({
+        sms: androidSmsReady,
+        notifications: androidNotificationReady,
+      });
+      await setCaptureOptOut(false);
+      if (androidNotificationReady) await enableAndroidNotificationAdmission();
+      saveJourney('complete');
+      await ensureDurable();
+      setSmsDenied(false);
       setCompletionOutcome('automatic');
       setStep('complete');
     } catch {
-      setResult({ tx: 0, accounts: 0, bills: 0 });
       trackGrowthEvent('capture_setup_failed', { focus, tracking, outcome: 'failed' });
       setCompletionOutcome('failed');
       saveJourney('complete');
@@ -606,6 +575,34 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setStep('complete');
   };
 
+  useEffect(() => {
+    if (Platform.OS !== 'android' || activeStep !== 'capture') return;
+    let cancelled = false;
+    const refresh = async () => {
+      const sms = await hasSmsPermission().catch(() => false);
+      if (!cancelled && state.androidCaptureSources?.sms === true) {
+        setAndroidSmsReady(sms);
+      }
+      if (state.androidCaptureSources?.notifications !== true) return;
+      if (!hasBankNotificationSystemAccess()) return;
+      if (!awaitingNotificationAccess && androidNotificationReady) return;
+      const admitted = await enableAndroidNotificationAdmission();
+      if (!cancelled && admitted) {
+        setAndroidNotificationReady(true);
+        setAwaitingNotificationAccess(false);
+      }
+    };
+    void refresh();
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void refresh();
+    });
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, [activeStep, awaitingNotificationAccess, androidNotificationReady, enableAndroidNotificationAdmission,
+    state.androidCaptureSources?.notifications, state.androidCaptureSources?.sms]);
+
   const continueManually = async () => {
     setSmsDenied(false);
     setResult(null);
@@ -613,7 +610,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       // This choice says "no SMS access" even when Android retained a grant
       // from an older install or test run. Persist the capture opt-out before
       // showing success so a mounted foreground importer cannot race it.
+      if (Platform.OS === 'android') {
+        await setAndroidCaptureSources({ sms: false, notifications: false });
+      }
       await setCaptureOptOut(true);
+      if (Platform.OS === 'android') {
+        try {
+          if (NotificationReader?.setSourceConfiguration) {
+            await NotificationReader.setSourceConfiguration(false, 0);
+          } else {
+            await NotificationReader?.setCaptureEnabled?.(false, 0);
+          }
+        } catch { /* durable opt-out is authoritative */ }
+        setAndroidSmsReady(false);
+        setAndroidNotificationReady(false);
+        setAwaitingNotificationAccess(false);
+      }
       if (Platform.OS === 'ios') {
         // The user may have started Shortcut setup and then backed out. An
         // app-only flag is not enough: that Shortcut would still send bank
@@ -668,14 +680,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     } else if (activeStep === 'capture') {
       setStep('preview');
       saveJourney('preview');
-    } else if (activeStep === 'goals') {
-      setStep('capture');
-    } else if (activeStep === 'budget') {
-      setStep('goals');
-    } else if (activeStep === 'privacy') {
-      setStep('preview');
-      saveJourney('preview');
     } else if (activeStep === 'preview') {
+      setStep('intention');
+      saveJourney('intention');
+    } else if (activeStep === 'intention') {
       setStep('tracking');
       saveJourney('tracking');
     } else if (activeStep === 'tracking') {
@@ -771,9 +779,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     return (
       <View style={styles.loadingRoot} accessibilityLiveRegion="polite">
         <StatusBar style="light" />
-        <View style={styles.markHalo}>
-          <WafraMark size={44} color={night.primary} />
-        </View>
+        <WafraTile size={56} />
         <ThemedText style={styles.loadingLabel}>
           {t(resumeFailed ? 'onboardResumeError' : 'loadingLedger')}
         </ThemedText>
@@ -831,6 +837,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       {gatedChildren}
       <StatusBar style="light" />
       <View style={[StyleSheet.absoluteFillObject, styles.root]}>
+        <OnboardingAtmosphere />
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           {activeStep === 'welcome' ? (
             <Animated.ScrollView
@@ -840,16 +847,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               contentContainerStyle={styles.welcomeBody}>
               <View style={styles.welcomeTop}>
                 <View style={styles.brandLine}>
-                  <View style={styles.markHalo}>
-                    <WafraMark size={32} color={night.primary} />
-                  </View>
+                  <WafraTile size={42} />
                   <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
                 </View>
-                <ThemedText
-                  style={styles.headline}
-                  accessibilityRole="header">
-                  {t('onboardHeadline')}
-                </ThemedText>
+                <View
+                  accessible
+                  accessibilityRole="header"
+                  accessibilityLabel={t('onboardHeadline')}
+                  style={styles.headlineBlock}>
+                  {t('onboardHeadline').split('\n').map((line, index) => (
+                    <ThemedText
+                      key={`${index}-${line}`}
+                      accessible={false}
+                      style={[styles.headline, index === 1 && styles.headlineAccent]}>
+                      {line}
+                    </ThemedText>
+                  ))}
+                </View>
                 <ThemedText style={styles.sub}>
                   {t('onboardWelcomeBody')}
                 </ThemedText>
@@ -860,7 +874,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   label={t('onboardChooseStart')}
                   onPress={() => {
                     if (!beginStepTransition()) return;
-                    setPersonalizing(false);
                     saveJourney('focus');
                     setStep('focus');
                   }}
@@ -878,9 +891,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             <>
               <BackHeader step={activeStep} onBack={goBack}
                 disabled={setupBusy || finishing || transitioning}
-                progressSteps={personalizing
-                  ? (PLAN_STEPS.includes(activeStep) ? PLAN_STEPS : null)
-                  : (JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null)} />
+                progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null} />
               <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
@@ -894,7 +905,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
                       </View>
-                      <FocusChooser value={focus} onChange={chooseFocus} />
+                      <FocusChooser value={focus} onChange={chooseFocus} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -919,11 +930,36 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardTrackingBody')}</ThemedText>
                       </View>
-                      <TrackingChooser value={tracking} onChange={chooseTracking} marketId={state.marketId} />
+                      <TrackingChooser value={tracking} onChange={chooseTracking} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
                           disabled={!tracking || transitioning}
+                          onPress={() => {
+                            if (!tracking || !beginStepTransition()) return;
+                            saveJourney('intention');
+                            setStep('intention');
+                          }}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'intention' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardIntentionTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardIntentionBody')}</ThemedText>
+                      </View>
+                      <IntentionChooser value={intention} onChange={chooseIntention} reducedMotion={reducedMotion} />
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          disabled={!intention || transitioning}
                           onPress={showValuePreview}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
@@ -940,148 +976,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardPersonalizedBody')}</ThemedText>
                       </View>
-                      <PersonalizedProductPreview focus={focus} />
+                      <PersonalizedProductPreview focus={focus} tracking={tracking} intention={intention} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t(Platform.OS === 'web' ? 'onboardChooseStart' : 'onboardConnectMyMoney')}
                           onPress={showCapture}
-                          disabled={transitioning}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                      </View>
-                    </>
-                  )}
-
-                  {activeStep === 'privacy' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardPrivacyTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardDataControlBody')}</ThemedText>
-                      </View>
-                      <View style={styles.privacyList} testID="onboarding-privacy-points">
-                        {([
-                          ['lock', 'onboardPrivacyLocalTitle', 'onboardPrivacyLocalBody'],
-                          ['bank', 'onboardPrivacyNoLoginTitle', 'onboardPrivacyNoLoginBody'],
-                          ['repeat', 'onboardPrivacyChoiceTitle', 'onboardPrivacyChoiceBody'],
-                        ] as const).map(([icon, titleKey, bodyKey]) => (
-                          <View key={titleKey} style={styles.privacyPoint}>
-                            <View style={styles.privacyPointIcon}>
-                              <Icon name={icon} size={19} color={night.primary} />
-                            </View>
-                            <View style={styles.valueStepCopy}>
-                              <ThemedText style={styles.valueStepTitle}>{t(titleKey)}</ThemedText>
-                              <ThemedText style={styles.choiceDetail}>{t(bodyKey)}</ThemedText>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                      <View style={styles.questionActions}>
-                        <Button wrapLabel
-                          label={t('onboardPrivacyContinue')}
-                          onPress={showCapture}
-                          disabled={transitioning}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                      </View>
-                    </>
-                  )}
-
-                  {activeStep === 'goals' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardGoalsTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>
-                          {t('onboardGoalsBody')}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {GOAL_PRESETS.map((preset) => (
-                          <SelectionRow
-                            key={preset.id}
-                            title={t(preset.titleKey)}
-                            detail={t(preset.detailKey)}
-                            icon={preset.icon}
-                            selected={plan.goalIds.includes(preset.id)}
-                            onPress={() => chooseGoal(preset.id)}
-                            role="checkbox"
-                            hint={t('onboardGoalSelectionHint')}
-                          />
-                        ))}
-                      </View>
-                      {goalLimitAnnounced && (
-                        <ThemedText
-                          accessibilityLiveRegion="polite"
-                          style={[styles.inlineNote, { color: night.warning }]}>
-                          {t('onboardGoalMax')}
-                        </ThemedText>
-                      )}
-                      <View style={styles.questionActions}>
-                        <Button wrapLabel
-                          label={t('continueWord')}
-                          disabled={plan.goalIds.length === 0 || transitioning}
-                          onPress={() => { if (beginStepTransition()) setStep('budget'); }}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                        <Button wrapLabel variant="outline" label={t('onboardSkipPersonalization')}
-                          disabled={transitioning}
-                          onPress={() => {
-                            if (!beginStepTransition()) return;
-                            setPersonalizing(false); saveJourney('capture'); setStep('capture');
-                          }}
-                          labelColor={night.text} style={styles.ghost} />
-                      </View>
-                    </>
-                  )}
-
-                  {activeStep === 'budget' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardBudgetTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>
-                          {t('onboardBudgetBody')}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {BUDGET_PRESETS.map((preset) => {
-                          const icon: IconName = preset.id === 'essentials'
-                            ? 'lock'
-                            : preset.id === 'balanced'
-                              ? 'target'
-                              : 'spark';
-                          return (
-                            <SelectionRow
-                              key={preset.id}
-                              title={t(preset.titleKey)}
-                              detail={t(preset.detailKey)}
-                              icon={icon}
-                              selected={plan.budgetId === preset.id}
-                              onPress={() => setPlan((current) => ({
-                                ...current,
-                                budgetId: preset.id as OnboardingBudgetId,
-                              }))}
-                            />
-                          );
-                        })}
-                      </View>
-                      <View style={styles.deferredPlanNote}>
-                        <Icon name="lock" size={16} color={night.primary} />
-                        <ThemedText style={styles.deferredPlanText}>
-                          {t('onboardPlanActivatesLater')}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.questionActions}>
-                        <Button wrapLabel
-                          label={t('onboardBudgetContinue')}
-                          onPress={finishPreferences}
                           disabled={transitioning}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
@@ -1123,7 +1022,59 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           </View>
                         ))}
                       </View>}
-                      {Platform.OS === 'ios' ? (
+                      {Platform.OS === 'android' ? (
+                        <View style={styles.androidSources} testID="onboarding-start-options">
+                          <Pressable accessibilityRole="button"
+                            accessibilityState={{ selected: androidSmsReady, disabled: setupBusy || transitioning }}
+                            disabled={setupBusy || transitioning}
+                            onPress={() => void runSetupAction(startScan)}
+                            style={({ pressed }) => [styles.captureSource, androidSmsReady && styles.captureSourceReady, { opacity: pressed ? 0.76 : 1 }]}>
+                            <View style={[styles.captureSourceIcon, androidSmsReady && styles.captureSourceIconReady]}>
+                              <Icon name="mail" size={21} color={androidSmsReady ? night.onPrimary : night.primary} />
+                            </View>
+                            <View style={styles.grow}>
+                              <ThemedText style={styles.captureSourceTitle}>{t('onboardAndroidSmsSourceTitle')}</ThemedText>
+                              <ThemedText style={styles.captureSourceBody}>{t('onboardAndroidSmsSourceBody')}</ThemedText>
+                            </View>
+                            {androidSmsReady
+                              ? <Icon name="check" size={18} color={night.primary} />
+                              : <Icon name="chevron-right" size={18} color={night.textTertiary} />}
+                          </Pressable>
+                          {smsDenied && !androidSmsReady && <ThemedText accessibilityLiveRegion="polite"
+                            style={[styles.inlineNote, { color: night.warning }]}>{t('onboardSmsDeniedInline')}</ThemedText>}
+
+                          <Pressable accessibilityRole="button"
+                            accessibilityState={{ selected: androidNotificationReady, disabled: setupBusy || transitioning }}
+                            disabled={setupBusy || transitioning}
+                            onPress={() => void runSetupAction(connectAndroidNotifications)}
+                            style={({ pressed }) => [styles.captureSource, androidNotificationReady && styles.captureSourceReady, { opacity: pressed ? 0.76 : 1 }]}>
+                            <View style={[styles.captureSourceIcon, androidNotificationReady && styles.captureSourceIconReady]}>
+                              <Icon name="phone" size={21} color={androidNotificationReady ? night.onPrimary : night.primary} />
+                            </View>
+                            <View style={styles.grow}>
+                              <ThemedText style={styles.captureSourceTitle}>{t('onboardAndroidPushSourceTitle')}</ThemedText>
+                              <ThemedText style={styles.captureSourceBody}>{t(awaitingNotificationAccess ? 'onboardAndroidPushAwaiting' : 'onboardAndroidPushSourceBody')}</ThemedText>
+                            </View>
+                            {androidNotificationReady
+                              ? <Icon name="check" size={18} color={night.primary} />
+                              : <Icon name="chevron-right" size={18} color={night.textTertiary} />}
+                          </Pressable>
+
+                          {(androidSmsReady || androidNotificationReady) && <Button wrapLabel
+                            label={t(androidSmsReady && androidNotificationReady ? 'onboardCaptureContinueBoth' : 'onboardCaptureContinueOne')}
+                            onPress={() => void runSetupAction(finishAndroidCapture)}
+                            disabled={setupBusy || transitioning}
+                            labelColor={night.onPrimary}
+                            style={styles.primaryButton} />}
+                          <Pressable accessibilityRole="button"
+                            disabled={setupBusy || transitioning}
+                            accessibilityState={{ disabled: setupBusy || transitioning }}
+                            onPress={() => void runSetupAction(continueManually)}
+                            style={({ pressed }) => [styles.skipCaptureButton, { opacity: pressed ? 0.6 : 1 }]}>
+                            <ThemedText style={styles.skipCaptureText}>{t('onboardManualChoice')}</ThemedText>
+                          </Pressable>
+                        </View>
+                      ) : Platform.OS === 'ios' ? (
                         <View style={styles.captureActions} testID="onboarding-start-options">
                           <Button
                             wrapLabel
@@ -1144,9 +1095,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </View>
                       ) : (
                         <View style={styles.startOptions} testID="onboarding-start-options">
-                          {Platform.OS !== 'web' && (
-                            <StartOption automatic disabled={setupBusy || transitioning} onPress={() => void runSetupAction(beginCapture)} />
-                          )}
                           <StartOption automatic={false} disabled={setupBusy || transitioning} onPress={() => void runSetupAction(continueManually)} />
                         </View>
                       )}
@@ -1163,27 +1111,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           labelColor={night.text}
                           style={[styles.learnMoreButton, styles.ghost]}
                         />
-                      )}
-                      {Platform.OS !== 'ios' && (
-                      <Pressable accessibilityRole="button" disabled={setupBusy || transitioning}
-                        accessibilityState={{ disabled: setupBusy || transitioning }}
-                        accessibilityLabel={t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
-                        accessibilityHint={t(state.onboardingPlan ? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote')}
-                        onPress={() => {
-                          if (!beginStepTransition()) return;
-                          tapped(); setPersonalizing(true); setStep('goals');
-                        }}
-                        style={({ pressed }) => [styles.personalizeRow, { opacity: pressed ? 0.65 : 1 }]}>
-                        <View style={styles.choiceCopy}>
-                          <ThemedText style={styles.choiceTitle}>
-                            {t(state.onboardingPlan ? 'onboardEditPlan' : 'onboardPersonalizeOptional')}
-                          </ThemedText>
-                          <ThemedText style={styles.choiceDetail}>
-                            {t(state.onboardingPlan ? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote')}
-                          </ThemedText>
-                        </View>
-                        <Icon name="chevron-right" size={18} color={night.textSecondary} />
-                      </Pressable>
                       )}
                     </>
                   )}
@@ -1416,14 +1343,6 @@ const styles = StyleSheet.create({
   },
   welcomeTop: { paddingTop: 12, gap: 12 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  markHalo: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: night.primarySoft,
-  },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
   eyebrow: {
     paddingTop: 12,
@@ -1435,12 +1354,14 @@ const styles = StyleSheet.create({
   },
   headline: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 32,
-    lineHeight: 39,
-    letterSpacing: -0.6,
+    fontSize: 38,
+    lineHeight: 42,
+    letterSpacing: -1.3,
     color: night.text,
     maxWidth: 430,
   },
+  headlineBlock: { gap: 0 },
+  headlineAccent: { color: night.primary },
   sub: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 22, color: night.textSecondary },
   welcomeActions: { marginTop: 'auto', gap: Spacing.two },
   setupTime: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
@@ -1521,12 +1442,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  personalizeRow: { marginTop: Spacing.four, paddingVertical: Spacing.three,
-    minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong,
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.four, gap: Spacing.two },
   skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
+  androidSources: { paddingTop: Spacing.three, gap: Spacing.two },
+  captureSource: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: night.cardBorderStrong,
+    backgroundColor: 'rgba(17,17,14,0.54)',
+  },
+  captureSourceReady: { borderColor: night.primary, backgroundColor: night.primarySoft },
+  captureSourceIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: night.backgroundSelected },
+  captureSourceIconReady: { backgroundColor: night.primary },
+  captureSourceTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
+  captureSourceBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17 },
   startOptions: { paddingTop: Spacing.three, gap: Spacing.two },
   startOption: {
     minHeight: 70,

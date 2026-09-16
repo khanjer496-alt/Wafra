@@ -100,10 +100,12 @@ const goal: Check = (value) => record(value) && required(value, {
 });
 const onboardingProfile: Check = (value) => record(value) && required(value, {
   v: oneOf(1),
-  stage: oneOf('welcome', 'focus', 'tracking', 'preview', 'privacy', 'capture', 'complete'),
+  stage: oneOf('welcome', 'focus', 'tracking', 'intention', 'preview', 'privacy', 'capture', 'complete'),
   focus: oneOf(null, 'spending', 'bills', 'cashflow', 'overview'),
   tracking: oneOf(null, 'none', 'bank-apps', 'spreadsheet', 'finance-app'),
   startedAt: nonnegative,
+}) && optional(value, {
+  intention: oneOf(null, 'control', 'spend-intentionally', 'stay-ahead', 'build-buffer'),
 });
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>
@@ -133,6 +135,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
+    androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
     marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
     themePreference: oneOf('system', 'light', 'dark'),
