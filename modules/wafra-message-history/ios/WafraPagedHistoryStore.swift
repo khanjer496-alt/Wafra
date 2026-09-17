@@ -138,10 +138,11 @@ public final class WafraPagedHistoryStore {
     let stableGuid = guid.isEmpty
       ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(sender)\u{0}\(bodyIdentity)".utf8)))"
       : guid
-    let ref = try reference(guid: stableGuid, dateText: dateText)
+    let instant = try date(dateText, diagnostic: true)
+    let ref = try reference(guid: stableGuid, instant: instant)
     guard let body else { return PreparedRow(reference: ref, record: nil) }
     let record = WafraMessageHistoryImporter.preparedRecord(guid: stableGuid, body: body,
-      sender: sender, date: try date(dateText), now: now())
+      sender: sender, date: instant, now: now())
     return PreparedRow(reference: ref, record: record == "{\"v\":0}" ? nil : record)
   }
 
@@ -181,17 +182,32 @@ public final class WafraPagedHistoryStore {
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1_000))
   }
-  private func date(_ value: String) throws -> Date {
+  private func date(_ value: String, diagnostic: Bool = false) throws -> Date {
     guard let normalized = WafraMessageHistoryStore.normalizeShortcutProducedInstant(value, now: now()) else {
+      if diagnostic {
+        let scalarCount = value.unicodeScalars.count
+        let whitespaceCount = value.unicodeScalars.filter {
+          $0.value == 0x00A0 || $0.value == 0x202F || CharacterSet.whitespacesAndNewlines.contains($0)
+        }.count
+        let nonASCII = value.unicodeScalars.filter { $0.value > 0x7F }.count
+        throw FrameRefusal(reason: "invalid-input-date bytes=\(value.utf8.count) scalars=\(scalarCount) spaces=\(whitespaceCount) nonascii=\(nonASCII)")
+      }
       throw Failure.fieldDate
     }
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let result = f.date(from: normalized) else { throw Failure.fieldDate }
+    guard let result = f.date(from: normalized) else {
+      if diagnostic { throw FrameRefusal(reason: "invalid-input-date normalized") }
+      throw Failure.fieldDate
+    }
     return result
   }
   private func reference(guid: String, dateText: String) throws -> WafraHistoryCursor.Reference {
     guard !guid.isEmpty, guid.utf8.count <= 1_024 else { throw Failure.invalidInput }
     let instant = try date(dateText)
+    return try reference(guid: guid, instant: instant)
+  }
+  private func reference(guid: String, instant: Date) throws -> WafraHistoryCursor.Reference {
+    guard !guid.isEmpty, guid.utf8.count <= 1_024 else { throw Failure.invalidInput }
     return .init(id: Self.hash(Data(guid.utf8)),
       milliseconds: Int64((instant.timeIntervalSince1970 * 1_000).rounded()))
   }

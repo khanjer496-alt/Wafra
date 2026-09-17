@@ -549,6 +549,42 @@ struct NativeHistoryStoreTests {
         timeZone: dubaiDisplayZone
       ) == "2026-09-12T17:22:00.000Z"
     )
+    let ordinarySpaces = observedText
+      .replacingOccurrences(of: "\u{202F}", with: " ")
+      .replacingOccurrences(of: "\u{00A0}", with: " ")
+    check(
+      "en_AE display date accepts ordinary spaces when iOS drops narrow NBSP",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        ordinarySpaces,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+    let bidiDecorated = ordinarySpaces.replacingOccurrences(of: "PM", with: "\u{200F}PM\u{200E}")
+    check(
+      "en_AE display date ignores presentation-only bidi markers",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        bidiDecorated,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+    var nonGregorianDeviceCalendar = Calendar(identifier: .islamicUmmAlQura)
+    nonGregorianDeviceCalendar.timeZone = dubaiDisplayZone
+    check(
+      "Gregorian Shortcuts display date parses even when device calendar differs",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        ordinarySpaces,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: nonGregorianDeviceCalendar,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
 
     var hijriCalendar = Calendar(identifier: .islamicUmmAlQura)
     let dubai = TimeZone(secondsFromGMT: 4 * 60 * 60)!

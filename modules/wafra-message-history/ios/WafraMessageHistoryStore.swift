@@ -1402,39 +1402,87 @@ public final class WafraMessageHistoryStore {
       return validInstant(canonical, now: now) ? canonical : nil
     }
 
+    // iOS/Shortcuts can swap ordinary spaces for NBSP / narrow-NBSP and may
+    // insert bidi formatting scalars around a localized AM/PM marker. Those
+    // are presentation details, not date semantics. Normalize them only for
+    // the parse/round-trip comparison; stored timestamps still become strict
+    // UTC ISO-8601 below.
+    func comparableDisplayText(_ text: String) -> String {
+      var scalars: [UnicodeScalar] = []
+      var pendingSpace = false
+      for scalar in text.precomposedStringWithCanonicalMapping.unicodeScalars {
+        switch scalar.value {
+        case 0x061C, 0x200E, 0x200F, 0x202A...0x202E, 0x2066...0x2069, 0xFEFF:
+          continue
+        default:
+          break
+        }
+        if scalar.value == 0x00A0 || scalar.value == 0x202F ||
+           CharacterSet.whitespacesAndNewlines.contains(scalar) {
+          pendingSpace = true
+          continue
+        }
+        if pendingSpace, !scalars.isEmpty { scalars.append(UnicodeScalar(0x20)!) }
+        scalars.append(scalar)
+        pendingSpace = false
+      }
+      return String(String.UnicodeScalarView(scalars))
+    }
+
+    let comparableValue = comparableDisplayText(value)
+    let parseInputs = comparableValue == value ? [value] : [value, comparableValue]
+
+    func exactlyParses(_ formatter: DateFormatter) -> String? {
+      for input in parseInputs {
+        guard let instant = formatter.date(from: input) else { continue }
+        guard comparableDisplayText(formatter.string(from: instant)) == comparableValue else {
+          continue
+        }
+        if let canonical = canonicalUTC(instant) { return canonical }
+      }
+      return nil
+    }
+
+    var gregorian = Calendar(identifier: .gregorian)
+    gregorian.timeZone = timeZone
+    // `nil` means let DateFormatter choose the calendar implied by `locale`.
+    // We also try the device calendar and Gregorian explicitly because iOS 26
+    // has displayed a Gregorian Message date while the device calendar was a
+    // different system calendar.
+    let calendarCandidates: [Calendar?] = [nil, calendar, gregorian]
+
     // The intended producer is the Shortcut's custom Format Date action. Keep
     // that exact round-trip first because it preserves milliseconds/offsets.
-    let custom = DateFormatter()
-    custom.locale = locale
-    custom.calendar = calendar
-    custom.timeZone = timeZone
-    custom.isLenient = false
-    custom.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
-    if let instant = custom.date(from: value), custom.string(from: instant) == value,
-       let canonical = canonicalUTC(instant) {
-      return canonical
+    for candidateCalendar in calendarCandidates {
+      let custom = DateFormatter()
+      custom.locale = locale
+      if let candidateCalendar { custom.calendar = candidateCalendar }
+      custom.timeZone = timeZone
+      custom.isLenient = false
+      custom.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+      if let canonical = exactlyParses(custom) { return canonical }
     }
 
     // iOS 26 can materialize a Message date as the system display string even
     // though the Shortcut graph requested a custom format. On an en_AE phone
     // this is, for example, "12 Sep 2026 at 9:22\u{202F}PM". Parse only values
-    // that exactly round-trip through this phone's own locale/calendar/timezone
-    // styles; never use a lenient free-form date parser. This also covers the
-    // equivalent Arabic, Hijri, Buddhist and 24-hour representations.
+    // that round-trip through this phone's own locale/calendar/timezone styles
+    // after the harmless presentation-scalar normalization above; never use a
+    // lenient free-form date parser. This also covers the equivalent Arabic,
+    // Hijri, Buddhist and 24-hour representations.
     let dateStyles: [DateFormatter.Style] = [.short, .medium, .long, .full]
     let timeStyles: [DateFormatter.Style] = [.short, .medium, .long]
-    for dateStyle in dateStyles {
-      for timeStyle in timeStyles {
-        let display = DateFormatter()
-        display.locale = locale
-        display.calendar = calendar
-        display.timeZone = timeZone
-        display.isLenient = false
-        display.dateStyle = dateStyle
-        display.timeStyle = timeStyle
-        if let instant = display.date(from: value), display.string(from: instant) == value,
-           let canonical = canonicalUTC(instant) {
-          return canonical
+    for candidateCalendar in calendarCandidates {
+      for dateStyle in dateStyles {
+        for timeStyle in timeStyles {
+          let display = DateFormatter()
+          display.locale = locale
+          if let candidateCalendar { display.calendar = candidateCalendar }
+          display.timeZone = timeZone
+          display.isLenient = false
+          display.dateStyle = dateStyle
+          display.timeStyle = timeStyle
+          if let canonical = exactlyParses(display) { return canonical }
         }
       }
     }
