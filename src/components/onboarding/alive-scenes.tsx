@@ -161,7 +161,7 @@ function PosterAlertCard({ example, index, reducedMotion }: {
   return <Animated.View style={[styles.posterAlert, cardStyle]}
     accessible accessibilityLabel={`${bankName}. ${posterKindLabel(example)}. ${merchant}. ${example.amount}`}>
     <Animated.View style={logoStyle}>
-      <BankLogo bank={example.bank} size={46} />
+      <BankLogo bank={example.bank} size={40} />
     </Animated.View>
     <View style={styles.posterAlertCopy}>
       <ThemedText numberOfLines={1} style={styles.posterBank}>{bankName}</ThemedText>
@@ -386,7 +386,7 @@ function IntentionVisual({ intention }: { intention: OnboardingIntention }) {
       </View>
       <View style={styles.intentionSpendStage}>
         <View style={styles.intentionSpendGuide} />
-        {bars.map((height, index) => <View key={index} style={[styles.intentionSpendBar, { height: 106 * height, opacity: 0.42 + index * 0.065 }]} />)}
+        {bars.map((height, index) => <View key={index} style={[styles.intentionSpendBar, { height: 82 * height, opacity: 0.42 + index * 0.065 }]} />)}
       </View>
       <ThemedText style={styles.intentionSceneCopy}>{t('onboardIntentionSpendScene')}</ThemedText>
     </View>;
@@ -511,7 +511,7 @@ export function CaptureMarketScene({ marketId }: { marketId: string }) {
   return <View style={styles.captureScene} testID="onboarding-capture-market-scene">
     <View style={styles.bankRow}>
       {[0, 1, 2].map(index => <View key={index} style={styles.bankItem}>
-        <BankLogo bank={banks[index] ?? null} size={46} />
+        <BankLogo bank={banks[index] ?? null} size={40} />
         <ThemedText numberOfLines={1} style={styles.bankName}>{banks[index]?.name ?? t('onboardRegionalBankGeneric')}</ThemedText>
       </View>)}
     </View>
@@ -539,10 +539,10 @@ const styles = StyleSheet.create({
   logo: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   logoInitials: { color: '#FFFFFF', fontFamily: Fonts.sansSemi, letterSpacing: 0.3 },
 
-  welcomeScene: { gap: 12, paddingVertical: 4 },
-  posterStage: { minHeight: 300, justifyContent: 'center', gap: 10, paddingHorizontal: 6, position: 'relative' },
-  posterGlow: { position: 'absolute', alignSelf: 'center', top: 34, width: 300, height: 246, borderRadius: 150, backgroundColor: 'rgba(67,170,129,0.15)' },
-  posterAlert: { minHeight: 78, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: '#25221C' },
+  welcomeScene: { gap: 8 },
+  posterStage: { minHeight: 220, justifyContent: 'center', gap: 7, paddingHorizontal: 6, position: 'relative' },
+  posterGlow: { position: 'absolute', alignSelf: 'center', top: 22, width: 280, height: 186, borderRadius: 140, backgroundColor: 'rgba(67,170,129,0.15)' },
+  posterAlert: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: '#25221C' },
   posterAlertCopy: { flex: 1, minWidth: 0, gap: 1 },
   posterBank: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13, lineHeight: 17 },
   posterMerchant: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 16 },
@@ -555,18 +555,18 @@ const styles = StyleSheet.create({
   posterResult: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, paddingTop: 2 },
   posterResultKicker: { color: night.income, fontFamily: Fonts.monoMedium, letterSpacing: 1.1 },
   posterNetLine: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
-  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 28, lineHeight: 34, letterSpacing: -0.5, writingDirection: 'ltr' },
+  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 24, lineHeight: 30, letterSpacing: -0.5, writingDirection: 'ltr' },
   posterNetNote: { color: night.textSecondary, fontSize: 12 },
   posterReady: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: Radius.full, borderWidth: 1, borderColor: night.primaryBorder, backgroundColor: night.primarySoft },
   posterReadyText: { color: night.income, fontFamily: Fonts.sansSemi, fontSize: 11 },
   posterFootnote: { color: night.textTertiary, fontSize: 11, lineHeight: 15 },
-  miniCard: { borderWidth: 1, borderColor: night.cardBorderStrong, borderRadius: 18, padding: 14, backgroundColor: night.backgroundElement, gap: 8 },
+  miniCard: { borderWidth: 1, borderColor: night.cardBorderStrong, borderRadius: 18, padding: 12, backgroundColor: night.backgroundElement, gap: 6 },
   miniHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
   miniTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15 },
   miniBigLine: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 2 },
   miniBig: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 28, letterSpacing: -0.5, writingDirection: 'ltr' },
   miniBigNote: { color: night.textSecondary, fontSize: 12 },
-  miniRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
+  miniRow: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   miniLead: { width: 22, color: night.warning, fontFamily: Fonts.monoMedium, fontSize: 13 },
   miniLabel: { flexShrink: 1, color: night.textSecondary, fontSize: 13 },
   miniPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: Radius.full, borderWidth: 1, borderColor: night.cardBorderStrong },
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
   miniStat: { flex: 1, gap: 4, paddingVertical: 8, borderTopWidth: 1, borderColor: night.cardBorderStrong },
   miniStatValue: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 18, writingDirection: 'ltr' },
 
-  chooser: { gap: 14 },
+  chooser: { gap: 10 },
   optionGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
   optionCell: { width: '50%', paddingHorizontal: 6 },
   optionTab: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 2, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
@@ -586,30 +586,30 @@ const styles = StyleSheet.create({
   optionList: { gap: 0 },
   optionRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   optionRowSelected: { borderBottomWidth: 1, borderColor: night.primary },
-  trackingScene: { gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
-  intentionPoster: { minHeight: 236, gap: 14, padding: 16, borderRadius: 24, backgroundColor: '#1C1A16', borderWidth: 1, borderColor: night.cardBorderStrong, overflow: 'hidden' },
+  trackingScene: { gap: 8, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
+  intentionPoster: { minHeight: 190, gap: 10, padding: 14, borderRadius: 22, backgroundColor: '#1C1A16', borderWidth: 1, borderColor: night.cardBorderStrong, overflow: 'hidden' },
   intentionPosterHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   intentionSceneCopy: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 19 },
   intentionTimeline: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong },
-  intentionTimelineRow: { minHeight: 43, flexDirection: 'row', alignItems: 'center', gap: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
+  intentionTimelineRow: { minHeight: 35, flexDirection: 'row', alignItems: 'center', gap: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   intentionTimelineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: night.cardBorderStrong },
   intentionTimelineDotActive: { width: 10, height: 10, borderRadius: 5, backgroundColor: night.primary },
   intentionDay: { width: 24, color: night.primary, fontFamily: Fonts.monoSemi, fontSize: 13 },
   intentionTimelineLabel: { flex: 1, color: night.textSecondary, fontSize: 12 },
-  bufferStage: { minHeight: 112, justifyContent: 'flex-end', alignItems: 'center', position: 'relative', marginHorizontal: 18 },
+  bufferStage: { minHeight: 88, justifyContent: 'flex-end', alignItems: 'center', position: 'relative', marginHorizontal: 18 },
   bufferLayer: { position: 'absolute', width: '100%', height: 64, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   bufferLayerBack: { bottom: 30, backgroundColor: '#24221D', transform: [{ scale: 0.9 }] },
   bufferLayerMid: { bottom: 15, backgroundColor: '#20382F', transform: [{ scale: 0.95 }] },
   bufferLayerFront: { bottom: 0, backgroundColor: '#1E4B3B', alignItems: 'center', justifyContent: 'center', gap: 2 },
   bufferValue: { color: night.income, fontFamily: Fonts.monoSemi, fontSize: 26, lineHeight: 31, writingDirection: 'ltr' },
   bufferLabel: { color: night.textSecondary, fontSize: 11 },
-  intentionSpendStage: { height: 116, flexDirection: 'row', alignItems: 'flex-end', gap: 7, position: 'relative', paddingHorizontal: 4 },
+  intentionSpendStage: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 7, position: 'relative', paddingHorizontal: 4 },
   intentionSpendGuide: { position: 'absolute', start: 0, end: 0, top: 44, height: 1, backgroundColor: night.primaryBorder },
   intentionSpendBar: { flex: 1, borderTopLeftRadius: 6, borderTopRightRadius: 6, backgroundColor: night.warning },
-  controlStage: { height: 118, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  controlStage: { height: 90, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   controlOrbit: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: night.primaryBorder },
-  controlOrbitOuter: { width: 150, height: 150 },
-  controlOrbitInner: { width: 92, height: 92, opacity: 0.75 },
+  controlOrbitOuter: { width: 118, height: 118 },
+  controlOrbitInner: { width: 76, height: 76, opacity: 0.75 },
   controlCenter: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
   controlChip: { position: 'absolute', width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: night.backgroundElement, borderWidth: 1, borderColor: night.cardBorderStrong },
   controlChipOne: { top: 4, start: 34 },
@@ -621,23 +621,23 @@ const styles = StyleSheet.create({
   outcome: { minHeight: 24, justifyContent: 'center' },
   outcomeText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18, textAlign: 'center' },
 
-  previewStep: { gap: 14 },
-  morphSource: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
+  previewStep: { gap: 10 },
+  morphSource: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
   morphSourceIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
   morphSourceTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   morphSourceDetail: { color: night.textTertiary, fontSize: 11, lineHeight: 15, paddingTop: 2 },
-  morphRail: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  morphRail: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 10 },
   morphLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
   morphBadge: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
-  intentionOutcome: { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 10, borderTopWidth: 1, borderColor: night.cardBorderStrong },
+  intentionOutcome: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7, borderTopWidth: 1, borderColor: night.cardBorderStrong },
   intentionOutcomeIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft },
   intentionOutcomeText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18, paddingTop: 2 },
   nextList: { gap: 2 },
   nextItem: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   nextItemText: { flex: 1, color: night.textSecondary, fontSize: 13, lineHeight: 18 },
 
-  captureScene: { gap: 12, marginTop: Spacing.three, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
-  captureLedgerLine: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  captureScene: { gap: 8, marginTop: 6, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
+  captureLedgerLine: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10 },
   captureLedgerTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13 },
   captureLedgerBody: { color: night.textTertiary, fontSize: 11, lineHeight: 15 },
 });

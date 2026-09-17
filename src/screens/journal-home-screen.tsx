@@ -32,6 +32,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
+import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { periodLabel } from '@/lib/period';
@@ -369,9 +370,13 @@ export default function JournalHomeScreen() {
     setRecapEntry((current) => current ? { ...current, unread: false } : current);
     router.push(`/recap?kind=${descriptor.kind}&value=${encodeURIComponent(String(value))}` as never);
   } : undefined;
-  const greeting = language === 'ar'
+  const preferredName = state.userName === 'there' ? null : normalizePreferredName(state.userName);
+  const greetingBase = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const greeting = preferredName
+    ? `${greetingBase}${language === 'ar' ? '،' : ','} ${preferredName}`
+    : greetingBase;
   // Hermes' Intl date formatting with options is slow enough to notice on a
   // screen that re-renders on every store update; the label changes by day.
   const dateLabel = useMemo(
