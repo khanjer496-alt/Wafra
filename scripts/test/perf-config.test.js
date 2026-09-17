@@ -689,6 +689,8 @@ function fastest(fn, runs = 7) {
 {
   const merchantAvatar = read('src/components/ui/merchant-avatar.tsx');
   const bankAvatar = read('src/components/ui/bank-avatar.tsx');
+  const merchantLogoResolver = read('src/lib/merchant-logo-resolver.ts');
+  const bankLogoResolver = read('src/lib/bank-logo-resolver.ts');
   const detail = read('src/components/entry-detail-sheet.tsx');
   const haptics = read('src/lib/haptics.ts');
 
@@ -699,6 +701,25 @@ function fastest(fn, runs = 7) {
   ok('bank avatars subscribe only to Private Mode, not the whole ledger',
     /usePrivateMode/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
     'account artwork should not rebuild when transactions, budgets, or import progress change');
+
+  ok('remote merchant artwork has bounded JS metadata and unresolved work',
+    /MAX_MEMORY_CACHE_ENTRIES\s*=\s*128/.test(merchantLogoResolver) &&
+      /MAX_PENDING_RESOLUTIONS\s*=\s*24/.test(merchantLogoResolver) &&
+      /pending\.size >= MAX_PENDING_RESOLUTIONS/.test(merchantLogoResolver) &&
+      /while \(memory\.size > MAX_MEMORY_CACHE_ENTRIES\)/.test(merchantLogoResolver),
+    'a long transaction history can expose thousands of unique merchant strings; presentation enrichment must not become a process-lifetime Map/promise backlog');
+
+  ok('remote bank artwork has bounded JS metadata and unresolved work',
+    /MAX_MEMORY_CACHE_ENTRIES\s*=\s*64/.test(bankLogoResolver) &&
+      /MAX_PENDING_RESOLUTIONS\s*=\s*8/.test(bankLogoResolver) &&
+      /pending\.size >= MAX_PENDING_RESOLUTIONS/.test(bankLogoResolver) &&
+      /while \(memory\.size > MAX_MEMORY_CACHE_ENTRIES\)/.test(bankLogoResolver),
+    'wallet navigation must not retain every remote institution lookup for the lifetime of the process');
+
+  ok('Android remote logos use disk cache instead of process-wide decoded-image memory',
+    /Platform\.OS === 'android'[\s\S]*?'disk'\s*:\s*'memory-disk'/.test(merchantAvatar) &&
+      /Platform\.OS === 'android'\s*\?\s*'disk'\s*:\s*'memory-disk'/.test(bankAvatar),
+    'decoded remote artwork has unbounded brand cardinality on imported ledgers; disk cache keeps reuse without retaining every image in RAM');
 
   ok('opening an entry does not reconcile the full transfer graph',
     !/reconcileTransfers\s*\(/.test(detail) && /transferOwnership\(transaction\)/.test(detail),

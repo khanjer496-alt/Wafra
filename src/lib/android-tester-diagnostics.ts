@@ -22,6 +22,8 @@ import {
 } from '@/lib/feedback-transport';
 import { getLaunchMetrics } from '@/lib/launch-performance';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
+import { getBankLogoCacheDiagnostics } from '@/lib/bank-logo-resolver';
+import { getMerchantLogoCacheDiagnostics } from '@/lib/merchant-logo-resolver';
 import { notificationDeliveryAllowed } from '@/lib/notifications';
 import { sanitizeParserTemplate } from '@/lib/parser-research';
 import { getRuntimePerformanceSnapshot } from '@/lib/runtime-performance';
@@ -214,6 +216,18 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
   } catch {
     notificationDiagnostics = { unavailable: true };
   }
+  let processExitDiagnostics: unknown[] = [];
+  try {
+    processExitDiagnostics = NotificationReader?.getProcessExitDiagnostics?.() ?? [];
+  } catch {
+    processExitDiagnostics = [];
+  }
+  let processMemoryDiagnostics: unknown = null;
+  try {
+    processMemoryDiagnostics = NotificationReader?.getProcessMemoryDiagnostics?.() ?? null;
+  } catch {
+    processMemoryDiagnostics = null;
+  }
 
   const readSmsGranted = await hasSmsPermission().catch(() => false);
   const receiveSmsGranted = await hasSmsDeliveryPermission().catch(() => false);
@@ -368,6 +382,25 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
     performance: {
       launch: getLaunchMetrics(),
       runtimeJs: runtimeBeforeDiagnostic,
+      // Counts only: no merchant/bank names, URLs or cache keys leave device.
+      presentationCaches: {
+        merchantLogos: getMerchantLogoCacheDiagnostics(),
+        bankLogos: getBankLogoCacheDiagnostics(),
+      },
+      recentProcessExits: processExitDiagnostics.map((entry) => {
+        const row = entry as Record<string, unknown>;
+        const timestamp = typeof row.timestamp === 'number' ? row.timestamp : null;
+        return {
+          ageMs: timestamp === null ? null : safeAgeMs(timestamp, now),
+          reason: row.reason ?? null,
+          reasonLabel: row.reasonLabel ?? null,
+          status: row.status ?? null,
+          importance: row.importance ?? null,
+          pssKb: row.pssKb ?? null,
+          rssKb: row.rssKb ?? null,
+        };
+      }),
+      currentProcessMemory: processMemoryDiagnostics,
       dataScale: {
         accounts: state.accounts.length,
         transactions: state.transactions.length,

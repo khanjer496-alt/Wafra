@@ -116,7 +116,7 @@ function loadAvatar(identities) {
       case 'react/jsx-runtime': return { jsx, jsxs: jsx };
       // The avatar is a React.memo component; the harness calls it directly.
       case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined, memo: (component) => component };
-      case 'react-native': return { StyleSheet: { create: (value) => value }, View: 'view' };
+      case 'react-native': return { Platform: { OS: 'android' }, StyleSheet: { create: (value) => value }, View: 'view' };
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
@@ -178,4 +178,8 @@ assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');
 const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
 assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{52\}/,
   'transaction details keep the current compact merchant-logo treatment');
+const avatarSource = fs.readFileSync(path.join(root, 'src/components/ui/merchant-avatar.tsx'), 'utf8');
+assert.match(avatarSource,
+  /Platform\.OS === 'android' && typeof source !== 'number' \? 'disk' : 'memory-disk'/,
+  'Android remote merchant artwork stays off the process-wide decoded-image memory cache');
 console.log(`✓ ${assets.size} bundled logos; ${Object.keys(matches).length} identity cases; ${samples.length} negative cases; asset integrity, privacy, accessibility and failure recovery`);

@@ -147,5 +147,34 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.equal(await failing.resolveBankLogo('Worldwide Example Bank'), null);
   assert.equal(failures, 2, 'transient failures remain retryable instead of becoming cached misses');
 
+  const bounded = load({ fetchImpl: async () => response([]) });
+  for (let i = 0; i < 90; i++) {
+    await bounded.resolveBankLogo(`Synthetic Bank ${i}`);
+  }
+  const cache = bounded.getBankLogoCacheDiagnostics();
+  assert.ok(cache.memoryEntries <= cache.memoryLimit, 'bank logo metadata cache is bounded');
+  assert.equal(cache.memoryLimit, 64);
+  assert.ok(cache.peakMemoryEntries <= cache.memoryLimit, 'bank logo cache never exceeds its ceiling even transiently');
+  assert.ok(cache.memoryEvictions > 0, 'older in-memory bank metadata is evicted while its durable cache remains');
+
+  let releaseSaturated;
+  const saturatedGate = new Promise(resolve => { releaseSaturated = resolve; });
+  const saturated = load({ fetchImpl: async () => { await saturatedGate; return response([]); } });
+  const saturatedJobs = Array.from({ length: 20 }, (_, i) => saturated.resolveBankLogo(`Queued Bank ${i}`));
+  await new Promise(resolve => setImmediate(resolve));
+  const duringSaturation = saturated.getBankLogoCacheDiagnostics();
+  assert.equal(duringSaturation.pendingEntries, duringSaturation.pendingLimit,
+    'Wallet cannot retain more unresolved bank-logo jobs than the ceiling');
+  assert.equal(duringSaturation.pendingLimit, 8);
+  assert.ok(duringSaturation.saturatedResolutionDrops > 0);
+  releaseSaturated();
+  await Promise.all(saturatedJobs);
+
+  const bankAvatarSource = fs.readFileSync(path.join(root, 'src/components/ui/bank-avatar.tsx'), 'utf8');
+  assert.match(bankAvatarSource, /cachePolicy=\{Platform\.OS === 'android' \? 'disk' : 'memory-disk'\}/,
+    'Android remote bank artwork stays off the process-wide decoded-image memory cache');
+  assert.match(bankAvatarSource, /requestIdleCallback/,
+    'bank artwork enrichment cannot compete with the first navigation frame');
+
   console.log('✓ bank logos keep known local domains and onboarding stays country-localized');
 })().catch(error => { console.error(error); process.exitCode = 1; });
