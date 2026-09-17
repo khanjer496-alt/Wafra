@@ -169,6 +169,61 @@ ok('opening the database verifies the key against page 1',
   /sqlite_master/.test(storage),
   'PRAGMA key never fails; only a read proves the key is right');
 
+const openEncryptedBody = bodyOf(storage, 'async function openEncryptedDatabase');
+ok('a retry waits for failed-handle cleanup before consulting the shared connection',
+  !!openEncryptedBody &&
+    inOrder(openEncryptedBody, 'await waitForDatabaseRecovery()', 'if (databasePromise)'),
+  'expo-sqlite caches Android handles by path; checking databasePromise first can let a retry ' +
+    'reuse a NativeDatabase that the previous failed open has not finished closing');
+
+ok('open failures are attributed to a closed-vocabulary stage before arbitrary native text is dropped',
+  !!openEncryptedBody &&
+    inOrder(
+      openEncryptedBody,
+      "failureStage = 'sqlite-open'",
+      "failureStage = 'cipher-key'",
+      "failureStage = 'cipher-validation'",
+      "failureStage = 'schema-init'",
+      'recordStorageFailure(failureStage, error)',
+    ),
+  'ERR_UNEXPECTED by itself cannot tell support whether SecureStore, native SQLite open, ' +
+    'SQLCipher page validation or schema bootstrap failed');
+
+ok('a handle opened before a later initialization failure is closed before the retry rejects',
+  !!openEncryptedBody &&
+    inOrder(
+      openEncryptedBody,
+      'opened = db',
+      'const recovery = beginDatabaseRecovery(opened)',
+      'databasePromise = null',
+      'await recovery',
+      'throw error',
+    ),
+  'clearing the JS promise without closeAsync leaves expo-sqlite free to hand the same cached ' +
+    'half-open handle straight back to Try again');
+
+const recoverReadBody = bodyOf(storage, 'async function recoverSharedDatabaseAfterFailure');
+ok('a native read failure retires the already-open shared connection before retry',
+  !!recoverReadBody &&
+    inOrder(
+      recoverReadBody,
+      'const opening = databasePromise',
+      'const recovery = trackDatabaseRecovery',
+      'databasePromise = null',
+      'await recovery',
+    ),
+  'the incident was recorded as a read failure: keeping a resolved databasePromise would make ' +
+    'Try again reuse the same failing NativeDatabase even though open itself had succeeded');
+
+const singleReadBody = bodyOf(storage, 'async getItem(key)');
+const batchReadBody = bodyOf(storage, 'async multiGet(keys)');
+ok('single and batched hydration reads record distinct safe stages and recover the connection',
+  !!singleReadBody && !!batchReadBody &&
+    inOrder(singleReadBody, "recordStorageFailure('state-read', error)", 'await recoverSharedDatabaseAfterFailure()', 'throw error') &&
+    inOrder(batchReadBody, "recordStorageFailure('state-batch-read', error)", 'await recoverSharedDatabaseAfterFailure()', 'throw error'),
+  'support needs to distinguish the ledger metadata read from the chunk batch without retaining ' +
+    'the native error message or any ledger content');
+
 ok('ledger chunk hydration uses one batched SQLite read',
   /SELECT key, value FROM \$\{TABLE\} WHERE key IN/.test(storage) &&
     /getAllAsync<\{ key: string; value: string \}>/.test(storage),
@@ -234,12 +289,24 @@ for (const method of ['async multiSet(entries)', 'async multiRemove(keys)']) {
 // real cause. Only a close actually releases it.
 // ---------------------------------------------------------------------------
 
+const recoveryCloseBody = bodyOf(storage, 'async function closeDatabaseForRecovery');
+const recoveryTrackBody = bodyOf(storage, 'function trackDatabaseRecovery');
+const recoveryBody = bodyOf(storage, 'function beginDatabaseRecovery');
+ok('failed native handles are closed behind a shared recovery barrier',
+  !!recoveryCloseBody && !!recoveryTrackBody && !!recoveryBody &&
+    /closeAsync/.test(recoveryCloseBody) &&
+    /recordStorageFailure\('connection-close'/.test(recoveryCloseBody) &&
+    inOrder(recoveryTrackBody, 'const tracked', 'databaseRecoveryPromise = tracked', 'return tracked') &&
+    /trackDatabaseRecovery\(closeDatabaseForRecovery\(db\)\)/.test(recoveryBody),
+  'dropping a promise alone is not enough: the native cache would hand the same poisoned ' +
+    'connection back to the next open, while a close failure still needs safe attribution');
+
 const poisonBody = bodyOf(storage, 'async function poisonDatabase');
-ok('a failed ROLLBACK drops the shared handle and closes it',
+ok('a failed ROLLBACK installs the close barrier before dropping the shared handle',
   !!poisonBody &&
-    inOrder(poisonBody, 'databasePromise = null', 'closeAsync'),
-  'dropping the promise alone is not enough: the native cache would hand the same poisoned ' +
-    'connection back to the next open');
+    inOrder(poisonBody, 'beginDatabaseRecovery(db)', 'databasePromise = null', 'await recovery'),
+  'the barrier must exist before databasePromise becomes null or another read can race into ' +
+    'openDatabaseAsync while the poisoned handle is still cached');
 
 const writeTxnBody = bodyOf(storage, 'async function writeTransaction');
 ok('the poison path is awaited from the ROLLBACK catch, before the original error is thrown',
@@ -543,6 +610,11 @@ if (!gateSrc || !recoverySrc) {
     /retryHydration/.test(recovery) && /storageRecoveryRetry/.test(recovery),
     '"force-stop and reopen" is not a recovery instruction to give someone whose ledger is ' +
       'on the line');
+
+  ok('Android recovery does not show the iOS unlock hint',
+    /Platform\.OS === 'ios' && !keyMismatch && !erased/.test(recovery),
+    'the existing hint describes iOS protected storage; Android ERR_UNEXPECTED/SQLite recovery ' +
+      'is not fixed by telling the user to unlock an already-unlocked phone');
 
   /**
    * Reachability, not source order. The erase handler is defined near the top

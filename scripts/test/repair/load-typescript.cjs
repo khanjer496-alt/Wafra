@@ -46,6 +46,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // test explicitly provides its own counted implementation.
       if (name === '@/lib/runtime-performance') {
         return {
+          recordRuntimeInteraction() {},
           recordRuntimeOperation() {},
           measureRuntimeOperation: (_tag, work) => work(),
           measureRuntimeOperationAsync: async (_tag, work) => work(),
