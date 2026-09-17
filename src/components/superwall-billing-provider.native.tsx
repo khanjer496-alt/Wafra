@@ -119,6 +119,27 @@ function onboardingIntention(value: unknown): OnboardingIntention | null {
     : null;
 }
 
+/**
+ * `request-callback` variable keys are editor-state identifiers. When the Flow
+ * uses `replaceNodeIdsWithNames`, those keys become node names rather than the
+ * semantic names `focus`, `tracking` and `intention`. Keep this seam resilient
+ * to harmless editor renames by accepting an explicit semantic key first and
+ * then locating the value by its closed enum.
+ */
+function onboardingCallbackValue<T>(
+  variables: Record<string, unknown>,
+  key: string,
+  parse: (value: unknown) => T | null,
+): T | null {
+  const explicit = parse(variables[key]);
+  if (explicit) return explicit;
+  for (const value of Object.values(variables)) {
+    const parsed = parse(value);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   const { state, ensureDurable, setOnboardingProfile, setPro } = useStore();
   const superwall = useSuperwall();
@@ -135,9 +156,10 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     if (callback.name !== 'wafra_onboarding_handoff') {
       return { status: 'failure', data: { reason: 'unsupported_callback' } };
     }
-    const focus = onboardingFocus(callback.variables?.focus);
-    const tracking = onboardingTracking(callback.variables?.tracking);
-    const intention = onboardingIntention(callback.variables?.intention);
+    const callbackVariables = (callback.variables ?? {}) as Record<string, unknown>;
+    const focus = onboardingCallbackValue(callbackVariables, 'focus', onboardingFocus);
+    const tracking = onboardingCallbackValue(callbackVariables, 'tracking', onboardingTracking);
+    const intention = onboardingCallbackValue(callbackVariables, 'intention', onboardingIntention);
     if (!focus || !tracking || !intention) {
       return { status: 'failure', data: { reason: 'invalid_onboarding_answers' } };
     }
