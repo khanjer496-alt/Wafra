@@ -277,6 +277,7 @@ export default function RootLayout() {
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="recap" options={{ animation: 'fade' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
             {/* Every name below has a file behind it in src/app, and nothing that
                 lacks one is declared. That is the whole rule for this block: a
