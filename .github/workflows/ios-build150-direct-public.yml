@@ -1,0 +1,141 @@
+name: Direct-upload Wafra iOS build 150 public TestFlight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ios-build150-direct-public
+  cancel-in-progress: false
+
+jobs:
+  upload-and-publish:
+    runs-on: macos-26
+    timeout-minutes: 55
+    env:
+      EXPECTED_SOURCE_SHA: e71c3cac9c9a842bdf0b5456533df78c5b91c943
+      EXPECTED_IPA_SHA256: 0ac2cc6e14b3dc702040ee90ee305db25ed56c8d586a082dcd20ee3dfce05f6f
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: '150'
+      WAFRA_BETA_SOURCE_SHA: e71c3cac9c9a842bdf0b5456533df78c5b91c943
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download already-verified build 150 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wafra-ios-local-150
+          path: verified-build
+          repository: khanjer496-alt/Wafra
+          run-id: 35264126540
+          github-token: ${{ github.token }}
+
+      - name: Refuse anything except exact verified build 150
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA=$(find verified-build -maxdepth 1 -type f -name '*.ipa' -print -quit)
+          REPORT=$(find verified-build -maxdepth 1 -type f -name 'verification.json' -print -quit)
+          test -n "$IPA" && test -f "$IPA" && test -f "$REPORT"
+          test "$(shasum -a 256 "$IPA" | awk '{print $1}')" = "$EXPECTED_IPA_SHA256"
+          node <<'NODE'
+          const fs=require('fs');
+          const v=JSON.parse(fs.readFileSync('verified-build/verification.json','utf8'));
+          if(v.sourceCommit!==process.env.EXPECTED_SOURCE_SHA || v.version!=='1.0.0' ||
+             String(v.buildNumber)!=='150' || v.bundleIdentifier!=='app.wafra.ios' ||
+             v.sha256!==process.env.EXPECTED_IPA_SHA256 || v.storeSigningVerified!==true) {
+            throw new Error('Build 150 verification mismatch');
+          }
+          NODE
+          echo "ipa_path=$IPA" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare App Store Connect API key for direct Apple upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_ASC_API_KEY_P8" && test -n "$EXPO_ASC_KEY_ID" && test -n "$EXPO_ASC_ISSUER_ID"
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          chmod 700 "$KEY_DIR"
+          KEY_FILE="$KEY_DIR/AuthKey_${EXPO_ASC_KEY_ID}.p8"
+          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY_FILE"
+          else
+            printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY_FILE"
+          fi
+          chmod 600 "$KEY_FILE"
+          grep -q 'BEGIN PRIVATE KEY' "$KEY_FILE"
+
+      - name: Upload exact verified IPA directly to App Store Connect
+        env:
+          IPA_PATH: ${{ steps.artifact.outputs.ipa_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun altool --upload-app --type ios --file "$IPA_PATH" \
+            --apiKey "$EXPO_ASC_KEY_ID" --apiIssuer "$EXPO_ASC_ISSUER_ID"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Wait for build 150 and declare export compliance
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const APP='6799171482', VERSION='1.0.0', NUMBER='150';
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'';
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem), kid=process.env.EXPO_ASC_KEY_ID, iss=process.env.EXPO_ASC_ISSUER_ID;
+          if(!raw||!kid||!iss) throw new Error('App Store Connect credentials are missing');
+          const b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const token=()=>{const now=Math.floor(Date.now()/1000);const signed=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;return `${signed}.${sign('sha256',Buffer.from(signed),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path,{method='GET',body}={}){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{method,headers:{Authorization:`Bearer ${token()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const text=await r.text();if(!r.ok)throw new Error(`${method} ${path.split('?')[0]}: ${r.status} ${text}`);return text?JSON.parse(text):null;}
+          const wait=ms=>new Promise(r=>setTimeout(r,ms));
+          let build=null;
+          for(let attempt=0;attempt<91;attempt+=1){
+            const result=await api(`builds?filter[app]=${APP}&filter[version]=${NUMBER}&include=preReleaseVersion&limit=100`);
+            const included=new Map((result.included??[]).map(e=>[`${e.type}:${e.id}`,e]));
+            const matches=result.data.filter(e=>{const ref=e.relationships?.preReleaseVersion?.data;return ref&&included.get(`${ref.type}:${ref.id}`)?.attributes.version===VERSION;});
+            if(matches.length>1) throw new Error('ambiguous-build-150');
+            build=matches[0]??null;
+            console.log(JSON.stringify({attempt,found:Boolean(build),processingState:build?.attributes.processingState??null}));
+            if(build?.attributes.processingState==='VALID') break;
+            if(['INVALID','FAILED'].includes(build?.attributes.processingState)) throw new Error('apple-processing-failed');
+            await wait(20000);
+          }
+          if(!build||build.attributes.processingState!=='VALID') throw new Error('Build 150 did not become VALID');
+          if(build.attributes.usesNonExemptEncryption===null){
+            await api(`builds/${build.id}`,{method:'PATCH',body:{data:{type:'builds',id:build.id,attributes:{usesNonExemptEncryption:false}}}});
+          } else if(build.attributes.usesNonExemptEncryption!==false){
+            throw new Error('Build 150 has conflicting export compliance');
+          }
+          const after=await api(`builds/${build.id}`);
+          console.log(JSON.stringify({build:after.data.attributes.version,id:after.data.id,processingState:after.data.attributes.processingState,usesNonExemptEncryption:after.data.attributes.usesNonExemptEncryption},null,2));
+          NODE
+
+      - name: Publish build 150 to existing public TestFlight group
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Preserve publication evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build150-direct-public-${{ github.run_id }}
+          path: ios-release-evidence/public-beta.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Remove temporary App Store Connect key
+        if: always()
+        shell: bash
+        run: rm -rf "$HOME/.appstoreconnect/private_keys"
