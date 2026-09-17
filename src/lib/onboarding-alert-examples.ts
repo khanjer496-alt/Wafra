@@ -54,12 +54,31 @@ const GROCERS: Readonly<Record<string, OnboardingMerchantExample>> = {
   JO: M('Carrefour', 'cart', 'carrefourjordan.com'),
 };
 
+/**
+ * A recognisable local biller for every onboarding preview region.
+ *
+ * The domain is deliberately the provider's own site: the welcome poster can
+ * render the real mark through the same reviewed Brandfetch-domain path as bank
+ * logos. Keeping this table complete prevents a global user from seeing local
+ * banks next to a generic "Electricity" example that still feels UAE-centric.
+ */
 const UTILITIES: Readonly<Record<string, OnboardingMerchantExample>> = {
   AE: M('DEWA', 'bolt', 'dewa.gov.ae'),
   SA: M('Saudi Electricity', 'bolt', 'se.com.sa'),
-  GB: M('Octopus Energy', 'bolt', 'octopus.energy'),
   US: M('Con Edison', 'bolt', 'coned.com'),
+  GB: M('Octopus Energy', 'bolt', 'octopus.energy'),
+  FR: M('EDF', 'bolt', 'edf.fr'),
+  DE: M('E.ON', 'bolt', 'eon.de'),
+  ES: M('Iberdrola', 'bolt', 'iberdrola.es'),
+  IT: M('Enel Energia', 'bolt', 'enel.it'),
+  NL: M('Eneco', 'bolt', 'eneco.nl'),
+  IN: M('Tata Power', 'bolt', 'tatapower.com'),
   QA: M('Kahramaa', 'bolt', 'km.qa'),
+  KW: M('MEW Kuwait', 'bolt', 'mew.gov.kw'),
+  BH: M('EWA Bahrain', 'bolt', 'ewa.bh'),
+  OM: M('Nama Supply', 'bolt', 'supply.nama.om'),
+  EG: M('Egyptian Electricity', 'bolt', 'eehc.gov.eg'),
+  JO: M('JEPCO', 'bolt', 'jepco.com.jo'),
 };
 
 const GULF_FORMAT = new Set(['AE', 'SA', 'QA', 'KW', 'BH', 'OM']);
