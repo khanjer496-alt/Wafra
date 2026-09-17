@@ -4,7 +4,6 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
-import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { Money } from '@/components/ui/money';
 import type { Colors } from '@/constants/theme';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
@@ -25,10 +24,8 @@ type Props = {
   onSettings: () => void;
   onIncome: () => void;
   onSpending: () => void;
-  /** A completed monthly/yearly story. Only the W mark becomes the story affordance. */
-  onRecap?: () => void;
-  recapUnread?: boolean;
-  recapLabel?: string;
+  /** Optional replacement for the standalone W mark, owned by the calling screen. */
+  brandMark?: React.ReactNode;
   /** Internal builds only: tapping the Wafra wordmark grants durable Founder Pro. */
   onFounderUnlock?: () => void;
 };
@@ -40,17 +37,12 @@ export function ReferenceHomeSummary(p: Props) {
   const netColor = p.netFils < 0 ? p.theme.expense : p.netFils > 0 ? p.theme.income : p.theme.text;
   const currency = p.moneySpec.currency;
   const wordmark = <>
-    {p.onRecap ? <RecapLogoTrigger
-      unread={p.recapUnread ?? false}
-      accessibilityLabel={p.recapLabel ?? 'Open Wafra Recap'}
-      onPress={p.onRecap}
-      onLongPress={p.onFounderUnlock}
-    /> : <WafraMark size={28} />}
+    {p.brandMark ?? <WafraMark size={28} />}
     <ThemedText type="title">Wafra</ThemedText>
   </>;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.header}>
-      {p.onFounderUnlock && !p.onRecap ? (
+      {p.onFounderUnlock && !p.brandMark ? (
         <Pressable
           testID="founder-unlock-logo"
           accessibilityRole="button"

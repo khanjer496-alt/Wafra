@@ -14,6 +14,7 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
@@ -429,13 +430,14 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')}
-          onRecap={openRecap}
-          recapUnread={recapEntry?.unread}
-          recapLabel={recapEntry
-            ? language === 'ar'
-              ? `ملخص وفرة · ${recapEntry.descriptor.label}`
-              : `Wafra Recap · ${recapEntry.descriptor.label}`
-            : undefined}
+          brandMark={openRecap ? <RecapLogoTrigger
+            unread={recapEntry?.unread ?? false}
+            accessibilityLabel={language === 'ar'
+              ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
+              : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
+            onPress={openRecap}
+            onLongPress={unlockFounder}
+          /> : undefined}
           onFounderUnlock={unlockFounder} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}

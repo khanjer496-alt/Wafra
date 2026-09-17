@@ -124,8 +124,10 @@ ok('Home defers recap discovery until after launch interactions',
   /InteractionManager\.runAfterInteractions[\s\S]{0,700}2_600/.test(homeSource));
 ok('Home never runs the full recap projection', !/\bprojectRecap\b/.test(homeSource));
 ok('the W mark, not a fake brand asset, owns the recap entry',
-  /RecapLogoTrigger/.test(summarySource) && /WafraMark/.test(
+  /RecapLogoTrigger/.test(homeSource) && /brandMark=/.test(homeSource) && /WafraMark/.test(
     fs.readFileSync(path.join(root, 'src/components/recap/recap-logo-trigger.tsx'), 'utf8')));
+ok('the shared Home summary keeps its old dependency surface',
+  !/recap-logo-trigger/.test(summarySource) && /brandMark\?: React\.ReactNode/.test(summarySource));
 ok('story visuals reuse Wafra merchant, bank and category primitives',
   ['MerchantAvatar', 'BankAvatar', 'CategoryDonut', 'WafraMark'].every((name) => storySource.includes(name)));
 ok('recap deliberately avoids decorative gradient UI', !/LinearGradient|RadialGradient/.test(storySource));
