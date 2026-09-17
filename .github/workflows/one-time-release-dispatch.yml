@@ -1,5 +1,6 @@
 name: One-time release dispatch
 
+# Triggered from an isolated automation branch; main remains the exact release source.
 on:
   push:
     branches:
