@@ -206,12 +206,10 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
             --github-summary "$GITHUB_STEP_SUMMARY"
           )
-          if [ "$PROFILE" = "preview" ] || [ "$PROFILE" = "history-beta" ]; then
-            node "${args[@]}"
-          else
-            printf -v check_command '%q ' node "${args[@]}"
-            npx --yes eas-cli@22.4.0 env:exec production "$check_command" --non-interactive
-          fi
+          # Public production config is pinned in app.json/eas.json, so this
+          # check must not depend on node_modules or a remote env wrapper before
+          # the Install dependencies step below.
+          node "${args[@]}"
 
       # ---- The Apple credentials.
       #
