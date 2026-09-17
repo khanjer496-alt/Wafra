@@ -30,6 +30,7 @@ import { shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
 import { isRTL } from '@/lib/i18n';
+import { recapCopy as copy } from '@/lib/recap-copy';
 import type { RecapSnapshot } from '@/lib/recap';
 
 const STORY_MS = 7_000;
@@ -39,73 +40,6 @@ function useRecapEntering() {
   const reducedMotion = useReducedMotion();
   return <T,>(animation: T): T | undefined => reducedMotion ? undefined : animation;
 }
-
-const copy = {
-  en: {
-    recap: 'WAFRA RECAP',
-    monthIntro: 'Your month, in money.',
-    yearIntro: 'Your year, in money.',
-    introBody: 'The patterns behind what came in, what went out, and where it went.',
-    spent: 'You spent',
-    transactions: 'payments',
-    merchants: 'merchants',
-    less: 'less than the previous period',
-    more: 'more than the previous period',
-    categories: 'WHERE IT WENT',
-    topCategory: 'was your biggest category',
-    merchant: 'YOUR #1 MERCHANT',
-    visits: 'payments',
-    account: 'YOUR GO-TO CARD',
-    accountFallback: 'YOUR GO-TO ACCOUNT',
-    used: 'used',
-    rhythm: 'YOUR MONEY RHYTHM',
-    noSpend: 'no-spend days',
-    average: 'average payment',
-    busiest: 'busiest spending day',
-    morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', night: 'Night',
-    favoriteTime: 'most payments happened in the',
-    biggest: 'YOUR BIGGEST SPEND',
-    monthly: 'THE SHAPE OF YOUR YEAR',
-    quietest: 'Quietest month',
-    highest: 'Highest month',
-    finale: 'THAT WAS YOUR',
-    wrapped: 'A clearer picture, built from your own ledger.',
-    done: 'Done',
-    close: 'Close recap',
-  },
-  ar: {
-    recap: 'ملخص وفرة',
-    monthIntro: 'شهرك، بلغة المال.',
-    yearIntro: 'سنتك، بلغة المال.',
-    introBody: 'الأنماط وراء ما دخل، وما خرج، وإلى أين ذهب.',
-    spent: 'أنفقت',
-    transactions: 'دفعات',
-    merchants: 'متجر',
-    less: 'أقل من الفترة السابقة',
-    more: 'أكثر من الفترة السابقة',
-    categories: 'أين ذهب المال',
-    topCategory: 'كانت أكبر فئة لديك',
-    merchant: 'متجرك الأول',
-    visits: 'دفعات',
-    account: 'بطاقتك الأكثر استخداماً',
-    accountFallback: 'حسابك الأكثر استخداماً',
-    used: 'استُخدمت',
-    rhythm: 'إيقاع إنفاقك',
-    noSpend: 'أيام بلا إنفاق',
-    average: 'متوسط الدفعة',
-    busiest: 'أكثر يوم إنفاقاً',
-    morning: 'الصباح', afternoon: 'بعد الظهر', evening: 'المساء', night: 'الليل',
-    favoriteTime: 'حدثت معظم الدفعات في',
-    biggest: 'أكبر إنفاق',
-    monthly: 'شكل سنتك',
-    quietest: 'أهدأ شهر',
-    highest: 'أعلى شهر',
-    finale: 'كان هذا ملخص',
-    wrapped: 'صورة أوضح، مبنية من سجلك أنت.',
-    done: 'تم',
-    close: 'إغلاق الملخص',
-  },
-} as const;
 
 function HeroMoney({ fils, moneySpec, color }: { fils: number; moneySpec: LedgerMoneySpec; color?: string }) {
   return <View style={styles.heroMoney} accessible accessibilityLabel={`${moneySpec.currency} ${formatMinorUnits(Math.abs(fils), moneySpec)}`}>
