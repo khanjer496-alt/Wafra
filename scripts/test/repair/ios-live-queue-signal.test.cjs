@@ -84,6 +84,10 @@ function harness(options = {}) {
     'react-native': { AppState: appState, Platform: { OS: 'ios' } },
     '@/components/ui/toast': { useToast: () => ({ show: () => {} }) },
     '@/lib/auto-import': {},
+    '@/lib/android-capture-sources': {
+      androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
+      androidNotificationCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.notifications ?? true),
+    },
     '@/lib/background-relay': { enableRelayBackgroundSync: async () => {} },
     '@/lib/capture': { getIosCaptureNativeModule: () => native, isCaptureAvailable: () => true,
       publishIosCaptureStatusRefresh: () => {}, subscribeIosCaptureStatusRefresh: () => () => {} },

@@ -121,6 +121,10 @@ function harness(overrides = {}, options = {}) {
       isSmsInboxAccessError: error => error?.code === 'ERR_SMS_INBOX_ACCESS',
       openSmsPermissionSettings: async () => {},
     },
+    '@/lib/android-capture-sources': {
+      androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
+      androidNotificationCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.notifications ?? true),
+    },
     '../../modules/notification-reader': { __esModule: true, default: {
       setCaptureEnabled: async enabled => { notificationPolicy = enabled; calls.policy.push(enabled); return true; },
       addListener: () => ({ remove() {} }),
