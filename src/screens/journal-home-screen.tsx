@@ -107,6 +107,11 @@ export default function JournalHomeScreen() {
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
+  // The clock is refreshed on every foreground resume for greeting/review
+  // freshness, but Home's money projections are day-based. Keep the derived
+  // day key above every effect that depends on it so recap discovery and the
+  // dashboard share the same stable invalidation boundary.
+  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -203,12 +208,10 @@ export default function JournalHomeScreen() {
     return () => listener.remove();
   }, []);
 
-  // The clock is refreshed on every foreground resume for greeting/review
-  // freshness, but Home's money projections are day-based. Depending on the
-  // Date object itself made every reopen synchronously re-walk a large ledger
-  // twice before Android could feel responsive, even when no money changed.
-  // A review expiring still invalidates the Home projection explicitly below.
-  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // Depending on the Date object itself made every reopen synchronously
+  // re-walk a large ledger twice before Android could feel responsive, even
+  // when no money changed. A review expiring still invalidates the Home
+  // projection explicitly below.
   const dashboard = useMemo(() => projectDashboard({
     state,
     period,
