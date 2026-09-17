@@ -35,9 +35,21 @@ let netWorthBreakdownCache: {
 export function accountBalanceFils(state: BalanceState, accountId: string): number {
   const account = state.accounts.find((a) => a.id === accountId);
   let balance = account?.openingFils ?? 0;
-  const secondary = reconcileTransfers(state.transactions, state.accounts).corroboratingIds;
+  // Corroborating rows are a bank-capture concept. A fully manual account can
+  // never own one, so rebuilding the complete transfer graph just to add its
+  // own entries is pure render-path cost. This matters because reliableBalance
+  // uses this function for manual accounts and Wallet/Card lists can call it on
+  // first paint. Keep the exact reconciliation path for any account that has
+  // captured-bank evidence; skip it only where it provably cannot affect the
+  // answer.
+  const hasCapturedRows = state.transactions.some(
+    (t) => t.accountId === accountId && (t.source === 'sms' || Boolean(t.smsKey)),
+  );
+  const secondary = hasCapturedRows
+    ? reconcileTransfers(state.transactions, state.accounts).corroboratingIds
+    : null;
   for (const t of state.transactions) {
-    if (t.accountId !== accountId || secondary.has(t.id)) continue;
+    if (t.accountId !== accountId || secondary?.has(t.id)) continue;
     balance += t.type === 'income' ? t.amountFils : -t.amountFils;
   }
   return balance;
@@ -88,14 +100,26 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
   }
   const runningByAccount = new Map<string, number>();
   const smsAccountIds = new Set<string>();
-  const secondary = reconcileTransfers(state.transactions, state.accounts).corroboratingIds;
+  // Legacy captured rows can carry a durable smsKey even if an old snapshot
+  // predates the explicit `source: 'sms'` field. Keep track of those accounts
+  // so the rare legacy case can fall back to the exact reconciled balance
+  // without charging every modern Wallet paint for a full transfer-graph walk.
+  const capturedIdentityAccountIds = new Set<string>();
 
   for (const account of state.accounts) {
     if (!account.archived) runningByAccount.set(account.id, account.openingFils ?? 0);
   }
   for (const transaction of state.transactions) {
-    if (!runningByAccount.has(transaction.accountId) || secondary.has(transaction.id)) continue;
+    if (!runningByAccount.has(transaction.accountId)) continue;
+    // `balanceByAccountId` consumes this running sum only for accounts with no
+    // SMS history. Corroborating transfer alerts are bank-captured SMS rows, so
+    // any account on which they could change the sum is marked unknown below
+    // (or replaced by the bank's own snapshot) and the sum is never read. The
+    // old unconditional reconcileTransfers() therefore spent seconds rebuilding
+    // a 10k+ row transfer graph on the first Accounts paint for a result that
+    // could not affect the value shown.
     if (transaction.source === 'sms') smsAccountIds.add(transaction.accountId);
+    if (transaction.smsKey) capturedIdentityAccountIds.add(transaction.accountId);
     runningByAccount.set(
       transaction.accountId,
       (runningByAccount.get(transaction.accountId) ?? 0) +
@@ -120,8 +144,16 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
           : null;
     } else if (account.snapshotKind === 'balance' && account.snapshotFils !== undefined) {
       reliable = account.snapshotFils;
+    } else if (smsAccountIds.has(account.id)) {
+      reliable = null;
+    } else if (capturedIdentityAccountIds.has(account.id)) {
+      // Preserve the pre-`source` legacy edge exactly. accountBalanceFils pays
+      // for reconciliation only on this captured account, while ordinary modern
+      // SMS accounts above remain unknown and fully-manual accounts below use
+      // the already-built running index.
+      reliable = accountBalanceFils(state, account.id);
     } else {
-      reliable = smsAccountIds.has(account.id) ? null : (runningByAccount.get(account.id) ?? 0);
+      reliable = runningByAccount.get(account.id) ?? 0;
     }
 
     if (reliable === null) {

@@ -30,6 +30,11 @@ test('logging failures never change financial execution', () => {
   const h = harness('1', () => { throw new Error('sink unavailable'); });
   assert.doesNotThrow(() => h.captureTrace('save:done', 1, 20));
 });
+test('runtime capture-plan timing is independent of verbose capture tracing', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../../src/lib/capture-executor.ts'), 'utf8');
+  assert.match(source, /const planStarted = Date\.now\(\)/);
+  assert.doesNotMatch(source, /const planStarted = tracing \? Date\.now\(\) : 0/);
+});
 test('public APK builds default tracing off and Play bundles refuse it', () => {
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/build-apk.yml'), 'utf8');
   assert.match(workflow, /capture_trace:\n[\s\S]*?default: false/);

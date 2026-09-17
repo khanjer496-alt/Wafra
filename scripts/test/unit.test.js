@@ -1066,6 +1066,14 @@ ok('net worth breakdown row figures agree with the reliable-balance contract',
       const projected = worthBreakdown.balanceByAccountId[account.id];
       return reliable === null ? projected === null : projected === reliable;
     }));
+const legacyCaptureBalanceState = {
+  accounts: [mkAcc({ id: 'legacy-captured', kind: 'bank', openingFils: 50000 })],
+  transactions: [{ id: 'legacy-row', accountId: 'legacy-captured', type: 'expense', amountFils: 1200,
+    date: '2026-07-03', title: 'Legacy capture', category: 'other', smsKey: 's1783036800000-1200' }],
+};
+ok('net worth preserves legacy captured-row balance semantics without the modern source marker',
+  bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] ===
+    bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]));
 
 // ── One payment must not settle two overlapping statements ──
 const allocLib = require('./build/cards');
