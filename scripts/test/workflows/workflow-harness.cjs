@@ -95,6 +95,10 @@ function createWorkflowHarness(options={}) {
   if(screen==='pro'){
    h.local('@/lib/purchases','src/lib/purchases.ts');
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
+   d['@/components/superwall-billing-context']={useWafraBilling:()=>({
+    available:false,configured:false,configurationError:null,paywallStatus:'idle',
+    presentProPaywall:async()=>{},restorePro:async()=>null,
+   })};
    store.setPro=record('setPro');
   }
   if(screen==='trusted-devices')h.local('@/lib/trusted-device-contract','src/lib/trusted-device-contract.ts');

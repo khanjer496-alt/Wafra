@@ -83,7 +83,7 @@ test('bank-payment nicknames learn by bill identity and never write a merchant-w
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{4:true}}),tree=h.renderScreen('onboarding');
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{8:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
  assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
  const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');
@@ -126,7 +126,7 @@ test('feedback submission is reachable only through the confirmation callback',a
 for(const platform of ['android','ios'])test(`paywall does not manufacture a storefront price: ${platform}`,()=>{
  const h=createWorkflowHarness({platform,state:{pro:false,founderPro:false}}),tree=h.renderScreen('pro');
  const content=text(tree);assert.ok(!content.includes('US$9.99'));assert.ok(!content.includes('US$74.99'));
- assert.ok(content.includes(h.deps['@/lib/i18n'].t('priceUnavailable')));assert.deepEqual(h.events,[]);
+ assert.ok(content.includes(h.deps['@/lib/i18n'].t('getPro')));assert.ok(content.includes(h.deps['@/lib/i18n'].t('restorePurchase')));assert.deepEqual(h.events,[]);
 });
 test('unpaired trusted devices preserves privacy disclosure and makes no connection on render',()=>{
  const h=createWorkflowHarness({state:{privateMode:true},states:{2:false}}),tree=h.renderScreen('trusted-devices');

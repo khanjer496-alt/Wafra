@@ -58,15 +58,20 @@ test('main onboarding Back actions follow the integrated journey',()=>{
   ['capture','preview','preview'],['preview','intention','intention'],['intention','tracking','tracking'],
   ['tracking','focus','focus'],['focus','welcome','welcome'],['complete','capture','capture'],
  ];
- for(const[activeStep,expected,journey]of cases){
-  const events=[];
-  onboardingAction('goBack',{activeStep,params:{},setStep:step=>events.push(['step',step]),
-   saveJourney:stage=>events.push(['journey',stage]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
-  assert.deepEqual(events,[['step',expected],['journey',journey]],activeStep);
+  for(const[activeStep,expected,journey]of cases){
+   const events=[];
+   onboardingAction('goBack',{activeStep,params:{},previewMode:false,setStep:step=>events.push(['step',step]),
+   saveJourney:stage=>events.push(['journey',stage]),preferredName:'Naser',
+   setNameDraft:value=>events.push(['nameDraft',value]),setNameSaveFailed:value=>events.push(['nameFailed',value]),
+   setCollectingName:value=>events.push(['collectName',value]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
+  const expectedEvents=[['step',expected],['journey',journey]];
+  if(activeStep==='focus') expectedEvents.push(['nameDraft','Naser'],['nameFailed',false],['collectName',true]);
+  assert.deepEqual(events,expectedEvents,activeStep);
  }
  const events=[];
- onboardingAction('goBack',{activeStep:'complete',params:{onboarding:'complete'},setStep:step=>events.push(['step',step]),
-  saveJourney:stage=>events.push(['journey',stage]),router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
+ onboardingAction('goBack',{activeStep:'complete',params:{onboarding:'complete'},previewMode:false,setStep:step=>events.push(['step',step]),
+  saveJourney:stage=>events.push(['journey',stage]),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+  router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
  assert.deepEqual(events,[['step','capture'],['journey','capture'],['params',['onboarding'],undefined]]);
 });
 test('obsolete optional goals and budget wizard handlers are absent from the shipping gate',()=>{
@@ -78,8 +83,9 @@ test('obsolete optional goals and budget wizard handlers are absent from the shi
 test('blocked onboarding Back transitions preserve the integrated journey',()=>{
  for(const activeStep of ['capture','preview','intention','tracking','focus','complete','welcome']){
   const events=[];
-  onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},
+  onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},previewMode:false,
    setStep:step=>events.push(['step',step]),saveJourney:stage=>events.push(['journey',stage]),
+   preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
    router:{setParams:params=>events.push(['params',params])}},false);
   assert.deepEqual(events,[],`${activeStep}: a blocked press cannot navigate, persist progress or clear the callback`);
  }
