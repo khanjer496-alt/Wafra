@@ -56,8 +56,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { transferEntry: 'Transfers', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave as recorded' },
-  ar: { transferEntry: 'التحويلات', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه كما هو مسجل' },
+  en: { transferEntry: 'Check a transfer', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave as recorded' },
+  ar: { transferEntry: 'مراجعة تحويل', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه كما هو مسجل' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -121,9 +121,9 @@ async function home(page, expected, pendingCount) {
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  // Pending transfer review no longer interrupts Home. Current main keeps
-  // the review workflow reachable from Wallet and transaction details while
-  // Home remains focused on confirmed Income / Spending / Net.
+  // Pending transfer review no longer interrupts Home. The shipping flow keeps
+  // review contextual to a transaction detail instead of a permanent Wallet row,
+  // while Home remains focused on confirmed Income / Spending / Net.
   assert.equal(await page.getByTestId('transfer-review-notice').count(), 0);
 }
 async function choose(page, words, id, ownership) {
@@ -167,9 +167,16 @@ try {
     try {
       await home(page, [200000, 10000, 190000], 4);
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
-      await page.goto(`${BASE}/wallet`, { waitUntil: 'networkidle' });
+      // Transfer review is contextual now: open a pending transfer's details,
+      // then take its explicit review action. Wallet intentionally has no
+      // permanent Transfers section between the balance hero and accounts.
+      await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
+      await click(page.getByRole('button', { name: /^Outgoing transfer,/ }).first());
+      await fits(page.getByTestId('entry-transfer-review'));
       await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);
+      await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });
+      await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
       await fits(page.getByTestId('transfer-search'));
       await page.screenshot({ path: path.join(OUT, `${name}-recent-groups.png`) });
