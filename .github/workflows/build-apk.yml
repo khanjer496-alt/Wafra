@@ -66,6 +66,7 @@ jobs:
       # fork or a renamed Worker overrides it without editing this file. Not a
       # secret: it is a public URL that ships inside the APK by definition.
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+      EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: ${{ vars.EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY || 'pk_h206sECq-roxM9QdMvVBJ' }}
       # Both halves are required: Gradle compiles the raw native method closed,
       # while Expo inlines the public flag into the JavaScript bundle. A normal
       # push/manual build pins both off. Only an explicit manual corpus run can
