@@ -257,11 +257,22 @@ curl https://wafra-relay.<your-subdomain>.workers.dev/v1/health
 # {"ok":true}
 ```
 
-Cloudflare's free tier covers early usage comfortably: 100k Worker requests a
-day, and D1's free allowance is far beyond what a queue that empties itself
-will ever hold. Add an edge rate-limit rule for the unauthenticated `/v1/pair`
-route before production; the Worker's own global backstop is a second line, not
-the first.
+The relay now has three Cloudflare-native Rate Limiting API bindings before its
+D1-backed exact counters: public writes/health, token-scoped API traffic, and a
+tighter statement-import limit. Exact D1 counters stop updating after their
+ceiling rather than charging one more write for every rejected request. Heavy
+imports also have per-device and account-wide hourly budgets, and the
+half-hourly recovery cron wakes at most 250 devices per run. Wafra is currently
+on Workers Free, whose hard CPU/request ceilings are themselves a cost guard.
+Cloudflare rejects custom CPU limits on Free; `wrangler.toml` contains the exact
+10-second `[limits]` block that must be uncommented **before** moving to Paid.
+
+Two emergency switches are committed and enabled by default:
+`IMPORTS_ENABLED="1"` and `FEEDBACK_AGENT_ENABLED="1"`. Flip either to `"0"`
+and deploy to disable that cost surface without taking capture/sync offline.
+Cloudflare's in-Worker Rate Limiting API cannot prevent the Worker invocation
+itself from being billed; if the relay is put behind a custom Cloudflare zone,
+an edge/WAF rate-limit rule is still useful as an outer layer.
 
 ## API
 

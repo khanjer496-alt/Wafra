@@ -127,6 +127,19 @@ CREATE TABLE IF NOT EXISTS ingest_limits (
   request_count INTEGER NOT NULL
 );
 
+-- Exact cost budgets for work that fans one request into many database writes.
+-- `actor_id` is either a device UUID or the literal `global`; it is deliberately
+-- not a foreign key so the account-wide circuit breaker can share the same
+-- atomic fixed-window mechanism. No request body, IP, bank, merchant or other
+-- user-derived content is stored here.
+CREATE TABLE IF NOT EXISTS cost_limits (
+  actor_id      TEXT NOT NULL,
+  scope         TEXT NOT NULL,
+  window_start  INTEGER NOT NULL,
+  usage_count   INTEGER NOT NULL,
+  PRIMARY KEY (actor_id, scope)
+);
+
 -- Global Worker-side pairing backstop. Production also applies an edge rule,
 -- but the endpoint is never unbounded when that rule is misconfigured.
 CREATE TABLE IF NOT EXISTS pair_limits (
@@ -167,7 +180,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   -- Serialized JSON, redacted client-side. Bounded at the wire.
   diagnostic  TEXT,
   -- 'pending' | 'sent' | 'failed' | 'skipped_unconfigured' |
-  -- 'skipped_budget' | 'skipped_no_consent'.
+  -- 'skipped_budget' | 'skipped_disabled' | 'skipped_no_consent'.
   -- An operator has to be able to tell "no agent ran because GitHub is not
   -- wired up" from "no agent ran because the hourly budget was spent" without
   -- a log line quoting the payload.
@@ -200,11 +213,13 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
 -- ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS queue_by_device ON queue (device_id, created_at);
+CREATE INDEX IF NOT EXISTS queue_by_expiry ON queue (created_at);
 CREATE INDEX IF NOT EXISTS devices_by_ingest_token ON devices (ingest_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_sync_token ON devices (sync_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_admin_token ON devices (admin_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_email_token ON devices (email_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_vault ON devices (vault_id);
+CREATE INDEX IF NOT EXISTS devices_by_last_seen ON devices (last_seen);
 CREATE INDEX IF NOT EXISTS invites_by_expiry ON device_invites (expires_at);
 CREATE INDEX IF NOT EXISTS admin_deletion_receipts_by_expiry ON admin_deletion_receipts (expires_at);
 CREATE INDEX IF NOT EXISTS push_by_expiry ON push_registrations (expires_at);
