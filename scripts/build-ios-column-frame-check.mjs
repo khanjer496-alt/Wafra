@@ -49,15 +49,11 @@ export function buildColumnFrameProbe() {
   const split = value => outValue(emit('is.workflow.actions.text.split', {
     WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, text: scalar(value),
   }), 'Split Text');
-  const formatted = emit('is.workflow.actions.format.date', {
-    WFDate: scalar({ ...page, Aggrandizements: [property('date')] }),
-    WFDateFormatStyle: 'Custom', WFTimeFormatStyle: 'None', WFDateFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-  });
   const columns = [
     ['guids', count(split(combine(column('GUID'))))],
     ['bodies', count(split(combine(column('Body'))))],
     ['senders', count(split(combine(column('Sender'))))],
-    ['dates', count(split(combine(outValue(formatted, 'Formatted Date'))))],
+    ['dates', count(split(combine(column('date'))))],
   ];
   let summary = 'WAFRA_COLUMN_PROBE_V1\n'; const attachments = {};
   for (const [name, value] of [['messages', messages], ...columns]) {

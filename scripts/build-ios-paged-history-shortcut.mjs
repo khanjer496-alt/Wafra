@@ -68,10 +68,13 @@ function buildPagedGraph({ columnar }) {
   });
   const field = (value, name) => emit('is.workflow.actions.gettext', { WFTextActionText: scalar({ ...value,
     Aggrandizements: [property(name), { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] }) });
-  const dateText = value => emit('is.workflow.actions.format.date', {
-    WFDate: scalar({ ...value, Aggrandizements: [property('date')] }),
-    WFDateFormatStyle: 'Custom', WFTimeFormatStyle: 'None', WFDateFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-  });
+  // Do not run Message.date through Format Date. Physical builds 139-141
+  // proved that iOS can show the Date in the permission sheet while Format
+  // Date still returns an empty scalar inside the page loop. The older V3
+  // history path already proved the reliable binding on this same device:
+  // read the Message `date` property directly and coerce it to Text. Native
+  // code normalizes that local display text back to UTC.
+  const dateText = value => field(value, 'date');
   const native = (name, parameters) => emit(`app.wafra.ios.${name}`, {
     AppIntentDescriptor: { TeamIdentifier: 'UV7YN4GQ66', BundleIdentifier: 'app.wafra.ios', Name: 'Wafra', AppIntentIdentifier: name }, ...parameters,
   });
@@ -141,14 +144,10 @@ function buildPagedGraph({ columnar }) {
     const combine = value => output(emit('is.workflow.actions.text.combine', {
       WFTextSeparator: 'Custom', WFTextCustomSeparator: COLUMN_SEPARATOR, text: attachment(value),
     }), 'Combined Text');
-    const formatted = emit('is.workflow.actions.format.date', {
-      WFDate: scalar({ ...variable('Page'), Aggrandizements: [property('date')] }),
-      WFDateFormatStyle: 'Custom', WFTimeFormatStyle: 'None', WFDateFormat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-    });
     const guids = combine(column('GUID'));
     const bodies = combine(column('Body'));
     const senders = combine(column('Sender'));
-    const dates = combine(output(formatted, 'Formatted Date'));
+    const dates = combine(column('date'));
     set('Columns Result', output(native('StageWafraPagedColumnsIntent', {
       request: scalar(variable('Request')), found: attachment(output(found, 'Count')),
       guids: scalar(guids), bodies: scalar(bodies), senders: scalar(senders), dates: scalar(dates),

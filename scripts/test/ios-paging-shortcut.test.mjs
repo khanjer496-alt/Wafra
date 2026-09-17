@@ -22,10 +22,8 @@ test('saved paging cursor is returned by Wafra as a typed date; Shortcuts never 
     assert.equal(ref.Type, 'ActionOutput');
     assert.equal(ref.OutputUUID, cursor.WFWorkflowActionParameters.UUID);
   }
-  for (const action of actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.format.date')) {
-    assert.equal(action.WFWorkflowActionParameters.WFDate.WFSerializationType, 'WFTextTokenString',
-      'WFDateFieldParameter needs the scalar wrapper; this is not a global wrapper replacement');
-  }
+  assert.equal(actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.format.date').length, 0,
+    'paged history must not use Format Date for Message properties; it returned empty text on the physical iPhone');
 });
 
 function walk(value, visit) {
@@ -59,14 +57,9 @@ test('column framing reads each field for the whole page with no per-message act
   assert.equal(combines.length, 4);
   for (const combine of combines) assert.equal(combine.WFWorkflowActionParameters.WFTextCustomSeparator, COLUMN_SEPARATOR);
   const properties = combines.map(c => c.WFWorkflowActionParameters.text.Value.Aggrandizements?.[0]?.PropertyName);
-  assert.deepEqual(properties.slice(0, 3), ['GUID', 'Body', 'Sender']);
-  // The date column comes from Format Date applied to the whole page, so the
-  // native side receives the same ISO instant format as the v2 line frame.
-  const dateInput = combines[3].WFWorkflowActionParameters.text.Value;
-  const formatter = actions.find(a => a.WFWorkflowActionParameters.UUID === dateInput.OutputUUID);
-  assert.equal(formatter.WFWorkflowActionIdentifier, 'is.workflow.actions.format.date');
-  assert.equal(formatter.WFWorkflowActionParameters.WFDateFormat, "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
-  assert.equal(formatter.WFWorkflowActionParameters.WFDate.WFSerializationType, 'WFTextTokenString');
+  assert.deepEqual(properties, ['GUID', 'Body', 'Sender', 'date']);
+  assert.equal(actions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.format.date').length, 0,
+    'column framing must use the proven direct Message.date property binding too');
   const stage = actions.find(a => a.WFWorkflowActionIdentifier === 'app.wafra.ios.StageWafraPagedColumnsIntent');
   for (const key of ['request', 'guids', 'bodies', 'senders', 'dates']) {
     assert.equal(stage.WFWorkflowActionParameters[key].WFSerializationType, 'WFTextTokenString', key);
@@ -77,6 +70,20 @@ test('column framing reads each field for the whole page with no per-message act
   const columnIndex = actions.indexOf(stage);
   const loopStart = actions.findIndex(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.repeat.each');
   assert.ok(columnIndex < loopStart);
+});
+test('paged row dates use the proven direct Message.date text binding', () => {
+  const actions = buildPagedHistoryShortcut().WFWorkflowActions;
+  const dateReads = actions.filter(action => {
+    if (action.WFWorkflowActionIdentifier !== 'is.workflow.actions.gettext') return false;
+    const attachment = action.WFWorkflowActionParameters.WFTextActionText?.Value?.attachmentsByRange?.['{0, 1}'];
+    const aggrandizements = attachment?.Aggrandizements ?? [];
+    return aggrandizements[0]?.Type === 'WFPropertyVariableAggrandizement' &&
+      aggrandizements[0]?.PropertyName === 'date' &&
+      aggrandizements[1]?.Type === 'WFCoercionVariableAggrandizement' &&
+      aggrandizements[1]?.CoercionItemClass === 'WFStringContentItem';
+  });
+  // Oldest boundary, newest boundary, and the per-message page row.
+  assert.equal(dateReads.length, 3);
 });
 test('a column framing refusal falls back to the exact v2 per-message page for that page only', () => {
   const actions = buildColumnarHistoryShortcut().WFWorkflowActions;
