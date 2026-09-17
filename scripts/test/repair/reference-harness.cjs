@@ -102,6 +102,7 @@ function createHarness(options = {}) {
     '@/lib/notifications':{syncPaymentReminders:async()=>{}},'@/lib/reminders':{reminderScheduleInputsChanged:(before,after)=>before!==after},'@/lib/launch-performance':{markLaunchPhase(){}},
     '@/components/ui/toast':{useToast:()=>({show:m=>events.push(['toast',m])})},
     '@/components/ui/states':{EmptyMonth:p=>jsx('EmptyMonth',p),SkeletonRows:p=>jsx('SkeletonRows',p)},
+    '@/components/recap/recap-logo-trigger':{RecapLogoTrigger:p=>jsx('RecapLogoTrigger',p)},
   };
   const animated={View:'View'};const fade={delay(){return this},duration(){return this}};
   deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,ReduceMotion:{System:'system'},

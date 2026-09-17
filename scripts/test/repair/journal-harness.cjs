@@ -69,6 +69,7 @@ function harness(options = {}) {
     '@/components/ui/merchant-avatar': { MerchantAvatar: (props) => jsx('Avatar', props) },
     '@/components/ui/icon': { Icon: (props) => { if (!icons.has(props.name)) throw new Error(`Unknown icon ${props.name}`); return jsx('Icon', props); } },
     '@/components/ui/money': { Money: (props) => jsx('Money', props) },
+    '@/components/recap/recap-logo-trigger': { RecapLogoTrigger: (props) => jsx('RecapLogoTrigger', props) },
     '@/components/ui/screen-scaffold': { ScreenScaffold: (props) => jsx('Scaffold', props) },
     '@/components/ui/states': { EmptyMonth: (props) => jsx('EmptyMonth', props), SkeletonRows: (props) => jsx('SkeletonRows', props) },
     '@/components/ui/toast': { useToast: () => ({ show: (message) => events.push(['toast', message]) }) },
