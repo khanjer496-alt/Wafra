@@ -2055,6 +2055,7 @@ async function queueItem(id, row, publicKey) {
       };
       const executorModule = execute('src/lib/capture-executor.ts', (id) => {
         if (id === '@/lib/capture-trace') return require('./build/capture-trace.js');
+        if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         if (id === '@/lib/auto-import') return { buildImportPlan: () => emptyPlan };
         if (id === '@/lib/capture') {
           return {
