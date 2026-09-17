@@ -1394,21 +1394,51 @@ public final class WafraMessageHistoryStore {
     if let strict = normalizeShortcutInstant(value, now: now) { return strict }
     guard !value.isEmpty, value.utf8.count <= 128 else { return nil }
 
-    let local = DateFormatter()
-    local.locale = locale
-    local.calendar = calendar
-    local.timeZone = timeZone
-    local.isLenient = false
-    local.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
-    guard let instant = local.date(from: value), local.string(from: instant) == value else {
-      return nil
+    func canonicalUTC(_ instant: Date) -> String? {
+      let utc = ISO8601DateFormatter()
+      utc.timeZone = TimeZone(secondsFromGMT: 0)
+      utc.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      let canonical = utc.string(from: instant)
+      return validInstant(canonical, now: now) ? canonical : nil
     }
 
-    let utc = ISO8601DateFormatter()
-    utc.timeZone = TimeZone(secondsFromGMT: 0)
-    utc.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let canonical = utc.string(from: instant)
-    return validInstant(canonical, now: now) ? canonical : nil
+    // The intended producer is the Shortcut's custom Format Date action. Keep
+    // that exact round-trip first because it preserves milliseconds/offsets.
+    let custom = DateFormatter()
+    custom.locale = locale
+    custom.calendar = calendar
+    custom.timeZone = timeZone
+    custom.isLenient = false
+    custom.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    if let instant = custom.date(from: value), custom.string(from: instant) == value,
+       let canonical = canonicalUTC(instant) {
+      return canonical
+    }
+
+    // iOS 26 can materialize a Message date as the system display string even
+    // though the Shortcut graph requested a custom format. On an en_AE phone
+    // this is, for example, "12 Sep 2026 at 9:22\u{202F}PM". Parse only values
+    // that exactly round-trip through this phone's own locale/calendar/timezone
+    // styles; never use a lenient free-form date parser. This also covers the
+    // equivalent Arabic, Hijri, Buddhist and 24-hour representations.
+    let dateStyles: [DateFormatter.Style] = [.short, .medium, .long, .full]
+    let timeStyles: [DateFormatter.Style] = [.short, .medium, .long]
+    for dateStyle in dateStyles {
+      for timeStyle in timeStyles {
+        let display = DateFormatter()
+        display.locale = locale
+        display.calendar = calendar
+        display.timeZone = timeZone
+        display.isLenient = false
+        display.dateStyle = dateStyle
+        display.timeStyle = timeStyle
+        if let instant = display.date(from: value), display.string(from: instant) == value,
+           let canonical = canonicalUTC(instant) {
+          return canonical
+        }
+      }
+    }
+    return nil
   }
 
   private static func validInstant(_ value: String, now: Date) -> Bool {
