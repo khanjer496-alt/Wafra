@@ -3804,6 +3804,7 @@ struct WafraBankSenderRegistryTests {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
         }
         if (id === '@/lib/purchases') return { isProActive: () => true };
+        if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         if (id === '@/lib/relay') {
           return {
             getRelayConfig: async () => null,
