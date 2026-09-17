@@ -40,9 +40,36 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           waitForForegroundHistoryIdle: async () => {},
         };
       }
+      // Runtime performance breadcrumbs are observational only. Repair/UI
+      // harnesses exercise the shipping computation and interaction paths,
+      // not the diagnostics collector, so keep timing transparent unless a
+      // test explicitly provides its own counted implementation.
+      if (name === '@/lib/runtime-performance') {
+        return {
+          recordRuntimeOperation() {},
+          measureRuntimeOperation: (_tag, work) => work(),
+          measureRuntimeOperationAsync: async (_tag, work) => work(),
+        };
+      }
+      // Recap discovery is a Home presentation enhancement. Unless a recap
+      // test supplies the real module, unrelated repair harnesses keep it
+      // dormant so they can continue isolating their own screen behavior.
+      if (name === '@/lib/recap') {
+        return {
+          hasRecapActivity: () => false,
+          recapCandidates: () => [],
+        };
+      }
+      if (name === '@/lib/recap-view-state') {
+        return { loadViewedRecaps: async () => new Set() };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
-    console, setTimeout, clearTimeout, Date, Set, Map, Number, Math, Promise,
+    console, setTimeout, clearTimeout,
+    requestAnimationFrame: callback => { callback(Date.now()); return 1; },
+    cancelAnimationFrame() {},
+    Date, Set, Map, Number, Math, Promise,
+    process: { env: {} },
     ...globals,
   }, { filename: file });
   return module.exports;

@@ -93,13 +93,16 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
   );
   const hiddenCount = Math.max(0, totalCount - visibleCount);
   return <View style={styles.root} testID="payment-agenda">
-    {visibleCount === 0 && selectedGroup && <View style={styles.emptyState}>
+    {visibleCount === 0 && <View style={styles.emptyState}>
       <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
-        <Icon name={groupIcons[selectedGroup]} size={20} color={theme.textSecondary} />
+        <Icon name={selectedGroup ? groupIcons[selectedGroup] : 'receipt'} size={20} color={theme.textSecondary} />
       </View>
       <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>
-        {emptyFor(selectedGroup)}
+        {selectedGroup ? emptyFor(selectedGroup) : w.empty}
       </ThemedText>
+      {!selectedGroup && <ThemedText type="meta" themeColor="textTertiary" style={styles.empty}>
+        {w.emptyBody}
+      </ThemedText>}
     </View>}
     {limitedSections.map((section) => <View key={section.key} style={styles.section} testID={`bills-${section.key}`}>
       <View style={styles.sectionHeading}>

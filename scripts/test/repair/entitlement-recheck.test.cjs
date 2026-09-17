@@ -161,7 +161,15 @@ function harness(overrides = {}, options = {}) {
     '@/lib/store': { useStore: () => ({ ...store, state }) },
     '@/lib/ios-capture-health': { isCaptureTimestamp: value => Number.isFinite(value) && value > 0 },
     '@/lib/ios-message-onboarding': { loadIosMessageSetupProgress: async () => null },
-  }, { Date: Clock });
+  }, {
+    Date: Clock,
+    // Production intentionally leaves several seconds of quiet foreground time
+    // before maintenance. These tests assert the resulting behavior, not wall
+    // clock latency, so collapse only the hook-owned grace timers to the next
+    // task while preserving the scheduler's own coalescing timers.
+    setTimeout: (callback, _delay, ...args) => setTimeout(callback, 0, ...args),
+    clearTimeout,
+  });
   let model;
   function render() {
     model = runtime.render(() => {
@@ -172,8 +180,9 @@ function harness(overrides = {}, options = {}) {
     runtime.flush();
   }
   async function settle() {
-    // Drain asynchronous boundary completions, then reflect hook state updates.
-    await new Promise(resolve => setImmediate(resolve));
+    // Drain hook-owned next-task grace timers and asynchronous boundary
+    // completions, then reflect hook state updates.
+    await new Promise(resolve => setTimeout(resolve, 10));
     render();
     await new Promise(resolve => setImmediate(resolve));
   }
@@ -183,9 +192,9 @@ function harness(overrides = {}, options = {}) {
     update: async patch => { state = { ...state, ...patch }; render(); await settle(); },
     advance: ms => { now += ms; },
     background: () => { native.AppState.currentState = 'background'; for (const listener of appListeners) listener('background'); },
-    // Shipping Android deliberately defers source-free resume scans by 1.5s so
-    // reopening the app stays responsive. Provider events still wake sooner.
-    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 1900)); await settle(); },
+    // Shipping Android defers source-free resume scans; the hook's grace timer
+    // is collapsed above, so this only needs to let the next task run.
+    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 320)); await settle(); },
     emitInboxChange: () => { for (const listener of inboxListeners) listener(); },
     inboxChanged: async () => { for (const listener of inboxListeners) listener(); await new Promise(r => setTimeout(r, 280)); await settle(); },
     observerCount: () => inboxListeners.size,

@@ -58,9 +58,10 @@ for(const language of ['en','ar']) {
   assert.equal(h.events.length,4);
  });
  test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
-  // focus + tracking added two useState slots ahead of resumeReady; slot 4 now
-  // represents the hydrated/resume-ready gate in this source-executed harness.
-  const h=createWorkflowHarness({language,state:{onboarded:false},states:{4:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
+  // Name personalization plus focus/tracking/intention now sit ahead of
+  // resumeReady; slot 8 represents the hydrated/resume-ready gate in this
+  // source-executed harness.
+  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{8:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
   const scene=walk(tree).find(n=>n.props.testID==='onboarding-market-money-scene');assert.ok(scene);
   assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===t('onboardChooseStart')));
   // Region-aware examples come from the market pack, not an invented partner list.

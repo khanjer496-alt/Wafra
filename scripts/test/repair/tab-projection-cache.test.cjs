@@ -15,8 +15,10 @@ test('tab projections reuse immutable ledger work instead of rescanning on every
   assert.match(insights, /monthSummaryCache\?\.transactions === transactions/);
   assert.match(insights, /monthSummaryCache\.live === live/);
   assert.match(insights, /monthSummaryCache\.internal === internal/);
-  assert.match(subscriptions, /subscriptionDetectionCache\?\.transactions === transactions/);
-  assert.match(subscriptions, /subscriptionDetectionCache\.liveAccounts === liveAccounts/);
+  assert.match(subscriptions, /subscriptionDetectionCache\.findIndex\(\(entry\) =>/);
+  assert.match(subscriptions, /sameDetectionKey\(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers\)/);
+  assert.match(subscriptions, /entry\.transactions === transactions/);
+  assert.match(subscriptions, /entry\.liveAccounts === liveAccounts/);
   assert.match(balances, /netWorthBreakdownCache\?\.accounts === state\.accounts/);
   assert.match(balances, /netWorthBreakdownCache\.transactions === state\.transactions/);
 });

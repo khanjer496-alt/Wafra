@@ -44,7 +44,7 @@ function createWorkflowHarness(options={}) {
  for(const name of ['expo-document-picker','expo-local-authentication','expo-print','expo-sharing','expo-crypto','expo-device'])d[name]={};
  const store=d['@/lib/store'].useStore();
  for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','setAndroidCaptureSources','importBackup','clearAll'])store[name]=record(name);
- Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,storageFailure:null,...options.state});
+ Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,userName:'',storageFailure:null,...options.state});
  Object.assign(store,{storageFailure:null,storageRecoveryState:null,hydrationFailed:false});
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
