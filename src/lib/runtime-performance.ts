@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 
 /**
@@ -9,6 +10,29 @@ import { AppState, Platform } from 'react-native';
 
 const SAMPLE_INTERVAL_MS = 1_000;
 const RECENT_STALLS_MAX = 8;
+const RUNTIME_BREADCRUMB_KEY = 'wafra.runtime-breadcrumb.v1';
+const BREADCRUMB_VERSION = 1;
+const RAPID_TAB_WINDOW_MS = 2_000;
+const BREADCRUMB_WRITE_INTERVAL_MS = 250;
+
+interface PersistedRuntimeBreadcrumb {
+  version: 1;
+  processStartedAt: number;
+  updatedAt: number;
+  recentMainTabPresses2s: number;
+  lastStallMs: number;
+  maxStallMs: number;
+  stallsOver100Ms: number;
+}
+
+export interface PreviousProcessPerformanceBreadcrumb {
+  /** Age at diagnostic collection time; never an absolute device timestamp. */
+  updatedAgeMs: number;
+  recentMainTabPresses2s: number;
+  lastStallMs: number;
+  maxStallMs: number;
+  stallsOver100Ms: number;
+}
 
 export interface RuntimePerformanceSnapshot {
   sampleIntervalMs: number;
@@ -18,8 +42,12 @@ export interface RuntimePerformanceSnapshot {
   lagOver500Ms: number;
   maxLagMs: number;
   recentStallsMs: number[];
+  recentMainTabPresses2s: number;
+  previousProcess: PreviousProcessPerformanceBreadcrumb | null;
   operations: Partial<Record<RuntimeOperationTag, RuntimeOperationSnapshot>>;
 }
+
+export type RuntimeInteractionTag = 'main-tab-press';
 
 export type RuntimeOperationTag =
   | 'ask-total'
@@ -67,8 +95,110 @@ let maxLagMs = 0;
 let recentStallsMs: number[] = [];
 const operationStats = new Map<RuntimeOperationTag, RuntimeOperationSnapshot>();
 const OPERATION_RECENT_MAX = 6;
+const processStartedAt = Date.now();
+let mainTabPresses: number[] = [];
+let previousProcessBreadcrumb: PersistedRuntimeBreadcrumb | null = null;
+let breadcrumbInitPromise: Promise<void> | null = null;
+let breadcrumbWriteTail: Promise<void> = Promise.resolve();
+let breadcrumbWriteTimer: ReturnType<typeof setTimeout> | null = null;
+let lastBreadcrumbWriteAt = 0;
 
 const now = (): number => Date.now();
+
+const nonnegativeFinite = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+function parsePersistedBreadcrumb(raw: string | null): PersistedRuntimeBreadcrumb | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return null;
+    const row = value as Partial<PersistedRuntimeBreadcrumb>;
+    if (
+      row.version !== BREADCRUMB_VERSION ||
+      !nonnegativeFinite(row.processStartedAt) ||
+      !nonnegativeFinite(row.updatedAt) ||
+      !nonnegativeFinite(row.recentMainTabPresses2s) ||
+      !nonnegativeFinite(row.lastStallMs) ||
+      !nonnegativeFinite(row.maxStallMs) ||
+      !nonnegativeFinite(row.stallsOver100Ms)
+    ) return null;
+    return {
+      version: BREADCRUMB_VERSION,
+      processStartedAt: row.processStartedAt,
+      updatedAt: row.updatedAt,
+      recentMainTabPresses2s: Math.floor(row.recentMainTabPresses2s),
+      lastStallMs: Math.round(row.lastStallMs),
+      maxStallMs: Math.round(row.maxStallMs),
+      stallsOver100Ms: Math.floor(row.stallsOver100Ms),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function initializeBreadcrumbPersistence(): Promise<void> {
+  if (Platform.OS !== 'android') return Promise.resolve();
+  if (breadcrumbInitPromise) return breadcrumbInitPromise;
+  breadcrumbInitPromise = AsyncStorage.getItem(RUNTIME_BREADCRUMB_KEY)
+    .then((raw) => {
+      const persisted = parsePersistedBreadcrumb(raw);
+      if (persisted && persisted.processStartedAt !== processStartedAt) {
+        previousProcessBreadcrumb = persisted;
+      }
+    })
+    .catch(() => undefined);
+  return breadcrumbInitPromise;
+}
+
+function pruneTabPresses(at: number): void {
+  const floor = at - RAPID_TAB_WINDOW_MS;
+  if (mainTabPresses.length > 0) mainTabPresses = mainTabPresses.filter((stamp) => stamp >= floor);
+}
+
+function currentBreadcrumb(at: number): PersistedRuntimeBreadcrumb {
+  pruneTabPresses(at);
+  return {
+    version: BREADCRUMB_VERSION,
+    processStartedAt,
+    updatedAt: at,
+    recentMainTabPresses2s: mainTabPresses.length,
+    lastStallMs: recentStallsMs.at(-1) ?? 0,
+    maxStallMs: maxLagMs,
+    stallsOver100Ms: lagOver100Ms,
+  };
+}
+
+function writeBreadcrumb(): void {
+  if (Platform.OS !== 'android') return;
+  const at = now();
+  const payload = JSON.stringify(currentBreadcrumb(at));
+  lastBreadcrumbWriteAt = at;
+  const write = breadcrumbWriteTail
+    .then(() => initializeBreadcrumbPersistence())
+    .then(() => AsyncStorage.setItem(RUNTIME_BREADCRUMB_KEY, payload));
+  breadcrumbWriteTail = write.catch(() => undefined);
+}
+
+function persistBreadcrumbSoon(urgent = false): void {
+  if (Platform.OS !== 'android') return;
+  const elapsed = now() - lastBreadcrumbWriteAt;
+  const wait = urgent ? 0 : Math.max(0, BREADCRUMB_WRITE_INTERVAL_MS - elapsed);
+  if (wait === 0) {
+    if (breadcrumbWriteTimer) {
+      clearTimeout(breadcrumbWriteTimer);
+      breadcrumbWriteTimer = null;
+    }
+    writeBreadcrumb();
+    return;
+  }
+  if (!breadcrumbWriteTimer) {
+    breadcrumbWriteTimer = setTimeout(() => {
+      breadcrumbWriteTimer = null;
+      writeBreadcrumb();
+    }, wait);
+  }
+}
 
 const resetExpectedAt = () => {
   expectedAt = now() + SAMPLE_INTERVAL_MS;
@@ -87,8 +217,27 @@ const sample = () => {
   if (lag >= 100) lagOver100Ms += 1;
   if (lag >= 250) lagOver250Ms += 1;
   if (lag >= 500) lagOver500Ms += 1;
-  if (lag >= 100) recentStallsMs = [...recentStallsMs, lag].slice(-RECENT_STALLS_MAX);
+  if (lag >= 100) {
+    recentStallsMs = [...recentStallsMs, lag].slice(-RECENT_STALLS_MAX);
+    // A process death erases every in-memory counter. Persist only timing and
+    // interaction counts, never screen names, transaction data, IDs or text.
+    persistBreadcrumbSoon(true);
+  }
 };
+
+/**
+ * Source-free interaction pressure. The tag is deliberately a closed enum so
+ * no route, merchant, account or arbitrary UI label can enter diagnostics.
+ */
+export function recordRuntimeInteraction(tag: RuntimeInteractionTag): void {
+  if (Platform.OS !== 'android') return;
+  if (tag === 'main-tab-press') {
+    const at = now();
+    pruneTabPresses(at);
+    mainTabPresses.push(at);
+    persistBreadcrumbSoon();
+  }
+}
 
 /**
  * Fixed-label, source-free timing breadcrumbs for tester diagnostics.
@@ -137,12 +286,14 @@ export function startRuntimePerformanceMonitor(): () => void {
   if (Platform.OS !== 'android') return () => {};
   if (!started) {
     started = true;
+    void initializeBreadcrumbPersistence();
     active = AppState.currentState === 'active';
     resetExpectedAt();
     timer = setInterval(sample, SAMPLE_INTERVAL_MS);
     subscription = AppState.addEventListener('change', (next) => {
       active = next === 'active';
       resetExpectedAt();
+      if (next !== 'active') persistBreadcrumbSoon(true);
     });
   }
   return () => {
@@ -152,11 +303,15 @@ export function startRuntimePerformanceMonitor(): () => void {
     timer = null;
     subscription?.remove();
     subscription = null;
+    if (breadcrumbWriteTimer) clearTimeout(breadcrumbWriteTimer);
+    breadcrumbWriteTimer = null;
     started = false;
   };
 }
 
 export function getRuntimePerformanceSnapshot(): RuntimePerformanceSnapshot {
+  const at = now();
+  pruneTabPresses(at);
   const operations: RuntimePerformanceSnapshot['operations'] = {};
   for (const [tag, stats] of operationStats) {
     operations[tag] = { ...stats, recentMs: [...stats.recentMs] };
@@ -169,6 +324,16 @@ export function getRuntimePerformanceSnapshot(): RuntimePerformanceSnapshot {
     lagOver500Ms,
     maxLagMs,
     recentStallsMs: [...recentStallsMs],
+    recentMainTabPresses2s: mainTabPresses.length,
+    previousProcess: previousProcessBreadcrumb
+      ? {
+          updatedAgeMs: Math.max(0, at - previousProcessBreadcrumb.updatedAt),
+          recentMainTabPresses2s: previousProcessBreadcrumb.recentMainTabPresses2s,
+          lastStallMs: previousProcessBreadcrumb.lastStallMs,
+          maxStallMs: previousProcessBreadcrumb.maxStallMs,
+          stallsOver100Ms: previousProcessBreadcrumb.stallsOver100Ms,
+        }
+      : null,
     operations,
   };
 }

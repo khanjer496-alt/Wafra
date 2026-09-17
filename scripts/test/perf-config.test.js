@@ -311,6 +311,21 @@ const tabBar = stripComments(read('src/components/tab-bar.tsx'));
   ok('src/components/tab-bar.tsx: selected state is exposed without motion',
     /accessibilityState=\{\{ selected: focused \}\}/.test(tabBar) && !/Animated|withSpring/.test(tabBar),
     'selection is immediate for every user including Reduce Motion');
+
+  ok('src/components/tab-bar.tsx: rapid taps cannot enqueue overlapping navigation transitions',
+    /navigationPendingRef/.test(tabBar) &&
+      /if \(!focused && navigationPendingRef\.current !== null\) return/.test(tabBar) &&
+      /navigationPendingRef\.current = route\.key/.test(tabBar) &&
+      /\}, \[state\.index\]\)/.test(tabBar) &&
+      /setTimeout\([\s\S]*?750\)/.test(tabBar),
+    'the selected index can lag a physical tap; a second destination must wait for the first ' +
+      'fragment/navigation transaction instead of piling more work onto a stalled UI thread');
+
+  ok('src/components/tab-bar.tsx: tap storms leave only a source-free diagnostic breadcrumb',
+    /recordRuntimeInteraction\('main-tab-press'\)/.test(tabBar) &&
+      !/recordRuntimeInteraction\([^)]*route\.name/.test(tabBar),
+    'a crash report may count pressure, but it must not persist which financial destination ' +
+      'the user was viewing');
 }
 
 // ---------------------------------------------------------------------------

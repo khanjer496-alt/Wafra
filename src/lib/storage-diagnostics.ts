@@ -46,6 +46,22 @@
 /** The persistence operation that failed. Never a value, never a key. */
 export type StorageOp =
   | 'open'
+  /** SecureStore key lookup/generation before SQLite is touched. */
+  | 'secure-key'
+  /** Native expo-sqlite handle creation. */
+  | 'sqlite-open'
+  /** Applying PRAGMA key to the newly opened connection. */
+  | 'cipher-key'
+  /** The first page-1 read that proves the SQLCipher key is usable. */
+  | 'cipher-validation'
+  /** Pragmas/table bootstrap after the key has been validated. */
+  | 'schema-init'
+  /** Closing a failed/poisoned native handle before another open is allowed. */
+  | 'connection-close'
+  /** One encrypted key/value read after the connection is already open. */
+  | 'state-read'
+  /** The batched encrypted chunk read used during ledger hydration. */
+  | 'state-batch-read'
   | 'read'
   | 'write'
   | 'remove'

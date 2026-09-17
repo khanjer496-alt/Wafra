@@ -205,7 +205,10 @@ export function StorageRecovery({
                   ? t('storageRecoveryKeyBody')
                   : t('storageRecoveryBody')}
             </ThemedText>
-            {!keyMismatch && !erased && (
+            {/* This hint describes the iOS protected-storage case. Android's
+                transient SQLite failures are not fixed by "unlocking the phone",
+                so showing it there sends the user toward the wrong remedy. */}
+            {Platform.OS === 'ios' && !keyMismatch && !erased && (
               <ThemedText style={styles.hint}>{t('storageRecoveryHint')}</ThemedText>
             )}
             {retriedInVain && (
