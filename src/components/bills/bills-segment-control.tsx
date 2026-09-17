@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -13,7 +13,7 @@ type BillsSegmentControlProps = {
   onChange: (segment: BillsSegment) => void;
 };
 
-/** Compact, horizontally scrollable Bills filters so five views fit on phones without a giant control. */
+/** Compact Bills filters: horizontally scrollable on native, wrapping safely on narrow web viewports. */
 export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlProps) {
   const theme = useTheme();
   const labels: Record<BillsSegment, string> = {
@@ -25,54 +25,68 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
   };
   const segments: BillsSegment[] = ['upcoming', 'subscriptions', 'utilities', 'cards', 'all'];
 
+  const tabs = (
+    <View role="tablist" style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
+      {segments.map((value) => {
+        const active = segment === value;
+        return (
+          <Pressable
+            key={value}
+            accessibilityRole="tab"
+            accessibilityLabel={labels[value]}
+            accessibilityState={{ selected: active }}
+            aria-selected={active}
+            onPress={() => {
+              if (active) return;
+              tapped();
+              onChange(value);
+            }}
+            style={({ pressed }) => [
+              styles.segmentItem,
+              {
+                backgroundColor: active
+                  ? theme.inverseSurface
+                  : pressed
+                    ? theme.backgroundSelected
+                    : theme.backgroundElement,
+                borderColor: active ? theme.inverseSurface : theme.cardBorder,
+              },
+            ]}>
+            <ThemedText
+              type={active ? 'smallBold' : 'small'}
+              style={{ color: active ? theme.inverseText : theme.textSecondary }}>
+              {labels[value]}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.webContainer} accessibilityLabel={t('billsTitle')}>
+        {tabs}
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.scrollContent}
       accessibilityLabel={t('billsTitle')}>
-      <View role="tablist" style={styles.segment}>
-        {segments.map((value) => {
-          const active = segment === value;
-          return (
-            <Pressable
-              key={value}
-              accessibilityRole="tab"
-              accessibilityLabel={labels[value]}
-              accessibilityState={{ selected: active }}
-              aria-selected={active}
-              onPress={() => {
-                if (active) return;
-                tapped();
-                onChange(value);
-              }}
-              style={({ pressed }) => [
-                styles.segmentItem,
-                {
-                  backgroundColor: active
-                    ? theme.inverseSurface
-                    : pressed
-                      ? theme.backgroundSelected
-                      : theme.backgroundElement,
-                  borderColor: active ? theme.inverseSurface : theme.cardBorder,
-                },
-              ]}>
-              <ThemedText
-                type={active ? 'smallBold' : 'small'}
-                style={{ color: active ? theme.inverseText : theme.textSecondary }}>
-                {labels[value]}
-              </ThemedText>
-            </Pressable>
-          );
-        })}
-      </View>
+      {tabs}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   scrollContent: { paddingEnd: Spacing.one },
+  webContainer: { width: '100%' },
   segment: { flexDirection: 'row', gap: Spacing.two },
+  webSegment: { flexWrap: 'wrap', width: '100%' },
   segmentItem: {
     minHeight: 48,
     alignItems: 'center',
