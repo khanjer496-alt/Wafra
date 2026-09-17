@@ -1192,6 +1192,11 @@ const S = {
     en: 'Know where it goes. Watch it grow.',
     ar: 'اعرف أين تذهب أموالك وراقبها تنمو.',
   },
+  settingsViewOnboarding: { en: 'View onboarding', ar: 'عرض تجربة البداية' },
+  settingsViewOnboardingDetail: {
+    en: 'Replay the welcome flow without changing your data or settings',
+    ar: 'أعد مشاهدة تجربة البداية دون تغيير بياناتك أو إعداداتك',
+  },
   settingsTrialDays: {
     en: 'Free trial · {count} day{s} left',
     ar: 'تجربة مجانية · متبقٍ {count} يوم',

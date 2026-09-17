@@ -194,7 +194,7 @@ export default function SettingsScreen() {
     Platform.OS !== 'web' && isFounderUnlockBuild();
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
-  const { section } = useLocalSearchParams<{ section?: string }>();
+  const { section } = useLocalSearchParams<{ section?: string; onboarding?: string }>();
   const scrollRef = useRef<ScrollView>(null);
   const importsOffset = useRef<number | null>(null);
   const contentHeight = useRef(0);
@@ -1412,6 +1412,11 @@ export default function SettingsScreen() {
             t('homeCustomizeTitle'),
             t('homeCustomizeDetail'),
             () => router.push('/home-customize'),
+          )}
+          {Platform.OS !== 'web' && linkRow(
+            t('settingsViewOnboarding'),
+            t('settingsViewOnboardingDetail'),
+            () => router.setParams({ onboarding: 'preview' }),
           )}
           {ledgerCurrencyLocked ? (
             <Row

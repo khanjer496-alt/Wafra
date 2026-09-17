@@ -211,11 +211,14 @@ export const applyMaterializedImportBatch = (
     parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
   };
 
-  // Intermediate first-history pages are already source-deduped by the import
-  // planner. Re-running every whole-ledger repair after each page makes the
-  // foreground cost scale as pages × ledger size and can pin Hermes for
-  // seconds on a 10k+ row ledger. Keep the page durable and provisionally
-  // sorted here; the final page performs the exact canonical repair once.
+  // First-history import can contain tens of thousands of messages. Running
+  // every whole-ledger repair after EACH page made the foreground cost scale as
+  // pages × ledger size: duplicate repair, payment-flow reconciliation and
+  // capture dedupe all re-walked the same 10k+ rows before the next page could
+  // begin. The planner has already deduped this page against the authoritative
+  // source identities, so intermediate pages only need to append their durable
+  // facts. The final page still runs the exact canonical reconciliation below
+  // once over the complete history.
   if (historyStillRunning) {
     return {
       ...pageState,

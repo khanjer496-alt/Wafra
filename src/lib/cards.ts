@@ -93,6 +93,11 @@ function sameInputs(a: CardInputs, b: CardInputs): boolean {
 }
 
 let openDuesCache: (CardInputs & { day: string; value: DueWithStatus[] }) | null = null;
+let recentlySettledDuesCache: (CardInputs & {
+  day: string;
+  withinDays: number;
+  value: DueWithStatus[];
+}) | null = null;
 let paymentsCache: {
   transactions: Transaction[];
   accounts: Account[];
@@ -1180,7 +1185,13 @@ export function recentlySettledDues(
   today: Date,
   withinDays = 75,
 ): DueWithStatus[] {
-  const cutoff = shiftISO(toISODate(today), -withinDays);
+  const day = toISODate(today);
+  if (recentlySettledDuesCache && recentlySettledDuesCache.day === day &&
+      recentlySettledDuesCache.withinDays === withinDays &&
+      sameInputs(recentlySettledDuesCache, state)) {
+    return recentlySettledDuesCache.value.slice();
+  }
+  const cutoff = shiftISO(day, -withinDays);
   const creditIds = new Set(
     state.accounts.filter((account) => account.cardType === 'credit' && !account.archived)
       .map((account) => account.id),
@@ -1193,7 +1204,16 @@ export function recentlySettledDues(
     const prior = newest.get(due.accountId);
     if (!prior || due.dueDate > prior.due.dueDate) newest.set(due.accountId, status);
   }
-  return [...newest.values()].sort((a, b) => b.due.dueDate.localeCompare(a.due.dueDate));
+  const value = [...newest.values()].sort((a, b) => b.due.dueDate.localeCompare(a.due.dueDate));
+  recentlySettledDuesCache = {
+    accounts: state.accounts,
+    transactions: state.transactions,
+    cardDues: state.cardDues,
+    day,
+    withinDays,
+    value,
+  };
+  return value.slice();
 }
 
 function computeOpenDues(state: AppState, today: Date): DueWithStatus[] {

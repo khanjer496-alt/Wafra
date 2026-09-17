@@ -82,6 +82,8 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     /scanned: page\.scannedCount/.test(historyHookSource) &&
       /found: page\.parsed\.length \+ page\.reviewCandidates\.length/.test(historyHookSource),
   );
+  // Foreground work uses small interaction-safe pages; background keeps the
+  // larger throughput-oriented page size because no visible UI is competing.
   ok(
     'foreground history uses small pages while background keeps throughput',
     /BACKGROUND_HISTORY_PAGE_SIZE = 500/.test(historyHookSource) &&

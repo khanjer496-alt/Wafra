@@ -52,6 +52,7 @@ import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import {
   getRelayConfig,
@@ -66,6 +67,7 @@ import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
   WafraLiveCaptureNativeModule,
@@ -82,7 +84,8 @@ let androidNotificationAccessPromptShown = false;
 // immediately while Wafra is alive; the bounded recheck is only a safety net
 // for OEMs that suspend/drop that source-free event in background.
 const ANDROID_NOTIFICATION_RECHECK_MS = 30_000;
-let androidNotificationDrainRequired = true;
+const ANDROID_NOTIFICATION_RECOVERY_GRACE_MS = 10_000;
+let androidNotificationDrainRequired = false;
 let androidNotificationLastCheckedAt = 0;
 
 type IosCaptureWarningFacts = Pick<
@@ -133,7 +136,9 @@ const shouldSkipFreshAndroidResumeScan = (now = Date.now()): boolean =>
 // signals remain fast; only the lifecycle-triggered catch-up gets a longer
 // grace period. A real new SMS received while backgrounded is still picked up
 // after this bounded delay (or immediately by a provider event/pull refresh).
-const ANDROID_RESUME_SCAN_GRACE_MS = 1_500;
+const ANDROID_RESUME_SCAN_GRACE_MS = 5_000;
+const ANDROID_INITIAL_SCAN_GRACE_MS = 6_000;
+const DAILY_SUMMARY_MAINTENANCE_GRACE_MS = 9_000;
 // Payment-reminder recurrence analysis is useful background maintenance, not
 // launch-critical work. Keep it away from Home's first usable interaction
 // window; the projection itself also yields in 2 ms slices on Android.
@@ -1072,7 +1077,9 @@ export function useAutoImport(
   // that should instead join one already running go through `runAutoImport`.
   const startAutoImport = useCallback(
     (interactive: boolean): Promise<AutoImportOutcome> => {
+      const startedAt = Date.now();
       const operation = performAutoImport(interactive).finally(() => {
+        recordRuntimeOperation('auto-import', Date.now() - startedAt);
         if (importInFlight?.promise === operation) importInFlight = null;
       });
       importInFlight = { promise: operation, interactive };
@@ -1167,15 +1174,19 @@ export function useAutoImport(
     if (!current.hydrated || !current.onboarded || current.captureOptOut ||
       !androidNotificationCaptureEnabled(current) || !isProActive(current) ||
       !hasBankNotificationAccess()) return;
-    if (!androidNotificationDrainRequired &&
-        Date.now() - androidNotificationLastCheckedAt < ANDROID_NOTIFICATION_RECHECK_MS) return;
+    if (!androidNotificationDrainRequired) return;
 
     await syncAndroidNotificationAdmission(current).catch(() => {});
+    const drainStartedAt = Date.now();
+    // Clear the edge BEFORE reading. If another notification lands while this
+    // drain is in flight, onQueueChanged sets it back to true and the coalesced
+    // scheduler performs one more pass after this one. Clearing on completion
+    // loses exactly that race.
+    androidNotificationDrainRequired = false;
     const operation = captureExecutor.execute('notification-only')
       .then<AutoImportOutcome>((outcome) => {
         if (outcome.kind === 'not-hydrated') return 'not-hydrated';
         if (outcome.kind === 'needs-setup') return 'needs-setup';
-        androidNotificationDrainRequired = false;
         androidNotificationLastCheckedAt = Date.now();
         if (outcome.kind === 'imported') {
           postAndroidImportNotice(outcome.transactionIds);
@@ -1183,17 +1194,25 @@ export function useAutoImport(
         }
         return 'up-to-date';
       })
+      .catch((error) => {
+        // Failure is not evidence the queue is empty. Keep the recovery edge
+        // armed for the next delayed pass.
+        androidNotificationDrainRequired = true;
+        throw error;
+      })
       .finally(() => {
+        recordRuntimeOperation('notification-drain', Date.now() - drainStartedAt);
         if (importInFlight?.promise === operation) importInFlight = null;
       });
     importInFlight = { promise: operation, interactive: false };
     await operation;
   }, [captureExecutor, getStateSnapshot, postAndroidImportNotice, syncAndroidNotificationAdmission]);
 
-  // Android's NotificationListenerService can enqueue a bank alert while the
-  // app is backgrounded without changing the SMS provider. Drain that source
-  // independently on first eligible foreground mount and every resume. This
-  // path never reads the SMS inbox, so it is cheap and bypasses SMS freshness.
+  // Android's NotificationListenerService emits onQueueChanged while JS is
+  // alive; that path below drains immediately. Cold launch/resume can miss that
+  // edge, but recovery must never blindly decrypt the queue in the first Home
+  // frames. Wait for an idle grace window, inspect only the plaintext envelope
+  // count, and touch AndroidKeyStore only when a queue actually exists.
   useEffect(() => {
     if (!watchForeground || Platform.OS !== 'android' || !state.hydrated ||
       !state.onboarded || !androidNotificationCaptureEnabled(state) || !entitlementActive) return;
@@ -1205,15 +1224,25 @@ export function useAutoImport(
         timer = null;
         if (!mounted || RNAppState.currentState !== 'active') return;
         void (async () => {
+          await waitForForegroundHistoryIdle();
+          if (!mounted || RNAppState.currentState !== 'active') return;
           // Notification access can remain granted while some Android OEMs
           // kill the listener service. Repair only that disconnected state;
           // the native method is otherwise a no-op and never scans the shade.
           if (hasBankNotificationAccess()) {
             await NotificationReader?.ensureListenerConnected?.().catch(() => false);
           }
+          if (!androidNotificationDrainRequired) {
+            const now = Date.now();
+            if (now - androidNotificationLastCheckedAt < ANDROID_NOTIFICATION_RECHECK_MS) return;
+            const pending = await NotificationReader?.getPendingCount?.().catch(() => 0) ?? 0;
+            androidNotificationLastCheckedAt = Date.now();
+            if (pending <= 0) return;
+            androidNotificationDrainRequired = true;
+          }
           await runAndroidNotificationDrain();
         })().catch(() => {});
-      }, 350);
+      }, ANDROID_NOTIFICATION_RECOVERY_GRACE_MS);
     };
     schedule();
     const subscription = RNAppState.addEventListener('change', (next) => {
@@ -1350,7 +1379,9 @@ export function useAutoImport(
       if (resumeTimer !== null) clearTimeout(resumeTimer);
       resumeTimer = setTimeout(() => {
         resumeTimer = null;
-        if (canScan()) scheduler.request();
+        void waitForForegroundHistoryIdle().then(() => {
+          if (canScan()) scheduler.request();
+        });
       }, ANDROID_RESUME_SCAN_GRACE_MS);
     });
     return () => {
@@ -1462,8 +1493,19 @@ export function useAutoImport(
     // Do not stamp the freshness throttle for a scan that the durable opt-out
     // will refuse. When capture is explicitly enabled again, force the first
     // real scan even if another scan happened less than 30 seconds earlier.
+    let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
+    let initialScanCancelled = false;
     if (!state.captureOptOut && entitlementActive) {
-      scan(state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated);
+      const force = state.lastScanTs <= 0 || captureJustEnabled || entitlementJustActivated;
+      if (Platform.OS === 'android') {
+        initialScanTimer = setTimeout(() => {
+          void waitForForegroundHistoryIdle().then(() => {
+            if (!initialScanCancelled && RNAppState.currentState === 'active') scan(force);
+          });
+        }, ANDROID_INITIAL_SCAN_GRACE_MS);
+      } else {
+        scan(force);
+      }
     }
 
     if (state.onboarded && !sessionSetupRan) {
@@ -1471,7 +1513,7 @@ export function useAutoImport(
       void (async () => {
         try {
           await enableRelayBackgroundSync();
-          await new Promise<void>((resolve) => setTimeout(resolve, SESSION_REMINDER_SYNC_GRACE_MS));
+          await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
           const current = getStateSnapshot();
           if (!current.hydrated || !current.onboarded) return;
           // Never prompt on launch. Reminder/instant-alert surfaces ask only
@@ -1487,7 +1529,11 @@ export function useAutoImport(
     const sub = RNAppState.addEventListener('change', (next) => {
       if (next === 'active' && Platform.OS !== 'android') scan();
     });
-    return () => sub.remove();
+    return () => {
+      initialScanCancelled = true;
+      if (initialScanTimer !== null) clearTimeout(initialScanTimer);
+      sub.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     entitlementActive,
@@ -1525,9 +1571,23 @@ export function useAutoImport(
   useEffect(() => {
     if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
     if (historyImportRunning) return;
-    void syncDailySummary(getStateSnapshot()).catch(() => {
-      // A digest is never worth surfacing an error over.
-    });
+    let cancelled = false;
+    void (async () => {
+      await waitForForegroundHistoryIdle(DAILY_SUMMARY_MAINTENANCE_GRACE_MS);
+      if (cancelled || RNAppState.currentState !== 'active') return;
+      const current = getStateSnapshot();
+      if (!current.hydrated || !current.onboarded || !current.dailySummary ||
+          current.historyImport?.status === 'running') return;
+      const startedAt = Date.now();
+      try {
+        await syncDailySummary(current);
+      } catch {
+        // A digest is never worth surfacing an error over.
+      } finally {
+        recordRuntimeOperation('daily-summary', Date.now() - startedAt);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
     state.transactions, watchForeground]);
 

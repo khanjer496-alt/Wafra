@@ -44,19 +44,19 @@ object NotificationCaptureStore {
   private const val VERSION = 1
 
   @Synchronized
-  fun append(context: Context, pkg: String, title: String, text: String, ts: Long) {
+  fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
     // Recheck while holding the queue lock: an opt-out racing a callback must
     // never leave a candidate behind after the opt-out's clear completes.
-    if (!NotificationCapturePolicy.isEnabled(context)) return
+    if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
     purgeLegacyPlaintext(context)
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return
-    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return
+    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
     val samePostedNotification = current.indexOfFirst { it.pkg == pkg && it.ts == ts }
     if (samePostedNotification >= 0) {
       val prior = current[samePostedNotification]
-      if (prior.title == title && prior.text == text) return
+      if (prior.title == title && prior.text == text) return "duplicate"
       // A newer app version may learn how an OEM actually exposes the visible
       // body (for example ColorOS moved ADCB's amount out of EXTRA_TEXT). A
       // shade re-sweep must HEAL the retained encrypted row rather than append
@@ -64,7 +64,7 @@ object NotificationCaptureStore {
       val repaired = current.toMutableList()
       repaired[samePostedNotification] = prior.copy(title = title, text = text)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
-      return
+      return "repaired"
     }
     val next = (current + CapturedBankNotification(
       id = UUID.randomUUID().toString(),
@@ -74,6 +74,7 @@ object NotificationCaptureStore {
       ts = ts,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
+    return "appended"
   }
 
   /** Source-free reason helper for admission diagnostics; never returns queue text. */
@@ -100,6 +101,23 @@ object NotificationCaptureStore {
     val retained = all.filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
     if (retained.size != all.size) writeAll(context, retained)
     return retained.filter { it.ts >= cutoff }.sortedBy { it.ts }
+  }
+
+  /**
+   * Cheap source-free recovery hint. This deliberately does not open
+   * AndroidKeyStore or decrypt queue rows; foreground startup only needs to
+   * know whether an expensive drain might be necessary.
+   */
+  @Synchronized
+  fun pendingCount(context: Context): Int {
+    purgeLegacyPlaintext(context)
+    val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getString(QUEUE, null) ?: return 0
+    return try {
+      JSONArray(raw).length()
+    } catch (_: Exception) {
+      0
+    }
   }
 
   /**

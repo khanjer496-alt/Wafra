@@ -85,7 +85,7 @@ class NotificationReaderModule : Module() {
       // foreground. That is not a new capture grant and must not rescan the
       // entire Android notification shade. Sweep only on a real off -> on
       // transition; explicit recovery has its own operation below.
-      if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
+      if (!wasEnabled && nowEnabled) BankNotificationListenerService.scheduleSweepConnected()
       true
     }
 
@@ -121,6 +121,19 @@ class NotificationReaderModule : Module() {
         BankNotificationListenerService.sweepOrRequestRebind(context)
       }
       true
+    }
+
+    /**
+     * Source-free, non-decrypting queue hint for delayed foreground recovery.
+     * A real onQueueChanged event remains the fast path.
+     */
+    AsyncFunction("getPendingCount") {
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction 0
+      val context = appContext.reactContext ?: return@AsyncFunction 0
+      if (!NotificationCapturePolicy.isEnabled(context) || !hasSystemAccess(context)) {
+        return@AsyncFunction 0
+      }
+      NotificationCaptureStore.pendingCount(context)
     }
 
     /** Opens the system Notification access screen for the user to enable it. */

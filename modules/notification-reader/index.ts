@@ -45,6 +45,8 @@ interface NotificationReaderModule {
   setSourceConfiguration?(notificationEnabled: boolean, expiresAtMs: number): Promise<boolean>;
   /** Cheap foreground self-heal: request an Android listener rebind only when disconnected. */
   ensureListenerConnected?(): Promise<boolean>;
+  /** Source-free queue count that never decrypts AndroidKeyStore-backed rows. */
+  getPendingCount?(): Promise<number>;
   openSettings(): boolean;
   /** Source-free local diagnostics; never returns notification text. */
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;

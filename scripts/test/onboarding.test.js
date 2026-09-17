@@ -284,6 +284,7 @@ const gateSource = fs.readFileSync(
   'utf8',
 );
 const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const i18nSource = fs.readFileSync(path.join(__dirname, '../../src/lib/i18n.ts'), 'utf8');
 const iosSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
 const iosControllerSource = fs.readFileSync(
@@ -310,6 +311,20 @@ ok(
     !gateSource.includes("activeStep === 'budget'") &&
     !gateSource.includes('onboardPersonalizeOptional'),
 );
+ok(
+  'Settings can replay the latest name-personalized onboarding without mutating app state',
+  /settingsViewOnboarding/.test(settingsSource) &&
+    /router\.setParams\(\{ onboarding: 'preview' \}\)/.test(settingsSource) &&
+    /const previewMode = state\.onboarded && params\.onboarding === 'preview'/.test(gateSource) &&
+    /if \(previewMode\) return;[\s\S]{0,120}setOnboardingProfile/.test(gateSource) &&
+    /if \(previewMode\) \{[\s\S]{0,160}setAndroidSmsReady\(true\)/.test(gateSource) &&
+    /const openWafra = async[\s\S]*?if \(previewMode\) \{[\s\S]{0,120}closePreview\(\);[\s\S]{0,80}return;/.test(gateSource) &&
+    /const openWafra = async[\s\S]*?setOnboarded\(\)/.test(gateSource) &&
+    /if \(!previewMode\) trackGrowthEvent\(\.\.\.args\)/.test(gateSource),
+);
+eq('Settings explains onboarding replay is read-only',
+  i18n.t('settingsViewOnboardingDetail', 'en'),
+  'Replay the welcome flow without changing your data or settings');
 ok(
   'name personalization morphs inside Welcome instead of becoming a fifth progress step',
   gateSource.includes('testID="onboarding-name-input"') &&
@@ -518,7 +533,7 @@ ok(
 );
 ok(
   'manual completion keeps the gate visible through a failed durable save',
-  /const showOverlay\s*=[\s\S]{0,220}\(!state\.onboarded \|\| finishing\)/.test(gateSource) &&
+  /const showOverlay\s*=[\s\S]{0,240}\(!state\.onboarded \|\| finishing \|\| previewMode\)/.test(gateSource) &&
     /const openWafra = async[\s\S]*?setFinishing\(true\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setFinishing\(false\)[\s\S]*?catch[\s\S]*?setFinishSaveFailed\(true\)/.test(gateSource) &&
     /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
 );

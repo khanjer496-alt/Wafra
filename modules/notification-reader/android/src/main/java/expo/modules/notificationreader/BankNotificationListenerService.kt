@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import java.util.concurrent.Executors
 
 /**
  * Captures bank-app transaction notifications (banks are shifting from SMS to
@@ -36,7 +37,10 @@ class BankNotificationListenerService : NotificationListenerService() {
    */
   override fun onListenerConnected() {
     connected = this
-    sweepActiveNotifications()
+    // Android may reconnect the listener while Wafra is launching. Queue
+    // recovery decrypts device-bound rows and can be slow on some KeyStore/OEM
+    // combinations, so never perform it inline on the listener callback thread.
+    scheduleSweep()
   }
 
   override fun onListenerDisconnected() {
@@ -48,6 +52,13 @@ class BankNotificationListenerService : NotificationListenerService() {
       activeNotifications?.forEach { capture(it) }
     } catch (_: Exception) {
       // A listener that dies on connect never captures anything again.
+    }
+  }
+
+  private fun scheduleSweep() {
+    recoveryExecutor.execute {
+      if (connected !== this) return@execute
+      sweepActiveNotifications()
     }
   }
 
@@ -189,23 +200,20 @@ class BankNotificationListenerService : NotificationListenerService() {
       }
       recordAdmission("moneyPassed", adcb)
 
-      val blockReason = NotificationCaptureStore.admissionBlockReason(
-        this, sbn.packageName, text, sbn.postTime,
-      )
-      if (blockReason != null) {
-        recordAdmission(blockReason, adcb)
-        return
-      }
       recordAdmission("appendAttempted", adcb)
 
-      NotificationCaptureStore.append(
+      val appendResult = NotificationCaptureStore.append(
         context = this,
         pkg = sbn.packageName,
         title = title,
         text = text,
         ts = sbn.postTime,
       )
-      recordAdmission("appendSucceeded", adcb)
+      if (appendResult != "appended" && appendResult != "repaired") {
+        recordAdmission(appendResult, adcb)
+        return
+      }
+      recordAdmission(if (appendResult == "repaired") "appendRepaired" else "appendSucceeded", adcb)
       // Source-free wake-up only. The encrypted queue remains the source of
       // truth, and a backgrounded/killed JS runtime simply catches up on resume.
       if (wakeAfterAppend) {
@@ -296,8 +304,11 @@ class BankNotificationListenerService : NotificationListenerService() {
       )
     }
 
-    /** A user returning from Settings may enable capture after the listener connected. */
+    /** Explicit recovery waits for the connected listener's sweep to finish. */
     fun sweepConnected() { connected?.sweepActiveNotifications() }
+
+    /** Automatic lifecycle recovery must never block the caller on KeyStore work. */
+    fun scheduleSweepConnected() { connected?.scheduleSweep() }
 
     /** Cheap ordinary-drain repair for rows already in the encrypted queue. */
     fun refreshQueuedVisible(): Int = connected?.refreshQueuedVisible() ?: 0
@@ -360,6 +371,9 @@ class BankNotificationListenerService : NotificationListenerService() {
     private const val MAX_EXTRA_KEYS = 64
     private const val MAX_NESTED_KEYS = 16
     private const val MAX_TEXT_NESTING = 2
+    private val recoveryExecutor = Executors.newSingleThreadExecutor { runnable ->
+      Thread(runnable, "wafra-notification-recovery").apply { isDaemon = true }
+    }
 
     private fun looksLikeTextExtraKey(key: String): Boolean {
       val normalized = key.lowercase()

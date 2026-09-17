@@ -23,10 +23,16 @@ import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const BACKGROUND_HISTORY_PAGE_SIZE = 500;
+// Foreground pages are intentionally much smaller than background pages. Even
+// with a cooperative parser, planning + reducer work is synchronous JS; a 500
+// row page can monopolise Hermes long enough for taps and navigation to look
+// dead on a large ledger. Background keeps the throughput-oriented page size.
 const FOREGROUND_HISTORY_PAGE_SIZE = 64;
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 650;
-// Only a genuinely new first-history job may auto-start in the foreground.
-// A saved job never restarts merely because Android restored the Activity.
+// A brand-new first run may begin by itself, but a previously paused history
+// job must never restart merely because the user returned to Wafra. Re-entry is
+// an interaction-critical transition and the saved Home card already exposes
+// an explicit Continue action.
 const FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000;
 
 /**
@@ -162,6 +168,10 @@ export function useHistoryImport(): void {
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
     const progress = getStateSnapshot().historyImport;
+    // Only a genuinely new first-history job auto-starts. A saved/paused job
+    // with real progress belongs to the explicit Continue control: silently
+    // resuming it on every cold launch was the cause of the blank/reopening
+    // state on large ledgers.
     if (!progress || progress.status !== 'paused' || progress.scanned > 0 || progress.error) return;
     const timer = setTimeout(() => {
       void run().catch(() => {
@@ -183,12 +193,14 @@ export function useHistoryImport(): void {
     if (Platform.OS !== 'android') return;
     const subscription = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
-      // The visible app always wins over maintenance. If history was running
-      // while Wafra was away, stop its native lease at the next safe page
-      // boundary and leave the durable progress paused for the explicit
-      // Continue control.
+      // Returning to Wafra means the UI wins immediately. A history service
+      // that was running while the app was away stops at its next safe
+      // coordinator boundary and persists `paused`; it is never restarted just
+      // because Android restored the Activity.
       historyBackground.cancel();
     });
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+    };
   }, []);
 }

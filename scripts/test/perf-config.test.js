@@ -847,17 +847,50 @@ function bodyOf(source, header) {
     'history pages, settings changes, and other unrelated reducer updates must not reschedule the daily summary; completion may schedule once');
 
   ok('Android resume catch-up leaves the first reopened frames to UI/input',
-    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*1_500/.test(autoImport) &&
+    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*5_000/.test(autoImport) &&
+      /ANDROID_INITIAL_SCAN_GRACE_MS\s*=\s*6_000/.test(autoImport) &&
+      /waitForForegroundHistoryIdle/.test(autoImport) &&
+      /initialScanCancelled/.test(autoImport) &&
       /shouldSkipFreshAndroidResumeScan\(\)/.test(autoImport) &&
       /setTimeout\([\s\S]*?scheduler\.request\(\)[\s\S]*?ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport),
     'a fresh source-free resume should do no inbox work, and a stale one must not start it while Android restores the window');
 
+  ok('launch notification and digest maintenance respect the navigation lease',
+    /ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\s*=\s*10_000/.test(autoImport) &&
+      /DAILY_SUMMARY_MAINTENANCE_GRACE_MS\s*=\s*9_000/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(DAILY_SUMMARY_MAINTENANCE_GRACE_MS\)/.test(autoImport),
+    'source-free maintenance must keep yielding priority to real taps even after its wall-clock grace expires');
+
   ok('Android bank-app queue is not reopened on every quick resume without a change signal',
     /ANDROID_NOTIFICATION_RECHECK_MS\s*=\s*30_000/.test(autoImport) &&
-      /!androidNotificationDrainRequired[\s\S]*?androidNotificationLastCheckedAt/.test(autoImport) &&
+      /ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\s*=\s*10_000/.test(autoImport) &&
+      /androidNotificationDrainRequired\s*=\s*false/.test(autoImport) &&
+      /getPendingCount/.test(autoImport) &&
+      /pending <= 0/.test(autoImport) &&
       /NotificationReader\.addListener\('onQueueChanged',[\s\S]*?androidNotificationDrainRequired = true[\s\S]*?scheduler\.request\(\)/.test(autoImport) &&
       /androidNotificationDrainRequired = false[\s\S]*?androidNotificationLastCheckedAt = Date\.now\(\)/.test(autoImport),
-    'no-change resumes should reuse the recent queue answer; a native queue edge must still force an immediate drain');
+    'cold launch/resume must inspect only a source-free pending count after an idle grace; a real native queue edge still forces an immediate drain');
+
+  const notificationListener = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt'));
+  const notificationStore = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt'));
+  const notificationModule = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt'));
+  ok('notification-listener reconnect recovery never runs KeyStore sweep inline',
+    /override fun onListenerConnected\(\)[\s\S]*?scheduleSweep\(\)/.test(notificationListener) &&
+      /recoveryExecutor\.execute/.test(notificationListener) &&
+      /fun scheduleSweepConnected\(\)/.test(notificationListener) &&
+      /if \(!wasEnabled && nowEnabled\) BankNotificationListenerService\.scheduleSweepConnected\(\)/.test(notificationModule),
+    'Android can reconnect NotificationListenerService during launch; encrypted shade recovery must be pushed off that callback path');
+
+  ok('bank notification admission touches the encrypted queue only once per candidate',
+    /val appendResult = NotificationCaptureStore\.append\(/.test(notificationListener) &&
+      !/NotificationCaptureStore\.admissionBlockReason\(/.test(notificationListener) &&
+      /fun append\([\s\S]*?\): String/.test(notificationStore) &&
+      /return "duplicate"/.test(notificationStore),
+    'a duplicate preflight followed by append decrypted the same AndroidKeyStore queue twice for every visible bank notification');
 
   const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
   ok('Android history repair never auto-restarts when the user returns to Wafra',
@@ -923,11 +956,11 @@ function bodyOf(source, header) {
   const notifications = stripComments(read('src/lib/notifications.ts'));
   const reminders = stripComments(read('src/lib/reminders.ts'));
   ok('automatic Android reminder setup never runs synchronous full-ledger recurrence detection',
-    /detectSubscriptionsCooperatively\(/.test(notifications) &&
+      /detectSubscriptionsCooperatively\(/.test(notifications) &&
       /recordRuntimeOperation\('reminder-projection'/.test(notifications) &&
       /buildPaymentReminders\(state, now, MAX_REMINDERS, detectedSubscriptions\)/.test(notifications) &&
       /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*8_000/.test(autoImport) &&
-      /setTimeout\(resolve, SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
       /syncPaymentReminders\(current\)/.test(autoImport),
     'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
 
@@ -989,6 +1022,12 @@ function bodyOf(source, header) {
       /billsForMonthCache\.bills === bills/.test(billsLogic) &&
       /return billsForMonthCache\.value\.slice\(\)/.test(billsLogic),
     'Home already computes card/bill upcoming data; opening Bills must reuse that result rather than retokenize the full ledger');
+
+  ok('settled-card history is cached by immutable card inputs and day',
+    /let recentlySettledDuesCache:/.test(cards) &&
+      /recentlySettledDuesCache\.withinDays === withinDays/.test(cards) &&
+      /sameInputs\(recentlySettledDuesCache, state\)/.test(cards),
+    'Cards/All should not replay statement allocation when revisiting Bills on an unchanged ledger');
 
   ok('card statement allocation is cached once per card and immutable ledger snapshot',
     /let allocationCache:/.test(cards) && /sameInputs\(allocationCache, state\)/.test(cards) &&

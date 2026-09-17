@@ -34,6 +34,9 @@ export type RuntimeOperationTag =
   | 'bills-manual'
   | 'bills-agenda-items'
   | 'bills-agenda-window'
+  | 'notification-drain'
+  | 'auto-import'
+  | 'daily-summary'
   | 'reminder-projection'
   | 'home-insight';
 
