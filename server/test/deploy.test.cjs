@@ -112,6 +112,26 @@ ok(
     /^\s*compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"[^\]]*\]/m.test(toml),
 );
 
+ok('Free-plan config does not activate a CPU limit Cloudflare rejects',
+  !/^\s*\[limits\]\s*$/m.test(toml));
+ok('the paid-plan upgrade instruction pins a 10-second CPU circuit breaker',
+  /BEFORE changing this[\s\S]{0,320}# \[limits\][\s\S]{0,80}# cpu_ms = 10_000/.test(toml));
+
+const rateLimitNames = [...toml.matchAll(/^name\s*=\s*"(PUBLIC_RATE_LIMITER|AUTH_RATE_LIMITER|IMPORT_RATE_LIMITER)"$/gm)]
+  .map((match) => match[1]);
+const namespaceIds = [...toml.matchAll(/^namespace_id\s*=\s*"([^"]+)"$/gm)]
+  .map((match) => match[1]);
+ok('Cloudflare-native rate limits guard public, authenticated, and heavy-import traffic',
+  new Set(rateLimitNames).size === 3 &&
+    /name = "PUBLIC_RATE_LIMITER"[\s\S]{0,180}limit = 10[\s\S]{0,80}period = 60/.test(toml) &&
+    /name = "AUTH_RATE_LIMITER"[\s\S]{0,180}limit = 120[\s\S]{0,80}period = 60/.test(toml) &&
+    /name = "IMPORT_RATE_LIMITER"[\s\S]{0,180}limit = 6[\s\S]{0,80}period = 60/.test(toml));
+ok('rate-limit namespaces are explicit and unique inside the account',
+  namespaceIds.length >= 3 && new Set(namespaceIds).size === namespaceIds.length);
+ok('production emergency cost switches are explicit and enabled by default',
+  /^IMPORTS_ENABLED\s*=\s*"1"$/m.test(toml) &&
+    /^FEEDBACK_AGENT_ENABLED\s*=\s*"1"$/m.test(toml));
+
 ok('the deploy runbook exists', fs.existsSync(path.join(root, 'DEPLOY.md')));
 
 console.log(`\n${passed} passed, ${failed} failed`);

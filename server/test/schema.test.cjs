@@ -93,8 +93,23 @@ ok('authenticated deletion retries retain only an expiring token digest',
     /PRIMARY KEY \(token_hash, route\)/.test(schema) &&
     /DELETE FROM admin_deletion_receipts WHERE expires_at <= unixepoch\(\)/.test(worker));
 ok('retained queue rows get scheduled wake retries',
-  /SELECT DISTINCT q\.device_id AS id[\s\S]*JOIN push_registrations/.test(worker) &&
-    /pending \?\? \[\][\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
+  /SELECT p\.device_id AS id[\s\S]*FROM push_registrations p[\s\S]*EXISTS \(SELECT 1 FROM queue q/.test(worker) &&
+    /LIMIT \?1/.test(worker) &&
+    /MAX_SCHEDULED_WAKE_DEVICES/.test(worker) &&
+    /pendingRows[\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
+ok('scheduled recovery is bounded and queue expiry has a supporting index',
+  /const MAX_SCHEDULED_WAKE_DEVICES = 250/.test(worker) &&
+    /const SCHEDULED_WAKE_CONCURRENCY = 20/.test(worker) &&
+    /CREATE INDEX IF NOT EXISTS queue_by_expiry ON queue \(created_at\)/.test(schema));
+const costLimitColumns = schema
+  .slice(schema.indexOf('CREATE TABLE IF NOT EXISTS cost_limits ('),
+    schema.indexOf('CREATE TABLE IF NOT EXISTS pair_limits ('))
+  .replace(/--[^\n]*/g, '');
+ok('supplemental cost budgets contain counters only and stop writing at the ceiling',
+  /CREATE TABLE IF NOT EXISTS cost_limits \(/.test(schema) &&
+    /PRIMARY KEY \(actor_id, scope\)/.test(schema) &&
+    /cost_limits\.usage_count \+ excluded\.usage_count <= \?5/.test(worker) &&
+    !/\b(?:ip|message|merchant|sender|body)\s+(?:TEXT|BLOB)\b/i.test(costLimitColumns));
 ok('server drops parser raw before sealing',
   /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(worker));
 ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports',
@@ -159,9 +174,15 @@ ok('direct PDF upload enforces media type, byte cap and PDF magic',
     /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) && /!== '%PDF-'/.test(worker));
 ok('direct CSV upload requires admin scope, an allowed media type, and a byte cap',
   /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
-    /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
-    /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
-    /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+  /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
+  /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
+  /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+ok('cloud imports have request, fan-out, and emergency-disable cost guards',
+  /const STATEMENT_IMPORTS_PER_HOUR = 12/.test(worker) &&
+    /GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000/.test(worker) &&
+    /SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR = 25_000/.test(worker) &&
+    /GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR = 100_000/.test(worker) &&
+    /IMPORTS_ENABLED/.test(worker) && /imports_disabled/.test(worker));
 ok('current statement uploads use explicit ISO ledger money instead of device country',
   /x-wafra-ledger-currency/.test(worker) && /x-wafra-ledger-exponent/.test(worker) &&
     /ledgerMoneySpec\(rawCurrency\)/.test(worker) && /spec\.exponent !== exponent/.test(worker) &&

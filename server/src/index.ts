@@ -92,8 +92,18 @@ interface DiagnosticEmailBinding {
   }): Promise<{ messageId: string }>;
 }
 
+interface RateLimitBinding {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env extends PushEnv {
   DB: D1Database;
+  /** Cloudflare-native, pre-D1 guard for unauthenticated public write routes. */
+  PUBLIC_RATE_LIMITER?: RateLimitBinding;
+  /** Cloudflare-native guard for token-scoped relay traffic before D1 auth. */
+  AUTH_RATE_LIMITER?: RateLimitBinding;
+  /** Tighter guard for CPU-heavy statement parsing. */
+  IMPORT_RATE_LIMITER?: RateLimitBinding;
   /** Optional Cloudflare Email Service binding for final-test diagnostic copies. */
   DIAGNOSTIC_EMAIL?: DiagnosticEmailBinding;
   /** Verified destination mailbox that receives tester diagnostic attachments. */
@@ -113,6 +123,10 @@ export interface Env extends PushEnv {
   GITHUB_DISPATCH_TOKEN?: string;
   /** `owner/repo` the dispatch is aimed at. Not secret; a [vars] entry. */
   GITHUB_REPOSITORY?: string;
+  /** Emergency kill switch. `0`, `false`, or `off` disables cloud imports. */
+  IMPORTS_ENABLED?: string;
+  /** Emergency kill switch for feedback -> GitHub coding-agent dispatch only. */
+  FEEDBACK_AGENT_ENABLED?: string;
 }
 
 /** Longer than any real bank SMS; anything bigger is abuse or a mistake. */
@@ -138,6 +152,23 @@ const MAX_VAULT_DEVICES = 8;
 const PAIR_PER_MINUTE = 60;
 /** Per-device ingest ceiling. UAE banks send tens of alerts a day, not hundreds. */
 const INGEST_PER_HOUR = 300;
+/** Heavy file parsing: generous for a person, finite for a loop or leaked token. */
+const STATEMENT_IMPORTS_PER_HOUR = 12;
+/** Account-wide backstop for a bad release repeatedly uploading statements. */
+const GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000;
+/** Forwarded alerts are more frequent than statements, but still bounded. */
+const EMAIL_IMPORTS_PER_HOUR = 120;
+const GLOBAL_EMAIL_IMPORTS_PER_HOUR = 5_000;
+/**
+ * A 200-row import can fan out to as many as eight trusted phones. This budget
+ * counts attempted sealed deliveries, not just HTTP requests, because that is
+ * what drives queue + replay-receipt writes in D1.
+ */
+const SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR = 25_000;
+const GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR = 100_000;
+/** Half-hour recovery cron may inspect/wake at most this many devices per run. */
+const MAX_SCHEDULED_WAKE_DEVICES = 250;
+const SCHEDULED_WAKE_CONCURRENCY = 20;
 /** Retry idempotency window; exact repeat purchases remain possible later. */
 const REPLAY_WINDOW_SECONDS = 15 * 60;
 /** Bounded abuse without making a normal long-offline phone lose history. */
@@ -175,6 +206,53 @@ const PUSH_COALESCE_SECONDS = 600;
 const textEncoder = new TextEncoder();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ANDROID_TESTER_DIAGNOSTIC_TEXT = 'Android tester diagnostics.';
+
+function featureEnabled(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  return !['0', 'false', 'off'].includes(value.trim().toLowerCase());
+}
+
+function importsEnabled(env: Env): boolean {
+  return featureEnabled(env.IMPORTS_ENABLED);
+}
+
+function feedbackAgentEnabled(env: Env): boolean {
+  return featureEnabled(env.FEEDBACK_AGENT_ENABLED);
+}
+
+/**
+ * Cloudflare's binding is the cheap first line and D1 counters remain the exact
+ * backstop. If a configured binding itself errors, fail closed: availability of
+ * an optional import/feedback operation is less important than accidentally
+ * bypassing the cost firewall during a provider/configuration fault.
+ */
+async function rateLimitExceeded(binding: RateLimitBinding | undefined, key: string): Promise<boolean> {
+  if (!binding) return false;
+  try {
+    return !(await binding.limit({ key })).success;
+  } catch {
+    return true;
+  }
+}
+
+function publicRateLimitKey(req: Request, route: string): string {
+  // Cloudflare already sees this address at the edge. It is used only as the
+  // ephemeral Rate Limiting API key and is never written to D1 or application logs.
+  // Health is machine traffic rather than a user action. A route-global key
+  // prevents a distributed address spray in one Cloudflare location from
+  // turning a public liveness probe into repeated D1 schema reads.
+  if (route === '/v1/health') return route;
+  const address = req.headers.get('cf-connecting-ip')?.trim() || 'unknown';
+  return `${route}:${address}`;
+}
+
+function authenticatedTrafficScope(method: string, pathname: string): string | null {
+  if (!pathname.startsWith('/v1/')) return null;
+  if (['/v1/pair', '/v1/join', '/v1/feedback', '/v1/health'].includes(pathname)) return null;
+  if (/^\/v1\/feedback\/[^/]+$/.test(pathname)) return `${method}:feedback-item`;
+  if (/^\/v1\/devices\/[^/]+$/.test(pathname)) return `${method}:device-item`;
+  return `${method}:${pathname}`;
+}
 
 function headers(contentType?: string): HeadersInit {
   return {
@@ -462,31 +540,15 @@ async function overPairRateLimit(env: Env): Promise<boolean> {
          ELSE 1
        END,
        window_start = excluded.window_start
+     WHERE pair_limits.window_start != excluded.window_start
+        OR pair_limits.request_count < ?2
      RETURNING request_count`,
   )
-    .bind(windowStart)
+    .bind(windowStart, PAIR_PER_MINUTE)
     .first<{ request_count: number }>();
-  return (row?.request_count ?? PAIR_PER_MINUTE + 1) > PAIR_PER_MINUTE;
-}
-
-/** Fixed hourly window without retaining an IP address or message fingerprint. */
-async function overRateLimit(env: Env, deviceId: string): Promise<boolean> {
-  const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
-  const row = await env.DB.prepare(
-    `INSERT INTO ingest_limits (device_id, window_start, request_count)
-     VALUES (?1, ?2, 1)
-     ON CONFLICT(device_id) DO UPDATE SET
-       request_count = CASE
-         WHEN ingest_limits.window_start = excluded.window_start
-         THEN ingest_limits.request_count + 1
-         ELSE 1
-       END,
-       window_start = excluded.window_start
-     RETURNING request_count`,
-  )
-    .bind(deviceId, windowStart)
-    .first<{ request_count: number }>();
-  return (row?.request_count ?? INGEST_PER_HOUR + 1) > INGEST_PER_HOUR;
+  // NULL means the existing window was already full. Crucially, the guarded
+  // UPSERT also made ZERO writes, so rejected abuse cannot itself inflate D1.
+  return row === null;
 }
 
 /**
@@ -518,9 +580,13 @@ async function consumeShortcutRateLimit(
        SELECT 1 FROM devices
         WHERE id = ?1 AND shortcut_ingest_enabled = 1
      )
+       AND (
+         ingest_limits.window_start != excluded.window_start
+         OR ingest_limits.request_count < ?3
+       )
      RETURNING request_count`,
   )
-    .bind(deviceId, windowStart)
+    .bind(deviceId, windowStart, INGEST_PER_HOUR)
     .first<{ request_count: number }>();
   return row?.request_count ?? null;
 }
@@ -556,11 +622,86 @@ async function overFeedbackWindow(env: Env, bucket: string, ceiling: number): Pr
          ELSE 1
        END,
        window_start = excluded.window_start
+     WHERE feedback_limits.window_start != excluded.window_start
+        OR feedback_limits.request_count < ?3
      RETURNING request_count`,
   )
-    .bind(bucket, windowStart)
+    .bind(bucket, windowStart, ceiling)
     .first<{ request_count: number }>();
-  return (row?.request_count ?? ceiling + 1) > ceiling;
+  return row === null;
+}
+
+/**
+ * Exact hourly cost budget. Unlike a normal "count then reject" limiter, the
+ * ceiling lives in the UPSERT's WHERE clause. Once exhausted, later requests
+ * return no row and cause no further D1 writes. `actorId = global` is the
+ * account-wide circuit breaker; device UUIDs are independent per-user budgets.
+ */
+async function consumeCostBudget(
+  env: Env,
+  actorId: string,
+  scope: string,
+  ceiling: number,
+  units = 1,
+): Promise<boolean> {
+  if (!Number.isInteger(units) || units <= 0 || units > ceiling) return false;
+  const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+  const row = await env.DB.prepare(
+    `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+     VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(actor_id, scope) DO UPDATE SET
+       usage_count = CASE
+         WHEN cost_limits.window_start = excluded.window_start
+         THEN cost_limits.usage_count + excluded.usage_count
+         ELSE excluded.usage_count
+       END,
+       window_start = excluded.window_start
+     WHERE cost_limits.window_start != excluded.window_start
+        OR cost_limits.usage_count + excluded.usage_count <= ?5
+     RETURNING usage_count`,
+  )
+    .bind(actorId, scope, windowStart, units, ceiling)
+    .first<{ usage_count: number }>();
+  return row !== null;
+}
+
+async function consumeRequestBudget(
+  env: Env,
+  deviceId: string,
+  scope: 'statement_requests' | 'email_requests',
+): Promise<boolean> {
+  const perDevice = scope === 'statement_requests'
+    ? STATEMENT_IMPORTS_PER_HOUR
+    : EMAIL_IMPORTS_PER_HOUR;
+  const global = scope === 'statement_requests'
+    ? GLOBAL_STATEMENT_IMPORTS_PER_HOUR
+    : GLOBAL_EMAIL_IMPORTS_PER_HOUR;
+  if (!(await consumeCostBudget(env, deviceId, scope, perDevice))) return false;
+  return consumeCostBudget(env, 'global', scope, global);
+}
+
+async function reserveSupplementalDeliveries(
+  env: Env,
+  deviceId: string,
+  rowCount: number,
+  targetCount: number,
+): Promise<boolean> {
+  const units = rowCount * targetCount;
+  if (units === 0) return true;
+  if (!(await consumeCostBudget(
+    env,
+    deviceId,
+    'supplemental_deliveries',
+    SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR,
+    units,
+  ))) return false;
+  return consumeCostBudget(
+    env,
+    'global',
+    'supplemental_deliveries',
+    GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR,
+    units,
+  );
 }
 
 /**
@@ -980,6 +1121,7 @@ async function queueEmailRows(
   device: Device,
   normalized: string,
   eventMaterial: string,
+  knownTargets?: readonly QueueTarget[],
 ): Promise<{ acceptedRows: number; wake: Set<string> }> {
   // Forwarded single alerts use the same per-alert AED/SAR routing as the
   // Shortcut. The paired device market remains the default only for
@@ -1011,7 +1153,10 @@ async function queueEmailRows(
   const receivedAt = alert
     ? [new Date().toISOString()]
     : rowReceiptTimes(parsedRows, Date.now());
-  const targets = await supplementalQueueTargets(env, device);
+  const targets = knownTargets ?? await supplementalQueueTargets(env, device);
+  if (!(await reserveSupplementalDeliveries(env, device.id, parsedRows.length, targets.length))) {
+    throw new Error('supplemental_budget_exceeded');
+  }
   const wake = await queueSupplementalRows(
     env, device,
     parsedRows.map((_, index) => ({
@@ -1086,6 +1231,34 @@ export default {
   ): Promise<Response> {
     const url = new URL(req.url);
     if (!secureTransport(url)) return json({ error: 'https_required' }, 400);
+
+    // These bindings execute before any D1 query. The D1 fixed windows below
+    // remain exact/accounting-safe backstops; this first layer keeps ordinary
+    // floods and accidental client loops from reaching the database at all.
+    if (
+      req.method === 'POST' &&
+      (url.pathname === '/v1/pair' || url.pathname === '/v1/join' || url.pathname === '/v1/feedback') &&
+      await rateLimitExceeded(
+        env.PUBLIC_RATE_LIMITER,
+        publicRateLimitKey(req, url.pathname),
+      )
+    ) return json({ error: 'rate_limited' }, 429);
+    if (
+      req.method === 'GET' &&
+      url.pathname === '/v1/health' &&
+      await rateLimitExceeded(env.PUBLIC_RATE_LIMITER, publicRateLimitKey(req, url.pathname))
+    ) return json({ error: 'rate_limited' }, 429);
+
+    const authTrafficScope = authenticatedTrafficScope(req.method, url.pathname);
+    const presentedBearer = authTrafficScope ? bearerToken(req) : '';
+    if (
+      authTrafficScope &&
+      presentedBearer &&
+      await rateLimitExceeded(
+        env.AUTH_RATE_LIMITER,
+        `${authTrafficScope}:${await hashToken(presentedBearer)}`,
+      )
+    ) return json({ error: 'rate_limited' }, 429);
 
     // ── Pairing: the app posts its X25519 public key, gets a bearer token ──
     //
@@ -1349,6 +1522,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(target.id),
+        env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(target.id),
       ]);
@@ -1375,6 +1549,9 @@ export default {
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM ingest_limits WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
+        ).bind(device.vault_id),
+        env.DB.prepare(
+          'DELETE FROM cost_limits WHERE actor_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM automation_generations WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
@@ -1444,9 +1621,12 @@ export default {
         rateLimitWindowStart,
       );
       if (shortcutRequestCount === null) {
-        return json({ error: 'unauthorized' }, 401);
-      }
-      if (shortcutRequestCount > INGEST_PER_HOUR) {
+        // NULL has two meanings by design: retirement/deletion won the guarded
+        // write race, or this device already spent its exact hourly budget.
+        // Distinguish them without reintroducing a write on the rejected path.
+        if (await shortcutIngestEnabled(env, device.id) !== true) {
+          return json({ error: 'unauthorized' }, 401);
+        }
         return json({ error: 'rate_limited' }, 429);
       }
       if (await queueIsFull(env, device.id)) return json({ error: 'queue_full' }, 429);
@@ -1670,14 +1850,15 @@ export default {
     if (req.method === 'GET' && url.pathname === '/v1/import/capabilities') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      const enabled = importsEnabled(env);
       return json({
         email: {
-          enabled: !!env.EMAIL_DOMAIN,
+          enabled: enabled && !!env.EMAIL_DOMAIN,
           accepts: ['text/plain', 'text/html', 'message/rfc822'],
           maxBytes: MAX_EMAIL_BYTES,
         },
         pdf: {
-          enabled: true,
+          enabled,
           accepts: ['application/pdf'],
           maxBytes: MAX_PDF_BYTES,
           maxRows: MAX_IMPORT_ROWS,
@@ -1686,7 +1867,7 @@ export default {
           note: 'Scans and ambiguous visual debit/credit columns are rejected, not guessed.',
         },
         csv: {
-          enabled: true,
+          enabled,
           accepts: [...CSV_CONTENT_TYPES],
           maxBytes: MAX_CSV_BYTES,
           maxRows: MAX_IMPORT_ROWS,
@@ -1699,6 +1880,7 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/email-token') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
       if (!env.EMAIL_DOMAIN) return json({ error: 'email_not_configured' }, 503);
       const emailToken = randomToken();
       await env.DB.prepare('UPDATE devices SET email_token_hash = ?1 WHERE id = ?2')
@@ -1722,7 +1904,10 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/email/ingest') {
       const device = await authenticate(req, env, 'email');
       if (!device) return json({ error: 'unauthorized' }, 401);
-      if (await overRateLimit(env, device.id)) return json({ error: 'rate_limited' }, 429);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (!(await consumeRequestBudget(env, device.id, 'email_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const incoming = await readBody(req, MAX_EMAIL_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
       const body = (() => {
@@ -1761,6 +1946,9 @@ export default {
       try {
         imported = await queueEmailRows(env, device, normalized, eventMaterial);
       } catch (error) {
+        if (error instanceof Error && error.message === 'supplemental_budget_exceeded') {
+          return json({ error: 'rate_limited' }, 429);
+        }
         if (error instanceof Error && error.message === 'too_many_rows') {
           return json({ error: 'too_many_rows' }, 413);
         }
@@ -1776,6 +1964,13 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/import/pdf') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:pdf`)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       if (req.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/pdf') {
@@ -1828,6 +2023,9 @@ export default {
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
       const targets = await supplementalQueueTargets(env, device);
+      if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const wake = await queueSupplementalRows(
         env, device,
         extracted.rows.map((_, index) => ({
@@ -1859,6 +2057,13 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/import/csv') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:csv`)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
@@ -1891,6 +2096,9 @@ export default {
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
       const targets = await supplementalQueueTargets(env, device);
+      if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const wake = await queueSupplementalRows(
         env, device,
         parsed.rows.map((row, index) => ({
@@ -2062,6 +2270,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(device.id),
+        env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(device.id),
       ]);
@@ -2126,7 +2335,9 @@ export default {
       let dispatchStatus = 'skipped_no_consent';
       let dispatched = false;
       if (validated.aiReviewConsent) {
-        if (!githubRepository(env.GITHUB_REPOSITORY) || !env.GITHUB_DISPATCH_TOKEN) {
+        if (!feedbackAgentEnabled(env)) {
+          dispatchStatus = 'skipped_disabled';
+        } else if (!githubRepository(env.GITHUB_REPOSITORY) || !env.GITHUB_DISPATCH_TOKEN) {
           dispatchStatus = 'skipped_unconfigured';
         } else if (await overFeedbackWindow(env, 'dispatch', FEEDBACK_AGENT_RUNS_PER_HOUR)) {
           dispatchStatus = 'skipped_budget';
@@ -2273,6 +2484,9 @@ export default {
         await env.DB.prepare(
           'SELECT device_id, generation FROM automation_generations LIMIT 0',
         ).all();
+        await env.DB.prepare(
+          'SELECT actor_id, scope, usage_count FROM cost_limits LIMIT 0',
+        ).all();
       } catch {
         // The exception text can name internals, and this endpoint is public.
         return json({ ok: false, error: 'schema_drift' }, 503);
@@ -2297,7 +2511,14 @@ export default {
       message.setReject('This Wafra forwarding address is no longer active.');
       return;
     }
-    if (message.rawSize > MAX_RAW_EMAIL_BYTES || await overRateLimit(env, device.id)) {
+    if (!importsEnabled(env)) {
+      message.setReject('Wafra imports are temporarily disabled.');
+      return;
+    }
+    if (
+      message.rawSize > MAX_RAW_EMAIL_BYTES ||
+      !(await consumeRequestBudget(env, device.id, 'email_requests'))
+    ) {
       message.setReject('This forwarded email exceeds Wafra import limits.');
       return;
     }
@@ -2313,6 +2534,9 @@ export default {
     const messageId = message.headers.get('message-id')?.slice(0, 512) ?? crypto.randomUUID();
     const wake = new Set<string>();
     let importedRows = 0;
+    // Reuse this target set for the whole MIME message. Previously every row of
+    // every attachment rediscovered the vault devices, multiplying D1 reads.
+    const targets = await supplementalQueueTargets(env, device);
     if (parsedEmail.text) {
       try {
         const imported = await queueEmailRows(
@@ -2320,11 +2544,16 @@ export default {
           device,
           parsedEmail.text,
           `mime:${messageId}`,
+          targets,
         );
         importedRows += imported.acceptedRows;
         for (const id of imported.wake) wake.add(id);
-      } catch {
-        message.setReject('This forwarded email has too many statement rows.');
+      } catch (error) {
+        message.setReject(
+          error instanceof Error && error.message === 'supplemental_budget_exceeded'
+            ? 'Wafra import limit reached; try again later.'
+            : 'This forwarded email has too many statement rows.',
+        );
         return;
       }
     }
@@ -2365,6 +2594,10 @@ export default {
         extracted.totalRows > MAX_IMPORT_ROWS ||
         importedRows + extracted.rows.length > MAX_IMPORT_ROWS
       ) continue;
+      if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
+        message.setReject('Wafra import limit reached; try again later.');
+        return;
+      }
       const baseKey = await keyedFingerprint(
         device.requestSecret,
         `mime-pdf:${messageId}:${attachmentIndex}:${digest}`,
@@ -2383,6 +2616,7 @@ export default {
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
+          targets,
         );
         for (const id of inserted) wake.add(id);
       }
@@ -2406,6 +2640,10 @@ export default {
         continue;
       }
       if (parsed.rows.length === 0 || importedRows + parsed.rows.length > MAX_IMPORT_ROWS) continue;
+      if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
+        message.setReject('Wafra import limit reached; try again later.');
+        return;
+      }
       const digest = b64encode(
         await crypto.subtle.digest(
           'SHA-256',
@@ -2429,6 +2667,7 @@ export default {
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
+          targets,
         );
         for (const id of inserted) wake.add(id);
       }
@@ -2457,16 +2696,18 @@ export default {
     // disappear. Retry the same id for two hours, at most once per cron tick.
     // The workflow concurrency key is the id, so an accepted dispatch whose
     // response was lost cannot create two simultaneous agent runs.
-    const { results: failedFeedback } = await env.DB.prepare(
-      `SELECT id FROM feedback
-        WHERE dispatch_status = 'failed'
-          AND created_at > unixepoch() - 7200
-          AND dispatched_at <= unixepoch() - 900
-        ORDER BY created_at ASC
-        LIMIT 5`,
-    ).all<{ id: string }>();
-    for (const row of failedFeedback ?? []) {
-      await sendRepositoryDispatch(env, row.id);
+    if (feedbackAgentEnabled(env)) {
+      const { results: failedFeedback } = await env.DB.prepare(
+        `SELECT id FROM feedback
+          WHERE dispatch_status = 'failed'
+            AND created_at > unixepoch() - 7200
+            AND dispatched_at <= unixepoch() - 900
+          ORDER BY created_at ASC
+          LIMIT 5`,
+      ).all<{ id: string }>();
+      for (const row of failedFeedback ?? []) {
+        await sendRepositoryDispatch(env, row.id);
+      }
     }
     await env.DB.prepare('DELETE FROM push_registrations WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM device_invites WHERE expires_at <= unixepoch()').run();
@@ -2485,6 +2726,9 @@ export default {
       'DELETE FROM ingest_limits WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
     await env.DB.prepare(
+      "DELETE FROM cost_limits WHERE actor_id <> 'global' AND actor_id NOT IN (SELECT id FROM devices)",
+    ).run();
+    await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
     await env.DB.prepare(
@@ -2494,11 +2738,20 @@ export default {
       'DELETE FROM vaults WHERE id NOT IN (SELECT DISTINCT vault_id FROM devices)',
     ).run();
     const { results: pending } = await env.DB.prepare(
-      `SELECT DISTINCT q.device_id AS id
-         FROM queue q
-         JOIN push_registrations p ON p.device_id = q.device_id
-        WHERE p.expires_at > unixepoch()`,
-    ).all<{ id: string }>();
-    await Promise.all((pending ?? []).map((row) => wakeDevice(env, row.id)));
+      `SELECT p.device_id AS id
+         FROM push_registrations p
+        WHERE p.expires_at > unixepoch()
+          AND EXISTS (SELECT 1 FROM queue q WHERE q.device_id = p.device_id)
+        ORDER BY p.updated_at ASC
+        LIMIT ?1`,
+    ).bind(MAX_SCHEDULED_WAKE_DEVICES).all<{ id: string }>();
+    const pendingRows = pending ?? [];
+    for (let start = 0; start < pendingRows.length; start += SCHEDULED_WAKE_CONCURRENCY) {
+      await Promise.all(
+        pendingRows
+          .slice(start, start + SCHEDULED_WAKE_CONCURRENCY)
+          .map((row) => wakeDevice(env, row.id)),
+      );
+    }
   },
 } satisfies ExportedHandler<Env>;

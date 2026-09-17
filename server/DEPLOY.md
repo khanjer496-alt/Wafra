@@ -170,8 +170,9 @@ curl -sS https://wafra-relay.<your-subdomain>.workers.dev/v1/health
 # {"ok":true}
 ```
 
-`/v1/health` checks `devices.market`, `push_registrations.push_sent_at`, and
-`automation_generations` through the Worker's D1 binding without reading user
+`/v1/health` checks `devices.market`, `devices.shortcut_ingest_enabled`,
+`push_registrations.push_sent_at`, `automation_generations`, and the
+`cost_limits` budget table through the Worker's D1 binding without reading user
 rows. It is not a column-by-column proof of the whole schema and does not prove
 authenticated writes, encryption, or queue delivery; the catalogue and
 throwaway pair/delete checks below cover those progressively stronger claims.
@@ -184,9 +185,9 @@ npx wrangler d1 execute wafra --remote --command \
   "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-Expect these 12 application tables: `admin_deletion_receipts`,
+Expect these 13 application tables: `admin_deletion_receipts`,
 `automation_generations`, `device_invites`, `devices`, `feedback`,
-`feedback_limits`, `ingest_limits`, `ingest_receipts`, `pair_limits`,
+`feedback_limits`, `ingest_limits`, `ingest_receipts`, `cost_limits`, `pair_limits`,
 `push_registrations`, `queue`, `vaults`. D1 keeps internal tables of its own
 (`_cf_KV` and similar) in the same catalogue, so extra names beginning with an
 underscore are normal. There is no messages table — that is the design, not a
@@ -287,17 +288,16 @@ D1 database survives), and `npx wrangler d1 delete wafra` removes the database
 and everything queued in it. The second one is irreversible. Neither is needed
 for a normal rollback.
 
-## Cost
+## Cost and runaway-billing protection
 
-Figures below are Cloudflare's published free-tier limits as of August 2026.
-**Re-check them on Cloudflare's pricing page before launch** — they have
-changed before and this document cannot see the current page.
+Figures below are Cloudflare's published limits as checked in September 2026.
+Re-check them before a major plan change; Cloudflare can change platform limits.
 
 | Free tier | Limit |
 | --- | --- |
 | Workers requests | 100,000 / day |
 | Workers CPU time | 10 ms per invocation |
-| Worker size | 3 MB compressed |
+| Worker size | 64 MiB uncompressed |
 | D1 storage | 5 GB |
 | D1 rows read | 5,000,000 / day |
 | D1 rows written | 100,000 / day |
@@ -305,28 +305,53 @@ changed before and this document cannot see the current page.
 Against what this app actually does:
 
 - **Requests.** One per captured bank message, one per sync, one per ack, plus
-  the half-hourly cron (48/day). A heavy single user is on the order of 150
-  invocations a day, so the 100k/day allowance is roughly hundreds of active
-  users, not tens. *Not verified: whether scheduled (cron) invocations count
-  against the free daily request allowance. Assume they do.*
+  the half-hourly cron. Do not use the free-tier request limit as a cost
+  firewall after moving to Workers Paid; paid Workers meter overages rather than
+  stopping at the free daily ceiling.
 - **Rows.** An ingest writes two rows (a sealed queue row and a replay
-  receipt); an ack deletes. 100k writes/day is far past the request ceiling, so
-  requests bind first.
+  receipt); an ack deletes. `cost_limits` now caps statement requests and
+  attempted supplemental fan-out both per device and account-wide. Every fixed
+  window uses a guarded UPSERT: once a ceiling is reached, rejected traffic no
+  longer increments the limiter row itself.
 - **Storage.** The queue holds rows only until the phone collects them, with a
   30-day sweep as the ceiling. 5 GB is not a constraint for this design.
-- **Worker size.** `npm run build:check` reports 2681.58 KiB raw / **648.94 KiB
-  gzipped** — measured, not estimated. Comfortably inside 3 MB compressed, and
-  worth re-reading after any dependency change, because `unpdf` is most of it.
-- **CPU.** This is the one real risk on the free plan. Sealing a row is
+- **Worker size.** The September 17 dry run reports 3033.87 KiB raw / 735.65 KiB
+  gzipped. Cloudflare's current limit is 64 MiB uncompressed, so size has ample
+  headroom; keep `npm run build:check` in the release gate.
+- **CPU.** This is the one real capacity risk on the free plan. Sealing a row is
   microseconds, but `POST /v1/import/pdf` accepts up to 5 MiB and 100 pages and
-  runs text extraction. *Not measured from here — no account.* If PDF import
-  starts returning errors under load while SMS capture stays fine, the 10 ms
-  free-plan CPU limit is the first thing to suspect, and Workers Paid ($5/month
-  at time of writing, with a much higher CPU allowance) is the fix.
+  runs text extraction. Free already enforces a hard 10 ms CPU ceiling and, on
+  this account, Cloudflare rejects any custom `[limits]` block with API error
+  `100328`. `wrangler.toml` therefore leaves the paid-only block commented out.
+  **Before upgrading Workers to Paid**, uncomment `[limits]` and
+  `cpu_ms = 10000`; do that as part of the plan change, not afterwards.
 
-So: **free to run at launch scale**, with a plausible $5/month if statement
-import gets real use or the user base passes a few hundred. Email Routing is
-free but needs a domain you own on Cloudflare.
+The application-side cost firewall is intentionally layered:
+
+1. `PUBLIC_RATE_LIMITER` — 10 requests/minute per public actor/route; health is
+   route-global per Cloudflare location.
+2. `AUTH_RATE_LIMITER` — 120 requests/minute per bearer+route, before D1 auth.
+3. `IMPORT_RATE_LIMITER` — 6 PDF/CSV requests/minute per device+format.
+4. exact D1 hourly budgets — 12 statement requests/device, 1,000 globally;
+   120 forwarded-email requests/device, 5,000 globally; and at most 25,000
+   attempted supplemental deliveries/device or 100,000 globally per hour.
+5. queue/import shape caps — 200 rows/import, 8 vault devices, 10,000 queued
+   rows/device, 5 MiB/100-page PDF ceiling.
+6. scheduled recovery — no more than 250 devices are woken per half-hour run,
+   processed 20 at a time.
+7. emergency switches — set `IMPORTS_ENABLED="0"` to stop email/PDF/CSV imports,
+   or `FEEDBACK_AGENT_ENABLED="0"` to stop GitHub coding-agent dispatch/retries;
+   pairing, capture and sync remain available.
+
+Cloudflare's Rate Limiting API executes inside the Worker and is deliberately
+treated as a fast guard, not exact accounting. The D1 budgets are the exact
+backstop. If this Worker is later placed behind a custom Cloudflare zone, add a
+WAF/edge rate-limit rule for the public routes as an outer layer; that is the
+layer that can reject traffic before a Worker invocation is billed.
+
+Also configure Cloudflare billing budget alerts. They are alarms, **not hard
+spending caps**, so they supplement these runtime limits rather than replacing
+them.
 
 ## When something goes wrong
 

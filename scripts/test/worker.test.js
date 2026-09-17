@@ -168,7 +168,7 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
 const ALL_TABLES = [
   'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
-  'admin_deletion_receipts', 'feedback', 'feedback_limits',
+  'cost_limits', 'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
 /** Every byte the database holds, for the "nothing readable is stored" checks. */
@@ -589,6 +589,29 @@ const CARD_PAYMENT_DEBIT =
     ok('transport: plain http to a public host is refused', insecure.status === 400);
   }
 
+  {
+    const denied = { limit: async () => ({ success: false }) };
+    const env = { DB: makeDb(), PUBLIC_RATE_LIMITER: denied };
+    const keys = deviceKeypair(webcrypto.getRandomValues(new Uint8Array(32)));
+    const res = await call(env, 'POST', '/v1/pair', {
+      headers: { 'cf-connecting-ip': '203.0.113.10' },
+      body: { publicKey: encodeKey(keys.publicKey) },
+    });
+    ok('edge cost guard: a public-rate-limit refusal happens before any D1 pair write',
+      res.status === 429 && count(env.DB, 'pair_limits') === 0 && count(env.DB, 'devices') === 0,
+      JSON.stringify({ status: res.status, pairLimits: count(env.DB, 'pair_limits') }));
+
+    const broken = {
+      DB: makeDb(),
+      PUBLIC_RATE_LIMITER: { limit: async () => { throw new Error('provider fault'); } },
+    };
+    const failClosed = await call(broken, 'POST', '/v1/pair', {
+      body: { publicKey: encodeKey(keys.publicKey) },
+    });
+    ok('edge cost guard: a configured rate limiter fails closed instead of bypassing protection',
+      failClosed.status === 429 && count(broken.DB, 'pair_limits') === 0);
+  }
+
   /* ═════════════ Scopes: one credential is not the others ═════════════ */
 
   {
@@ -931,6 +954,21 @@ const CARD_PAYMENT_DEBIT =
         'device_id,window_start,request_count');
   }
 
+  {
+    const env = {
+      DB: makeDb(),
+      AUTH_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    };
+    const me = await pairDevice(env);
+    const blocked = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId: nextEvent() },
+    });
+    ok('edge cost guard: token-scoped throttling rejects before the D1 ingest counter',
+      blocked.status === 429 && count(env.DB, 'ingest_limits') === 0 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ status: blocked.status, limits: count(env.DB, 'ingest_limits') }));
+  }
+
   /* ═════════════ Scoped retirement of Shortcut capture ═════════════
    *
    * Retirement revokes only the ingest capability already copied into an
@@ -1090,15 +1128,26 @@ const CARD_PAYMENT_DEBIT =
     const exhaustedCount = env.DB.handle.prepare(
       'SELECT request_count FROM ingest_limits WHERE device_id = ?',
     ).get(me.deviceId)?.request_count;
+    const refusedAgain = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: {},
+    });
+    const afterRepeatedRefusal = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId)?.request_count;
     ok('shortcut traffic limit: authenticated invalid and ignored requests consume the fixed-hour budget',
       expectedStatuses && limit?.request_count === 300 && exhausted.status === 429 &&
-        (await exhausted.json()).error === 'rate_limited' && exhaustedCount === 301,
+        (await exhausted.json()).error === 'rate_limited' && exhaustedCount === 300 &&
+        refusedAgain.status === 429 && afterRepeatedRefusal === 300,
       JSON.stringify({
         expectedStatuses,
         requestCount: limit?.request_count ?? null,
         exhaustedStatus: exhausted.status,
         exhaustedCount,
+        afterRepeatedRefusal,
       }));
+    ok('shortcut traffic limit: rejected abuse causes no further D1 counter writes',
+      exhaustedCount === 300 && afterRepeatedRefusal === 300);
   }
 
   {
@@ -1660,6 +1709,91 @@ const CARD_PAYMENT_DEBIT =
   }
 
   /* ═════════════════ Forwarded email and PDF supplements ═════════════════ */
+
+  {
+    const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test', IMPORTS_ENABLED: '0' };
+    const me = await pairDevice(env);
+    const caps = await call(env, 'GET', '/v1/import/capabilities', { token: me.adminToken });
+    const body = await caps.json();
+    const blockedPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['2026-01-03 SALIK 4.00 DR']),
+    });
+    ok('import kill switch: capabilities truthfully disable every cloud import surface',
+      body.email.enabled === false && body.pdf.enabled === false && body.csv.enabled === false);
+    ok('import kill switch: heavy imports stop without taking pairing or sync offline',
+      blockedPdf.status === 503 && (await blockedPdf.json()).error === 'imports_disabled' &&
+        count(env.DB, 'cost_limits') === 0);
+    ok('import kill switch: no new forwarding credential is minted while imports are off',
+      (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).status === 503);
+    ok('import kill switch: core sync remains available',
+      (await call(env, 'GET', '/v1/sync', { token: me.syncToken })).status === 200);
+  }
+
+  {
+    const env = {
+      DB: makeDb(),
+      IMPORT_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    };
+    const me = await pairDevice(env);
+    const blocked = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    ok('import cost guard: Cloudflare import throttling rejects before exact D1 budgets or parsing',
+      blocked.status === 429 && count(env.DB, 'cost_limits') === 0 && count(env.DB, 'queue') === 0);
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+    env.DB.handle.prepare(
+      `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+       VALUES (?, 'statement_requests', ?, 12)`,
+    ).run(me.deviceId, windowStart);
+    const first = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    const second = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n02/07/2026,Taxi,21.00,',
+    });
+    const usage = env.DB.handle.prepare(
+      `SELECT usage_count FROM cost_limits
+        WHERE actor_id = ? AND scope = 'statement_requests'`,
+    ).get(me.deviceId)?.usage_count;
+    ok('import cost guard: an exhausted exact budget rejects repeated uploads without more D1 writes',
+      first.status === 429 && second.status === 429 && usage === 12 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ first: first.status, second: second.status, usage }));
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+    env.DB.handle.prepare(
+      `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+       VALUES (?, 'supplemental_deliveries', ?, 25000)`,
+    ).run(me.deviceId, windowStart);
+    const blocked = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    const deliveryUsage = env.DB.handle.prepare(
+      `SELECT usage_count FROM cost_limits
+        WHERE actor_id = ? AND scope = 'supplemental_deliveries'`,
+    ).get(me.deviceId)?.usage_count;
+    ok('import cost guard: exhausted fan-out budget blocks queue writes and itself stops writing',
+      blocked.status === 429 && deliveryUsage === 25000 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ status: blocked.status, deliveryUsage }));
+  }
 
   {
     const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test' };
@@ -2256,6 +2390,40 @@ const CARD_PAYMENT_DEBIT =
       ok('feedback: and the cron actually deletes it', count(env.DB, 'feedback') === 0);
     }
 
+    {
+      const env = {
+        DB: makeDb(),
+        GITHUB_REPOSITORY: 'wafra/wafra',
+        GITHUB_DISPATCH_TOKEN: 'ghp_dispatch',
+        FEEDBACK_AGENT_ENABLED: '0',
+      };
+      const github = stubFetch();
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', {
+        body: RESEARCH_REPORT,
+        ctx: wake.ctx,
+      });
+      const body = await res.json();
+      await wake.settled();
+      github.restore();
+      ok('feedback agent kill switch: research feedback is stored but no expensive dispatch runs',
+        res.status === 202 && body.dispatched === false && github.calls.length === 0 &&
+          feedbackRow(env, body.id).dispatch_status === 'skipped_disabled');
+    }
+
+    {
+      const env = {
+        DB: makeDb(),
+        PUBLIC_RATE_LIMITER: { limit: async () => ({ success: false }) },
+      };
+      const blocked = await call(env, 'POST', '/v1/feedback', {
+        headers: { 'cf-connecting-ip': '203.0.113.11' },
+        body: REPORT,
+      });
+      ok('feedback cost guard: edge refusal happens before the D1 feedback counter',
+        blocked.status === 429 && count(env.DB, 'feedback_limits') === 0 && count(env.DB, 'feedback') === 0);
+    }
+
     /* ── Explicitly consented, client-redacted parser research ── */
     {
       const env = {
@@ -2604,6 +2772,15 @@ const CARD_PAYMENT_DEBIT =
         firstRefusal > 0, `first refusal at ${firstRefusal}`);
       ok('feedback: the window bounds what a flood can put in the table',
         count(env.DB, 'feedback') === firstRefusal);
+      const refusedAgain = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'one more refusal' },
+      });
+      const limiter = env.DB.handle.prepare(
+        "SELECT request_count FROM feedback_limits WHERE id = 'feedback'",
+      ).get();
+      ok('feedback: once the window is full, rejected requests stop writing the D1 counter',
+        refusedAgain.status === 429 && limiter?.request_count === 60,
+        JSON.stringify({ status: refusedAgain.status, limiter }));
       ok('feedback: the limiter stores a counter, not an address or a fingerprint',
         !('device_id' in env.DB.handle.prepare('SELECT * FROM feedback_limits').get()));
     }
@@ -2701,6 +2878,20 @@ const CARD_PAYMENT_DEBIT =
         missingAutomationBody.ok === false &&
         missingAutomationBody.error === 'schema_drift',
       `${missingAutomationGenerations.status} ${JSON.stringify(missingAutomationBody)}`);
+    const withoutCostLimits = (sql) => sql.replace(
+      /CREATE TABLE IF NOT EXISTS cost_limits \([\s\S]*?\n\);\n/,
+      '',
+    );
+    const missingCostLimits = await call(
+      { DB: makeDb(withoutCostLimits) },
+      'GET',
+      '/v1/health',
+    );
+    const missingCostBody = await missingCostLimits.json();
+    ok('health: refuses when the exact cost-budget table is missing',
+      missingCostLimits.status === 503 && missingCostBody.ok === false &&
+        missingCostBody.error === 'schema_drift',
+      `${missingCostLimits.status} ${JSON.stringify(missingCostBody)}`);
     ok('routing: an unknown path is 404', (await call(env, 'GET', '/v1/nope')).status === 404);
     ok('routing: the right path with the wrong method is 404',
       (await call(env, 'GET', '/v1/pair')).status === 404);
