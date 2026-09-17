@@ -1,0 +1,27 @@
+{
+  "checkedAt": "2026-09-17T20:25:05.021Z",
+  "expectedSource": "e71c3cac9c9a842bdf0b5456533df78c5b91c943",
+  "appId": "6799171482",
+  "version": "1.0.0",
+  "buildNumber": "150",
+  "requestedPublish": true,
+  "actions": [
+    "test-notes-verified",
+    "associated-existing-public-Beta-group",
+    "submitted-for-Beta-App-Review"
+  ],
+  "publicLink": "https://testflight.apple.com/join/jbwzCgZ6",
+  "build": {
+    "id": "c479029f-ae43-42bb-a25d-52ff6030f2a1",
+    "processingState": "VALID",
+    "expired": false,
+    "beta": {
+      "autoNotifyEnabled": true,
+      "internalBuildState": "READY_FOR_BETA_TESTING",
+      "externalBuildState": "READY_FOR_BETA_SUBMISSION"
+    }
+  },
+  "finalExternalState": "IN_BETA_TESTING",
+  "inPublicGroup": true,
+  "outcome": "public-beta-testing"
+}
