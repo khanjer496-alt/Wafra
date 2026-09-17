@@ -410,7 +410,7 @@ const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
   'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
-  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
 ]) {
@@ -477,7 +477,7 @@ await resetPreferences();
   await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
   ok('Home income opens the income-filtered ledger', /\/transactions\?type=income/.test(await url(page)));
   await flow(); await categoryDetails('Rent');
-  if (!(await tapKey(page, 'View activity'))) throw new Error('Category activity action is unreachable');
+  if (!(await tapKey(page, 'View transactions'))) throw new Error('Category transactions action is unreachable');
   await page.waitForURL(/category=rent/);
   ok('category detail opens only its own expenses', new URL(page.url()).searchParams.get('type') === 'expense');
 }
