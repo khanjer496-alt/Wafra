@@ -518,6 +518,74 @@ struct NativeHistoryStoreTests {
         ) == "2025-10-09T08:53:20.000Z"
       )
     }
+    // Physical build 139 produced this system-display date shape on an en_AE
+    // iPhone even though the Shortcut graph requested the custom ISO-like
+    // format. Pin that exact locale/style path so it cannot regress again.
+    let dubaiDisplayZone = TimeZone(identifier: "Asia/Dubai")!
+    var dubaiGregorian = Calendar(identifier: .gregorian)
+    dubaiGregorian.timeZone = dubaiDisplayZone
+    let aeLocale = Locale(identifier: "en_AE")
+    let observedInstant = dubaiGregorian.date(from: DateComponents(
+      year: 2026, month: 9, day: 12, hour: 21, minute: 22
+    ))!
+    let observedNow = dubaiGregorian.date(from: DateComponents(
+      year: 2026, month: 9, day: 17, hour: 14
+    ))!
+    let observedFormatter = DateFormatter()
+    observedFormatter.locale = aeLocale
+    observedFormatter.calendar = dubaiGregorian
+    observedFormatter.timeZone = dubaiDisplayZone
+    observedFormatter.isLenient = false
+    observedFormatter.dateStyle = .medium
+    observedFormatter.timeStyle = .short
+    let observedText = observedFormatter.string(from: observedInstant)
+    check(
+      "build 139 en_AE display date canonicalizes instead of invalid-input-date",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        observedText,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+    let ordinarySpaces = observedText
+      .replacingOccurrences(of: "\u{202F}", with: " ")
+      .replacingOccurrences(of: "\u{00A0}", with: " ")
+    check(
+      "en_AE display date accepts ordinary spaces when iOS drops narrow NBSP",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        ordinarySpaces,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+    let bidiDecorated = ordinarySpaces.replacingOccurrences(of: "PM", with: "\u{200F}PM\u{200E}")
+    check(
+      "en_AE display date ignores presentation-only bidi markers",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        bidiDecorated,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+    var nonGregorianDeviceCalendar = Calendar(identifier: .islamicUmmAlQura)
+    nonGregorianDeviceCalendar.timeZone = dubaiDisplayZone
+    check(
+      "Gregorian Shortcuts display date parses even when device calendar differs",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        ordinarySpaces,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: nonGregorianDeviceCalendar,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+
     var hijriCalendar = Calendar(identifier: .islamicUmmAlQura)
     let dubai = TimeZone(secondsFromGMT: 4 * 60 * 60)!
     hijriCalendar.timeZone = dubai
