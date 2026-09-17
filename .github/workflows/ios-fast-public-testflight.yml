@@ -1,0 +1,312 @@
+name: Fast public TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: 'Optional exact 40-character commit already on main. Empty = current main.'
+        type: string
+        default: ''
+      profile:
+        description: 'Store-signed Wafra profile to ship.'
+        type: choice
+        options:
+          - history-beta
+          - production
+          - production-candidate
+        default: history-beta
+      mobai_preflight:
+        description: 'Run the MobAI iOS simulator launch smoke before spending release-build time.'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ios-fast-public-testflight
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve an exact main-line source
+        id: source
+        env:
+          REQUESTED: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED" ]; then
+            printf '%s' "$REQUESTED" | grep -qE '^[0-9a-f]{40}$' || {
+              echo 'source_commit must be a full 40-character commit SHA.'
+              exit 1
+            }
+            git cat-file -e "$REQUESTED^{commit}"
+            SHA="$REQUESTED"
+          else
+            SHA=$(git rev-parse origin/main)
+          fi
+          git merge-base --is-ancestor "$SHA" origin/main || {
+            echo "$SHA is not on main; refusing to publish an unmerged source."
+            exit 1
+          }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Release source: \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+  mobai:
+    needs: resolve
+    if: inputs.mobai_preflight
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source }}
+
+      - name: Select Xcode 26.2 or newer
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -vi beta | sort -V | tail -1)
+          test -n "$BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          node -e 'const [a,b]=process.argv[1].split(".").map(Number); if (!(a>26 || (a===26 && b>=2))) process.exit(1)' "$VER"
+          xcodebuild -version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Cache CocoaPods downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+          key: wafra-cocoapods-${{ runner.os }}-${{ hashFiles('package-lock.json', 'app.json', 'app.config.js') }}
+          restore-keys: |
+            wafra-cocoapods-${{ runner.os }}-
+
+      - name: Install CocoaPods dependencies
+        run: npx pod-install
+
+      - name: Boot MobAI simulator
+        uses: MobAI-App/mobai-ci@v1
+        with:
+          boot-sim: true
+
+      - name: Build Wafra for the MobAI simulator
+        run: |
+          set -euo pipefail
+          test -n "${MOBAI_SIM_UDID:-}"
+          xcodebuild \
+            -workspace ios/Wafra.xcworkspace \
+            -scheme Wafra \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath ios/build \
+            -destination "id=$MOBAI_SIM_UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Start and warm Metro
+        run: |
+          set -euo pipefail
+          npx expo start --dev-client --port 8081 > "$RUNNER_TEMP/wafra-metro.log" 2>&1 &
+          for _ in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8081/status >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8081/status >/dev/null || {
+            tail -100 "$RUNNER_TEMP/wafra-metro.log"
+            exit 1
+          }
+          curl -sSf --max-time 600 \
+            -o "$RUNNER_TEMP/wafra-warm.bundle" \
+            'http://127.0.0.1:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false&runModule=true' \
+            || tail -100 "$RUNNER_TEMP/wafra-metro.log"
+
+      - name: Run fast MobAI launch smoke
+        run: |
+          set -euo pipefail
+          APP=$(find ios/build/Build/Products -name '*.app' -type d | head -1)
+          test -n "$APP"
+          mobai-ci test .maestro/testflight-smoke.yaml \
+            --app "$APP" \
+            --device "$MOBAI_SIM_UDID" \
+            --wait-device 4m \
+            --timeout 10m \
+            --test-timeout 6m \
+            --output mobai-ci-out
+
+      - name: Preserve MobAI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-mobai-testflight-preflight-${{ needs.resolve.outputs.source }}
+          path: |
+            mobai-ci-out/
+            ${{ runner.temp }}/wafra-metro.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    needs: [resolve, mobai]
+    if: always() && needs.resolve.result == 'success' && (needs.mobai.result == 'success' || needs.mobai.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Validate public-beta publisher
+        run: node --check scripts/release/ios-public-beta-publish.mjs
+
+      - name: Start the existing signed GitHub-macOS build
+        id: child
+        env:
+          SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          set -euo pipefail
+          START=$(date -u +%s)
+
+          gh workflow run ios-testflight.yml \
+            --repo "$GH_REPO" \
+            --ref main \
+            -f build_host=github-macos \
+            -f source_commit="$SOURCE_SHA" \
+            -f profile="$PROFILE" \
+            -f submit=true \
+            -f wait=false \
+            -f what_to_test='' \
+            -f submit_build_id=''
+
+          RUN_ID=''
+          for _ in $(seq 1 60); do
+            RUN_ID=$(
+              gh run list \
+                --repo "$GH_REPO" \
+                --workflow ios-testflight.yml \
+                --event workflow_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt \
+              | jq -r --argjson start "$START" '
+                  [.[] | select((.createdAt | fromdateiso8601) >= $start)]
+                  | sort_by(.createdAt)
+                  | last
+                  | .databaseId // empty
+                '
+            )
+            [ -n "$RUN_ID" ] && break
+            sleep 2
+          done
+
+          test -n "$RUN_ID" || {
+            echo 'Could not identify the dispatched iOS build run.'
+            exit 1
+          }
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Child iOS build run: https://github.com/$GH_REPO/actions/runs/$RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          gh run watch "$RUN_ID" --repo "$GH_REPO" --exit-status --interval 30
+
+      - name: Read the exact uploaded build
+        id: build
+        env:
+          RUN_ID: ${{ steps.child.outputs.run_id }}
+          SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+        run: |
+          set -euo pipefail
+          mkdir -p child-artifacts
+          gh run download "$RUN_ID" \
+            --repo "$GH_REPO" \
+            --pattern 'wafra-ios-local-*' \
+            --dir child-artifacts
+
+          REPORT=$(find child-artifacts -type f -name verification.json | head -1)
+          test -n "$REPORT"
+
+          node - "$REPORT" <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (report.sourceCommit !== process.env.SOURCE_SHA) throw new Error('artifact source does not match requested source');
+          if (report.buildHost !== 'github-macos') throw new Error('artifact was not built on the fast GitHub macOS path');
+          if (report.storeSigningVerified !== true) throw new Error('store signing was not verified');
+          if (!/^\d+$/.test(String(report.buildNumber))) throw new Error('invalid build number');
+          if (typeof report.version !== 'string' || !report.version) throw new Error('missing app version');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+            `version=${report.version}\nbuild_number=${report.buildNumber}\nipa_sha256=${report.sha256}\n`);
+          NODE
+
+      - name: Publish that build to the existing public TestFlight group
+        env:
+          WAFRA_BETA_VERSION: ${{ steps.build.outputs.version }}
+          WAFRA_BETA_BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
+          WAFRA_BETA_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Preserve public-beta evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-fast-public-testflight-${{ needs.resolve.outputs.source }}
+          path: |
+            ios-release-evidence/public-beta.json
+            child-artifacts/**/verification.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Write public TestFlight summary
+        if: always()
+        env:
+          SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+          VERSION: ${{ steps.build.outputs.version }}
+          BUILD_NUMBER: ${{ steps.build.outputs.build_number }}
+        run: |
+          {
+            echo '# Wafra public TestFlight'
+            echo
+            echo '<https://testflight.apple.com/join/jbwzCgZ6>'
+            echo
+            echo "| Source | \`$SOURCE_SHA\` |"
+            echo '| --- | --- |'
+            echo "| Version | \`${VERSION:-unknown}\` |"
+            echo "| Build | \`${BUILD_NUMBER:-unknown}\` |"
+            if [ -f ios-release-evidence/public-beta.json ]; then
+              OUTCOME=$(node -e "const r=require('./ios-release-evidence/public-beta.json'); process.stdout.write(r.outcome || 'unknown')")
+              STATE=$(node -e "const r=require('./ios-release-evidence/public-beta.json'); process.stdout.write(r.finalExternalState || '')")
+              echo "| Public-beta outcome | \`$OUTCOME\` |"
+              [ -n "$STATE" ] && echo "| Apple external state | \`$STATE\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
