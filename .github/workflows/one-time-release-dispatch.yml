@@ -1,0 +1,48 @@
+name: One-time release dispatch
+
+on:
+  push:
+    branches:
+      - automation/release-50d82f8d
+    paths:
+      - '.github/workflows/one-time-release-dispatch.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 50d82f8ddbd11384f989b267ef267b59cf74de6e
+      SOURCE_CI_RUN: '35241342083'
+    steps:
+      - name: Require exact-source CI then dispatch Android and iOS
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 45); do
+            state="$(gh run view "$SOURCE_CI_RUN" --repo "$GITHUB_REPOSITORY" --json status,conclusion --jq '.status + ":" + (.conclusion // "")')"
+            echo "source CI: $state"
+            case "$state" in
+              completed:success) break ;;
+              completed:*) echo "Source CI did not pass; refusing release builds."; exit 1 ;;
+            esac
+            sleep 20
+            if [ "$attempt" = 45 ]; then echo 'Timed out waiting for source CI.'; exit 1; fi
+          done
+
+          gh workflow run build-apk.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f bundle=false -f corpus=false -f founder_unlock=false -f architecture=arm64 -f capture_trace=false
+
+          gh workflow run ios-testflight.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f build_host=github-macos \
+            -f source_commit="$SOURCE_SHA" \
+            -f profile=production \
+            -f submit=true \
+            -f wait=true \
+            -f what_to_test='' \
+            -f submit_build_id=''
+
+          echo 'Release workflows dispatched from exact-source main.'
