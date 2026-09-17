@@ -97,6 +97,7 @@ function harness(options = {}) {
     '@/lib/period': { periodLabel: () => language === 'ar' ? 'سبتمبر 2026' : 'September 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },
+    '@/lib/onboarding': { normalizePreferredName: (value) => typeof value === 'string' && value.trim() ? value.trim() : null },
     '@/lib/store': { useStore: () => ({ state, getStateSnapshot: () => state, applyFxUpdates() {},
       setCaptureOptOut: async (value) => events.push(['optOut', value]), beginHistoryImport: async () => events.push(['resume']),
       unlockFounderPro: async () => { state.founderPro = true; events.push(['founder']); } }) },
