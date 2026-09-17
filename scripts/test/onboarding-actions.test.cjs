@@ -111,6 +111,8 @@ function actions(options = {}) {
       record('source-write-durable', value);
     },
     requestSmsPermission: service('requestSmsPermission', options.granted ?? true),
+    requestSmsDeliveryPermission: service('requestSmsDeliveryPermission', true),
+    requestVisibleNotificationPermission: service('requestVisibleNotificationPermission', true),
     beginHistoryImport: service('beginHistoryImport'),
     ensureDurable: service('ensureDurable'),
     getRelayConfigStrict: service('getRelayConfigStrict', options.relay ?? null),
