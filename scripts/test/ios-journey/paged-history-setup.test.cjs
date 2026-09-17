@@ -58,7 +58,7 @@ test('the production profile installs the paged record and every iOS binary reta
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,
-    ['original', './modules/wafra-message-history/plugin/paged']);
+    ['original', './modules/wafra-message-history/plugin/paged', './modules/wafra-high-refresh/plugin']);
 });
 test('normal setup routes to bounded history without retiring the published original', () => {
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');

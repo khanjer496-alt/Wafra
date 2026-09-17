@@ -182,18 +182,21 @@
     },
     {
       "file": "src/app/pro.tsx",
-      "name": "buy",
-      "sha256": "861faafd89a0fd6b16f7f9d1ff2f737d292103b8cd3e76fadf7e6754d2de54e3"
+      "name": "openPaywall",
+      "sha256": "8e26828e82fd7bf21db8e0b41171e3e16b75629fbc8ea566d548d36ba012ec80",
+      "reviewedChange": "2026-09-17: Superwall now owns the canonical purchase UI. The protected handler refuses purchase presentation until legal links and the SDK are configured, presents only the reviewed Pro placement, and converts presentation failures into localized native fallback state."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "restore",
-      "sha256": "2b9be76d6bd074cdc60fac1fa60269ffbf58b717dc667b8bfc4316f229f32b7e"
+      "sha256": "e3b55cc51a27ad7f8c737f2e7972d52d898c20306da4e15607b488b2802daae2",
+      "reviewedChange": "2026-09-17: Restore is delegated to the configured Superwall billing provider and reports unavailable, no-purchase, failure, and success states without synthesizing an entitlement."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "manage",
-      "sha256": "b1c05b539f86db1fa11d69873a0f49972229944b0a41bc70a1a412ee94a798d9"
+      "sha256": "79a4d47c9a1a12026b34dea919515d646d9ef6080de7064b94ba9d5af628d737",
+      "reviewedChange": "2026-09-17: Subscription management remains a user-initiated store URL action with explicit URL availability checks and localized failure state."
     },
     {
       "file": "src/app/pro.tsx",
@@ -269,44 +272,44 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "connectAndroidNotifications",
-      "sha256": "6cd28b9cf9f84df9ea0aea74ccfcad638f183fe09b6f6c88e3766cc84f456d17",
-      "reviewedChange": "2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
+      "sha256": "e21c59a212affa08ac488687faffbead4e683ddbaba83dd3b0fff650663f81e1",
+      "reviewedChange": "2026-09-17: Android bank-app notification setup persists source choice before system access and never claims readiness early. Settings onboarding replay adds a read-only preview branch that changes only local preview readiness and never opens settings, persists capture, or touches the native lease."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "finishAndroidCapture",
-      "sha256": "d654e6ac4037547ebe80ed3424393d37ae9514fd9d0dd3e57acedda661bc502e",
-      "reviewedChange": "2026-09-17: Replace the deleted optional goals/budget save with the explicit Android source-selection completion boundary. At least one source must be ready, exact SMS/notification choices are persisted, then the completion checkpoint is saved."
+      "sha256": "25cdb9ce36795aa812497fb146570fbfc6c9ac6a6fe5f4eb421069daa26459da",
+      "reviewedChange": "2026-09-17: Android source completion still requires at least one ready source and persists exact choices before the completion checkpoint. Replay mode now advances only its local completion state and performs no store or native writes."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "79deafbf221f21804ee66f4fbd81453cb3487685f2d6330be21a17a1e077096e",
-      "reviewedChange": "2026-09-17: SMS onboarding now configures only the SMS source, remains on the source-selection screen after permission, and persists the source checkpoint before starting resumable history import."
+      "sha256": "d9fde7919b7d81fc931a4c59920d09d39aacdd96dd4cc9c8fd4f69bd97d689e3",
+      "reviewedChange": "2026-09-17: SMS onboarding configures only the SMS source and persists the checkpoint before resumable history import. Replay mode simulates readiness locally and returns before permission, import, capture-source, or durability work."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "beginCapture",
-      "sha256": "abcc4f5115607c4f80a32967f60fb49a1104b2c78c7ddf81b9cd1a4aac231cf9",
-      "reviewedChange": "2026-09-10: Capture setup keeps serialized native handoff behavior, records source-free funnel state, and still requires explicit manual choice when capture is unavailable."
+      "sha256": "dfc5779a1a5b70061f66f869892c15c81c210a3fcdba465b6f07256f8f81fabe",
+      "reviewedChange": "2026-09-17: Shipping capture setup keeps the serialized iOS/Android handoff and explicit manual fallback. Settings replay now completes locally without routing to iOS setup, changing opt-out, requesting permissions, or starting capture."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "de7faa56609fbfa6e737ffdfda5607eb8048e18f9b7cbee3055d2489c26201e4",
-      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
+      "sha256": "d68aba11ab8331681c322450419aa59ed796645b6da1e30167bac5c70b07743a",
+      "reviewedChange": "2026-09-17: Manual onboarding still disables Android sources/native admission before global opt-out and keeps iOS relay cleanup. Replay mode changes only its local completion outcome and never mutates capture or relay state."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "54e95e235fc409f7b823965b7484afe1da75601623a892535b23b11dd8de7426",
-      "reviewedChange": "2026-09-17: Back follows the integrated welcome → focus → tracking → intention → preview → capture journey after removing standalone privacy/goals/budget screens. Completion callback cleanup remains unchanged."
+      "sha256": "f1c12ddd9955111cc636decf66e260679781caff82020f4dd62e3a823d532000",
+      "reviewedChange": "2026-09-17: Back follows the integrated welcome/name → focus → tracking → intention → preview → capture journey. Returning from Focus reopens preferred-name editing without erasing saved choices; completion callback cleanup remains unchanged outside read-only replay."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "814b8eea2303cb3b2400caaa27e86cb273a9e89dd03575f335379910324f5bf5",
-      "reviewedChange": "2026-09-12: Preserve the requested Pro destination along with first-entry intent for durable-save retry; completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
+      "sha256": "209008cf98d5c60c19e067937e4f5d906212e79bba54d7a14db93ec6bbe40271",
+      "reviewedChange": "2026-09-17: Shipping completion still preserves requested destination/first-entry intent and waits for durable persistence. Settings replay exits through closePreview before onboarding state, notification choice, durability, analytics, or navigation can be changed."
     },
     {
       "file": "src/app/review-alerts.tsx",

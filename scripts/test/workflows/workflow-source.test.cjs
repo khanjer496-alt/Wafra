@@ -48,9 +48,10 @@ const onboardingAction=(name,inputs,transitionAllowed=true)=>{
  const action=ts.createPrinter().printNode(ts.EmitHint.Unspecified,found,sf);
  const js=ts.transpileModule(`const action = ${action}; action();`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
  let transitionChecks=0;
- require('node:vm').runInNewContext(js,{...inputs,beginStepTransition:()=>{
-  transitionChecks++;return transitionAllowed;
- }});
+ require('node:vm').runInNewContext(js,{preferredName:null,previewMode:false,
+  setNameDraft(){},setNameSaveFailed(){},setCollectingName(){},...inputs,beginStepTransition:()=>{
+   transitionChecks++;return transitionAllowed;
+  }});
  assert.equal(transitionChecks,1,`shipping ${name} checks the transition guard exactly once`);
 };
 test('main onboarding Back actions follow the integrated journey',()=>{
