@@ -1,17 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   AppState as RNAppState,
   Linking,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { OnboardingAtmosphere, WafraTile } from '@/components/onboarding/alive-scenes';
 import { ChecklistRow } from '@/components/ios-message-setup/checklist-row';
 import { AutomationGuide } from '@/components/ios-message-setup/automation-guide';
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
@@ -19,9 +22,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { Icon } from '@/components/ui/icon';
 import { Block } from '@/components/ui/layout';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { Colors, Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
@@ -79,6 +83,8 @@ const INITIAL_PROGRESS: IosMessageSetupProgress = {
   historyStatus: 'not-started',
   returnToOnboarding: false,
 };
+
+const onboardingNight = Colors.dark;
 
 const historyNativeModule = async () =>
   (await import('../../modules/wafra-message-history')).default;
@@ -847,6 +853,271 @@ export default function IosSetupScreen() {
     }
   }
 
+  if (fromOnboarding) {
+    const onboardingStep = progress.activeSection === 'history' ? 2 : 1;
+    const onboardingPrimary = setupComplete
+      ? { label: t('iosMessageContinue'), onPress: finish, disabled: false }
+      : progress.activeSection === 'future' && futureConfigured &&
+        !historyComplete && !historyDeferred && !showAutomationGuide
+        ? { label: t('iosMessageNextHistory'), onPress: () => selectSection('history'), disabled: false }
+        : { label: t(action.label), onPress: action.onPress, disabled: !!action.disabled };
+    const futureGuide = showingAutomation
+      ? (['iosMessageGuideEntry', 'iosMessageGuideSender', 'iosMessageGuideImmediate', 'iosMessageGuideRunShortcut'] as const)
+        .map((key) => tf(key, { shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME }))
+      : [];
+    const setupBody = progress.activeSection === 'history'
+      ? historyDeferred
+        ? t('iosMessageHistoryDeferredHelp')
+        : pagedEnabled
+          ? pagingCopy.intro
+          : tf(historyRunning ? 'iosMessageHistoryRunningHelp'
+            : historyConfirmed ? 'iosMessageHistoryStartHelp'
+              : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp',
+          { shortcut: IOS_HISTORY_SHORTCUT_NAME })
+      : showingAutomation
+        ? journeyCopy.senderHelp
+        : tf(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
+          : futureStep === 'confirm-shortcut' ? 'iosMessageFutureReturnHelp' : 'iosMessageFutureInstallHelp',
+        { shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME });
+
+    return (
+      <View testID="ios-onboarding-shortcut-setup" style={styles.onboardingRoot}>
+        <StatusBar style="light" />
+        <Stack.Screen options={{ gestureEnabled: false }} />
+        <OnboardingAtmosphere />
+        <SafeAreaView style={styles.onboardingSafe} edges={['top', 'bottom']}>
+          <View style={styles.onboardingTopbar}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('back')}
+              accessibilityState={{ disabled: busy || finishRetryRequired }}
+              disabled={busy || finishRetryRequired}
+              hitSlop={10}
+              onPress={() => void leave()}
+              style={({ pressed }) => [styles.onboardingBack, { opacity: pressed ? 0.6 : 1 }]}>
+              <Icon name="chevron-left" size={18} color={onboardingNight.textSecondary} />
+              <ThemedText style={styles.onboardingBackText}>{t('back')}</ThemedText>
+            </Pressable>
+            <View style={styles.onboardingTopActions}>
+              {!setupComplete && (
+                <ThemedText style={styles.onboardingStepLabel}>
+                  {tf('onboardStepOf', { step: onboardingStep, total: 2 })}
+                </ThemedText>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('iosMessageLearnMore')}
+                disabled={busy}
+                onPress={openHelp}
+                hitSlop={10}
+                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 10 })}>
+                <ThemedText style={styles.onboardingLearnMore}>{t('iosMessageLearnMore')}</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+
+          <ScrollView
+            style={styles.onboardingScroll}
+            scrollEnabled={largeText}
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={[
+              styles.onboardingContent,
+              largeText ? styles.onboardingContentLargeText : undefined,
+            ]}
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.onboardingHero}>
+              <WafraTile size={52} />
+              <ThemedText style={styles.onboardingTitle} accessibilityRole="header">
+                {setupComplete
+                  ? t('onboardCompleteAutomaticTitle')
+                  : progress.activeSection === 'history'
+                    ? t('iosMessagePastTitle')
+                    : t('iosMessageFutureTitle')}
+              </ThemedText>
+              <ThemedText style={styles.onboardingBody}>
+                {setupComplete ? t(onboardingInsight.title) : setupBody}
+              </ThemedText>
+              {setupComplete && (
+                <ThemedText style={styles.onboardingBodySecondary}>{t(onboardingInsight.body)}</ThemedText>
+              )}
+            </View>
+
+            {!setupComplete && (
+              <View style={styles.onboardingProgressRail} accessible={false}>
+                {([
+                  [1, t('iosMessageFutureTitle'), futureStatus],
+                  [2, t('iosMessagePastTitle'), progress.historyStatus],
+                ] as const).map(([step, label, status]) => {
+                  const complete = status === 'complete' || (step === 2 && historyDeferred);
+                  const active = onboardingStep === step;
+                  return (
+                    <View key={step} style={styles.onboardingProgressItem}>
+                      <View style={[
+                        styles.onboardingProgressDot,
+                        active && styles.onboardingProgressDotActive,
+                        complete && styles.onboardingProgressDotComplete,
+                      ]}>
+                        {complete
+                          ? <Icon name="check" size={13} color={onboardingNight.onPrimary} />
+                          : <ThemedText style={styles.onboardingProgressNumber}>{step}</ThemedText>}
+                      </View>
+                      <ThemedText numberOfLines={2} style={[
+                        styles.onboardingProgressText,
+                        active && styles.onboardingProgressTextActive,
+                      ]}>{label}</ThemedText>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {!setupComplete && futureGuide.length > 0 && (
+              <View style={styles.onboardingGuide}>
+                {futureGuide.map((line, index) => (
+                  <View key={line} style={styles.onboardingGuideRow}>
+                    <View style={styles.onboardingGuideNumber}>
+                      <ThemedText style={styles.onboardingGuideNumberText}>{index + 1}</ThemedText>
+                    </View>
+                    <ThemedText style={styles.onboardingGuideText}>{line}</ThemedText>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {!setupComplete && progress.activeSection === 'history' && pagedProgress && (
+              <View testID="ios-onboarding-history-progress" style={styles.onboardingHistoryProgress}>
+                <ThemedText style={styles.onboardingHistoryCount} tabular>
+                  {pagedProgress.checked.toLocaleString()} · {pagingCopy.counts}
+                </ThemedText>
+                <ThemedText style={styles.onboardingBodySecondary}>
+                  {pagedProgress.accepted.toLocaleString()} {pagingCopy.accepted} · {pagedProgress.skipped.toLocaleString()} {pagingCopy.skipped}
+                </ThemedText>
+              </View>
+            )}
+
+            {error && (
+              <View style={styles.onboardingNotice} accessibilityLiveRegion="polite">
+                <Icon name="alert" size={18} color={onboardingNight.warning} />
+                <View style={styles.onboardingNoticeCopy}>
+                  <ThemedText style={styles.onboardingNoticeText} selectable>{error}</ThemedText>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => void runOperation(async () => {
+                      if (!setupInitialized.current) {
+                        await updateProgress({ type: 'onboarding-started' });
+                        if (requestedSection) {
+                          await updateProgress({ type: 'active-section-changed', section: requestedSection });
+                        }
+                        setupInitialized.current = true;
+                      }
+                      await send({ type: 'refresh-status' });
+                      await refreshSetup(true);
+                    })}>
+                    <ThemedText style={styles.onboardingInlineAction}>{t('iosMessageRetrySetup')}</ThemedText>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+
+          <View style={[styles.onboardingFooter, largeText ? styles.onboardingFooterLargeText : undefined]}>
+            <Button
+              label={onboardingPrimary.label}
+              onPress={onboardingPrimary.onPress}
+              disabled={busy || setup.loading || !progressLoaded || onboardingPrimary.disabled}
+              labelColor={onboardingNight.onPrimary}
+              style={styles.onboardingPrimaryButton}
+              wrapLabel
+            />
+            {!setupComplete && progress.activeSection === 'future' && showingAutomation && (
+              <Button
+                label={t('iosLocalOpenAutomation')}
+                variant="outline"
+                onPress={openAutomation}
+                disabled={busy}
+                labelColor={onboardingNight.text}
+                style={styles.onboardingOutlineButton}
+                wrapLabel
+              />
+            )}
+            {!setupComplete && futureConfigured && !historyComplete && !historyDeferred &&
+              (progress.activeSection === 'history' || !showAutomationGuide) && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('iosMessageSkipHistory')}
+                disabled={busy}
+                onPress={confirmSkipHistory}
+                style={({ pressed }) => [styles.onboardingTextAction, { opacity: pressed ? 0.6 : 1 }]}>
+                <ThemedText style={styles.onboardingTextActionLabel}>{t('iosMessageSkipHistory')}</ThemedText>
+              </Pressable>
+            )}
+            {!setupComplete && progress.activeSection === 'history' && !futureConfigured && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('iosMessageNextFuture')}
+                disabled={busy}
+                onPress={() => selectSection('future')}
+                style={({ pressed }) => [styles.onboardingTextAction, { opacity: pressed ? 0.6 : 1 }]}>
+                <ThemedText style={styles.onboardingTextActionLabel}>{t('iosMessageNextFuture')}</ThemedText>
+              </Pressable>
+            )}
+            {!setupComplete && (shortcutsMissing || setup.failure === 'shortcuts-missing') && (
+              <Button
+                label={t('iosInstallShortcuts')}
+                variant="outline"
+                onPress={() => void runOperation(async () => {
+                  await send({ type: 'open-shortcuts-store' });
+                  setShortcutsMissing(false);
+                })}
+                disabled={busy}
+                labelColor={onboardingNight.text}
+                style={styles.onboardingOutlineButton}
+                wrapLabel
+              />
+            )}
+            {!setupComplete && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('iosMessageContinueManual')}
+                disabled={busy || !progressLoaded}
+                onPress={continueWithoutAutomaticCapture}
+                style={({ pressed }) => [styles.onboardingTextAction, { opacity: pressed ? 0.6 : 1 }]}>
+                <ThemedText style={styles.onboardingTextActionLabel}>{t('iosMessageContinueManual')}</ThemedText>
+              </Pressable>
+            )}
+          </View>
+
+          <ConfirmSheet
+            visible={skipHistoryVisible}
+            onClose={() => setSkipHistoryVisible(false)}
+            question={t(historyRunning ? 'iosMessageResetHistoryTitle' : 'iosMessageSkipHistoryTitle')}
+            body={t(historyRunning ? 'iosMessageSkipStoppedHistoryBody' : 'iosMessageSkipHistoryBody')}
+            confirmLabel={t('iosMessageSkipHistory')}
+            onConfirm={skipHistory}
+          />
+          <ConfirmSheet
+            visible={resetHistoryVisible}
+            onClose={() => setResetHistoryVisible(false)}
+            question={t('iosMessageResetHistoryTitle')}
+            body={t('iosMessageResetHistoryBody')}
+            confirmLabel={t('iosMessageResetHistory')}
+            onConfirm={resetStoppedHistory}
+          />
+          <DetailsSheet
+            visible={detailsVisible}
+            onClose={() => setDetailsVisible(false)}
+            section={progress.activeSection}
+            fromOnboarding
+            actions={helpActions}
+            privacyExpanded={privacyExpanded}
+            onTogglePrivacy={() => setPrivacyExpanded((value) => !value)}
+          />
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
     <ThemedView style={styles.root}>
       <Stack.Screen options={{ gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired }} />
@@ -1134,4 +1405,213 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingVertical: 12,
   },
   footerLargeText: { paddingBottom: Spacing.four },
+  onboardingRoot: { flex: 1, backgroundColor: onboardingNight.background },
+  onboardingSafe: { flex: 1 },
+  onboardingTopbar: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    minHeight: 52,
+    paddingHorizontal: ScreenPadding,
+    paddingTop: Spacing.one,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  onboardingBack: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  onboardingBackText: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 12,
+  },
+  onboardingTopActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  onboardingStepLabel: {
+    color: onboardingNight.textTertiary,
+    fontFamily: Fonts.monoMedium,
+    fontSize: 11,
+  },
+  onboardingLearnMore: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 12,
+  },
+  onboardingScroll: { flex: 1 },
+  onboardingContent: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: ScreenPadding,
+    paddingVertical: Spacing.two,
+    gap: 16,
+  },
+  onboardingContentLargeText: { justifyContent: 'flex-start', paddingTop: Spacing.four },
+  onboardingHero: { gap: Spacing.two, alignItems: 'flex-start' },
+  onboardingTitle: {
+    color: onboardingNight.text,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 27,
+    lineHeight: 33,
+    letterSpacing: -0.7,
+    maxWidth: 460,
+  },
+  onboardingBody: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 500,
+  },
+  onboardingBodySecondary: {
+    color: onboardingNight.textTertiary,
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  onboardingProgressRail: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: onboardingNight.cardBorderStrong,
+  },
+  onboardingProgressItem: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: 10,
+  },
+  onboardingProgressDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: onboardingNight.cardBorderStrong,
+    backgroundColor: onboardingNight.backgroundElement,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  onboardingProgressDotActive: { borderColor: onboardingNight.primary },
+  onboardingProgressDotComplete: {
+    borderColor: onboardingNight.primary,
+    backgroundColor: onboardingNight.primary,
+  },
+  onboardingProgressNumber: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.monoMedium,
+    fontSize: 11,
+  },
+  onboardingProgressText: {
+    flex: 1,
+    minWidth: 0,
+    color: onboardingNight.textTertiary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  onboardingProgressTextActive: { color: onboardingNight.text },
+  onboardingGuide: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: onboardingNight.cardBorderStrong,
+  },
+  onboardingGuideRow: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 5,
+  },
+  onboardingGuideNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: onboardingNight.primarySoft,
+  },
+  onboardingGuideNumberText: {
+    color: onboardingNight.primary,
+    fontFamily: Fonts.monoSemi,
+    fontSize: 11,
+  },
+  onboardingGuideText: {
+    flex: 1,
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  onboardingHistoryProgress: {
+    gap: Spacing.one,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: onboardingNight.cardBorderStrong,
+  },
+  onboardingHistoryCount: {
+    color: onboardingNight.text,
+    fontFamily: Fonts.monoSemi,
+    fontSize: 20,
+    lineHeight: 26,
+  },
+  onboardingNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: onboardingNight.expenseSoftBorder,
+  },
+  onboardingNoticeCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
+  onboardingNoticeText: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  onboardingInlineAction: {
+    color: onboardingNight.primary,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  onboardingFooter: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    paddingHorizontal: ScreenPadding,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.two,
+    gap: Spacing.one,
+  },
+  onboardingFooterLargeText: { paddingBottom: Spacing.three },
+  onboardingPrimaryButton: { backgroundColor: onboardingNight.primary },
+  onboardingOutlineButton: {
+    borderColor: onboardingNight.cardBorderStrong,
+    backgroundColor: 'transparent',
+  },
+  onboardingTextAction: {
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  onboardingTextActionLabel: {
+    color: onboardingNight.textSecondary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
 });

@@ -123,7 +123,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'react-native': platform,
       'expo-router': { Stack: { Screen: 'StackScreen' }, useRouter: () => router, useLocalSearchParams: () => params },
+      'expo-status-bar': { StatusBar: 'StatusBar' },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+      '@/components/onboarding/alive-scenes': { OnboardingAtmosphere: 'OnboardingAtmosphere', WafraTile: 'WafraTile' },
       '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
       '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },
       '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
@@ -131,9 +133,17 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/themed-view': { ThemedView: 'ThemedView' },
       '@/components/ui/controls': { Button: 'Button' },
       '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' },
+      '@/components/ui/icon': { Icon: 'Icon' },
       '@/components/ui/layout': { Block: 'Block' },
       '@/components/ui/screen-header': { ScreenHeader: 'ScreenHeader' },
-      '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+      '@/constants/theme': {
+        Spacing: {}, Radius: {}, Fonts: {}, ScreenPadding: 20, MaxContentWidth: 600,
+        Colors: { dark: {
+          text: '#fff', textSecondary: '#aaa', textTertiary: '#888', background: '#111',
+          backgroundElement: '#222', cardBorderStrong: '#444', primary: '#5b9', onPrimary: '#132',
+          primarySoft: '#243', warning: '#da6', expenseSoftBorder: '#533',
+        } },
+      },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/components/workflows/workflow-copy': execute('src/lib/workflow-copy.ts'),
       '@/components/workflows/workflow-surfaces': { WorkflowHero: 'WorkflowHero' },
@@ -219,7 +229,17 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         return true;
       },
       failStatus: () => { statusFailure = true; },
-      selectHistory: async () => { all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessagePastTitle', 'en')).props.onPress(); await settle(); },
+      selectHistory: async () => {
+        const row = all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessagePastTitle', 'en'));
+        if (row) row.props.onPress();
+        else {
+          const next = button('iosMessageNextHistory');
+          if (!next || next.props.disabled) return false;
+          await next.props.onPress();
+        }
+        await settle();
+        return true;
+      },
       saved: () => JSON.parse(values.get('wafra/ios-message-setup-progress/v1')),
       handoffPreserved: () => values.get('wafra/ios-history-handoff-started-at/v1') === String(startedAt) &&
         values.get('wafra/ios-history-return-origin/v1') === 'onboarding',
@@ -227,10 +247,13 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   };
 
   const fresh = await makeScreen({ fresh: true });
-  eq('iOS setup: a fresh start opens Future first and keeps History collapsed second',
-    fresh.all().filter((node) => node.type === 'ChecklistRow').map((node) =>
-      [node.props.title, node.props.step, node.props.expanded]),
-    [[translated('iosMessageFutureTitle', 'en'), 1, true], [translated('iosMessagePastTitle', 'en'), 2, false]]);
+  eq('iOS onboarding: a fresh start uses the redesigned Shortcut surface with no legacy checklist',
+    [
+      fresh.all().some((node) => node.props.testID === 'ios-onboarding-shortcut-setup'),
+      fresh.all().filter((node) => node.type === 'ChecklistRow').length,
+      fresh.saved().activeSection,
+    ],
+    [true, 0, 'future']);
   eq('iOS setup: Future-first arrival neither opens Shortcuts nor fills setup or history evidence',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.saved().historySkippedForNow, fresh.nativeStatus.firstCapturedAt, fresh.urls, fresh.onboarded()],
@@ -266,11 +289,11 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   await fresh.foreground();
   eq('iOS setup: confirmation leaves Future selected and keeps the direct manual exit visible',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
-      fresh.all().filter((node) => node.type === 'Button').at(-1)?.props.label],
-    ['future', true, 'not-started', translated('iosMessageContinueManual', 'en')]);
+      !!fresh.button('iosMessageContinueManual')],
+    ['future', true, 'not-started', true]);
   ok('iOS setup: History remains a secondary deliberate choice after Future confirmation',
     !!fresh.button('iosMessageNextHistory'));
-  ok('iOS setup: Future-first primary action opens the existing explicit history-deferral confirmation',
+  ok('iOS setup: Future-ready onboarding keeps the explicit history-deferral action available',
     await fresh.press('iosMessageSkipHistory'));
   eq('iOS setup: opening Future-only confirmation does not import, defer or finish anything',
     [fresh.saved().historyStatus, fresh.saved().historySkippedForNow, fresh.onboarded()], ['not-started', undefined, false]);
@@ -303,8 +326,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   }).join(' ').split(/\s+/).filter(Boolean).length;
   ok('iOS setup: history installation fits a short screen instead of a wall of copy', words <= 70);
 
-  const history = await makeScreen();
-  await history.selectHistory();
+  const history = await makeScreen({ params: { fromOnboarding: '1', section: 'history' } });
   await history.press('historyAddAction');
   await history.foreground();
   ok('iOS recovery: canceled history install can open the published link again',
@@ -316,22 +338,19 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   ok('iOS recovery: future install still opens the public iCloud link when the scheme probe is false',
     missing.urls.length === 1 && /https:\/\/www\.icloud\.com\/shortcuts\//.test(missing.urls[0]));
 
-  const noHistoryBridge = await makeScreen({ historyAvailable: false, progress: { historyShortcutConfirmed: true } });
-  await noHistoryBridge.selectHistory();
+  const noHistoryBridge = await makeScreen({ historyAvailable: false, params: { fromOnboarding: '1', section: 'history' }, progress: { historyShortcutConfirmed: true } });
   eq('iOS recovery: absent history native actions block the long-running handoff',
     await noHistoryBridge.press('historyStartAction'), false);
   eq('iOS recovery: unavailable history cannot complete required setup',
     await noHistoryBridge.press('iosMessageContinue'), false);
   eq('iOS recovery: unavailable history preserves onboarding return state', noHistoryBridge.saved().returnToOnboarding, true);
 
-  const missingHistoryShortcuts = await makeScreen({ available: false });
-  await missingHistoryShortcuts.selectHistory();
+  const missingHistoryShortcuts = await makeScreen({ available: false, params: { fromOnboarding: '1', section: 'history' } });
   await missingHistoryShortcuts.press('historyAddAction');
   ok('iOS recovery: history install still opens the public iCloud link when the scheme probe is false',
     missingHistoryShortcuts.urls.length === 1 && /https:\/\/www\.icloud\.com\/shortcuts\//.test(missingHistoryShortcuts.urls[0]));
 
-  const runningHistory = await makeScreen({ historyInFlight: true });
-  await runningHistory.selectHistory();
+  const runningHistory = await makeScreen({ historyInFlight: true, params: { fromOnboarding: '1', section: 'history' } });
   await runningHistory.press('historyContinueAction');
   eq('iOS recovery: continuing a running history opens Shortcuts without launching another import', runningHistory.urls, ['shortcuts://']);
   ok('iOS recovery: continuing history preserves the original timestamp and return origin', runningHistory.handoffPreserved());
@@ -341,20 +360,20 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   ok('iOS recovery: individual statuses describe setup without a misleading aggregate score',
     !skipped.all().some((node) => node.props.accessibilityRole === 'progressbar'));
   eq('iOS recovery: skipped choices retain individual truthful statuses',
-    skipped.all().filter((node) => node.type === 'ChecklistRow').map((node) => node.props.status), ['skipped', 'skipped']);
+    [skipped.saved().futureStatus, skipped.saved().historyStatus], ['skipped', 'skipped']);
 
   const disabled = await makeScreen({ progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true, futureStatus: 'complete' } });
   eq('iOS recovery: disabled native capture cannot leave a completed Future row',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
+    disabled.saved().futureStatus, 'in-progress');
   disabled.nativeStatus.enabled = true;
   disabled.nativeStatus.setupProofVersion = 1;
   await disabled.foreground();
   eq('iOS recovery: harmless native proof restores readiness after enable',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'complete');
+    disabled.saved().futureStatus, 'complete');
   disabled.failStatus();
   await disabled.foreground();
   eq('iOS recovery: a failed native refresh cannot keep advertising readiness',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
+    disabled.saved().futureStatus, 'in-progress');
   const directHistory = await makeScreen({ params: { section: 'history' } });
   eq('iOS setup: a Settings history link opens the requested section without starting onboarding',
     [directHistory.saved().activeSection, directHistory.urls.length, directHistory.saved().returnToOnboarding], ['history', 0, false]);
