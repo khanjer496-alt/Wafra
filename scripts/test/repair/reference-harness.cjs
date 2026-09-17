@@ -90,6 +90,7 @@ function createHarness(options = {}) {
     '@/lib/format':format,'@/lib/markets':{ledgerCurrencyCode:()=> 'AED',ledgerCurrencyDisplay:()=>lang==='ar'?'د.إ':'AED'},
     '@/lib/period':periodModule,'@/lib/period-context':{usePeriod:()=>({period,setPeriod:p=>events.push(['period',p])})},
     '@/lib/store':{useStore:()=>store},
+    '@/lib/onboarding':{normalizePreferredName:value=>typeof value==='string'&&value.trim()?value.trim():null},
     '@/components/ui/screen-scaffold':{ScreenScaffold:p=>jsx('Scaffold',p),useScreenContentInsets:()=>({contentInset:{top:0},contentContainerStyle:{}})},
     '@/components/ledger-currency-sheet':{LedgerCurrencySheet:p=>jsx('Boundary',{...p,name:'LedgerCurrencySheet'}),suggestedLedgerCurrency:()=> 'AED'},
     '@/components/ui/bottom-sheet':{BottomSheet:p=>p.visible?jsx('Sheet',p):null},
