@@ -48,9 +48,7 @@
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
-    "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server",
-    "eval:typesafe-parser": "bash scripts/test/build.sh && node scripts/typesafe-parser-eval.mjs",
-    "eval:typesafe-parser:live": "bash scripts/test/build.sh && node scripts/typesafe-parser-eval.mjs --require-typesafe"
+    "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
@@ -112,8 +110,7 @@
     "globals": "^14.0.0",
     "playwright": "^1.62.0",
     "pod-install": "1.1.0",
-    "typescript": "~5.9.2",
-    "@typesafe-ai/sdk": "^0.6.0"
+    "typescript": "~5.9.2"
   },
   "private": true,
   "expo": {
