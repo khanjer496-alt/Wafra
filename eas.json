@@ -153,7 +153,9 @@
         "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d",
         "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
-        "WAFRA_SMS_CORPUS_EXPORT": "0"
+        "WAFRA_SMS_CORPUS_EXPORT": "0",
+        "EXPO_PUBLIC_SUPERWALL_IOS_API_KEY": "pk_xwC_I1SLdNOLaL2r2zxx3",
+        "EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY": "pk_h206sECq-roxM9QdMvVBJ"
       }
     },
     "production-candidate": {
