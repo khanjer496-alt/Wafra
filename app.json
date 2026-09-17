@@ -201,9 +201,9 @@
       "eas": {
         "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
       },
-      "privacyPolicyUrl": "",
-      "termsOfUseUrl": "",
-      "supportUrl": ""
+      "privacyPolicyUrl": "https://wafra-app-azg.pages.dev/privacy",
+      "termsOfUseUrl": "https://wafra-app-azg.pages.dev/terms",
+      "supportUrl": "https://wafra-app-azg.pages.dev/support"
     }
   }
 }
