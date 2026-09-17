@@ -235,7 +235,10 @@ struct PagedHistoryTests {
     var badDate = nextRows.map(\.framed)
     badDate[0] = badDate[0].split(separator: "|").dropLast().joined(separator: "|") + "|" + Data("13/09/2026 10:00".utf8).base64EncodedString()
     try refusal("a date outside the producer's instant format names that check",
-      found: nextRows.count, frame: badDate.joined(separator: "\n"), matches: { ($0 as? WafraPagedHistoryStore.Failure) == WafraPagedHistoryStore.Failure.fieldDate })
+      found: nextRows.count, frame: badDate.joined(separator: "\n"), matches: {
+        guard let reason = ($0 as? WafraPagedHistoryStore.FrameRefusal)?.reason else { return false }
+        return reason.hasPrefix("invalid-input-date bytes=") && !reason.contains("13/09/2026")
+      })
     try check("named refusals leave the cursor untouched",
       try json(oversize.status()!)["checked"] as! Int == oversizeResult["checked"] as! Int)
 
