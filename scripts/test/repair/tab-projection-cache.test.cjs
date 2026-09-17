@@ -23,6 +23,23 @@ test('tab projections reuse immutable ledger work instead of rescanning on every
   assert.match(balances, /netWorthBreakdownCache\.transactions === state\.transactions/);
 });
 
+test('Wallet balance projection does not reconcile the full transfer graph on first paint', () => {
+  const balances = read('src/lib/balances.ts');
+  const breakdown = balances.match(/export function netWorthBreakdown[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.doesNotMatch(breakdown, /=\s*reconcileTransfers\s*\(/,
+    'recorded-balance projection must not synchronously rebuild the transfer graph');
+  assert.match(breakdown, /transaction\.source === 'sms'/,
+    'SMS-fed accounts must still remain excluded from derived running balances');
+});
+
+test('manual account balance skips transfer reconciliation when bank-capture evidence is absent', () => {
+  const balances = read('src/lib/balances.ts');
+  const account = balances.match(/export function accountBalanceFils[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(account, /hasCapturedRows/);
+  assert.match(account, /t\.source === 'sms' \|\| Boolean\(t\.smsKey\)/);
+  assert.match(account, /hasCapturedRows\s*\?\s*reconcileTransfers/);
+});
+
 test('Android tab shell keeps the measured freeze/detach configuration', () => {
   const tabs = read('src/components/app-tabs-layout.tsx');
   assert.match(tabs, /freezeOnBlur: Platform\.OS === 'android'/);
