@@ -14,6 +14,7 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
@@ -42,6 +43,8 @@ import type { CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
+import { loadViewedRecaps } from '@/lib/recap-view-state';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -103,6 +106,12 @@ export default function JournalHomeScreen() {
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
+  const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
+  // The clock is refreshed on every foreground resume for greeting/review
+  // freshness, but Home's money projections are day-based. Keep the derived
+  // day key above every effect that depends on it so recap discovery and the
+  // dashboard share the same stable invalidation boundary.
+  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -164,18 +173,45 @@ export default function JournalHomeScreen() {
     };
   }, [focused, homeAnalysisReady, privacyGateCleared, state.hydrated, state.onboarded]);
   useEffect(() => {
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Recap is celebratory, never launch-critical. Wait until Home and its
+    // existing insight lane are settled, then do only the cheap period presence
+    // check. The full ledger projection runs after the user taps the W.
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        const candidates = recapCandidates(now).filter((descriptor) =>
+          hasRecapActivity(state.transactions, descriptor));
+        if (candidates.length === 0) {
+          if (alive) setRecapEntry(null);
+          return;
+        }
+        void loadViewedRecaps().then((viewed) => {
+          const descriptor = candidates.find((candidate) => !viewed.has(candidate.id)) ?? candidates[0]!;
+          if (alive) setRecapEntry({ descriptor, unread: !viewed.has(descriptor.id) });
+        });
+      }, 2_600);
+    });
+    return () => {
+      alive = false;
+      task.cancel();
+      if (timer !== null) clearTimeout(timer);
+    };
+    // A new day can cross a salary-month boundary and produce a new recap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, state.transactions, projectionDay]);
+  useEffect(() => {
     const listener = AppState.addEventListener('change', (next) => {
       if (next === 'active') setNow(new Date());
     });
     return () => listener.remove();
   }, []);
 
-  // The clock is refreshed on every foreground resume for greeting/review
-  // freshness, but Home's money projections are day-based. Depending on the
-  // Date object itself made every reopen synchronously re-walk a large ledger
-  // twice before Android could feel responsive, even when no money changed.
-  // A review expiring still invalidates the Home projection explicitly below.
-  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // Depending on the Date object itself made every reopen synchronously
+  // re-walk a large ledger twice before Android could feel responsive, even
+  // when no money changed. A review expiring still invalidates the Home
+  // projection explicitly below.
   const dashboard = useMemo(() => projectDashboard({
     state,
     period,
@@ -327,6 +363,12 @@ export default function JournalHomeScreen() {
           .catch(() => toast.show('Founder Pro could not be saved', { tone: 'error' }));
       }
     : undefined;
+  const openRecap = recapEntry ? () => {
+    const descriptor = recapEntry.descriptor;
+    const value = descriptor.kind === 'year' ? descriptor.year : descriptor.key;
+    setRecapEntry((current) => current ? { ...current, unread: false } : current);
+    router.push(`/recap?kind=${descriptor.kind}&value=${encodeURIComponent(String(value))}` as never);
+  } : undefined;
   const greeting = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
@@ -391,6 +433,14 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')}
+          brandMark={openRecap ? <RecapLogoTrigger
+            unread={recapEntry?.unread ?? false}
+            accessibilityLabel={language === 'ar'
+              ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
+              : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
+            onPress={openRecap}
+            onLongPress={unlockFounder}
+          /> : undefined}
           onFounderUnlock={unlockFounder} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
