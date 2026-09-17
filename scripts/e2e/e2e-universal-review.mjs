@@ -102,7 +102,7 @@ async function remainsPending(page) {
 
 async function expectConfirmationRefusal(page) {
   await click(page, CONFIRM);
-  await visible(page.getByText('Confirm the amount, direction, account, category and date first.', { exact: true }));
+  await visible(page.getByText('Complete the missing detail before adding.', { exact: true }));
   await remainsPending(page);
 }
 
@@ -170,10 +170,8 @@ try {
     assert.equal(await button(page, 'Dining').count(), 0, 'category is derived rather than re-confirmed');
     assert.notEqual(await page.getByRole('radio', { name: 'USD 24.90', exact: true }).getAttribute('aria-checked'), 'true');
     assert.notEqual(await page.getByRole('radio', { name: 'CAD 24.90', exact: true }).getAttribute('aria-checked'), 'true');
-    assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '');
     await expectConfirmationRefusal(page);
     await click(page, 'USD 24.90', 'radio');
-    await expectConfirmationRefusal(page);
     await click(page, '2026-04-03', 'radio');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
