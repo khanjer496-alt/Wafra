@@ -21,9 +21,9 @@ on:
         type: boolean
         default: false
       founder_unlock:
-        description: 'Internal test APK only: enable hidden Wafra logo Founder Pro unlock'
+        description: 'Internal test APK: enable hidden Wafra logo Founder Pro unlock'
         type: boolean
-        default: false
+        default: true
       architecture:
         description: 'ARM64 for modern Android phones; universal for all supported CPUs'
         type: choice
@@ -83,6 +83,12 @@ jobs:
         if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'
         run: |
           echo '::error::Capture tracing is for a local device test APK, not a Play bundle.'
+          exit 1
+
+      - name: Refuse Founder unlock in a Play bundle
+        if: github.event.inputs.founder_unlock == 'true' && github.event.inputs.bundle == 'true'
+        run: |
+          echo '::error::Founder Pro unlock is for internal test APKs only. Disable founder_unlock before building a Play bundle.'
           exit 1
 
       - name: Require the approved Claude design baseline

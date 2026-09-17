@@ -39,6 +39,7 @@ ok('a clock moving backwards restarts the sequence',
 const root = path.join(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const eas = JSON.parse(read('eas.json'));
+const apkWorkflow = read('.github/workflows/build-apk.yml');
 const settings = read('src/app/settings.tsx');
 const store = read('src/lib/store.tsx');
 const purchases = read('src/lib/purchases.ts');
@@ -47,6 +48,9 @@ ok('founder unlock is enabled in both distributed test profiles and closed in pr
   eas.build['capture-beta'].env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1' &&
     eas.build['corpus-preview'].env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1' &&
     eas.build.production.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '0');
+ok('manual Android test APKs enable Founder unlock by default but Play bundles refuse it',
+  /founder_unlock:[\s\S]{0,180}default: true/.test(apkWorkflow) &&
+    /Refuse Founder unlock in a Play bundle[\s\S]{0,220}founder_unlock == 'true'[\s\S]{0,120}bundle == 'true'/.test(apkWorkflow));
 ok('only the Wafra logo in an enabled native test build advances the gesture',
   /Platform\.OS !== 'web' && isFounderUnlockBuild\(\)/.test(settings) &&
     /<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings));
