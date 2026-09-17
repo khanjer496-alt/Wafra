@@ -41,6 +41,9 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const eas = JSON.parse(read('eas.json'));
 const apkWorkflow = read('.github/workflows/build-apk.yml');
 const settings = read('src/app/settings.tsx');
+const home = read('src/screens/journal-home-screen.tsx');
+const homeSummary = read('src/components/reference-home-summary.tsx');
+const recapLogo = read('src/components/recap/recap-logo-trigger.tsx');
 const store = read('src/lib/store.tsx');
 const purchases = read('src/lib/purchases.ts');
 
@@ -58,6 +61,10 @@ ok('founder unlock stays on the Support brand mark and never becomes a setting r
   (settings.match(/onPress=\{\(\) => void onFounderLogoTap\(\)\}/g) ?? []).length === 1 &&
     /supportHeader[\s\S]*<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings) &&
     !/linkRow\([\s\S]{0,180}onFounderLogoTap|<Row[^>]*onPress=\{[^}]*onFounderLogoTap/.test(settings));
+ok('Home and Recap have no Founder Pro unlock path',
+  !/unlockFounderPro|founderUnlockEnabled|unlockFounder|onFounderUnlock/.test(home) &&
+    !/onFounderUnlock|founder-unlock-logo|Unlock Founder Pro/.test(homeSummary) &&
+    !/onLongPress|delayLongPress/.test(recapLogo));
 ok('Settings grants the dedicated founder entitlement instead of forging store Pro',
   /await unlockFounderPro\(\)/.test(settings) && !/setPro\(/.test(settings));
 ok('the founder grant is durable, excluded from backups, and preserved by ledger erase',

@@ -19,12 +19,10 @@ export function RecapLogoTrigger({
   unread,
   accessibilityLabel,
   onPress,
-  onLongPress,
 }: {
   unread: boolean;
   accessibilityLabel: string;
   onPress: () => void;
-  onLongPress?: () => void;
 }) {
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
@@ -53,8 +51,6 @@ export function RecapLogoTrigger({
     accessibilityRole="button"
     accessibilityLabel={accessibilityLabel}
     onPress={onPress}
-    onLongPress={onLongPress}
-    delayLongPress={750}
     hitSlop={8}
     style={({ pressed }) => [styles.target, { opacity: pressed ? 0.68 : 1 }]}>
     <Animated.View style={[styles.ring, {

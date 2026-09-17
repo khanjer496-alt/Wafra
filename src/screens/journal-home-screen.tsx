@@ -91,7 +91,6 @@ export default function JournalHomeScreen() {
     applyFxUpdates,
     setCaptureOptOut,
     beginHistoryImport,
-    unlockFounderPro,
   } = useStore();
   const { period } = usePeriod();
   // Restores can change denomination while all three figures stay identical.
@@ -356,14 +355,6 @@ export default function JournalHomeScreen() {
           : status === 'migration-retry' ? 'captureIosMigrationRetry'
             : status === 'needs-automation' ? 'captureIosNeedsAutomation' : 'captureIosOff');
   const healthy = status === 'waiting-for-alert' || status === 'first-alert-captured';
-  const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
-  const unlockFounder = founderUnlockEnabled && !state.founderPro
-    ? () => {
-        void unlockFounderPro()
-          .then(() => toast.show('Founder Pro unlocked'))
-          .catch(() => toast.show('Founder Pro could not be saved', { tone: 'error' }));
-      }
-    : undefined;
   const openRecap = recapEntry ? () => {
     const descriptor = recapEntry.descriptor;
     const value = descriptor.kind === 'year' ? descriptor.year : descriptor.key;
@@ -444,9 +435,7 @@ export default function JournalHomeScreen() {
               ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
               : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
             onPress={openRecap}
-            onLongPress={unlockFounder}
-          /> : undefined}
-          onFounderUnlock={unlockFounder} />
+          /> : undefined} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {moneyPicture

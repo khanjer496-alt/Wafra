@@ -126,6 +126,10 @@ ok('Home never runs the full recap projection', !/\bprojectRecap\b/.test(homeSou
 ok('the W mark, not a fake brand asset, owns the recap entry',
   /RecapLogoTrigger/.test(homeSource) && /brandMark=/.test(homeSource) && /WafraMark/.test(
     fs.readFileSync(path.join(root, 'src/components/recap/recap-logo-trigger.tsx'), 'utf8')));
+ok('the Home W mark is Recap-only and carries no Founder unlock gesture',
+  !/unlockFounderPro|onFounderUnlock|unlockFounder/.test(homeSource) &&
+    !/onLongPress|delayLongPress/.test(
+      fs.readFileSync(path.join(root, 'src/components/recap/recap-logo-trigger.tsx'), 'utf8')));
 ok('the shared Home summary keeps its old dependency surface',
   !/recap-logo-trigger/.test(summarySource) && /brandMark\?: React\.ReactNode/.test(summarySource));
 ok('story visuals reuse Wafra merchant, bank and category primitives',

@@ -26,8 +26,6 @@ type Props = {
   onSpending: () => void;
   /** Optional replacement for the standalone W mark, owned by the calling screen. */
   brandMark?: React.ReactNode;
-  /** Internal builds only: tapping the Wafra wordmark grants durable Founder Pro. */
-  onFounderUnlock?: () => void;
 };
 
 /** One period, three reconciled figures. Account balances belong in Accounts. */
@@ -42,19 +40,7 @@ export function ReferenceHomeSummary(p: Props) {
   </>;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.header}>
-      {p.onFounderUnlock && !p.brandMark ? (
-        <Pressable
-          testID="founder-unlock-logo"
-          accessibilityRole="button"
-          accessibilityLabel="Unlock Founder Pro"
-          hitSlop={8}
-          onPress={p.onFounderUnlock}
-          style={({ pressed }) => [styles.wordmark, { opacity: pressed ? 0.65 : 1 }]}>
-          {wordmark}
-        </Pressable>
-      ) : (
-        <View style={styles.wordmark}>{wordmark}</View>
-      )}
+      <View style={styles.wordmark}>{wordmark}</View>
       <Pressable accessibilityRole="button" accessibilityLabel={w.add} onPress={p.onAdd}
         style={({ pressed }) => [styles.headerAction, { opacity: pressed ? 0.65 : 1 }]}>
         <Icon name="plus" size={22} color={p.theme.primary} />
