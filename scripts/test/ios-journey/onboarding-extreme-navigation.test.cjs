@@ -129,6 +129,7 @@ async function gate(options = {}) {
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' }, 'expo-status-bar': { StatusBar: 'StatusBar' },
     'expo-router': { useRouter: () => router, usePathname: () => input.pathname, useGlobalSearchParams: () => input.params },
     '@/hooks/use-language': { useLanguage: () => language },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
     '@/hooks/use-reduced-motion': { useMotionPreference: () => ({ ready: options.motionReady ?? true, reducedMotion: options.reducedMotion ?? true }) },
     '@/components/storage-recovery': { StorageRecovery: 'StorageRecovery' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/bottom-sheet': { BottomSheet: 'BottomSheet' },

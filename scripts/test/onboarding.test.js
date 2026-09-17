@@ -291,6 +291,10 @@ const iosControllerSource = fs.readFileSync(
   path.join(__dirname, '../../src/lib/ios-capture-setup.ts'),
   'utf8',
 );
+const journalHomeSource = fs.readFileSync(
+  path.join(__dirname, '../../src/screens/journal-home-screen.tsx'),
+  'utf8',
+);
 const aliveScenesSource = fs.readFileSync(
   path.join(__dirname, '../../src/components/onboarding/alive-scenes.tsx'),
   'utf8',
@@ -328,12 +332,17 @@ eq('Settings explains onboarding replay is read-only',
 ok(
   'name personalization morphs inside Welcome instead of becoming a fifth progress step',
   gateSource.includes('testID="onboarding-name-input"') &&
-    gateSource.includes('testID="onboarding-name-reveal"') &&
+    gateSource.includes('testID="onboarding-name-preview"') &&
     /onboardChooseStart[\s\S]*?openNamePersonalization/.test(gateSource) &&
     /onboardNameSkip/.test(gateSource) &&
     /setUserName\(nextName\)[\s\S]*?saveJourney\('focus'\)[\s\S]*?ensureDurable\(\)/.test(gateSource) &&
     gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
     !/JOURNEY_STEPS[^\n]*name/.test(gateSource),
+);
+ok(
+  'Home greeting uses the durable onboarding name while preserving the skipped-name fallback',
+  /state\.userName === 'there' \? null : normalizePreferredName\(state\.userName\)/.test(journalHomeSource) &&
+    /const greeting = preferredName[\s\S]{0,180}greetingBase/.test(journalHomeSource),
 );
 ok(
   'saved preferred name personalizes later onboarding without touching financial data',

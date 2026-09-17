@@ -96,14 +96,16 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-// Font metrics, wrapping, locale and safe areas determine actual screen height.
-// The browser onboarding suite measures viewport overflow; these source checks
-// preserve the structural accessibility guarantees without inventing a height.
-ok('onboarding keeps welcome and every setup step scrollable at larger text sizes',
+// Normal onboarding is a fixed one-screen composition. Accessibility text sizes
+// keep the ScrollView escape hatch so content can grow without being clipped.
+ok('onboarding stays on one screen normally and only enables scrolling for accessibility text sizes',
+  /useLargeTextLayout/.test(onboardingGate) &&
   /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
     /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
+    (onboardingGate.match(/scrollEnabled=\{largeText\}/g) ?? []).length === 2 &&
     /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
     /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
+    /questionActions: \{ marginTop: 'auto'/.test(onboardingGate) &&
     /<BottomSheet/.test(onboardingGate));
 ok('onboarding text and its sample can grow without truncation or a scale ceiling',
   [onboardingGate, onboardingExample].every((code) =>

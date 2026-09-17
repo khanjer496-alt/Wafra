@@ -11,7 +11,6 @@ import {
   StyleSheet,
   TextInput,
   View,
-  type AccessibilityRole,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,6 +33,7 @@ import {
 } from '@/components/onboarding/alive-scenes';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import {
   hasBankNotificationSystemAccess,
@@ -216,6 +216,7 @@ function BackHeader({ step, onBack, onClose, progressSteps, disabled }: {
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const language = useLanguage();
+  const largeText = useLargeTextLayout();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ onboarding?: string }>();
   const router = useRouter();
@@ -458,7 +459,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     void restore();
     return () => { cancelled = true; };
   }, [state.captureOptOut, state.historyImport, state.hydrated, state.onboarded, state.onboardingPlan,
-    state.onboardingProfile, hydrationFailed, pathname, params.onboarding, router, resumeAttempt]);
+    state.onboardingProfile, state.userName, hydrationFailed, pathname, params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = !previewMode && params.onboarding === 'complete' ? 'complete' : step;
   const capture = captureCopy();
@@ -666,7 +667,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const enableAndroidNotificationAdmission = React.useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== 'android' || !NotificationReader?.setCaptureEnabled) return false;
-    const expiresAt = bankNotificationAdmissionExpiresAt(state);
+    const expiresAt = bankNotificationAdmissionExpiresAt({
+      pro: state.pro,
+      founderPro: state.founderPro,
+      trialStartTs: state.trialStartTs,
+    });
     if (expiresAt <= Date.now()) return false;
     try {
       return NotificationReader.setSourceConfiguration
@@ -1044,6 +1049,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           {activeStep === 'welcome' ? (
             <Animated.ScrollView
               entering={reducedMotion || Platform.OS === 'android' ? undefined : FadeIn.duration(180)}
+              scrollEnabled={largeText}
+              bounces={largeText}
               showsVerticalScrollIndicator={false}
               testID="onboarding-welcome"
               contentContainerStyle={styles.welcomeBody}>
@@ -1096,22 +1103,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 </View>
               </> : <>
                 <View style={styles.nameTop}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('onboardBack')}
-                    disabled={nameSaving || transitioning}
-                    onPress={() => {
-                      tapped();
-                      setNameSaveFailed(false);
-                      setCollectingName(false);
-                    }}
-                    style={({ pressed }) => [styles.nameBack, { opacity: pressed ? 0.6 : 1 }]}>
-                    <Icon name="chevron-left" size={18} color={night.textSecondary} />
-                    <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
-                  </Pressable>
-                  <View style={styles.brandLine}>
-                    <WafraTile size={42} />
-                    <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
+                  <View style={styles.nameNav}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('onboardBack')}
+                      disabled={nameSaving || transitioning}
+                      onPress={() => {
+                        tapped();
+                        setNameSaveFailed(false);
+                        setCollectingName(false);
+                      }}
+                      style={({ pressed }) => [styles.nameBack, { opacity: pressed ? 0.6 : 1 }]}>
+                      <Icon name="chevron-left" size={18} color={night.textSecondary} />
+                      <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
+                    </Pressable>
                     {previewMode && (
                       <Pressable
                         accessibilityRole="button"
@@ -1127,19 +1132,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   </ThemedText>
                   <ThemedText style={styles.sub}>{t('onboardNameBody')}</ThemedText>
                 </View>
-
-                <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(320)}
-                  style={styles.nameReveal} testID="onboarding-name-reveal">
-                  <View style={styles.nameRevealMark}>
-                    <WafraTile size={58} />
-                  </View>
-                  <ThemedText style={[styles.nameGreeting, !draftPreferredName && styles.nameGreetingMuted]}>
-                    {draftPreferredName
-                      ? tf('onboardNamePreview', { name: draftPreferredName })
-                      : t('onboardNamePreviewEmpty')}
-                  </ThemedText>
-                  <View style={styles.nameGlowLine} />
-                </Animated.View>
 
                 <View style={styles.nameInputBlock}>
                   <TextInput
@@ -1163,6 +1155,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     }}
                     style={[styles.nameInput, { textAlign: language === 'ar' ? 'right' : 'left' }]}
                   />
+                  <View style={styles.namePreviewSlot} testID="onboarding-name-preview" accessibilityLiveRegion="polite">
+                    {draftPreferredName ? (
+                      <ThemedText style={styles.namePreviewText}>
+                        {tf('onboardNamePreview', { name: draftPreferredName })}
+                      </ThemedText>
+                    ) : null}
+                  </View>
                   <View style={styles.namePrivacyLine}>
                     <Icon name="lock" size={13} color={night.primary} />
                     <ThemedText style={styles.namePrivacyText}>{t('onboardNamePrivacy')}</ThemedText>
@@ -1200,6 +1199,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null} />
               <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
+                scrollEnabled={largeText}
+                bounces={largeText}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
@@ -1323,14 +1324,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           ['bank', 'onboardPrivacyNoLoginTitle', 'onboardPrivacyNoLoginBody'],
                           ['repeat', 'onboardPrivacyChoiceTitle', 'onboardPrivacyChoiceBody'],
                         ] as const).map(([icon, titleKey, bodyKey]) => (
-                          <View key={titleKey} style={styles.contextTrustRow}>
+                          <View key={titleKey} style={styles.contextTrustItem} accessible
+                            accessibilityLabel={`${t(titleKey)}. ${t(bodyKey)}`}>
                             <View style={styles.contextTrustIcon}>
                               <Icon name={icon} size={16} color={night.primary} />
                             </View>
-                            <View style={styles.valueStepCopy}>
-                              <ThemedText style={styles.contextTrustTitle}>{t(titleKey)}</ThemedText>
-                              <ThemedText style={styles.contextTrustBody}>{t(bodyKey)}</ThemedText>
-                            </View>
+                            <ThemedText style={styles.contextTrustTitle}>{t(titleKey)}</ThemedText>
                           </View>
                         ))}
                       </View>}
@@ -1650,12 +1649,13 @@ const styles = StyleSheet.create({
   welcomeBody: {
     flexGrow: 1,
     paddingHorizontal: ScreenPadding,
-    paddingBottom: 18,
+    paddingBottom: 14,
     alignItems: 'stretch',
-    gap: 18,
+    gap: 12,
   },
-  welcomeTop: { paddingTop: 12, gap: 12 },
-  nameTop: { paddingTop: 8, gap: 12 },
+  welcomeTop: { paddingTop: 8, gap: 8 },
+  nameTop: { paddingTop: 4, gap: 10 },
+  nameNav: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   nameBack: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
@@ -1681,61 +1681,32 @@ const styles = StyleSheet.create({
   headlineAccent: { color: night.primary },
   sub: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 22, color: night.textSecondary },
   nameTitle: {
-    marginTop: 8,
+    marginTop: 4,
     maxWidth: 430,
     color: night.text,
     fontFamily: Fonts.sansSemi,
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -1,
+    fontSize: 30,
+    lineHeight: 36,
+    letterSpacing: -0.8,
   },
-  nameReveal: {
-    minHeight: 220,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: night.cardBorderStrong,
-    backgroundColor: 'rgba(17, 45, 36, 0.72)',
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 18,
-    overflow: 'hidden',
-  },
-  nameRevealMark: {
-    width: 82,
-    height: 82,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(89, 194, 157, 0.08)',
-  },
-  nameGreeting: {
-    color: night.text,
-    fontFamily: Fonts.sansSemi,
-    fontSize: 25,
-    lineHeight: 32,
-    letterSpacing: -0.6,
-    textAlign: 'center',
-  },
-  nameGreetingMuted: { color: night.textSecondary },
-  nameGlowLine: { width: 72, height: 3, borderRadius: 2, backgroundColor: night.primary },
-  nameInputBlock: { gap: 10 },
+  nameInputBlock: { marginTop: Spacing.four, gap: 8 },
   nameInput: {
-    minHeight: 64,
+    minHeight: 56,
     borderWidth: 1,
     borderColor: night.cardBorderStrong,
     borderRadius: Radius.control,
     backgroundColor: night.backgroundElement,
     color: night.text,
     fontFamily: Fonts.sansMedium,
-    fontSize: 22,
-    lineHeight: 28,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
+    fontSize: 18,
+    lineHeight: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  namePrivacyLine: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  namePrivacyText: { flexShrink: 1, color: night.textTertiary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  namePreviewSlot: { minHeight: 20, justifyContent: 'center' },
+  namePreviewText: { color: night.primary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18 },
+  namePrivacyLine: { minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  namePrivacyText: { flexShrink: 1, color: night.textTertiary, fontSize: 12, lineHeight: 18 },
   nameSkip: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   nameSkipText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
   welcomeActions: { marginTop: 'auto', gap: Spacing.two },
@@ -1755,17 +1726,17 @@ const styles = StyleSheet.create({
   stepLabel: { color: night.textTertiary, fontFamily: Fonts.monoMedium, fontSize: 11 },
   progressTrack: { flexDirection: 'row', gap: 5 },
   progressSegment: { flex: 1, height: 3, borderRadius: 2 },
-  scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
-  questionBody: { flex: 1, paddingTop: 18 },
-  questionTop: { gap: 6, marginBottom: 18 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: 12 },
+  questionBody: { flex: 1, paddingTop: 10 },
+  questionTop: { gap: 5, marginBottom: 10 },
   questionTitle: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 27,
-    lineHeight: 34,
-    letterSpacing: -0.8,
+    fontSize: 25,
+    lineHeight: 31,
+    letterSpacing: -0.7,
     color: night.text,
   },
-  questionBodyCopy: { color: night.textSecondary, fontSize: 14, lineHeight: 22 },
+  questionBodyCopy: { color: night.textSecondary, fontSize: 13, lineHeight: 19 },
   choiceList: { gap: Spacing.two },
   choice: {
     minHeight: 68,
@@ -1795,7 +1766,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  questionActions: { marginTop: 'auto', paddingTop: Spacing.four },
+  questionActions: { marginTop: 'auto', paddingTop: 10 },
   deferredPlanNote: {
     marginTop: Spacing.three,
     flexDirection: 'row',
@@ -1808,34 +1779,34 @@ const styles = StyleSheet.create({
   deferredPlanText: { flex: 1, color: night.textSecondary, fontSize: 12, lineHeight: 18 },
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
   permissionRecovery: { gap: Spacing.two, width: '100%' },
-  primaryButton: { marginTop: Spacing.three, backgroundColor: night.primary },
-  captureHero: { gap: Spacing.two, alignItems: 'flex-start' },
+  primaryButton: { backgroundColor: night.primary },
+  captureHero: { gap: 6, alignItems: 'flex-start' },
   captureIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 20,
+    width: 46,
+    height: 46,
+    borderRadius: 16,
     backgroundColor: night.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  captureActions: { marginTop: 'auto', paddingTop: Spacing.four, gap: Spacing.two },
+  captureActions: { marginTop: 'auto', paddingTop: 10, gap: 8 },
   skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
-  androidSources: { paddingTop: Spacing.three, gap: Spacing.two },
+  androidSources: { paddingTop: 8, gap: 8 },
   captureSource: {
-    minHeight: 82,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: night.cardBorderStrong,
     backgroundColor: 'rgba(17,17,14,0.54)',
   },
   captureSourceReady: { borderColor: night.primary, backgroundColor: night.primarySoft },
-  captureSourceIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: night.backgroundSelected },
+  captureSourceIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: night.backgroundSelected },
   captureSourceIconReady: { backgroundColor: night.primary },
   captureSourceTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
   captureSourceBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17 },
@@ -1865,11 +1836,11 @@ const styles = StyleSheet.create({
   startOptionTitleLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 14, lineHeight: 21 },
-  completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
+  completeHero: { gap: 10, alignItems: 'flex-start' },
   completeMark: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     borderWidth: 1,
     borderColor: night.primaryBorder,
     backgroundColor: night.primarySoft,
@@ -1879,17 +1850,17 @@ const styles = StyleSheet.create({
   completeMarkWarning: { backgroundColor: night.warning, borderColor: night.warning },
   resultCard: {
     width: '100%',
-    minHeight: 96,
+    minHeight: 78,
     flexDirection: 'row',
     alignItems: 'stretch',
-    marginTop: Spacing.two,
-    paddingVertical: 14,
+    marginTop: 4,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: night.cardBorderStrong,
   },
   resultCell: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.one },
-  resultNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 30, fontVariant: ['tabular-nums'] },
+  resultNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 26, fontVariant: ['tabular-nums'] },
   resultLabel: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 11, textAlign: 'center' },
   resultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
   valuePreview: {
@@ -1968,28 +1939,29 @@ const styles = StyleSheet.create({
     backgroundColor: night.primarySoft,
   },
   contextTrustCard: {
-    marginTop: Spacing.three,
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 8,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: night.cardBorderStrong,
   },
-  contextTrustRow: {
-    minHeight: 58,
-    flexDirection: 'row',
+  contextTrustItem: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 52,
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: night.cardBorder,
+    justifyContent: 'center',
+    gap: 4,
   },
   contextTrustIcon: {
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  contextTrustTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13, lineHeight: 18 },
-  contextTrustBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17 },
+  contextTrustTitle: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 11, lineHeight: 15, textAlign: 'center' },
   firstInsight: {
     width: '100%',
     flexDirection: 'row',
