@@ -151,9 +151,10 @@ jobs:
       - name: Run fast MobAI launch smoke
         run: |
           set -euo pipefail
-          APP=$(find ios/build/Build/Products -name '*.app' -type d | head -1)
-          test -n "$APP"
-          mobai-ci test .maestro/testflight-smoke.yaml \
+          APP="ios/build/Build/Products/Debug-iphonesimulator/Wafra.app"
+          test -d "$APP"
+          mobai-ci validate .maestro/testflight-smoke.mob
+          mobai-ci test .maestro/testflight-smoke.mob \
             --app "$APP" \
             --device "$MOBAI_SIM_UDID" \
             --wait-device 4m \
