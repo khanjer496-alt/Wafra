@@ -64,7 +64,7 @@ class NotificationReaderModule : Module() {
     Function("isAdmissionActive") {
       if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@Function false
       val context = appContext.reactContext ?: return@Function false
-      NotificationCapturePolicy.isEnabled(context)
+      NotificationCapturePolicy.isLeaseActive(context)
     }
 
     /** The OS grant, even while Wafra's saved tracking choice is off. */
@@ -85,6 +85,22 @@ class NotificationReaderModule : Module() {
       // foreground. That is not a new capture grant and must not rescan the
       // entire Android notification shade. Sweep only on a real off -> on
       // transition; explicit recovery has its own operation below.
+      if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
+      true
+    }
+
+    /**
+     * Current builds separate the shared entitlement lease from the push-source
+     * choice. This lets SMS-only remain authorized while the NotificationListener
+     * itself is fully disabled and its encrypted queue is cleared.
+     */
+    AsyncFunction("setSourceConfiguration") { notificationEnabled: Boolean, expiresAtMs: Double ->
+      if (!TrustedBankNotificationPackages.CAPTURE_ENABLED) return@AsyncFunction false
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val wasEnabled = NotificationCapturePolicy.isEnabled(context)
+      val expiresAt = if (expiresAtMs.isFinite() && expiresAtMs > 0.0) expiresAtMs.toLong() else 0L
+      NotificationCapturePolicy.setConfiguration(context, notificationEnabled, expiresAt)
+      val nowEnabled = NotificationCapturePolicy.isEnabled(context)
       if (!wasEnabled && nowEnabled) BankNotificationListenerService.sweepConnected()
       true
     }

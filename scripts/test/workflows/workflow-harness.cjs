@@ -26,7 +26,14 @@ function createWorkflowHarness(options={}) {
  d['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};
  h.local('@/components/ui/layout');h.local('@/components/wafra-logo');
  h.local('@/lib/workflow-copy','src/lib/workflow-copy.ts');
- h.local('@/components/onboarding/money-preview');
+ // The welcome scene reads real source; artwork, locale and the logo CDN are explicit boundaries.
+ d['expo-image']={Image:p=>jsx('Image',p)};d['expo-localization']={getLocales:()=>[{regionCode:'AE'}]};
+ d['@/lib/verified-logo-identities']={verifiedLogoUrl:()=>null};
+ d['react-native-reanimated'].default.createAnimatedComponent=component=>component;
+ Object.assign(d['react-native-reanimated'],{withDelay:(_delay,value)=>value,withSpring:value=>value,withRepeat:value=>value,Easing:{...d['react-native-reanimated'].Easing,out:easing=>easing,inOut:easing=>easing,cubic:value=>value,sin:value=>value,linear:value=>value}});
+ h.local('@/lib/onboarding-bank-examples','src/lib/onboarding-bank-examples.ts');
+ h.local('@/lib/onboarding-alert-examples','src/lib/onboarding-alert-examples.ts');
+ h.local('@/components/onboarding/alive-scenes');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
@@ -36,11 +43,11 @@ function createWorkflowHarness(options={}) {
  d['expo-constants']={__esModule:true,default:{expoConfig:{version:'test',extra:{}},platform:{},executionEnvironment:'standalone'}};
  for(const name of ['expo-document-picker','expo-local-authentication','expo-print','expo-sharing','expo-crypto','expo-device'])d[name]={};
  const store=d['@/lib/store'].useStore();
- for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','importBackup','clearAll'])store[name]=record(name);
+ for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','setAndroidCaptureSources','importBackup','clearAll'])store[name]=record(name);
  Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,storageFailure:null,...options.state});
  Object.assign(store,{storageFailure:null,storageRecoveryState:null,hydrationFailed:false});
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
- Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'}}],canSelectMarket:()=>true});
+ Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
@@ -52,7 +59,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
  d['@/lib/background-relay']={clearBackgroundRelayRows:record('clearBackgroundRelayRows'),getChargeAlertPreference:async()=>false,setChargeAlertsEnabled:record('setChargeAlertsEnabled'),disableRelayBackgroundSync:record('disableRelayBackgroundSync')};
  Object.assign(d['@/lib/notifications'],{cancelDailySummary:record('cancelDailySummary'),requestNotificationPermission:async()=>false,syncDailySummary:record('syncDailySummary')});
- Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission')});
+ Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission'),hasBankNotificationSystemAccess:()=>false,openBankNotificationAccessSettings:async()=>true,isSmsScanningAvailable:()=>true});
  d['@/lib/founder-pro']={EMPTY_FOUNDER_TAP_SEQUENCE:[],isFounderUnlockBuild:()=>false,recordFounderTap:()=>({})};
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};
@@ -65,12 +72,13 @@ function createWorkflowHarness(options={}) {
   trackGrowthEvent:()=>{},
  };
  d['@/lib/reimbursement-report']={buildExpenseReportHtml:()=>'',reportExpenses:()=>[]};
- d['../../modules/notification-reader']={};d['../../modules/sms-reader']={};
- d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false};
+ d['../../modules/notification-reader']={__esModule:true,default:{setCaptureEnabled:async()=>true}};d['../../modules/sms-reader']={};
+ d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false,bankNotificationAdmissionExpiresAt:()=>Date.now()+86400000};
  Object.assign(d['@/lib/launch-performance'],{isInternalLaunchDiagnosticsEnabled:()=>false,serializeLaunchMetrics:()=>''});
  d['@/lib/growth-funnel']={GROWTH_PLACEMENTS:{onboarding:'onboarding_main',postImportPro:'post_import_pro',settingsPro:'settings_pro'},trackGrowthEvent:(...args)=>h.events.push(['growth',...args])};
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
+ h.local('@/lib/android-capture-sources','src/lib/android-capture-sources.ts');
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');

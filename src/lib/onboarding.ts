@@ -15,6 +15,23 @@ export type OnboardingMarketId = 'AE' | 'SA';
 export type OnboardingGoalId = OnboardingPlanPreferences['goalIds'][number];
 export type OnboardingBudgetId = OnboardingPlanPreferences['budgetId'];
 
+export const MAX_PREFERRED_NAME_LENGTH = 40;
+
+/**
+ * A first name/nickname used only for lightweight product personalization.
+ * Keep Unicode intact (Arabic included), collapse accidental whitespace, and
+ * bound the value before it reaches persisted app state.
+ */
+export function normalizePreferredName(value: string): string | null {
+  const cleaned = value
+    .normalize('NFC')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return null;
+  return Array.from(cleaned).slice(0, MAX_PREFERRED_NAME_LENGTH).join('');
+}
+
 export interface OnboardingFocusPreset {
   id: OnboardingFocus;
   titleKey: StringKey;

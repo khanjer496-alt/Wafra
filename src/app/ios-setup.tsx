@@ -626,11 +626,13 @@ export default function IosSetupScreen() {
       if (fromOnboarding) {
         const onboardingFocus = state.onboardingProfile?.focus ?? null;
         const onboardingTracking = state.onboardingProfile?.tracking ?? null;
+        const onboardingIntention = state.onboardingProfile?.intention ?? null;
         setOnboardingProfile({
           v: 1,
           stage: 'complete',
           focus: onboardingFocus,
           tracking: onboardingTracking,
+          intention: onboardingIntention,
           startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
         });
         const outcome = await completeIosMessageOnboardingAttempt({
@@ -697,11 +699,13 @@ export default function IosSetupScreen() {
 
       const onboardingFocus = state.onboardingProfile?.focus ?? null;
       const onboardingTracking = state.onboardingProfile?.tracking ?? null;
+      const onboardingIntention = state.onboardingProfile?.intention ?? null;
       setOnboardingProfile({
         v: 1,
         stage: 'complete',
         focus: onboardingFocus,
         tracking: onboardingTracking,
+        intention: onboardingIntention,
         startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
       });
       const outcome = await completeIosMessageOnboardingAttempt({

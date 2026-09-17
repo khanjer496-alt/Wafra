@@ -17,6 +17,10 @@ import { AppRegistry, AppState as RNAppState, Platform } from 'react-native';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
+import {
+  androidNotificationCaptureEnabled,
+  androidSmsCaptureEnabled,
+} from '@/lib/android-capture-sources';
 import { scanInbox } from '@/lib/auto-import';
 import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
 import type { CaptureResult } from '@/lib/capture';
@@ -267,12 +271,14 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
   if (!adapter) {
     const loaded = usablePersistedState(await diskPersistence.load());
     if (!loaded || !applyLedgerContext(loaded) || !isProActive(loaded)) return;
+    if (source === 'sms' ? !androidSmsCaptureEnabled(loaded) : !androidNotificationCaptureEnabled(loaded)) return;
     const holder: MutableLedger = { current: loaded };
     adapter = diskLedgerAdapter(holder);
   } else {
     const state = adapter.getState();
     if (!state.hydrated || !state.onboarded || state.captureOptOut || !isProActive(state) ||
         !applyLedgerContext(state)) return;
+    if (source === 'sms' ? !androidSmsCaptureEnabled(state) : !androidNotificationCaptureEnabled(state)) return;
   }
 
   const executor = createCaptureExecutor({

@@ -34,6 +34,7 @@ export interface GrowthEventPayload {
   platform?: 'ios' | 'android' | 'web' | 'other';
   placement?: (typeof GROWTH_PLACEMENTS)[keyof typeof GROWTH_PLACEMENTS];
   outcome?: 'automatic' | 'manual' | 'denied' | 'failed';
+  source?: 'sms' | 'bank-notifications';
 }
 
 export type GrowthEventSink = (event: GrowthEvent, payload: GrowthEventPayload) => void;

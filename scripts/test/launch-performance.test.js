@@ -165,7 +165,7 @@ ok('the internal export keeps the closed metric shape',
 ok('usable Home is marked by the focused Home behind a cleared privacy gate',
   !/first-usable-home/.test(rootSource) &&
     /focused && privacyGateCleared && state\.hydrated && state\.onboarded/.test(homeSource) &&
-    /PrivacyGateContext\.Provider value=\{false\}/.test(lockSource));
+    /PrivacyGateContext\.Provider value=\{!lockRequired\}/.test(lockSource));
 ok('internal Release metrics have a guarded local file export surface',
   /isInternalLaunchDiagnosticsEnabled\(\)/.test(settingsSource) &&
     /shareTextFile\('wafra-launch-metrics\.json'/.test(settingsSource));

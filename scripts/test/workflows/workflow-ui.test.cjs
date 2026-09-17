@@ -85,14 +85,14 @@ test('bank-payment nicknames learn by bill identity and never write a merchant-w
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
  const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{4:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
- assert.ok(text(tree).includes(t('onboardHeadline')));assert.ok(!text(tree).includes('42,500'));
- const example=walk(tree).find(n=>n.props?.testID==='onboarding-example');
- assert.ok(example,'the actual local sample is embedded on welcome');
- assert.ok(text(example).includes(t('onboardSampleLabel')));
- assert.ok(text(example).includes(t('onboardSampleNote')));
- assert.ok(text(example).includes('AED 24.50'));
- assert.ok(byLabel(example,t('onboardSampleAction')),'the sample offers its real reveal action');
- assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available before trying the example');
+ assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
+ const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');
+ assert.ok(example,'the real regional money scene is embedded on welcome');
+ for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(example).includes(bank),bank);
+ assert.ok(text(example).includes('AED 120.00'));
+ assert.ok(text(example).includes(t('onboardSceneOrganized')));
+ assert.ok(!walk(example).some(n=>n.props?.onPress),'the poster scene is display-only');
+ assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available beside the visual story');
  assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));
  assert.equal(h.state.transactions.length,0);assert.equal(h.state.accounts.length,0);
  assert.deepEqual(h.events,[],'rendering sample and setup controls performs no writes or setup actions');

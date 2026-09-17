@@ -2,6 +2,7 @@ import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useCallback, useEffect, useMemo } from 'react';
 import { historyBackground } from '@/lib/android-history-background';
+import { androidSmsCaptureEnabled } from '@/lib/android-capture-sources';
 
 import {
   buildImportPlan,
@@ -47,7 +48,7 @@ export function useHistoryImport(): void {
   const canStart = useCallback(() => {
     const current = getStateSnapshot();
     return Platform.OS === 'android' && current.hydrated && current.onboarded &&
-      !current.captureOptOut && isProActive(current) &&
+      androidSmsCaptureEnabled(current) && isProActive(current) &&
       (current.historyImport?.status === 'paused' || current.historyImport?.status === 'running');
   }, [getStateSnapshot]);
 
@@ -60,7 +61,7 @@ export function useHistoryImport(): void {
         historyBackground.canContinue() &&
         current.hydrated &&
         current.onboarded &&
-        !current.captureOptOut &&
+        androidSmsCaptureEnabled(current) &&
         isProActive(current);
     },
     now: Date.now,
@@ -169,7 +170,8 @@ export function useHistoryImport(): void {
       });
     }, FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS);
     return () => clearTimeout(timer);
-  }, [getStateSnapshot, run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
+  }, [getStateSnapshot, run, runnable, state.captureOptOut, state.androidCaptureSources?.sms,
+    state.hydrated, state.onboarded]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;

@@ -434,6 +434,9 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/trusted-bank-notification-packages': {
+      bankNotificationAdmissionExpiresAt: () => Date.now() + 86_400_000,
+    },
     // The REAL predicate, not a stub. It is what decides which rows a merchant
     // rule rewrites, and stubbing it here would let the store's blast radius
     // drift from the count the categorise screen prints beside the tap — the

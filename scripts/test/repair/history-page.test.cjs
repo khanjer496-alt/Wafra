@@ -34,6 +34,9 @@ function harness(options = {}) {
       isSmsInboxAccessError: () => false, scanInbox: async () => page,
       buildImportPlan: () => { events.push('plan'); return { batch: { transactions: [] } }; },
     },
+    '@/lib/android-capture-sources': {
+      androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
+    },
     '@/lib/history-import': { subscribeHistoryImportRequest: () => () => {}, createHistoryImportCoordinator: (value) => { dependencies = value; return { run() {} }; } },
     '@/lib/android-history-background': { historyBackground: { canContinue: () => allowed, run: (job) => job(), cancel() {} } },
     '@/lib/purchases': { isProActive: () => true },

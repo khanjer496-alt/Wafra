@@ -441,7 +441,7 @@ for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
   'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
-  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIds(',
+  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIdsForState(',
   '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
 assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,

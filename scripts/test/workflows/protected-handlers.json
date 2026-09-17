@@ -15,7 +15,8 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleSms",
-      "sha256": "15ed4b3a8cda3004712ba0a2c32c1b6c501e45fba88d3920e021149b00c2285c"
+      "sha256": "fba6c834c40ede8216b3d32a4532eb04b07e6974acd3d3f078b45f3b1e673c09",
+      "reviewedChange": "2026-09-17: Android SMS is now an independently persisted capture source. Turning it off no longer disables bank-app notifications; turning it on records the SMS source before clearing the global opt-out. OS permission revocation guidance remains unchanged."
     },
     {
       "file": "src/app/settings.tsx",
@@ -30,12 +31,12 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleInstantAlerts",
-      "sha256": "3178e8a203513b51aeab4e83d405698fce2af19becfa5d1df854b03fcd553efa"
+      "sha256": "4a437b22d37c257970234e7619e97d7ec29b2074886b7b9c613d86d5912cf53d"
     },
     {
       "file": "src/app/settings.tsx",
       "name": "toggleDailySummary",
-      "sha256": "059f9a966d21092bc7257a0df809eb495f11bb77023c2b6b2e2a0e97e3d36fa6"
+      "sha256": "11d3232fa9143d1fa14652eea203318ccd20592bcb1ce54d9d87ac39a9b5116d"
     },
     {
       "file": "src/app/settings.tsx",
@@ -165,8 +166,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "db6668e06aeb64c6d6e77b5441b9514bc370b8ac184fbd752117f5fb46c1c8b3",
-      "reviewedChange": "2026-09-13: Onboarding completion exits through dismissAll + navigate instead of router.replace, because replacing the pushed setup screen mounted a second tabs navigator (two Home screens). Durable completion order is unchanged. Covered by onboarding-extreme-setup.test.cjs and setup UX tests."
+      "sha256": "ac1ab6eb72d04bf5270c5c7cf56c6fa1aa8c52a4bb7802b67bf19c80c0bb097e",
+      "reviewedChange": "2026-09-17: Preserve the new source-free onboarding intention when iOS setup rewrites the completion profile. Existing durable completion order and dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-navigation and setup UX tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -247,7 +248,7 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "switchType",
-      "sha256": "7073dff86bdcdf7459fd22a05b2ab857c12203d5205944991dbdafad1940a0b0"
+      "sha256": "b8f4555b2092898d8e0aa469375ada3bd21ae60a91976fe63f6f73e9949c2e86"
     },
     {
       "file": "src/app/add-transaction.tsx",
@@ -267,20 +268,21 @@
     },
     {
       "file": "src/components/onboarding-gate.tsx",
-      "name": "chooseGoal",
-      "sha256": "e0e3f6cffff976b2655ce07af82998778f6a7e483586a8f7027fb05dbcaa5738"
+      "name": "connectAndroidNotifications",
+      "sha256": "6cd28b9cf9f84df9ea0aea74ccfcad638f183fe09b6f6c88e3766cc84f456d17",
+      "reviewedChange": "2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
-      "name": "finishPreferences",
-      "sha256": "ea1a194c8cf782d7a7e2bd8cf71eb325000146a2f7a51ac70fac4c1b3d4293d7",
-      "reviewedChange": "2026-09-12: Apply the short transition guard before saving the optional plan and capture resume stage. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
+      "name": "finishAndroidCapture",
+      "sha256": "d654e6ac4037547ebe80ed3424393d37ae9514fd9d0dd3e57acedda661bc502e",
+      "reviewedChange": "2026-09-17: Replace the deleted optional goals/budget save with the explicit Android source-selection completion boundary. At least one source must be ready, exact SMS/notification choices are persisted, then the completion checkpoint is saved."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "f76f7be10d1acc32992ddec5c1aa72a7de733ece164e9222373020022eb23936",
-      "reviewedChange": "2026-09-10: Android automatic setup retains the guarded permission/import path, adds source-free funnel events, and persists completion as the resumable stage; save-only retry never re-scans."
+      "sha256": "79deafbf221f21804ee66f4fbd81453cb3487685f2d6330be21a17a1e077096e",
+      "reviewedChange": "2026-09-17: SMS onboarding now configures only the SMS source, remains on the source-selection screen after permission, and persists the source checkpoint before starting resumable history import."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
@@ -291,19 +293,19 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "44fa1118fbe81ed3c0358bd7956f22a4a219906a3230f7b00fac23cd67367e90",
-      "reviewedChange": "2026-09-10: Manual setup still durably opts out and revokes iOS relay state, while recording only source-free funnel outcome/resume state."
+      "sha256": "de7faa56609fbfa6e737ffdfda5607eb8048e18f9b7cbee3055d2489c26201e4",
+      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "9db6cf1ceaf634d3a56dfef504a2d225a35398509f63be64150e3321a8bd2889",
-      "reviewedChange": "2026-09-12: Apply the short transition guard while preserving actual Back entry points, saved stages and completion callback cleanup. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
+      "sha256": "54e95e235fc409f7b823965b7484afe1da75601623a892535b23b11dd8de7426",
+      "reviewedChange": "2026-09-17: Back follows the integrated welcome → focus → tracking → intention → preview → capture journey after removing standalone privacy/goals/budget screens. Completion callback cleanup remains unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "b0c863f785c12063a598cd0ca16b7cf9e042dd5770f9184809c56bcc7878d591",
+      "sha256": "814b8eea2303cb3b2400caaa27e86cb273a9e89dd03575f335379910324f5bf5",
       "reviewedChange": "2026-09-12: Preserve the requested Pro destination along with first-entry intent for durable-save retry; completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
     },
     {
@@ -314,7 +316,7 @@
     {
       "file": "src/app/categorise.tsx",
       "name": "assign",
-      "sha256": "27854dc489fdd2c5bac062f90b4f385a64a2fd80a2442434a779dc4e1042b4b9"
+      "sha256": "e5905a46fcd6c68a95343efc8aa1eb8f7334db2a9a898a618435c0e84819410e"
     }
   ]
 }

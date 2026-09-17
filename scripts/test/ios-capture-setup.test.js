@@ -3537,6 +3537,12 @@ struct WafraBankSenderRegistryTests {
         if (id === '@/lib/background-relay') {
           return { enableRelayBackgroundSync: async () => false };
         }
+        if (id === '@/lib/android-capture-sources') {
+          return {
+            androidSmsCaptureEnabled: () => true,
+            androidNotificationCaptureEnabled: () => true,
+          };
+        }
         if (id === '@/lib/capture') {
           return {
             getIosCaptureNativeModule: () => native,
@@ -3764,6 +3770,12 @@ struct WafraBankSenderRegistryTests {
         }
         if (id === '@/lib/background-relay') {
           return { enableRelayBackgroundSync: async () => false };
+        }
+        if (id === '@/lib/android-capture-sources') {
+          return {
+            androidSmsCaptureEnabled: () => true,
+            androidNotificationCaptureEnabled: () => false,
+          };
         }
         if (id === '@/lib/capture') {
           return {

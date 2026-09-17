@@ -242,7 +242,7 @@ export default function AssistantScreen() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       const snapshot = getStateSnapshot();
-      if (!snapshot.hydrated) throw new Error('Ledger changed while sending');
+      if (!snapshot.hydrated) throw new Error(copy.stale);
       const startGeneration = getStateGeneration();
       const renderIsCurrent = generation === startGeneration;
       if (!renderIsCurrent) previousGeneration.current = startGeneration;

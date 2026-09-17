@@ -340,7 +340,7 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
   const row=rows[0];ok('Spending offers a category to inspect',!!row);
   if(row){
     const want=money(row.label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]||'');
-    await tapLabel(page,row.label);await tapText(page,'View activity',1500);
+    await tapLabel(page,row.label);await tapText(page,'View transactions',1500);
     ok('Category detail opens a scoped expense ledger', /category=/.test(page.url())&&/type=expense/.test(page.url()));
     const aggregate = page.getByTestId('transactions-net-total');
     let total;
@@ -378,7 +378,7 @@ ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length=
 ok('Trends includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
 await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
-await tapText(page,'Edit limits',800);
+await tapText(page,'Edit monthly limit',800);
 ok('Category limit editor remains reachable',!!(await visibleText(page,/MONTHLY LIMIT/i)));
 ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i)));
 // Opening the limit editor already closes the category detail sheet.
@@ -389,7 +389,7 @@ await tapTab(page, 'Bills');
 ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
 await agenda.waitFor({state:'visible'});
-ok('Agenda states that recording a payment does not move money',/Recording a payment does not move money/.test(await agenda.innerText()));
+ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));
 await tapText(page,'All',600);
 const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
 ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));

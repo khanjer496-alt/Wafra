@@ -353,11 +353,25 @@ export type OnboardingFocus = 'spending' | 'bills' | 'cashflow' | 'overview';
 /** How the person tracked money before Wafra. No provider/account identity. */
 export type OnboardingTracking = 'none' | 'bank-apps' | 'spreadsheet' | 'finance-app';
 
+/** Android capture sources are independently user-selectable after onboarding. */
+export interface AndroidCaptureSources {
+  sms: boolean;
+  notifications: boolean;
+}
+
+/** The personal outcome the user wants Wafra to help them feel first. */
+export type OnboardingIntention =
+  | 'control'
+  | 'spend-intentionally'
+  | 'stay-ahead'
+  | 'build-buffer';
+
 /** Durable first-run position so an interrupted setup resumes instead of restarting. */
 export type OnboardingJourneyStage =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'intention'
   | 'preview'
   | 'privacy'
   | 'capture'
@@ -368,6 +382,8 @@ export interface OnboardingProfile {
   stage: OnboardingJourneyStage;
   focus: OnboardingFocus | null;
   tracking: OnboardingTracking | null;
+  /** Optional for ledgers created before the visual-intention step existed. */
+  intention?: OnboardingIntention | null;
   startedAt: number;
 }
 
@@ -681,6 +697,11 @@ export interface AppState {
    * even when the OS still holds a previously granted SMS permission.
    */
   captureOptOut: boolean;
+  /**
+   * Android source selection. Optional for legacy ledgers: absence means the
+   * historical behavior (both sources allowed whenever captureOptOut=false).
+   */
+  androidCaptureSources?: AndroidCaptureSources;
   /**
    * The nightly spend digest. Off until asked for: it is an interruption, the
    * same standing as the per-charge banner, and a finance app that pushes

@@ -19,7 +19,7 @@ test('workflow consumers have real imports for their current localized presentat
  const files=['settings','import-sms','ios-setup','feedback','review-alerts','categorise','pro','trusted-devices'].map(n=>`src/app/${n}.tsx`).concat('src/components/onboarding-gate.tsx');
  for(const file of files){const sf=source(file),names=new Set();for(const n of sf.statements)if(ts.isImportDeclaration(n)&&n.importClause?.namedBindings&&ts.isNamedImports(n.importClause.namedBindings))for(const element of n.importClause.namedBindings.elements)names.add(element.name.text);
   if(file.endsWith('/onboarding-gate.tsx')){
-   for(const name of ['MoneyPreview','t','useLanguage','useMotionPreference'])assert.ok(names.has(name),`${file}: ${name} import`);
+   for(const name of ['WelcomeMoneyScene','t','useLanguage','useMotionPreference'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('SetupIllustration')&&!names.has('workflowCopy'),'Welcome uses its inline example and current translated copy');
   }else if(file.endsWith('/ios-setup.tsx')){
    for(const name of ['ScreenHeader','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
@@ -53,44 +53,36 @@ const onboardingAction=(name,inputs,transitionAllowed=true)=>{
  }});
  assert.equal(transitionChecks,1,`shipping ${name} checks the transition guard exactly once`);
 };
-test('value-first and optional-plan Back actions return to their actual entry points',()=>{
+test('main onboarding Back actions follow the integrated journey',()=>{
  const cases=[
-  ['capture','privacy','privacy'],['privacy','preview','preview'],['preview','tracking','tracking'],
-  ['tracking','focus','focus'],['focus','welcome','welcome'],['goals','capture',null],
-  ['budget','goals',null],['scanning','capture',null],['complete','capture','capture'],
+  ['capture','preview','preview'],['preview','intention','intention'],['intention','tracking','tracking'],
+  ['tracking','focus','focus'],['focus','welcome','welcome'],['complete','capture','capture'],
  ];
  for(const[activeStep,expected,journey]of cases){
   const events=[];
   onboardingAction('goBack',{activeStep,params:{},setStep:step=>events.push(['step',step]),
    saveJourney:stage=>events.push(['journey',stage]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
-  assert.deepEqual(events,[['step',expected],...(journey?[['journey',journey]]:[])],activeStep);
+  assert.deepEqual(events,[['step',expected],['journey',journey]],activeStep);
  }
  const events=[];
  onboardingAction('goBack',{activeStep:'complete',params:{onboarding:'complete'},setStep:step=>events.push(['step',step]),
   saveJourney:stage=>events.push(['journey',stage]),router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
  assert.deepEqual(events,[['step','capture'],['journey','capture'],['params',['onboarding'],undefined]]);
 });
-test('saving optional preferences records the chosen plan, resumes capture, and persists that journey stage',()=>{
- const plan={goalIds:['travel'],budgetId:'flexible'},events=[];
- onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),setPersonalizing:value=>events.push(['personalizing',value]),
-  saveJourney:stage=>events.push(['journey',stage]),setStep:value=>events.push(['step',value])});
- assert.deepEqual(events,[['plan',plan],['personalizing',false],['journey','capture'],['step','capture']]);
+test('obsolete optional goals and budget wizard handlers are absent from the shipping gate',()=>{
+ const text=fs.readFileSync(path.join(root,'src/components/onboarding-gate.tsx'),'utf8');
+ assert.doesNotMatch(text,/activeStep === 'goals'|activeStep === 'budget'|finishPreferences|onboardPersonalizeOptional/);
+ assert.match(text,/activeStep === 'intention'/);
+ assert.match(text,/IntentionChooser/);
 });
-test('blocked onboarding Back transitions preserve their stage, journey and completion callback',()=>{
- for(const activeStep of ['capture','privacy','preview','tracking','focus','goals','budget','scanning','complete','welcome']){
+test('blocked onboarding Back transitions preserve the integrated journey',()=>{
+ for(const activeStep of ['capture','preview','intention','tracking','focus','complete','welcome']){
   const events=[];
   onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},
    setStep:step=>events.push(['step',step]),saveJourney:stage=>events.push(['journey',stage]),
    router:{setParams:params=>events.push(['params',params])}},false);
   assert.deepEqual(events,[],`${activeStep}: a blocked press cannot navigate, persist progress or clear the callback`);
  }
-});
-test('blocked optional preference save neither records a plan nor changes the journey',()=>{
- const plan={goalIds:['travel'],budgetId:'flexible'},events=[];
- onboardingAction('finishPreferences',{plan,setOnboardingPlan:value=>events.push(['plan',value]),
-  setPersonalizing:value=>events.push(['personalizing',value]),saveJourney:stage=>events.push(['journey',stage]),
-  setStep:value=>events.push(['step',value])},false);
- assert.deepEqual(events,[],'a blocked press cannot write preferences, close personalization or resume capture');
 });
 test('new workflow files transpile without syntax errors',()=>{
  for(const file of ['src/components/workflows/workflow-copy.ts','src/components/workflows/workflow-surfaces.tsx']){

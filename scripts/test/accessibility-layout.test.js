@@ -113,12 +113,16 @@ ok('every shared onboarding button permits its localized label to wrap',
   onboardingButtons.length > 0 && onboardingButtons.every((button) => /\bwrapLabel\b/.test(button)));
 ok('onboarding action targets retain native accessibility size floors',
   declaredStyleValue(onboardingGate, 'startOption', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'personalizeRow', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'nameBack', 'minHeight') >= 44 &&
+    declaredStyleValue(onboardingGate, 'nameInput', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'nameSkip', 'minHeight') >= 48 &&
     declaredStyleValue(onboardingGate, 'back', 'minHeight') >= 44 &&
     declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
-ok('optional-plan choices expose the explanation to assistive technology',
-  /accessibilityLabel=\{t\(state\.onboardingPlan \? 'onboardEditPlan' : 'onboardPersonalizeOptional'\)\}[\s\S]{0,200}accessibilityHint=\{t\(state\.onboardingPlan \? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote'\)\}/.test(onboardingGate));
+ok('name personalization exposes a labelled optional input and skip action to assistive technology',
+  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{t\('onboardNamePlaceholder'\)\}/.test(onboardingGate) &&
+    /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{t\('onboardNameSkip'\)\}/.test(onboardingGate) &&
+    /onboardNamePrivacy/.test(onboardingGate));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
   /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&
