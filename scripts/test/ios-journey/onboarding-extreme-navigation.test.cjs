@@ -53,6 +53,7 @@ async function gate(options = {}) {
     hydrationFailed: options.hydrationFailed ?? false, storageFailure: options.storageFailure ?? null,
     pendingSetup: options.pendingSetup ?? false };
   let ledger = { hydrated: options.hydrated ?? true, onboarded: false, onboardingProfile: options.profile ?? null,
+    userName: options.userName ?? 'there',
     onboardingPlan: null, captureOptOut: options.optOut ?? false, transactions: [], accounts: [], bills: [], cardDues: [],
     ...(options.ledger ?? {}) };
   let durable = clone(ledger), cursor = 0, tree, mounted = true;
@@ -90,6 +91,7 @@ async function gate(options = {}) {
     get state() { return ledger; }, get hydrationFailed() { return input.hydrationFailed; },
     get storageFailure() { return input.storageFailure; }, storageRecoveryState: null,
     setOnboardingProfile(value) { ledger = { ...ledger, onboardingProfile: clone(value) }; record('profile', value); },
+    setUserName(value) { ledger = { ...ledger, userName: value }; record('setUserName', value); },
     setOnboardingPlan(value) { ledger = { ...ledger, onboardingPlan: clone(value) }; },
     setOnboarded() { ledger = { ...ledger, onboarded: true }; record('onboarded'); },
     setDailySummary(value) { ledger = { ...ledger, dailySummary: value }; record('dailySummary', value); },
@@ -107,7 +109,7 @@ async function gate(options = {}) {
   const animation = { duration: () => animation, delay: () => animation };
   const dependencies = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', Pressable: 'Pressable',
+    'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
       Linking: { openSettings: () => call('openSettings') } },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View', ScrollView: 'Animated.ScrollView', createAnimatedComponent: component => component },
@@ -194,6 +196,8 @@ async function gate(options = {}) {
       button.onPress(); await flush(); },
     async choose(index) { const options = visible(tree).filter(node => node.props?.accessibilityRole === 'radio');
       assert.ok(options[index], `Choice ${index} exists`); options[index].props.onPress(); await flush(); },
+    async changeText(testID, value) { const input = visible(tree).find(node => node.props?.testID === testID);
+      assert.ok(input?.props?.onChangeText, `${testID}: editable input exists`); input.props.onChangeText(value); await flush(); },
     async route(pathname, params = {}) { input.pathname = pathname; input.params = params; render(); await flush(); },
     async update(value) { ledger = { ...ledger, ...value }; render(); await flush(); },
     async setFailure(value) { input.storageFailure = value; render(); await flush(); },
@@ -208,12 +212,13 @@ const stageHeading = { welcome: 'onboardHeadline', focus: 'onboardFocusTitle', t
   intention: 'onboardIntentionTitle', preview: 'onboardPersonalizedTitle', capture: 'onboardCaptureTitleIos' };
 const normalizeVisible = value => String(value).replace(/\s+/g, ' ').trim();
 const at = (h, stage) => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t(stageHeading[stage]))), `Expected ${stage}; ${h.text()}`);
+const atName = h => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t('onboardNameTitle'))), `Expected name personalization; ${h.text()}`);
 const calls = (h, name) => h.events.filter(event => event[0] === name);
 
 for (const language of ['en', 'ar']) {
   test(`all required iOS stages support Back and Next without losing selections: ${language}`, async () => {
     const h = await gate({ language }); at(h, 'welcome');
-    await h.press('onboardChooseStart'); at(h, 'focus');
+    await h.press('onboardChooseStart'); atName(h); await h.press('onboardNameSkip'); at(h, 'focus');
     assert.equal(h.control('continueWord').disabled, true);
     await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
     assert.equal(h.control('continueWord').disabled, true);
@@ -221,8 +226,9 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.control('continueWord').disabled, true);
     await h.choose(3); await h.press('continueWord'); at(h, 'preview');
     await h.press('onboardConnectMyMoney'); at(h, 'capture');
-    for (const stage of ['preview', 'intention', 'tracking', 'focus', 'welcome']) { await h.press('onboardBack'); at(h, stage); }
-    await h.press('onboardChooseStart'); assert.equal(h.control('continueWord').disabled, false);
+    for (const stage of ['preview', 'intention', 'tracking', 'focus']) { await h.press('onboardBack'); at(h, stage); }
+    await h.press('onboardBack'); atName(h);
+    await h.press('onboardNameSkip'); await h.advance(400); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); await h.press('onboardConnectMyMoney'); at(h, 'capture');
@@ -267,7 +273,7 @@ test('welcome animates in without Reduce Motion and still exposes the market sce
   const h = await gate({ reducedMotion: false });
   at(h, 'welcome');
   assert.ok(walk(h.tree).some(node => node.props?.testID === 'onboarding-market-money-scene'));
-  await h.press('onboardChooseStart'); at(h, 'focus');
+  await h.press('onboardChooseStart'); atName(h); await h.press('onboardNameSkip'); at(h, 'focus');
   await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
   await h.choose(0); await h.press('continueWord'); at(h, 'intention');
   await h.choose(0); await h.press('continueWord'); at(h, 'preview');
@@ -410,7 +416,9 @@ test('repeated taps on synchronous Next controls cannot skip unanswered question
   const h = await gate();
   const start = h.control('onboardChooseStart');
   for (let n = 0; n < 20; n++) start.onPress();
-  await h.flush(); at(h, 'focus');
+  await h.flush(); atName(h);
+  assert.equal(h.control('onboardNameContinue').disabled, true);
+  await h.press('onboardNameSkip'); at(h, 'focus');
   assert.equal(h.control('continueWord').disabled, true);
   await h.choose(0);
   const next = h.control('continueWord');
@@ -423,7 +431,8 @@ test('repeated taps on synchronous Next controls cannot skip unanswered question
 test('six full Back/Next cycles preserve the latest answers without starting capture', async () => {
   const h = await gate();
   for (let cycle = 0; cycle < 6; cycle++) {
-    await h.press('onboardChooseStart');
+    if (cycle === 0) await h.press('onboardChooseStart');
+    atName(h); await h.press('onboardNameSkip');
     await h.choose(cycle % 4); await h.press('continueWord');
     await h.choose((cycle + 1) % 4); await h.press('continueWord');
     await h.choose((cycle + 2) % 4); await h.press('continueWord');
@@ -431,13 +440,30 @@ test('six full Back/Next cycles preserve the latest answers without starting cap
     assert.equal(h.state.onboardingProfile.focus, ['spending', 'bills', 'cashflow', 'overview'][cycle % 4]);
     assert.equal(h.state.onboardingProfile.tracking, ['bank-apps', 'spreadsheet', 'finance-app', 'none'][(cycle + 1) % 4]);
     assert.equal(h.state.onboardingProfile.intention, ['control', 'spend-intentionally', 'stay-ahead', 'build-buffer'][(cycle + 2) % 4]);
-    for (const stage of ['preview', 'intention', 'tracking', 'focus', 'welcome']) {
+    for (const stage of ['preview', 'intention', 'tracking', 'focus']) {
       await h.press('onboardBack'); at(h, stage);
       assert.equal(h.state.onboardingProfile.stage, stage);
     }
+    await h.press('onboardBack'); atName(h);
+    assert.equal(h.state.onboardingProfile.stage, 'welcome');
   }
   assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
   assert.equal(calls(h, 'setCaptureOptOut').length, 0); assert.equal(calls(h, 'beginHistoryImport').length, 0);
+});
+
+test('name personalization stays inside Welcome, persists Unicode safely, and personalizes the next screens', async () => {
+  const h = await gate({ language: 'en' });
+  await h.press('onboardChooseStart'); atName(h);
+  assert.ok(h.nodes().some(node => node.props?.testID === 'onboarding-name-input'));
+  assert.ok(!h.text().includes('Step 1 of 4'), 'name prompt is not a fifth progress step');
+  await h.changeText('onboarding-name-input', '  ناصر   Khanjar  ');
+  assert.ok(h.text().includes('ناصر Khanjar'));
+  await h.press('onboardNameContinue');
+  assert.equal(h.state.userName, 'ناصر Khanjar');
+  assert.equal(h.durable.userName, 'ناصر Khanjar');
+  assert.ok(h.text().includes('ناصر Khanjar'));
+  assert.equal(calls(h, 'setUserName').length, 1);
+  assert.deepEqual(h.state.transactions, []);
 });
 
 test('a completion callback reaches completion without replaying the saved setup redirect', async () => {

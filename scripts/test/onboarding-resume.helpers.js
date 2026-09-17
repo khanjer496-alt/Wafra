@@ -26,6 +26,7 @@ class EffectHarness {
     this.input = { state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null }, pathname: '/',
       params: {}, hydrationFailed: false, resumeAttempt: 0 };
     this.ui = { ready: false, failed: false, step: 'welcome', focus: null, tracking: null, intention: null,
+      collectingName: false, nameDraft: '', nameSaving: false, nameSaveFailed: false,
       smsReady: false, notificationReady: false, awaitingNotification: false };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
     this.notificationDecisionMade = { current: false };
@@ -41,6 +42,10 @@ class EffectHarness {
       setFocus: value => { this.ui.focus = value; },
       setTracking: value => { this.ui.tracking = value; },
       setIntention: value => { this.ui.intention = value; },
+      setCollectingName: value => { this.ui.collectingName = value; },
+      setNameDraft: value => { this.ui.nameDraft = value; },
+      setNameSaving: value => { this.ui.nameSaving = value; },
+      setNameSaveFailed: value => { this.ui.nameSaveFailed = value; },
       setAndroidSmsReady: value => { this.ui.smsReady = value; },
       setAndroidNotificationReady: value => { this.ui.notificationReady = value; },
       setAwaitingNotificationAccess: value => { this.ui.awaitingNotification = value; },

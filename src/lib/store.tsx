@@ -111,6 +111,7 @@ import type { FxUpdate } from '@/lib/fx';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
+  normalizePreferredName,
   onboardingIncomeBasis,
 } from '@/lib/onboarding';
 
@@ -765,6 +766,7 @@ type Action =
   | { type: 'deleteGoal'; id: string }
   | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
   | { type: 'setOnboardingProfile'; profile: OnboardingProfile }
+  | { type: 'setUserName'; name: string }
   | {
       type: 'activateOnboardingPlan';
       budgets: Budget[];
@@ -1342,6 +1344,10 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, onboardingPlan: action.plan };
     case 'setOnboardingProfile':
       return { ...state, onboardingProfile: action.profile };
+    case 'setUserName': {
+      const userName = normalizePreferredName(action.name);
+      return userName && userName !== state.userName ? { ...state, userName } : state;
+    }
     case 'activateOnboardingPlan': {
       // React Strict Mode may replay an effect. Clearing the pending plan in
       // the same reducer action makes activation idempotent even then.
@@ -1531,6 +1537,7 @@ interface StoreValue {
   deleteGoal: (id: string) => void;
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
   setOnboardingProfile: (profile: OnboardingProfile) => void;
+  setUserName: (name: string) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -2580,6 +2587,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboarded' });
   }, [dispatch]);
 
+  const setUserName = useCallback((name: string) => {
+    dispatch({ type: 'setUserName', name });
+  }, [dispatch]);
+
   const setThemePreference = useCallback((preference: string) => {
     dispatch({ type: 'setThemePreference', preference });
   }, [dispatch]);
@@ -2809,6 +2820,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setOnboardingPlan,
       setOnboardingProfile,
+      setUserName,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -2874,6 +2886,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setOnboardingPlan,
       setOnboardingProfile,
+      setUserName,
       setAppLock,
       setDailySummary,
       setPrivateMode,

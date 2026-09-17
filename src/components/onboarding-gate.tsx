@@ -9,6 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
   type AccessibilityRole,
 } from 'react-native';
@@ -55,6 +56,8 @@ import { t, tf, type StringKey } from '@/lib/i18n';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
+  MAX_PREFERRED_NAME_LENGTH,
+  normalizePreferredName,
   onboardingInsightKeys,
   onboardingLandingPath,
   onboardingResumeDestination,
@@ -198,7 +201,7 @@ function BackHeader({ step, onBack, progressSteps, disabled }: {
  * iOS return from its first-class Shortcut setup to the personalised summary.
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
-  useLanguage();
+  const language = useLanguage();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ onboarding?: string }>();
   const router = useRouter();
@@ -213,11 +216,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ensureDurable,
     setOnboarded,
     setOnboardingProfile,
+    setUserName,
     setCaptureOptOut,
     setAndroidCaptureSources,
     setDailySummary,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
+  const [collectingName, setCollectingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaveFailed, setNameSaveFailed] = useState(false);
   const [focus, setFocus] = useState<OnboardingFocus | null>(null);
   const [tracking, setTracking] = useState<OnboardingTracking | null>(null);
   const [intention, setIntention] = useState<OnboardingIntention | null>(null);
@@ -298,6 +306,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (previouslyOnboarded.current && !state.onboarded) {
       resumeHandled.current = false;
       setStep('welcome');
+      setCollectingName(false);
+      setNameDraft('');
+      setNameSaving(false);
+      setNameSaveFailed(false);
       setFocus(null);
       setTracking(null);
       setIntention(null);
@@ -436,9 +448,56 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     saveJourney('intention', focus, tracking, id);
   };
 
+  const preferredName = state.userName === 'there'
+    ? null
+    : normalizePreferredName(state.userName);
+  const draftPreferredName = normalizePreferredName(nameDraft);
+  const selectedFocus = focus ?? state.onboardingProfile?.focus ?? null;
+  const selectedTracking = tracking ?? state.onboardingProfile?.tracking ?? null;
+  const selectedIntention = intention ?? state.onboardingProfile?.intention ?? null;
+
+  const openNamePersonalization = () => {
+    if (!beginStepTransition()) return;
+    setNameDraft(preferredName ?? '');
+    setNameSaveFailed(false);
+    setCollectingName(true);
+  };
+
+  const continueFromName = async (saveName: boolean) => {
+    if (nameSaving || transitioning) return;
+    const nextName = normalizePreferredName(nameDraft);
+    if (saveName && !nextName) return;
+    const resumedFocus = selectedFocus;
+    const resumedTracking = selectedTracking;
+    const resumedIntention = selectedIntention;
+    setNameSaving(true);
+    setNameSaveFailed(false);
+    try {
+      if (saveName && nextName) setUserName(nextName);
+      // Going Back from a later screen to edit/skip the name must not erase
+      // choices that are already durable in the profile.
+      setFocus(resumedFocus);
+      setTracking(resumedTracking);
+      setIntention(resumedIntention);
+      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
+      // Persist the lightweight profile/name together. If the process dies on
+      // the next screen, onboarding resumes at Focus with the same greeting.
+      await ensureDurable();
+      if (!beginStepTransition()) return;
+      setStep('focus');
+    } catch {
+      setNameSaveFailed(true);
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
   const showValuePreview = () => {
-    if (!focus || !tracking || !intention || !beginStepTransition()) return;
-    saveJourney('preview');
+    if (!selectedFocus || !selectedTracking || !selectedIntention || !beginStepTransition()) return;
+    setFocus(selectedFocus);
+    setTracking(selectedTracking);
+    setIntention(selectedIntention);
+    saveJourney('preview', selectedFocus, selectedTracking, selectedIntention);
     setStep('preview');
     trackGrowthEvent('onboarding_value_previewed', {
       focus,
@@ -692,6 +751,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     } else if (activeStep === 'focus') {
       setStep('welcome');
       saveJourney('welcome');
+      setNameDraft(preferredName ?? '');
+      setNameSaveFailed(false);
+      setCollectingName(true);
     } else {
       setStep('welcome');
       saveJourney('welcome');
@@ -845,47 +907,132 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               showsVerticalScrollIndicator={false}
               testID="onboarding-welcome"
               contentContainerStyle={styles.welcomeBody}>
-              <View style={styles.welcomeTop}>
-                <View style={styles.brandLine}>
-                  <WafraTile size={42} />
-                  <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
+              {!collectingName ? <>
+                <View style={styles.welcomeTop}>
+                  <View style={styles.brandLine}>
+                    <WafraTile size={42} />
+                    <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
+                  </View>
+                  <View
+                    accessible
+                    accessibilityRole="header"
+                    accessibilityLabel={t('onboardHeadline')}
+                    style={styles.headlineBlock}>
+                    {t('onboardHeadline').split('\n').map((line, index) => (
+                      <ThemedText
+                        key={`${index}-${line}`}
+                        accessible={false}
+                        style={[styles.headline, index === 1 && styles.headlineAccent]}>
+                        {line}
+                      </ThemedText>
+                    ))}
+                  </View>
+                  <ThemedText style={styles.sub}>
+                    {t('onboardWelcomeBody')}
+                  </ThemedText>
                 </View>
-                <View
-                  accessible
-                  accessibilityRole="header"
-                  accessibilityLabel={t('onboardHeadline')}
-                  style={styles.headlineBlock}>
-                  {t('onboardHeadline').split('\n').map((line, index) => (
-                    <ThemedText
-                      key={`${index}-${line}`}
-                      accessible={false}
-                      style={[styles.headline, index === 1 && styles.headlineAccent]}>
-                      {line}
-                    </ThemedText>
-                  ))}
+                <WelcomeMoneyScene marketId={state.marketId} reducedMotion={reducedMotion} />
+                <View style={styles.welcomeActions}>
+                  <Button wrapLabel
+                    label={t('onboardChooseStart')}
+                    onPress={openNamePersonalization}
+                    disabled={transitioning}
+                    labelColor={night.onPrimary}
+                    style={{ backgroundColor: night.primary }}
+                  />
+                  <View style={styles.setupTime}>
+                    <Icon name="lock" size={14} color={night.textTertiary} />
+                    <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
+                  </View>
                 </View>
-                <ThemedText style={styles.sub}>
-                  {t('onboardWelcomeBody')}
-                </ThemedText>
-              </View>
-              <WelcomeMoneyScene marketId={state.marketId} reducedMotion={reducedMotion} />
-              <View style={styles.welcomeActions}>
-                <Button wrapLabel
-                  label={t('onboardChooseStart')}
-                  onPress={() => {
-                    if (!beginStepTransition()) return;
-                    saveJourney('focus');
-                    setStep('focus');
-                  }}
-                  disabled={transitioning}
-                  labelColor={night.onPrimary}
-                  style={{ backgroundColor: night.primary }}
-                />
-                <View style={styles.setupTime}>
-                  <Icon name="lock" size={14} color={night.textTertiary} />
-                  <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
+              </> : <>
+                <View style={styles.nameTop}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('onboardBack')}
+                    disabled={nameSaving || transitioning}
+                    onPress={() => {
+                      tapped();
+                      setNameSaveFailed(false);
+                      setCollectingName(false);
+                    }}
+                    style={({ pressed }) => [styles.nameBack, { opacity: pressed ? 0.6 : 1 }]}>
+                    <Icon name="chevron-left" size={18} color={night.textSecondary} />
+                    <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
+                  </Pressable>
+                  <View style={styles.brandLine}>
+                    <WafraTile size={42} />
+                    <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
+                  </View>
+                  <ThemedText style={styles.nameTitle} accessibilityRole="header">
+                    {t('onboardNameTitle')}
+                  </ThemedText>
+                  <ThemedText style={styles.sub}>{t('onboardNameBody')}</ThemedText>
                 </View>
-              </View>
+
+                <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(320)}
+                  style={styles.nameReveal} testID="onboarding-name-reveal">
+                  <View style={styles.nameRevealMark}>
+                    <WafraTile size={58} />
+                  </View>
+                  <ThemedText style={[styles.nameGreeting, !draftPreferredName && styles.nameGreetingMuted]}>
+                    {draftPreferredName
+                      ? tf('onboardNamePreview', { name: draftPreferredName })
+                      : t('onboardNamePreviewEmpty')}
+                  </ThemedText>
+                  <View style={styles.nameGlowLine} />
+                </Animated.View>
+
+                <View style={styles.nameInputBlock}>
+                  <TextInput
+                    testID="onboarding-name-input"
+                    accessibilityLabel={t('onboardNamePlaceholder')}
+                    value={nameDraft}
+                    onChangeText={(value) => {
+                      setNameDraft(value);
+                      setNameSaveFailed(false);
+                    }}
+                    placeholder={t('onboardNamePlaceholder')}
+                    placeholderTextColor={night.textTertiary}
+                    selectionColor={night.primary}
+                    maxLength={MAX_PREFERRED_NAME_LENGTH}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    enterKeyHint="done"
+                    returnKeyType="done"
+                    onSubmitEditing={() => {
+                      if (draftPreferredName) void continueFromName(true);
+                    }}
+                    style={[styles.nameInput, { textAlign: language === 'ar' ? 'right' : 'left' }]}
+                  />
+                  <View style={styles.namePrivacyLine}>
+                    <Icon name="lock" size={13} color={night.primary} />
+                    <ThemedText style={styles.namePrivacyText}>{t('onboardNamePrivacy')}</ThemedText>
+                  </View>
+                  {nameSaveFailed && <ThemedText accessibilityLiveRegion="polite"
+                    style={[styles.inlineNote, { color: night.warning }]}>
+                    {t('onboardFinishSaveFailedBody')}
+                  </ThemedText>}
+                </View>
+
+                <View style={styles.welcomeActions}>
+                  <Button wrapLabel
+                    label={t('onboardNameContinue')}
+                    onPress={() => void continueFromName(true)}
+                    disabled={!draftPreferredName || nameSaving || transitioning}
+                    labelColor={night.onPrimary}
+                    style={{ backgroundColor: night.primary }}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('onboardNameSkip')}
+                    disabled={nameSaving || transitioning}
+                    onPress={() => void continueFromName(false)}
+                    style={({ pressed }) => [styles.nameSkip, { opacity: pressed ? 0.6 : 1 }]}>
+                    <ThemedText style={styles.nameSkipText}>{t('onboardNameSkip')}</ThemedText>
+                  </Pressable>
+                </View>
+              </>}
             </Animated.ScrollView>
           ) : (
             <>
@@ -901,18 +1048,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     <>
                       <View style={styles.questionTop}>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardFocusTitle')}
+                          {preferredName
+                            ? tf('onboardFocusTitleNamed', { name: preferredName })
+                            : t('onboardFocusTitle')}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
                       </View>
-                      <FocusChooser value={focus} onChange={chooseFocus} reducedMotion={reducedMotion} />
+                      <FocusChooser value={selectedFocus} onChange={chooseFocus} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={!focus || transitioning}
+                          disabled={!selectedFocus || transitioning}
                           onPress={() => {
-                            if (!focus || !beginStepTransition()) return;
-                            saveJourney('tracking');
+                            if (!selectedFocus || !beginStepTransition()) return;
+                            setFocus(selectedFocus);
+                            saveJourney('tracking', selectedFocus, selectedTracking, selectedIntention);
                             setStep('tracking');
                           }}
                           labelColor={night.onPrimary}
@@ -930,14 +1080,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardTrackingBody')}</ThemedText>
                       </View>
-                      <TrackingChooser value={tracking} onChange={chooseTracking} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <TrackingChooser value={selectedTracking} onChange={chooseTracking} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={!tracking || transitioning}
+                          disabled={!selectedTracking || transitioning}
                           onPress={() => {
-                            if (!tracking || !beginStepTransition()) return;
-                            saveJourney('intention');
+                            if (!selectedTracking || !beginStepTransition()) return;
+                            setTracking(selectedTracking);
+                            saveJourney('intention', selectedFocus, selectedTracking, selectedIntention);
                             setStep('intention');
                           }}
                           labelColor={night.onPrimary}
@@ -955,11 +1106,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardIntentionBody')}</ThemedText>
                       </View>
-                      <IntentionChooser value={intention} onChange={chooseIntention} reducedMotion={reducedMotion} />
+                      <IntentionChooser value={selectedIntention} onChange={chooseIntention} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
-                          disabled={!intention || transitioning}
+                          disabled={!selectedIntention || transitioning}
                           onPress={showValuePreview}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
@@ -972,11 +1123,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     <>
                       <View style={styles.questionTop}>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardPersonalizedTitle')}
+                          {preferredName
+                            ? tf('onboardPersonalizedTitleNamed', { name: preferredName })
+                            : t('onboardPersonalizedTitle')}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardPersonalizedBody')}</ThemedText>
                       </View>
-                      <PersonalizedProductPreview focus={focus} tracking={tracking} intention={intention} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <PersonalizedProductPreview focus={selectedFocus} tracking={selectedTracking} intention={selectedIntention} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t(Platform.OS === 'web' ? 'onboardChooseStart' : 'onboardConnectMyMoney')}
@@ -1343,6 +1496,8 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   welcomeTop: { paddingTop: 12, gap: 12 },
+  nameTop: { paddingTop: 8, gap: 12 },
+  nameBack: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
   eyebrow: {
@@ -1364,6 +1519,64 @@ const styles = StyleSheet.create({
   headlineBlock: { gap: 0 },
   headlineAccent: { color: night.primary },
   sub: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 22, color: night.textSecondary },
+  nameTitle: {
+    marginTop: 8,
+    maxWidth: 430,
+    color: night.text,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -1,
+  },
+  nameReveal: {
+    minHeight: 220,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: night.cardBorderStrong,
+    backgroundColor: 'rgba(17, 45, 36, 0.72)',
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+    overflow: 'hidden',
+  },
+  nameRevealMark: {
+    width: 82,
+    height: 82,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(89, 194, 157, 0.08)',
+  },
+  nameGreeting: {
+    color: night.text,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 25,
+    lineHeight: 32,
+    letterSpacing: -0.6,
+    textAlign: 'center',
+  },
+  nameGreetingMuted: { color: night.textSecondary },
+  nameGlowLine: { width: 72, height: 3, borderRadius: 2, backgroundColor: night.primary },
+  nameInputBlock: { gap: 10 },
+  nameInput: {
+    minHeight: 64,
+    borderWidth: 1,
+    borderColor: night.cardBorderStrong,
+    borderRadius: Radius.control,
+    backgroundColor: night.backgroundElement,
+    color: night.text,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 22,
+    lineHeight: 28,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  namePrivacyLine: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  namePrivacyText: { flexShrink: 1, color: night.textTertiary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  nameSkip: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  nameSkipText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
   welcomeActions: { marginTop: 'auto', gap: Spacing.two },
   setupTime: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   setupTimeText: { flexShrink: 1, color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 13, textAlign: 'center' },

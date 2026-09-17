@@ -48,6 +48,14 @@ eq('spending focus opens Spending after setup', onboarding.onboardingLandingPath
 eq('bills focus opens Bills after setup', onboarding.onboardingLandingPath('bills'), '/bills');
 eq('cash-flow focus opens Home after setup', onboarding.onboardingLandingPath('cashflow'), '/');
 eq('overview focus opens Home after setup', onboarding.onboardingLandingPath('overview'), '/');
+eq('preferred name trims and collapses accidental whitespace',
+  onboarding.normalizePreferredName('  Naser   Khanjar  '), 'Naser Khanjar');
+eq('preferred name preserves Arabic and Unicode',
+  onboarding.normalizePreferredName('  ناصر  '), 'ناصر');
+eq('preferred name rejects an empty value', onboarding.normalizePreferredName('   \n\t '), null);
+eq('preferred name is bounded by Unicode code points',
+  Array.from(onboarding.normalizePreferredName('😀'.repeat(60))).length,
+  onboarding.MAX_PREFERRED_NAME_LENGTH);
 
 eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.GROWTH_PLACEMENTS, {
   onboarding: 'onboarding_main',
@@ -294,13 +302,30 @@ const onboardingBankExamplesSource = fs.readFileSync(
 ok(
   'first-run personalization is one integrated journey without the optional goals/budget wizard',
   gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
-    gateSource.includes('<FocusChooser value={focus} onChange={chooseFocus}') &&
-    gateSource.includes('<TrackingChooser value={tracking} onChange={chooseTracking}') &&
-    gateSource.includes('<IntentionChooser value={intention} onChange={chooseIntention}') &&
+    gateSource.includes('<FocusChooser value={selectedFocus} onChange={chooseFocus}') &&
+    gateSource.includes('<TrackingChooser value={selectedTracking} onChange={chooseTracking}') &&
+    gateSource.includes('<IntentionChooser value={selectedIntention} onChange={chooseIntention}') &&
     !gateSource.includes('PLAN_STEPS') &&
     !gateSource.includes("activeStep === 'goals'") &&
     !gateSource.includes("activeStep === 'budget'") &&
     !gateSource.includes('onboardPersonalizeOptional'),
+);
+ok(
+  'name personalization morphs inside Welcome instead of becoming a fifth progress step',
+  gateSource.includes('testID="onboarding-name-input"') &&
+    gateSource.includes('testID="onboarding-name-reveal"') &&
+    /onboardChooseStart[\s\S]*?openNamePersonalization/.test(gateSource) &&
+    /onboardNameSkip/.test(gateSource) &&
+    /setUserName\(nextName\)[\s\S]*?saveJourney\('focus'\)[\s\S]*?ensureDurable\(\)/.test(gateSource) &&
+    gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
+    !/JOURNEY_STEPS[^\n]*name/.test(gateSource),
+);
+ok(
+  'saved preferred name personalizes later onboarding without touching financial data',
+  /onboardFocusTitleNamed/.test(gateSource) &&
+    /onboardPersonalizedTitleNamed/.test(gateSource) &&
+    /case 'setUserName'[\s\S]{0,260}normalizePreferredName/.test(storeSource) &&
+    !/setUserName[\s\S]{0,120}(?:addTransaction|importBatch|upsertBudget|addGoal)/.test(gateSource),
 );
 ok(
   'starter-plan copy waits for real income instead of implying country support',
@@ -471,7 +496,7 @@ ok(
 );
 ok(
   'tracking choice changes a real product scene instead of collecting a dead survey answer',
-  /<TrackingChooser value=\{tracking\} onChange=\{chooseTracking\} marketId=\{state\.marketId\}/.test(gateSource) &&
+  /<TrackingChooser value=\{selectedTracking\} onChange=\{chooseTracking\} marketId=\{state\.marketId\}/.test(gateSource) &&
     /id: 'bank-apps'/.test(aliveScenesSource) &&
     /id: 'spreadsheet'/.test(aliveScenesSource) &&
     /id: 'finance-app'/.test(aliveScenesSource) &&
