@@ -11,6 +11,8 @@ export type IosHistoryCardState =
   | 'review';
 
 export const IOS_HISTORY_HANDOFF_TTL_MS = 60 * 60_000;
+export const IOS_HISTORY_BASELINE_200_URL =
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-baseline-200-20260917/Wafra-History-Baseline-200.signed.shortcut';
 /**
  * Name Apple installs for each canonical public History record.
  *
@@ -37,6 +39,9 @@ export const IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS: Readonly<Record<string, Ios
 };
 export const IOS_HISTORY_SHORTCUT_DEFAULT_NAME = 'Wafra History Import';
 const iosHistoryShortcutRecord = (installUrl: unknown): IosHistoryShortcutRecord | null => {
+  if (installUrl === IOS_HISTORY_BASELINE_200_URL) {
+    return { name: IOS_HISTORY_SHORTCUT_DEFAULT_NAME, resumesOnRerun: false };
+  }
   const id = typeof installUrl === 'string'
     ? /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(installUrl)?.[1]?.toLowerCase()
     : undefined;
@@ -165,6 +170,7 @@ export const historyShortcutContinueUrl = (): string =>
   iosHistoryShortcutResumesOnRerun() ? historyShortcutRunUrl() : 'shortcuts://';
 
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
+  if (value === IOS_HISTORY_BASELINE_200_URL) return IOS_HISTORY_BASELINE_200_URL;
   if (typeof value !== 'string') return null;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;
