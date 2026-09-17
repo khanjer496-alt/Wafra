@@ -7,6 +7,7 @@ import {
   type CustomCallbackResult,
   type SubscriptionStatus,
 } from 'expo-superwall';
+import { getLocales } from 'expo-localization';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 
@@ -26,6 +27,8 @@ import {
   setIosLocalCaptureEntitlementLease,
   subscribeIosCaptureEntitlementReset,
 } from '@/lib/capture';
+import { marketCurrencyCode } from '@/lib/markets';
+import { onboardingBankRegion } from '@/lib/onboarding-bank-examples';
 import { ENTITLEMENT_ID, localCaptureEntitlementLease, trialDaysLeft } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
@@ -45,10 +48,41 @@ function platformApiKey(): string {
   return '';
 }
 
-function localeIdentifier(language: string, marketId: string): string {
+function normalizedMarketCode(marketId: string): string {
+  const normalized = marketId.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : 'AE';
+}
+
+function deviceCountryCode(): string | null {
+  try {
+    const region = getLocales()[0]?.regionCode?.trim().toUpperCase() ?? '';
+    return /^[A-Z]{2}$/.test(region) ? region : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parser market, visual country and language are deliberately separate.
+ * A UK/India/US phone must not inherit UAE onboarding artwork merely because
+ * AE is Wafra's safe launch parser fallback before a real bank alert is seen.
+ */
+function superwallLocaleContext(language: string, marketId: string) {
   const languageCode = language === 'ar' ? 'ar' : 'en';
-  const region = marketId === 'SA' ? 'SA' : 'AE';
-  return `${languageCode}_${region}`;
+  const market = normalizedMarketCode(marketId);
+  const country = deviceCountryCode() ?? market;
+  const visualRegion = onboardingBankRegion(market, country);
+  return {
+    language: languageCode,
+    market,
+    country,
+    locale: `${languageCode}_${country}`,
+    currency: visualRegion?.currency ?? (country === market ? marketCurrencyCode(market) : ''),
+  } as const;
+}
+
+function localeIdentifier(language: string, marketId: string): string {
+  return superwallLocaleContext(language, marketId).locale;
 }
 
 function LocalCaptureLeaseSync() {
@@ -248,9 +282,12 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   // amounts, SMS bodies, account/card identifiers, or the user's name.
   useEffect(() => {
     if (!superwall.isConfigured || !state.hydrated || state.privateMode) return;
+    const locale = superwallLocaleContext(state.language, state.marketId);
     void superwall.setUserAttributes({
-      wafra_language: state.language === 'ar' ? 'ar' : 'en',
-      wafra_market: state.marketId,
+      wafra_language: locale.language,
+      wafra_market: locale.market,
+      wafra_country: locale.country,
+      wafra_currency: locale.currency,
       wafra_onboarded: state.onboarded,
       wafra_onboarding_focus: state.onboardingProfile?.focus ?? null,
       wafra_onboarding_tracking: state.onboardingProfile?.tracking ?? null,
@@ -275,12 +312,12 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
 
   const presentProPaywall = useCallback(async (params: Record<string, unknown> = {}) => {
     if (!superwall.isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
+    const locale = superwallLocaleContext(state.language, state.marketId);
     await proPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.pro,
       params: {
         source: 'wafra_pro',
-        language: state.language === 'ar' ? 'ar' : 'en',
-        market: state.marketId,
+        ...locale,
         focus: state.onboardingProfile?.focus ?? null,
         intention: state.onboardingProfile?.intention ?? null,
         ...params,
@@ -297,12 +334,12 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
 
   const presentOnboardingFlow = useCallback(async () => {
     if (!superwall.isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
+    const locale = superwallLocaleContext(state.language, state.marketId);
     await onboardingPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.onboarding,
       params: {
         source: 'first_run',
-        language: state.language === 'ar' ? 'ar' : 'en',
-        market: state.marketId,
+        ...locale,
         platform: Platform.OS,
       },
     });

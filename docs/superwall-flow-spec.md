@@ -98,12 +98,42 @@ native capture/setup step without replaying Focus/Tracking/Intention.
 - storage/hydration recovery;
 - final durable `onboarded=true` transition and notification consent.
 
-## Localization
+## Localization and country visual packs
 
 Create English and Arabic variants. Keep Arabic conversational and GCC-friendly,
 keep “Wafra” as the product name, keep CTAs short, and manually review RTL.
-Every placement receives `language` (`en`/`ar`) and `market`; use `language` in
-audience rules so an in-session Wafra language switch is deterministic.
+
+Every placement receives independent localization inputs:
+
+- `language`: `en` or `ar`;
+- `market`: Wafra's parser-market preference (currently `AE` / `SA`);
+- `country`: actual device/onboarding region when Wafra has a reviewed pack;
+- `locale`: `<language>_<country>` such as `en_AE`, `ar_SA`, `en_GB`;
+- `currency`: visual country's currency when known;
+- `platform`, plus the existing placement-specific parameters.
+
+Country and language are different axes. `AE + en` and `AE + ar` use the same
+UAE visual pack with different copy/direction; `SA + en` and `SA + ar` do the
+same for Saudi. A device in another reviewed region uses that region even while
+the parser remains on its launch fallback.
+
+The shared first-page money scene is driven by `country`, not by language and
+not by parser `market`. It must use real reviewed bank domains/logo artwork plus
+local merchant/service examples and local currency. Do **not** duplicate the
+full Focus/Tracking/Intention flow per country.
+
+Current reviewed onboarding regions are:
+
+```text
+AE SA US GB FR DE ES IT NL IN QA KW BH OM EG JO
+```
+
+Unsupported countries use a neutral generic-bank/merchant fallback. They must
+never silently inherit UAE examples.
+
+Local brands on the value scene are familiarity examples, not a claim that every
+displayed institution is supported. Keep the examples-only disclosure unless
+the wording is backed by actual parser/capture coverage.
 
 ## Failure/fallback rules
 
@@ -115,8 +145,8 @@ onboarding so first run can never become a dead end.
 
 ## Privacy contract
 
-Allowed Wafra-supplied targeting metadata is limited to language, market,
-onboarding focus/tracking/intention, capture choice and local trial days. Never
+Allowed Wafra-supplied targeting metadata is limited to language, parser market,
+country/currency, onboarding focus/tracking/intention, capture choice and local trial days. Never
 send the local first name, ledger rows, balances, amounts, SMS bodies or
 card/account identifiers. With Wafra's saved local-only preference enabled,
 optional event tracking is disabled and these targeting attributes are withheld.
