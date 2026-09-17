@@ -153,6 +153,7 @@ function createHarness(options = {}) {
   }
   local('@/components/ui/category-chips');
   local('@/components/wafra-logo');
+  deps['@/components/recap/recap-logo-trigger']={RecapLogoTrigger:p=>jsx('RecapLogoTrigger',p)};
   local('@/lib/ledger-light-copy','src/lib/ledger-light-copy.ts');
   local('@/components/history-reading-status');
   local('@/lib/money-picture-progress','src/lib/money-picture-progress.ts');
