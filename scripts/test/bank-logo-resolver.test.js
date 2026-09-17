@@ -29,7 +29,13 @@ function load({ fetchImpl = async () => ({ ok: false, json: async () => [] }), d
     }, { filename });
     return exports;
   }
-  return { ...requireModule('@/lib/bank-logo-resolver'), marketBanks: requireModule('@/lib/markets').MARKETS.flatMap(market => market.banks) };
+  return {
+    ...requireModule('@/lib/bank-logo-resolver'),
+    marketBanks: requireModule('@/lib/markets').MARKETS.flatMap(market => market.banks),
+    onboardingBanks: requireModule('@/lib/onboarding-bank-examples'),
+    onboardingAlerts: requireModule('@/lib/onboarding-alert-examples'),
+    verifiedLogoUrl: requireModule('@/lib/verified-logo-identities').verifiedLogoUrl,
+  };
 }
 
 const response = rows => ({ ok: true, json: async () => rows });
@@ -68,6 +74,36 @@ const response = rows => ({ ok: true, json: async () => rows });
     assert.equal((await m.resolveBankLogo(bank.name))?.domain, bank.domain, `preserve market bank ${bank.name}`);
   }
   assert.equal(calls.length, 0, 'known launch-market banks stay on the local fast path');
+
+  // The animated onboarding must never regress to UAE examples for global
+  // users. Every country Wafra currently carries as a first-class preview gets
+  // three real bank domains plus local grocery and utility artwork.
+  const onboardingRegions = ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO'];
+  for (const regionId of onboardingRegions) {
+    const region = m.onboardingBanks.onboardingBankRegion(null, regionId);
+    assert.ok(region, `onboarding preview exists for ${regionId}`);
+    assert.equal(region.id, regionId);
+    assert.ok(region.currency, `onboarding currency exists for ${regionId}`);
+    assert.equal(region.banks.length, 3, `onboarding carries exactly three bank examples for ${regionId}`);
+    assert.equal(new Set(region.banks.map(bank => bank.domain)).size, 3, `onboarding bank domains stay distinct for ${regionId}`);
+    for (const bank of region.banks) {
+      assert.match(bank.domain, /^(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+[a-z]{2,24}$/i, `valid bank domain for ${bank.name}`);
+      assert.ok(m.verifiedLogoUrl(bank.domain)?.startsWith('https://cdn.brandfetch.io/domain/'),
+        `bank logo has a verified Brandfetch path for ${bank.name}`);
+    }
+
+    const alerts = m.onboardingAlerts.onboardingAlertExamples(region, {
+      grocery: 'Grocery store', electricity: 'Electricity', salary: 'Salary',
+    });
+    assert.equal(alerts.length, 3);
+    assert.ok(alerts[0].merchant.domain, `local grocery artwork exists for ${regionId}`);
+    assert.ok(alerts[1].merchant.domain, `local utility artwork exists for ${regionId}`);
+    assert.ok(m.verifiedLogoUrl(alerts[0].merchant.domain), `grocery logo domain is safe for ${regionId}`);
+    assert.ok(m.verifiedLogoUrl(alerts[1].merchant.domain), `utility logo domain is safe for ${regionId}`);
+    assert.ok(alerts.every(alert => alert.amount.includes(region.currency)), `sample money uses ${region.currency}`);
+  }
+  assert.equal(m.onboardingBanks.onboardingBankRegion(null, 'ZZ'), null,
+    'an unsupported country stays neutral instead of borrowing another country’s banks');
 
   const boa = await m.resolveBankLogo('Bank of America');
   assert.equal(boa?.domain, 'bankofamerica.com');
@@ -111,5 +147,5 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.equal(await failing.resolveBankLogo('Worldwide Example Bank'), null);
   assert.equal(failures, 2, 'transient failures remain retryable instead of becoming cached misses');
 
-  console.log('✓ bank logos keep known local domains and search Brandfetch globally for other clean institution names');
+  console.log('✓ bank logos keep known local domains and onboarding stays country-localized');
 })().catch(error => { console.error(error); process.exitCode = 1; });
