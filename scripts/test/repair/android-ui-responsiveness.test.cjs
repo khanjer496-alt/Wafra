@@ -55,7 +55,7 @@ function filterProbe(language = 'en', options = {}) {
   ];
   const props = { initialFilters: defaults(), resetFilters: defaults(), accounts: [{ id: 'bank', name: 'Bank' }],
     hasUnassignedIncome: false, index: filters.createTransactionFilterIndex(rows, language),
-    options: { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'month', key: '2026-09' }, live: new Set(['bank']), internal: new Set(), ...options },
+    options: { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'month', key: '2026-09' }, live: new Set(['bank']), internal: new Set(), corroborating: new Set(), ...options },
     onClose: () => events.push(['close']), onApply: (filters, resetScope) => events.push(['apply', filters, resetScope]) };
   const { TransactionFilterSheet } = load(path.join(root, 'src/components/transaction-filter-sheet.tsx'), deps);
   const render = () => { react.begin(); return TransactionFilterSheet(props); };

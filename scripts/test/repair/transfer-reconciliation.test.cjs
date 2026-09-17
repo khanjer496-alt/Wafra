@@ -14,7 +14,10 @@ const core = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), {
 });
 const { isTransferCandidate, transferOwnership, transferFingerprint,
   reconcileTransfers, normalizeTransferLinks, applyTransferDecision } = core;
-const ledger = load(path.join(root, 'src/lib/ledger.ts'), { '@/lib/transfer-reconciliation': core });
+const ledger = load(path.join(root, 'src/lib/ledger.ts'), {
+  '@/lib/transfer-reconciliation': core,
+  '@/lib/markets': markets,
+});
 const NOW = Date.parse('2026-09-08T10:00:00Z');
 const clone = x => JSON.parse(JSON.stringify(x));
 const bank = (id, last4, bankName = 'ADCB', extra = {}) => ({

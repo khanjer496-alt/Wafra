@@ -108,7 +108,9 @@ test('ordinary notification drains are sweep-free and shade recovery is explicit
   assert.match(module.slice(explicitSweep, getCaptured), /Thread\.sleep\(50\)/);
   assert.match(listener, /requestRebind\(ComponentName\(context, BankNotificationListenerService::class\.java\)\)/);
   assert.match(listener, /fun isConnected\(\): Boolean = connected != null/);
-  assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,120}sweepActiveNotifications\(\)/);
+  assert.match(listener, /override fun onListenerConnected\(\)[\s\S]{0,320}scheduleSweep\(\)/);
+  assert.match(listener, /private fun scheduleSweep\(\)[\s\S]{0,180}recoveryExecutor\.execute[\s\S]{0,180}sweepActiveNotifications\(\)/,
+    'listener reconnect recovery must leave KeyStore/shade work off the callback thread');
 });
 
 test('notification diagnostics expose only source-free listener and queue state', () => {
@@ -124,7 +126,7 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(module, /"queuedVisibleMatchCount" to queuedVisibleMatches/);
   assert.match(module, /"adcbAdmissionCounts"/);
   assert.match(listener, /recordAdmission\("moneyPassed", adcb\)/);
-  assert.match(listener, /recordAdmission\("appendSucceeded", adcb\)/);
+  assert.match(listener, /recordAdmission\(if \(appendResult == "repaired"\) "appendRepaired" else "appendSucceeded", adcb\)/);
   assert.match(listener, /recordAdmission\("exception", adcb\)/);
   assert.match(listener, /filter \{ MONEY_RE\.containsMatchIn\(it\) \}[\s\S]{0,80}maxByOrNull \{ it\.length \}/);
   assert.match(listener, /listOf\(title\) \+ nonBlankTextCandidates/);
@@ -138,6 +140,12 @@ test('notification diagnostics expose only source-free listener and queue state'
   assert.match(store, /putString\(ACKED, JSONArray\(acked\)\.toString\(\)\)/);
   assert.match(store, /acknowledgedRows\.map \{ notificationFingerprint\(it\.pkg, it\.ts\) \}/);
   assert.match(bridge, /getDiagnostics\(\): Promise<NotificationReaderDiagnostics>/);
+  const diagnosticStart = module.indexOf('AsyncFunction("getDiagnostics")');
+  const diagnosticEnd = module.indexOf('AsyncFunction("sweepVisible")', diagnosticStart);
+  const diagnosticBody = module.slice(diagnosticStart, diagnosticEnd);
+  assert.match(diagnosticBody, /NotificationCaptureStore\.pendingCount\(context\)/);
+  assert.doesNotMatch(diagnosticBody, /NotificationCaptureStore\.read\(context, 0L\)/,
+    'source-free diagnostics must not decrypt the AndroidKeyStore-backed queue');
   assert.match(bridge, /sweepVisible\(\): Promise<boolean>/);
   assert.doesNotMatch(settings, /notifDiagnosticsTitle|notifDiagnosticsRefresh/,
     'raw notification diagnostics should not be part of normal Settings');
@@ -160,7 +168,9 @@ test('native opt-out defaults closed and clears ciphertext before future callbac
   const listener = read(`${base}BankNotificationListenerService.kt`);
   const module = read(`${base}NotificationReaderModule.kt`);
   assert.match(policy, /getBoolean\(ENABLED, false\)/);
-  assert.match(policy, /if \(!enabled\) NotificationCaptureStore\.clear\(context\)/);
+  assert.match(policy, /if \(previousPush && !pushActive\) NotificationCaptureStore\.clear\(context\)/);
+  assert.match(policy, /else if \(!leaseActive\) NotificationCaptureStore\.clear\(context\)/,
+    'turning capture off must erase ciphertext even when the push source was already disabled');
   assert.ok(store.indexOf('if (!NotificationCapturePolicy.isEnabled(context)) return') <
     store.indexOf('purgeLegacyPlaintext(context)', store.indexOf('fun append(')));
   assert.ok(listener.indexOf('if (!NotificationCapturePolicy.isEnabled(this)) return') <
@@ -168,7 +178,8 @@ test('native opt-out defaults closed and clears ciphertext before future callbac
   assert.match(module, /AsyncFunction\("setCaptureEnabled"\)/);
   assert.match(module, /val wasEnabled = NotificationCapturePolicy\.isEnabled\(context\)/);
   assert.match(module, /val nowEnabled = NotificationCapturePolicy\.isEnabled\(context\)/);
-  assert.match(module, /if \(!wasEnabled && nowEnabled\) BankNotificationListenerService\.sweepConnected\(\)/);
+  assert.match(module, /if \(!wasEnabled && nowEnabled\) BankNotificationListenerService\.scheduleSweepConnected\(\)/,
+    'enabling admission must not block the JS/native bridge on a shade sweep');
   assert.match(module, /ComponentName\.unflattenFromString\(value\)/);
   assert.match(module, /if \(!NotificationCapturePolicy\.isEnabled\(context\) \|\| !hasSystemAccess\(context\)\)/);
 });
@@ -326,9 +337,8 @@ test('500 queued notification candidates process without touching SMS and ACK on
 test('eligible Android users are auto-admitted and prompted only for the unavoidable system grant', () => {
   const hook = read('src/hooks/use-auto-import.ts');
   const autoImport = read('src/lib/auto-import.ts');
-  assert.match(hook, /current\.hydrated && current\.onboarded &&[\s\S]{0,120}!current\.captureOptOut && isProActive\(current\)/);
+  assert.match(hook, /if \(!current\.hydrated \|\| !current\.onboarded \|\| current\.captureOptOut \|\| !isProActive\(current\)\) return;/);
   assert.match(hook, /Platform\.OS !== 'android' \|\| !watchForeground \|\| androidNotificationAccessPromptShown/);
-  assert.match(hook, /current\.captureOptOut \|\| !isProActive\(current\)/);
   assert.match(hook, /hasBankNotificationSystemAccess\(\)/);
   assert.match(hook, /openBankNotificationAccessSettings\(\)/);
   assert.match(autoImport, /NotificationReader\.hasSystemAccess\?\.\(\) === true/);
@@ -355,8 +365,12 @@ test('foreground notification drain is independent of SMS freshness and self-hea
   const module = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt');
   assert.match(hook, /const runAndroidNotificationDrain = useCallback/);
   assert.match(hook, /captureExecutor\.execute\('notification-only'\)/);
-  assert.match(hook, /Android's NotificationListenerService can enqueue a bank alert/);
-  assert.match(hook, /setTimeout\([\s\S]*?ensureListenerConnected[\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?, 350\)/);
+  assert.match(hook, /ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\s*=\s*10_000/);
+  assert.match(hook, /getPendingCount\?\.\(\)/);
+  assert.match(hook, /if \(pending <= 0\) return;/);
+  assert.match(hook, /ensureListenerConnected\?\.\(\)/);
+  assert.match(hook, /setTimeout\([\s\S]*?getPendingCount[\s\S]*?runAndroidNotificationDrain\(\)[\s\S]*?ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\)/,
+    'source-free recovery waits until after the launch grace and opens KeyStore only for a real pending queue');
   const drainStart = hook.indexOf('const runAndroidNotificationDrain = useCallback');
   const drainEnd = hook.indexOf(`/**\n   * The current scan`, drainStart);
   const drainBody = hook.slice(drainStart, drainEnd);

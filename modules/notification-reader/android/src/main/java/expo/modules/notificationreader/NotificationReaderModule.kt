@@ -168,8 +168,13 @@ class NotificationReaderModule : Module() {
       BankNotificationListenerService.resetAdmissionDiagnostics()
       val visibility = BankNotificationListenerService.visibilityDiagnostics(context)
       val admission = BankNotificationListenerService.admissionDiagnostics()
+      // Diagnostics must stay source-free and cheap. Reading the encrypted
+      // queue here opens AndroidKeyStore and decrypts every retained row, which
+      // can recreate the same multi-second foreground stall the delayed
+      // recovery path is designed to avoid. The envelope count is enough for
+      // diagnostics and never exposes notification content.
       val queued = if (admissionActive) {
-        try { NotificationCaptureStore.read(context, 0L).size } catch (_: Exception) { -1 }
+        try { NotificationCaptureStore.pendingCount(context) } catch (_: Exception) { -1 }
       } else 0
       val queuedVisibleMatches = if (admissionActive && systemAccess) {
         BankNotificationListenerService.queuedVisibleMatchCount()

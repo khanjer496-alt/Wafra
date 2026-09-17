@@ -63,7 +63,10 @@ test('Home renders at most five recent transactions without losing the full acti
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
 test('Bills keeps every obligation in one due-date timeline instead of type silos', () => {
-  const tree = createHarness().render('bills');
+  // iOS keeps the synchronous recurrence projection used by this presentation
+  // contract. Android deliberately defers that historical scan until after the
+  // first Bills frame; its behavior is covered by the performance suites.
+  const tree = createHarness({ platform: 'ios' }).render('bills');
   const agenda = text(nodeById(tree, 'payment-agenda'));
   for (const label of ['Netflix', 'Spotify', 'DEWA', 'Etisalat', 'NBD credit card']) {
     assert.match(agenda, new RegExp(label));
@@ -74,7 +77,7 @@ test('Bills keeps every obligation in one due-date timeline instead of type silo
   assert.ok(agenda.indexOf('Next 7 days') < agenda.indexOf('Later'));
 });
 test('a manually tracked detected subscription is shown once in the due timeline', () => {
-  const h = createHarness();
+  const h = createHarness({ platform: 'ios' });
   h.state.bills.push({ id: 'netflix', title: 'Netflix', category: 'entertainment', amountFils: 4900, dueDay: 9, paidMonths: [] });
   const tree = h.render('bills');
   const rows = walk(nodeById(tree, 'payment-agenda')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
@@ -100,8 +103,8 @@ test('estimated, confirmed overdue and paid semantics survive payment-type group
   assert.equal(JSON.stringify(items), before);
 });
 test('empty Bills shows one truthful empty timeline without inventing type sections', () => {
-  const tree = createHarness({ empty: true }).render('bills');
-  assert.match(text(nodeById(tree, 'payment-agenda-summary')), /Nothing coming up/);
+  const tree = createHarness({ empty: true, platform: 'ios' }).render('bills');
+  assert.match(text(nodeById(tree, 'payment-agenda')), /Nothing coming up/);
   assert.equal(nodeById(tree, 'bills-subscriptions'), undefined);
   assert.equal(nodeById(tree, 'bills-utilities'), undefined);
 });

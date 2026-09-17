@@ -154,7 +154,13 @@ async function screen(t, options = {}) {
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
-    '@/lib/onboarding': { onboardingLandingPath: () => '/' }, '@/lib/store': { useStore: () => store },
+    '@/lib/onboarding': {
+      onboardingLandingPath: () => '/',
+      onboardingInsightKeys: () => ({
+        title: 'onboardInsightOverviewTitle',
+        body: 'onboardInsightOverviewBody',
+      }),
+    }, '@/lib/store': { useStore: () => store },
     '../../modules/wafra-message-history': { __esModule: true, default: options.historyAvailable === false ? {} : native },
   }).default;
   const render = () => { if (disposed) return; cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };

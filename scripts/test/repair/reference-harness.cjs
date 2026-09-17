@@ -40,8 +40,9 @@ function createHarness(options = {}) {
     toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,parseAmountWithMoneySpec,
     totalAsShown:a=>a.reduce((s,v)=>s+v,0),fullDateTime:tx=>tx.date,friendlyDate:d=>format.shortDate(d),
   };
+  const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
-    Platform:{OS:'android',select:x=>x.android},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1})};
+    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1})};
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
     periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):'This year',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
