@@ -1,5 +1,6 @@
 name: One-time onboarding contract migration
 
+# Added only to migrate the stale first-run ownership assertion, then removed.
 on:
   push:
     branches: [main]
