@@ -10,7 +10,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -30,28 +29,31 @@ const deviceRegion = (): string | null => {
   try { return getLocales()[0]?.regionCode ?? null; } catch { return null; }
 };
 
-/** Full-screen cinematic ground used by every onboarding step. */
+/** Quiet, full-screen ground shared by every onboarding step. */
 export function OnboardingAtmosphere() {
   return <View style={StyleSheet.absoluteFillObject} pointerEvents="none" accessible={false}>
     <LinearGradient
-      colors={['#173D31', '#10261F', night.background]}
-      locations={[0, 0.34, 0.74]}
+      colors={['#17352C', '#10251F', '#0E1714', night.background]}
+      locations={[0, 0.28, 0.62, 1]}
       style={StyleSheet.absoluteFillObject}
     />
-    <View style={[styles.atmosphereDisc, styles.atmosphereDiscGreen]} />
-    <View style={[styles.atmosphereDisc, styles.atmosphereDiscAmber]} />
+    <LinearGradient
+      colors={['rgba(83,196,151,0.07)', 'rgba(83,196,151,0)']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.atmosphereWash}
+    />
   </View>;
 }
 
-/** The real Wafra mark on the dimensional tile used throughout the journey. */
+/** The real Wafra mark, kept deliberately flatter than the surrounding UI. */
 export function WafraTile({ size = 40 }: { size?: number }) {
   return <LinearGradient
-    colors={['#83D9B5', '#49AA83', '#286F57']}
-    locations={[0, 0.56, 1]}
+    colors={['#67CBA4', '#43A77F']}
+    locations={[0, 1]}
     start={{ x: 0.1, y: 0 }}
     end={{ x: 0.9, y: 1 }}
     style={[styles.wafraTile, { width: size, height: size, borderRadius: Math.round(size * 0.31) }]}>
-    <View style={styles.wafraTileSheen} />
     <WafraMark size={Math.round(size * 0.62)} color={night.onPrimary} />
   </LinearGradient>;
 }
@@ -97,8 +99,6 @@ function Rise({ delay, reducedMotion, children, style }: { delay: number; reduce
   return <Animated.View style={[style, riseStyle]}>{children}</Animated.View>;
 }
 
-const POSTER_ROTATIONS = [-4, 3, -2] as const;
-
 function posterKindLabel(example: OnboardingAlertExample): string {
   return example.kind === 'purchase'
     ? t('onboardScenePurchase')
@@ -107,52 +107,30 @@ function posterKindLabel(example: OnboardingAlertExample): string {
       : t('onboardSceneIncome');
 }
 
-/**
- * One cinematic alert card. The card itself drops first, then the bank logo
- * lands independently with a small spring. This mirrors the approved mockup:
- * money objects feel physical, while all motion stays on Reanimated's UI thread.
- */
+/** One real-looking alert row. Motion explains arrival; styling stays product-like. */
 function PosterAlertCard({ example, index, reducedMotion }: {
   example: OnboardingAlertExample;
   index: number;
   reducedMotion: boolean;
 }) {
   const card = useSharedValue(reducedMotion ? 1 : 0);
-  const logo = useSharedValue(reducedMotion ? 1 : 0);
   useEffect(() => {
     if (reducedMotion) {
       card.value = 1;
-      logo.value = 1;
       return;
     }
     card.value = 0;
-    logo.value = 0;
-    card.value = withDelay(120 + index * 220, withSpring(1, {
-      damping: 13,
-      stiffness: 115,
-      mass: 0.9,
+    card.value = withDelay(100 + index * 150, withTiming(1, {
+      duration: 360,
+      easing: Easing.out(Easing.cubic),
     }));
-    logo.value = withDelay(520 + index * 220, withSpring(1, {
-      damping: 10,
-      stiffness: 190,
-      mass: 0.72,
-    }));
-  }, [card, index, logo, reducedMotion]);
+  }, [card, index, reducedMotion]);
 
   const cardStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(card.value, [0, 0.14, 1], [0, 1, 1]),
+    opacity: card.value,
     transform: [
-      { translateY: interpolate(card.value, [0, 1], [-155 - index * 18, 0]) },
-      { rotate: `${interpolate(card.value, [0, 1], [0, POSTER_ROTATIONS[index] ?? 0])}deg` },
-      { scale: interpolate(card.value, [0, 0.72, 1], [0.94, 1.025, 1]) },
-    ],
-  }));
-  const logoStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(logo.value, [0, 0.18, 1], [0, 1, 1]),
-    transform: [
-      { translateY: interpolate(logo.value, [0, 1], [-72, 0]) },
-      { scale: interpolate(logo.value, [0, 0.72, 1], [0.65, 1.12, 1]) },
-      { rotate: `${interpolate(logo.value, [0, 1], [-16, 0])}deg` },
+      { translateY: interpolate(card.value, [0, 1], [18, 0]) },
+      { scale: interpolate(card.value, [0, 1], [0.985, 1]) },
     ],
   }));
   const merchant = example.kind === 'salary' ? t('onboardSceneIncomeCategory') : example.merchant.name;
@@ -160,9 +138,9 @@ function PosterAlertCard({ example, index, reducedMotion }: {
 
   return <Animated.View style={[styles.posterAlert, cardStyle]}
     accessible accessibilityLabel={`${bankName}. ${posterKindLabel(example)}. ${merchant}. ${example.amount}`}>
-    <Animated.View style={logoStyle}>
+    <View>
       <BankLogo bank={example.bank} size={40} />
-    </Animated.View>
+    </View>
     <View style={styles.posterAlertCopy}>
       <ThemedText numberOfLines={1} style={styles.posterBank}>{bankName}</ThemedText>
       <ThemedText numberOfLines={1} style={styles.posterMerchant}>{merchant}</ThemedText>
@@ -177,10 +155,7 @@ function PosterAlertCard({ example, index, reducedMotion }: {
   </Animated.View>;
 }
 
-/**
- * Poster-style welcome scene: three real regional alerts fall into one Wafra
- * picture. Nothing is written to the ledger; the examples are display-only.
- */
+/** Three regional alerts resolve into one Wafra summary. Display-only. */
 export function WelcomeMoneyScene({ marketId, reducedMotion }: { marketId: string; reducedMotion: boolean }) {
   const region = useMemo(() => onboardingBankRegion(marketId, deviceRegion()), [marketId]);
   const examples = useMemo(() => onboardingAlertExamples(region, {
@@ -192,7 +167,6 @@ export function WelcomeMoneyScene({ marketId, reducedMotion }: { marketId: strin
 
   return <View style={styles.welcomeScene} testID="onboarding-market-money-scene">
     <View style={styles.posterStage}>
-      <View style={styles.posterGlow} pointerEvents="none" />
       {examples.map((example, index) => <PosterAlertCard
         key={example.kind}
         example={example}
@@ -200,7 +174,7 @@ export function WelcomeMoneyScene({ marketId, reducedMotion }: { marketId: strin
         reducedMotion={reducedMotion}
       />)}
     </View>
-    <Rise delay={2150} reducedMotion={reducedMotion} style={styles.posterResult}>
+    <Rise delay={720} reducedMotion={reducedMotion} style={styles.posterResult}>
       <View style={styles.grow}>
         <ThemedText type="micro" style={styles.posterResultKicker}>{t('onboardSceneAlertsToPicture')}</ThemedText>
         <View style={styles.posterNetLine}>
@@ -208,12 +182,11 @@ export function WelcomeMoneyScene({ marketId, reducedMotion }: { marketId: strin
           <ThemedText style={styles.posterNetNote}>{t('onboardSceneNetWeek')}</ThemedText>
         </View>
       </View>
-      <View style={styles.posterReady}>
-        <Icon name="check" size={13} color={night.primary} />
-        <ThemedText style={styles.posterReadyText}>{t('onboardSceneOrganized')}</ThemedText>
-      </View>
     </Rise>
-    <ThemedText style={styles.posterFootnote}>{t('onboardRegionalExample')} · {t('onboardSceneRevealFootnote')}</ThemedText>
+    <View style={styles.posterFootnoteRow}>
+      <Icon name="check" size={12} color={night.primary} />
+      <ThemedText style={styles.posterFootnote}>{t('onboardRegionalExample')}</ThemedText>
+    </View>
   </View>;
 }
 
@@ -316,17 +289,45 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
   ];
   const current = options.find(option => option.id === value) ?? null;
   return <View style={styles.chooser} testID="onboarding-tracking-options">
-    <View style={styles.trackingScene}>
-      <View style={styles.bankRow}>
+    {current && <Animated.View key={current.id} entering={reducedMotion ? undefined : FadeIn.duration(180)}
+      style={styles.trackingScene} accessibilityLiveRegion="polite">
+      {current.id === 'bank-apps' ? <View style={styles.bankRow}>
         {[0, 1, 2].map(i => <View key={i} style={styles.bankItem}>
-          <BankLogo bank={banks[i] ?? null} size={44} />
+          <BankLogo bank={banks[i] ?? null} size={40} />
           <ThemedText numberOfLines={1} style={styles.bankName}>{banks[i]?.name ?? t('onboardRegionalBankGeneric')}</ThemedText>
         </View>)}
+      </View> : current.id === 'spreadsheet' ? <View style={styles.trackingSheet}>
+        <View style={styles.trackingSheetRow}>
+          <ThemedText style={styles.trackingSheetKey}>{t('onboardSceneGroceries')}</ThemedText>
+          <ThemedText style={styles.trackingSheetValue} tabular>1,120</ThemedText>
+        </View>
+        <View style={styles.trackingSheetRow}>
+          <ThemedText style={styles.trackingSheetKey}>{t('onboardSceneElectricity')}</ThemedText>
+          <ThemedText style={styles.trackingSheetValue} tabular>318</ThemedText>
+        </View>
+        <View style={styles.trackingSheetRow}>
+          <ThemedText style={styles.trackingSheetKey}>{t('onboardSceneIncome')}</ThemedText>
+          <ThemedText style={[styles.trackingSheetValue, { color: night.income }]} tabular>+7,500</ThemedText>
+        </View>
+      </View> : current.id === 'finance-app' ? <View style={styles.trackingPhone}>
+        <View style={styles.trackingPhoneTop}>
+          <Icon name="phone" size={15} color={night.primary} />
+          <ThemedText style={styles.trackingPhoneTitle}>{t('onboardTrackingFinanceApp')}</ThemedText>
+        </View>
+        <MiniRow label={t('onboardSceneGroceries')} amount="1,120" />
+        <MiniRow label={t('onboardSceneInternet')} amount="389" />
+      </View> : <View style={styles.trackingFresh}>
+        <WafraTile size={44} />
+        <View style={styles.grow}>
+          <ThemedText style={styles.trackingFreshTitle}>{t('onboardTrackingFreshSceneTitle')}</ThemedText>
+          <ThemedText style={styles.trackingFreshBody}>{t('onboardTrackingFreshSceneBody')}</ThemedText>
+        </View>
+      </View>}
+      <View style={styles.outcome}>
+        <Icon name="check" size={14} color={night.primary} />
+        <ThemedText style={styles.outcomeText}>{current.outcome}</ThemedText>
       </View>
-      <Animated.View key={current?.id ?? 'none-yet'} entering={reducedMotion ? undefined : FadeIn.duration(180)} style={styles.outcome} accessibilityLiveRegion="polite">
-        <ThemedText style={styles.outcomeText}>{current ? current.outcome : t('onboardTrackingScattered')}</ThemedText>
-      </Animated.View>
-    </View>
+    </Animated.View>}
     <View style={styles.optionList}>
       {options.map(option => {
         const selected = value === option.id;
@@ -342,77 +343,30 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
   </View>;
 }
 
-function IntentionVisual({ intention }: { intention: OnboardingIntention }) {
-  if (intention === 'stay-ahead') {
-    return <View style={styles.intentionPoster}>
-      <View style={styles.intentionPosterHead}>
-        <ThemedText type="micro" style={styles.kicker}>{t('onboardIntentionAhead')}</ThemedText>
-        <Icon name="receipt" size={20} color={night.primary} />
-      </View>
-      <View style={styles.intentionTimeline}>
-        {[[7, t('onboardSceneElectricity')], [12, t('onboardSceneCardDue')], [18, t('onboardSceneInternet')]].map(([day, label], index) => <View key={String(label)} style={styles.intentionTimelineRow}>
-          <View style={[styles.intentionTimelineDot, index === 0 && styles.intentionTimelineDotActive]} />
-          <ThemedText style={styles.intentionDay} tabular>{day}</ThemedText>
-          <ThemedText style={styles.intentionTimelineLabel}>{label}</ThemedText>
-          <Icon name={index === 0 ? 'check' : 'chevron-right'} size={15} color={index === 0 ? night.primary : night.textTertiary} />
-        </View>)}
-      </View>
-      <ThemedText style={styles.intentionSceneCopy}>{t('onboardIntentionAheadScene')}</ThemedText>
-    </View>;
-  }
-  if (intention === 'build-buffer') {
-    return <View style={styles.intentionPoster}>
-      <View style={styles.intentionPosterHead}>
-        <ThemedText type="micro" style={styles.kicker}>{t('onboardIntentionBuffer')}</ThemedText>
-        <Icon name="wallet" size={20} color={night.primary} />
-      </View>
-      <View style={styles.bufferStage}>
-        <View style={[styles.bufferLayer, styles.bufferLayerBack]} />
-        <View style={[styles.bufferLayer, styles.bufferLayerMid]} />
-        <View style={[styles.bufferLayer, styles.bufferLayerFront]}>
-          <ThemedText style={styles.bufferValue} tabular>+ 2,340</ThemedText>
-          <ThemedText style={styles.bufferLabel}>{t('onboardSceneNet')}</ThemedText>
-        </View>
-      </View>
-      <ThemedText style={styles.intentionSceneCopy}>{t('onboardIntentionBufferScene')}</ThemedText>
-    </View>;
-  }
-  if (intention === 'spend-intentionally') {
-    const bars = [0.85, 0.58, 0.72, 0.45, 0.62, 0.38, 0.5];
-    return <View style={styles.intentionPoster}>
-      <View style={styles.intentionPosterHead}>
-        <ThemedText type="micro" style={styles.kicker}>{t('onboardIntentionSpend')}</ThemedText>
-        <Icon name="chart" size={20} color={night.warning} />
-      </View>
-      <View style={styles.intentionSpendStage}>
-        <View style={styles.intentionSpendGuide} />
-        {bars.map((height, index) => <View key={index} style={[styles.intentionSpendBar, { height: 82 * height, opacity: 0.42 + index * 0.065 }]} />)}
-      </View>
-      <ThemedText style={styles.intentionSceneCopy}>{t('onboardIntentionSpendScene')}</ThemedText>
-    </View>;
-  }
-  return <View style={styles.intentionPoster}>
-    <View style={styles.intentionPosterHead}>
-      <ThemedText type="micro" style={styles.kicker}>{t('onboardIntentionControl')}</ThemedText>
-      <Icon name="spark" size={20} color={night.primary} />
+function IntentionVisual({ intention, currency }: { intention: OnboardingIntention; currency: string }) {
+  const focus: OnboardingFocus = intention === 'spend-intentionally' ? 'spending'
+    : intention === 'stay-ahead' ? 'bills'
+      : intention === 'build-buffer' ? 'cashflow' : 'overview';
+  const copy = intention === 'spend-intentionally' ? t('onboardIntentionSpendScene')
+    : intention === 'stay-ahead' ? t('onboardIntentionAheadScene')
+      : intention === 'build-buffer' ? t('onboardIntentionBufferScene')
+        : t('onboardIntentionControlScene');
+  return <View style={styles.intentionScene}>
+    <FocusPreviewCard focus={focus} currency={currency} />
+    <View style={styles.intentionSceneLine}>
+      <Icon name="check" size={14} color={night.primary} />
+      <ThemedText style={styles.intentionSceneCopy}>{copy}</ThemedText>
     </View>
-    <View style={styles.controlStage}>
-      <View style={[styles.controlOrbit, styles.controlOrbitOuter]} />
-      <View style={[styles.controlOrbit, styles.controlOrbitInner]} />
-      <View style={styles.controlCenter}><Icon name="wallet" size={30} color={night.primary} /></View>
-      <View style={[styles.controlChip, styles.controlChipOne]}><Icon name="receipt" size={16} color={night.warning} /></View>
-      <View style={[styles.controlChip, styles.controlChipTwo]}><Icon name="chart" size={16} color={night.primary} /></View>
-      <View style={[styles.controlChip, styles.controlChipThree]}><Icon name="bank" size={16} color={night.textSecondary} /></View>
-    </View>
-    <ThemedText style={styles.intentionSceneCopy}>{t('onboardIntentionControlScene')}</ThemedText>
   </View>;
 }
 
-export function IntentionChooser({ value, onChange, reducedMotion = false }: {
+export function IntentionChooser({ value, onChange, marketId, reducedMotion = false }: {
   value: OnboardingIntention | null;
   onChange(value: OnboardingIntention): void;
+  marketId?: string | null;
   reducedMotion?: boolean;
 }) {
+  const region = useMemo(() => onboardingBankRegion(marketId ?? null, deviceRegion()), [marketId]);
   const options: { id: OnboardingIntention; label: string; icon: IconName }[] = [
     { id: 'control', label: t('onboardIntentionControl'), icon: 'spark' },
     { id: 'spend-intentionally', label: t('onboardIntentionSpend'), icon: 'chart' },
@@ -422,7 +376,7 @@ export function IntentionChooser({ value, onChange, reducedMotion = false }: {
   const current = value ?? 'control';
   return <View style={styles.chooser} testID="onboarding-intention-options">
     <Animated.View key={current} entering={reducedMotion ? undefined : FadeIn.duration(180)} accessibilityLiveRegion="polite">
-      <IntentionVisual intention={current} />
+      <IntentionVisual intention={current} currency={region?.currency ?? ''} />
     </Animated.View>
     <View style={styles.optionList}>
       {options.map(option => {
@@ -473,30 +427,20 @@ export function PersonalizedProductPreview({ focus, tracking, intention, marketI
         : t('onboardTrackingFreshSceneBody');
 
   return <View style={styles.previewStep} testID="onboarding-product-preview">
-    <View style={styles.morphSource}>
-      <View style={styles.morphSourceIcon}><Icon name={sourceIcon} size={22} color={night.primary} /></View>
+    <View style={styles.previewContext}>
+      <View style={styles.previewContextIcon}><Icon name={sourceIcon} size={18} color={night.primary} /></View>
       <View style={styles.grow}>
         <ThemedText type="micro" style={styles.kicker}>{t('onboardPreviewFrom')}</ThemedText>
-        <ThemedText style={styles.morphSourceTitle}>{trackingTitle(tracking)}</ThemedText>
-        <ThemedText numberOfLines={2} style={styles.morphSourceDetail}>{sourceDetail}</ThemedText>
+        <ThemedText style={styles.previewContextTitle}>{trackingTitle(tracking)}</ThemedText>
+        <ThemedText numberOfLines={2} style={styles.previewContextDetail}>{sourceDetail}</ThemedText>
       </View>
     </View>
-    <View style={styles.morphRail} accessible={false}>
-      <View style={styles.morphLine} />
-      <Rise delay={160} reducedMotion={reducedMotion} style={styles.morphBadge}>
-        <Icon name="chevron-down" size={18} color={night.primary} />
-      </Rise>
-      <View style={styles.morphLine} />
-    </View>
-    <Rise delay={260} reducedMotion={reducedMotion}>
+    <Rise delay={120} reducedMotion={reducedMotion}>
       <FocusPreviewCard focus={current} currency={region?.currency ?? ''} />
     </Rise>
-    <Rise delay={420} reducedMotion={reducedMotion} style={styles.intentionOutcome}>
-      <View style={styles.intentionOutcomeIcon}><Icon name="spark" size={17} color={night.primary} /></View>
-      <View style={styles.grow}>
-        <ThemedText type="micro" style={styles.kicker}>{t('onboardPreviewForYou')}</ThemedText>
-        <ThemedText style={styles.intentionOutcomeText}>{intentionResult(intention)}</ThemedText>
-      </View>
+    <Rise delay={220} reducedMotion={reducedMotion} style={styles.previewOutcome}>
+      <Icon name="check" size={14} color={night.primary} />
+      <ThemedText style={styles.previewOutcomeText}>{intentionResult(intention)}</ThemedText>
     </Rise>
   </View>;
 }
@@ -531,18 +475,14 @@ export function CaptureMarketScene({ marketId }: { marketId: string }) {
 const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 0 },
   kicker: { color: night.textTertiary, fontFamily: Fonts.monoMedium, letterSpacing: 0.9 },
-  atmosphereDisc: { position: 'absolute', borderRadius: 999 },
-  atmosphereDiscGreen: { width: 360, height: 360, top: 80, start: -170, backgroundColor: 'rgba(76,176,137,0.16)' },
-  atmosphereDiscAmber: { width: 320, height: 320, top: 430, end: -180, backgroundColor: 'rgba(151,101,34,0.11)' },
-  wafraTile: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 8 },
-  wafraTileSheen: { position: 'absolute', top: 0, start: 0, end: 0, height: '42%', backgroundColor: 'rgba(255,255,255,0.15)' },
+  atmosphereWash: { position: 'absolute', top: -80, start: -40, end: -40, height: 330 },
+  wafraTile: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 9, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
   logo: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   logoInitials: { color: '#FFFFFF', fontFamily: Fonts.sansSemi, letterSpacing: 0.3 },
 
   welcomeScene: { gap: 8 },
-  posterStage: { minHeight: 220, justifyContent: 'center', gap: 7, paddingHorizontal: 6, position: 'relative' },
-  posterGlow: { position: 'absolute', alignSelf: 'center', top: 22, width: 280, height: 186, borderRadius: 140, backgroundColor: 'rgba(67,170,129,0.15)' },
-  posterAlert: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: '#25221C' },
+  posterStage: { minHeight: 204, justifyContent: 'center', gap: 6 },
+  posterAlert: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(15,23,20,0.88)' },
   posterAlertCopy: { flex: 1, minWidth: 0, gap: 1 },
   posterBank: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13, lineHeight: 17 },
   posterMerchant: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 16 },
@@ -552,13 +492,12 @@ const styles = StyleSheet.create({
   posterKind: { color: night.textTertiary, fontSize: 10, lineHeight: 14 },
   posterAmount: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 14, writingDirection: 'ltr' },
   posterAmountIncome: { color: night.income },
-  posterResult: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, paddingTop: 2 },
-  posterResultKicker: { color: night.income, fontFamily: Fonts.monoMedium, letterSpacing: 1.1 },
+  posterResult: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong },
+  posterResultKicker: { color: night.textTertiary, fontFamily: Fonts.monoMedium, letterSpacing: 0.9 },
   posterNetLine: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
-  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 24, lineHeight: 30, letterSpacing: -0.5, writingDirection: 'ltr' },
+  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 26, lineHeight: 32, letterSpacing: -0.6, writingDirection: 'ltr' },
   posterNetNote: { color: night.textSecondary, fontSize: 12 },
-  posterReady: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: Radius.full, borderWidth: 1, borderColor: night.primaryBorder, backgroundColor: night.primarySoft },
-  posterReadyText: { color: night.income, fontFamily: Fonts.sansSemi, fontSize: 11 },
+  posterFootnoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   posterFootnote: { color: night.textTertiary, fontSize: 11, lineHeight: 15 },
   miniCard: { borderWidth: 1, borderColor: night.cardBorderStrong, borderRadius: 18, padding: 12, backgroundColor: night.backgroundElement, gap: 6 },
   miniHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
@@ -586,52 +525,33 @@ const styles = StyleSheet.create({
   optionList: { gap: 0 },
   optionRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   optionRowSelected: { borderBottomWidth: 1, borderColor: night.primary },
-  trackingScene: { gap: 8, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
-  intentionPoster: { minHeight: 190, gap: 10, padding: 14, borderRadius: 22, backgroundColor: '#1C1A16', borderWidth: 1, borderColor: night.cardBorderStrong, overflow: 'hidden' },
-  intentionPosterHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  intentionSceneCopy: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 19 },
-  intentionTimeline: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong },
-  intentionTimelineRow: { minHeight: 35, flexDirection: 'row', alignItems: 'center', gap: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
-  intentionTimelineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: night.cardBorderStrong },
-  intentionTimelineDotActive: { width: 10, height: 10, borderRadius: 5, backgroundColor: night.primary },
-  intentionDay: { width: 24, color: night.primary, fontFamily: Fonts.monoSemi, fontSize: 13 },
-  intentionTimelineLabel: { flex: 1, color: night.textSecondary, fontSize: 12 },
-  bufferStage: { minHeight: 88, justifyContent: 'flex-end', alignItems: 'center', position: 'relative', marginHorizontal: 18 },
-  bufferLayer: { position: 'absolute', width: '100%', height: 64, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  bufferLayerBack: { bottom: 30, backgroundColor: '#24221D', transform: [{ scale: 0.9 }] },
-  bufferLayerMid: { bottom: 15, backgroundColor: '#20382F', transform: [{ scale: 0.95 }] },
-  bufferLayerFront: { bottom: 0, backgroundColor: '#1E4B3B', alignItems: 'center', justifyContent: 'center', gap: 2 },
-  bufferValue: { color: night.income, fontFamily: Fonts.monoSemi, fontSize: 26, lineHeight: 31, writingDirection: 'ltr' },
-  bufferLabel: { color: night.textSecondary, fontSize: 11 },
-  intentionSpendStage: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 7, position: 'relative', paddingHorizontal: 4 },
-  intentionSpendGuide: { position: 'absolute', start: 0, end: 0, top: 44, height: 1, backgroundColor: night.primaryBorder },
-  intentionSpendBar: { flex: 1, borderTopLeftRadius: 6, borderTopRightRadius: 6, backgroundColor: night.warning },
-  controlStage: { height: 90, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  controlOrbit: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: night.primaryBorder },
-  controlOrbitOuter: { width: 118, height: 118 },
-  controlOrbitInner: { width: 76, height: 76, opacity: 0.75 },
-  controlCenter: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
-  controlChip: { position: 'absolute', width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: night.backgroundElement, borderWidth: 1, borderColor: night.cardBorderStrong },
-  controlChipOne: { top: 4, start: 34 },
-  controlChipTwo: { bottom: 2, end: 38 },
-  controlChipThree: { top: 38, end: 24 },
+  trackingScene: { gap: 8, paddingVertical: 9, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
+  trackingSheet: { borderWidth: 1, borderColor: night.cardBorderStrong, borderRadius: 14, overflow: 'hidden', backgroundColor: night.backgroundElement },
+  trackingSheetRow: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
+  trackingSheetKey: { flex: 1, color: night.textSecondary, fontSize: 12 },
+  trackingSheetValue: { color: night.text, fontFamily: Fonts.monoMedium, fontSize: 12, writingDirection: 'ltr' },
+  trackingPhone: { borderWidth: 1, borderColor: night.cardBorderStrong, borderRadius: 16, paddingHorizontal: 12, backgroundColor: night.backgroundElement },
+  trackingPhoneTop: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  trackingPhoneTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13 },
+  trackingFresh: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  trackingFreshTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
+  trackingFreshBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17, paddingTop: 2 },
+  intentionScene: { gap: 7 },
+  intentionSceneLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 2 },
+  intentionSceneCopy: { flex: 1, color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18 },
   bankRow: { flexDirection: 'row', gap: 12 },
   bankItem: { flex: 1, minWidth: 0, alignItems: 'center', gap: 7 },
   bankName: { color: night.textSecondary, fontSize: 10, textAlign: 'center', maxWidth: '100%' },
-  outcome: { minHeight: 24, justifyContent: 'center' },
-  outcomeText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  outcome: { minHeight: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  outcomeText: { flexShrink: 1, color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18, textAlign: 'center' },
 
   previewStep: { gap: 10 },
-  morphSource: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, borderTopWidth: 1, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
-  morphSourceIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
-  morphSourceTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
-  morphSourceDetail: { color: night.textTertiary, fontSize: 11, lineHeight: 15, paddingTop: 2 },
-  morphRail: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  morphLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
-  morphBadge: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft, borderWidth: 1, borderColor: night.primaryBorder },
-  intentionOutcome: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7, borderTopWidth: 1, borderColor: night.cardBorderStrong },
-  intentionOutcomeIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft },
-  intentionOutcomeText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18, paddingTop: 2 },
+  previewContext: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
+  previewContextIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: night.primarySoft },
+  previewContextTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
+  previewContextDetail: { color: night.textTertiary, fontSize: 11, lineHeight: 15, paddingTop: 1 },
+  previewOutcome: { minHeight: 34, flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 2 },
+  previewOutcomeText: { flex: 1, color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18 },
   nextList: { gap: 2 },
   nextItem: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
   nextItemText: { flex: 1, color: night.textSecondary, fontSize: 13, lineHeight: 18 },

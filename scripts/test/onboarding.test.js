@@ -373,12 +373,11 @@ ok(
     !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
 );
 ok(
-  'welcome money reveal drops real regional alerts and their bank logos independently',
+  'welcome money reveal uses real regional alerts with restrained product-like motion',
   /function PosterAlertCard/.test(aliveScenesSource) &&
-    /card\.value = withDelay[\s\S]*?withSpring/.test(aliveScenesSource) &&
-    /logo\.value = withDelay[\s\S]*?withSpring/.test(aliveScenesSource) &&
-    /translateY:[\s\S]*?-155/.test(aliveScenesSource) &&
-    /translateY:[\s\S]*?-72/.test(aliveScenesSource) &&
+    /card\.value = withDelay[\s\S]*?withTiming/.test(aliveScenesSource) &&
+    /translateY:[\s\S]*?\[18, 0\]/.test(aliveScenesSource) &&
+    !/POSTER_ROTATIONS|withSpring|rotate:/.test(aliveScenesSource) &&
     /onboardingAlertExamples/.test(aliveScenesSource) &&
     /onboardSceneAlertsToPicture/.test(aliveScenesSource) &&
     !/function MessageParse|function Token/.test(aliveScenesSource),
