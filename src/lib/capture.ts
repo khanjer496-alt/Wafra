@@ -172,7 +172,7 @@ export const setIosLocalCaptureEntitlementLease = async (
 };
 
 /**
- * Apply one RevenueCat answer with its request timestamp. Native storage owns
+ * Apply one verified store/Superwall answer with its request timestamp. Native storage owns
  * the monotonic compare, so a late async response cannot resurrect or shorten
  * a newer subscription lease.
  */

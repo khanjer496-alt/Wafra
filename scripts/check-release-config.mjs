@@ -21,6 +21,8 @@ const publicEnv = Object.fromEntries([
   'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL',
   'EXPO_PUBLIC_WAFRA_E2E_DEMO',
   'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT',
+  'EXPO_PUBLIC_SUPERWALL_IOS_API_KEY',
+  'EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY',
   'WAFRA_SMS_CORPUS_EXPORT',
 ].flatMap((key) => process.env[key] ? [[key, process.env[key]]] : []));
 

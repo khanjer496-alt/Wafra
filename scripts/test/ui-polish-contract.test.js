@@ -40,7 +40,7 @@ assert.match(flow, /summarizeMonth\(/);
 assert.match(flow, /spendingCategoryRows\(/);
 
 const pro = read('src/app/pro.tsx');
-for (const seam of ['loadStorePrices(', 'purchasePro(', 'restorePro(', 'priceString']) {
+for (const seam of ['useWafraBilling(', 'presentProPaywall(', 'restorePro(', 'subscriptionManagementUrl(']) {
   assert.ok(pro.includes(seam), `Pro lost ${seam}`);
 }
 
@@ -301,12 +301,7 @@ assert.match(task7Settings, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?h
 assert.match(task7Pro, /const proHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('wafraPro'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
 assert.match(task7Pro, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{proHeader\}/);
 assert.doesNotMatch(task7Pro, /footer=\{purchaseFooter\}/);
-assert.match(
-  task7Pro,
-  /!entitled && \([\s\S]*?<Section index=\{3\}[\s\S]*?<\/Section>\s*\)\}\s*\{purchaseFooter\}\s*<View style=\{styles\.legalLinks\}>/,
-  'Pro keeps purchase controls in the page scroll after plan selection and before legal links',
-);
-assert.match(task7Pro, /purchaseBar: \{[\s\S]*?paddingTop: Spacing\.two/);
+assert.match(task7Pro, /<View style=\{styles\.actions\}>[\s\S]*?<View style=\{\[styles\.legalLinks/);
 
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
@@ -383,7 +378,7 @@ for (const row of [
 assert.match(task7Settings, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
 
 const proPublicRows = task7Pro.match(
-  /const publicLinkRow[\s\S]*?(?=\n  const purchaseFooter)/,
+  /const publicLinkRow[\s\S]*?\n  \};/,
 )?.[0] ?? '';
 assert.ok(proPublicRows.length > 0, 'Pro public-link row helper was not found');
 assert.match(proPublicRows, /if \(url\) return \([\s\S]*?<Pressable[\s\S]*?accessibilityRole="link"[\s\S]*?openLegal\(url\)/);
@@ -396,14 +391,12 @@ assert.doesNotMatch(unavailableProPublicRow, /onPress|chevron/);
 assert.match(task7Pro, /publicLinkRow\(t\('privacyPolicy'\), privacyPolicyUrl\)[\s\S]*publicLinkRow\(t\('termsOfUse'\), termsOfUseUrl, true\)/);
 
 for (const seam of [
-  'loadStorePrices(', 'storePrices?.[candidate]?.priceString', 'purchasePro(', 'restorePro(',
-  'subscriptionManagementUrl(', 'legalReady', 'savingPercent',
+  'useWafraBilling(', 'presentProPaywall(', 'billing.restorePro(',
+  'subscriptionManagementUrl(', 'legalReady',
 ]) assert.ok(task7Pro.includes(seam), `Pro lost ${seam}`);
 assert.match(task7Pro, /notice && \([\s\S]*?accessibilityLiveRegion="polite"/);
-assert.match(task7Pro, /completion && \([\s\S]*?accessibilityLiveRegion="polite"/);
 assert.match(task7Pro, /if \(!legalReady\)[\s\S]*?purchaseLegalMissingBody/);
-assert.match(task7Pro, /!entitled && \([\s\S]*?accessibilityRole="radiogroup"/);
-assert.match(task7Pro, /completion \? \([\s\S]*?proContinue[\s\S]*?: state\.founderPro \? \([\s\S]*?proContinue[\s\S]*?: state\.pro \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?onPress=\{buy\}[\s\S]*?restorePurchase[\s\S]*?onPress=\{restore\}/);
+assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?openPaywall\('pro_screen_cta'\)[\s\S]*?restorePurchase/);
 
 const task8Routes = [
   ['accuracy', 'accuracyHeader'],

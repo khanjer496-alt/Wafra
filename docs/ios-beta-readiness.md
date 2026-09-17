@@ -100,7 +100,7 @@ verification with each candidate. Publish/update the website's Android link
 only after the corresponding APK is actually available at the target URL.
 Building an artifact does not automatically publish it or deploy the website.
 
-Production iOS preflight still requires the real RevenueCat Apple key, hosted
+Production iOS preflight still requires the real Superwall iOS public key and published paywall/onboarding campaigns, hosted
 privacy/terms/support URLs and completed contact/operator/jurisdiction/store
 details. Do not insert invented values to make that gate green.
 

@@ -3,30 +3,19 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useRef } from 'react';
-import { AppState, Platform, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
-import { OnboardingGate } from '@/components/onboarding-gate';
+import { SuperwallBillingProvider } from '@/components/superwall-billing-provider';
+import { SuperwallOnboarding } from '@/components/superwall-onboarding';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { LedgerMoneyProvider } from '@/hooks/use-ledger-money';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { startMotionPreference } from '@/hooks/use-reduced-motion';
-import {
-  observeEntitlement,
-  refreshEntitlement,
-  syncStoreCaptureEntitlement,
-  type EntitlementSnapshot,
-} from '@/lib/billing';
-import {
-  publishIosCaptureStatusRefresh,
-  setIosLocalCaptureEntitlementLease,
-  subscribeIosCaptureEntitlementReset,
-} from '@/lib/capture';
 import { PeriodProvider } from '@/lib/period-context';
-import { localCaptureEntitlementLease } from '@/lib/purchases';
 import { StoreProvider, useStore } from '@/lib/store';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
@@ -45,102 +34,6 @@ import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 // capture module keeps its promise of holding no network by taking delivery
 // through a setter; this is the one call that fills it in.
 installFeedbackTransport();
-
-function BillingSync() {
-  const { state, setPro } = useStore();
-  const currentPro = useRef(state.pro);
-  currentPro.current = state.pro;
-
-  const syncLocalCaptureLease = useCallback(() => {
-    if (!state.hydrated || Platform.OS !== 'ios') return;
-    const lease = localCaptureEntitlementLease({
-      founderPro: state.founderPro,
-      trialStartTs: state.trialStartTs,
-    });
-    if (!lease) return;
-    void setIosLocalCaptureEntitlementLease(lease.expiresAtMs, lease.lifetime)
-      .then((applied) => {
-        if (applied) publishIosCaptureStatusRefresh();
-      })
-      .catch(() => {
-        // The optional native module failing closed must not crash the ledger.
-        // Setup will stay paused until a build containing the module is installed.
-      });
-  }, [state.founderPro, state.hydrated, state.trialStartTs]);
-
-  useEffect(() => {
-    syncLocalCaptureLease();
-  }, [syncLocalCaptureLease]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    return subscribeIosCaptureEntitlementReset(syncLocalCaptureLease);
-  }, [syncLocalCaptureLease]);
-
-  useEffect(() => {
-    if (!state.hydrated) return;
-    let disposed = false;
-    let stopObserving = () => {};
-    let latestRequestDateMs = 0;
-    let latestSnapshot: EntitlementSnapshot | null = null;
-    let refreshGeneration = 0;
-    const apply = async (snapshot: EntitlementSnapshot, allowEqual = false) => {
-      if (
-        disposed ||
-        snapshot.requestDateMs < latestRequestDateMs ||
-        (!allowEqual && snapshot.requestDateMs === latestRequestDateMs)
-      ) return;
-      latestRequestDateMs = Math.max(latestRequestDateMs, snapshot.requestDateMs);
-      let nativeAccepted = true;
-      if (Platform.OS === 'ios') {
-        try {
-          nativeAccepted = await syncStoreCaptureEntitlement(snapshot);
-        } catch {
-          // Billing remains usable if a malformed/missing native build is
-          // installed; native admission itself still fails closed.
-        }
-      }
-      if (disposed || snapshot.requestDateMs !== latestRequestDateMs || !nativeAccepted) return;
-      latestSnapshot = snapshot;
-      if (snapshot.active === currentPro.current) return;
-      currentPro.current = snapshot.active;
-      setPro(snapshot.active);
-    };
-    void observeEntitlement((snapshot) => {
-      refreshGeneration += 1;
-      void apply(snapshot);
-    }).then((cleanup) => {
-      if (disposed) cleanup();
-      else stopObserving = cleanup;
-    });
-    const refreshStoreLease = (allowEqual = false) => {
-      const generation = ++refreshGeneration;
-      void refreshEntitlement().then((snapshot) => {
-        if (generation === refreshGeneration && snapshot) void apply(snapshot, allowEqual);
-      });
-    };
-    const entitlementReset = Platform.OS === 'ios'
-      ? subscribeIosCaptureEntitlementReset(() => {
-          // Replay the last confirmed answer without requiring connectivity;
-          // native accepts an identical revision and rejects equal conflicts.
-          if (latestSnapshot) void apply(latestSnapshot, true);
-          else refreshStoreLease(true);
-        })
-      : () => {};
-    const appState = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
-      refreshStoreLease();
-    });
-    return () => {
-      disposed = true;
-      appState.remove();
-      entitlementReset();
-      stopObserving();
-    };
-  }, [setPro, state.hydrated]);
-
-  return null;
-}
 
 /**
  * Mirrors the whole app left-to-right or right-to-left, live.
@@ -259,15 +152,14 @@ export default function RootLayout() {
   */
   return (
     <StoreProvider>
+      <SuperwallBillingProvider>
       {!ready ? null : (
-      <>
-      <BillingSync />
       <Direction>
       <PeriodProvider>
       <ThemeProvider value={navTheme}>
         <StatusBar style={dark ? 'light' : 'dark'} />
         <LockGate>
-          <OnboardingGate>
+          <SuperwallOnboarding>
           <ToastProvider>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
@@ -307,13 +199,13 @@ export default function RootLayout() {
             <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
           </Stack>
           </ToastProvider>
-          </OnboardingGate>
+          </SuperwallOnboarding>
         </LockGate>
       </ThemeProvider>
       </PeriodProvider>
       </Direction>
-      </>
       )}
+      </SuperwallBillingProvider>
     </StoreProvider>
   );
 }

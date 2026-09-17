@@ -2,8 +2,6 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const APPLE_KEY = /^appl_[A-Za-z0-9]+$/;
-const GOOGLE_KEY = /^goog_[A-Za-z0-9]+$/;
 const SHORTCUT_PATH = /^\/shortcuts\/[0-9a-f]{32}$/i;
 // A structurally valid iCloud URL can still identify a retired artifact, which
 // must not be included in a new production build.
@@ -82,6 +80,10 @@ const requireHttps = (value, code, label, findings, { host, pathPattern } = {}) 
 };
 
 const publicValue = (name, profileEnv, publicEnv) => publicEnv[name] ?? profileEnv[name];
+const validSuperwallPublicKey = (value) =>
+  typeof value === 'string' &&
+  value.trim().length >= 12 &&
+  !/(?:YOUR[_ -]?SUPERWALL|PLACEHOLDER|EXAMPLE)/i.test(value);
 
 const checkProject = (expo, findings) => {
   const projectId = expo?.extra?.eas?.projectId ?? '';
@@ -201,6 +203,8 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
   const relayUrl = publicValue('EXPO_PUBLIC_WAFRA_RELAY_URL', env, publicEnv);
   const captureUrl = publicValue('EXPO_PUBLIC_WAFRA_SHORTCUT_URL', env, publicEnv);
   const historyUrl = publicValue('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', env, publicEnv);
+  const superwallIosKey = publicValue('EXPO_PUBLIC_SUPERWALL_IOS_API_KEY', env, publicEnv);
+  const superwallAndroidKey = publicValue('EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY', env, publicEnv);
   const e2eDemo = publicValue('EXPO_PUBLIC_WAFRA_E2E_DEMO', env, publicEnv);
   const smsCorpusJs = publicValue(
     'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT',
@@ -256,12 +260,12 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
     if (captureShortcutId && historyShortcutId && captureShortcutId === historyShortcutId) {
       findings.push(finding('distinct-shortcuts', 'Capture and History links are identical', 'The two Shortcuts have different permissions and data paths.', 'Publish distinct iCloud links for Capture and History Import.'));
     }
-    if (!APPLE_KEY.test(extra.revenueCatIosKey ?? '')) {
-      findings.push(finding('revenuecat-ios-key', 'The RevenueCat iOS key is missing or invalid', 'A production iOS build cannot sell or restore Pro.', 'Configure the public appl_ RevenueCat SDK key.'));
+    if (!validSuperwallPublicKey(superwallIosKey)) {
+      findings.push(finding('superwall-ios-key', 'The Superwall iOS public API key is missing or invalid', 'A production iOS build cannot present, sell or restore Wafra Pro.', 'Configure EXPO_PUBLIC_SUPERWALL_IOS_API_KEY with the public key from Superwall Settings → Keys.'));
     }
   }
-  if ((platform === 'android' || platform === 'all') && !GOOGLE_KEY.test(extra.revenueCatAndroidKey ?? '')) {
-    findings.push(finding('revenuecat-android-key', 'The RevenueCat Android key is missing or invalid', 'A production Android build cannot sell or restore Pro.', 'Configure the public goog_ RevenueCat SDK key.'));
+  if ((platform === 'android' || platform === 'all') && !validSuperwallPublicKey(superwallAndroidKey)) {
+    findings.push(finding('superwall-android-key', 'The Superwall Android public API key is missing or invalid', 'A production Android build cannot present, sell or restore Wafra Pro.', 'Configure EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY with the public key from Superwall Settings → Keys.'));
   }
   requireHttps(extra.privacyPolicyUrl, 'privacy-url', 'expo.extra.privacyPolicyUrl', findings);
   requireHttps(extra.termsOfUseUrl, 'terms-url', 'expo.extra.termsOfUseUrl', findings);

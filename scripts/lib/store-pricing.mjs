@@ -32,8 +32,8 @@ export function validateStorePricing(pricing, metadata) {
     errors.push('store introductory offers must stay disabled while the local three-day period ships');
   }
   if (pricing.rules?.display !==
-    'Always use the Apple or Google storefront-formatted price returned by RevenueCat.') {
-    errors.push('pricing display rule must require the storefront-formatted RevenueCat price');
+    'Always use the Apple or Google storefront-formatted price returned through Superwall.') {
+    errors.push('pricing display rule must require the storefront-formatted Superwall price');
   }
   if (pricing.rules?.manualFxPricing !== false) {
     errors.push('global pricing must not hand-convert a ledger or reference currency');

@@ -38,7 +38,7 @@ scan → transactions appearing.
 ## Data safety form
 
 - Android bank-alert content is processed on-device and not sent to the relay.
-- RevenueCat's current purchase and anonymous-identifier disclosures must be
+- Superwall's current purchase/paywall and identifier disclosures must be
   reflected in the final Play Data safety form; do not submit the old blanket
   “No data collected” answer without verifying the configured SDK.
 - User financial records stay local unless the user exports them.
@@ -122,16 +122,16 @@ automatic SMS capture is unavailable on iPhone in that mode.
 ## Data safety form answers
 
 These answers must be completed for the Android artifact actually submitted and
-the configured RevenueCat SDK. The old blanket answers are retained below only
+the configured Superwall SDK. The old blanket answers are retained below only
 as examples of what **not** to submit:
 
 | Question | Answer |
 | --- | --- |
-| Does your app collect or share any of the required user data types? | **Verify RevenueCat's current disclosure; Android bank-alert content itself is not uploaded** |
+| Does your app collect or share any of the required user data types? | **Verify Superwall's current disclosure; Android bank-alert content itself is not uploaded** |
 | Is all user data encrypted in transit? | Yes for configured purchase traffic |
 | Do you provide a way for users to request data deletion? | Yes — uninstall, or clear data in Settings |
 
-Verify Play billing and RevenueCat handling against the current Data safety
+Verify Play billing and Superwall handling against the current Data safety
 definitions before submission. If cloud sync or crash reporting is added, this
 section and the privacy policy must change before that build ships.
 
@@ -203,9 +203,9 @@ these three facts.
 - SKUs (create in Play Console → Monetize → Subscriptions):
   `wafra_pro_monthly`, `wafra_pro_yearly`. Use Google Play's territory price
   tiers; the paywall renders the storefront's localized price string.
-- Code: paywall at `src/app/pro.tsx`; entitlement `state.pro`; RevenueCat store
-  integration in `src/lib/billing.ts`. Production builds still require the
-  public platform SDK keys plus the matching store products and `pro`
+- Code: paywall entry at `src/app/pro.tsx`; entitlement cache `state.pro`;
+  Superwall runtime integration in `src/components/superwall-billing-provider.native.tsx`.
+  Production builds require the public platform SDK keys plus the matching store products and `pro`
   entitlement described in `docs/billing.md`.
 - Play policy: digital subscriptions MUST use Play Billing. Include a
   manage/cancel path and verify the current fee/program terms in Play Console.
