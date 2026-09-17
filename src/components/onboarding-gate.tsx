@@ -437,7 +437,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         });
         resumeHandled.current = true;
         if (destination === 'ios-setup') router.replace('/ios-setup?fromOnboarding=1');
-        else setStep(destination === 'privacy' ? 'preview' : destination);
+        else if (destination === 'remote-handoff') {
+          // Superwall owns the value/personalization journey, but the optional
+          // first name remains device-only. Resume directly in the existing
+          // native name surface, then continue to capture without replaying the
+          // questions Superwall already collected.
+          setNameDraft(
+            state.userName === 'there' ? '' : normalizePreferredName(state.userName) ?? '',
+          );
+          setNameSaveFailed(false);
+          setCollectingName(true);
+          setStep('welcome');
+        } else setStep(destination === 'privacy' ? 'preview' : destination);
         setResumeReady(true);
         setResumeFailed(false);
       } catch {
@@ -563,6 +574,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(resumedFocus);
       setTracking(resumedTracking);
       setIntention(resumedIntention);
+      if (
+        state.onboardingProfile?.stage === 'remote-handoff' &&
+        resumedFocus &&
+        resumedTracking &&
+        resumedIntention
+      ) {
+        // The remote Flow already asked Focus → Tracking → Intention and showed
+        // the personalized value preview. Name is the only local personalization
+        // step between that Flow and OS-specific capture setup.
+        saveJourney('capture', resumedFocus, resumedTracking, resumedIntention);
+        await ensureDurable();
+        if (!beginStepTransition()) return;
+        setCollectingName(false);
+        setStep('capture');
+        return;
+      }
       saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
       // Persist the lightweight profile/name together. If the process dies on
       // the next screen, onboarding resumes at Focus with the same greeting.

@@ -163,6 +163,17 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
       "./modules/wafra-message-history/plugin",
       "./modules/wafra-live-capture/plugin",
       [
@@ -190,8 +201,6 @@
       "eas": {
         "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
       },
-      "revenueCatAndroidKey": "",
-      "revenueCatIosKey": "",
       "privacyPolicyUrl": "",
       "termsOfUseUrl": "",
       "supportUrl": ""

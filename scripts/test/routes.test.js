@@ -398,15 +398,12 @@ function sources(dir = SRC) {
     'deleteBill',
     'setNotSubscription',
     'addBill',
-    'purchasePro',
-    'restorePro',
     'setPro',
   ];
 
   const screens = {
     'app/(tabs)/bills.tsx': ['markBillPaid', 'payCardDue', 'deleteBill', 'setNotSubscription'],
     'components/card-payment-sheet.tsx': ['payCardDue'],
-    'app/pro.tsx': ['purchasePro', 'restorePro'],
   };
 
   for (const [rel, expected] of Object.entries(screens)) {
@@ -504,17 +501,14 @@ function sources(dir = SRC) {
 
   {
     const pro = code(read('app/pro.tsx'));
-    // The paywall's five answers report, they do not ask — so they are drawn
-    // inline rather than in a sheet. What matters is that a tap on the two
-    // buttons that sell the app can never again produce nothing.
+    // Superwall owns checkout; native fallback outcomes must still be visible.
     const outcomes = [
-      "title: t('playOnlyTitle')",
-      "title: t('nothingToRestore')",
-      "title: t('purchaseFailed')",
+      "title: t('purchaseUnavailable')",
       "title: t('restoreFailed')",
       "title: t('noPurchaseFound')",
+      "title: t('proRestoreSuccessTitle')",
     ].filter((s) => pro.includes(s));
-    ok(`every paywall outcome reaches the screen (${outcomes.length} of 5)`, outcomes.length === 5);
+    ok(`every native Superwall fallback outcome reaches the screen (${outcomes.length} of 4)`, outcomes.length === 4);
     ok('the paywall renders the answer it just produced', /\{notice && \(/.test(pro));
   }
 

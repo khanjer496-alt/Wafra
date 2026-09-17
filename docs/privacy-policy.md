@@ -185,10 +185,14 @@ store biometric templates.
   both name searches and image requests. Logo caches are removed by Erase all
   data; image bitmap caching remains managed by the platform image library.
 
-- **Purchases:** when store billing is configured, Apple or Google processes
-  the payment and RevenueCat manages an anonymous subscription entitlement.
-  RevenueCat does not receive bank messages, ledger transactions or balances
-  from Wafra.
+- **Purchases and paywalls:** when store billing is configured, Apple or Google
+  processes payment and Superwall provides paywall/onboarding presentation,
+  subscription entitlement state and related product-flow analytics. Wafra may
+  send language, market and non-financial onboarding choices for targeting, but
+  does not send bank messages, ledger transactions, balances, transaction
+  amounts, account/card identifiers or the locally stored first name to
+  Superwall. When the saved local-only preference is active, Wafra disables
+  optional Superwall event tracking and withholds those targeting attributes.
 - **Forwarded bank email:** if the user creates a private forwarding address,
   the relay parses the forwarded MIME, text, HTML and supported PDF, CSV, or TSV attachments
   in memory. Raw email and attachments are not stored. Only structured rows,

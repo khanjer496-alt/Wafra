@@ -1,14 +1,14 @@
 /**
- * Billing for Wafra Pro, through RevenueCat.
+ * Billing contracts for Wafra Pro, surfaced through Superwall.
  *
- * RevenueCat rather than separate store adapters: one entitlement model and
- * one validation path cover both stores. Wafra has no account-linking system,
+ * Superwall rather than separate client checkout adapters: one entitlement
+ * model and remote purchase surface cover both stores. Wafra has no account-linking system,
  * so anonymous purchases do not automatically transfer between an Android
  * install and a separate iPhone install.
  *
  * The three moving parts, and which of them is the truth:
  *
- *   RevenueCat  the ONLY source of entitlement. Asked at launch, so a lapsed,
+ *   Superwall   the storefront entitlement source. Asked at launch, so a lapsed,
  *               refunded or cancelled subscription actually locks again.
  *               A reinstall creates a new anonymous customer and still needs
  *               the user-visible Restore button to attach the store receipt.
@@ -17,25 +17,23 @@
  *   the trial   local and independent of both. Three days from first launch,
  *               granted before any purchase exists to check.
  *
- * Nothing financial ever reaches RevenueCat: it sees a purchase and an
- * anonymous id, never a transaction, a balance or an SMS. Worth being precise
- * about, because onboarding promises there is no server.
+ * Wafra never sends ledger rows, balances, transaction amounts, SMS bodies,
+ * card/account identifiers or the user's first name to Superwall. Optional
+ * targeting is limited to product/onboarding metadata.
  *
- * The store-facing half lives in billing.ts, which imports the SDK and so
- * cannot be loaded by the test harness. What is here is the arithmetic — the
- * trial clock, the prices, the saving — and it is tested.
+ * The runtime Superwall bridge lives in superwall-billing-provider.native.tsx.
+ * What is here is the pure product/trial contract and it remains testable.
  *
  * SETUP (none of which can be done from here — see docs/billing.md):
- *   1. RevenueCat project → add the Play app → paste the Play service account.
- *   2. Create the two subscriptions in Play Console with the SKUs below.
- *   3. RevenueCat → Entitlements → create `pro`, attach both products.
- *   4. Put the PUBLIC SDK key in app.json → expo.extra.revenueCatAndroidKey.
- * Until step 4, isBillingAvailable() is false and the app behaves exactly as
- * it does today.
+ *   1. Create the two subscriptions in App Store Connect and Play with the SKUs below.
+ *   2. Superwall → Apps/Products → connect both storefront apps/products.
+ *   3. Superwall → Entitlements → attach both products to `pro`.
+ *   4. Put the public Superwall keys in the EAS production environment.
+ * Until step 4, the native fallback explains that purchases are unavailable.
  */
 import { Platform } from 'react-native';
 
-/** The entitlement id configured in RevenueCat. One, for everything Pro. */
+/** The entitlement id configured in Superwall. One, for everything Pro. */
 export const ENTITLEMENT_ID = 'pro';
 
 export const PRO_SKUS = {
@@ -91,7 +89,7 @@ export interface LocalCaptureEntitlementLease {
 
 /**
  * The source-free local grant mirrored into the iOS App Intent store.
- * Purchased `pro` is deliberately absent: only a fresh RevenueCat snapshot
+ * Purchased `pro` is deliberately absent: only a fresh verified store snapshot
  * may create or extend the separate storefront lease.
  */
 export function localCaptureEntitlementLease(
@@ -119,7 +117,7 @@ export function localCaptureEntitlementLease(
  * moving the date backwards has always stretched a trial derived from it, and
  * no arithmetic here can tell that apart from a genuinely slow clock without
  * server state. The bound keeps the figure honest and keeps the grant finite;
- * the real entitlement gate is RevenueCat, asked at every launch.
+ * the real entitlement gate is the store-backed Superwall status, refreshed at launch.
  */
 export function trialDaysLeft(
   state: { trialStartTs: number },
@@ -190,14 +188,8 @@ export function autoCaptureMethod(): Exclude<CaptureMethod, 'manual'> | null {
 }
 
 /**
- * Which store would handle a purchase here. Used for COPY, not for gating —
- * `isBillingAvailable()` in billing.ts is the gate, and it additionally
- * requires a configured RevenueCat key.
- *
- * This one function is all that survives of the other branch's billing stub;
- * its `isBillingAvailable`/`purchasePro`/`restorePro` returned a hardcoded
- * `false` and would have shadowed billing.ts's real implementations at every
- * import site that reached for the nearer name.
+ * Which native storefront owns subscription management. Used for copy/routing;
+ * purchase availability itself is owned by the Superwall provider.
  */
 export type BillingStore = 'play' | 'appStore' | 'none';
 

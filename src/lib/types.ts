@@ -373,6 +373,7 @@ export type OnboardingJourneyStage =
   | 'tracking'
   | 'intention'
   | 'preview'
+  | 'remote-handoff'
   | 'privacy'
   | 'capture'
   | 'complete';
@@ -678,7 +679,7 @@ export interface AppState {
   appLock: boolean;
   /** Day of month the reporting month begins (salary day). 1 = calendar months. */
   monthStartDay: number;
-  /** Cached Wafra Pro entitlement supplied by the platform stores via RevenueCat. */
+  /** Cached Wafra Pro entitlement supplied by the platform stores via Superwall. */
   pro: boolean;
   /** Durable local founder grant, available only from explicitly enabled test builds. */
   founderPro: boolean;

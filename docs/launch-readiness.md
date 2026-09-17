@@ -20,7 +20,7 @@ This document separates work as follows:
 
 - **Repo** — a file, build, or test change that can be completed in this
   repository.
-- **Account** — work in Apple, Google, Expo, RevenueCat, Cloudflare, DNS, or
+- **Account** — work in Apple, Google, Expo, Superwall, Cloudflare, DNS, or
   GitHub owned by the publisher. Do not commit the resulting secrets.
 - **Evidence** — a result that must be observed on the actual signed artifact
   or a physical device.
@@ -33,7 +33,7 @@ This document separates work as follows:
 | App version | `1.0.0`; iOS build `1`; Android version code `1` | EAS production uses remote auto-increment; GitHub Android builds stamp `versionCode` from the run number |
 | IDs | iOS `app.wafra.ios`; Android `app.wafra.android` | Present; the store records still need to be created/confirmed by the account owner |
 | EAS project | No `expo.extra.eas.projectId` | **Blocked** |
-| Billing | Both RevenueCat public SDK keys are empty | **Blocked** for purchasable Pro |
+| Billing | Superwall public SDK keys/campaigns are not configured in the repository | **Blocked** for purchasable Pro |
 | iOS relay client | Relay, Shortcut, and project ID are read from `EXPO_PUBLIC_*` build variables | Production values absent from the repository, as intended; must be present in the EAS production environment |
 | Relay | Worker, D1 schema, encrypted queue, push wake, email, and PDF paths exist; deploy dry-run passes (about 2.6 MiB / 632 KiB gzip) | D1 ID, Worker variables/secrets, routing, rate limit, deployment, and live proof are **blocked** |
 | Legal | Draft privacy policy and terms exist | Legal entity, jurisdiction/processing location, support address, counsel review, hosted URLs, and in-app links are **blocked** |
@@ -58,9 +58,9 @@ Production submission must wait until all of these are true:
   configure its public iCloud URL in the production EAS environment.
 - [ ] **Account:** Configure APNs credentials, Expo enhanced push security,
   and production notification delivery.
-- [ ] **Account:** Configure both stores and RevenueCat: two products per
-  store, entitlement `pro`, localized territory prices, public platform SDK
-  keys, and store server credentials. Do not add storefront introductory
+- [ ] **Account:** Configure both stores and Superwall: two products per
+  store, entitlement `pro`, placement `pro_upgrade`, localized territory prices
+  and public platform SDK keys. Do not add storefront introductory
   trials while the app's local three-day trial is enabled.
 - [ ] **Repo + Account:** Complete legal decisions and counsel review, host
   privacy/terms/support pages on public HTTPS URLs, and add visible links in
@@ -103,8 +103,8 @@ correct for the production environment.
 | `expo.extra.eas.projectId` or `EXPO_PUBLIC_WAFRA_PROJECT_ID` | UUID of Wafra's EAS project | Expo push token attribution and release check |
 | `EXPO_PUBLIC_WAFRA_RELAY_URL` | Reachable HTTPS origin of the production Worker, with `/v1/health` passing | iOS capture, trusted devices, email/PDF import |
 | `EXPO_PUBLIC_WAFRA_SHORTCUT_URL` | `https://www.icloud.com/shortcuts/<published-id>` for a public, credential-free Shortcut | iOS setup |
-| `expo.extra.revenueCatAndroidKey` | RevenueCat **public** Google SDK key beginning `goog_` | Android billing |
-| `expo.extra.revenueCatIosKey` | RevenueCat **public** Apple SDK key beginning `appl_` | iOS billing |
+| `EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY` | Superwall **public** Android SDK key | Android billing/paywalls |
+| `EXPO_PUBLIC_SUPERWALL_IOS_API_KEY` | Superwall **public** iOS SDK key | iOS billing/paywalls |
 
 `EXPO_PUBLIC_*` values are readable from the shipped JavaScript bundle. Never
 put a bearer token, private API key, Shortcut setup code, or service-account
@@ -125,7 +125,7 @@ the intended source auditable. See [EAS environment variables](https://docs.expo
 | Google Play | Verified developer account, accepted agreements, and app record for `app.wafra.android` | Console accepts the AAB under the intended publisher |
 | Android signing | `WAFRA_KEYSTORE_B64`, `WAFRA_KEYSTORE_PASSWORD`; optional `WAFRA_KEY_PASSWORD`, `WAFRA_KEY_ALIAS` | GitHub AAB is signed by the persistent Play upload key. Preserve the keystore and passwords offline |
 | Google Play/EAS | Google service-account JSON with Play Console API access | EAS Submit, if used. Upload to EAS credentials; do not commit it |
-| RevenueCat | Google service-account connection and App Store Connect in-app purchase key/configuration | RevenueCat validates purchases from both stores |
+| Superwall | iOS/Android app setup, store products, `pro` entitlement, published `pro_upgrade` and `onboarding` placements | Native paywalls, remote onboarding and store-backed entitlement state |
 | Cloudflare | Authenticated account with Workers, D1, DNS, Email Routing, and rate-limit access | Production relay can be provisioned and operated |
 | Worker | `PUSH_TOKEN_KEY` | Wrangler secret containing standard base64 of exactly 32 random bytes; encrypts Expo push tokens at rest |
 | Worker | `EXPO_ACCESS_TOKEN` | Wrangler secret used after Expo enhanced push security is enabled |
@@ -256,9 +256,9 @@ curl --fail --show-error https://<production-relay>/v1/health
   names/descriptions, UAE prices matching the approved commercial decision,
   and review screenshots. Do not add an introductory free trial while Wafra's
   local three-day trial remains enabled; the clocks would stack.
-- [ ] Add the Apple app to RevenueCat, connect App Store credentials, create
-  entitlement `pro`, attach both products, and place only the `appl_` public
-  SDK key in app config.
+- [ ] Add the Apple app/products to Superwall, attach both products to
+  entitlement `pro`, publish `pro_upgrade` and `onboarding`, and configure
+  `EXPO_PUBLIC_SUPERWALL_IOS_API_KEY` in the EAS production environment.
 - [ ] Verify subscription terms are displayed before purchase, Restore works,
   manage/cancel routing is understandable, trial/renewal price copy matches the
   live storefront, lapsed/refunded entitlements update, and offline cached
@@ -266,12 +266,11 @@ curl --fail --show-error https://<production-relay>/v1/health
 - [ ] Add working in-app links to the hosted Privacy Policy and Terms of Use on
   the paywall before enabling either subscription product.
 - [ ] Do not promise cross-platform entitlement continuity without proof.
-  Wafra has no login and RevenueCat anonymous customer IDs are normally
-  installation-specific; an Android purchase does not automatically prove an
+  Wafra has no cross-platform account-linking identity; an Android purchase does not automatically prove an
   iPhone entitlement. Either implement and disclose a safe identity/linking
   design or remove that product claim.
 - [ ] Complete App Privacy for the union of app and third-party behavior:
-  RevenueCat purchase history/identifiers as applicable; transient selected
+  Superwall purchase/paywall identifiers and analytics as applicable; transient selected
   bank-alert processing; encrypted structured financial rows; optional email,
   PDF, and trusted-device paths; retention and deletion. Apple requires a
   public privacy policy URL and third-party SDK practices.
@@ -360,8 +359,8 @@ curl --fail --show-error https://<production-relay>/v1/health
   matched video of prominent disclosure -> permission grant -> historical scan
   -> live SMS capture -> transaction, plus a decline/manual-entry path.
 - [ ] Complete Data safety for the actual artifact and all enabled paths. Do
-  not submit “No data collected.” RevenueCat says its SDK requires declaring
-  purchase history; Wafra's optional relay-backed email/PDF/trusted-device
+  not submit “No data collected.” Review Superwall's shipping SDK disclosures;
+  Wafra's optional relay-backed email/PDF/trusted-device
   features must also be assessed even though Android SMS itself stays local.
 - [ ] Complete the Financial features declaration, content rating, target
   audience, ads declaration, app access instructions, privacy policy, account
@@ -373,10 +372,9 @@ curl --fail --show-error https://<production-relay>/v1/health
 - [ ] Create subscriptions `wafra_pro_monthly` and `wafra_pro_yearly`, base
   plans/offers, localized prices and descriptions, with no introductory store
   trial while the app's local three-day trial is enabled. Activate them, attach
-  them to RevenueCat entitlement `pro`, and verify the `goog_` public key in the
-  release build.
-- [ ] Connect RevenueCat to Play with a least-privilege Google service account.
-  Separately upload a Play service account to EAS only if EAS Submit is the
+  them to Superwall entitlement `pro`, publish `pro_upgrade`, and verify the
+  Superwall Android public key in the release build.
+- [ ] Separately upload a Play service account to EAS only if EAS Submit is the
   chosen submission lane.
 - [ ] Configure license testers and test purchase, acknowledgement, renewal,
   cancellation, grace/hold, refund, restore/reinstall, and entitlement expiry
@@ -477,7 +475,7 @@ satisfy it.
   a small and large phone, Arabic/RTL, light/dark, permission denial, battery
   restrictions, and if supported by available hardware, dual-SIM delivery.
 - [ ] Inspect traffic during SMS/notification capture and prove bank-alert
-  content is not sent to the iOS relay or RevenueCat.
+  content is not sent to the iOS relay or Superwall.
 
 ### Both platforms
 
@@ -515,7 +513,7 @@ satisfy it.
 - [ ] Add those links inside the app and to both store records. The support
   path must reach a monitored address owned by the publisher.
 - [ ] Reconcile policy claims with deployed behavior, including Cloudflare,
-  RevenueCat, Expo Push Service/APNs, email/PDF import, trusted devices,
+  Superwall, Expo Push Service/APNs, email/PDF import, trusted devices,
   Keychain survival after uninstall, backups/exports, and deletion failure
   recovery.
 - [x] Ordinary feedback discloses 14-day retention and human maintainer access
@@ -531,7 +529,7 @@ satisfy it.
   hard negatives. Synthetic and public examples are research evidence, not a
   sufficient market launch corpus.
 - [ ] Establish an incident/support process for parser errors, deletion
-  requests, RevenueCat customer deletion, compromised upload/relay keys, relay
+  requests, Superwall customer/privacy requests, compromised upload/relay keys, relay
   outage, and store review questions.
 
 ## What `release:check` covers
@@ -539,8 +537,8 @@ satisfy it.
 The current `npm run release:check` correctly fails with ten configuration
 findings:
 
-1. Android RevenueCat public key missing.
-2. iOS RevenueCat public key missing.
+1. Android Superwall public key missing.
+2. iOS Superwall public key missing.
 3. Production relay URL missing.
 4. Public Shortcut URL missing.
 5. EAS project UUID missing.
@@ -552,7 +550,7 @@ findings:
 
 It verifies only shape/presence:
 
-- RevenueCat key prefixes (`goog_`, `appl_`);
+- Superwall public-key presence/placeholder checks;
 - HTTPS syntax for relay/Shortcut URLs and a `/shortcuts/<id>` pathname;
 - UUID syntax for EAS project and D1 database;
 - exact known legal/support placeholder strings.
@@ -561,7 +559,7 @@ It does **not** prove:
 
 - the Shortcut URL is on `icloud.com`, reachable, current, or credential-free;
 - public build variables are present in the EAS production build;
-- a RevenueCat key belongs to Wafra or products/entitlement/trials work;
+- a Superwall key belongs to Wafra or products/entitlement/campaigns work;
 - D1 exists, is migrated, or is bound to the deployed Worker;
 - Worker variables/secrets, Email Routing, retention, or rate limiting exist;
 - relay URLs, health, crypto delivery, push receipts, APNs, or enhanced push

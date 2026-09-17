@@ -402,21 +402,18 @@ function ktSources(dir) {
       /backup\/restore remain free/.test(listingCopy) &&
       /backup\/restore keep working without Pro/.test(releaseGuide));
 
-  ok('the paywall renders the storefront price instead of ledger Money',
-    /storePrices\?\.\[[a-zA-Z]+\]\?\.priceString/.test(pro) &&
-      /loadStorePrices/.test(pro) &&
-      !/<Money[^>]*PRO_PRICES/.test(pro));
-  ok('native pricing never falls back to an unlabeled USD reference',
-    /Platform\.OS === 'web'[\s\S]{0,100}PRO_REFERENCE_PRICE_STRINGS/.test(pro) &&
-      /if \(!storePrices\?\.\[plan\]\)/.test(pro) &&
-      /billingAvailable && !storePrices\?\.\[plan\]/.test(pro));
-  ok('a failed catalog load can be retried without reopening the paywall',
-    /priceStatus === 'failed'/.test(pro) &&
-      /setPriceRequest\(\(request\) => request \+ 1\)/.test(pro));
-  ok('the paywall discloses renewal and reaches store subscription management',
-    /subscriptionRenewalTerms/.test(pro) &&
+  ok('the native Pro screen delegates storefront pricing and checkout to Superwall',
+    /presentProPaywall/.test(pro) &&
+      /useWafraBilling/.test(pro) &&
       /subscriptionManagementUrl/.test(pro) &&
-      /manageSubscription/.test(pro));
+      !/loadStorePrices|PRO_REFERENCE_PRICE_STRINGS|PRO_PRICES/.test(pro));
+  ok('the native fallback never invents a local price or local checkout catalog',
+    !/priceStatus|setPriceRequest|storePrices|priceString/.test(pro));
+  ok('an unconfigured Superwall build explains itself instead of disabling both actions',
+    /if \(!billing\.available \|\| !billing\.configured\)/.test(pro) &&
+      !/disabled=\{billingAction !== null \|\| !billing\.available \|\| !billing\.configured\}/.test(pro));
+  ok('the purchase contract keeps store subscription management reachable',
+    /manageSubscription/.test(pro) && /subscriptionManagementUrl/.test(pro));
 
   // No English sentence built inline: every user-visible string goes through
   // t() or tf(), so Arabic gets Arabic.
@@ -512,79 +509,80 @@ function ktSources(dir) {
 }
 
 
-/* ── billing ──────────────────────────────────────────────────────────
- *
- * Nothing here can exercise the store SDK, so these check the things that
- * are wrong in the SOURCE rather than at runtime — which is where the
- * expensive mistakes in a billing file live. */
+/* ── billing / Superwall ────────────────────────────────────────────── */
 {
   const src = read('src/lib/purchases.ts');
   const sdk = read('src/lib/billing.ts');
+  const provider = read('src/components/superwall-billing-provider.native.tsx');
+  const remoteOnboarding = read('src/components/superwall-onboarding.native.tsx');
   const layout = read('src/components/app-root-layout.tsx');
+  const pkg = JSON.parse(read('package.json'));
 
-  // The entitlement id is a string shared with a dashboard nobody can grep.
   ok('the entitlement id is named once and exported',
     /export const ENTITLEMENT_ID = 'pro'/.test(src) &&
       (src.match(/'pro'/g) || []).length === 1);
-
-  // Entitlement has to be asked for at launch. Without it `pro` is a local
-  // boolean that survives a lapsed subscription, a refund and a cancellation.
-  ok('entitlement is re-checked on launch',
-    /observeEntitlement/.test(layout) && /refreshEntitlement\(\)/.test(layout));
-
-  // ...and the answer has three states, not two. Treating "could not reach
-  // the store" as "has not paid" locks a paying customer out of their own
-  // ledger the first time they open the app on a plane.
-  ok('a null entitlement leaves the cached flag alone',
-    /generation === refreshGeneration && snapshot\) void apply\(snapshot, allowEqual\)/
-      .test(layout));
-  ok('refreshEntitlement can return null',
-    /Promise<EntitlementSnapshot \| null>/.test(sdk));
-  ok('billing snapshots carry the exact RevenueCat expiration into native capture',
+  ok('Superwall owns the native purchase stack',
+    pkg.dependencies?.['expo-superwall'] && !pkg.dependencies?.['react-native-purchases']);
+  ok('the root is wrapped in the Superwall billing provider',
+    /SuperwallBillingProvider/.test(layout));
+  ok('first-run value onboarding is a Superwall flow with a native recovery fallback',
+    /SuperwallOnboarding/.test(layout) &&
+      /presentOnboardingFlow/.test(remoteOnboarding) &&
+      /<OnboardingGate>\{children\}<\/OnboardingGate>/.test(remoteOnboarding) &&
+      /onboardingFlowStatus === 'error'/.test(remoteOnboarding) &&
+      /onboardingFlowStatus === 'skipped'/.test(remoteOnboarding) &&
+      /onboardingFlowStatus === 'dismissed'/.test(remoteOnboarding));
+  ok('the provider uses public platform keys and named placements',
+    /EXPO_PUBLIC_SUPERWALL_IOS_API_KEY/.test(provider) &&
+      /EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY/.test(provider) &&
+      /pro_upgrade/.test(provider) && /onboarding: 'onboarding'/.test(provider));
+  ok('the remote handoff validates every personalization value and is durable',
+    /wafra_onboarding_handoff/.test(provider) &&
+      /\['spending', 'bills', 'cashflow', 'overview'\]/.test(provider) &&
+      /\['none', 'bank-apps', 'spreadsheet', 'finance-app'\]/.test(provider) &&
+      /'control'/.test(provider) && /'spend-intentionally'/.test(provider) &&
+      /'stay-ahead'/.test(provider) && /'build-buffer'/.test(provider) &&
+      /stage: 'remote-handoff'/.test(provider) && /await ensureDurable\(\)/.test(provider));
+  ok('the local first name is never sent to Superwall',
+    !/userName/.test(provider) && /user's name/.test(provider));
+  ok('unknown storefront state preserves the cached Pro flag',
+    /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
+      /if \(!snapshot\) return/.test(provider));
+  ok('resolved entitlements are re-checked and mirrored on launch/foreground',
+    /superwall\.subscriptionStatus/.test(provider) &&
+      /AppState\.addEventListener\('change'/.test(provider) &&
+      /refreshUser\(\)/.test(provider) &&
+      /setPro\(snapshot\.active\)/.test(provider));
+  ok('foreground refresh never synthesizes inactive from an empty entitlement fetch',
+    !/const resolved: SubscriptionStatus = entitlements\.active/.test(
+      provider.match(/const refresh = useCallback[\s\S]*?\n  \}, \[[^\]]*\]\);/)?.[0] ?? '',
+    ));
+  ok('store snapshots carry a bounded or exact expiration into native capture',
     /expirationDateMs: number \| null/.test(sdk) &&
-      /entitlement\.expirationDateMillis/.test(sdk) &&
+      /STORE_CAPTURE_FALLBACK_LEASE_MS/.test(sdk) &&
       /setIosStoreCaptureEntitlementLease/.test(sdk) &&
-      /syncStoreCaptureEntitlement/.test(layout));
-  ok('active-to-active renewals update native capture before the cached Pro shortcut',
-    /await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?snapshot\.active === currentPro\.current/
-      .test(layout));
-  ok('offline unknown never writes a storefront capture lease',
-    /generation === refreshGeneration && snapshot/.test(layout) &&
-      !/refreshEntitlement\(\)[\s\S]{0,180}else[\s\S]{0,120}syncStoreCaptureEntitlement/.test(layout));
-  ok('purchase and restore mirror their exact CustomerInfo before reporting completion',
-    /purchasePackage\(selectedPackage\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return 'granted'/.test(sdk) &&
-      /restorePurchases\(\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return snapshot\.active/.test(sdk));
-
-  // A secret key in the client is a real incident. RevenueCat's platform
-  // public SDK keys may be committed because native builds need them baked
-  // into Expo config; local development may deliberately leave them empty.
-  const appJson = JSON.parse(read('app.json'));
-  const extra = appJson.expo.extra || {};
-  ok('the Android RevenueCat key is empty or a Google public SDK key',
-    extra.revenueCatAndroidKey === '' || /^goog_[A-Za-z0-9]+$/.test(extra.revenueCatAndroidKey));
-  ok('the iOS RevenueCat key is empty or an Apple public SDK key',
-    extra.revenueCatIosKey === '' || /^appl_[A-Za-z0-9]+$/.test(extra.revenueCatIosKey));
-  ok('no secret RevenueCat key is committed',
-    !/sk_[A-Za-z0-9]{10}/.test(read('app.json') + src + sdk));
+      /syncStoreCaptureEntitlement/.test(provider));
+  ok('restore has three answers and refreshes the pro entitlement',
+    /Promise<boolean \| null>/.test(provider) &&
+      /restored\.result === 'failed'\) return null/.test(provider) &&
+      /return active/.test(provider));
   const releaseCheck = read('scripts/lib/release-readiness.mjs');
-  ok('the release gate rejects prefix-only RevenueCat placeholders',
-    /\^goog_\[A-Za-z0-9\]\+\$/.test(releaseCheck) &&
-      /\^appl_\[A-Za-z0-9\]\+\$/.test(releaseCheck));
+  ok('the release gate requires both Superwall public keys',
+    /EXPO_PUBLIC_SUPERWALL_IOS_API_KEY/.test(releaseCheck) &&
+      /EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY/.test(releaseCheck));
+  ok('no RevenueCat client dependency remains',
+    !/react-native-purchases/.test(read('package.json')) &&
+      !/revenueCat(?:Android|Ios)Key/.test(read('app.json')));
 
-  // Billing must be impossible rather than broken when unconfigured, or the
-  // paywall opens a flow that cannot complete.
-  ok('billing is unavailable without a key', /apiKey\(\) !== null/.test(sdk));
-  ok('billing is unavailable on web', /Platform\.OS !== 'web'/.test(sdk));
-
-  // Product ids are store configuration; native prices come back localized.
   const { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS } = require('./build/purchases');
   ok('both plans have a product id and an explicit USD preview reference',
     Object.keys(PRO_SKUS).every(
       (k) => PRO_SKUS[k] && /^US\$/.test(PRO_REFERENCE_PRICE_STRINGS[k]),
     ),
     { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS });
-  ok('the setup doc names the same product ids',
-    Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)));
+  ok('the setup doc names the same product ids and Superwall placement',
+    Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)) &&
+      read('docs/billing.md').includes('pro_upgrade'));
 }
 
 /* ── private ledger persistence ───────────────────────────────────────
@@ -1290,15 +1288,14 @@ function ktSources(dir) {
   const captureErase = capture.match(
     /export const eraseIosCaptureStore[\s\S]*?\n\};/,
   )?.[0] || '';
+  const billingProvider = read('src/components/superwall-billing-provider.native.tsx');
   ok('native erase deterministically requests local and store entitlement reseeding',
     /await native\.eraseAll\(\)[\s\S]*publishIosCaptureEntitlementReset\(\)/.test(captureErase) &&
-      /subscribeIosCaptureEntitlementReset\(syncLocalCaptureLease\)/.test(layout) &&
-      /subscribeIosCaptureEntitlementReset\(\(\) => \{[\s\S]*apply\(latestSnapshot, true\)/
-        .test(layout));
-  ok('erase can replay the same verified store snapshot while ordinary duplicates stay deduped',
-    /const apply = async \(snapshot: EntitlementSnapshot, allowEqual = false\)/.test(layout) &&
-      /!allowEqual && snapshot\.requestDateMs === latestRequestDateMs/.test(layout) &&
-      /apply\(latestSnapshot, true\)/.test(layout));
+      /subscribeIosCaptureEntitlementReset\(syncLocalCaptureLease\)/.test(billingProvider) &&
+      /subscribeIosCaptureEntitlementReset\(\(\) => \{[\s\S]*latestSnapshot\.current/.test(billingProvider));
+  ok('erase replays the last verified store snapshot without inventing a new entitlement',
+    /const snapshot = latestSnapshot\.current/.test(billingProvider) &&
+      /if \(snapshot\) void applySnapshot\(snapshot\)/.test(billingProvider));
   ok('storage recovery offers conditional legacy Shortcut cleanup after a successful erase',
     /const hadLegacyShortcut = isLegacyShortcutCaptureActive\(relay\)/.test(recovery) &&
       /await clearAll\(cleanupCaptureQueue\)[\s\S]*?shortcutCleanupApplies\(hadLegacyShortcut\)[\s\S]*?openShortcutsApp\(\)/.test(recovery) &&
@@ -1959,24 +1956,19 @@ ok('the spoken label agrees with the sign on screen',
 
 /* ── a store that cannot be reached is not a customer who never paid ─── */
 {
-  const sdk = read('src/lib/billing.ts');
+  const provider = read('src/components/superwall-billing-provider.native.tsx');
   const pro = read('src/app/pro.tsx');
   const strings = read('src/lib/i18n.ts');
 
-  ok('restorePro has three answers, not two',
-    /export async function restorePro\(\): Promise<boolean \| null>/.test(sdk),
-    'false meant both "never bought it" and "could not ask"');
-  ok('the paywall tells a subscriber to retry rather than that nothing exists',
-    /restored === null/.test(code(pro)) && /restoreFailed/.test(pro),
-    'a reinstall on bad connectivity read as "No purchase found"');
-
-  ok('a purchase reports why it did not happen',
-    /export type PurchaseOutcome = 'granted' \| 'cancelled' \| 'failed'/.test(sdk));
-  ok('backing out of the store sheet is told apart from a broken store',
-    /userCancelled/.test(code(sdk)),
-    'an unactivated SKU made "Get Pro" silently inert, forever');
-  ok('the paywall reports a failed purchase and stays silent on a cancelled one',
-    /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
+  ok('restorePro keeps failure distinct from no active purchase',
+    /Promise<boolean \| null>/.test(provider) &&
+      /restored\.result === 'failed'\) return null/.test(provider) &&
+      /return active/.test(provider));
+  ok('the paywall tells an unreachable-store restore apart from no purchase found',
+    /restored === null/.test(code(pro)) && /restoreFailed/.test(pro) &&
+      /!restored/.test(code(pro)) && /noPurchaseFound/.test(pro));
+  ok('the purchase UI is a Superwall placement rather than a local checkout',
+    /presentProPaywall/.test(pro) && !/purchasePackage|purchasePro/.test(pro));
   ok('an unconfirmed entitlement never guarantees that the store charged nothing',
     !/Nothing has been charged/.test(strings) && !/لم يتم خصم أي مبلغ/.test(strings));
   ok('the paywall exposes one live announcement path instead of announcing twice',

@@ -6,13 +6,13 @@ _Prepared 10 September 2026. Complete against the exact archive selected in App 
 
 Wafra does not track users for advertising and the repository contains no ad SDK
 or third-party analytics SDK. The privacy answers must still describe the union
-of Wafra plus RevenueCat and every optional network feature enabled in the
+of Wafra plus Superwall and every optional network feature enabled in the
 submitted binary.
 
 Relevant categories to review in App Store Connect include financial information
 and purchase history used for app functionality, customer-support content sent
 only when the user explicitly submits feedback, and any identifier/purchase data
-RevenueCat documents for the shipping SDK version. The main ledger itself is
+Superwall documents for the shipping SDK version. The main ledger itself is
 stored in encrypted app storage on the device and is not a Wafra account/profile.
 
 The current iPhone automatic-capture path is user-configured Apple Message
@@ -43,10 +43,10 @@ reviewers a real user's bank message, account credential or reusable bearer toke
 ## Remaining App Store Connect blockers
 
 - Publisher export-compliance determination.
-- Final App Privacy answers checked against RevenueCat's shipping SDK behavior.
-- RevenueCat Apple key/products/entitlement and TestFlight purchase/restore proof.
+- Final App Privacy answers checked against Superwall's shipping SDK behavior.
+- Superwall iOS public key, products, `pro` entitlement, `pro_upgrade` campaign
+  and TestFlight purchase/restore proof.
 - Public Privacy/Terms/Support URLs and monitored support contact.
 - Governing-law/counsel approval of Terms and Privacy Policy.
 - Production-signed physical-iPhone verification of local Message automation,
   history import, notifications, deletion and accessibility.
-
