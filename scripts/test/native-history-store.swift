@@ -518,6 +518,38 @@ struct NativeHistoryStoreTests {
         ) == "2025-10-09T08:53:20.000Z"
       )
     }
+    // Physical build 139 produced this system-display date shape on an en_AE
+    // iPhone even though the Shortcut graph requested the custom ISO-like
+    // format. Pin that exact locale/style path so it cannot regress again.
+    let dubaiDisplayZone = TimeZone(identifier: "Asia/Dubai")!
+    var dubaiGregorian = Calendar(identifier: .gregorian)
+    dubaiGregorian.timeZone = dubaiDisplayZone
+    let aeLocale = Locale(identifier: "en_AE")
+    let observedInstant = dubaiGregorian.date(from: DateComponents(
+      year: 2026, month: 9, day: 12, hour: 21, minute: 22
+    ))!
+    let observedNow = dubaiGregorian.date(from: DateComponents(
+      year: 2026, month: 9, day: 17, hour: 14
+    ))!
+    let observedFormatter = DateFormatter()
+    observedFormatter.locale = aeLocale
+    observedFormatter.calendar = dubaiGregorian
+    observedFormatter.timeZone = dubaiDisplayZone
+    observedFormatter.isLenient = false
+    observedFormatter.dateStyle = .medium
+    observedFormatter.timeStyle = .short
+    let observedText = observedFormatter.string(from: observedInstant)
+    check(
+      "build 139 en_AE display date canonicalizes instead of invalid-input-date",
+      WafraMessageHistoryStore.normalizeShortcutProducedInstant(
+        observedText,
+        now: observedNow,
+        locale: aeLocale,
+        calendar: dubaiGregorian,
+        timeZone: dubaiDisplayZone
+      ) == "2026-09-12T17:22:00.000Z"
+    )
+
     var hijriCalendar = Calendar(identifier: .islamicUmmAlQura)
     let dubai = TimeZone(secondsFromGMT: 4 * 60 * 60)!
     hijriCalendar.timeZone = dubai
