@@ -40,6 +40,7 @@ import {
   hasSmsPermission,
   isSmsScanningAvailable,
   openBankNotificationAccessSettings,
+  requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
@@ -649,6 +650,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setSmsDenied(true);
       return;
     }
+    // READ_SMS makes history/catch-up work, but it does not deliver
+    // SMS_RECEIVED while Wafra is backgrounded. Ask for the live-delivery edge
+    // and Wafra's own notification permission here, while the user is
+    // explicitly enabling automatic SMS tracking. Either refusal still keeps
+    // catch-up import usable; the foreground repair prompt can retry later.
+    await requestSmsDeliveryPermission().catch(() => false);
+    await requestVisibleNotificationPermission().catch(() => false);
     trackOnboardingEvent('capture_permission_granted', { focus, tracking, source: 'sms', outcome: 'automatic' });
     try {
       await setAndroidCaptureSources({

@@ -284,8 +284,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "d9fde7919b7d81fc931a4c59920d09d39aacdd96dd4cc9c8fd4f69bd97d689e3",
-      "reviewedChange": "2026-09-17: SMS onboarding now configures only the SMS source, remains on the source-selection screen after permission, and persists the source checkpoint before starting resumable history import."
+      "sha256": "9fc318b4f6664ab1fe53a4a7c8c32ed349346ebf269abdf15311a069c49a8160",
+      "reviewedChange": "2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action."
     },
     {
       "file": "src/components/onboarding-gate.tsx",

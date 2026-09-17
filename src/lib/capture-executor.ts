@@ -327,7 +327,10 @@ export const createCaptureExecutor = ({
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
           importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
-        const saveStarted = tracing ? Date.now() : 0;
+        // Runtime diagnostics are always active in tester builds. Do not zero
+        // this clock when verbose capture tracing is off; that records an
+        // epoch-sized fake duration and hides the real save cost.
+        const saveStarted = Date.now();
         captureTrace('save:start');
         const cursorReceipt = activeLedger.importBatch(importBatch);
         await cursorReceipt.durable;
@@ -376,7 +379,7 @@ export const createCaptureExecutor = ({
       };
     }
 
-    const saveStarted = tracing ? Date.now() : 0;
+    const saveStarted = Date.now();
     captureTrace('save:start', plan.txCount + plan.healedCount);
     const receipt = activeLedger.importBatch(importBatch);
     await receipt.durable;

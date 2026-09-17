@@ -19,6 +19,7 @@ export interface StateStorage {
   multiGet(keys: readonly string[]): Promise<readonly Pair[]>;
   multiSet(entries: readonly WritePair[]): Promise<void>;
   multiRemove(keys: readonly string[]): Promise<void>;
+  withSnapshotRead?<T>(task: () => Promise<T>): Promise<T>;
   destroy(prefix: string): Promise<void>;
 }
 
@@ -27,6 +28,7 @@ export const stateStorage: StateStorage = {
   multiGet: (keys) => AsyncStorage.multiGet([...keys]),
   multiSet: (entries) => AsyncStorage.multiSet([...entries]),
   multiRemove: (keys) => AsyncStorage.multiRemove([...keys]),
+  withSnapshotRead: (task) => task(),
   async destroy(prefix) {
     return withLogoCacheErase(async () => {
       const keys = await AsyncStorage.getAllKeys();

@@ -28,6 +28,8 @@ export interface StateStorage {
   multiGet(keys: readonly string[]): Promise<readonly Pair[]>;
   multiSet(entries: readonly WritePair[]): Promise<void>;
   multiRemove(keys: readonly string[]): Promise<void>;
+  /** Run one logically consistent snapshot read without interleaving encrypted writes. */
+  withSnapshotRead?<T>(task: () => Promise<T>): Promise<T>;
   /** Cryptographically erase this store and any pre-SQLCipher copy. */
   destroy(prefix: string): Promise<void>;
 }
@@ -39,7 +41,8 @@ const TABLE = 'wafra_state';
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
 /**
- * Every write runs on the ONE keyed connection, so they are serialised here.
+ * Every ledger mutation and snapshot read runs on the ONE keyed connection, so
+ * they are serialised here.
  *
  * This used to be `withExclusiveTransactionAsync`, which does not do what it
  * looks like it does on an encrypted database — see `writeTransaction` below.
@@ -47,9 +50,11 @@ let databasePromise: Promise<SQLiteDatabase> | null = null;
  * nested transactions, so two overlapping `multiSet` calls on one connection
  * would make the second `BEGIN` fail outright.
  *
- * StoreProvider already chains its own saves, but `destroy` and
- * `migrateLegacyState` write outside that queue, so the guarantee belongs here
- * rather than in the caller.
+ * StoreProvider already chains its own saves, but the background-capture and
+ * foreground StoreProvider persistence owners can overlap. Reads must join the
+ * same queue too: expo-sqlite uses one native connection, and an async read that
+ * lands inside another owner's BEGIN IMMEDIATE transaction can observe a split
+ * snapshot or fail with an uncoded native exception.
  */
 let writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -188,6 +193,7 @@ async function openEncryptedDatabase(): Promise<SQLiteDatabase> {
 }
 
 const encryptedStorage: StateStorage = {
+  withSnapshotRead: (task) => serialiseWrite(task),
   // Reads rethrow rather than returning null. A read that FAILED and a key
   // that is genuinely absent are different facts, and the caller turns the
   // second one into "this phone has never run the app" — so collapsing them

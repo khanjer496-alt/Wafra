@@ -90,7 +90,7 @@ for(const language of ['en','ar'])test(`onboarding shows an inline labeled examp
  assert.ok(example,'the real regional money scene is embedded on welcome');
  for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(example).includes(bank),bank);
  assert.ok(text(example).includes('AED 120.00'));
- assert.ok(text(example).includes(t('onboardSceneOrganized')));
+ assert.ok(text(example).includes(t('onboardSceneAlertsToPicture')));
  assert.ok(!walk(example).some(n=>n.props?.onPress),'the poster scene is display-only');
  assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available beside the visual story');
  assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));

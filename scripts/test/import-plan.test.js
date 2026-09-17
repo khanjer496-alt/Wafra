@@ -1009,6 +1009,30 @@ const DECLINE_SMS = [{
   ok('identity resolution: bare card wording reuses one unambiguous known card',
     againstKnown.newAccountCount === 0 && againstKnown.batch.transactions[0]?.accountId === 'adcb1111',
     againstKnown.batch);
+  ok('identity resolution: an already-known issuer is not re-emitted as fake account metadata',
+    Object.keys(againstKnown.batch.bankNames).length === 0,
+    againstKnown.batch.bankNames);
+
+  const explicitKnownDebit = {
+    ...BASE,
+    accounts: [{
+      id: 'adcb-debit-1111', name: 'ADCB Debit Card •1111', kind: 'card', cardType: 'debit',
+      last4: '1111', bankName: 'ADCB', openingFils: 0, color: '#f00',
+    }],
+    accountHints: { 'ADCB|debit|1111': 'adcb-debit-1111', '1111': 'adcb-debit-1111' },
+  };
+  const explicitKnownDebitPurchase = {
+    ...unknownPurchase,
+    card: { last4: '1111', kind: 'debit' },
+    raw: 'Debit Card ending 1111',
+    smsTs: unknownPurchase.smsTs + 1,
+  };
+  const againstKnownDebit = buildImportPlan(
+    [explicitKnownDebitPurchase], explicitKnownDebit, explicitKnownDebitPurchase.smsTs);
+  ok('identity resolution: an unchanged known card type stays off the live-import mutation path',
+    Object.keys(againstKnownDebit.batch.bankNames).length === 0 &&
+      Object.keys(againstKnownDebit.batch.cardTypes).length === 0,
+    { bankNames: againstKnownDebit.batch.bankNames, cardTypes: againstKnownDebit.batch.cardTypes });
 
   const sameBatch = buildImportPlan([unknownPurchase, creditStatement], BASE, creditStatement.smsTs, new Date(2026, 7, 2));
   ok('identity resolution: bare purchase plus statement creates one account in one scan',

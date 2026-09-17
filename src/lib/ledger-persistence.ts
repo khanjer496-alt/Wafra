@@ -105,57 +105,71 @@ export function createLedgerPersistence({
     storedChunkOrder = currentChunkOrder;
   };
 
-  const readSnapshot = async (): Promise<PersistedState | null> => {
-    let raw = await storage.getItem(prefix);
-    if (!raw && (await migrateLegacyState(prefix))) raw = await storage.getItem(prefix);
-    if (!raw) {
-      resetWriteCache();
-      return null;
-    }
+  // Native SQLCipher supplies a connection-wide snapshot lease. The fallback
+  // keeps in-memory/test and older browser adapters source-compatible.
+  const withSnapshotRead = <T>(task: () => Promise<T>): Promise<T> =>
+    storage.withSnapshotRead ? storage.withSnapshotRead(task) : task();
 
-    const parsed = JSON.parse(raw) as PersistedMeta;
-    const chunkBodies: string[] = [];
-    const chunkOrder: ChunkOrder =
-      parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
-    let corrupt = false;
+  const readExistingSnapshot = async (): Promise<PersistedState | null> =>
+    withSnapshotRead(async () => {
+      const raw = await storage.getItem(prefix);
+      if (!raw) {
+        resetWriteCache();
+        return null;
+      }
 
-    if (!Array.isArray(parsed.transactions)) {
-      const count = Number(parsed.txChunks) || 0;
-      const blocks: Transaction[][] = [];
-      if (count > 0) {
-        const pairs = await storage.multiGet(
-          Array.from({ length: count }, (_, index) => chunkKey(index)),
-        );
-        for (const [, value] of pairs) {
-          if (!value) {
-            corrupt = true;
-            continue;
-          }
-          try {
-            const rows = JSON.parse(value) as Transaction[];
-            if (Array.isArray(rows)) {
-              blocks.push(rows);
-              chunkBodies.push(value);
-            } else {
+      const parsed = JSON.parse(raw) as PersistedMeta;
+      const chunkBodies: string[] = [];
+      const chunkOrder: ChunkOrder =
+        parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
+      let corrupt = false;
+
+      if (!Array.isArray(parsed.transactions)) {
+        const count = Number(parsed.txChunks) || 0;
+        const blocks: Transaction[][] = [];
+        if (count > 0) {
+          const pairs = await storage.multiGet(
+            Array.from({ length: count }, (_, index) => chunkKey(index)),
+          );
+          for (const [, value] of pairs) {
+            if (!value) {
+              corrupt = true;
+              continue;
+            }
+            try {
+              const rows = JSON.parse(value) as Transaction[];
+              if (Array.isArray(rows)) {
+                blocks.push(rows);
+                chunkBodies.push(value);
+              } else {
+                corrupt = true;
+              }
+            } catch {
               corrupt = true;
             }
-          } catch {
-            corrupt = true;
           }
         }
+        if (chunkOrder === currentChunkOrder) blocks.reverse();
+        parsed.transactions = blocks.flat();
       }
-      if (chunkOrder === currentChunkOrder) blocks.reverse();
-      parsed.transactions = blocks.flat();
-    }
 
-    delete parsed.txChunks;
-    delete parsed.txChunkOrder;
+      delete parsed.txChunks;
+      delete parsed.txChunkOrder;
 
-    previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
-    previousChunks = corrupt ? [] : chunkBodies;
-    storedChunkOrder = chunkOrder;
-    previousTransactions = parsed.transactions ?? [];
-    return parsed;
+      previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
+      previousChunks = corrupt ? [] : chunkBodies;
+      storedChunkOrder = chunkOrder;
+      previousTransactions = parsed.transactions ?? [];
+      return parsed;
+    });
+
+  const readSnapshot = async (): Promise<PersistedState | null> => {
+    const existing = await readExistingSnapshot();
+    if (existing) return existing;
+    // Legacy migration writes into the encrypted store, so it must run OUTSIDE
+    // the snapshot-read lock. Re-enter the lock only after that write settles.
+    if (await migrateLegacyState(prefix)) return readExistingSnapshot();
+    return null;
   };
 
   /** Logical row range for one persisted chunk in either supported layout. */

@@ -814,7 +814,7 @@ function bodyOf(source, header) {
    * scrambled order, which is enough to change which of two duplicate rows
    * `reconcileCaptureDuplicates` keeps.
    */
-  const load = bodyOf(ledgerPersistenceSource, 'const readSnapshot = async');
+  const load = bodyOf(ledgerPersistenceSource, 'const readExistingSnapshot = async');
   ok('the loader reads the stored chunk layout before reassembling',
     !!load &&
       /parsed\.txChunkOrder === currentChunkOrder/.test(load) &&

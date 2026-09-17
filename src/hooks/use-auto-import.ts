@@ -27,11 +27,13 @@ import { useToast } from '@/components/ui/toast';
 import {
   hasBankNotificationAccess,
   hasBankNotificationSystemAccess,
+  hasSmsDeliveryPermission,
   openBankNotificationAccessSettings,
   hasSmsPermission,
   isSmsInboxAccessError,
   isSmsScanningAvailable,
   openSmsPermissionSettings,
+  requestSmsDeliveryPermission,
   requestSmsPermission,
   subscribeInboxChanges,
 } from '@/lib/auto-import';
@@ -50,7 +52,12 @@ import {
 } from '@/lib/android-capture-sources';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
-import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
+import {
+  notificationDeliveryAllowed,
+  requestNotificationPermission,
+  syncDailySummary,
+  syncPaymentReminders,
+} from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
@@ -79,6 +86,7 @@ import SmsReader from '../../modules/sms-reader';
 /** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
 let androidNotificationAccessPromptShown = false;
+let androidSmsLiveAlertPromptShown = false;
 // A quick app switch must not reopen/decrypt the unchanged Android bank-app
 // queue on every resume. Native `onQueueChanged` edges make fresh rows drain
 // immediately while Wafra is alive; the bounded recheck is only a safety net
@@ -774,6 +782,44 @@ export function useAutoImport(
       }],
     });
   }, [entitlementActive, getStateSnapshot, state.captureOptOut, state.hydrated, state.onboarded, toast, watchForeground]);
+
+  // Older Android builds could have READ_SMS (foreground catch-up works) while
+  // lacking RECEIVE_SMS or POST_NOTIFICATIONS (no Wafra alert while the app is
+  // away). That exact split looks like capture is healthy until the next app
+  // open. Repair existing installs once per JS session with an explicit action
+  // rather than silently leaving the native instant-alert preference "on".
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !watchForeground || androidSmsLiveAlertPromptShown) return;
+    const current = getStateSnapshot();
+    if (!current.hydrated || !current.onboarded || current.captureOptOut ||
+        !isProActive(current) || !androidSmsCaptureEnabled(current)) return;
+    try {
+      if (SmsReader?.getInstantAlerts?.() === false) return;
+    } catch {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      hasSmsDeliveryPermission().catch(() => false),
+      notificationDeliveryAllowed().catch(() => false),
+    ]).then(([deliveryReady, notificationsReady]) => {
+      if (cancelled || (deliveryReady && notificationsReady)) return;
+      androidSmsLiveAlertPromptShown = true;
+      toast.show(t('instantAlertsLivePermissionPrompt'), {
+        tone: 'warning',
+        actions: [{
+          label: t('enableAction'),
+          onPress: () => void (async () => {
+            const delivery = await requestSmsDeliveryPermission().catch(() => false);
+            if (!delivery) return;
+            await requestNotificationPermission().catch(() => false);
+          })(),
+        }],
+      });
+    });
+    return () => { cancelled = true; };
+  }, [entitlementActive, getStateSnapshot, state.androidCaptureSources?.sms,
+    state.captureOptOut, state.hydrated, state.onboarded, toast, watchForeground]);
 
   const recoverIosCapture = useCallback((): Promise<boolean> => {
     if (iosRecoveryInFlight.current) return iosRecoveryInFlight.current;

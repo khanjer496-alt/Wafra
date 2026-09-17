@@ -68,7 +68,7 @@ for(const language of ['en','ar']) {
   for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(scene).includes(bank),bank);
   assert.match(text(scene),/120\.00/);
   assert.match(text(scene),/7,062\.00/);
-  assert.ok(text(scene).includes(t('onboardSceneOrganized')));
+  assert.ok(text(scene).includes(t('onboardSceneAlertsToPicture')));
   // Nothing inside the scene is pressable, so the example cannot reach the store.
   assert.ok(!walk(scene).some(n=>n.props.onPress));
   assert.deepEqual(h.events,[]);

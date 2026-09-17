@@ -688,7 +688,15 @@ export function buildImportPlan(
       const known = effectiveCardType(ref);
       // A statement or payment's explicit credit evidence is stronger than a
       // purchase alert whose missing type made the parser fall back to debit.
-      if (kind === 'credit' || known !== 'credit') cardTypes[ref] = kind;
+      // Existing cards already carrying this exact type need no reducer patch.
+      // Re-emitting unchanged metadata on every normal purchase disabled the
+      // incremental-capture fast path and forced a whole-ledger reconciliation
+      // for one new row. Keep provisional same-batch refs explicit because
+      // later rows in this plan may still upgrade them.
+      const existingRef = !/^\d+$/.test(ref);
+      if (!existingRef || (kind === 'credit' ? known !== 'credit' : known === undefined)) {
+        cardTypes[ref] = kind;
+      }
       if (kind === 'credit' && snapshots[ref]?.kind === 'balance') {
         snapshots[ref] = { ...snapshots[ref], kind: 'limit' };
       }
@@ -702,7 +710,13 @@ export function buildImportPlan(
       // reused legacy holding is deliberately non-confident; stamping the SMS
       // sender onto it would make later resolver passes treat that guess as
       // established identity.
-      if (bank && confident) bankNames[ref] ??= bank.name;
+      if (bank && confident) {
+        const account = accountAtRef(ref);
+        const existingRef = !/^\d+$/.test(ref);
+        // Learning a missing issuer is a real mutation. Re-stating the issuer
+        // already persisted on this exact account is not.
+        if (!existingRef || !account?.bankName) bankNames[ref] ??= bank.name;
+      }
       noteType(ref);
       return { accountId: ref, confident };
     };

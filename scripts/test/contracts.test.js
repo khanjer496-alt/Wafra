@@ -723,9 +723,13 @@ function ktSources(dir) {
     /kind: 'wafra\.sync'/.test(wake) &&
       /_contentAvailable: true/.test(wake) &&
       !/\btitle:|\bbody:|merchant|amountFils/.test(wake));
-  ok('Android notification permission is never requested on cold launch',
-    !/requestNotificationPermission/.test(home) &&
-      !/requestNotificationPermission/.test(onboarding));
+  ok('Android notification permission is requested only from an explicit user action',
+    /onPress:\s*\(\) => void \(async \(\) => \{[\s\S]{0,420}requestNotificationPermission\(\)/.test(home) &&
+      /const startScan = async \(\) => \{[\s\S]{0,1800}requestVisibleNotificationPermission\(\)/.test(onboarding) &&
+      /const finishNotificationChoice = async[\s\S]{0,650}requestVisibleNotificationPermission\(\)/.test(onboarding) &&
+      (home.match(/requestNotificationPermission\(\)/g) ?? []).length === 1 &&
+      (onboarding.match(/requestVisibleNotificationPermission\(\)/g) ?? []).length === 2,
+    'cold launch may offer an Enable action, but it must not open Android permission UI until the user taps it');
   ok('headless sync writes SQLCipher before relay acknowledgement',
     executor.indexOf('await background.stage(queued.parsed)') <
       executor.indexOf(
