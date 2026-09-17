@@ -1155,13 +1155,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     }}
                     style={[styles.nameInput, { textAlign: language === 'ar' ? 'right' : 'left' }]}
                   />
-                  <View style={styles.namePreviewSlot} testID="onboarding-name-preview" accessibilityLiveRegion="polite">
-                    {draftPreferredName ? (
+                  {draftPreferredName ? (
+                    <View style={styles.namePreviewSlot} testID="onboarding-name-preview" accessibilityLiveRegion="polite">
                       <ThemedText style={styles.namePreviewText}>
                         {tf('onboardNamePreview', { name: draftPreferredName })}
                       </ThemedText>
-                    ) : null}
-                  </View>
+                    </View>
+                  ) : null}
                   <View style={styles.namePrivacyLine}>
                     <Icon name="lock" size={13} color={night.primary} />
                     <ThemedText style={styles.namePrivacyText}>{t('onboardNamePrivacy')}</ThemedText>
@@ -1214,7 +1214,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
                       </View>
-                      <FocusChooser value={selectedFocus} onChange={chooseFocus} reducedMotion={reducedMotion} />
+                      <FocusChooser value={selectedFocus} onChange={chooseFocus} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -1266,7 +1266,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardIntentionBody')}</ThemedText>
                       </View>
-                      <IntentionChooser value={selectedIntention} onChange={chooseIntention} reducedMotion={reducedMotion} />
+                      <IntentionChooser value={selectedIntention} onChange={chooseIntention} marketId={state.marketId} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -1305,13 +1305,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {activeStep === 'capture' && (
                     <>
                       <View style={styles.captureHero}>
-                        <View style={styles.captureIcon}>
-                          <Icon
-                            name={Platform.OS === 'web' ? 'check' : 'mail'}
-                            size={27}
-                            color={night.primary}
-                          />
-                        </View>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
                           {t(capture.title)}
                         </ThemedText>
@@ -1780,15 +1773,7 @@ const styles = StyleSheet.create({
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
   permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { backgroundColor: night.primary },
-  captureHero: { gap: 6, alignItems: 'flex-start' },
-  captureIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
-    backgroundColor: night.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  captureHero: { gap: 5, alignItems: 'flex-start' },
   captureActions: { marginTop: 'auto', paddingTop: 10, gap: 8 },
   skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
