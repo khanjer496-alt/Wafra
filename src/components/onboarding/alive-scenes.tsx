@@ -17,7 +17,7 @@ import Animated, {
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
-import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
+import { Colors, Fonts, Radius } from '@/constants/theme';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';

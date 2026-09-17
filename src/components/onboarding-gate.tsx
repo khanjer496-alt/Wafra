@@ -11,7 +11,6 @@ import {
   StyleSheet,
   TextInput,
   View,
-  type AccessibilityRole,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -460,7 +459,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     void restore();
     return () => { cancelled = true; };
   }, [state.captureOptOut, state.historyImport, state.hydrated, state.onboarded, state.onboardingPlan,
-    state.onboardingProfile, hydrationFailed, pathname, params.onboarding, router, resumeAttempt]);
+    state.onboardingProfile, state.userName, hydrationFailed, pathname, params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = !previewMode && params.onboarding === 'complete' ? 'complete' : step;
   const capture = captureCopy();
@@ -668,7 +667,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const enableAndroidNotificationAdmission = React.useCallback(async (): Promise<boolean> => {
     if (Platform.OS !== 'android' || !NotificationReader?.setCaptureEnabled) return false;
-    const expiresAt = bankNotificationAdmissionExpiresAt(state);
+    const expiresAt = bankNotificationAdmissionExpiresAt({
+      pro: state.pro,
+      founderPro: state.founderPro,
+      trialStartTs: state.trialStartTs,
+    });
     if (expiresAt <= Date.now()) return false;
     try {
       return NotificationReader.setSourceConfiguration
