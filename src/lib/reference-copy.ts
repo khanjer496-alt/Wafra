@@ -63,13 +63,13 @@ export const spendingCopy = {
 
 export const spendingTrendsCopy = {
   en: { cashflow: 'Income & spending', sixMonths: 'Six money months', income: 'Income', spending: 'Spending', net: 'Net',
-    merchants: 'Top merchants', change: 'What changed', fewer: 'Less', more: 'More', vs: 'Compared with',
+    latest: 'Latest', merchants: 'Top merchants', change: 'What changed', fewer: 'Less', more: 'More', vs: 'Compared with',
     noMerchants: 'Merchant trends will appear after you add spending.', noChange: 'No material category change for this comparison.',
     missingComparison: 'Choose a shorter period for a comparable view.', patterns: 'Spending by weekday',
     patternsNote: 'Recorded spending, excluding fixed commitments. This is not a forecast.',
     noData: 'No recorded activity', records: 'transactions', partial: 'The selected month may be incomplete.' },
   ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق', net: 'الصافي',
-    merchants: 'أبرز التجار', change: 'ما الذي تغير', fewer: 'أقل', more: 'أكثر', vs: 'مقارنة مع',
+    latest: 'الأحدث', merchants: 'أبرز التجار', change: 'ما الذي تغير', fewer: 'أقل', more: 'أكثر', vs: 'مقارنة مع',
     noMerchants: 'ستظهر اتجاهات التجار بعد إضافة المصروفات.', noChange: 'لا يوجد تغير كبير في الفئات لهذه المقارنة.',
     missingComparison: 'اختر فترة أقصر لعرض المقارنة.', patterns: 'الإنفاق حسب أيام الأسبوع',
     patternsNote: 'المصروفات المسجلة باستثناء الالتزامات الثابتة. ليست توقعات مستقبلية.',

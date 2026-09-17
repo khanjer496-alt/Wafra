@@ -12,6 +12,7 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED, monthLabel, weekdayShort } from '@/lib/format';
+import { tapped } from '@/lib/haptics';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
@@ -53,6 +54,8 @@ export function SpendingTrends(p: Props) {
   const w = copy[lang === 'ar' ? 'ar' : 'en']; const [patterns, setPatterns] = useState(false);
   const max = Math.max(1, ...p.months.flatMap((m) => [m.incomeFils, m.expenseFils]));
   const selected = p.months.find((m) => m.key === p.selectedKey);
+  const latest = p.months.at(-1);
+  const canReturnToLatest = !!latest && latest.key !== p.selectedKey;
   const hasActivity = (month: MonthFlow) => month.incomeFils !== 0 || month.expenseFils !== 0;
   const monthDescription = (month: MonthFlow) => hasActivity(month)
     ? `${monthLabel(month.key)}. ${w.income}: ${moneyLabel(month.incomeFils)}. ${w.spending}: ${moneyLabel(month.expenseFils)}`
@@ -97,10 +100,17 @@ export function SpendingTrends(p: Props) {
               const inH = Math.max(month.incomeFils > 0 ? 3 : 0, month.incomeFils / max * 100);
               const outH = Math.max(month.expenseFils > 0 ? 3 : 0, month.expenseFils / max * 100);
               return <Pressable key={month.key} accessibilityRole="button"
+                testID={`cashflow-month-${month.key}`}
                 aria-selected={isSelected}
                 accessibilityState={{ selected: isSelected }}
                 accessibilityLabel={monthDescription(month)}
-                onPress={() => p.onMonth(month.key)} style={styles.column}>
+                onPress={() => { if (!isSelected) { tapped(); p.onMonth(month.key); } }}
+                hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
+                pressRetentionOffset={{ top: 18, bottom: 18, left: 8, right: 8 }}
+                style={({ pressed }) => [styles.column, {
+                  backgroundColor: pressed && !isSelected ? theme.backgroundSelected : 'transparent',
+                  opacity: pressed ? 0.94 : 1,
+                }]}>
                 <View style={[styles.barPair, isSelected && { backgroundColor: theme.backgroundSelected, borderRadius: 6 }]}>
                   <View style={[styles.bar, styles.barIn, { height: `${inH}%`, backgroundColor: theme.primary, opacity: isSelected || month.incomeFils === 0 ? 1 : 0.85 }]} />
                   <View style={[styles.bar, styles.barOut, { height: `${outH}%`, backgroundColor: theme.expenseGraphic, opacity: isSelected || month.expenseFils === 0 ? 1 : 0.7 }]} />
@@ -121,16 +131,29 @@ export function SpendingTrends(p: Props) {
       {selected && <View style={[styles.selected, { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder }]} accessibilityLiveRegion="polite">
         <View style={styles.selectedHead}>
           <ThemedText type="smallBold">{monthLabel(selected.key)}</ThemedText>
-          {deltaPct !== null && <View style={[styles.deltaChip, {
-            backgroundColor: theme.background,
-            borderColor: deltaFils > 0 ? theme.expenseSoftBorder : theme.primaryBorder,
-          }]}>
-            <Icon name={deltaFils > 0 ? 'arrow-up' : 'arrow-down'} size={12}
-              color={deltaFils > 0 ? theme.expenseGraphic : theme.primary} />
-            <ThemedText type="meta" tabular themeColor={deltaFils > 0 ? 'expense' : 'income'}>
-              {Math.abs(deltaPct)}% {deltaFils > 0 ? w.more : w.fewer}
-            </ThemedText>
-          </View>}
+          <View style={styles.selectedHeadActions}>
+            {canReturnToLatest && latest ? <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={w.latest}
+              onPress={() => { tapped(); p.onMonth(latest.key); }}
+              hitSlop={6}
+              style={({ pressed }) => [styles.latestButton, {
+                borderColor: theme.cardBorder,
+                backgroundColor: pressed ? theme.background : 'transparent',
+              }]}>
+              <ThemedText type="meta" style={{ color: theme.primary }}>{w.latest}</ThemedText>
+            </Pressable> : null}
+            {deltaPct !== null && <View style={[styles.deltaChip, {
+              backgroundColor: theme.background,
+              borderColor: deltaFils > 0 ? theme.expenseSoftBorder : theme.primaryBorder,
+            }]}>
+              <Icon name={deltaFils > 0 ? 'arrow-up' : 'arrow-down'} size={12}
+                color={deltaFils > 0 ? theme.expenseGraphic : theme.primary} />
+              <ThemedText type="meta" tabular themeColor={deltaFils > 0 ? 'expense' : 'income'}>
+                {Math.abs(deltaPct)}% {deltaFils > 0 ? w.more : w.fewer}
+              </ThemedText>
+            </View>}
+          </View>
         </View>
         {monthFigures(selected)}
         <View style={styles.selectedNetRow}>
@@ -144,7 +167,8 @@ export function SpendingTrends(p: Props) {
           accessibilityRole="button" accessibilityLabel={monthDescription(month)}
           aria-selected={month.key === p.selectedKey}
           accessibilityState={{ selected: month.key === p.selectedKey }}
-          onPress={() => p.onMonth(month.key)}
+          onPress={() => { if (month.key !== p.selectedKey) { tapped(); p.onMonth(month.key); } }}
+          pressRetentionOffset={12}
           style={[styles.monthDetail, { borderColor: theme.cardBorder }]}>
           <ThemedText type="smallBold">{monthLabel(month.key)}</ThemedText>
           {monthFigures(month)}
@@ -212,7 +236,7 @@ const styles = StyleSheet.create({
   grid: { position: 'absolute', left: 0, right: 0, top: 0, height: 148, justifyContent: 'space-between' },
   gridline: { height: StyleSheet.hairlineWidth },
   chart: { flexDirection: 'row', gap: 4 },
-  column: { flex: 1, minWidth: 0, gap: 6 },
+  column: { flex: 1, minWidth: 0, gap: 6, borderRadius: 8 },
   barPair: { height: 148, alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'center', gap: 3, paddingHorizontal: 3, paddingBottom: 2 },
   bar: { width: '36%' },
   barIn: { borderTopLeftRadius: 4, borderTopRightRadius: 4 },
@@ -224,6 +248,8 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   selected: { paddingVertical: 10, paddingHorizontal: 12, gap: 8, borderWidth: 1, borderRadius: 12 },
   selectedHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  selectedHeadActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 },
+  latestButton: { minHeight: 30, minWidth: 54, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   selectedNetRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
   section: { gap: 8 }, group: { overflow: 'hidden', },

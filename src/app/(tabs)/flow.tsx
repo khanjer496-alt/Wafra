@@ -60,7 +60,15 @@ export default function FlowScreen() {
   const [category, setCategory] = useState<CategoryId | null>(null);
   const [categoryHistoryEndKey, setCategoryHistoryEndKey] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
-  useEffect(() => { if (validView(params.view)) setView(params.view); }, [params.view]);
+  // The Trends chart owns a stable six-month viewport while a user inspects
+  // individual months. Without a separate anchor, tapping an older bar makes
+  // that month the new end of the window, so the newest month disappears.
+  const [trendWindowEndKey, setTrendWindowEndKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!validView(params.view)) return;
+    setTrendWindowEndKey(null);
+    setView(params.view);
+  }, [params.view]);
   useEffect(() => { setFilter('all'); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
@@ -77,6 +85,11 @@ export default function FlowScreen() {
   const rows = useMemo(() => spendingCategoryRows(summary, state.budgets, period.mode === 'month'), [summary, state.budgets, period.mode]);
   const accountById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts]);
   const key = period.mode === 'month' ? period.key : monthKey(new Date());
+  const trendWindowAnchorKey = trendWindowEndKey ?? key;
+  const setViewMode = (next: ViewMode) => {
+    if (next !== view) setTrendWindowEndKey(null);
+    setView(next);
+  };
   const openCategory = (id: CategoryId) => {
     // Keep the visible six-month window anchored to the month the user opened.
     // Previously every bar tap moved the window itself, so tapping Aug while
@@ -135,7 +148,7 @@ export default function FlowScreen() {
   }, [sortedActivity, appliedQuery, accountById]);
   const analysis = useMemo(() => {
     if (view !== 'trends') return null;
-    const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(key, i - 5));
+    const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
     const buckets = new Map(keys.map((key) => [key, { key, incomeFils: 0, expenseFils: 0 }]));
     for (const tx of state.transactions) {
       const bucket = buckets.get(monthKey(tx.date)); if (!bucket) continue;
@@ -148,7 +161,7 @@ export default function FlowScreen() {
       movers: categoryMovers(state.transactions, period, 5, live, internal),
       weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
       comparisonLabel: comparable ? periodLabel(comparable) : null };
-  }, [view, key, state.transactions, period, live, internal]);
+  }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
 
   const flowHeader: ScreenHeaderProps = { title: t('tabFlow'), actions: [{ icon: 'search', label: w.search, onPress: () => setView('activity') }] };
 
@@ -156,7 +169,7 @@ export default function FlowScreen() {
     <ScreenScaffold tabbed headerMode="inline" testID="reference-spending-screen"
       header={flowHeader}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
-      <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
+      <SegmentedControl value={view} onChange={setViewMode} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
@@ -209,12 +222,16 @@ export default function FlowScreen() {
           </View>
         </View>
         <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
-          onMonth={(key) => setPeriod({ mode: 'month', key })}
+          onMonth={(monthKey) => {
+            if (monthKey === key) return;
+            setTrendWindowEndKey((anchor) => anchor ?? trendWindowAnchorKey);
+            setPeriod({ mode: 'month', key: monthKey });
+          }}
           onMerchant={(merchant) => router.push(merchantSpendingHref(merchant))}
           onCategory={openCategory} />
       </>}
     </ScreenScaffold>
-    <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
+    <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} onApply={() => setTrendWindowEndKey(null)} />
     <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
     <BottomSheet
       visible={category !== null}
