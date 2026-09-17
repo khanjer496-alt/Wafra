@@ -569,7 +569,7 @@ try {
         await turns(page).first().waitFor({ state: 'visible' });
         await latestVisible(page);
         const answer = await turns(page).first().innerText();
-        assert.match(answer, /Aug(?:ust)? 2026|2026-08/);
+        assert.match(answer, /1 Aug(?:ust)?\s*[–-]\s*31 Aug(?:ust)?|Aug(?:ust)? 2026|2026-08/);
         if (source === 'home' || source === 'flow') assert.ok(answer.includes(money(PREVIOUS_TOTAL)), answer);
         else {
           assert.ok(answer.includes(JSON.stringify(MERCHANT)), 'context prompt preserves the complete quoted name');
