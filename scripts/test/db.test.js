@@ -455,6 +455,18 @@ const hydration = loadHydrationExports();
 const { buildLaunchBenchmarkBackup } = require('./build/launch-benchmark.js');
 const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
 
+ok('ledger metadata and transaction chunks are read under one native storage lease',
+  /withSnapshotRead: \(task\) => serialiseWrite\(task\)/.test(storage) &&
+    /withSnapshotRead[\s\S]*?storage\.withSnapshotRead[\s\S]*?readExistingSnapshot[\s\S]*?withSnapshotRead[\s\S]*?storage\.getItem[\s\S]*?storage\.multiGet/.test(ledgerPersistenceSource),
+  'foreground hydration and a headless capture share one SQLCipher connection. Reading meta ' +
+    'before a background write and chunks after it can produce a split snapshot or an uncoded ' +
+    'native read failure; the complete snapshot read must hold the same queue as writes');
+
+ok('legacy migration is outside the snapshot-read lease before the ledger is reread',
+  /const readSnapshot[\s\S]*?readExistingSnapshot\(\)[\s\S]*?migrateLegacyState\(prefix\)[\s\S]*?readExistingSnapshot\(\)/.test(ledgerPersistenceSource),
+  'legacy migration writes through the same encrypted queue, so attempting it while the read ' +
+    'lease is held would deadlock behind itself');
+
 ok('a failed hydration latches writes off',
   /mode = 'blocked'/.test(ledgerPersistenceSource) &&
     /if \(mode !== 'ready'\) return Promise\.resolve\(false\)/.test(ledgerPersistenceSource),

@@ -215,6 +215,17 @@ export async function hasSmsPermission(): Promise<boolean> {
   return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
 }
 
+/**
+ * READ_SMS is enough for catch-up after Wafra opens; RECEIVE_SMS is what lets
+ * Android deliver the real-time SMS_RECEIVED edge while Wafra is backgrounded.
+ * Keep the two facts separate so diagnostics/UI cannot call catch-up access
+ * "live capture ready" when the delivery permission is actually missing.
+ */
+export async function hasSmsDeliveryPermission(): Promise<boolean> {
+  if (!isSmsScanningAvailable()) return false;
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
+}
+
 export async function requestSmsPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   if (await hasSmsPermission()) return true;
@@ -243,7 +254,7 @@ export function isSmsInboxAccessError(error: unknown): boolean {
 export async function requestSmsDeliveryPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
   const permission = PermissionsAndroid.PERMISSIONS.RECEIVE_SMS;
-  if (await PermissionsAndroid.check(permission)) return true;
+  if (await hasSmsDeliveryPermission()) return true;
   return (await PermissionsAndroid.request(permission)) === PermissionsAndroid.RESULTS.GRANTED;
 }
 

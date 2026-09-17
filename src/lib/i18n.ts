@@ -1139,6 +1139,10 @@ const S = {
     en: 'Instant banners need Android’s incoming SMS permission. Bank-alert history import still works with the separate SMS-reading permission.',
     ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل تنبيهات البنك يعمل بإذن قراءة الرسائل المنفصل.',
   },
+  instantAlertsLivePermissionPrompt: {
+    en: 'Live purchase alerts need incoming SMS access and Wafra notification permission. Enable them so Wafra can alert you as soon as a bank SMS arrives.',
+    ar: 'تحتاج تنبيهات المشتريات الفورية إلى إذن الرسائل الواردة وإذن إشعارات وفرة. فعّلهما ليصلك تنبيه وفرة فور وصول رسالة البنك.',
+  },
   bankPushOn: {
     en: 'On · new bank notifications are added automatically',
     ar: 'مفعّل · تُضاف إشعارات البنك الجديدة تلقائياً',

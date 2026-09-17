@@ -4,7 +4,11 @@ import { Platform } from 'react-native';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
-import { getAndroidNotificationImportDiagnostics, hasSmsPermission } from '@/lib/auto-import';
+import {
+  getAndroidNotificationImportDiagnostics,
+  hasSmsDeliveryPermission,
+  hasSmsPermission,
+} from '@/lib/auto-import';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { collectDiagnosticBankMessages } from '@/lib/diagnostic-messages';
 import { buildFeedbackPayload } from '@/lib/feedback';
@@ -18,6 +22,7 @@ import {
 } from '@/lib/feedback-transport';
 import { getLaunchMetrics } from '@/lib/launch-performance';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
+import { notificationDeliveryAllowed } from '@/lib/notifications';
 import { sanitizeParserTemplate } from '@/lib/parser-research';
 import { getRuntimePerformanceSnapshot } from '@/lib/runtime-performance';
 import { bankProfileForSender, PARSER_VERSION } from '@/lib/sms-parser';
@@ -211,6 +216,14 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
   }
 
   const readSmsGranted = await hasSmsPermission().catch(() => false);
+  const receiveSmsGranted = await hasSmsDeliveryPermission().catch(() => false);
+  const appNotificationGranted = await notificationDeliveryAllowed().catch(() => false);
+  let instantAlertsPreference = false;
+  try {
+    instantAlertsPreference = SmsReader?.getInstantAlerts?.() ?? false;
+  } catch {
+    instantAlertsPreference = false;
+  }
   const smsReader = SmsReader;
   const parser: Record<string, unknown> = {
     currentVersion: PARSER_VERSION,
@@ -389,6 +402,12 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
     },
     parser,
     notifications: {
+      liveSms: {
+        readPermission: readSmsGranted,
+        receivePermission: receiveSmsGranted,
+        appNotificationPermission: appNotificationGranted,
+        instantAlertsPreference,
+      },
       native: notificationDiagnostics,
       lastImport: getAndroidNotificationImportDiagnostics(),
     },
