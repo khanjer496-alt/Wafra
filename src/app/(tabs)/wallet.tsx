@@ -34,6 +34,7 @@ import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthBreakdown } from '@/lib/balances';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
   formatAmount,
   parseAmountWithMoneySpec,
@@ -159,9 +160,9 @@ export default function WalletScreen() {
    * Wallet no longer turns those incomplete observations into "net worth".
    * The useful fact here is the latest balance the banks actually reported;
    * card debt remains beside its statements and payment state below.
-   */
+  */
   const balances = useMemo(
-    () => netWorthBreakdown(state),
+    () => measureRuntimeOperation('wallet-balances', () => netWorthBreakdown(state)),
     // The shared balance calculator reads only accounts and transactions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions],
@@ -184,10 +185,10 @@ export default function WalletScreen() {
         });
   // cards.ts reads these three immutable arrays. Import progress, settings and
   // review status do not change statements or justify another ledger scan.
-  const dues = useMemo(() => openDues(state, now),
+  const dues = useMemo(() => measureRuntimeOperation('wallet-dues', () => openDues(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
-  const reissues = useMemo(() => reissueSuggestions(state, now),
+  const reissues = useMemo(() => measureRuntimeOperation('wallet-reissues', () => reissueSuggestions(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
   const dueByAccountId = useMemo(
@@ -202,17 +203,21 @@ export default function WalletScreen() {
   // Active accounts and cards share one institution-grouped source list.
   // Expired/unused ones (silent 90+ days, or hidden) live in a drawer below.
   const [showInactive, setShowInactive] = useState(false);
-  const activeSources = useMemo(
-    () => state.accounts.filter((account) => !isInactiveAccount(state, account, now)),
+  const accountActivity = useMemo(
+    () => measureRuntimeOperation('wallet-activity', () => {
+      const active: Account[] = [];
+      const inactive: Account[] = [];
+      for (const account of state.accounts) {
+        (isInactiveAccount(state, account, now) ? inactive : active).push(account);
+      }
+      return { active, inactive };
+    }),
     // Activity depends on account snapshots and transaction dates only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, now],
   );
-  const inactiveAccounts = useMemo(
-    () => state.accounts.filter((a) => isInactiveAccount(state, a, now)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, now],
-  );
+  const activeSources = accountActivity.active;
+  const inactiveAccounts = accountActivity.inactive;
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
   }`;

@@ -293,7 +293,11 @@ export const createCaptureExecutor = ({
     // restored ledger as having completed a historical parser migration.
     const stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
-    const planStarted = tracing ? Date.now() : 0;
+    // Runtime diagnostics are always on for Android tester builds, independently
+    // of the verbose capture trace flag. Starting this clock at zero when trace
+    // was disabled produced epoch-sized "capture-plan" durations and hid the
+    // real operation that could be blocking the JS thread.
+    const planStarted = Date.now();
     captureTrace('plan:start', collected.parsed.length);
     const plan = dependencies.planRows(
       collected.parsed,

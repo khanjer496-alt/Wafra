@@ -48,11 +48,14 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(unverified.pagedHistoryEnabled(), true);
   assert.equal(unverified.PAGED_HISTORY_INSTALL_URL, null);
 });
-test('the production profile installs the paged record and every iOS binary retains the native paging intents', () => {
+test('history-beta pins Baseline 200 while every iOS binary retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
+  const historyBeta = config.build['history-beta'].env;
   for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
-    assert.equal(config.build['history-beta'].env[key], '1');
+    assert.equal(historyBeta[key], '0');
   }
+  assert.equal(historyBeta.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
+    'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-baseline-200-20260917/Wafra-History-Baseline-200.signed.shortcut');
   assert.equal(config.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
     'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
   const base = { name: 'Wafra', plugins: ['original'] };

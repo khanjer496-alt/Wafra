@@ -41,7 +41,11 @@ export type RuntimeOperationTag =
   | 'auto-import'
   | 'daily-summary'
   | 'reminder-projection'
-  | 'home-insight';
+  | 'home-insight'
+  | 'wallet-balances'
+  | 'wallet-dues'
+  | 'wallet-reissues'
+  | 'wallet-activity';
 
 export interface RuntimeOperationSnapshot {
   count: number;
