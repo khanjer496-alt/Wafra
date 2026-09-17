@@ -5,24 +5,23 @@ import Animated, {
   Easing,
   FadeIn,
   FadeInDown,
+  FadeInLeft,
+  FadeInRight,
   FadeInUp,
   cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { BankAvatar } from '@/components/ui/bank-avatar';
-import { CategoryDonut, useCategoricalPalette } from '@/components/ui/charts';
+import { useCategoricalPalette } from '@/components/ui/charts';
 import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { WafraMark } from '@/components/wafra-logo';
-import { EASE, Fonts, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
@@ -41,11 +40,18 @@ function useRecapEntering() {
   return <T,>(animation: T): T | undefined => reducedMotion ? undefined : animation;
 }
 
+
 function HeroMoney({ fils, moneySpec, color }: { fils: number; moneySpec: LedgerMoneySpec; color?: string }) {
+  const amount = formatMinorUnits(Math.abs(fils), moneySpec);
+  const amountSize = amount.length >= 11
+    ? styles.heroAmountTight
+    : amount.length >= 8
+      ? styles.heroAmountMedium
+      : undefined;
   return <View style={styles.heroMoney} accessible accessibilityLabel={`${moneySpec.currency} ${formatMinorUnits(Math.abs(fils), moneySpec)}`}>
     <ThemedText type="meta" themeColor="textSecondary" style={styles.heroCurrency}>{moneySpec.currency}</ThemedText>
-    <ThemedText tabular style={[styles.heroAmount, color ? { color } : undefined]}>
-      {fils < 0 ? '−' : ''}{formatMinorUnits(Math.abs(fils), moneySpec)}
+    <ThemedText tabular style={[styles.heroAmount, amountSize, color ? { color } : undefined]}>
+      {fils < 0 ? '−' : ''}{amount}
     </ThemedText>
   </View>;
 }
@@ -58,48 +64,38 @@ function Rule({ color }: { color: string }) {
   return <View style={[styles.rule, { backgroundColor: color }]} />;
 }
 
-function BrandOrbit() {
+function IntroMark() {
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
-  const turn = useSharedValue(0);
+  const reveal = useSharedValue(reducedMotion ? 1 : 0);
   useEffect(() => {
-    if (reducedMotion) return;
-    turn.value = withRepeat(withTiming(1, { duration: 11_000, easing: Easing.linear }), -1, false);
-    return () => cancelAnimation(turn);
-  }, [reducedMotion, turn]);
-  const motion = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.value * 360}deg` }] }));
-  return <View style={styles.orbit}>
-    <Animated.View style={[StyleSheet.absoluteFillObject, motion]}>
-      <Svg width="100%" height="100%" viewBox="0 0 220 220">
-        <Circle cx="110" cy="110" r="91" fill="none" stroke={theme.track} strokeWidth="1" />
-        <Circle cx="110" cy="110" r="91" fill="none" stroke={theme.primary} strokeWidth="2.5"
-          strokeDasharray="48 524" strokeLinecap="round" />
-        <Circle cx="110" cy="110" r="74" fill="none" stroke={theme.cardBorderStrong} strokeWidth="1"
-          strokeDasharray="3 8" />
-      </Svg>
-    </Animated.View>
-    <WafraMark size={72} />
-  </View>;
+    if (reducedMotion) {
+      reveal.value = 1;
+      return;
+    }
+    reveal.value = withTiming(1, { duration: Motion.sectionEnter, easing: Easing.bezier(...EASE) });
+    return () => cancelAnimation(reveal);
+  }, [reducedMotion, reveal]);
+  const motion = useAnimatedStyle(() => ({
+    opacity: reveal.value,
+    transform: [{ translateY: (1 - reveal.value) * 12 }, { scale: 0.94 + reveal.value * 0.06 }],
+  }));
+  return <Animated.View style={[styles.introMark, motion]}>
+    <WafraMark size={58} />
+    <View style={[styles.introMarkRule, { backgroundColor: theme.primary }]} />
+  </Animated.View>;
 }
 
 function LedgerBackdrop({ variant = 0 }: { variant?: number }) {
   const theme = useTheme();
-  const dark = useColorScheme() === 'dark';
-  const muted = dark ? '#FFFFFF' : '#16130F';
-  const path = variant % 3 === 0
-    ? 'M-20 180 C70 95 130 265 240 144 C300 82 345 110 430 58'
-    : variant % 3 === 1
-      ? 'M-30 82 C82 175 126 18 230 92 C310 148 356 108 430 166'
-      : 'M-20 150 C64 35 150 220 226 110 C294 14 350 162 430 76';
   return <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-    <Svg width="100%" height="100%" viewBox="0 0 400 760" preserveAspectRatio="none">
-      {[130, 250, 370, 490, 610].map((y) =>
-        <Line key={y} x1="18" x2="382" y1={y} y2={y} stroke={muted} opacity={0.045} strokeWidth="1" />)}
-      <Path d={path} fill="none" stroke={theme.primary} strokeWidth="1.5" opacity={0.16} />
-      <Path d={path} fill="none" stroke={theme.primary} strokeWidth="8" opacity={0.025} />
-      <Circle cx={variant % 2 ? 332 : 68} cy={variant % 2 ? 232 : 570} r="92" fill="none"
-        stroke={theme.gold} strokeWidth="1" opacity={0.12} />
-    </Svg>
+    <View style={[styles.ledgerMargin, { backgroundColor: theme.primary }]} />
+    {Array.from({ length: 6 }, (_, i) => (
+      <View key={i} style={[styles.ledgerRule, { top: `${18 + i * 13}%` as `${number}%`, backgroundColor: theme.cardBorder }]} />
+    ))}
+    <ThemedText accessible={false} style={[styles.pageIndex, { color: theme.text }]}>
+      {String(variant + 1).padStart(2, '0')}
+    </ThemedText>
   </View>;
 }
 
@@ -107,14 +103,18 @@ function IntroScene({ snapshot }: { snapshot: RecapSnapshot }) {
   const language = useLanguage();
   const w = copy[language === 'ar' ? 'ar' : 'en'];
   const enter = useRecapEntering();
-  return <View style={styles.sceneCentered}>
+  return <View style={styles.sceneIntro}>
     <Animated.View entering={enter(FadeIn.duration(Motion.sectionEnter))}>
-      <BrandOrbit />
+      <IntroMark />
     </Animated.View>
-    <Animated.View entering={enter(FadeInUp.delay(100).duration(420))} style={styles.centerCopy}>
+    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={styles.introCopy}>
       <ThemedText type="micro" themeColor="textTertiary">{w.recap} · {snapshot.descriptor.label}</ThemedText>
       <ThemedText style={styles.storyTitle}>{snapshot.descriptor.kind === 'year' ? w.yearIntro : w.monthIntro}</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary" style={styles.centerBody}>{w.introBody}</ThemedText>
+      <ThemedText type="default" themeColor="textSecondary">{w.introBody}</ThemedText>
+    </Animated.View>
+    <Animated.View entering={enter(FadeInUp.delay(180).duration(360))} style={styles.introFooter}>
+      <View style={styles.introFooterRule} />
+      <ThemedText type="meta" themeColor="textTertiary">{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
     </Animated.View>
   </View>;
 }
@@ -135,11 +135,13 @@ function SpendScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpe
           {Math.abs(change)}% {change <= 0 ? w.less : w.more}
         </ThemedText>
       </View>}
+      <ThemedText type="meta" themeColor="textSecondary">
+        {snapshot.spendingCount} {w.transactions} · {snapshot.merchantCount} {w.merchants}
+      </ThemedText>
     </Animated.View>
-    <View style={styles.metricRail}>
-      <Metric value={String(snapshot.spendingCount)} label={w.transactions} delay={80} />
-      <Metric value={String(snapshot.merchantCount)} label={w.merchants} delay={140} />
-      <Metric value={formatMinorUnits(snapshot.totalIncomeFils, moneySpec)} label={moneySpec.currency + ' in'} delay={200} />
+    <View style={[styles.metricRail, styles.pushBottom]}>
+      <Metric value={`${moneySpec.currency} ${formatMinorUnits(snapshot.totalIncomeFils, moneySpec)}`} label={w.income} delay={100} />
+      <Metric value={`${moneySpec.currency} ${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={160} />
     </View>
   </View>;
 }
@@ -147,7 +149,8 @@ function SpendScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpe
 function Metric({ value, label, delay = 0 }: { value: string; label: string; delay?: number }) {
   const enter = useRecapEntering();
   return <Animated.View entering={enter(FadeInUp.delay(delay).duration(360))} style={styles.metric}>
-    <ThemedText style={styles.metricValue} tabular>{value}</ThemedText>
+    <ThemedText style={[styles.metricValue, value.length > 15 && styles.metricValueTight]} tabular
+      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{value}</ThemedText>
     <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
   </Animated.View>;
 }
@@ -157,28 +160,31 @@ function CategoryScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; money
   const w = copy[language === 'ar' ? 'ar' : 'en'];
   const palette = useCategoricalPalette();
   const enter = useRecapEntering();
-  const slices = snapshot.topCategories.map((row, i) => ({
-    key: row.category,
-    label: row.label,
-    value: row.spendFils,
-    color: palette[i % palette.length],
-  }));
+  const top = snapshot.topCategories[0];
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}>
       <ThemedText type="micro" themeColor="textTertiary">{w.categories}</ThemedText>
-      {snapshot.topCategories[0] && <ThemedText style={styles.storyTitleSmall}>
-        {snapshot.topCategories[0].label} <ThemedText themeColor="textSecondary">{w.topCategory}</ThemedText>
-      </ThemedText>}
+      {top && <View style={styles.categoryHeadline}>
+        <ThemedText style={styles.categoryPercent} tabular>{top.percent}%</ThemedText>
+        <View style={styles.categoryHeadlineCopy}>
+          <ThemedText style={styles.storyTitleSmall}>{top.label}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{w.topCategory}</ThemedText>
+        </View>
+      </View>}
     </View>
-    <Animated.View entering={enter(FadeIn.delay(80).duration(480))} style={styles.donutRow}>
-      <CategoryDonut slices={slices} size={190} thickness={18}
-        centerLabel={snapshot.topCategories[0] ? `${snapshot.topCategories[0].percent}%` : '—'} />
+    <Animated.View entering={enter(FadeIn.delay(80).duration(420))} style={styles.categoryStack}>
+      {snapshot.topCategories.map((row, index) => (
+        <View key={row.category} style={[styles.categorySegment, {
+          flex: Math.max(1, row.percent),
+          backgroundColor: palette[index % palette.length],
+        }]} />
+      ))}
     </Animated.View>
-    <View style={styles.categoryList}>
+    <View style={[styles.categoryList, styles.pushBottom]}>
       {snapshot.topCategories.slice(0, 4).map((row, index) =>
         <Animated.View key={row.category} entering={enter(FadeInUp.delay(100 + index * 45).duration(320))} style={styles.categoryRow}>
-          <View style={[styles.swatch, { backgroundColor: palette[index % palette.length] }]} />
-          <ThemedText type="small" style={styles.flex}>{row.label}</ThemedText>
+          <View style={[styles.rankDot, { backgroundColor: palette[index % palette.length] }]} />
+          <ThemedText type="smallBold" style={styles.flex}>{row.label}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary" tabular>{row.percent}%</ThemedText>
           <MoneyText fils={row.spendFils} moneySpec={moneySpec} />
         </Animated.View>)}
@@ -194,19 +200,28 @@ function MerchantScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; money
   if (!top) return null;
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.merchant}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(430))} style={styles.merchantHero}>
-      <MerchantAvatar title={top.title} category={top.category} size={88} />
-      <ThemedText style={styles.storyTitle}>{top.title}</ThemedText>
-      <MoneyText fils={top.spendFils} moneySpec={moneySpec} />
-      <ThemedText type="meta" themeColor="textSecondary">{top.count} {w.visits}</ThemedText>
+    <Animated.View entering={enter(FadeInUp.duration(430))} style={styles.merchantFeature}>
+      <View style={styles.merchantFeatureTop}>
+        <ThemedText style={styles.featureRank} themeColor="textTertiary">01</ThemedText>
+        <MerchantAvatar title={top.title} category={top.category} size={74} />
+      </View>
+      <ThemedText style={styles.storyTitle} numberOfLines={2}>{top.title}</ThemedText>
+      <View style={styles.merchantFeatureMeta}>
+        <MoneyText fils={top.spendFils} moneySpec={moneySpec} />
+        <ThemedText type="meta" themeColor="textSecondary">{top.count} {w.visits}</ThemedText>
+      </View>
     </Animated.View>
-    <View style={styles.merchantPodium}>
-      {snapshot.topMerchants.slice(0, 3).map((merchant, index) =>
+    <View style={[styles.merchantList, styles.pushBottom]}>
+      {snapshot.topMerchants.slice(1, 3).map((merchant, index) =>
         <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 70).duration(360))}
-          style={[styles.merchantMini, index === 0 && styles.merchantMiniFirst]}>
-          <ThemedText type="nano" themeColor="textTertiary">#{index + 1}</ThemedText>
-          <MerchantAvatar title={merchant.title} category={merchant.category} size={46 + (index === 0 ? 8 : 0)} />
-          <ThemedText type="meta" numberOfLines={1} style={styles.merchantMiniLabel}>{merchant.title}</ThemedText>
+          style={styles.merchantRow}>
+          <ThemedText style={styles.runnerRank} themeColor="textTertiary">0{index + 2}</ThemedText>
+          <MerchantAvatar title={merchant.title} category={merchant.category} size={42} />
+          <View style={styles.flex}>
+            <ThemedText type="smallBold" numberOfLines={1}>{merchant.title}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{merchant.count} {w.visits}</ThemedText>
+          </View>
+          <MoneyText fils={merchant.spendFils} moneySpec={moneySpec} />
         </Animated.View>)}
     </View>
   </View>;
@@ -222,20 +237,17 @@ function AccountScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneyS
   const isCard = row.account.kind === 'card' || !!row.account.cardType;
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{isCard ? w.account : w.accountFallback}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(460))}
-      style={[styles.bankCard, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorderStrong }]}>
-      <View style={styles.bankCardTop}>
-        <BankAvatar account={row.account} size={50} />
-        <WafraMark size={28} color={theme.textTertiary} />
-      </View>
-      <View style={styles.bankCardBottom}>
-        <ThemedText type="smallBold" numberOfLines={2}>{row.label}</ThemedText>
+    <Animated.View entering={enter(FadeInUp.duration(460))} style={styles.accountFeature}>
+      <BankAvatar account={row.account} size={68} />
+      <View style={styles.accountIdentity}>
+        <ThemedText style={styles.storyTitleSmall} numberOfLines={2}>{row.label}</ThemedText>
         {row.account.last4 && <ThemedText type="meta" themeColor="textTertiary" tabular>•••• {row.account.last4}</ThemedText>}
       </View>
+      <View style={[styles.accountRule, { backgroundColor: theme.cardBorderStrong }]} />
     </Animated.View>
-    <View style={styles.metricRail}>
+    <View style={[styles.metricRail, styles.pushBottom]}>
       <Metric value={String(row.count)} label={`${w.used} · ${w.visits}`} delay={100} />
-      <View style={styles.metric}><MoneyText fils={row.spendFils} moneySpec={moneySpec} /><ThemedText type="meta" themeColor="textSecondary">{w.spent.toLowerCase()}</ThemedText></View>
+      <Metric value={`${moneySpec.currency} ${formatMinorUnits(row.spendFils, moneySpec)}`} label={w.spent.toLowerCase()} delay={160} />
     </View>
   </View>;
 }
@@ -249,23 +261,24 @@ function RhythmScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySp
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.rhythm}</ThemedText>
       {snapshot.busiestWeekday && <ThemedText style={styles.storyTitleSmall}>{weekdayName(snapshot.busiestWeekday.day)} <ThemedText themeColor="textSecondary">{w.busiest}</ThemedText></ThemedText>}
     </View>
-    <View style={styles.rhythmPicture}>
-      <View style={styles.dayRings}>
+    <View style={styles.dayTape}>
         {Array.from({ length: 7 }, (_, i) => {
           const active = snapshot.busiestWeekday?.day === i;
-          return <Animated.View key={i} entering={enter(FadeIn.delay(i * 45).duration(260))} style={styles.dayItem}>
-            <View style={[styles.dayDot, { borderColor: active ? theme.primary : theme.cardBorderStrong,
-              backgroundColor: active ? theme.primarySoft : 'transparent' }]} />
-            <ThemedText type="nano" themeColor={active ? 'text' : 'textTertiary'}>{weekdayName(i).slice(0, 2)}</ThemedText>
+          return <Animated.View key={i} entering={enter(FadeIn.delay(i * 40).duration(260))}
+            style={[styles.dayCell, { borderBottomColor: active ? theme.primary : theme.cardBorder }]}>
+            <ThemedText type={active ? 'smallBold' : 'meta'} themeColor={active ? 'text' : 'textTertiary'}>
+              {weekdayName(i).slice(0, 2)}
+            </ThemedText>
           </Animated.View>;
         })}
-      </View>
     </View>
-    <View style={styles.metricGrid}>
+    <View style={[styles.metricGrid, styles.pushBottom]}>
       <View style={styles.metricGridItem}><ThemedText style={styles.metricValue} tabular>{snapshot.noSpendDays}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.noSpend}</ThemedText></View>
       <View style={styles.metricGridItem}><MoneyText fils={snapshot.averagePurchaseFils} moneySpec={moneySpec} /><ThemedText type="meta" themeColor="textSecondary">{w.average}</ThemedText></View>
-      {snapshot.favoriteTime && <View style={[styles.metricGridItem, styles.metricWide]}><Icon name="sun" size={20} color={theme.warning} />
-        <ThemedText type="smallBold">{w[snapshot.favoriteTime.bucket]}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.favoriteTime}</ThemedText></View>}
+      {snapshot.favoriteTime && <View style={[styles.metricGridItem, styles.metricWide]}>
+        <View style={[styles.timeMarker, { backgroundColor: theme.goldSoft }]}><Icon name="sun" size={18} color={theme.warning} /></View>
+        <View><ThemedText type="smallBold">{w[snapshot.favoriteTime.bucket]}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.favoriteTime}</ThemedText></View>
+      </View>}
     </View>
   </View>;
 }
@@ -292,7 +305,7 @@ function HighlightScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; mone
           <ThemedText type="nano" themeColor={month.key === high.key ? 'text' : 'textTertiary'}>{month.label.slice(0, 1)}</ThemedText>
         </View>)}
       </View>
-      <View style={styles.metricRail}>
+      <View style={[styles.metricRail, styles.pushBottom]}>
         <View style={styles.metric}><ThemedText type="smallBold">{high.label}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.highest}</ThemedText><MoneyText fils={high.spendFils} moneySpec={moneySpec} /></View>
         {low && <View style={styles.metric}><ThemedText type="smallBold">{low.label}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.quietest}</ThemedText><MoneyText fils={low.spendFils} moneySpec={moneySpec} /></View>}
       </View>
@@ -303,10 +316,12 @@ function HighlightScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; mone
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.biggest}</ThemedText></View>
     <Animated.View entering={enter(FadeInUp.duration(430))} style={styles.bigPurchase}>
-      <MerchantAvatar title={purchase.title} category={purchase.category} size={72} />
-      <ThemedText style={styles.storyTitle}>{purchase.title}</ThemedText>
+      <View style={styles.bigPurchaseTop}>
+        <MerchantAvatar title={purchase.title} category={purchase.category} size={72} />
+        <ThemedText type="meta" themeColor="textTertiary">{shortDate(purchase.date)}</ThemedText>
+      </View>
+      <ThemedText style={styles.storyTitle} numberOfLines={2}>{purchase.title}</ThemedText>
       <HeroMoney fils={purchase.amountFils} moneySpec={moneySpec} />
-      <ThemedText type="meta" themeColor="textSecondary">{shortDate(purchase.date)}</ThemedText>
     </Animated.View>
   </View>;
 }
@@ -322,7 +337,7 @@ function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot;
       <ThemedText style={styles.storyTitle}>{snapshot.descriptor.label}</ThemedText>
       <ThemedText type="default" themeColor="textSecondary">{w.wrapped}</ThemedText>
     </View>
-    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, { borderColor: theme.cardBorderStrong }]}>
+    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, styles.pushBottom, { borderColor: theme.cardBorderStrong }]}>
       <FinalFact label={w.spent} value={`${moneySpec.currency} ${formatMinorUnits(snapshot.totalSpendFils, moneySpec)}`} />
       <Rule color={theme.cardBorder} />
       <FinalFact label={w.transactions} value={String(snapshot.spendingCount)} />
@@ -339,7 +354,8 @@ function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot;
 }
 
 function FinalFact({ label, value }: { label: string; value: string }) {
-  return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText><ThemedText type="smallBold" tabular>{value}</ThemedText></View>;
+  return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText><ThemedText type="smallBold" tabular
+    numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{value}</ThemedText></View>;
 }
 
 export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; onClose: () => void }) {
@@ -348,8 +364,9 @@ export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSn
   const w = copy[language === 'ar' ? 'ar' : 'en'];
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(0);
+  const [direction, setDirection] = useState<1 | -1>(1);
   const progress = useSharedValue(reducedMotion ? 1 : 0);
   const slides = useMemo(() => {
     const story = [
@@ -376,9 +393,13 @@ export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSn
   }, [moneySpec, onClose, snapshot]);
 
   const next = useCallback(() => {
+    setDirection(1);
     setIndex((current) => current >= slides.length - 1 ? current : current + 1);
   }, [slides.length]);
-  const previous = useCallback(() => setIndex((current) => Math.max(0, current - 1)), []);
+  const previous = useCallback(() => {
+    setDirection(-1);
+    setIndex((current) => Math.max(0, current - 1));
+  }, []);
 
   useEffect(() => {
     cancelAnimation(progress);
@@ -396,6 +417,10 @@ export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSn
     if (event.nativeEvent.locationX < width * 0.34) previous();
     else next();
   };
+  const compact = height < 740;
+  const slideEntering = reducedMotion
+    ? undefined
+    : (direction > 0 ? FadeInRight : FadeInLeft).duration(260);
 
   return <View style={[styles.root, { backgroundColor: theme.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }]}>
     <LedgerBackdrop variant={index} />
@@ -416,7 +441,8 @@ export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSn
     </View>
     <Pressable accessibilityRole="button" accessibilityLabel={`${w.recap}, ${index + 1} / ${slides.length}`}
       onPress={navigate} style={styles.touchArea}>
-      <Animated.View key={`${snapshot.descriptor.id}:${index}`} entering={reducedMotion ? undefined : FadeIn.duration(240)} style={styles.slide}>
+      <Animated.View key={`${snapshot.descriptor.id}:${index}`} entering={slideEntering}
+        style={[styles.slide, compact && styles.slideCompact]}>
         {slides[index]}
       </Animated.View>
     </Pressable>
@@ -425,55 +451,71 @@ export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSn
 
 const styles = StyleSheet.create({
   root: { flex: 1, overflow: 'hidden' },
-  topChrome: { paddingHorizontal: ScreenPadding, gap: Spacing.three, zIndex: 3 },
-  progressRow: { flexDirection: 'row', gap: 5, height: 4 },
+  topChrome: { paddingHorizontal: Spacing.four, paddingTop: Spacing.two, gap: 12, zIndex: 3 },
+  progressRow: { flexDirection: 'row', gap: 4, height: 3 },
   progressTrack: { flex: 1, height: 2, borderRadius: 1, overflow: 'hidden' },
   progressFill: { borderRadius: 1 },
-  close: { width: 44, height: 44, borderRadius: Radius.full, borderWidth: 1, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end' },
+  close: { width: 40, height: 40, borderRadius: Radius.full, borderWidth: 1, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end' },
   touchArea: { flex: 1 },
-  slide: { flex: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
-  sceneCentered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four, paddingBottom: 54 },
-  sceneSpread: { flex: 1, justifyContent: 'space-between', paddingTop: Spacing.three, paddingBottom: Spacing.four, gap: Spacing.four },
-  sceneHeading: { gap: Spacing.two },
-  centerCopy: { alignItems: 'center', gap: Spacing.two, maxWidth: 340 },
-  centerBody: { textAlign: 'center', maxWidth: 310 },
-  storyTitle: { fontFamily: Fonts.sansSemi, fontSize: 38, lineHeight: 44, letterSpacing: -1.1 },
-  storyTitleSmall: { fontFamily: Fonts.sansSemi, fontSize: 29, lineHeight: 36, letterSpacing: -0.7 },
-  orbit: { width: 220, height: 220, alignItems: 'center', justifyContent: 'center' },
+  slide: { flex: 1, paddingHorizontal: Spacing.four, paddingBottom: Spacing.three },
+  slideCompact: { paddingBottom: Spacing.two },
+  sceneIntro: { flex: 1, paddingTop: Spacing.four, paddingBottom: Spacing.four },
+  introMark: { alignSelf: 'flex-start', gap: 14 },
+  introMarkRule: { width: 64, height: 3, borderRadius: 2 },
+  introCopy: { marginTop: 48, gap: 12, maxWidth: 340 },
+  introFooter: { marginTop: 'auto', gap: 12 },
+  introFooterRule: { width: 42, height: 1, backgroundColor: 'rgba(127,127,127,0.38)' },
+  sceneSpread: { flex: 1, paddingTop: 20, paddingBottom: Spacing.two, gap: 28 },
+  sceneHeading: { gap: 10 },
+  pushBottom: { marginTop: 'auto' },
+  storyTitle: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 45, letterSpacing: -1.25 },
+  storyTitleSmall: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -0.8 },
   heroMoney: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 8 },
   heroCurrency: { fontFamily: Fonts.sansMedium, fontSize: 14 },
-  heroAmount: { fontFamily: Fonts.monoSemi, fontSize: 49, lineHeight: 56, letterSpacing: -1.3 },
-  changeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 36, paddingHorizontal: 10, borderRadius: Radius.chip },
-  metricRail: { flexDirection: 'row', gap: Spacing.three, flexWrap: 'wrap' },
-  metric: { minWidth: 94, flexGrow: 1, gap: 5 },
-  metricValue: { fontFamily: Fonts.monoSemi, fontSize: 28, lineHeight: 34, letterSpacing: -0.5 },
-  donutRow: { alignItems: 'center', justifyContent: 'center' },
+  heroAmount: { fontFamily: Fonts.monoSemi, fontSize: 52, lineHeight: 58, letterSpacing: -1.45 },
+  heroAmountMedium: { fontSize: 47, lineHeight: 53, letterSpacing: -1.15 },
+  heroAmountTight: { fontSize: 41, lineHeight: 47, letterSpacing: -0.9 },
+  changeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 34, paddingHorizontal: 10, borderRadius: Radius.chip },
+  metricRail: { flexDirection: 'row', gap: Spacing.four },
+  metric: { minWidth: 0, flex: 1, gap: 6 },
+  metricValue: { fontFamily: Fonts.monoSemi, fontSize: 27, lineHeight: 33, letterSpacing: -0.5 },
+  metricValueTight: { fontSize: 23, lineHeight: 29, letterSpacing: -0.35 },
+  categoryHeadline: { flexDirection: 'row', alignItems: 'flex-end', gap: 14 },
+  categoryHeadlineCopy: { flex: 1, gap: 3, paddingBottom: 4 },
+  categoryPercent: { fontFamily: Fonts.monoSemi, fontSize: 60, lineHeight: 62, letterSpacing: -2 },
+  categoryStack: { minHeight: 16, flexDirection: 'row', gap: 2, overflow: 'hidden', borderRadius: 3 },
+  categorySegment: { minWidth: 2, borderRadius: 2 },
   categoryList: { gap: 0 },
-  categoryRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  swatch: { width: 8, height: 24, borderRadius: 2 },
+  categoryRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rankDot: { width: 8, height: 8, borderRadius: 4 },
   flex: { flex: 1, minWidth: 0 },
-  merchantHero: { alignItems: 'center', justifyContent: 'center', gap: Spacing.two, flex: 1 },
-  merchantPodium: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: Spacing.three },
-  merchantMini: { flex: 1, maxWidth: 110, alignItems: 'center', gap: 6, minHeight: 100 },
-  merchantMiniFirst: { paddingBottom: 16 },
-  merchantMiniLabel: { maxWidth: 100, textAlign: 'center' },
-  bankCard: { minHeight: 220, borderWidth: 1, borderRadius: Radius.sheet, padding: 22, justifyContent: 'space-between' },
-  bankCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bankCardBottom: { gap: 6 },
-  rhythmPicture: { paddingVertical: 12 },
-  dayRings: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
-  dayItem: { alignItems: 'center', gap: 8, flex: 1 },
-  dayDot: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5 },
+  merchantFeature: { gap: 14, paddingTop: Spacing.two },
+  merchantFeatureTop: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  featureRank: { fontFamily: Fonts.monoSemi, fontSize: 46, lineHeight: 50, letterSpacing: -1.6 },
+  merchantFeatureMeta: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.three },
+  merchantList: { gap: 4 },
+  merchantRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  runnerRank: { width: 26, fontFamily: Fonts.monoMedium, fontSize: 16, lineHeight: 20 },
+  accountFeature: { paddingTop: Spacing.two, gap: Spacing.three },
+  accountIdentity: { gap: 5 },
+  accountRule: { height: StyleSheet.hairlineWidth, width: '100%', marginTop: Spacing.two },
+  dayTape: { flexDirection: 'row', gap: 5, paddingTop: 4 },
+  dayCell: { flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2 },
   metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
-  metricGridItem: { flexGrow: 1, flexBasis: '40%', minHeight: 92, gap: 6, justifyContent: 'center' },
-  metricWide: { flexBasis: '100%', flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  bigPurchase: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
+  metricGridItem: { flexGrow: 1, flexBasis: '40%', minHeight: 88, gap: 6, justifyContent: 'center' },
+  metricWide: { flexBasis: '100%', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  timeMarker: { width: 36, height: 36, borderRadius: Radius.tile, alignItems: 'center', justifyContent: 'center' },
+  bigPurchase: { flex: 1, justifyContent: 'center', gap: Spacing.three, paddingBottom: Spacing.four },
+  bigPurchaseTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   yearBars: { height: 190, flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   yearColumn: { flex: 1, alignItems: 'center', gap: 6 },
   yearBarTrack: { height: 154, alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'center' },
   yearBar: { width: '68%', maxWidth: 18, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   finalBoard: { borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 4 },
-  finalFact: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  finalFact: { minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   rule: { height: StyleSheet.hairlineWidth, width: '100%' },
-  doneButton: { minHeight: 52, borderRadius: Radius.control, alignItems: 'center', justifyContent: 'center' },
+  doneButton: { minHeight: 52, borderRadius: Radius.control, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three },
+  ledgerMargin: { position: 'absolute', top: 0, bottom: 0, left: 9, width: StyleSheet.hairlineWidth, opacity: 0.12 },
+  ledgerRule: { position: 'absolute', left: Spacing.four, right: Spacing.four, height: StyleSheet.hairlineWidth, opacity: 0.32 },
+  pageIndex: { position: 'absolute', right: 12, bottom: 18, fontFamily: Fonts.monoSemi, fontSize: 88, lineHeight: 92, letterSpacing: -4, opacity: 0.035 },
 });
