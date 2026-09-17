@@ -24,22 +24,18 @@ jobs:
 
           path = Path('scripts/test/contracts.test.js')
           text = path.read_text()
-          old = """  ok('first-run value onboarding is a Superwall flow with a native recovery fallback',
+          start_marker = "  ok('first-run value onboarding is a Superwall flow with a native recovery fallback',"
+          end_marker = "      /onboardingFlowStatus === 'dismissed'/.test(remoteOnboarding));"
+          start = text.find(start_marker)
+          end_start = text.find(end_marker, start if start >= 0 else 0)
+          if start < 0 or end_start < 0:
+              raise SystemExit('Expected stale Superwall onboarding contract markers were not found')
+          end = end_start + len(end_marker)
+          replacement = """  ok('native Wafra onboarding owns first run while Superwall stays mounted for billing',
             /SuperwallOnboarding/.test(layout) &&
-              /presentOnboardingFlow/.test(remoteOnboarding) &&
               /<OnboardingGate>\\{children\\}<\\/OnboardingGate>/.test(remoteOnboarding) &&
-              /onboardingFlowStatus === 'error'/.test(remoteOnboarding) &&
-              /onboardingFlowStatus === 'skipped'/.test(remoteOnboarding) &&
-              /onboardingFlowStatus === 'dismissed'/.test(remoteOnboarding));
-          """
-          new = """  ok('native Wafra onboarding owns first run while Superwall stays mounted for billing',
-            /SuperwallOnboarding/.test(layout) &&
-              /<OnboardingGate>\\{children\\}<\\/OnboardingGate>/.test(remoteOnboarding) &&
-              !/presentOnboardingFlow/.test(remoteOnboarding));
-          """
-          if old not in text:
-              raise SystemExit('Expected stale Superwall onboarding contract block was not found')
-          path.write_text(text.replace(old, new, 1))
+              !/presentOnboardingFlow/.test(remoteOnboarding));"""
+          path.write_text(text[:start] + replacement + text[end:])
           PY
       - name: Commit contract migration
         run: |
