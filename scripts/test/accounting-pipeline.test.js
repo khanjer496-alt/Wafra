@@ -719,4 +719,54 @@ ok('compact bank shorthand replay is idempotent',
     Boolean(ordinary) && !internal.has(ordinary.id), JSON.stringify([...internal]));
 }
 
+
+/* ── live ordinary captures do not re-walk the complete transfer graph ───── */
+{
+  setLedgerCurrency(null);
+  setActiveMarket('AE');
+  const existing = {
+    id: 'older-purchase', type: 'expense', amountFils: 4200, category: 'groceries',
+    accountId: 'fab-card', title: 'CARREFOUR', date: '2026-08-10', source: 'sms',
+    smsKey: 'holder-purchase', ts: Date.parse('2026-08-10T09:00:00Z'),
+  };
+  const priorInternalIds = [];
+  const settled = {
+    ...BASE,
+    ledgerMoney: ledgerMoneySpec('AED'),
+    transactions: [existing],
+    hydrationFinalizeVersion: 1,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: priorInternalIds,
+  };
+  const ordinaryBatch = materializeImportBatch({
+    importMoney: ledgerMoneySpec('AED'),
+    transactions: [{
+      type: 'expense', amountFils: 2550, category: 'dining', accountId: 'fab-card',
+      title: 'KARAK HOUSE', date: '2026-08-12', source: 'sms',
+      smsKey: 'hlive-purchase', ts: Date.parse('2026-08-12T18:00:00Z'),
+    }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {},
+    bankNames: {}, cardTypes: {}, lastScanTs: Date.parse('2026-08-12T18:00:00Z'),
+  }, settled, () => 'live-purchase');
+  const fast = applyMaterializedImportBatch(settled, ordinaryBatch);
+  ok('a live ordinary purchase preserves the exact prior transfer receipt without a graph rebuild',
+    fast.transferInternalIds === priorInternalIds);
+  ok('the live ordinary purchase is merged newest-first without disturbing history',
+    fast.transactions.length === 2 && fast.transactions[0].id === 'live-purchase' &&
+      fast.transactions[1] === existing);
+
+  const transferShapedBatch = materializeImportBatch({
+    importMoney: ledgerMoneySpec('AED'),
+    transactions: [{
+      type: 'expense', amountFils: 5000, category: 'other', accountId: 'liv-bank',
+      title: 'Outgoing transfer', date: '2026-08-12', source: 'sms', isTransfer: true,
+    }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {},
+    bankNames: {}, cardTypes: {}, lastScanTs: Date.parse('2026-08-12T18:01:00Z'),
+  }, settled, () => 'live-transfer');
+  const canonical = applyMaterializedImportBatch(settled, transferShapedBatch);
+  ok('transfer-shaped live activity still takes canonical reconciliation',
+    canonical.transferInternalIds !== priorInternalIds);
+}
+
 console.log(`\naccounting-pipeline: ${pass} passed, 0 failed`);

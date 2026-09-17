@@ -27,6 +27,7 @@ import type {
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 
 export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
@@ -239,7 +240,9 @@ export const createCaptureExecutor = ({
     const tracing = captureTraceEnabled();
     const traceStarted = tracing ? Date.now() : 0;
     captureTrace('routine:start');
+    const collectStarted = Date.now();
     const collected = await dependencies.collectRoutine(state, { notificationOnly });
+    recordRuntimeOperation('capture-collect', Date.now() - collectStarted);
     captureTrace('collect:done', collected.parsed.length, tracing ? Date.now() - traceStarted : 0);
     if (collected.needsSetup) return { kind: 'needs-setup' };
     // Inbox/relay I/O can overlap a hand edit or another import. Do not use
@@ -299,6 +302,7 @@ export const createCaptureExecutor = ({
       new Date(),
       collected.declined,
     );
+    recordRuntimeOperation('capture-plan', Date.now() - planStarted);
     captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
@@ -323,6 +327,7 @@ export const createCaptureExecutor = ({
         captureTrace('save:start');
         const cursorReceipt = activeLedger.importBatch(importBatch);
         await cursorReceipt.durable;
+        recordRuntimeOperation('capture-save', Date.now() - saveStarted);
         captureTrace('save:done', cursorReceipt.ids.length, tracing ? Date.now() - saveStarted : 0);
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -371,6 +376,7 @@ export const createCaptureExecutor = ({
     captureTrace('save:start', plan.txCount + plan.healedCount);
     const receipt = activeLedger.importBatch(importBatch);
     await receipt.durable;
+    recordRuntimeOperation('capture-save', Date.now() - saveStarted);
     captureTrace('save:done', receipt.ids.length, tracing ? Date.now() - saveStarted : 0);
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };

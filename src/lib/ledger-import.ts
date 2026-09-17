@@ -23,7 +23,13 @@ import {
   migrateLegacyLedgerMoney,
 } from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
-import { normalizeTransferLinks, reconcileTransfers, reconciliationInternalIds, TRANSFER_NORMALIZATION_VERSION } from '@/lib/transfer-reconciliation';
+import {
+  isTransferCandidate,
+  normalizeTransferLinks,
+  reconcileTransfers,
+  reconciliationInternalIds,
+  TRANSFER_NORMALIZATION_VERSION,
+} from '@/lib/transfer-reconciliation';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type {
   Account,
@@ -106,6 +112,67 @@ export const materializeImportBatch = (
 
 const sortTransactions = (transactions: Transaction[]): Transaction[] =>
   [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+/**
+ * The persisted ledger is already newest-first. A live capture normally adds
+ * one row, so sorting all 10k+ historical rows again is needless foreground
+ * work. Preserve the same stable ordering as `sortTransactions`: fresh rows
+ * win ties because the old implementation prepended them before stable sort.
+ */
+const mergeSortedTransactions = (
+  incoming: readonly Transaction[],
+  existing: readonly Transaction[],
+): Transaction[] => {
+  if (incoming.length === 0) return existing as Transaction[];
+  if (existing.length === 0) return sortTransactions([...incoming]);
+  const fresh = sortTransactions([...incoming]);
+  const merged: Transaction[] = [];
+  let freshIndex = 0;
+  let existingIndex = 0;
+  while (freshIndex < fresh.length && existingIndex < existing.length) {
+    if (fresh[freshIndex].date >= existing[existingIndex].date) {
+      merged.push(fresh[freshIndex++]);
+    } else {
+      merged.push(existing[existingIndex++]);
+    }
+  }
+  while (freshIndex < fresh.length) merged.push(fresh[freshIndex++]);
+  while (existingIndex < existing.length) merged.push(existing[existingIndex++]);
+  return merged;
+};
+
+/**
+ * A normal purchase cannot change any previously reconciled transfer/payment
+ * relationship. The import planner has already deduped the incoming source
+ * identity against the authoritative ledger, and hydration has already run the
+ * capture/payment cleanup once. In that very common case, rerunning every
+ * whole-ledger repair after one live SMS/push row only blocks Hermes while
+ * producing the same transfer receipt.
+ *
+ * Stay deliberately conservative: account identity changes, parser healing,
+ * payment-flow/card-payment roles, or anything transfer-shaped still take the
+ * canonical full path below.
+ */
+const canUseIncrementalCaptureFastPath = (
+  state: AppState,
+  batch: MaterializedImportBatch,
+): boolean =>
+  (state.hydrationFinalizeVersion ?? 0) >= 1 &&
+  state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+  Array.isArray(state.transferInternalIds) &&
+  batch.updates.length === 0 &&
+  batch.newAccounts.length === 0 &&
+  Object.keys(batch.bankNames).length === 0 &&
+  Object.keys(batch.cardTypes).length === 0 &&
+  batch.transactions.every((transaction) =>
+    !isTransferCandidate(transaction) &&
+    transaction.isTransfer !== true &&
+    transaction.transferMatch === undefined &&
+    transaction.transferDecision === undefined &&
+    transaction.transferEvidence === undefined &&
+    transaction.paymentFlowSide === undefined &&
+    transaction.cardPaymentSide === undefined
+  );
 
 type MoneyBearingImport = Pick<ImportBatchInput,
   'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'>;
@@ -192,13 +259,16 @@ export const applyMaterializedImportBatch = (
   const bills = mergeImportedBills(state.bills, batch.newBills);
   const existing = applyHealUpdates(state.transactions, batch.updates);
   const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
+  const incrementalFastPath = !historyStillRunning && canUseIncrementalCaptureFastPath(state, batch);
   const pageState: AppState = {
     ...state,
     ...(batch.importMoney && !state.ledgerMoney && changesImportMoney(batch)
       ? { ledgerMoney: batch.importMoney } : {}),
     onboardingCurrencyEvidence:
       batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
-    transactions: sortTransactions([...batch.transactions, ...existing]),
+    transactions: incrementalFastPath
+      ? mergeSortedTransactions(batch.transactions, existing)
+      : sortTransactions([...batch.transactions, ...existing]),
     accounts,
     accountHints: { ...state.accountHints, ...batch.newHints },
     cardDues: dues,
@@ -224,6 +294,18 @@ export const applyMaterializedImportBatch = (
       ...pageState,
       transferNormalizationVersion: undefined,
       transferInternalIds: state.transferInternalIds ?? [],
+    };
+  }
+
+  // The prior transfer receipt is still exact when the only new rows are
+  // ordinary non-transfer activity. This is the hot path for a live card SMS:
+  // render/persist the new row immediately instead of walking the complete
+  // ledger through duplicate, payment-flow and transfer reconciliation first.
+  if (incrementalFastPath) {
+    return {
+      ...pageState,
+      transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+      transferInternalIds: state.transferInternalIds,
     };
   }
 

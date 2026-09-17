@@ -88,6 +88,11 @@ const S = {
     en: 'Wafra updated your ledger automatically.',
     ar: 'حدّثت وفرة سجلك تلقائياً.',
   },
+  liveTransactionAdded: { en: 'Transaction added to Wafra', ar: 'تمت إضافة العملية إلى وفرة' },
+  liveTransactionsAdded: {
+    en: '{count} transactions added to Wafra',
+    ar: 'تمت إضافة {count} عمليات إلى وفرة',
+  },
   testerDiagnosticsSend: { en: 'Send test diagnostics', ar: 'إرسال تشخيص الاختبار' },
   testerDiagnosticsCollecting: { en: 'Collecting diagnostics…', ar: 'جارٍ جمع التشخيص…' },
   testerDiagnosticsDetail: {

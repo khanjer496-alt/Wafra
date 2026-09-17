@@ -832,14 +832,18 @@ function bodyOf(source, header) {
 
 
 // ---------------------------------------------------------------------------
-// Automatic capture must stay quiet and avoid unrelated notification work.
+// Automatic capture must distinguish source-free maintenance from real arrivals.
 // ---------------------------------------------------------------------------
 
 {
   const autoImport = stripComments(read('src/hooks/use-auto-import.ts'));
-  ok('silent automatic imports do not fire the success toast or haptic',
-    /if \(interactive\) \{\s*committed\(\);\s*toast\.show\(\s*tf\('importedTransactions'/.test(autoImport),
-    'provider/foreground scans are background bookkeeping; only an explicit refresh should announce success');
+  ok('real Android arrival edges acknowledge a durable import while source-free maintenance stays quiet',
+    /liveEvent && !interactive/.test(autoImport) &&
+      /showLiveCaptureFeedback\(outcome\.transactions\)/.test(autoImport) &&
+      /latestScan\.current\(false, true\)/.test(autoImport) &&
+      /runAndroidNotificationDrain\(true\)/.test(autoImport) &&
+      /latestScan\.current\(false\)/.test(autoImport),
+    'only a source-backed SMS/notification edge should get the short live success feedback; launch/resume safety scans remain silent');
 
   ok('daily summary work is keyed to ledger changes, not every store mutation',
     /\[getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&

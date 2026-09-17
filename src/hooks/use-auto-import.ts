@@ -524,13 +524,14 @@ export const createCoalescingStatusRefresh = (
 let importInFlight: {
   promise: Promise<AutoImportOutcome>;
   interactive: boolean;
+  liveEvent: boolean;
 } | null = null;
 
 export type AutoImport = {
-  /** Scan now. `interactive` decides who owes the user feedback. */
-  runAutoImport: (interactive: boolean) => Promise<void>;
+  /** Scan now. `interactive` owns explicit UI; `liveEvent` is a source-backed Android arrival. */
+  runAutoImport: (interactive: boolean, liveEvent?: boolean) => Promise<void>;
   /** Drain only the encrypted Android bank-notification queue; never reads SMS. */
-  runAndroidNotificationDrain: () => Promise<void>;
+  runAndroidNotificationDrain: (liveEvent?: boolean) => Promise<void>;
   /** Android has not granted READ_SMS. */
   needsPermission: boolean;
   /** What the capture surface should say on this platform right now. */
@@ -866,8 +867,43 @@ export function useAutoImport(
     });
   }, [refreshCaptureStatus, watchStatus]);
 
+  const postAndroidImportNotice = useCallback((transactionIds: readonly string[]): void => {
+    if (Platform.OS !== 'android' || transactionIds.length === 0 ||
+        !NotificationReader?.postImportNotice) return;
+    try {
+      if (SmsReader?.getInstantAlerts?.() === false) return;
+    } catch {
+      // Older native builds have no preference reader; default remains on.
+    }
+    const ids = new Set(transactionIds);
+    const rows = getStateSnapshot().transactions.filter(
+      (transaction) => ids.has(transaction.id) && transaction.viaPush === true,
+    );
+    if (rows.length === 0) return;
+    const title = rows.length === 1
+      ? t('bankPushNoticeTitle')
+      : tf('bankPushNoticeGroupTitle', { count: rows.length });
+    const body = rows.length === 1
+      ? tf('bankPushNoticeBody', { merchant: rows[0].title })
+      : tf('bankPushNoticeGroupBody', { count: rows.length });
+    try {
+      NotificationReader.postImportNotice(title, body);
+    } catch {
+      // The ledger write is authoritative; a presentation failure is not.
+    }
+  }, [getStateSnapshot]);
+
+  const showLiveCaptureFeedback = useCallback((count: number): void => {
+    if (count <= 0) return;
+    committed();
+    toast.show(
+      count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count }),
+      { tone: 'success', durationMs: 3200 },
+    );
+  }, [toast]);
+
   const performAutoImport = useCallback(
-    async (interactive: boolean): Promise<AutoImportOutcome> => {
+    async (interactive: boolean, liveEvent = false): Promise<AutoImportOutcome> => {
       const state = getStateSnapshot();
       // Never scan against a ledger that has not finished loading. Every
       // duplicate check in the plan is a lookup against state.transactions,
@@ -1030,12 +1066,15 @@ export function useAutoImport(
         return 'up-to-date';
       }
       if (outcome.kind !== 'imported') return 'up-to-date';
-      // Automatic foreground/provider scans are intentionally quiet. A bank
-      // alert can arrive while the user is doing something unrelated in Wafra;
-      // showing the same success toast/haptic as a pull-to-refresh makes the
-      // app look like it is repeatedly importing on its own even though this is
-      // normal capture. Explicit refreshes still get confirmation and Undo.
-      if (interactive) {
+      // A routine Android SMS scan also drains the encrypted bank-app queue.
+      // If it wins the race against the dedicated queue listener, it still owns
+      // posting Wafra's confirmed bank-app notification after the durable write.
+      if (Platform.OS === 'android') postAndroidImportNotice(outcome.transactionIds);
+      // Source-free launch/resume maintenance stays quiet, but an actual live
+      // Android provider edge should feel immediate once the durable row lands.
+      if (liveEvent && !interactive) {
+        showLiveCaptureFeedback(outcome.transactions);
+      } else if (interactive) {
         committed();
         toast.show(
           tf('importedTransactions', {
@@ -1070,26 +1109,26 @@ export function useAutoImport(
       return 'imported';
     },
     [captureExecutor, getStateSnapshot, iosCycleDependencies, syncAndroidNotificationAdmission,
-      undoBatch, toast, router],
+      undoBatch, toast, router, postAndroidImportNotice, showLiveCaptureFeedback],
   );
 
   // The single owner of `importInFlight`. Always starts a fresh scan — callers
   // that should instead join one already running go through `runAutoImport`.
   const startAutoImport = useCallback(
-    (interactive: boolean): Promise<AutoImportOutcome> => {
+    (interactive: boolean, liveEvent = false): Promise<AutoImportOutcome> => {
       const startedAt = Date.now();
-      const operation = performAutoImport(interactive).finally(() => {
+      const operation = performAutoImport(interactive, liveEvent).finally(() => {
         recordRuntimeOperation('auto-import', Date.now() - startedAt);
         if (importInFlight?.promise === operation) importInFlight = null;
       });
-      importInFlight = { promise: operation, interactive };
+      importInFlight = { promise: operation, interactive, liveEvent };
       return operation;
     },
     [performAutoImport],
   );
 
   const runAutoImport = useCallback(
-    (interactive: boolean): Promise<void> => {
+    (interactive: boolean, liveEvent = false): Promise<void> => {
       // iOS cannot grant Wafra direct Messages-database access. For an explicit
       // refresh, hand control to the installed Local Capture Shortcut's
       // no-input recovery branch. It rereads a bounded newest-message overlap
@@ -1103,11 +1142,20 @@ export function useAutoImport(
           .catch(() => startAutoImport(true).then(() => undefined));
       }
       const existing = importInFlight;
-      if (!existing) return startAutoImport(interactive).then(() => undefined);
+      if (!existing) return startAutoImport(interactive, liveEvent).then(() => undefined);
       // Two silent callers, or an interactive caller joining another
       // interactive one already in flight: the one running owns delivering
       // whatever feedback applies, same as before.
-      if (!interactive || existing.interactive) return existing.promise.then(() => undefined);
+      if (!interactive) {
+        if (!liveEvent || existing.interactive || existing.liveEvent) {
+          return existing.promise.then(() => undefined);
+        }
+        return existing.promise.then(async (outcome) => {
+          const followUp = await startAutoImport(false, true);
+          if (followUp !== 'imported' && outcome === 'imported') showLiveCaptureFeedback(1);
+        });
+      }
+      if (existing.interactive) return existing.promise.then(() => undefined);
       // An explicit action (pull-to-refresh, tapping the capture card) joined
       // a scan nobody was watching. That scan only ever ran its `interactive`
       // branches as false, so a permission prompt, a paywall/setup redirect,
@@ -1128,47 +1176,28 @@ export function useAutoImport(
         return undefined;
       });
     },
-    [startAutoImport, toast],
+    [showLiveCaptureFeedback, startAutoImport, toast],
   );
 
-  const postAndroidImportNotice = useCallback((transactionIds: readonly string[]): void => {
-    if (Platform.OS !== 'android' || transactionIds.length === 0 ||
-        !NotificationReader?.postImportNotice) return;
-    // Keep one user preference for per-charge Wafra alerts regardless of
-    // whether the bank delivered the event by SMS or app notification.
-    try {
-      if (SmsReader?.getInstantAlerts?.() === false) return;
-    } catch {
-      // Older native builds have no preference reader; default remains on.
-    }
-    const ids = new Set(transactionIds);
-    const rows = getStateSnapshot().transactions.filter(
-      (transaction) => ids.has(transaction.id) && transaction.viaPush === true,
-    );
-    if (rows.length === 0) return;
-    const title = rows.length === 1
-      ? t('bankPushNoticeTitle')
-      : tf('bankPushNoticeGroupTitle', { count: rows.length });
-    const body = rows.length === 1
-      ? tf('bankPushNoticeBody', { merchant: rows[0].title })
-      : tf('bankPushNoticeGroupBody', { count: rows.length });
-    try {
-      NotificationReader.postImportNotice(title, body);
-    } catch {
-      // The ledger write is authoritative; a presentation failure is not.
-    }
-  }, [getStateSnapshot]);
-
-  const runAndroidNotificationDrain = useCallback(async (): Promise<void> => {
+  const runAndroidNotificationDrain = useCallback(async (liveEvent = false): Promise<void> => {
     if (Platform.OS !== 'android') return;
 
     // Notification capture is independent from the SMS inbox. A recent SMS
     // scan must never make the encrypted push queue look "fresh". Serialize
     // behind any scan already mutating the ledger, then claim the same import
     // lane for this lightweight notification-only pass.
+    const beforePushIds = liveEvent
+      ? new Set(getStateSnapshot().transactions.filter((transaction) => transaction.viaPush === true)
+        .map((transaction) => transaction.id))
+      : null;
     const existing = importInFlight?.promise;
     if (existing) await existing.catch(() => {});
     if (importInFlight) return;
+    const pushRowsImportedByExisting = beforePushIds
+      ? getStateSnapshot().transactions.filter(
+        (transaction) => transaction.viaPush === true && !beforePushIds.has(transaction.id),
+      ).length
+      : 0;
 
     const current = getStateSnapshot();
     if (!current.hydrated || !current.onboarded || current.captureOptOut ||
@@ -1190,7 +1219,11 @@ export function useAutoImport(
         androidNotificationLastCheckedAt = Date.now();
         if (outcome.kind === 'imported') {
           postAndroidImportNotice(outcome.transactionIds);
+          if (liveEvent) showLiveCaptureFeedback(outcome.transactions);
           return 'imported';
+        }
+        if (liveEvent && pushRowsImportedByExisting > 0) {
+          showLiveCaptureFeedback(pushRowsImportedByExisting);
         }
         return 'up-to-date';
       })
@@ -1204,9 +1237,10 @@ export function useAutoImport(
         recordRuntimeOperation('notification-drain', Date.now() - drainStartedAt);
         if (importInFlight?.promise === operation) importInFlight = null;
       });
-    importInFlight = { promise: operation, interactive: false };
+    importInFlight = { promise: operation, interactive: false, liveEvent };
     await operation;
-  }, [captureExecutor, getStateSnapshot, postAndroidImportNotice, syncAndroidNotificationAdmission]);
+  }, [captureExecutor, getStateSnapshot, postAndroidImportNotice, showLiveCaptureFeedback,
+    syncAndroidNotificationAdmission]);
 
   // Android's NotificationListenerService emits onQueueChanged while JS is
   // alive; that path below drains immediately. Cold launch/resume can miss that
@@ -1275,9 +1309,9 @@ export function useAutoImport(
         hasBankNotificationAccess();
     };
     const scheduler = createInboxRefreshScheduler(async () => {
-      const ongoing = importInFlight?.promise;
-      if (ongoing) await ongoing.catch(() => {});
-      if (canDrain()) await runAndroidNotificationDrain();
+      // Let the drain own the join so it can detect whether a scan already in
+      // flight consumed this viaPush arrival and still acknowledge it.
+      if (canDrain()) await runAndroidNotificationDrain(true);
     }, canDrain);
     let subscription: { remove(): void } | null = null;
     try {
@@ -1339,11 +1373,9 @@ export function useAutoImport(
       // Clear only when the queued source evidence actually enters the scan
       // lane. A hint received while backgrounded must survive until resume.
       providerHintPending = false;
-      // A provider change can arrive after the running scan's last page.
-      // Wait for its durable completion, then reread through the shared lane.
-      const ongoing = importInFlight?.promise;
-      if (ongoing) await ongoing.catch(() => {});
-      if (canScan()) await latestScan.current(false);
+      // Let runAutoImport own the join so a provider edge that races an
+      // already-running silent scan still gets a bounded follow-up and feedback.
+      if (canScan()) await latestScan.current(false, true);
     }, canScan);
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     // The native observer checks permission only when it starts. Recreate it
