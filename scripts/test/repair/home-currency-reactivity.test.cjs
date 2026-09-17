@@ -48,6 +48,7 @@ function harness() {
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
     '@/hooks/use-color-scheme': { useColorScheme: () => 'light' },
+    '@/lib/haptics': { tapped: () => {} },
     '@/components/ui/category-avatar': { CategoryAvatar: 'CategoryAvatar' },
     '@/components/ui/charts': { CategoryDonut: 'CategoryDonut', useRamp: () => [], useCategoricalPalette: () => ['#1F6B52','#B4503C','#A07B2A','#3B7A8C','#7A4E76'] },
     '@/components/ui/bank-avatar': { BankAvatar: 'BankAvatar' },
