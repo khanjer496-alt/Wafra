@@ -129,7 +129,7 @@ ok('the W mark, not a fake brand asset, owns the recap entry',
 ok('the shared Home summary keeps its old dependency surface',
   !/recap-logo-trigger/.test(summarySource) && /brandMark\?: React\.ReactNode/.test(summarySource));
 ok('story visuals reuse Wafra merchant, bank and category primitives',
-  ['MerchantAvatar', 'BankAvatar', 'CategoryDonut', 'WafraMark'].every((name) => storySource.includes(name)));
+  ['MerchantAvatar', 'BankAvatar', 'useCategoricalPalette', 'WafraMark'].every((name) => storySource.includes(name)));
 ok('recap deliberately avoids decorative gradient UI', !/LinearGradient|RadialGradient/.test(storySource));
 ok('full recap analytics live behind the dedicated route',
   /projectRecap\(state, descriptor\)/.test(routeSource));
