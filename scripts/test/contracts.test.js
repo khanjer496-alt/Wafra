@@ -1007,8 +1007,8 @@ function ktSources(dir) {
       (scan.match(/await yieldToUi\(\)/g) ?? []).length === 5,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
-    /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
-      /importInFlight = \{ promise: operation, interactive \}/.test(home));
+    /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive, liveEvent\)/.test(home) &&
+      /importInFlight = \{ promise: operation, interactive, liveEvent \}/.test(home));
   // ...and the thing they join is MODULE-level, not a component ref. Four tabs
   // now mount this hook; a per-component ref would have given each screen its
   // own "one" scan, which is four inbox reads racing four import plans built
@@ -1022,7 +1022,7 @@ function ktSources(dir) {
   // outcome and go unanswered. It must run its own follow-up once the shared
   // scan settles, without re-entering as a second concurrent scan.
   ok('an interactive join preserves feedback without duplicating a successful scan',
-    /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
+    /if \(existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
       /shouldReplayJoinedAutoImport/.test(home) &&
       /return startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home) &&
       /if \([^\n]*outcome === 'up-to-date'\)[\s\S]*upToDateNoNew/.test(home));
