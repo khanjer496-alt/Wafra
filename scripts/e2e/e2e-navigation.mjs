@@ -228,6 +228,10 @@ async function clippedText(page, screen) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      const cx = Math.min(Math.max(r.x + r.width / 2, 1), width - 2);
+      const cy = Math.min(Math.max(r.y + r.height / 2, 1), window.innerHeight - 2);
+      const top = document.elementFromPoint(cx, cy);
+      if (!(top && (el.contains(top) || top.contains(el)))) continue;
       if (r.right > width + 2) out.push(`${label}: "${text.slice(0, 30)}" ends ${Math.round(r.right - width)}px past the edge`);
     }
     return out;
@@ -410,7 +414,7 @@ const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
   'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
-  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
 ]) {
@@ -587,7 +591,7 @@ for (const [name, enter] of [
 {
   await flow();
   await categoryDetails('Transport');
-  ok('flow: category detail opens its existing limit editor', await tapKey(page, 'Edit limits', 5000) === true);
+  ok('flow: category detail opens its existing limit editor', await tapKey(page, 'Edit monthly limit', 5000) === true);
   await page.waitForTimeout(1200);
   /**
    * Read off the row, not off `paintedText`.
