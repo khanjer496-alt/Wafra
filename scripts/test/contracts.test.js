@@ -525,13 +525,10 @@ function ktSources(dir) {
     pkg.dependencies?.['expo-superwall'] && !pkg.dependencies?.['react-native-purchases']);
   ok('the root is wrapped in the Superwall billing provider',
     /SuperwallBillingProvider/.test(layout));
-  ok('first-run value onboarding is a Superwall flow with a native recovery fallback',
-    /SuperwallOnboarding/.test(layout) &&
-      /presentOnboardingFlow/.test(remoteOnboarding) &&
-      /<OnboardingGate>\{children\}<\/OnboardingGate>/.test(remoteOnboarding) &&
-      /onboardingFlowStatus === 'error'/.test(remoteOnboarding) &&
-      /onboardingFlowStatus === 'skipped'/.test(remoteOnboarding) &&
-      /onboardingFlowStatus === 'dismissed'/.test(remoteOnboarding));
+  ok('native Wafra onboarding owns first run while Superwall stays mounted for billing',
+  /SuperwallOnboarding/.test(layout) &&
+    /<OnboardingGate>\{children\}<\/OnboardingGate>/.test(remoteOnboarding) &&
+    !/presentOnboardingFlow/.test(remoteOnboarding));
   ok('the provider uses public platform keys and named placements',
     /EXPO_PUBLIC_SUPERWALL_IOS_API_KEY/.test(provider) &&
       /EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY/.test(provider) &&
