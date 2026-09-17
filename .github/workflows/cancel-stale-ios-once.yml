@@ -1,0 +1,24 @@
+name: Cancel stale iOS test builds
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/cancel-stale-ios-once.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel stale production and paged-history iOS runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for run in 35244741537 35246609744; do
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/cancel" || true
+          done
