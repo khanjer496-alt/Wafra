@@ -85,6 +85,8 @@ function actions(options = {}) {
     get finishing() { return ui.finishing; },
     get finishSaveFailed() { return ui.finishSaveFailed; },
     state: ledger,
+    previewMode: false,
+    trackOnboardingEvent() {},
     showRecovery: false,
     isIosSetupRoute: false,
     setSetupBusy(value) { ui.busy = value; record('busy', value); },
