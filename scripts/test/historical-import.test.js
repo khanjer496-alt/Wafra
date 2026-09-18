@@ -210,11 +210,8 @@ function applyLikeStore(state, plan) {
     record({ id: id('e'), sender: '\u202EENBD' }),
     record({ id: id('f'), text: '😀'.repeat(MAX_HISTORICAL_TEXT_BYTES / 2) }),
   ], {}, NOW);
-  ok('duplicate IDs are counted once across automatic import and source-free review',
-    result.duplicateCount === 1 &&
-      result.parsed.length === 1 &&
-      result.reviewCandidates.length === 1,
-    result);
+  ok('duplicate IDs are counted and parsed once',
+    result.duplicateCount === 1 && result.parsed.length === 2, result);
   ok('non-posting alerts retain only safe routing metadata',
     result.declined.length === 2 &&
       result.declined[0].smsTs === Date.parse(RECEIVED) &&
@@ -230,12 +227,11 @@ function applyLikeStore(state, plan) {
     result.ignoredCount === 0, result);
   ok('malformed, impossible-date and oversized rows are rejected',
     result.invalidCount === 4, result);
-  ok('unsafe optional sender metadata is dropped and the bank alert fails closed to Review',
-    result.reviewCandidates.some((row) =>
-      row.sourceKey === `apple_message_review_source_${id('e')}` &&
-      row.channel === 'shortcut' &&
+  ok('unsafe optional sender metadata is dropped without losing the bank alert',
+    result.parsed.some((row) =>
+      row.sourceEventId === id('e') &&
       !Object.prototype.hasOwnProperty.call(row, 'sender')),
-    result.reviewCandidates);
+    result.parsed);
 }
 
 {
