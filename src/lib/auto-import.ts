@@ -1251,11 +1251,15 @@ export async function scanInbox(
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
-        const p = launchParsed ?? (
-          universalParsed && (!requiredCurrency || universalParsed.currency === requiredCurrency)
-            ? universalParsed
-            : null
-        );
+        const parsedCandidate = launchParsed ?? universalParsed;
+        // Parser success is not admission to the ledger. A trusted bank-app
+        // package may auto-post globally, but only in the ledger's established
+        // currency (or the single currency already established by this batch).
+        // Apply that rule to BOTH parser paths: launchParsed used to bypass it
+        // entirely, so a BNP EUR push could enter an otherwise-AED scan.
+        const p = parsedCandidate && (!requiredCurrency || parsedCandidate.currency === requiredCurrency)
+          ? parsedCandidate
+          : null;
         const pushSource = { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)

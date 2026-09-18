@@ -339,7 +339,14 @@ export const parsePastedBankAlerts = (
 ): ParsedSms[] => {
   const session = createLaunchAlertSession({ overrides });
   return parseSmsBatch(text, overrides, (source) => {
-    const parsed = session.parse(source, '', session.inspect(source, ''));
+    // Paste has no authenticated issuer. Keep the mature AED/SAR deterministic
+    // path automatic, but do not turn a structurally valid worldwide amount
+    // into unattended money with no sender evidence. Refused global blocks are
+    // handed to the caller's Review flow instead.
+    const launchMarket = detectLaunchMarketFromAlert(source, '');
+    const parsed = launchMarket
+      ? session.parse(source, '', session.inspect(source, ''), launchMarket)
+      : null;
     if (!parsed) onRefused?.(source);
     return parsed;
   });
