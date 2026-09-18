@@ -49,7 +49,7 @@ function captureProbe(page) {
     '@/lib/auto-import': { isSmsScanningAvailable: () => true, scanInbox: async (...values) => { args = values; return page; } },
     '@/lib/background-relay-storage': {},
     '@/lib/relay': { isRelayPlatform: () => false },
-    '@/lib/sms-parser': { PARSER_VERSION: 40 },
+    '@/lib/sms-parser': { PARSER_VERSION: 40, PARSER_BACKFILL_VERSION: 40 },
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
   });
   return { collect: module.collectNewMessages, args: () => args };

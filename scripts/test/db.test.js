@@ -386,6 +386,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
   });
   const parser = {
     PARSER_VERSION: 999,
+    PARSER_BACKFILL_VERSION: 999,
     normalizeServiceName: (title) => title === 'Legacy service' ? 'Canonical service' : null,
     guessCategory: (title, _type, overrides) =>
       overrides?.[title.trim().toLowerCase()] ??
@@ -2969,6 +2970,7 @@ asyncSuites.push((async () => {
   let guessCalls = 0;
   const parser = {
     PARSER_VERSION: 999,
+    PARSER_BACKFILL_VERSION: 999,
     normalizeServiceName: () => { normalizeCalls++; return null; },
     guessCategory: () => { guessCalls++; return 'other'; },
     parseSms: () => { calls++; return null; },
@@ -2992,7 +2994,7 @@ asyncSuites.push((async () => {
     JSON.stringify(repeat.transactions) === before && repeat.parserVersion === 999);
   parser.PARSER_VERSION++;
   const upgraded = h.migratePersistedState(JSON.parse(JSON.stringify(repeat)), options);
-  ok('a new parser version rechecks retained raw SMS', calls === 2);
+  ok('a runtime parser revision does not recheck retained raw SMS', calls === 1);
   // Saving a merchant rule must NOT re-read the whole ledger. `healPatch`
   // refuses to apply a pinned category to an existing row ("remember for
   // future" is a default for new rows), so the pass this used to trigger did
@@ -3001,22 +3003,22 @@ asyncSuites.push((async () => {
   // launch slower than the last.
   upgraded.merchantOverrides.cafe = 'shopping';
   h.migratePersistedState(upgraded, options);
-  ok('a saved merchant rule does not re-read the ledger on the next launch', calls === 2);
+  ok('a saved merchant rule does not re-read the ledger on the next launch', calls === 1);
   upgraded.marketId = 'SA';
   h.migratePersistedState(upgraded, options);
-  ok('changed parser market invalidates saved-SMS parsing', calls === 3);
+  ok('changed parser market invalidates saved-SMS parsing', calls === 2);
   h.migratePersistedState(upgraded);
-  ok('ordinary migration callers still force saved-SMS repair', calls === 4);
+  ok('ordinary migration callers still force saved-SMS repair', calls === 3);
   const beforeRestoreNormalize = normalizeCalls;
   const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
   ok('restored backups cannot use a local startup receipt to bypass repair',
-    restored && calls === 5 && normalizeCalls > beforeRestoreNormalize);
+    restored && calls === 4 && normalizeCalls > beforeRestoreNormalize);
   // Upgrading to the grammar-only receipt must not cost a re-read. A stored
   // revision-1 receipt naming this same parser version and market already
   // proves the ledger was healed under this grammar, so it is accepted and
   // restamped rather than discarded for being the wrong shape.
   const legacyReceipt = JSON.stringify([
-    1, parser.PARSER_VERSION, 'SA', [['cafe', 'shopping']],
+    1, parser.PARSER_BACKFILL_VERSION, 'SA', [['cafe', 'shopping']],
   ]);
   const legacy = { ...upgraded, hydrationReparseKey: legacyReceipt };
   const before1 = calls;
@@ -3024,11 +3026,11 @@ asyncSuites.push((async () => {
   ok('a revision-1 receipt for this grammar is accepted without re-reading the ledger',
     calls === before1);
   ok('the accepted receipt is upgraded in place so later launches compare by equality',
-    accepted.hydrationReparseKey === JSON.stringify([2, parser.PARSER_VERSION, 'SA']));
+    accepted.hydrationReparseKey === JSON.stringify([2, parser.PARSER_BACKFILL_VERSION, 'SA']));
   // ...but only when it genuinely names this grammar.
   const staleGrammar = {
     ...upgraded,
-    hydrationReparseKey: JSON.stringify([1, parser.PARSER_VERSION - 1, 'SA', []]),
+    hydrationReparseKey: JSON.stringify([1, parser.PARSER_BACKFILL_VERSION - 1, 'SA', []]),
   };
   const before2 = calls;
   h.migratePersistedState(staleGrammar, options);
@@ -3038,13 +3040,14 @@ asyncSuites.push((async () => {
   h.migratePersistedState(corrupt, options);
   ok('an unreadable receipt is repaired rather than trusted', calls > before3);
 
-  // Narrowing the TRIGGER must not narrow the DATA: when a grammar change does
+  // Narrowing the TRIGGER must not narrow the DATA: when an explicit historical
+  // backfill change does
   // re-read the ledger, the current rules still reach the parser.
   let sawOverrides;
   parser.parseSms = (_raw, overrides) => { calls++; sawOverrides = overrides; return null; };
-  parser.PARSER_VERSION++;
+  parser.PARSER_BACKFILL_VERSION++;
   h.migratePersistedState(upgraded, options);
-  ok('a grammar re-read still parses saved SMS against the current merchant rules',
+  ok('a backfill re-read still parses saved SMS against the current merchant rules',
     sawOverrides?.cafe === 'shopping');
   parser.parseSms = () => { throw new Error('synthetic parser failure'); };
   const failed = { ...upgraded, hydrationReparseKey: 'obsolete' };
@@ -3056,6 +3059,7 @@ asyncSuites.push((async () => {
   let calls = 0;
   const parser = {
     PARSER_VERSION: 1000,
+    PARSER_BACKFILL_VERSION: 1000,
     normalizeServiceName: () => null,
     guessCategory: () => 'other',
     parseSms: () => { calls++; return null; },

@@ -348,6 +348,16 @@ export interface ParsedCard {
  * second parser API. Existing source identities still dedupe/heal in place.
  */
 export const PARSER_VERSION = 46;
+/**
+ * Historical-repair contract for already-saved data.
+ *
+ * Keep this separate from PARSER_VERSION. Most parser releases should improve
+ * only future captures; they must not automatically turn into a full retained-
+ * inbox reread or a launch-time raw-row reparse on phones with years of SMS.
+ * Bump this only when an existing persisted row/obligation is known to need
+ * source-backed repair.
+ */
+export const PARSER_BACKFILL_VERSION = 46;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

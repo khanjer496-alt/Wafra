@@ -1758,7 +1758,7 @@ async function queueItem(id, row, publicKey) {
           buildImportPlan: (parsed) => ({ parsed }),
         };
       }
-      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1 };
+      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1, PARSER_BACKFILL_VERSION: 1 };
       throw new Error(`unexpected capture dependency ${id}`);
     };
 
@@ -1803,7 +1803,7 @@ async function queueItem(id, row, publicKey) {
             },
           };
         }
-        if (id === '@/lib/sms-parser') return { PARSER_VERSION: 24 };
+        if (id === '@/lib/sms-parser') return { PARSER_BACKFILL_VERSION: 24 };
         throw new Error(`unexpected history-capture dependency ${id}`);
       });
       let code = null;
@@ -1821,7 +1821,7 @@ async function queueItem(id, row, publicKey) {
       } catch (error) {
         code = error?.code;
       }
-      eq('parser migration: a version change requests the complete inbox', requestedSince, 0);
+      eq('parser migration: an outdated backfill receipt requests the complete inbox', requestedSince, 0);
       eq('parser migration: an empty restricted history cannot be stamped complete',
         code, 'ERR_SMS_HISTORY_UNAVAILABLE');
 

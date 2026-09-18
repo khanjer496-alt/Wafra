@@ -7,7 +7,7 @@ import { getMonthStartDay, monthKey } from '@/lib/format';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { getLaunchMetrics } from '@/lib/launch-performance';
 import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
-import { nonPostingReason, PARSER_VERSION } from '@/lib/sms-parser';
+import { nonPostingReason, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
 
@@ -138,7 +138,15 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   options.onProgress?.(state.transactions.length, state.transactions.length);
   return {
     schema: 'wafra-diagnostics-v1', exportedAt: new Date(now).toISOString(),
-    build: { ...fields(build, 'version build platform'), parserVersion: PARSER_VERSION, storedParserVersion: state.parserVersion ?? null },
+    build: {
+      ...fields(build, 'version build platform'),
+      parserVersion: PARSER_VERSION,
+      // Compatibility aliases retained for older support tooling. The stored
+      // value is now explicitly a backfill receipt, not the runtime grammar.
+      storedParserVersion: state.parserVersion ?? null,
+      historyRepairVersion: PARSER_BACKFILL_VERSION,
+      storedHistoryRepairVersion: state.parserVersion ?? null,
+    },
     delivery: { mode: 'manual', uploadedByWafra: false, destinationChosenByUser: true },
     notice: 'Sensitive financial data, not a restore backup. Includes all recorded periods and hidden accounts. No automatic corrections are made by this report.',
     coverage: { allRecordedTransactions: true, transactionCount: transactions.length,

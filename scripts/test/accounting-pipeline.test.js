@@ -19,7 +19,7 @@ const {
 } = require('./build/ledger-import.js');
 const { setActiveMarket, setLedgerCurrency } = require('./build/markets.js');
 const { ledgerMoneySpec } = require('./build/ledger-money.js');
-const { parseSms, PARSER_VERSION } = require('./build/sms-parser.js');
+const { parseSms, PARSER_BACKFILL_VERSION } = require('./build/sms-parser.js');
 const { reconcileTransfers, reconciliationInternalIds, TRANSFER_NORMALIZATION_VERSION } = require('./build/transfer-reconciliation.js');
 
 let pass = 0;
@@ -218,8 +218,8 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
     (prefix) => `reread-${prefix}-${++rereadId}`,
   );
   const afterReread = applyMaterializedImportBatch(restoredState, reread);
-  ok('only a completed full-history batch advances the durable parser version',
-    afterReread.parserVersion === PARSER_VERSION,
+  ok('only a completed full-history batch advances the durable parser backfill receipt',
+    afterReread.parserVersion === PARSER_BACKFILL_VERSION,
     afterReread.parserVersion);
 
   const pageProgress = {

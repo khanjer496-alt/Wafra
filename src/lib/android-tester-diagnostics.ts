@@ -27,7 +27,7 @@ import { getMerchantLogoCacheDiagnostics } from '@/lib/merchant-logo-resolver';
 import { notificationDeliveryAllowed } from '@/lib/notifications';
 import { sanitizeParserTemplate } from '@/lib/parser-research';
 import { getRuntimePerformanceSnapshot } from '@/lib/runtime-performance';
-import { bankProfileForSender, PARSER_VERSION } from '@/lib/sms-parser';
+import { bankProfileForSender, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
 import { getStorageFailures } from '@/lib/storage-diagnostics';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
@@ -241,7 +241,9 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
   const smsReader = SmsReader;
   const parser: Record<string, unknown> = {
     currentVersion: PARSER_VERSION,
+    historyRepairVersion: PARSER_BACKFILL_VERSION,
     storedVersion: state.parserVersion ?? null,
+    storedHistoryRepairVersion: state.parserVersion ?? null,
     coverage: feedbackCoverage.counts,
     samples: [] as SafeParserSample[],
     inbox: {

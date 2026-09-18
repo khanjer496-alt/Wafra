@@ -1,6 +1,6 @@
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { historyBackground } from '@/lib/android-history-background';
 import { androidSmsCaptureEnabled } from '@/lib/android-capture-sources';
 
@@ -24,11 +24,13 @@ import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const BACKGROUND_HISTORY_PAGE_SIZE = 1_000;
+const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 2;
 // Foreground pages are intentionally much smaller than background pages. Even
 // with a cooperative parser, planning + reducer work is synchronous JS; a 500
 // row page can monopolise Hermes long enough for taps and navigation to look
 // dead on a large ledger. Background keeps the throughput-oriented page size.
 const FOREGROUND_HISTORY_PAGE_SIZE = 256;
+const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 4;
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // A brand-new first run may begin by itself, but a previously paused history
 // job must never restart merely because the user returned to Wafra. Re-entry is
@@ -52,6 +54,11 @@ export function useHistoryImport(): void {
     setHistoryImportProgress,
     setMarket,
   } = useStore();
+  const legacyReviewKeys = useRef<{
+    generation: number;
+    startedAt: number;
+    keys: string[];
+  } | null>(null);
   const canStart = useCallback(() => {
     const current = getStateSnapshot();
     return Platform.OS === 'android' && current.hydrated && current.onboarded &&
@@ -83,17 +90,37 @@ export function useHistoryImport(): void {
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
+      const snapshot = getStateSnapshot();
+      const generation = getStateGeneration();
+      const historyStartedAt = snapshot.historyImport?.startedAt ?? 0;
+      const cachedLegacyKeys = legacyReviewKeys.current;
+      if (!cachedLegacyKeys ||
+          cachedLegacyKeys.generation !== generation ||
+          cachedLegacyKeys.startedAt !== historyStartedAt) {
+        legacyReviewKeys.current = {
+          generation,
+          startedAt: historyStartedAt,
+          keys: collectLegacyReviewSourceKeys(snapshot),
+        };
+      }
+      const requestedLegacyReviewKeys = legacyReviewKeys.current?.keys ?? [];
       const scanStartedAt = Date.now();
       const page = await scanInbox(
         0,
-        getStateSnapshot().merchantOverrides,
+        snapshot.merchantOverrides,
         undefined,
         undefined,
         {
           cursor,
-          maxInboxPages: 1,
+          // Parsing itself remains cooperative inside scanInbox. Group several
+          // provider pages before one plan/persist boundary so the expensive
+          // full-ledger indexes and React transaction-array publication are not
+          // repeated hundreds of times on a large retained inbox.
+          maxInboxPages: foreground
+            ? FOREGROUND_HISTORY_PAGES_PER_COMMIT
+            : BACKGROUND_HISTORY_PAGES_PER_COMMIT,
           pageSize: foreground ? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE,
-          legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
+          legacyReviewSourceKeys: requestedLegacyReviewKeys,
         },
       );
       recordRuntimeOperation('history-scan-page', Date.now() - scanStartedAt);

@@ -27,7 +27,12 @@ function harness(options = {}) {
   };
   const native = { Platform: { OS: 'android' }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } };
   const hook = load(path.resolve(__dirname, '../../../src/hooks/use-history-import.ts'), {
-    react: { useMemo: (factory) => factory(), useCallback: (fn) => fn, useEffect() {} },
+    react: {
+      useMemo: (factory) => factory(),
+      useCallback: (fn) => fn,
+      useEffect() {},
+      useRef: (value) => ({ current: value }),
+    },
     'react-native': native,
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
     '@/lib/auto-import': {
