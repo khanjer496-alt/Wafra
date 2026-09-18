@@ -143,8 +143,10 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const meta = getCategory(transaction.category);
   const transferReview = isTransferCandidate(transaction);
   const transferWords = transferReviewCopy();
+  const ownership = transferOwnership(transaction);
   const confirmedTransfer = isLedgerTransfer(transaction);
-  const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown';
+  const confirmedOwnTransfer = ownership === 'own';
+  const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
   const categories = income ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
@@ -264,6 +266,19 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           style={styles.headAmount}
         />
       </View>
+
+      {(confirmedOwnTransfer || pendingTransfer) && (
+        <View
+          testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
+          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="smallBold">
+            {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
+          </ThemedText>
+        </View>
+      )}
 
       {transferReview && <View style={styles.field} testID="entry-transfer-review">
         {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
@@ -412,7 +427,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               {
                 label: t('category'),
                 value: confirmedTransfer || pendingTransfer ? (
-                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown : t('transferLabel')}</ThemedText>
+                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown
+                    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
                 ) : (
                   <ThemedText
                     type="small"
@@ -683,6 +699,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
+  },
+  transferMeaning: {
+    gap: Spacing.one,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two + 2,
   },
   actionsLarge: { flexDirection: 'column' },
   actions: {

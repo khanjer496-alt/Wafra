@@ -84,6 +84,26 @@ test('transfers never masquerade as merchant-spending links', () => {
     tree.props.onPress(); assert.deepEqual(h.events, [['transaction', 'fixture']]);
   }
 });
+test('confirmed own-account transfers say they are not spending', () => {
+  const h = rowFixture();
+  const tree = h.render({ isTransfer: true, title: 'Own account transfer' });
+  const meaning = byId(tree, 'own-transfer-meaning');
+  assert.ok(meaning);
+  assert.match(String(meaning.props.children), /Between your accounts · not spending/);
+  assert.match(tree.props.accessibilityLabel, /Between your accounts · not spending/);
+});
+test('an unresolved transfer is visibly excluded while it waits for review', () => {
+  const h = rowFixture();
+  const tree = h.render({
+    title: 'Bank transfer',
+    source: 'sms',
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' },
+  });
+  const meaning = byId(tree, 'pending-transfer-meaning');
+  assert.ok(meaning);
+  assert.match(String(meaning.props.children), /Transfer needs review · not counted yet/);
+  assert.match(tree.props.accessibilityLabel, /Transfer needs review · not counted yet/);
+});
 test('merchant previews can disable their own merchant link without losing transaction details', () => {
   const h = rowFixture(); const tree = h.render({}, { merchantLinks: false });
   assert.equal(byId(tree, 'transaction-merchant-link'), undefined);
