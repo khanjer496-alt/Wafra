@@ -19,16 +19,17 @@ import {
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const BACKGROUND_HISTORY_PAGE_SIZE = 500;
+const BACKGROUND_HISTORY_PAGE_SIZE = 1_000;
 // Foreground pages are intentionally much smaller than background pages. Even
 // with a cooperative parser, planning + reducer work is synchronous JS; a 500
 // row page can monopolise Hermes long enough for taps and navigation to look
 // dead on a large ledger. Background keeps the throughput-oriented page size.
-const FOREGROUND_HISTORY_PAGE_SIZE = 64;
-const FOREGROUND_HISTORY_PAGE_GAP_MS = 650;
+const FOREGROUND_HISTORY_PAGE_SIZE = 256;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // A brand-new first run may begin by itself, but a previously paused history
 // job must never restart merely because the user returned to Wafra. Re-entry is
 // an interaction-critical transition and the saved Home card already exposes
@@ -82,6 +83,7 @@ export function useHistoryImport(): void {
       } else {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
+      const scanStartedAt = Date.now();
       const page = await scanInbox(
         0,
         getStateSnapshot().merchantOverrides,
@@ -94,6 +96,7 @@ export function useHistoryImport(): void {
           legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
         },
       );
+      recordRuntimeOperation('history-scan-page', Date.now() - scanStartedAt);
       return {
         ...page,
         scanned: page.scannedCount,
@@ -136,16 +139,23 @@ export function useHistoryImport(): void {
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
         : getStateSnapshot();
+      const planStartedAt = Date.now();
       const plan = buildImportPlan(page.parsed, ledger, page.newestTs, undefined, page.declined);
+      recordRuntimeOperation('history-plan-page', Date.now() - planStartedAt);
       if (RNAppState.currentState === 'active') {
         await waitForForegroundHistoryIdle();
       }
       if (!canCommit()) return false;
-      await importBatch({
-        ...plan.batch,
-        parserRereadComplete: page.inboxHistoryComplete,
-        historyImport: next,
-      }).durable;
+      const saveStartedAt = Date.now();
+      try {
+        await importBatch({
+          ...plan.batch,
+          parserRereadComplete: page.inboxHistoryComplete,
+          historyImport: next,
+        }).durable;
+      } finally {
+        recordRuntimeOperation('history-save-page', Date.now() - saveStartedAt);
+      }
       markLaunchPhase('first-history-page');
       // Never acknowledge transient native rows before the ledger write.
       // A pause during persistence leaves them available for safe replay.

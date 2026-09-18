@@ -86,9 +86,9 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   // larger throughput-oriented page size because no visible UI is competing.
   ok(
     'foreground history uses small pages while background keeps throughput',
-    /BACKGROUND_HISTORY_PAGE_SIZE = 500/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGE_SIZE = 64/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGE_GAP_MS = 650/.test(historyHookSource) &&
+    /BACKGROUND_HISTORY_PAGE_SIZE = 1_000/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE = 256/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
       /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );
@@ -111,6 +111,12 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyHookSource) &&
       /await waitForForegroundHistoryIdle\(\);/.test(historyHookSource) &&
       /blockedUntil = Math\.max\(blockedUntil, now \+ quietMs\)/.test(prioritySource),
+  );
+  ok(
+    'history page timings separate scan, planning, and durable save',
+    /recordRuntimeOperation\('history-scan-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-plan-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-save-page'/.test(historyHookSource),
   );
   ok(
     'intermediate history pages defer every full-ledger repair until completion',

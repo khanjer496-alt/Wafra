@@ -75,6 +75,7 @@ import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { historyImportIncomplete } from '@/lib/history-import';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
   WafraLiveCaptureNativeModule,
@@ -572,6 +573,7 @@ export function useAutoImport(
     recordIosCaptureWarning,
     clearIosCaptureWarning,
   } = useStore();
+  const previousHistoryIncomplete = useRef(historyImportIncomplete(state.historyImport));
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,
     getStateGeneration,
@@ -1620,6 +1622,38 @@ export function useAutoImport(
     state.hydrated,
     state.onboarded,
     state.lastScanTs,
+    watchForeground,
+  ]);
+
+  // The first session reminder sync may run while Android is still rebuilding
+  // retained SMS history. In that state syncPaymentReminders deliberately skips
+  // the full subscription recurrence projection. Rebuild once, after the final
+  // history page is durable, so reminders become complete without competing
+  // with parser/history work on every intermediate page.
+  useEffect(() => {
+    if (!watchForeground || Platform.OS !== 'android') return;
+    const incomplete = historyImportIncomplete(state.historyImport);
+    const wasIncomplete = previousHistoryIncomplete.current;
+    previousHistoryIncomplete.current = incomplete;
+    if (!wasIncomplete || incomplete || !state.hydrated || !state.onboarded) return;
+    let cancelled = false;
+    void (async () => {
+      await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
+      if (cancelled || RNAppState.currentState !== 'active') return;
+      const current = getStateSnapshot();
+      if (!current.hydrated || !current.onboarded || historyImportIncomplete(current.historyImport)) return;
+      try {
+        await syncPaymentReminders(current);
+      } catch {
+        // Best-effort maintenance; completed history never depends on reminders.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [
+    getStateSnapshot,
+    state.historyImport?.status,
+    state.hydrated,
+    state.onboarded,
     watchForeground,
   ]);
 
