@@ -327,13 +327,14 @@ export function parseHistoricalMessageRecords(
       continue;
     }
     // A retained Message can legitimately arrive without a sender when the
-    // Shortcut could not expose one. Structure alone may be sufficient for the
-    // universal parser to understand the money, but it is not sufficient
-    // issuer evidence for unattended historical auto-posting. Preserve those
-    // grounded facts in source-free Review instead. If Review cannot safely
-    // represent it, retain the parser result rather than silently dropping a
-    // transaction the deterministic parser did understand.
-    if (!sender) {
+    // Shortcut could not expose one. UAE/Saudi have mature local grammars and
+    // explicit launch currencies, so those established historical paths remain
+    // automatic. A sender-less non-Gulf result, however, came only from the
+    // broad universal parser; preserve its grounded facts in source-free Review
+    // instead of auto-posting history without issuer evidence. If Review cannot
+    // safely represent it, retain the parser result rather than dropping money
+    // the parser did understand.
+    if (!sender && result.currency !== 'AED' && result.currency !== 'SAR') {
       const refusal = inspectHistoricalRefusal({
         record,
         timestamp,
