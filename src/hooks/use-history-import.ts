@@ -24,13 +24,13 @@ import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
 const BACKGROUND_HISTORY_PAGE_SIZE = 1_000;
-const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 2;
+const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1;
 // Foreground pages are intentionally much smaller than background pages. Even
 // with a cooperative parser, planning + reducer work is synchronous JS; a 500
 // row page can monopolise Hermes long enough for taps and navigation to look
 // dead on a large ledger. Background keeps the throughput-oriented page size.
 const FOREGROUND_HISTORY_PAGE_SIZE = 256;
-const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 4;
+const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 2;
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // A brand-new first run may begin by itself, but a previously paused history
 // job must never restart merely because the user returned to Wafra. Re-entry is

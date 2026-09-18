@@ -942,11 +942,19 @@ function bodyOf(source, header) {
   ok('history planning and commit both honor the foreground navigation lease',
     /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
       /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*256/.test(historyImport) &&
-      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*4/.test(historyImport) &&
-      /BACKGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*2/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*2/.test(historyImport) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*1/.test(historyImport) &&
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
       (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
+
+  const importPlanSource = stripComments(read('src/lib/import-plan.ts'));
+  ok('history exact-source repairs keep generalized duplicate indexes lazy',
+    /let guardCache: ReturnType<typeof duplicateGuard> \| null = null/.test(importPlanSource) &&
+      /if \(exactPrior\) \{[\s\S]*?healFromReparse\([\s\S]*?continue;[\s\S]*?const duplicate = guard\(\)/.test(importPlanSource) &&
+      /let rowsByTimestampCache: Map<number, Transaction\[\]> \| null = null/.test(importPlanSource) &&
+      /let transferRepairCandidatesCache: Map<string, Transaction\[\]> \| null = null/.test(importPlanSource),
+    'an exact retained-message identity should heal directly instead of allocating every cross-channel/title/timestamp index over a large ledger');
 
   const smsParserSource = stripComments(read('src/lib/sms-parser.ts'));
   const captureSource = stripComments(read('src/lib/capture.ts'));
