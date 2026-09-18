@@ -175,6 +175,7 @@ try {
       await fits(page.getByTestId('entry-transfer-review'));
       await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);
+      await click(page.getByTestId('transfer-review-entry'));
       await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });
       await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
