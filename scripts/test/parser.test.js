@@ -139,6 +139,26 @@ t('spend-to-enter-draw threshold is not spending',
 t('loan and credit-card sales offer is not salary or income',
   'We offer personal loans, Islamic personal finance, and credit cards. Bundle Offer Upto AED 12500 Rewards.',
   null);
+t('unknown bank parses a completed debit from structure alone',
+  'Transaction with an amount of AED 123.45 has been successfully paid to SAMPLE STORE.',
+  { type: 'expense', amountFils: 12345 },
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
+t('unknown bank parses a settled account credit from structure alone',
+  'AED 850.00 has been credited to your account successfully.',
+  { type: 'income', amountFils: 85000 },
+  { sender: 'NEW-BANK-SENDER-XYZ' });
+t('unknown bank parses a completed purchase without a card number',
+  'Purchase of AED 77.25 at SAMPLE CAFE was successfully processed.',
+  { type: 'expense', amountFils: 7725, merchant: 'Sample Cafe' },
+  { sender: 'TOTALLY-UNKNOWN-BANK' });
+t('unknown bank pending transaction still stays out of the ledger',
+  'Transaction with an amount of AED 123.45 is pending processing.',
+  null,
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
+t('unknown bank promotion still stays out of the ledger',
+  'Spend AED 123.45 on your next purchase and enter the prize draw.',
+  null,
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
 t('minimum-purchase instalment campaign is not spending',
   'Shop your favorite brands with FAB Credit Cards and enjoy 0% interest instalments for up to 12 months with ZERO processing fee on a purchase of AED 1,000 or more until 31 Dec 2026. Conditions apply.',
   null);

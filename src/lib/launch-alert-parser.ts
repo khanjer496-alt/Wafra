@@ -8,6 +8,7 @@ import {
   detectLaunchMarketFromAlert,
   detectLaunchMarketFromSender,
   getActiveMarket,
+  ledgerCurrencyExponent,
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
@@ -48,6 +49,87 @@ export const inspectGenericBankEventForReview = (
   return event;
 };
 
+/**
+ * Promote only a self-proving universal event.
+ *
+ * This is the bank-agnostic production seam: no bank/sender registry is
+ * required. The universal parser must prove one posted amount, one direction,
+ * and an unambiguous ISO currency. Anything involving transfer ownership,
+ * card settlement, statements, balances, bills/future events, authentication,
+ * promotions, or unresolved fields remains in Review.
+ */
+const parseUniversalPostedEvent = (
+  source: string,
+  sender: string,
+  pinnedCurrency: string | null,
+  pinnedExponent: number | null,
+): ParsedSms | null => {
+  const event = inspectUniversalBankEvent(source, { sender });
+  if (event.decision !== 'review' || event.status !== 'posted') return null;
+  if (event.direction !== 'debit' && event.direction !== 'credit') return null;
+  if (!['purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment'].includes(event.family)) {
+    return null;
+  }
+  if (event.amount.evidence !== 'explicit' || !event.amount.value) return null;
+  const money = event.amount.value;
+  if (pinnedCurrency && pinnedCurrency !== money.currency) return null;
+  if (pinnedExponent !== null && pinnedExponent !== money.exponent) return null;
+  const exponent = currencyMinorUnits(money.currency);
+  if (exponent === null || exponent !== money.exponent || !/^\d+$/.test(money.minorUnits)) return null;
+  const amountFils = Number(money.minorUnits);
+  if (!Number.isSafeInteger(amountFils) || amountFils <= 0) return null;
+  const blockedIssues = new Set([
+    'amount-role-unresolved',
+    'posting-status-unresolved',
+    'direction-unresolved',
+    'direction-conflict',
+    'multiple-event-adapter-required',
+    'authentication-not-posting',
+    'pending-not-posting',
+    'promotion-not-posting',
+    'settlement-adapter-required',
+    'failed-not-posting',
+  ]);
+  if (event.issues.some((issue) => blockedIssues.has(issue))) return null;
+
+  const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+  const card = instrument ? {
+    last4: instrument.last4 ?? '',
+    kind: instrument.kind === 'account' ? 'account' as const : 'unknown' as const,
+  } : null;
+  const merchant = event.merchant.evidence === 'explicit' && event.merchant.value
+    ? event.merchant.value
+    : event.family === 'cash-withdrawal'
+      ? 'ATM withdrawal'
+      : event.family === 'refund'
+        ? 'Refund'
+        : event.direction === 'credit'
+          ? 'Incoming transfer'
+          : 'Account debit';
+  const categoryGuess: CategoryId =
+    event.family === 'cash-withdrawal' ? 'cash-withdrawal' :
+      event.family === 'utility' ? 'utilities' : 'other';
+
+  return {
+    kind: 'transaction',
+    type: event.direction === 'credit' ? 'income' : 'expense',
+    amountFils,
+    currency: money.currency,
+    merchant,
+    date: event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null,
+    dueDay: null,
+    minDueFils: null,
+    card: card && card.last4 ? card : null,
+    reference: null,
+    transferHint: false,
+    snapshotFils: null,
+    snapshotKind: null,
+    categoryGuess,
+    categoryDeliberate: event.family === 'cash-withdrawal' || event.family === 'utility',
+    raw: source.trim(),
+  };
+};
+
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
   interpret(
@@ -84,6 +166,12 @@ export const createLaunchAlertSession = ({
   pinnedCurrency?: string | null;
   activeMarket?: string;
 }): LaunchAlertSession => {
+  const actualPinned = pinnedLedgerCurrencyCode();
+  const pinnedExponent = pinnedCurrency
+    ? pinnedCurrency === actualPinned
+      ? ledgerCurrencyExponent()
+      : currencyMinorUnits(pinnedCurrency)
+    : null;
   let sessionMarket: 'AE' | 'SA' | null =
     pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
   let detected: 'AE' | 'SA' | null = null;
@@ -154,7 +242,9 @@ export const createLaunchAlertSession = ({
     sender: string,
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
-  ): ParsedSms | null => interpret(source, sender, inspection, forcedMarket)?.parsed ?? null;
+  ): ParsedSms | null =>
+    interpret(source, sender, inspection, forcedMarket)?.parsed ??
+    parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
 
   return { inspect, interpret, parse, detectedMarket: () => detected };
 };

@@ -53,6 +53,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     phrase(String.raw`pagamento\s+con\s+carta\s+eseguito`),
     phrase(String.raw`acquisto\s+completato`),
     phrase(String.raw`kaartbetaling\s+voltooid`),
+    phrase(String.raw`afgeschreven\s+voor\s+(?:een\s+)?pasbetaling`),
     phrase(String.raw`overboeking\s+voltooid[\s\S]{0,100}afgeschreven`),
     phrase(String.raw`alışveriş(?:iniz)?\s+(?:gerçekleşmiştir|tamamlandı)`),
     phrase(String.raw`تم\s+(?:سداد|خصم)`),

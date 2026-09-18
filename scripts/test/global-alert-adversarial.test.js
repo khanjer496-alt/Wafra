@@ -97,6 +97,36 @@ for (const market of markets) {
   ok(`${market}: conflicting foreign issuer is ambiguous`,
     conflict.decision === 'ambiguous' && conflict.market === null,
     JSON.stringify(conflict));
+
+  const globalLedger = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: posted.expected.currency,
+  });
+  const universalParsed = globalLedger.parse(
+    posted.body,
+    posted.sender,
+    globalLedger.inspect(posted.body, posted.sender),
+  );
+  ok(`${market}: matching-currency ledger can auto-parse the posted worldwide alert`,
+    universalParsed !== null &&
+      universalParsed.currency === posted.expected.currency &&
+      String(universalParsed.amountFils) === posted.expected.minorUnits,
+    JSON.stringify(universalParsed));
+}
+
+{
+  const unknownUsd = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: 'USD',
+  });
+  const body = 'Card purchase USD 19.99 was debited at SAMPLE SHOP.';
+  const parsed = unknownUsd.parse(body, 'BANK-WAFRA-HAS-NEVER-SEEN', null);
+  ok('unknown USD bank auto-parses from universal structure alone',
+    parsed !== null && parsed.currency === 'USD' && parsed.amountFils === 1999 &&
+      parsed.type === 'expense',
+    JSON.stringify(parsed));
 }
 
 const hardNegatives = [
