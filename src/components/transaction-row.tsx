@@ -37,17 +37,21 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const largeText = useLargeTextLayout();
   const meta = getCategory(transaction.category);
   const clock = clockTime(transaction);
+  const ownership = transferOwnership(transaction);
+  const ownTransfer = internal === true || ownership === 'own';
   const isTransfer = isLedgerTransfer(transaction) || internal === true;
-  const pending = !internal && isTransferCandidate(transaction) && transferOwnership(transaction) === 'unknown';
+  const pending = !internal && isTransferCandidate(transaction) && ownership === 'unknown';
   const isIncome = transaction.type === 'income' && !isTransfer && !pending;
   // Direction and classification differ: an inbound transfer is positive,
   // but never painted as income. Preserve the shipping accounting distinction.
   const arrived = transaction.type === 'income';
   const where = pending ? transferReviewCopy(language).ownershipUnknown
-    : isTransfer ? t('transferLabel', language)
+    : ownTransfer ? transferReviewCopy(language).confirmedOwn
+      : isTransfer ? t('transferLabel', language)
       : transaction.paymentFlowSide === 'receipt' && transaction.category === 'other'
         ? t('registeredBillPayment', language)
         : categoryLabel(meta, language);
+  const meaningTestID = ownTransfer ? 'own-transfer-meaning' : pending ? 'pending-transfer-meaning' : undefined;
   const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
     ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
@@ -75,7 +79,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
         <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
         <View style={styles.content}>
           <ThemedText type="smallBold">{transaction.title}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+          <ThemedText testID={meaningTestID} type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
           {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
         </View>
       </Pressable>
@@ -103,7 +107,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
           {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
         </ThemedText>
       </View>
-      <ThemedText type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
+      <ThemedText testID={meaningTestID} type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
       {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
     </View>
   </Pressable>;
