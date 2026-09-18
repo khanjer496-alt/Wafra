@@ -1275,6 +1275,9 @@ function hasPostedEvidence(raw: string, card: ParsedCard | null): boolean {
     ) {
       return true;
     }
+    if (STRONG_SENDERLESS_POSTING_RE.test(raw)) {
+      return true;
+    }
     // A completed transfer remains money moved when the source is too masked
     // to identify. Do not make an invented four-digit prefix its admission
     // ticket; pending requests still fail the shared non-posting classifier.
@@ -1451,6 +1454,8 @@ const SETTLED_TENSE_RE =
  */
 const SETTLED_MOVEMENT_RE =
   /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|payment|transfer|purchase|withdrawal)\b[^.\n]{0,80}\b(?:completed|successful|succeeded|posted|processed)\b|تم خصم|تم الخصم|تم شراء|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
+const STRONG_SENDERLESS_POSTING_RE =
+  /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 /**
  * A returned, bounced or dishonoured cheque is money that did NOT leave the
  * account. It is stated in the perfect tense ("has been returned unpaid"), so
