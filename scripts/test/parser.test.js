@@ -139,6 +139,13 @@ t('spend-to-enter-draw threshold is not spending',
 t('loan and credit-card sales offer is not salary or income',
   'We offer personal loans, Islamic personal finance, and credit cards. Bundle Offer Upto AED 12500 Rewards.',
   null);
+t('application financing offer with a purchase amount is not spending',
+  'Apply now for 0% over 12 months on a purchase of AED 1000 with your FAB Credit Card.',
+  null,
+  { sender: 'FAB' });
+t('a settled purchase survives an application-financing footer',
+  'AED 75.00 was debited at SAMPLE STORE using your FAB Credit Card. Apply now for 0% over 12 months on purchases of AED 1000.',
+  { type: 'expense', amountFils: 7500 });
 t('unknown bank parses a completed debit from structure alone',
   'Transaction with an amount of AED 123.45 has been successfully paid to SAMPLE STORE.',
   { type: 'expense', amountFils: 12345 },

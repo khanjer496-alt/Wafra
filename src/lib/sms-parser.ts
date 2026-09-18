@@ -332,8 +332,15 @@ export interface ParsedCard {
  * field lists, and re-evaluate merchant/category normalization without changing
  * user-authored edits. Existing rows heal through the normal deduplicated
  * source-identity path rather than creating duplicate transactions.
+ *
+ * 45: unified-parser authority and offer-safety repair. Re-read retained
+ * history so application/financing offers and other future/non-posting money
+ * cannot be resurrected as transactions by semantic/worldwide fallback after
+ * the mature AE/SA grammar refused them. Proven UAE/Saudi postings retain their
+ * existing amounts, merchants and categories; worldwide parsing remains
+ * available through the same launch-session entry point for other markets.
  */
-export const PARSER_VERSION = 44;
+export const PARSER_VERSION = 45;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -1397,6 +1404,8 @@ const CONTEST_MARKETING_RE =
   /\b(?:chance|opportunity)\s+to\s+win\b|\bcash\s+prize\b|\b(?:entry|entries)\s+(?:to|into)\s+(?:the\s+)?(?:draw|raffle)\b|\bevery\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+spent\b[^.\n]{0,60}\b(?:entry|entries|draw|raffle)\b/i;
 const FINANCIAL_SALES_RE =
   /\bwe\s+offer\b[\s\S]{0,180}\b(?:personal\s+(?:loans?|finance)|credit\s+cards?|mortgages?|auto\s+finance)\b/i;
+const APPLICATION_PURCHASE_OFFER_RE =
+  /\bapply\b[\s\S]{0,180}\b\d{1,3}\s*%[\s\S]{0,120}\b\d{1,3}\s+months?\b[\s\S]{0,180}\bpurchases?\b|\bapply\b[\s\S]{0,180}\bpurchases?\b[\s\S]{0,180}\b\d{1,3}\s*%[\s\S]{0,120}\b\d{1,3}\s+months?\b/i;
 
 /**
  * A FUTURE OR SCHEDULED EVENT HAS NOT MOVED ANY MONEY — and the bank sends the
@@ -4555,7 +4564,8 @@ function parseSmsInner(
       FUTURE_PURCHASE_THRESHOLD_RE.test(raw) ||
       PURCHASE_THRESHOLD_OFFER_RE.test(raw) ||
       CONTEST_MARKETING_RE.test(raw) ||
-      FINANCIAL_SALES_RE.test(raw)) &&
+      FINANCIAL_SALES_RE.test(raw) ||
+      APPLICATION_PURCHASE_OFFER_RE.test(raw)) &&
     !ARABIC_MONTHLY_BILL_RE.test(raw) &&
     !SETTLED_MOVEMENT_RE.test(marketingMovementText) &&
     !strongFieldListPosting &&

@@ -3,6 +3,7 @@ import { inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
+import { isApplicationPurchaseOffer, isExpectedFutureMoneyNotice } from '@/lib/bank-alert-semantic-rules';
 
 const emptyEvent = (issue: string): UniversalBankEvent => ({
     version: 1, decision: 'ignore', family: 'unknown', status: 'unknown', direction: 'unknown',
@@ -150,6 +151,10 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
     /(?:^|[。.!?])\s*(?:カード決済|カード支払い|決済|支払い)(?:が|は)?拒否されました/u,
   ];
   if (declined.some((pattern) => unconditional(pattern))) return { status: 'failed' };
+  if (isExpectedFutureMoneyNotice(text)) {
+    return { status: 'future' };
+  }
+  if (isApplicationPurchaseOffer(text)) return { status: 'informational' };
   if (!includeLifecycle) return null;
   if (unconditional(/\boverboeking\b[^!?]{0,180}\baangevraagd\b/iu)) return { status: 'informational' };
   if (unconditional(/\b(?:subscription|membership)\s+will\s+(?:renew|be\s+renewed)\b/iu) ||

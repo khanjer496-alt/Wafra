@@ -49,6 +49,21 @@ const EXTERNAL_TRANSFER_LANGUAGE =
 const CARD_PURCHASE_LANGUAGE =
   /\b(?:card\s+purchase|purchase(?:d)?|card\b[^.\n]{0,40}\b(?:used|charged)|(?:subscription|membership)\b(?:[^.]|\.\d){0,64}\bcharged\s+(?:to|on)\s+(?:your\s+)?card|pos\s+(?:purchase|transaction)|pos\b(?:[^.\n]|\.(?=\d)){0,64}\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\bcard\b|card\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b(?:[^.\n]|\.(?=\d)){0,80}\bpos\b|(?:card\s+)?pur\b(?:[^.\n]|\.(?=\d)){0,80}\bcard\b)\b|شراء|دفع بالبطاق[هة]/iu;
 
+export const isExpectedFutureMoneyNotice = (source: string): boolean => {
+  const text = normalizeArabic(source).replace(/\s+/gu, ' ');
+  return /\b(?:expected|anticipated)\s+(?:refund|reversal|credit|deposit|transfer|payment)\b/iu.test(text) ||
+    /\b(?:refund|reversal|credit|deposit|transfer|payment)\b[^.!?]{0,80}\b(?:expected|anticipated)\b/iu.test(text);
+};
+
+/** A financing/application pitch can quote a real-looking purchase amount. */
+export const isApplicationPurchaseOffer = (source: string): boolean => {
+  const text = normalizeArabic(source).replace(/\s+/gu, ' ');
+  return /\bapply\b/iu.test(text) &&
+    /\bpurchases?\b/iu.test(text) &&
+    /\b\d{1,3}\s*%/u.test(text) &&
+    /\b\d{1,3}\s+months?\b/iu.test(text);
+};
+
 export const SEMANTIC_CANDIDATE_LANGUAGE = new RegExp([
   SALARY_LANGUAGE.source,
   BUSINESS_INCOME_LANGUAGE.source,
