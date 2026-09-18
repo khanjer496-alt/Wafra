@@ -235,8 +235,9 @@ try {
       assert.equal(await historic.count(), 1, 'old unresolved records remain reachable as one collapsed group');
       assert.equal(await page.getByTestId('transfer-scope-all').count(), 0, 'there is no second transfer-history mode');
       await page.getByTestId('transfer-search').fill('4222');
-      await page.waitForFunction(() => document.querySelector('[data-testid="transfer-browse-summary"]')?.textContent
-        .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[,٬]/g, '').includes('3106'));
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="transfer-review-group"]')]
+        .some(node => (node.textContent ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
+          .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '').includes('3106')));
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0);
       await page.screenshot({ path: path.join(OUT, `${name}-3106-history-collapsed.png`) });
       await click(historic.getByTestId('transfer-group-toggle'));
