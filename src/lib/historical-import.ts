@@ -326,6 +326,30 @@ export function parseHistoricalMessageRecords(
       else ignoredCount += 1;
       continue;
     }
+    // A retained Message can legitimately arrive without a sender when the
+    // Shortcut could not expose one. Structure alone may be sufficient for the
+    // universal parser to understand the money, but it is not sufficient
+    // issuer evidence for unattended historical auto-posting. Preserve those
+    // grounded facts in source-free Review instead. If Review cannot safely
+    // represent it, retain the parser result rather than silently dropping a
+    // transaction the deterministic parser did understand.
+    if (!sender) {
+      const refusal = inspectHistoricalRefusal({
+        record,
+        timestamp,
+        nowMs: now.getTime(),
+        session: launchSession,
+        inspection,
+      });
+      if (refusal.kind === 'declined') {
+        declined.push(refusal.row);
+        continue;
+      }
+      if (refusal.kind === 'review') {
+        reviewCandidates.push(refusal.item);
+        continue;
+      }
+    }
     if (shouldReviewParsedIncome(result)) {
       const refusal = inspectHistoricalRefusal({
         record,
