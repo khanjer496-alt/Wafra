@@ -117,8 +117,15 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     /if \(historyStillRunning\)[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
       fs.readFileSync(path.join(__dirname, '../../src/lib/ledger-import.ts'), 'utf8'),
     ) &&
-      /next\.historyImport\?\.status === 'running'/.test(storeSource),
+      /historyImportIncomplete\(next\.historyImport\)/.test(storeSource) &&
+      /historyImportIncomplete\(reduced\.historyImport\)/.test(storeSource),
   );
+
+  ok('unfinished history status includes process-death pause and retryable failure',
+    history.historyImportIncomplete({ status: 'running' }) &&
+    history.historyImportIncomplete({ status: 'paused' }) &&
+    history.historyImportIncomplete({ status: 'failed' }) &&
+    !history.historyImportIncomplete({ status: 'complete' }));
 
   eq('a new import starts paused with no provider cursor',
     history.createHistoryImportProgress(100), {

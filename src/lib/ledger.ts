@@ -1,5 +1,6 @@
 import type { Account, AppState, Transaction } from '@/lib/types';
 import { bankIdentityForName } from '@/lib/markets';
+import { historyImportIncomplete } from '@/lib/history-import';
 import {
   isTransferEvidence,
   isTransferCandidate,
@@ -203,9 +204,21 @@ export function internalTransferIdsForState(
   const ids = state.transferInternalIds;
   const receiptUsable = Array.isArray(ids) && (
     state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
-    state.historyImport?.status === 'running'
+    historyImportIncomplete(state.historyImport)
   );
-  if (!receiptUsable) return internalTransferIds(state.transactions, state.accounts);
+  if (!receiptUsable) {
+    // Do not route through internalTransferIds() here. A provisional history
+    // receipt intentionally primes that legacy array-identity cache so every UI
+    // caller sees the same cheap answer while import is unfinished. Once the
+    // job completes (or the receipt otherwise becomes unusable), the same
+    // immutable arrays may still be present; consulting the legacy cache would
+    // then return the stale provisional ids instead of the required canonical
+    // reconciliation. Reconcile explicitly and replace the cache with the live
+    // result at this state-aware boundary.
+    const value = reconciliationInternalIds(reconcileTransfers(state.transactions, state.accounts));
+    internalIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
+    return value;
+  }
   if (persistedInternalIdsCache?.transactions === state.transactions &&
       persistedInternalIdsCache.accounts === state.accounts &&
       persistedInternalIdsCache.ids === ids) {
