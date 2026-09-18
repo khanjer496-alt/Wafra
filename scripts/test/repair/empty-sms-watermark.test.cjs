@@ -23,7 +23,7 @@ function harness(result = {}, initial = {}, options = {}) {
           detectedLaunchMarket: null, commit: async () => { events.push('commit'); }, ...result };
       } },
     '@/lib/background-relay-storage': {}, '@/lib/relay': relay,
-    '@/lib/sms-parser': { PARSER_VERSION: 39 },
+    '@/lib/sms-parser': { PARSER_VERSION: 39, PARSER_BACKFILL_VERSION: 39 },
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
   });
   const executor = load(source('capture-executor'), {

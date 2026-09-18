@@ -1758,7 +1758,7 @@ async function queueItem(id, row, publicKey) {
           buildImportPlan: (parsed) => ({ parsed }),
         };
       }
-      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1 };
+      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1, PARSER_BACKFILL_VERSION: 1 };
       throw new Error(`unexpected capture dependency ${id}`);
     };
 
