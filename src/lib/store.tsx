@@ -1839,7 +1839,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // does not, because hydration converts `running` to `paused` and the same
       // provisional snapshot remains the safe cheap answer. Priming the cache
       // here prevents Home/Flow/Bills/Wallet from rebuilding the entire graph.
-      primeInternalTransferIds(next.transactions, next.accounts, next.transferInternalIds);
+      primeInternalTransferIds(
+        next.transactions,
+        next.accounts,
+        next.transferInternalIds,
+        next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
+      );
     }
     authoritativeRevision.current += 1;
     setState(next);
