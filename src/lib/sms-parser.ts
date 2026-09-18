@@ -325,8 +325,15 @@ export interface ParsedCard {
  * for one consumer reference and a real merchant elsewhere. Re-read history so
  * those receipts return to safe bill-purpose handling, where user corrections
  * are scoped by the privacy-safe bill identity instead of the displayed name.
+ *
+ * 44: Jev-guided field/template repair. Re-read retained history to remove
+ * balance/limit and promotional figures that older grammars could import as
+ * transactions, restore newly supported posted formats and foreign-currency
+ * field lists, and re-evaluate merchant/category normalization without changing
+ * user-authored edits. Existing rows heal through the normal deduplicated
+ * source-identity path rather than creating duplicate transactions.
  */
-export const PARSER_VERSION = 43;
+export const PARSER_VERSION = 44;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
