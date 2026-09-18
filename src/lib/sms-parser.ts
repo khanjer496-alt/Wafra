@@ -339,8 +339,15 @@ export interface ParsedCard {
  * the mature AE/SA grammar refused them. Proven UAE/Saudi postings retain their
  * existing amounts, merchants and categories; worldwide parsing remains
  * available through the same launch-session entry point for other markets.
+ *
+ * 46: one-parser global consolidation. Re-read retained history through the
+ * single LaunchAlertSession.parse boundary so every market uses the same money,
+ * date, posting-status and safety semantics. The universal language layer now
+ * activates every shipped market pack (including GB, KW, BH, OM, EG and JO),
+ * while AE/SA bank knowledge remains an internal evidence adapter rather than a
+ * second parser API. Existing source identities still dedupe/heal in place.
  */
-export const PARSER_VERSION = 45;
+export const PARSER_VERSION = 46;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

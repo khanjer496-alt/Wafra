@@ -803,19 +803,19 @@ ok('a future-fee footer cannot relabel a posted card settlement',
 {
   const cashback = 'Dear Customer, your cashback amount of AED 75.00 has been credited to your credit card account with the card number ending 4321XXXX1234.';
   const launch = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE' });
-  const read = source => launch.interpret(source, 'FAB', launch.inspect(source, 'FAB'));
+  const read = source => launch.parse(source, 'FAB', launch.inspect(source, 'FAB'));
   for (const [layout, source] of [['plain', cashback], ['wrapped', wrapEveryFiveWords(cashback)],
     ['nonbreaking spaces', cashback.replace(/ /g, '\u00a0')]]) {
     const result = read(source);
     ok(`cashback receipt ${layout}: shipping capture keeps income and the stated card`,
-      result?.parsed.kind === 'transaction' && result.parsed.type === 'income' &&
-        result.parsed.amountFils === 7500 && result.parsed.currency === 'AED' &&
-        result.parsed.transferHint === false && result.parsed.categoryGuess === 'other' &&
-        result.parsed.card?.last4 === '1234' && result.parsed.card.kind === 'credit' &&
-        result.parsed.cardPaymentSide === undefined && result.parsed.paymentFlowSide === undefined,
+      result?.kind === 'transaction' && result.type === 'income' &&
+        result.amountFils === 7500 && result.currency === 'AED' &&
+        result.transferHint === false && result.categoryGuess === 'other' &&
+        result.card?.last4 === '1234' && result.card.kind === 'credit' &&
+        result.cardPaymentSide === undefined && result.paymentFlowSide === undefined,
       JSON.stringify(result));
   }
-  const incoming = read(cashback).parsed;
+  const incoming = read(cashback);
   const cashbackRow = { id: 'cashback', type: incoming.type, amountFils: incoming.amountFils,
     title: incoming.merchant, category: incoming.categoryGuess, isTransfer: incoming.transferHint,
     accountId: 'credit', date: '2026-09-08', ts: Date.UTC(2026, 8, 8, 12) };
@@ -838,18 +838,18 @@ ok('a future-fee footer cannot relabel a posted card settlement',
     JSON.stringify(customCashback));
   const payment = read(cashback.replace('cashback amount', 'payment amount'));
   ok('a real payment amount credited to a card account remains a repayment',
-    payment?.parsed.kind === 'cardPayment' && payment.parsed.type === 'income' &&
-      payment.parsed.transferHint === true && payment.parsed.cardPaymentSide === 'receipt',
+    payment?.kind === 'cardPayment' && payment.type === 'income' &&
+      payment.transferHint === true && payment.cardPaymentSide === 'receipt',
     JSON.stringify(payment));
   const refund = read(cashback.replace('cashback amount', 'refund amount'));
   ok('a refund amount credited to a card account remains ordinary credit',
-    refund?.parsed.kind === 'transaction' && refund.parsed.type === 'income' &&
-      refund.parsed.transferHint === false && refund.parsed.cardPaymentSide === undefined,
+    refund?.kind === 'transaction' && refund.type === 'income' &&
+      refund.transferHint === false && refund.cardPaymentSide === undefined,
     JSON.stringify(refund));
   const purchase = read('Purchase of AED 75.00 with Credit Card ending 1234 at CASHBACK AMOUNT CAFE.');
   ok('a merchant named Cashback Amount cannot turn a purchase into income',
-    purchase?.parsed.kind === 'transaction' && purchase.parsed.type === 'expense' &&
-      purchase.parsed.transferHint === false && purchase.parsed.amountFils === 7500,
+    purchase?.kind === 'transaction' && purchase.type === 'expense' &&
+      purchase.transferHint === false && purchase.amountFils === 7500,
     JSON.stringify(purchase));
   for (const [name, source] of [
     ['future credit', cashback.replace('has been credited', 'will be credited')],
@@ -858,10 +858,10 @@ ok('a future-fee footer cannot relabel a posted card settlement',
   ]) ok(`cashback ${name} is never posted`, read(source) === null);
   const debit = read('Your cashback amount of AED 75.00 has been debited from your credit card account with the card number ending 4321XXXX1234.');
   ok('an explicit cashback debit cannot become income',
-    !debit || debit.parsed.type === 'expense', JSON.stringify(debit));
+    !debit || debit.type === 'expense', JSON.stringify(debit));
   const reversed = read('Your cashback credit of AED 75.00 has been reversed and debited from your credit card account with the card number ending 4321XXXX1234.');
   ok('a reversed cashback credit cannot become income',
-    !reversed || reversed.parsed.type === 'expense', JSON.stringify(reversed));
+    !reversed || reversed.type === 'expense', JSON.stringify(reversed));
 }
 
 console.log(`\nbank-alert-semantics-matrix: ${pass} passed, 0 failed`);

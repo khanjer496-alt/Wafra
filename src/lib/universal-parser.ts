@@ -15,7 +15,10 @@ const emptyEvent = (issue: string): UniversalBankEvent => ({
 
 // These supply existing language vocabularies, not a claim about the source's
 // country. ISO money remains inspectable outside this finite market registry.
-const LANGUAGE_PACKS: readonly UniversalMarket[] = ['US', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA'];
+const LANGUAGE_PACKS: readonly UniversalMarket[] = [
+  'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL',
+  'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+];
 const commonDirection = (directions: MoneyDirection[]): MoneyDirection => {
   const known = [...new Set(directions.filter((value) => value === 'debit' || value === 'credit'))];
   return known.length === 1 ? known[0] : 'unknown';

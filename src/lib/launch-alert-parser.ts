@@ -160,12 +160,6 @@ const parseUniversalPostedEvent = (
 
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
-  interpret(
-    source: string,
-    sender: string,
-    inspection?: UniversalAlertReview | null,
-    forcedMarket?: string,
-  ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null;
   parse(
     source: string,
     sender: string,
@@ -219,7 +213,11 @@ export const createLaunchAlertSession = ({
     }
   };
 
-  const interpret = (
+  // Internal evidence adapter for the mature Gulf grammar. It is deliberately
+  // not exposed on LaunchAlertSession: callers get one parser (`parse`) in
+  // every country. Regional knowledge enriches that one decision instead of
+  // becoming a second parser API with different behavior.
+  const parseRegionalEvidence = (
     source: string,
     sender: string,
     inspection: UniversalAlertReview | null = null,
@@ -276,7 +274,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
   ): ParsedSms | null => {
-    const local = interpret(source, sender, inspection, forcedMarket)?.parsed ?? null;
+    const local = parseRegionalEvidence(source, sender, inspection, forcedMarket)?.parsed ?? null;
     if (local) return local;
     // The worldwide parser is intentionally broader and therefore more
     // expensive. Ordinary conversations, delivery updates and generic service
@@ -316,7 +314,7 @@ export const createLaunchAlertSession = ({
     return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
   };
 
-  return { inspect, interpret, parse, detectedMarket: () => detected };
+  return { inspect, parse, detectedMarket: () => detected };
 };
 
 /**
