@@ -1264,6 +1264,17 @@ const POSTED_CLAUSE_RE =
 function hasPostedEvidence(raw: string, card: ParsedCard | null): boolean {
   if (amountWithFx(raw) === null) return false;
   if (!card) {
+    // A settled refund can omit the masked card/account identity entirely:
+    // "Purchase amount of AED X at Y on your Debit Card has been refunded..."
+    // Requiring digits here drops a real credit even though the message gives a
+    // final amount, merchant and settled refund verb. Keep this narrow to the
+    // strong refund grammar so an offer mentioning refunds cannot self-admit.
+    if (
+      REFUND_RE.test(raw) &&
+      (!!extractMerchant(raw, MERCHANT_RE) || !!extractArabicMerchant(raw, raw))
+    ) {
+      return true;
+    }
     // A completed transfer remains money moved when the source is too masked
     // to identify. Do not make an invented four-digit prefix its admission
     // ticket; pending requests still fail the shared non-posting classifier.
@@ -1366,6 +1377,16 @@ const REWARD_RATE_RE =
   /\b(?:earn|get)\b[^.\n]{0,40}?\b(?:points?|touchpoints?|rewards?|miles?|tps?)\b[^.\n]{0,48}?\b(?:for|per)\s+(?:every\s+|each\s+)?(?:(?:aed|dhs?|sar)\s*[\d,.]+|[\d,.]+\s*(?:aed|dhs?|sar)\b)(?:\s+spent\b)?/i;
 const PERCENT_PURCHASE_OFFER_RE =
   /\b(?:get|enjoy|save|avail|grab|extra|flat|up\s+to)\b[^.\n]{0,32}?\b\d{1,3}\s*%[^.\n]{0,64}?\bon\b[^.\n]{0,28}?\bpurchases?\b[^.\n]{0,28}?\b(?:aed|dhs?|sar)\b/i;
+const MOBILE_CREDIT_CAMPAIGN_RE =
+  /\b(?:participate|enter|join)\b[^.\n]{0,80}\b(?:offer|draw|prize|promotion|campaign)\b|\b(?:bonus|free)\b[^.\n]{0,60}\bmobile\s+credit\b|\bget\s+(?:up\s+to\s+)?(?:aed|dhs?|sar)\s*[\d,.]+\s+of\s+mobile\s+credit\b/i;
+const FUTURE_PURCHASE_THRESHOLD_RE =
+  /\b(?:spend|pay)\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:on|for)\s+(?:your\s+)?(?:next|first)\s+purchase\b|\b(?:next|first)\s+purchase\s+(?:of|worth)\s+(?:aed|dhs?|sar)\s*[\d,.]+\b|\b(?:get|receive|win)\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:back\s+)?on\s+(?:every|each|your)\s+purchases?\s+(?:of|worth)\s+(?:aed|dhs?|sar)\s*[\d,.]+\b/i;
+const PURCHASE_THRESHOLD_OFFER_RE =
+  /\b(?:on|for)\s+(?:a|any|your)\s+purchases?\s+of\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+(?:or\s+more|and\s+(?:above|over)|minimum)\b/i;
+const CONTEST_MARKETING_RE =
+  /\b(?:chance|opportunity)\s+to\s+win\b|\bcash\s+prize\b|\b(?:entry|entries)\s+(?:to|into)\s+(?:the\s+)?(?:draw|raffle)\b|\bevery\s+(?:aed|dhs?|sar)\s*[\d,.]+\s+spent\b[^.\n]{0,60}\b(?:entry|entries|draw|raffle)\b/i;
+const FINANCIAL_SALES_RE =
+  /\bwe\s+offer\b[\s\S]{0,180}\b(?:personal\s+(?:loans?|finance)|credit\s+cards?|mortgages?|auto\s+finance)\b/i;
 
 /**
  * A FUTURE OR SCHEDULED EVENT HAS NOT MOVED ANY MONEY — and the bank sends the
@@ -3505,6 +3526,12 @@ function extractAmountFils(raw: string): number | null {
     // AED..." must not read the account fragment as an amount).
     const before = match.index > 0 ? raw[match.index - 1] : ' ';
     if (/[A-Za-z0-9*•·.\-/]/.test(before)) continue;
+    const identityPrefix = raw.slice(Math.max(0, match.index - 40), match.index);
+    if (
+      /(?:\bcard\s*(?:no\.?|number|ending(?:\s+with)?|#)\s*|\b(?:account|acct|a\/c)\s*(?:no\.?|number|ending(?:\s+with)?|#)?\s*)$/i.test(
+        identityPrefix,
+      )
+    ) continue;
     // Skip if this is the number part of a prefix match ("AED 100" also ends before "AED"? no —
     // but "AED 100.00 AED"-style doubles resolve identically, so duplicates are harmless).
     candidates.push({ index: match.index, value: Math.round(Number(match[1].replace(/,/g, '')) * 100) });
@@ -3767,16 +3794,23 @@ function nonPostingReasonInBody(
   ) {
     return 'security-challenge';
   }
+  // A merchant descriptor may literally contain "TEMPORARY HOLD", while the
+  // same final receipt says that hold HAS BEEN REFUNDED. A known verification
+  // hold is still non-posting on BOTH sides: counting its release as income
+  // would create money that never existed. Other settled refunds may outrank
+  // generic preauthorisation/pending vocabulary.
+  const settledRefund = REFUND_RE.test(body);
+  if (VERIFICATION_HOLD_DESCRIPTOR_RE.test(body)) return 'preauthorisation';
   if (
-    VERIFICATION_HOLD_DESCRIPTOR_RE.test(body) ||
+    !settledRefund &&
     PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))
   ) {
     return 'preauthorisation';
   }
   if (RETURNED_UNPAID_RE.test(body)) return 'returned-unpaid';
-  if (PENDING_PROCESSING_RE.test(body) || EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
+  if (!settledRefund && (PENDING_PROCESSING_RE.test(body) || EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
     REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
-    CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body)) {
+    CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
     return 'pending-processing';
   }
   return null;
@@ -4489,13 +4523,29 @@ function parseSmsInner(
     BILL_DUE_WORDS.test(raw) &&
     (card !== null || /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw)) &&
     statementTotalFils(raw) !== null;
+  // A multi-line bank field list is stronger than a promo footer appended
+  // underneath it. FAB commonly writes:
+  //   Credit Card Purchase / Card No XXXX1234 / AED 34.15 / MERCHANT / date
+  //   ...then a "chance to win" campaign.
+  // The campaign is marketing; the field list above it is still a real posting.
+  const strongFieldListPosting =
+    posted &&
+    card !== null &&
+    extractDate(raw) !== null &&
+    /\b(?:credit|debit|covered|prepaid)\s+card\s+purchase\b/i.test(raw);
   const marketingMovementText = blank(raw, REWARD_RATE_RE);
   if (
     (ARABIC_MARKETING_RE.test(raw) ||
       REWARD_RATE_RE.test(raw) ||
-      PERCENT_PURCHASE_OFFER_RE.test(raw)) &&
+      PERCENT_PURCHASE_OFFER_RE.test(raw) ||
+      MOBILE_CREDIT_CAMPAIGN_RE.test(raw) ||
+      FUTURE_PURCHASE_THRESHOLD_RE.test(raw) ||
+      PURCHASE_THRESHOLD_OFFER_RE.test(raw) ||
+      CONTEST_MARKETING_RE.test(raw) ||
+      FINANCIAL_SALES_RE.test(raw)) &&
     !ARABIC_MONTHLY_BILL_RE.test(raw) &&
     !SETTLED_MOVEMENT_RE.test(marketingMovementText) &&
+    !strongFieldListPosting &&
     !statementEvidence
   ) {
     return null;
@@ -4586,7 +4636,7 @@ function parseSmsInner(
   // unchanged: an EPP line stapled to a real alert ("…Avl Cr. Limit is AED
   // 5,000.00. Convert now to easy instalments.") still keeps its purchase.
   if (
-    /\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan/i.test(raw) &&
+    /\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan|\b(?:enjoy|avail|get)\s+(?:easy\s+)?monthly\s+instal?ments?\s+on\s+your\s+purchase\b/i.test(raw) &&
     !(posted && SETTLED_TENSE_RE.test(raw))
   ) {
     return null;
@@ -4599,7 +4649,16 @@ function parseSmsInner(
     return null;
   }
   if (/payment reminder|due date reminder|pay immediately to avoid|avoid blockage|is overdue\b/i.test(raw)) return null;
-  if (/rate our service|thank you for using ajmanpay|successfully redeemed|delivery associate/i.test(raw)) return null;
+  const ajmanPaySettledReceipt =
+    /\byour\s+transaction\s+(?:for|with)\s+an?\s+amount\s+of\s+(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+[\s\S]{0,180}?\bhas\s+been\s+successfully\s+paid\b/i.test(
+      raw,
+    );
+  if (
+    /rate our service|successfully redeemed|delivery associate/i.test(raw) ||
+    (/thank you for using ajmanpay/i.test(raw) && !ajmanPaySettledReceipt)
+  ) {
+    return null;
+  }
 
   // RTA / municipal parking confirmations:
   //   Confirmation / PlateNo-XXX / TicketNo-XXX / Fee-AED2.38 / Paid upto ...
@@ -4761,6 +4820,162 @@ function parseSmsInner(
         transferHint: false,
         snapshotFils: Number.isFinite(fabBalanceFils) ? fabBalanceFils : snapshotFils,
         snapshotKind: Number.isFinite(fabBalanceFils) ? 'balance' : snapshotKind,
+        categoryGuess: 'other',
+        categoryDeliberate: false,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * Salik Arabic recharge confirmations can put the actual recharge as a bare
+   * number after "مبلغ" while only the later remaining balance carries the
+   * currency token:
+   *
+   *   "... اضافه مبلغ 50 ... باستخدام بطاقه ... رصيد ... 202.00 درهم"
+   *
+   * Generic money extraction can only see 202.00 there. Keep bare-number
+   * parsing sender- and grammar-scoped instead of weakening the global parser.
+   */
+  const salikBareRecharge =
+    /salik/i.test(options?.sender ?? '') && ARABIC_RE.test(raw)
+      ? raw.match(/اضاف(?:ه)?\s+مبلغ\s*(?:قدره|بقيمه|:)?\s*([0-9][\d,]*(?:\.\d{1,2})?)/)
+      : null;
+  // Salik also sends a more dangerous sibling that says only "an amount was
+  // added" and then quotes the NEW BALANCE. There is no transaction amount in
+  // the SMS at all, so the only correct action is to refuse the row. Before
+  // this guard the balance was silently imported as spending.
+  if (
+    /salik/i.test(options?.sender ?? '') &&
+    ARABIC_RE.test(raw) &&
+    /اضاف(?:ه)?\s+مبلغ\s+لحساب\s+سالك(?=\s|$)/.test(raw) &&
+    /بطاق/.test(raw) &&
+    /رصيد/.test(raw) &&
+    !salikBareRecharge
+  ) {
+    return null;
+  }
+  if (salikBareRecharge && /بطاق/.test(raw) && /رصيد/.test(raw)) {
+    const amountFils = Math.round(Number(salikBareRecharge[1].replace(/,/g, '')) * 100);
+    if (Number.isSafeInteger(amountFils) && amountFils > 0 && amountFils <= MAX_PLAUSIBLE_AMOUNT_FILS) {
+      return {
+        kind: 'transaction',
+        type: 'expense',
+        amountFils,
+        merchant: 'Salik',
+        date,
+        dueDay: null,
+        minDueFils: null,
+        card,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'transport',
+        categoryDeliberate: true,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * Some banks phrase a final refund around the original purchase rather than
+   * "refund of": "Purchase amount of AED X at Y ... has been refunded".
+   * The first money figure is the refund; a later available balance is only a
+   * snapshot. The settled refund wording is strong enough to be bank-agnostic.
+   */
+  const purchaseRefund = raw.match(
+    /\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i,
+  );
+  if (purchaseRefund) {
+    const amountFils = amountWithFx(raw);
+    if (amountFils) {
+      const merchant = titleCase(purchaseRefund[1].trim().replace(/\s{2,}/g, ' '));
+      return {
+        kind: 'transaction',
+        type: 'income',
+        amountFils,
+        merchant: merchant || 'Refund',
+        date,
+        dueDay: null,
+        minDueFils: null,
+        card,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'other',
+        categoryDeliberate: false,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * Explicit merchant return receipts may not use the word "refund" at all:
+   * "Return: <ref> is approved. AED 176.00 is now in your account/wallet."
+   * The approved return + amount + destination is strong settled-credit
+   * evidence and is intentionally sender-agnostic.
+   */
+  const approvedReturn = raw.match(
+    /\breturn\s*:\s*[A-Z0-9-]{4,40}\s+is\s+approved\b[\s\S]{0,80}?\b(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+\s+is\s+now\s+in\s+your\s+(?:account|wallet)\b/i,
+  );
+  if (approvedReturn) {
+    const amountFils = amountWithFx(raw);
+    if (amountFils) {
+      return {
+        kind: 'transaction',
+        type: 'income',
+        amountFils,
+        merchant: 'Refund',
+        date,
+        dueDay: null,
+        minDueFils: null,
+        card,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'other',
+        categoryDeliberate: false,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * Some payment gateways and insurers send a settled receipt without card or
+   * account identity:
+   *   "Your transaction for an amount of AED X ... was successful"
+   *   "Your transaction with an amount of AED X has been successfully paid"
+   *
+   * The final-state verb is required; a bare "transaction amount" remains too
+   * weak to import.
+   */
+  const settledAmountOnly = raw.match(
+    /\byour\s+transaction\s+(?:for|with)\s+an?\s+amount\s+of\s+(?:AED|Dhs?|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR)\s*[\d,.]+[\s\S]{0,180}?\b(?:was\s+successful|has\s+been\s+successfully\s+paid)\b/i,
+  );
+  if (settledAmountOnly) {
+    const amountFils = amountWithFx(raw);
+    if (amountFils) {
+      const insurance = /\bpremium\b|\bpolicy\s+(?:no\.?|number)\b/i.test(raw);
+      return {
+        kind: 'transaction',
+        type: 'expense',
+        amountFils,
+        merchant: insurance ? 'Insurance premium' : 'Payment',
+        date,
+        dueDay: null,
+        minDueFils: null,
+        card,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
         categoryGuess: 'other',
         categoryDeliberate: false,
         currency,
