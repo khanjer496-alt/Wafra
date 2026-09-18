@@ -26,7 +26,10 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-01' },
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
     '@/lib/ledger-money': { ledgerMoneySpec: currency => ({ currency, exponent: 2 }) },
-    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    // This suite measures parse scheduling, not trust/admission. Give the
+    // synthetic sender launch-tested Gulf identity so every row reaches the
+    // deterministic parser instead of the Review-first global SMS boundary.
+    '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
     '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
