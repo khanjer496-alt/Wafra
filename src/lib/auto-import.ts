@@ -577,6 +577,32 @@ function parsedFinancialCandidateReview(
   return candidate;
 }
 
+/**
+ * Preserve grounded money from a trusted/verified bank notification even when
+ * neither parser can prove enough semantics for automatic posting.
+ *
+ * Unknown direction/status/family are valid Universal Review states: the UI
+ * asks the user instead of silently inventing a transaction. This is the safe
+ * terminal path for terse OEM/bank-app push formats such as a bare amount plus
+ * reference text. Previously those rows stayed encrypted in the native queue
+ * forever and diagnostics reported unresolvedParserMiss=1.
+ */
+function universalEventReviewCandidate(
+  event: UniversalBankEvent,
+  observedAt: number,
+): SourceFreeReviewCandidate | null {
+  const prepared = prepareUniversalReviewAlert({
+    id: 'capture_probe_id_0001',
+    sourceKey: 'capture_probe_key_001',
+    observedAt,
+    channel: 'push',
+    event,
+  });
+  if (!prepared) return null;
+  const { id: _id, sourceKey: _sourceKey, ...candidate } = prepared;
+  return candidate;
+}
+
 const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
   'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment',
 ]);
@@ -989,11 +1015,14 @@ export async function scanInbox(
       // the bank's own savings pot rather than a shop, and money moving to the
       // bank's own brand name is moving inside your own bank.
       const worldwide = inspectWorldwide(sms.body, sms.address);
+      const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
       // Global SMS sender IDs stay review-first. Sender strings are useful
       // issuer evidence, but unlike an Android package identity they are not a
       // device-installed trust anchor. UAE/Saudi retain their mature automatic
       // parser; other markets use the sanitized worldwide Review path below.
-      const p = parseLaunchAlert(sms.body, sms.address, worldwide);
+      const p = launchSenderMarket
+        ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+        : null;
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
@@ -1084,7 +1113,10 @@ export async function scanInbox(
         // body is the one thing both copies agree on exactly.
         if (!inboxBodies.has(bodyPrint(sms.body))) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
-          const p = parseLaunchAlert(sms.body, sms.address, worldwide);
+          const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
+          const p = launchSenderMarket
+            ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+            : null;
           const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
             : null;
@@ -1219,19 +1251,27 @@ export async function scanInbox(
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
-        const p = launchParsed ?? (
-          universalParsed && (!requiredCurrency || universalParsed.currency === requiredCurrency)
-            ? universalParsed
-            : null
-        );
+        const parsedCandidate = launchParsed ?? universalParsed;
+        // Parser success is not admission to the ledger. A trusted bank-app
+        // package may auto-post globally, but only in the ledger's established
+        // currency (or the single currency already established by this batch).
+        // Apply that rule to BOTH parser paths: launchParsed used to bypass it
+        // entirely, so a BNP EUR push could enter an otherwise-AED scan.
+        const p = parsedCandidate && (!requiredCurrency || parsedCandidate.currency === requiredCurrency)
+          ? parsedCandidate
+          : null;
         const pushSource = { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
           : null;
+        const universalCandidateFallback = !p && universalEvent
+          ? universalEventReviewCandidate(universalEvent, n.ts)
+          : null;
+        const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
-              parsedCandidateFallback, skipKnownLaunchUniversal,
+              reviewFallback, skipKnownLaunchUniversal,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1255,7 +1295,7 @@ export async function scanInbox(
             worldwide,
             undefined,
             pushSource,
-            undefined,
+            reviewFallback,
             skipKnownLaunchUniversal,
           );
         }

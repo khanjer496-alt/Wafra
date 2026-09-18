@@ -326,6 +326,31 @@ export function parseHistoricalMessageRecords(
       else ignoredCount += 1;
       continue;
     }
+    // A retained Message can legitimately arrive without a sender when the
+    // Shortcut could not expose one. UAE/Saudi have mature local grammars and
+    // explicit launch currencies, so those established historical paths remain
+    // automatic. A sender-less non-Gulf result, however, came only from the
+    // broad universal parser; preserve its grounded facts in source-free Review
+    // instead of auto-posting history without issuer evidence. If Review cannot
+    // safely represent it, retain the parser result rather than dropping money
+    // the parser did understand.
+    if (!sender && result.currency !== 'AED' && result.currency !== 'SAR') {
+      const refusal = inspectHistoricalRefusal({
+        record,
+        timestamp,
+        nowMs: now.getTime(),
+        session: launchSession,
+        inspection,
+      });
+      if (refusal.kind === 'declined') {
+        declined.push(refusal.row);
+        continue;
+      }
+      if (refusal.kind === 'review') {
+        reviewCandidates.push(refusal.item);
+        continue;
+      }
+    }
     if (shouldReviewParsedIncome(result)) {
       const refusal = inspectHistoricalRefusal({
         record,

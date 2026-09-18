@@ -72,8 +72,11 @@ export const inspectGenericBankEventForReview = (
   if (!hasGenericBankAlertContext(source, sender)) return null;
   const event = inspectUniversalBankEvent(source, { sender });
   if (event.decision !== 'review') return null;
+  const hasGroundedMoney =
+    event.amount.evidence !== 'missing' ||
+    event.observations.some((observation) => observation.field.evidence !== 'missing');
   if (event.status === 'unknown' && event.family === 'unknown' &&
-    event.instrument.evidence !== 'explicit') return null;
+    event.instrument.evidence !== 'explicit' && !hasGroundedMoney) return null;
   return event;
 };
 
@@ -309,6 +312,12 @@ export const createLaunchAlertSession = ({
       inspection.route.market !== 'SA';
     const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
     const launchSenderMarket = detectLaunchMarketFromSender(sender);
+    // A single ordered capture/history session cannot change Gulf markets
+    // through the broad universal fallback after regional evidence already
+    // locked it. Without this guard, 50 UAE messages could establish AE and a
+    // later Saudi sender could bypass that lock only because the mature Saudi
+    // adapter correctly refused to switch sessionMarket.
+    if (sessionMarket && launchSenderMarket && launchSenderMarket !== sessionMarket) return null;
     if (gulfLedger && (launchSenderMarket === 'AE' || launchSenderMarket === 'SA')) return null;
     if (gulfLedger && !universalRouteIsNonGulf) return null;
     return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
@@ -330,7 +339,14 @@ export const parsePastedBankAlerts = (
 ): ParsedSms[] => {
   const session = createLaunchAlertSession({ overrides });
   return parseSmsBatch(text, overrides, (source) => {
-    const parsed = session.parse(source, '', session.inspect(source, ''));
+    // Paste has no authenticated issuer. Keep the mature AED/SAR deterministic
+    // path automatic, but do not turn a structurally valid worldwide amount
+    // into unattended money with no sender evidence. Refused global blocks are
+    // handed to the caller's Review flow instead.
+    const launchMarket = detectLaunchMarketFromAlert(source, '');
+    const parsed = launchMarket
+      ? session.parse(source, '', session.inspect(source, ''), launchMarket)
+      : null;
     if (!parsed) onRefused?.(source);
     return parsed;
   });

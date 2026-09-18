@@ -22,7 +22,7 @@ test('Screenmap uses only the synthetic iOS development ledger', () => {
   assert.match(source,
     /SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/);
   const screenmapGuard = source.indexOf('if (SCREENMAP_DEMO_LEDGER) {');
-  const encryptedRead = source.indexOf('const loaded = await persistence.load();', screenmapGuard);
+  const encryptedRead = source.indexOf('persistence.load()', screenmapGuard);
   assert.ok(screenmapGuard >= 0 && encryptedRead > screenmapGuard,
     'Screenmap guard must execute before encrypted persistence is read');
   const beforeEncryptedRead = source.slice(screenmapGuard, encryptedRead);

@@ -134,6 +134,13 @@ test('current persisted transfer receipt bypasses graph reconciliation for UI to
     transferInternalIds: ['invented-id'],
   });
   assert.equal(stale.has('invented-id'), false, 'an old receipt must never override live reconciliation');
+  const staleAgain = ledger.internalTransferIdsForState({
+    ...state,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION - 1,
+    transferInternalIds: ['invented-id'],
+  });
+  assert.equal(staleAgain, stale,
+    'same immutable stale-receipt snapshot reuses the canonical live reconciliation');
 });
 
 test('unfinished history import may use the store provisional transfer receipt after process death', () => {

@@ -40,6 +40,14 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           waitForForegroundHistoryIdle: async () => {},
         };
       }
+      // ledger.ts needs only the pure completion predicate from history-import.
+      // UI/repair harnesses that do not exercise the history coordinator should
+      // not have to model its native scheduling graph just to read ledger math.
+      if (name === '@/lib/history-import') {
+        return {
+          historyImportIncomplete: progress => !!progress && progress.status !== 'complete',
+        };
+      }
       // Runtime performance breadcrumbs are observational only. Repair/UI
       // harnesses exercise the shipping computation and interaction paths,
       // not the diagnostics collector, so keep timing transparent unless a

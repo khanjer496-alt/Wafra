@@ -144,7 +144,18 @@ export function isInboundTransfer(transaction: Transaction): boolean {
  * Legacy Set callers can still exclude explicit/user-owned rows, but cannot
  * establish a bank identity. New callers should supply the full account list.
  */
-let internalIdsCache: { transactions: Transaction[]; accounts: Account[]; value: Set<string> } | null = null;
+let internalIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  value: Set<string>;
+  /**
+   * Provisional history receipts are intentionally cheap while import is
+   * unfinished, but must never be reused once completion requires canonical
+   * reconciliation. A computed/live reconciliation is safe to reuse for the
+   * same immutable arrays even when no durable receipt exists yet.
+   */
+  canonical: boolean;
+} | null = null;
 let persistedInternalIdsCache: {
   transactions: Transaction[];
   accounts: Account[];
@@ -166,8 +177,9 @@ export function primeInternalTransferIds(
   transactions: Transaction[],
   accounts: Account[],
   ids: readonly string[],
+  canonical = true,
 ): void {
-  internalIdsCache = { transactions, accounts, value: new Set(ids) };
+  internalIdsCache = { transactions, accounts, value: new Set(ids), canonical };
 }
 
 export function internalTransferIds(
@@ -179,7 +191,7 @@ export function internalTransferIds(
   }
   const accountRows = Array.isArray(accounts) ? accounts : [];
   const value = reconciliationInternalIds(reconcileTransfers(transactions, accountRows));
-  if (Array.isArray(accounts)) internalIdsCache = { transactions, accounts, value };
+  if (Array.isArray(accounts)) internalIdsCache = { transactions, accounts, value, canonical: true };
   return value;
 }
 
@@ -215,8 +227,18 @@ export function internalTransferIdsForState(
     // then return the stale provisional ids instead of the required canonical
     // reconciliation. Reconcile explicitly and replace the cache with the live
     // result at this state-aware boundary.
+    if (internalIdsCache?.transactions === state.transactions &&
+        internalIdsCache.accounts === state.accounts &&
+        internalIdsCache.canonical) {
+      return internalIdsCache.value;
+    }
     const value = reconciliationInternalIds(reconcileTransfers(state.transactions, state.accounts));
-    internalIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
+    internalIdsCache = {
+      transactions: state.transactions,
+      accounts: state.accounts,
+      value,
+      canonical: true,
+    };
     return value;
   }
   if (persistedInternalIdsCache?.transactions === state.transactions &&
@@ -234,7 +256,12 @@ export function internalTransferIdsForState(
   // Keep the legacy array-identity cache hot for callers that still only have
   // transactions/accounts. This makes mixed old/new call sites converge on the
   // same O(1) result instead of unexpectedly rebuilding the graph later.
-  internalIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
+  internalIdsCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    value,
+    canonical: state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
+  };
   return value;
 }
 

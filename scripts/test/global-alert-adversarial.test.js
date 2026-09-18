@@ -77,6 +77,16 @@ const markets = [...new Set(corpus.map((row) => row.market))].sort();
     typeof oneParser.parse === 'function' && !Object.prototype.hasOwnProperty.call(oneParser, 'interpret'),
     JSON.stringify(Object.keys(oneParser)));
 }
+
+{
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: null });
+  const ae = 'Purchase of AED 20.00 with Debit Card ending 1234 at SAMPLE STORE.';
+  const sa = 'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234.';
+  ok('one Gulf session cannot switch market through the universal fallback',
+    session.parse(ae, 'ENBD', session.inspect(ae, 'ENBD')) !== null &&
+      session.parse(sa, 'ALRAJHI', session.inspect(sa, 'ALRAJHI')) === null,
+    session.detectedMarket());
+}
 for (const market of markets) {
   const marketRows = corpus.filter((row) => row.market === market);
   const posted = marketRows.find((row) => row.expected.status === 'posted');
