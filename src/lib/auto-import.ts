@@ -1015,11 +1015,14 @@ export async function scanInbox(
       // the bank's own savings pot rather than a shop, and money moving to the
       // bank's own brand name is moving inside your own bank.
       const worldwide = inspectWorldwide(sms.body, sms.address);
+      const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
       // Global SMS sender IDs stay review-first. Sender strings are useful
       // issuer evidence, but unlike an Android package identity they are not a
       // device-installed trust anchor. UAE/Saudi retain their mature automatic
       // parser; other markets use the sanitized worldwide Review path below.
-      const p = parseLaunchAlert(sms.body, sms.address, worldwide);
+      const p = launchSenderMarket
+        ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+        : null;
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
@@ -1110,7 +1113,10 @@ export async function scanInbox(
         // body is the one thing both copies agree on exactly.
         if (!inboxBodies.has(bodyPrint(sms.body))) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
-          const p = parseLaunchAlert(sms.body, sms.address, worldwide);
+          const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
+          const p = launchSenderMarket
+            ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+            : null;
           const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
             : null;
