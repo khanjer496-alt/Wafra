@@ -1211,10 +1211,12 @@ export function buildImportPlan(
     if (protectedEditedPush && smsKey) {
       protectedEditedPushConsumed.add(protectedEditedPush.id);
       protectedReplacementCandidates.push(captureCandidate);
-      if (guardCache) {
-        guardCache.consume(protectedEditedPush.id);
-        guardCache.add(captureCandidate);
-      }
+      // This is deliberately the rare escape hatch that may instantiate the
+      // generalized matcher: preserving a user-edited push needs its consumed
+      // state reflected immediately so a second genuine SMS cannot reuse it.
+      const duplicate = guard();
+      duplicate.consume(protectedEditedPush.id);
+      duplicate.add(captureCandidate);
       if (p.sourceEventId) {
         promoteMatchedHistory(protectedEditedPush.id, smsKey, p);
       }
