@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../../..');
 
 function harness() {
   let interpreterCalls = 0;
+  let universalCalls = 0;
   const module = load(path.join(root, 'src/lib/launch-alert-parser.ts'), {
     '@/lib/alert-market-detection': { inspectUniversalAlert: () => null },
     '@/lib/alert-institution-grammars': {
@@ -24,15 +25,19 @@ function harness() {
       detectLaunchMarketFromSender: sender => sender === 'FAB' ? 'AE' : null,
       getActiveMarket: () => ({ id: 'AE' }),
       pinnedLedgerCurrencyCode: () => 'AED',
+      ledgerCurrencyExponent: () => 2,
     },
     '@/lib/sms-parser': { parseSmsBatch: () => [] },
     '@/lib/currency-metadata': {
       CURRENCY_SYMBOL_CANDIDATES: { '$': ['USD'] },
       currencyMinorUnits: code => code === 'AED' || code === 'USD' ? 2 : null,
     },
-    '@/lib/universal-parser': { inspectUniversalBankEvent: () => ({ decision: 'ignored' }) },
+    '@/lib/universal-parser': { inspectUniversalBankEvent: () => {
+      universalCalls += 1;
+      return { decision: 'ignored' };
+    } },
   });
-  return { module, calls: () => interpreterCalls };
+  return { module, calls: () => interpreterCalls, universalCalls: () => universalCalls };
 }
 
 test('ordinary personal SMS bypasses the heavy launch bank parser', () => {
@@ -40,13 +45,44 @@ test('ordinary personal SMS bypasses the heavy launch bank parser', () => {
   const session = h.module.createLaunchAlertSession({ overrides: {} });
   assert.equal(session.parse('Dinner moved to seven tonight', 'Friend'), null);
   assert.equal(h.calls(), 0);
+  assert.equal(h.universalCalls(), 0);
 });
 
-test('known bank sender still reaches the parser without an explicit currency', () => {
+test('money-bearing service notice without posting evidence skips universal fallback', () => {
   const h = harness();
   const session = h.module.createLaunchAlertSession({ overrides: {} });
-  session.parse('Your card purchase was approved', 'FAB');
-  assert.equal(h.calls(), 1);
+  assert.equal(session.parse('Your monthly statement is AED 250.00', 'Unknown'), null);
+  assert.equal(h.universalCalls(), 0);
+});
+
+test('posted-event vocabulary still reaches universal fallback', () => {
+  const h = harness();
+  const session = h.module.createLaunchAlertSession({ overrides: {} });
+  session.parse('USD 20.00 charged at TEST SHOP', 'Unknown');
+  assert.equal(h.universalCalls(), 1);
+});
+
+test('known global institution sender bypasses cheap posting vocabulary gate', () => {
+  const h = harness();
+  const session = h.module.createLaunchAlertSession({ overrides: {} });
+  session.parse('Account update: USD 20.00', 'CHASE');
+  assert.equal(h.universalCalls(), 1);
+});
+
+test('known launch-bank field list without a verb still reaches universal fallback', () => {
+  const h = harness();
+  const session = h.module.createLaunchAlertSession({ overrides: {} });
+  session.parse('Cards ending 1234 AED 20.00 at TEST SHOP', 'FAB');
+  assert.equal(h.universalCalls(), 1);
+});
+
+test('known bank sender without money skips auto parsing and stays review-eligible', () => {
+  const h = harness();
+  const session = h.module.createLaunchAlertSession({ overrides: {} });
+  assert.equal(session.parse('Your card purchase was approved', 'FAB'), null);
+  assert.equal(h.calls(), 0);
+  assert.equal(h.universalCalls(), 0);
+  assert.equal(h.module.hasGenericBankAlertContext('Your card purchase was approved', 'FAB'), true);
 });
 
 test('currency-bearing launch alert still reaches the parser', () => {
@@ -54,6 +90,7 @@ test('currency-bearing launch alert still reaches the parser', () => {
   const session = h.module.createLaunchAlertSession({ overrides: {} });
   session.parse('Purchase of AED 20.00 at TEST SHOP', 'Unknown');
   assert.equal(h.calls(), 1);
+  assert.equal(h.universalCalls(), 1);
 });
 
 test('known global institution sender remains eligible for review routing', () => {

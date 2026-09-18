@@ -28,6 +28,34 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
     .some((match) => currencyMinorUnits(match[1]) !== null) ||
   Object.keys(CURRENCY_SYMBOL_CANDIDATES).some((symbol) => source.includes(symbol));
 
+/**
+ * Cheap evidence that a final money movement MAY have posted.
+ *
+ * The universal parser is deliberately broad and expensive (~0.7ms/call on the
+ * 30k research corpus). Running it after every regional-parser miss made history
+ * import spend most of its CPU proving ordinary bills/offers/service notices
+ * were not postings. This gate is only a superset admission test: matching it
+ * never imports anything; it merely earns the worldwide parser.
+ *
+ * Keep the verbs aligned with the universal language packs. A known worldwide
+ * institution sender bypasses this vocabulary gate below, so an unfamiliar
+ * bank phrasing from a supported institution still reaches the full parser.
+ */
+const UNIVERSAL_POSTED_EVENT_HINT =
+  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|transferr(?:ed|ing)|sent|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم)/iu;
+
+// A small family of real bank field-list alerts has amount + instrument +
+// merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
+// family ("cards ... AED <amount> ... at/to ..."). Keep this narrow and only
+// for a sender the mature regional router already recognises.
+const UNIVERSAL_FIELD_LIST_HINT =
+  /\bcards?\b[\s\S]{0,120}\bAED\b[^\d]{0,12}\d[\s\S]{0,120}\b(?:at|to)\b/iu;
+
+const shouldTryUniversalPosting = (source: string, sender: string): boolean =>
+  hasUniversalInstitutionSender(sender) ||
+  UNIVERSAL_POSTED_EVENT_HINT.test(source) ||
+  (!!detectLaunchMarketFromSender(sender) && UNIVERSAL_FIELD_LIST_HINT.test(source));
+
 // Review eligibility needs financial-alert context, not merely a currency in
 // a personal conversation. None of these words grants automatic import.
 const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
@@ -207,7 +235,12 @@ export const createLaunchAlertSession = ({
     // are absent. Known launch/global institution senders remain eligible via
     // hasGenericBankAlertContext even when an unusual template omits currency.
     const moneyHint = hasBankAlertMoneyHint(source);
-    if (!moneyHint && !hasGenericBankAlertContext(source, sender)) return null;
+    // Automatic ledger rows always need an explicit monetary value. Sender
+    // identity alone is enough for Review routing, but it cannot manufacture an
+    // amount. In the 30k corpus 1,981 regional-interpreter calls had no money
+    // evidence and not one produced a parsed row, so keep them out of the hot
+    // auto-parse path and let the refusal/review seam handle them.
+    if (!moneyHint) return null;
     if (
       inspection?.route.decision === 'single' &&
       inspection.route.market !== 'AE' &&
@@ -242,9 +275,21 @@ export const createLaunchAlertSession = ({
     sender: string,
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
-  ): ParsedSms | null =>
-    interpret(source, sender, inspection, forcedMarket)?.parsed ??
-    parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
+  ): ParsedSms | null => {
+    const local = interpret(source, sender, inspection, forcedMarket)?.parsed ?? null;
+    if (local) return local;
+    // The worldwide parser is intentionally broader and therefore more
+    // expensive. Ordinary conversations, delivery updates and generic service
+    // SMS must not pay that cost after the launch parser already failed fast.
+    // Money evidence OR bank-alert context is sufficient to preserve the
+    // bank-agnostic universal seam for unknown institutions and countries.
+    // Same rule for the worldwide parser: without explicit money it cannot
+    // create a valid ledger row. Bank context is still consumed by the review
+    // pipeline after this function returns null.
+    if (!hasBankAlertMoneyHint(source)) return null;
+    if (!shouldTryUniversalPosting(source, sender)) return null;
+    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
+  };
 
   return { inspect, interpret, parse, detectedMarket: () => detected };
 };
