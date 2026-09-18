@@ -71,6 +71,12 @@ for (const testCase of cases) {
 }
 
 const markets = [...new Set(corpus.map((row) => row.market))].sort();
+{
+  const oneParser = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+  ok('launch session exposes one production parser boundary',
+    typeof oneParser.parse === 'function' && !Object.prototype.hasOwnProperty.call(oneParser, 'interpret'),
+    JSON.stringify(Object.keys(oneParser)));
+}
 for (const market of markets) {
   const marketRows = corpus.filter((row) => row.market === market);
   const posted = marketRows.find((row) => row.expected.status === 'posted');
