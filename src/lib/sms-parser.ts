@@ -974,6 +974,39 @@ const GLUED_OTP_REQUEST_RE = new RegExp(
 );
 
 /**
+ * Some issuers call the challenge only "code" or "PIN" and put the action
+ * AFTER the digits:
+ *
+ *   "Code 458213 to complete your payment ..."
+ *   "PIN 458213 to confirm this transaction ..."
+ *
+ * A bare `code 458213` is deliberately NOT enough. Posted receipts routinely
+ * print an authorisation/approval code, and treating every numbered code as an
+ * OTP would delete real purchases. Requiring an imperative completion verb +
+ * transaction noun keeps this on the pre-posting side of that boundary.
+ */
+const TRANSACTION_CODE_REQUEST_RE = new RegExp(
+  String.raw`\b(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b` +
+    String.raw`|\b(?:use|enter)\s+(?:the\s+|your\s+)?(?:code|pin|password|passcode)\s*[:=-]?\s*${OTP_CODE_DIGITS}\s+(?:to|for)\s+(?:complete|confirm|authoris(?:e|z)e|authenticate|initiate|make)\s+(?:the\s+|this\s+|your\s+)?(?:payment|purchase|transaction|transfer)\b`,
+  'i',
+);
+
+/**
+ * A second issuer shape starts with the challenge noun, describes the protected
+ * transaction, then gives the PIN at the end of the clause:
+ *
+ *   "PIN for transaction ... card ending 1234 ... AED 85.00 ... is 583214"
+ *
+ * Starting with PIN + naming a transaction + ending that same sentence with a
+ * six-digit value is materially different from a posted receipt's trailing
+ * "Authorisation code: 123456". Keep the order and start anchor strict.
+ */
+const PIN_TRANSACTION_CHALLENGE_RE = new RegExp(
+  String.raw`^\s*pin\b(?:[^.\n]|\.\d){0,180}?\b(?:transaction|payment|purchase|transfer)\b(?:[^.\n]|\.\d){0,180}?\b(?:is|:)\s*${OTP_CODE_DIGITS}`,
+  'i',
+);
+
+/**
  * Pre-auth holds are not postings; the real charge arrives as its own SMS, so
  * a missed hold double-counts — and holds live at hotels, car rentals and fuel
  * pumps, which is exactly where the amounts are large.
@@ -1229,7 +1262,7 @@ const POSTED_CLAUSE_RE =
  * to being what they are: a footer on a real purchase.
  */
 function hasPostedEvidence(raw: string, card: ParsedCard | null): boolean {
-  if (extractAmountFils(raw) === null) return false;
+  if (amountWithFx(raw) === null) return false;
   if (!card) {
     // A completed transfer remains money moved when the source is too masked
     // to identify. Do not make an invented four-digit prefix its admission
@@ -1310,6 +1343,29 @@ const OFFER_RE =
 // expressed explicitly. A message that starts with "offer" is advertising,
 // even when it quotes a salary or purchase amount.
 const ARABIC_OFFER_RE = /^\s*عرض(?:\s|$)/u;
+
+/**
+ * Closed marketing shapes that can contain every ingredient of a purchase
+ * alert — amount, card vocabulary, a merchant/brand and even the word "spent"
+ * — while still describing only a promotion.
+ *
+ * These are intentionally NOT folded into OFFER_RE's posted-evidence gate. A
+ * loyalty rate such as "earn 2 points for every AED 1 spent" can make the loose
+ * posted evidence test true even though no AED 1 transaction happened. The
+ * caller therefore gates these on SETTLED_MOVEMENT_RE instead: an actual
+ * debit/charge in the same message always wins.
+ */
+const ARABIC_MARKETING_RE =
+  /عرض|عروض|هديه|لا\s+تفوت|تسوق\s+لدي|اشترك|للاشتراك|لعدم\s+استلام[^.\n]{0,40}الرسائل|قد\s+تربح|فرصه\s+(?:ربح|للفوز)|اربح|السحب\s+الكبير|اول\s+يوم\s+اشتراك\s+مجاني/i;
+// A monthly bill can carry a marketing sentence underneath it. The bill is
+// still an obligation, so its explicit total/deadline structure outranks any
+// offer vocabulary in the footer.
+const ARABIC_MONTHLY_BILL_RE =
+  /فاتورتك\s+لشهر[\s\S]{0,220}?اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ/i;
+const REWARD_RATE_RE =
+  /\b(?:earn|get)\b[^.\n]{0,40}?\b(?:points?|touchpoints?|rewards?|miles?|tps?)\b[^.\n]{0,48}?\b(?:for|per)\s+(?:every\s+|each\s+)?(?:(?:aed|dhs?|sar)\s*[\d,.]+|[\d,.]+\s*(?:aed|dhs?|sar)\b)(?:\s+spent\b)?/i;
+const PERCENT_PURCHASE_OFFER_RE =
+  /\b(?:get|enjoy|save|avail|grab|extra|flat|up\s+to)\b[^.\n]{0,32}?\b\d{1,3}\s*%[^.\n]{0,64}?\bon\b[^.\n]{0,28}?\bpurchases?\b[^.\n]{0,28}?\b(?:aed|dhs?|sar)\b/i;
 
 /**
  * A FUTURE OR SCHEDULED EVENT HAS NOT MOVED ANY MONEY — and the bank sends the
@@ -1409,6 +1465,7 @@ let AED_AMOUNT_RE = /x^/g;
 let AED_SUFFIX_RE = /x^/g;
 let MIN_DUE_RE = /x^/;
 let TOTAL_DUE_RE = /x^/;
+let CARD_PAYMENT_DUE_TOTAL_RE = /x^/;
 /** TOTAL_DUE_RE's LABEL without its figure — see statementTotalFils. */
 let TOTAL_DUE_LABEL_RE = /x^/;
 let AR_MIN_DUE_RE = /x^/;
@@ -1535,7 +1592,7 @@ function ensureCurrencyPatterns(): void {
   // figure. Without it that block had no minimum, and a statement with no
   // minimum raises no reminder for the payment the user actually has to make.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+of)?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1562,6 +1619,10 @@ function ensureCurrencyPatterns(): void {
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
     `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
+    `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
+    `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
+    `(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   TOTAL_DUE_LABEL_RE = new RegExp(TOTAL_DUE_LABEL, 'i');
   // Arabic renders the currency AFTER the figure as often as before it
   // ("3,240.00 درهم"), so both due patterns make it optional on the left.
@@ -1985,7 +2046,7 @@ function extractReference(raw: string): string | null {
  */
 function extractBillIdentity(raw: string): string | null {
   const matches = raw.matchAll(
-    /\b(account|consumer|party|customer|contract|service)(?:\s*-?\s*(?:number|no\.?|id))?\s*[:#-]?\s*([A-Z0-9X*·•-]{4,40})\b/gi,
+    /\b(account|consumer|party|customer|contract|service)(?:\s*-?\s*(?:number|no\.?|id))?\s*[:#-]?\s*([A-Z0-9X*·•.-]{4,40})\b/gi,
   );
   for (const match of matches) {
     const value = match[2].replace(/[^A-Z0-9]/gi, '').toUpperCase();
@@ -1998,7 +2059,9 @@ function extractBillIdentity(raw: string): string | null {
   }
   // e&'s Arabic eBill starts "للحساب رقم 065591849". Keep the same privacy
   // boundary as the English path: only the final four digits survive.
-  const arabic = normalizeArabic(raw).match(/(?:للحساب|حساب)\s+رقم\s*[:#-]?\s*([0-9X*·•-]{4,40})/);
+  const arabic = normalizeArabic(raw).match(
+    /(?:للحساب|الحساب|حسابك|حساب)(?:\s+[\u0600-\u06ff&]+){0,5}\s+رقم\s*[:#-]?\s*([0-9X*·•-]{4,40})/,
+  );
   if (!arabic) return null;
   const value = arabic[1].replace(/[^0-9X]/gi, '').toUpperCase();
   return value.length >= 4 ? `account:${value.slice(-4)}` : null;
@@ -2508,6 +2571,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Other — hiding the user's largest recurring outflow from the debt view.
   // Takaful is Islamic insurance, which the parser files under health.
   [/\bmurabaha?\b|\bijarah?\b|\bmusharaka?h?\b|\btawarruq\b|\bdiminishing\s+musharaka/i, 'loan'],
+  [/\b(?:tabby|tamara|postpay|cashew)\b/i, 'loan'],
   [/\btakaful\b/i, 'health'],
   // UAE merchants read off a real 300-message accuracy report. Acquirers
   // truncate the descriptor to 20-22 characters, so several of these
@@ -2539,15 +2603,18 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // body, so the card ISSUER's name decided the category and a domain renewal
   // was filed as a phone bill. The shop is what was bought from; the plastic it
   // was bought with is not. Both halves must therefore stay ABOVE telecom.
-  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village/i, 'entertainment'],
-  [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'software'],
+  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|majid al futtaim cinemas?|al futtaim cin/i, 'entertainment'],
+  [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bzoho\b|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'software'],
+  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds|iqoption|vibed\.inc/i, 'investing'],
+  [/netflix|spotify|anghami|shahid|\bosn\b|starz|disney\+?|amazon\s*prime|prime\s*video|you\s*tube\s*premium/i, 'entertainment'],
   [/\bunigaz\b/i, 'utilities'],
   // `lulu` carries a negative lookahead because Lulu Exchange is a
   // remittance house, not the hypermarket — a money transfer was being
   // filed as a grocery shop, which overstates consumption for exactly the
   // users who send money home every month.
-  [/carrefour|lulu(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
-  [/talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
+  [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
+  [/karam al sham gents/i, 'personal-care'],
+  [/uber\s*eats|talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|restoran|cafe|coffee|starbucks|costa|tim hortons|mc\s*donald|kfc|hardee|subway|shawarma|shaurma|cafeteria|dining|bakery|baklava|\bpide\b|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|galitos|\bfoods?\b|beverages/i, 'dining'],
   // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
   // toll free number 600 54 0000" is a footer on ordinary purchase alerts from
   // several UAE banks, and a bare \btoll\b would have filed every one of them
@@ -2615,11 +2682,11 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // 3. `[a-z]+cart` is the e-commerce naming convention (Cococart, Instacart),
   //    and the required prefix is what makes it safe: a BARE "cart" is a word
   //    in ordinary prose, "…cart" as one token is a storefront.
-  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|tradeling|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
+  [/amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|tradeling|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
   // `\bphy\b` is the acquirer's abbreviation for a pharmacy — "CITY LIFE PHY
   // BR5-1303" — and it doubles as the stub of "physiotherapy". Both are health,
   // which is why one short token is safe here and would not be anywhere else.
-  [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|\bphy\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic|insura\w*/i, 'health'],
+  [/emirates health servic\w*|pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|\bdental\b|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|jiu[-\s]?jitsu|martial\s+arts|karate|taekwondo|phar\b|\bphy\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic|insura\w*/i, 'health'],
   [/school|university|college|tuition|academy|nursery|kindergarten|\bgems\b|taaleem|kumon|udemy|coursera|coursra|skillshare|training (?:center|centre)|institute/i, 'education'],
   [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport ?(?:companion|lounge)|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight|daypass/i, 'travel'],
   // Moved OUT of this rule and into the `software` one below: openai, chatgpt,
@@ -2704,7 +2771,6 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // (crypto.com's token, and how one descriptor arrives) is deliberately NOT
   // here — three letters with no context would fire inside far too much, and
   // `crypto.com` already claims that merchant by name.
-  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds|iqoption|vibed\.inc/i, 'investing'],
   // Government sits AFTER transport/utilities so traffic fines, RTA and SEWA
   // keep their more specific buckets.
   //
@@ -3546,7 +3612,7 @@ const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
  * minimum, last payment or headroom into total debt can falsely settle a card.
  */
 function statementTotalFils(raw: string): number | null {
-  const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(AR_TOTAL_DUE_RE);
+  const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(CARD_PAYMENT_DUE_TOTAL_RE) ?? raw.match(AR_TOTAL_DUE_RE);
   return totalMatch ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100) : null;
 }
 
@@ -3693,6 +3759,8 @@ function nonPostingReasonInBody(
   if (
     OTP_RE.test(body) ||
     GLUED_OTP_REQUEST_RE.test(body) ||
+    TRANSACTION_CODE_REQUEST_RE.test(body) ||
+    PIN_TRANSACTION_CHALLENGE_RE.test(body) ||
     TRANSACTION_APPROVAL_REQUEST_RE.test(body) ||
     ((CODE_CHALLENGE_QUOTED_RE.test(body) || CODE_CHALLENGE_FOR_RE.test(body)) &&
       CODE_VALIDITY_WINDOW_RE.test(body))
@@ -4209,7 +4277,7 @@ function namedDate(monthWord: string, day: string, year: string): string | null 
  */
 function extractDueDate(raw: string): string | null {
   const arabicNumeric = normalizeArabic(raw).match(
-    /تاريخ الاستحقاق\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i,
+    /(?:تاريخ|موعد)\s+(?:ال)?استحقاق\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i,
   );
   if (arabicNumeric) return numericDate(arabicNumeric[1], arabicNumeric[2], arabicNumeric[3]);
   const arabic = normalizeArabic(raw).match(ARABIC_DUE_DATE_RE);
@@ -4421,6 +4489,17 @@ function parseSmsInner(
     BILL_DUE_WORDS.test(raw) &&
     (card !== null || /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw)) &&
     statementTotalFils(raw) !== null;
+  const marketingMovementText = blank(raw, REWARD_RATE_RE);
+  if (
+    (ARABIC_MARKETING_RE.test(raw) ||
+      REWARD_RATE_RE.test(raw) ||
+      PERCENT_PURCHASE_OFFER_RE.test(raw)) &&
+    !ARABIC_MONTHLY_BILL_RE.test(raw) &&
+    !SETTLED_MOVEMENT_RE.test(marketingMovementText) &&
+    !statementEvidence
+  ) {
+    return null;
+  }
   if ((OFFER_RE.test(raw) || ARABIC_OFFER_RE.test(raw)) && !posted && !statementEvidence) {
     return null;
   }
@@ -4598,6 +4677,98 @@ function parseSmsInner(
   const fundingAccountBalance = snapshot?.kind === 'balance' && cardPaymentLeg(raw) === 'debit';
   const cardPaymentSnapshotFils = fundingAccountBalance ? null : snapshotFils;
   const cardPaymentSnapshotKind = fundingAccountBalance ? null : snapshotKind;
+
+  /**
+   * A collection reminder can look like a card-payment posting because it says
+   * "deposit the overdue payment of AED ..." and names the credit card. No
+   * payment has moved yet: the message is asking for the promised amount by a
+   * future date and usually links to the statement.
+   *
+   * Keep the signature narrow: overdue + payment + credit-card identity + a
+   * promised/deposit instruction. That combination describes the obligation,
+   * not a receipt, and avoids stealing ordinary posted card-payment messages.
+   */
+  const overdueCardReminder = raw.match(
+    /\boverdue\s+payment\s+(?:of\s+)?AED\s*([\d,]+(?:\.\d{1,2})?)\b/i,
+  );
+  if (
+    overdueCardReminder &&
+    card &&
+    /\bcredit\s+card\b/i.test(raw) &&
+    /\bpromis(?:e|ed|ing)\b/i.test(raw) &&
+    /\bdeposit\b/i.test(raw)
+  ) {
+    const amountFils = Math.round(Number(overdueCardReminder[1].replace(/,/g, '')) * 100);
+    if (Number.isSafeInteger(amountFils) && amountFils > 0) {
+      const reminderDate = extractDueDate(raw) ?? extractDate(raw);
+      return {
+        kind: 'cardStatement',
+        type: 'expense',
+        amountFils,
+        merchant: `Card •${card.last4}`,
+        date: reminderDate,
+        dueDay: reminderDate ? Number(reminderDate.slice(8)) : null,
+        minDueFils: null,
+        card: { ...card, kind: 'credit' },
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'other',
+        categoryDeliberate: true,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * FAB also emits a terse FIELD-LIST credit with no verb at all:
+   *
+   *   Credit Account XXXX0004  AED 5000.00  ...  Balance AED 401913.68
+   *
+   * The generic direction parser quite reasonably refuses it: "Credit
+   * Account" could be a product noun on an unknown sender, and without a verb
+   * there is no generic posting clause. In FAB's sender-scoped grammar it is a
+   * completed incoming account credit, though, and the real corpus contains a
+   * repeated family of these alerts.
+   *
+   * Keep this sender-gated and shape-gated. The first AED figure after the
+   * masked account is the movement; extractSnapshot independently reads the
+   * later Balance figure. No FAB sender => no special interpretation.
+   */
+  const fabAccountCredit = bank?.name === 'FAB'
+    ? raw.match(
+        /\bcredit\s+account\b[\s\S]{0,32}?(?:[Xx*·•]+\s*)?(\d{4})\b[\s\S]{0,40}?\bAED\s*([\d,]+(?:\.\d{1,2})?)/i,
+      )
+    : null;
+  if (fabAccountCredit) {
+    const amountFils = Math.round(Number(fabAccountCredit[2].replace(/,/g, '')) * 100);
+    const fabBalance = raw.match(/\bbalance\s*(?:is|:)?\s*AED\s*([\d,]+(?:\.\d{1,2})?)/i);
+    const fabBalanceFils = fabBalance
+      ? Math.round(Number(fabBalance[1].replace(/,/g, '')) * 100)
+      : null;
+    if (Number.isFinite(amountFils) && amountFils > 0) {
+      return {
+        kind: 'transaction',
+        type: 'income',
+        amountFils,
+        merchant: 'Account credit',
+        date,
+        dueDay: null,
+        minDueFils: null,
+        card: { last4: fabAccountCredit[1], kind: 'account' },
+        transferHint: false,
+        snapshotFils: Number.isFinite(fabBalanceFils) ? fabBalanceFils : snapshotFils,
+        snapshotKind: Number.isFinite(fabBalanceFils) ? 'balance' : snapshotKind,
+        categoryGuess: 'other',
+        categoryDeliberate: false,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
 
   // Card payment received (transfer into the card) — before debit detection,
   // since these messages also contain the word "payment". Only credit cards
@@ -5055,12 +5226,12 @@ function parseSmsInner(
   // Read only the exact labelled total/deadline sentence, and require e&'s
   // own bill markers so an arbitrary Arabic amount cannot become a reminder.
   const arabicEandBill = raw.match(
-    /اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ\s+\d{1,2}\s+[\u0600-\u06ff]+\s+\d{4}\s+هو\s*:\s*([\d,]+(?:\.\d{1,2})?)\s*درهم(?:ا)?/,
+    /اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ\s+\d{1,2}\s+[\u0600-\u06ff]+\s+\d{4}\s+هو\s*:\s*([\d,]+(?:\.\d{1,2})?)\s*\.?\s*درهم(?:ا)?/,
   );
   if (
     arabicEandBill &&
     /فاتورتك\s+لشهر/.test(raw) &&
-    /(?:e&\s*uae|eand\.ae|اي\s+اند)/i.test(raw)
+    /(?:e&\s*uae|eand\.ae|اي\s+اند|اتصالات|\betisalat\b)/i.test(raw)
   ) {
     const dueDate = extractDueDate(raw);
     const amountFils = Math.round(Number(arabicEandBill[1].replace(/,/g, '')) * 100);
@@ -5084,6 +5255,96 @@ function parseSmsInner(
       raw: source,
     };
   }
+
+  /**
+   * e& / Etisalat's Arabic DUE reminders use a different sentence from the
+   * monthly eBill above. They say the bill is due today / nearing its due date,
+   * and ask the customer to pay "مبلغ وقدره <amount> درهماً". Those are
+   * obligations, not postings.
+   *
+   * This stays content-gated rather than Arabic-wide: the body must name
+   * Etisalat, contain an actual bill noun, explicit due vocabulary, and quote a
+   * dirham amount. A promotion from the same sender cannot satisfy all four.
+   */
+  const arabicEtisalatDueAmount = raw.match(
+    /(?:مبلغ\s+وقدره|مبلغ|اجمالي\s+المبلغ(?:\s+المستحق)?)\s*([\d,]+(?:\.\d{1,2})?)\s*درهم(?:ا|اً)?/,
+  );
+  if (
+    arabicEtisalatDueAmount &&
+    /(?:اتصالات|e&\s*uae|eand\.ae|اي\s+اند|\betisalat\b)/i.test(raw) &&
+    /فاتورتك|الفاتوره|فاتوره/.test(raw) &&
+    /موعد\s+(?:ال)?استحقاق|تاريخ\s+(?:ال)?استحقاق|مستحق\s+الدفع|مستحقه\s+الدفع|يرجي\s+سداد|يرجى\s+سداد|يرجي\s+دفع|يرجى\s+دفع/.test(raw)
+  ) {
+    const amountFils = Math.round(Number(arabicEtisalatDueAmount[1].replace(/,/g, '')) * 100);
+    if (Number.isSafeInteger(amountFils) && amountFils > 0) {
+      // Inside this branch the date is already guarded by explicit Arabic due
+      // vocabulary, so a plain numeric date is the deadline rather than (say)
+      // a transaction date. This covers "موعد الاستحقاق 25/09/2026".
+      const dueDate = extractDueDate(raw) ?? extractDate(raw);
+      return {
+        kind: 'billDue',
+        type: 'expense',
+        amountFils,
+        merchant: 'E&',
+        date: dueDate,
+        dueDay: dueDate ? Number(dueDate.slice(8)) : null,
+        minDueFils: null,
+        card: null,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'telecom',
+        categoryDeliberate: true,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  /**
+   * du collection reminders restate the billing period and amount, then give a
+   * deadline. Their footer may also say "if you've already paid", which makes a
+   * word-only direction detector look like money moved even though this is only
+   * an obligation. Bind the amount and deadline to the same du bill clause.
+   */
+  const duDatedBillDue = raw.match(
+    /\bbill\s+of\s+(?:AED|Dhs?)\s*([\d,]+(?:\.\d{1,2})?)[\s\S]{0,180}?\bdu\s+account\b[\s\S]{0,120}?\bdue\s+on\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i,
+  );
+  if (duDatedBillDue && !SETTLED_MOVEMENT_RE.test(raw)) {
+    const amountFils = Math.round(Number(duDatedBillDue[1].replace(/,/g, '')) * 100);
+    const dueDate = numericDate(duDatedBillDue[2], duDatedBillDue[3], duDatedBillDue[4]);
+    if (Number.isSafeInteger(amountFils) && amountFils > 0 && dueDate) {
+      return {
+        kind: 'billDue',
+        type: 'expense',
+        amountFils,
+        merchant: 'Du',
+        date: dueDate,
+        dueDay: Number(dueDate.slice(8)),
+        minDueFils: null,
+        card: null,
+        transferHint: false,
+        snapshotFils,
+        snapshotKind,
+        categoryGuess: 'telecom',
+        categoryDeliberate: true,
+        currency,
+        reference,
+        raw: source,
+      };
+    }
+  }
+
+  // An overdue du statement with no deadline must not become spending. Without
+  // a concrete due day the Bills model cannot safely create an obligation, so
+  // keep it non-posting until a dated reminder arrives.
+  if (
+    /\boverdue\s+bill\b/i.test(raw) &&
+    /\bdu\s+account\b/i.test(raw) &&
+    /\boverdue\b[^.\n]{0,48}?(?:AED|Dhs?)\s*[\d,]+(?:\.\d{1,2})?/i.test(raw) &&
+    !SETTLED_MOVEMENT_RE.test(raw)
+  ) return null;
 
   // A readable minimum plus card-statement context is not a money movement,
   // even when a compact/malformed deadline cannot satisfy BILL_DUE_WORDS.

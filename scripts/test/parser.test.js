@@ -74,7 +74,23 @@ function ok(name, condition, detail) {
 // ── The exact failure modes from the user's phone ──
 t('merchant stops at "with"',
   'Purchase of AED 50.00 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
-  { merchant: 'Tabby', amountFils: 5000, category: 'shopping', type: 'expense' });
+  { merchant: 'Tabby', amountFils: 5000, category: 'loan', type: 'expense' });
+
+t('Sharjah Islamic neutral foreign-currency transaction parses like the AED twin',
+  'A transaction on your Card ending 1234 at SAMPLE CAFE for JOD 25.50 on 18-Sep at 14:30 is successful. Your available balance is 1234.56',
+  { type: 'expense', merchant: 'Sample Cafe', category: 'dining',
+    originalAmountMinor: 2550, originalCurrency: 'JOD' });
+t('Sharjah Islamic EUR neutral transaction also survives the posted-evidence gate',
+  'A transaction on your Card ending 1234 at SAMPLE CAFE for EUR 9.99 on 18-Sep at 14:30 is successful. Your available balance is 1234.56',
+  { type: 'expense', merchant: 'Sample Cafe', category: 'dining',
+    originalAmountMinor: 999, originalCurrency: 'EUR' });
+t('a foreign available balance alone is still not posting evidence',
+  'Your Card ending 1234 is active. Your available balance is JOD 1,234.56.',
+  null);
+t('Sharjah Islamic yearless card due keeps total and minimum separate',
+  'Your Card ending with XXXX1234 payment is due on 25-Sep is AED 1,234.56, minimum payment due is AED 123.45.',
+  { kind: 'cardStatement', amountFils: 123456, minDueFils: 12345, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } });
 
 t('noon minutes → groceries, stops at with',
   'AED 43.00 was debited for payment to NOON MINUTES with Card no. XX99',
@@ -469,6 +485,33 @@ const fabCredit = parseSms(
   else { pass++; console.log('✓ FAB "Your balance is" account credit'); }
 }
 
+// The owner corpus also contains FAB's terse field-list variant. It has no
+// "credited" verb, so it must be sender-gated rather than widening the global
+// meaning of the noun phrase "Credit Account".
+const fabFieldCredit = parseSms(
+  'Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/2026\nBalance AED 40,191.68',
+  undefined,
+  { sender: 'FAB' },
+);
+if (
+  fabFieldCredit &&
+  fabFieldCredit.type === 'income' &&
+  fabFieldCredit.amountFils === 125075 &&
+  fabFieldCredit.card?.last4 === '0004' &&
+  fabFieldCredit.card?.kind === 'account' &&
+  fabFieldCredit.snapshotKind === 'balance' &&
+  fabFieldCredit.snapshotFils === 4019168
+) {
+  pass++; console.log('✓ FAB field-list Credit Account is an incoming account credit');
+} else {
+  fail++; console.log('✗ FAB field-list Credit Account is an incoming account credit', JSON.stringify(fabFieldCredit));
+}
+if (parseSms('Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/2026\nBalance AED 40,191.68') === null) {
+  pass++; console.log('✓ field-list Credit Account requires FAB sender context');
+} else {
+  fail++; console.log('✗ field-list Credit Account requires FAB sender context');
+}
+
 t('bare "daily limit" mention is NOT a snapshot source of truth',
   'Purchase of AED 200.00 at CARREFOUR with Debit Card ending 1234. Daily limit AED 5,000 applies',
   { amountFils: 20000 });
@@ -794,6 +837,37 @@ t('Arabic e& monthly statement creates one telecom reminder',
   'اضغط هنا لدفع فاتورتك عبر تطبيق e& UAE\nhttps://www.eand.ae/smsebill',
   { kind: 'billDue', merchant: 'E&', amountFils: 45045, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('legacy Arabic Etisalat monthly statement tolerates punctuation after the total',
+  'عزيزي العميل، فاتورتك لشهر ابريل للحساب رقم 123456789 متاحة الآن. ' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 مايو 2026 هو: 245.50. درهماً (يشمل ضريبة القيمة المضافة). ' +
+  'يمكنك الدفع عبر تطبيق My Etisalat UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 24550, date: '2026-05-15', dueDay: 15,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('Arabic Etisalat amount-due reminder is a telecom bill, not spending',
+  'يرجى سداد مبلغ وقدره 245.50 درهماً لفاتورة حسابك في اتصالات رقم 123456789 وذلك في موعد الاستحقاق 25/09/2026. يمكنك السداد بسهولة عبر تطبيق e& UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 24550, date: '2026-09-25', dueDay: 25,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('Arabic Etisalat due-today reminder may keep an unknown deadline',
+  'نود تذكيرك أن اليوم هو موعد استحقاق فاتورتك لحساب اتصالات رقم 123456789. يمكنك بسهولة دفع مبلغ وقدره 180 درهماً عبر تطبيق e& UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 18000, category: 'telecom',
+    billIdentity: 'account:6789', deliberate: true });
+
+t('legacy Arabic Etisalat due reminder keeps the account and stated deadline',
+  'اقترب تاريخ استحقاق الفاتورة: لديك مبلغ وقدره 180 درهماً مستحق الدفع على الحساب رقم 123456789 بتاريخ 25/09/2026. ادفع بسهولة عبر تطبيق My Etisalat UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 18000, date: '2026-09-25', dueDay: 25,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('du dated collection reminder is a bill due, not spending',
+  "Please note your payment for 07/04/2023 - 06/05/2023 bill of AED 208.95 in respect of your du account no. 1.23456789 is due on 20/05/2023. Log in to My du app to pay your bill. If you've already paid your bill, please ignore.",
+  { kind: 'billDue', merchant: 'Du', amountFils: 20895, date: '2023-05-20', dueDay: 20,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('undated overdue du statement is not a posted expense',
+  "Overdue bill: Please note your 07/04/2023 - 06/05/2023 bill for du account no. 1.23456789 is still overdue by AED 208.95. Settle your outstanding payment in the du app. If you've already paid, please ignore.",
+  null);
 
 t('Arabic e& bill with an impossible deadline is refused',
   'فاتورتك لشهر فبراير للحساب رقم 123456789 متاحة الآن. ' +
@@ -1439,6 +1513,55 @@ t('a sports playground is health', shop('OLE FOR SPORTS PLAYGR', 'AJMAN'), { cat
 t('a football academy is health', shop('FOOTBALL ACADEMY', 'DUBAI'), { category: 'health' });
 t('a sportswear retailer is still shopping', shop('SUN & SAND SPORTS', 'DUBAI'), { category: 'shopping' });
 t('majid al futtaim is retail', shop('MAJID AL FUTTAIM', 'DUBAI'), { category: 'shopping' });
+t('Majid Al Futtaim Cinemas is entertainment, not parent-company retail',
+  shop('MAJID AL FUTTAIM CINEMAS', 'DUBAI'), { category: 'entertainment' });
+t('Karam Al Sham Gents is personal care, not a restaurant matched by Karam',
+  shop('KARAM AL SHAM GENTS', 'SHARJAH'), { category: 'personal-care' });
+t('Uber Eats is dining, not an Uber ride',
+  shop('UBER EATS HELP.UBER', 'DUBAI'), { category: 'dining' });
+t('Family Mart is groceries before the generic store rule',
+  shop('FAMILY MART GUANGZHOU', 'CHINA'), { category: 'groceries' });
+t('7 Eleven with a space is groceries too',
+  shop('7 ELEVEN BEIJING SHANGHAI', 'CHINA'), { category: 'groceries' });
+t('Lawson Store is groceries before the generic store rule',
+  shop('LAWSON STORE', 'TOKYO'), { category: 'groceries' });
+t('a minimart in a free-zone descriptor remains groceries',
+  shop('JOUDI MINIMART DMCC', 'DUBAI'), { category: 'groceries' });
+t('a truncated supermarket beats a government-like brand token',
+  shop('SHAMS AL BUHAIRA SUPER', 'SHARJAH'), { category: 'groceries' });
+t('a truncated supermarket beats a restaurant-family name',
+  shop('WARDT ALSHAM SUPERMARK', 'SHARJAH'), { category: 'groceries' });
+t('Occidental hotel is travel; dental must not match inside Occidental',
+  shop('OCCIDENTAL TARGET HOTEL', 'SHARJAH'), { category: 'travel' });
+t('Emirates Health Services is health, not generic Emirates travel',
+  shop('EMIRATES HEALTH SERVICES', 'DUBAI'), { category: 'health' });
+t('truncated Emirates Health Services still stays health',
+  shop('EMIRATES HEALTH SERVIC', 'DUBAI'), { category: 'health' });
+t('Mc Donalds with an acquirer space is still dining',
+  shop('MC DONALDS ENOC', 'DUBAI'), { category: 'dining' });
+t('shaurma transliteration is dining',
+  shop('POS U SHAURMA N1', 'TBILISI'), { category: 'dining' });
+t('restoran transliteration is dining',
+  shop('SAVALAN RESTORAN', 'BAKU'), { category: 'dining' });
+t('baklava shop is dining',
+  shop('BAKLAVA 6', 'TBILISI'), { category: 'dining' });
+t('pide shop is dining',
+  shop('PIDE LAND LLC', 'TBILISI'), { category: 'dining' });
+t('jiu jitsu is health/fitness',
+  shop('ENTROPY JIU JITSU LLC', 'DUBAI'), { category: 'health' });
+t('generic Zoho descriptor is software',
+  shop('ZOHO-ZOHO CORP', 'US'), { category: 'software' });
+t('Luluat Al Khaleej Gift is shopping, not Lulu groceries',
+  shop('LULUAT AL KHALEEJ GIFT', 'SHARJAH'), { category: 'shopping' });
+t('Binance beats unrelated telecom/card branding',
+  'Purchase of AED 200.00 with Etisalat Credit Card ending 4744 at HTTP //WWW.BINANCE.COM, DUBAI. Avl Balance is AED 4,019.17.',
+  { merchant: 'Binance', category: 'investing' });
+t('Disney+ beats App Store processor words',
+  'Purchase of AED 39.99 with Credit Card ending 4744 at APP STORE DISNEY+, DUBAI.',
+  { category: 'entertainment' });
+t('Amazon Prime beats generic Amazon shopping',
+  'Purchase of AED 16.00 with Credit Card ending 4744 at AMAZON PRIME, DUBAI.',
+  { category: 'entertainment' });
 t('bioniq is supplements', shop('SP BIONIQ-GLOBAL', '+9715474'), { category: 'health' });
 t('a finance house instalment is a loan', shop('AAFAQ ISLAMIC FINANCE', 'DUBAI'), { category: 'loan' });
 
@@ -1714,6 +1837,26 @@ t(
   'an authorisation code is an approval reference on a posting, not an OTP',
   'AED 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456.',
   { type: 'expense', amountFils: 25000, merchant: 'Noon' },
+);
+t(
+  'a numbered code used to complete a payment is a challenge, not a posting',
+  'Code 458213 to complete your payment with card ending 1234 at SAMPLE AIRLINE for AED 720.00.',
+  null,
+);
+t(
+  'a numbered PIN used to confirm a transaction is a challenge, not a posting',
+  'PIN 583214 to confirm this transaction with card ending 1234 for AED 85.00.',
+  null,
+);
+t(
+  'a PIN-first transaction challenge with the code at the end is not a posting',
+  'PIN for transaction with HSBC Card ending 1234 for AED 85.00 at SAMPLE STORE is 583214. Call the bank if you did not request this.',
+  null,
+);
+t(
+  'an overdue card collection reminder is a statement obligation, not a posted payment',
+  'Dear Customer, as promised please deposit the overdue payment of AED 1,179.57 for your Credit Card ending with 1234 by 25/09/2026. Login to view your statement.',
+  { kind: 'cardStatement', amountFils: 117957, date: '2026-09-25', dueDay: 25, transferHint: false },
 );
 t(
   '3D Secure plus a reference number is still a posting',
@@ -2170,9 +2313,24 @@ t('an instalment-plan threshold does not fabricate a purchase',
   'Enjoy 0% instalment plans on purchases above AED 1,000.00 with your Mashreq card.', null);
 t('a points offer at "any store" does not fabricate a purchase',
   'Offer: Purchase of AED 250.00 at any store earns you double points this month.', null);
+t('"Get rewards for every 1 AED" is a reward rate, not a purchase',
+  'Get 2 FAB Rewards for every 1 AED spent with your card. Apply in the app.',
+  null);
+t('an Arabic prize-draw message is not an ATM withdrawal or purchase',
+  'اربح الذهب هذا الشهر! حوّل رصيد بمبلغ 20 درهم أو أكثر وادخل في السحب الكبير لفرصة للفوز بالذهب.',
+  null);
 // The controls that were already right and must stay so.
 t('a cashback offer is still skipped',
   'Get 50% cashback up to AED 200.00 when you use your ADCB card at Carrefour this weekend.', null);
+t('an Arabic device promotion with a purchase-sized price is not spending',
+  'هدية العيد لا تفوتها! احصل على جهاز SAMPLE ب 1,500 درهم فقط خلال عرض اتصالات للأجهزة. تسوق لدى المراكز الآن.',
+  null);
+t('a percentage purchase threshold is an offer, not a charge',
+  'Enjoy 20% discount on your purchase of AED 300 and above at SAMPLE STORE. Apply now.',
+  null);
+t('a settled purchase survives an offer-shaped percentage footer',
+  'AED 50.00 has been debited from your account at SAMPLE CAFE. Enjoy 20% discount on your next purchase of AED 300 and above.',
+  { type: 'expense', amountFils: 5000, merchant: 'Sample Cafe' });
 t('a credit-limit increase is not a transaction',
   'Your credit limit has been increased to AED 50,000.00.', null);
 
