@@ -136,15 +136,22 @@ test('current persisted transfer receipt bypasses graph reconciliation for UI to
   assert.equal(stale.has('invented-id'), false, 'an old receipt must never override live reconciliation');
 });
 
-test('running history import may use the store provisional transfer receipt', () => {
-  const state = {
+test('unfinished history import may use the store provisional transfer receipt after process death', () => {
+  const base = {
     transactions: [row('pending-out', 'expense', start)],
     accounts,
     transferNormalizationVersion: undefined,
-    transferInternalIds: ['pending-out'],
-    historyImport: { status: 'running' },
+    transferInternalIds: ['provisional-only-id'],
   };
-  assert.deepEqual([...ledger.internalTransferIdsForState(state)], ['pending-out']);
+  for (const status of ['running', 'paused', 'failed']) {
+    assert.deepEqual(
+      [...ledger.internalTransferIdsForState({ ...base, historyImport: { status } })],
+      ['provisional-only-id'],
+      `${status} import must not rebuild the complete transfer graph`,
+    );
+  }
+  const complete = ledger.internalTransferIdsForState({ ...base, historyImport: { status: 'complete' } });
+  assert.equal(complete.has('provisional-only-id'), false, 'completion requires the final canonical receipt');
 });
 
 test('FAB complementary transfer alerts collapse to one displayed event without full reconciliation', () => {

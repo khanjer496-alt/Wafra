@@ -683,11 +683,19 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /const loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
-    /const loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
+    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
+    /loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
     'branch that leaves a genuinely new install latched off forever');
+
+ok('transient encrypted read failures get exactly one automatic fresh-handle retry',
+  !!hydrateBody &&
+    /storageReadFailureMayRetry\(firstFailure\)/.test(hydrateBody) &&
+    (hydrateBody.match(/await persistence\.load\(\)/g) ?? []).length === 2 &&
+    /await new Promise<void>\(\(resolve\) => setTimeout\(resolve, 32\)\)/.test(hydrateBody),
+  'the first ERR_UNEXPECTED batch read should not immediately replace the app with recovery, ' +
+    'but retry must stay bounded to one fresh SQLCipher connection');
 
 ok('the browser demo ledger is isolated to an explicit E2E export',
   /Platform\.OS === 'web'\s*&&\s*process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1'/.test(store) &&
@@ -2155,6 +2163,17 @@ if (!fs.existsSync(diagBuild)) {
         !JSON.stringify(unknown).includes('500.00') &&
         unknown.code === null,
       JSON.stringify(unknown));
+
+    const locked = new Error('database is locked');
+    locked.code = 'SQLITE_BUSY';
+    const lockedFailure = diagnostics.recordStorageFailure('state-batch-read', locked);
+    ok('only transient read categories are eligible for one automatic retry',
+      diagnostics.storageReadFailureMayRetry(unknown) === true &&
+        diagnostics.storageReadFailureMayRetry(lockedFailure) === true &&
+        diagnostics.storageReadFailureMayRetry(mismatch) === false &&
+        diagnostics.storageReadFailureMayRetry(record) === false,
+      'unknown/locked may recover on a freshly opened handle; key mismatch and corruption must ' +
+        'fail closed without repeatedly touching the encrypted ledger');
 
     /** A merchant name is not an error code, however single-word it is. */
     const fakeCode = new Error('boom');

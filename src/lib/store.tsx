@@ -96,13 +96,18 @@ import {
   type MaterializedImportBatch,
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
-import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
+import {
+  recordStorageFailure,
+  storageReadFailureMayRetry,
+  type StorageFailure,
+} from '@/lib/storage-diagnostics';
 import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
 import {
   createHistoryImportProgress,
+  historyImportIncomplete,
   requestHistoryImportRun,
   normalizeHistoryImportProgress,
   type HistoryImportProgress,
@@ -876,9 +881,18 @@ function reducer(state: AppState, action: Action): AppState {
     // reducer preserves the transactions array when no row changed, so an
     // array that came through untouched is one the receipt still describes.
     const persistedTransferGraphIsCurrent = action.type === 'hydrate' &&
-      reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
       Array.isArray(reduced.transferInternalIds) &&
-      reduced.transactions === action.state.transactions;
+      reduced.transactions === action.state.transactions &&
+      (
+        reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+        // Intermediate history pages intentionally persist no final transfer
+        // version, but they do persist the last safe provisional id set. A
+        // process restart converts `running` to `paused`; rebuilding the full
+        // transfer graph here can block Hermes for seconds and be killed before
+        // the exact same provisional receipt can ever be saved again. Trust it
+        // until the final history page performs canonical reconciliation once.
+        historyImportIncomplete(reduced.historyImport)
+      );
     const needsTransferNormalization = !persistedTransferGraphIsCurrent && (accountsChanged || (
       transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
     ));
@@ -1817,13 +1831,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     authoritativeState.current = next;
     if (Array.isArray(next.transferInternalIds) && (
       next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
-      next.historyImport?.status === 'running'
+      historyImportIncomplete(next.historyImport)
     )) {
       // During an unfinished first-history import the ids are a provisional UI
       // snapshot only. The persisted normalization VERSION is intentionally
-      // absent, so a restart or the final page still forces exact reconciliation.
-      // Priming the cache here prevents Home/Flow/Bills/Wallet from rebuilding
-      // the entire transfer graph merely because this page replaced the arrays.
+      // absent. The final page still forces exact reconciliation; a restart
+      // does not, because hydration converts `running` to `paused` and the same
+      // provisional snapshot remains the safe cheap answer. Priming the cache
+      // here prevents Home/Flow/Bills/Wallet from rebuilding the entire graph.
       primeInternalTransferIds(next.transactions, next.accounts, next.transferInternalIds);
     }
     authoritativeRevision.current += 1;
@@ -1924,7 +1939,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // before reading so hydration never presents the snapshot from one write
       // behind. This is a no-op when no background capture is running.
       if (Platform.OS === 'android') await waitForAndroidBackgroundCaptureIdle();
-      const loaded = await persistence.load();
+      let loaded: Awaited<ReturnType<LedgerPersistence['load']>>;
+      try {
+        loaded = await persistence.load();
+      } catch (firstError) {
+        // The native adapter has already retired the failed shared SQLCipher
+        // handle before this throw reaches the store. A bounded subset of read
+        // failures is transient, so try exactly once on the fresh connection
+        // before replacing the app with the recovery takeover.
+        const firstFailure = recordStorageFailure('read', firstError);
+        if (!storageReadFailureMayRetry(firstFailure) || hydrationRun.current !== run) {
+          throw firstError;
+        }
+        // Give Android one event-loop turn after closeAsync. Persistence stays
+        // blocked throughout both reads, so a default/empty snapshot can never
+        // overwrite the ledger while recovery is in progress.
+        await new Promise<void>((resolve) => setTimeout(resolve, 32));
+        if (hydrationRun.current !== run) return false;
+        loaded = await persistence.load();
+      }
       if (hydrationRun.current !== run) return false;
       markLaunchPhase('ledger-read-complete');
       let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER

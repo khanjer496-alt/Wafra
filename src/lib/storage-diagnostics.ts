@@ -107,6 +107,21 @@ export interface StorageFailure {
   category: StorageCategory;
 }
 
+/**
+ * Whether one fresh-connection read retry is safe and useful.
+ *
+ * The native adapter retires the failing SQLCipher handle before rethrowing a
+ * state read error. `locked` and an otherwise `unknown` native failure can be
+ * transient and deserve one bounded retry. Everything else is deliberately
+ * fail-closed: retrying a wrong key, corrupt file, exhausted device, read-only
+ * store, or schema bug only delays recovery and can add more resource pressure.
+ */
+export function storageReadFailureMayRetry(
+  failure: Pick<StorageFailure, 'category'>,
+): boolean {
+  return failure.category === 'unknown' || failure.category === 'locked';
+}
+
 const FILE_NAME = 'wafra-storage-diagnostics.json';
 /** Enough to show a pattern across a few launches, small enough to write. */
 const MAX_RECORDS = 12;

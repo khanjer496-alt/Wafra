@@ -960,6 +960,11 @@ function bodyOf(source, header) {
       /finalizationReceiptCurrent[\s\S]*?\?\s*declinesRemoved\.transactions[\s\S]*?:\s*finalizeHydrationTransactions/.test(store),
     'decline cleanup plus capture/payment reconciliation cost hundreds of ms on a 14k-row persisted ledger and must run only when its receipt is stale');
 
+  ok('unfinished history hydration reuses its provisional transfer receipt instead of rebuilding the graph',
+    /historyImportIncomplete\(reduced\.historyImport\)/.test(store) &&
+      /historyImportIncomplete\(next\.historyImport\)/.test(store),
+    'a persisted running job hydrates as paused; treating only literal running as provisional caused multi-second 15k-row graph rebuilds on every relaunch');
+
   ok('build-262 ledgers can adopt the hydration-finalize receipt without one extra slow launch',
     /legacyFinalizationReceipt/.test(store) &&
       /hydrationReparseKey === exactReparseKey/.test(store) &&
