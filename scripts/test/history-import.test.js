@@ -87,9 +87,9 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   ok(
     'foreground history uses small pages while background keeps throughput',
     /BACKGROUND_HISTORY_PAGE_SIZE = 1_000/.test(historyHookSource) &&
-      /BACKGROUND_HISTORY_PAGES_PER_COMMIT = 2/.test(historyHookSource) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1/.test(historyHookSource) &&
       /FOREGROUND_HISTORY_PAGE_SIZE = 256/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 4/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 2/.test(historyHookSource) &&
       /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
       /maxInboxPages: foreground[\s\S]*?FOREGROUND_HISTORY_PAGES_PER_COMMIT[\s\S]*?BACKGROUND_HISTORY_PAGES_PER_COMMIT/.test(historyHookSource) &&
       /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
