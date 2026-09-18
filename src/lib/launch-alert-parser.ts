@@ -72,8 +72,11 @@ export const inspectGenericBankEventForReview = (
   if (!hasGenericBankAlertContext(source, sender)) return null;
   const event = inspectUniversalBankEvent(source, { sender });
   if (event.decision !== 'review') return null;
+  const hasGroundedMoney =
+    event.amount.evidence !== 'missing' ||
+    event.observations.some((observation) => observation.field.evidence !== 'missing');
   if (event.status === 'unknown' && event.family === 'unknown' &&
-    event.instrument.evidence !== 'explicit') return null;
+    event.instrument.evidence !== 'explicit' && !hasGroundedMoney) return null;
   return event;
 };
 

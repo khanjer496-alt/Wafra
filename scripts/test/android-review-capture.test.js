@@ -378,7 +378,7 @@ const { scanInbox, getAndroidNotificationImportDiagnostics } = require('./build/
     JSON.stringify(learnedBank));
   await learnedBank.commit();
 
-  const ackBeforeUnrecognized = acknowledgedNotifications.length;
+  const ackBeforeAmbiguousTrusted = acknowledgedNotifications.length;
   notificationRows = [{
     id: 'trusted-unrecognized-0001',
     pkg: 'ae.hsbc.hsbcuae',
@@ -387,20 +387,30 @@ const { scanInbox, getAndroidNotificationImportDiagnostics } = require('./build/
     ts: NOW + 5_950,
   }];
   const unresolvedTrusted = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  const trustedReviewDiagnostics = getAndroidNotificationImportDiagnostics();
+  ok('a terse money-bearing trusted-bank parser miss falls back to Review instead of becoming invisible',
+    unresolvedTrusted.parsed.length === 0 && unresolvedTrusted.reviewCandidates.length === 1 &&
+      unresolvedTrusted.reviewCandidates[0]?.kind === 'universal' &&
+      unresolvedTrusted.reviewCandidates[0]?.sourcePackage === 'ae.hsbc.hsbcuae' &&
+      unresolvedTrusted.reviewCandidates[0]?.sourceClass === 'trusted-bank' &&
+      trustedReviewDiagnostics?.review === 1 &&
+      trustedReviewDiagnostics?.unresolved === 0 &&
+      trustedReviewDiagnostics?.unresolvedParserMiss === 0 &&
+      acknowledgedNotifications.length === ackBeforeAmbiguousTrusted,
+    JSON.stringify({ unresolvedTrusted, trustedReviewDiagnostics, acknowledgedNotifications }));
   await unresolvedTrusted.commit();
-  ok('an unresolved money-bearing trusted-bank notification stays queued instead of disappearing',
-    unresolvedTrusted.parsed.length === 0 && unresolvedTrusted.reviewCandidates.length === 0 &&
-      acknowledgedNotifications.length === ackBeforeUnrecognized &&
-      !acknowledgedNotifications.includes('trusted-unrecognized-0001'),
+  ok('the trusted-bank Review row is acknowledged only after its durable commit boundary',
+    acknowledgedNotifications.length === ackBeforeAmbiguousTrusted + 1 &&
+      acknowledgedNotifications.includes('trusted-unrecognized-0001'),
     JSON.stringify({ unresolvedTrusted, acknowledgedNotifications }));
   const firstUnresolvedAttempt = getAndroidNotificationImportDiagnostics();
   const unresolvedRetry = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
   const secondUnresolvedAttempt = getAndroidNotificationImportDiagnostics();
-  ok('the same unresolved native notification is not reparsed again in one JS session',
-    firstUnresolvedAttempt?.captured === 1 &&
-      secondUnresolvedAttempt?.captured === 0 &&
-      unresolvedRetry.parsed.length === 0 && unresolvedRetry.reviewCandidates.length === 0 &&
-      acknowledgedNotifications.length === ackBeforeUnrecognized,
+  ok('a committed trusted-bank Review row is safe if a native test double returns it again',
+    firstUnresolvedAttempt?.review === 1 &&
+      secondUnresolvedAttempt?.review === 1 &&
+      unresolvedRetry.parsed.length === 0 && unresolvedRetry.reviewCandidates.length === 1 &&
+      acknowledgedNotifications.length === ackBeforeAmbiguousTrusted + 1,
     JSON.stringify({ firstUnresolvedAttempt, secondUnresolvedAttempt }));
 
   const hsbcTitle = 'Your credit card transaction is approved';

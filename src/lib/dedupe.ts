@@ -87,6 +87,7 @@ const GENERIC_CAPTURE_TITLES = new Set([
   'bank transfer',
   'own account transfer',
   'card payment',
+  'payment',
   'account debit',
   'telegraphic transfer',
   'outward remittance',

@@ -577,6 +577,32 @@ function parsedFinancialCandidateReview(
   return candidate;
 }
 
+/**
+ * Preserve grounded money from a trusted/verified bank notification even when
+ * neither parser can prove enough semantics for automatic posting.
+ *
+ * Unknown direction/status/family are valid Universal Review states: the UI
+ * asks the user instead of silently inventing a transaction. This is the safe
+ * terminal path for terse OEM/bank-app push formats such as a bare amount plus
+ * reference text. Previously those rows stayed encrypted in the native queue
+ * forever and diagnostics reported unresolvedParserMiss=1.
+ */
+function universalEventReviewCandidate(
+  event: UniversalBankEvent,
+  observedAt: number,
+): SourceFreeReviewCandidate | null {
+  const prepared = prepareUniversalReviewAlert({
+    id: 'capture_probe_id_0001',
+    sourceKey: 'capture_probe_key_001',
+    observedAt,
+    channel: 'push',
+    event,
+  });
+  if (!prepared) return null;
+  const { id: _id, sourceKey: _sourceKey, ...candidate } = prepared;
+  return candidate;
+}
+
 const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
   'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment',
 ]);
@@ -1228,10 +1254,14 @@ export async function scanInbox(
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
           : null;
+        const universalCandidateFallback = !p && universalEvent
+          ? universalEventReviewCandidate(universalEvent, n.ts)
+          : null;
+        const reviewFallback = parsedCandidateFallback ?? universalCandidateFallback;
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
-              parsedCandidateFallback, skipKnownLaunchUniversal,
+              reviewFallback, skipKnownLaunchUniversal,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1255,7 +1285,7 @@ export async function scanInbox(
             worldwide,
             undefined,
             pushSource,
-            undefined,
+            reviewFallback,
             skipKnownLaunchUniversal,
           );
         }
