@@ -92,6 +92,84 @@ t('Sharjah Islamic yearless card due keeps total and minimum separate',
   { kind: 'cardStatement', amountFils: 123456, minDueFils: 12345, dueDay: 25,
     card: { last4: '1234', kind: 'credit' } });
 
+t('Salik Arabic recharge uses the bare added amount, not the later balance',
+  'تم إضافة مبلغ 50 إلى الحساب رقم 12345678 باستخدام بطاقة ائتمان. رصيد حسابك 202.00 درهم.',
+  { type: 'expense', amountFils: 5000, merchant: 'Salik', category: 'transport',
+    snapshotFils: 20200, snapshotKind: 'balance' },
+  { sender: 'SALIK' });
+t('Salik bare amount rule is sender-scoped',
+  'تم إضافة مبلغ 50 إلى الحساب رقم 12345678 باستخدام بطاقة ائتمان. رصيد حسابك 202.00 درهم.',
+  { amountFils: 20200 });
+t('Salik amount-added notice with no stated recharge amount never imports its new balance',
+  'تم إضافة مبلغ لحساب سالك رقم 12345678 باستخدام بطاقة إضافة رصيد سالك. رصيدك الجديد 202.00 درهم.',
+  null,
+  { sender: 'SALIK' });
+
+t('FAB field-list card tail cannot become the amount before AED .99',
+  'Credit Card Purchase Card No 1234 AED .99 SAMPLE STORE 18/09/26 14:30 Available Balance AED 10000.00',
+  { type: 'expense', amountFils: 99, card: { last4: '1234', kind: 'credit' } });
+t('ordinary suffix amount after a charge verb still parses',
+  'Your card ending 1234 was charged 100 AED at SAMPLE STORE.',
+  { type: 'expense', amountFils: 10000 });
+
+t('mobile-credit campaign amount is not spending',
+  'You have credit to win a prize. Dial *123*45 to participate in offer AED 50 of mobile credit bonus.',
+  null);
+t('mobile-credit overdraft offer amount is not spending',
+  'Ran out of credit! Dial *108*1# to opt in & get up to AED 50 of mobile credit that you can use for calls, SMS or buy data.',
+  null);
+t('mobile-credit overdraft offer without up-to is not income',
+  'Do not have credit to make a call? Dial *108*1# to opt in and get AED 50 of mobile credit that you can use for calls or data.',
+  null);
+t('future purchase threshold is not spending',
+  'GET 2 FOR 1! Spend AED250 on your next purchase and enter the draw.',
+  null);
+t('loyalty next-purchase amount is not spending',
+  'Double your rewards on your next purchase of AED 150. Offer ends tomorrow.',
+  null);
+t('get-value-on-every-purchase offer is not spending',
+  'SHOP FOR FREE! Get AED250 on every purchase of AED250 till July 7. T&C apply.',
+  null);
+t('cash-prize campaign amount is not income',
+  'You have the chance to win a cash prize of 3000 AED daily when you participate in our survey.',
+  null);
+t('spend-to-enter-draw threshold is not spending',
+  'Every AED 500 spent gives 1 entry into the MEGA draw for a free trip.',
+  null);
+t('loan and credit-card sales offer is not salary or income',
+  'We offer personal loans, Islamic personal finance, and credit cards. Bundle Offer Upto AED 12500 Rewards.',
+  null);
+t('minimum-purchase instalment campaign is not spending',
+  'Shop your favorite brands with FAB Credit Cards and enjoy 0% interest instalments for up to 12 months with ZERO processing fee on a purchase of AED 1,000 or more until 31 Dec 2026. Conditions apply.',
+  null);
+t('standalone monthly-instalment conversion offer does not repeat an existing purchase',
+  'Enjoy easy monthly instalments on your purchase of AED 787.50 at TABBY Dubai with an attractive profit rate and zero processing fee.',
+  null);
+t('FAB field-list purchase survives a contest footer',
+  'Credit Card Purchase\nCard No XXXX9960\nAED 34.15\nTALABAT DUBAI ARE\n07/08/24 23:10\nAvailable Balance AED 13938.80\nYour August statement payment due date is 26/08/2024\nTravel now, pay later with NO fees & a chance to win spends back. Conditions apply.',
+  { kind: 'transaction', type: 'expense', amountFils: 3415, merchant: 'Talabat', category: 'dining',
+    card: { last4: '9960', kind: 'credit' } });
+t('a real debit survives a mobile-credit campaign footer',
+  'AED 25.00 has been debited at SAMPLE STORE. Join the promotion for AED 50 mobile credit bonus.',
+  { type: 'expense', amountFils: 2500 });
+
+t('purchase-shaped debit-card refund uses the purchase figure, not available balance',
+  'Purchase amount of AED 49.50 at SAMPLE STORE on your Debit Card ending 1234 has been successfully refunded. Available balance is AED 1,234.56.',
+  { type: 'income', amountFils: 4950, merchant: 'Sample Store',
+    card: { last4: '1234', kind: 'debit' } });
+t('approved return credit is a refund even without the word refund',
+  'Return: SAMPLE123456 is approved. AED 176.00 is now in your account.',
+  { type: 'income', amountFils: 17600, merchant: 'Refund' });
+t('approved wallet return credit is also a refund',
+  'Return: SAMPLE654321 is approved. AED 152.10 is now in your wallet.',
+  { type: 'income', amountFils: 15210, merchant: 'Refund' });
+t('successful amount-only insurance transaction is posted spending',
+  'Dear Customer, Your transaction for an amount of AED 1680.00 against the premium of policy number 09/601/64H/2022/4133 was successful.',
+  { type: 'expense', amountFils: 168000, merchant: 'Insurance premium' });
+t('successfully-paid amount-only gateway transaction is posted spending',
+  'Your transaction with an amount of AED 353.50 has been successfully paid.',
+  { type: 'expense', amountFils: 35350, merchant: 'Payment' });
+
 t('noon minutes → groceries, stops at with',
   'AED 43.00 was debited for payment to NOON MINUTES with Card no. XX99',
   { merchant: 'Noon Minutes', amountFils: 4300, category: 'groceries' });
