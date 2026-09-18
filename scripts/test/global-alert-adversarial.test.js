@@ -129,6 +129,19 @@ for (const market of markets) {
     JSON.stringify(parsed));
 }
 
+{
+  const gulf = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: 'AED',
+  });
+  const body = 'Enjoy 10% cashback on dining with your FAB Credit Card. Get bonus points on purchases above AED 1000. Apply now.';
+  const inspection = gulf.inspect(body, 'AD-FAB');
+  const parsed = gulf.parse(body, 'AD-FAB', inspection);
+  ok('known UAE sender cannot be resurrected by worldwide fallback after regional refusal',
+    parsed === null, JSON.stringify({ inspection: inspection?.route, parsed }));
+}
+
 const hardNegatives = [
   {
     id: 'shared-eur-without-issuer', market: 'FR', sender: 'BANK',

@@ -288,6 +288,31 @@ export const createLaunchAlertSession = ({
     // pipeline after this function returns null.
     if (!hasBankAlertMoneyHint(source)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
+    /**
+     * ONE PUBLIC PARSER, WITH A MATURE LOCAL EVIDENCE PACK.
+     *
+     * On AED/SAR ledgers the AE/SA deterministic grammar has years of
+     * high-specificity bank/biller/statement knowledge. If that pack refuses a
+     * message, the broader worldwide grammar may still inspect it for Review,
+     * but it must not silently resurrect the same message as a brand-new
+     * posting. The 30k UAE corpus proved why: doing so recovered 197 rows but
+     * introduced 139 high-confidence non-posting false positives, dominated by
+     * temporary holds and promotions.
+     *
+     * This is not a second user-facing parser. LaunchAlertSession.parse remains
+     * the single production entry point. The AE/SA pack is simply stronger
+     * evidence inside that parser. A positively routed non-Gulf institution is
+     * still allowed to use universal posting even when the user's current
+     * device/region is Gulf.
+     */
+    const universalRouteIsNonGulf =
+      inspection?.route.decision === 'single' &&
+      inspection.route.market !== 'AE' &&
+      inspection.route.market !== 'SA';
+    const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
+    const launchSenderMarket = detectLaunchMarketFromSender(sender);
+    if (gulfLedger && (launchSenderMarket === 'AE' || launchSenderMarket === 'SA')) return null;
+    if (gulfLedger && !universalRouteIsNonGulf) return null;
     return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
   };
 

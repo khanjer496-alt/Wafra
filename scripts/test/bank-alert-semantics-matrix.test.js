@@ -497,6 +497,8 @@ const hardNegatives = [
     'Credit card payment request received AED 900.00 for card 1234.'],
   ['Arabic card payment request', 'ALRAJHI', 'SA',
     'تم استلام طلب سداد SAR 900.00 للبطاقة الائتمانية 1234'],
+  ['application financing offer', 'FAB', 'AE',
+    'Apply now for 0% over 12 months on a purchase of AED 1000 with your FAB Credit Card.'],
 ];
 
 for (const [name, sender, market, source] of hardNegatives) {
