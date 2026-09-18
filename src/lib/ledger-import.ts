@@ -30,7 +30,7 @@ import {
   reconciliationInternalIds,
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
-import { PARSER_VERSION } from '@/lib/sms-parser';
+import { PARSER_BACKFILL_VERSION } from '@/lib/sms-parser';
 import type {
   Account,
   AppState,
@@ -226,7 +226,7 @@ export const applyMaterializedImportBatch = (
         batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
       lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
       historyImport: batch.historyImport ?? state.historyImport,
-      parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
+      parserVersion: batch.parserRereadComplete ? PARSER_BACKFILL_VERSION : state.parserVersion,
     };
   }
   const accounts = [...state.accounts, ...batch.newAccounts].map((account) => {
@@ -278,7 +278,7 @@ export const applyMaterializedImportBatch = (
     // Parser version is proof of a completed full-history reread, not merely
     // proof that one new alert was imported. This distinction matters when a
     // backup is restored while an incremental capture is already in flight.
-    parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
+    parserVersion: batch.parserRereadComplete ? PARSER_BACKFILL_VERSION : state.parserVersion,
   };
 
   // First-history import can contain tens of thousands of messages. Running

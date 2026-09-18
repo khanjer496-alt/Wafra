@@ -74,7 +74,6 @@ export function createLedgerPersistence({
 
   let mode: Mode = 'blocked';
   let previousChunkCount = 0;
-  let previousChunks: string[] = [];
   let previousTransactions: Transaction[] | null = null;
   let storedChunkOrder: ChunkOrder = currentChunkOrder;
   let lifecycleGeneration = 0;
@@ -94,13 +93,11 @@ export function createLedgerPersistence({
   };
 
   const clearWriteCache = (): void => {
-    previousChunks = [];
     previousTransactions = null;
   };
 
   const resetWriteCache = (): void => {
     previousChunkCount = 0;
-    previousChunks = [];
     previousTransactions = null;
     storedChunkOrder = currentChunkOrder;
   };
@@ -119,7 +116,6 @@ export function createLedgerPersistence({
       }
 
       const parsed = JSON.parse(raw) as PersistedMeta;
-      const chunkBodies: string[] = [];
       const chunkOrder: ChunkOrder =
         parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
       let corrupt = false;
@@ -140,7 +136,6 @@ export function createLedgerPersistence({
               const rows = JSON.parse(value) as Transaction[];
               if (Array.isArray(rows)) {
                 blocks.push(rows);
-                chunkBodies.push(value);
               } else {
                 corrupt = true;
               }
@@ -157,9 +152,11 @@ export function createLedgerPersistence({
       delete parsed.txChunkOrder;
 
       previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
-      previousChunks = corrupt ? [] : chunkBodies;
       storedChunkOrder = chunkOrder;
-      previousTransactions = parsed.transactions ?? [];
+      // A partial/corrupt read must never become the identity baseline for a
+      // later "unchanged chunk" decision. Force the next write to rebuild all
+      // chunk keys from the recovered in-memory snapshot instead.
+      previousTransactions = corrupt ? null : parsed.transactions ?? [];
       return parsed;
     });
 
@@ -227,27 +224,27 @@ export function createLedgerPersistence({
     const needsChunks = transactionsChanged || layoutChanged;
     const chunkCount = needsChunks ? Math.ceil(transactions.length / chunkSize) : previousChunkCount;
     const order = needsChunks ? targetOrder : storedChunkOrder;
-    let nextChunks: string[] | null = null;
     let changed: [string, string][] = [];
 
     if (needsChunks) {
-      // A layout conversion changes every key's meaning, so serialize all chunks
+      // A layout conversion changes every key's meaning, so write every chunk
       // once. Ordinary immutable updates stay on the fast identity-diff path.
-      if (layoutChanged || !previousTransactions || previousChunks.length === 0) {
+      //
+      // Do NOT retain the serialized chunk bodies after this write. On a large
+      // ledger that kept a second full JSON representation alive beside the
+      // parsed transaction objects for the whole app session, increasing steady
+      // memory and GC pressure. Row identity already tells us which ordinary
+      // chunks are unchanged; a rewritten chunk is cheap enough to write once.
+      if (layoutChanged || !previousTransactions) {
         const bodies = order === currentChunkOrder
           ? chunkTransactions(transactions)
           : Array.from({ length: chunkCount }, (_, index) => serializeChunk(transactions, index, order));
-        nextChunks = bodies;
-        changed = bodies.flatMap((body, index) =>
-          previousChunks[index] === body ? [] : [[chunkKey(index), body] as [string, string]]);
+        changed = bodies.map((body, index) => [chunkKey(index), body]);
       } else {
-        nextChunks = previousChunks.slice(0, chunkCount);
-        while (nextChunks.length < chunkCount) nextChunks.push('');
         for (let index = 0; index < chunkCount; index += 1) {
           if (chunkRowsUnchanged(transactions, index, order)) continue;
           const body = serializeChunk(transactions, index, order);
-          nextChunks[index] = body;
-          if (previousChunks[index] !== body) changed.push([chunkKey(index), body]);
+          changed.push([chunkKey(index), body]);
         }
       }
     }
@@ -265,9 +262,8 @@ export function createLedgerPersistence({
           ),
         );
       }
-      if (nextChunks) {
+      if (needsChunks) {
         previousChunkCount = chunkCount;
-        previousChunks = nextChunks;
         storedChunkOrder = order;
       }
       previousTransactions = transactions;

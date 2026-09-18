@@ -650,10 +650,11 @@ export interface AppState {
   /** Body-free, resumable progress for Android's first full history import. */
   historyImport: HistoryImportProgress | null;
   /**
-   * The parser version the stored rows were read with. When it falls behind
-   * `PARSER_VERSION` the next scan re-reads the whole inbox so the improvements
-   * reach data already imported. Absent on states written before this existed,
-   * which correctly reads as "older than any version".
+   * Historical parser-repair receipt.
+   *
+   * This intentionally tracks PARSER_BACKFILL_VERSION, not the ordinary runtime
+   * parser revision. A grammar release does not imply that years of retained SMS
+   * must be re-read; only an explicit backfill-version bump does.
    */
   parserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */

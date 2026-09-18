@@ -59,7 +59,7 @@ import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
-  PARSER_VERSION,
+  PARSER_BACKFILL_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
 import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
@@ -362,7 +362,7 @@ export function migratePersistedState(
   // imported file must be normalized by the receiving build even if it carries
   // a receipt copied from another installation.
   const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
-  const reparseKey = JSON.stringify([2, PARSER_VERSION, grammarMarketId]);
+  const reparseKey = JSON.stringify([2, PARSER_BACKFILL_VERSION, grammarMarketId]);
   const persistedRowRepairsAreCurrent =
     options?.reuseCompletedReparse === true && parsed.hydrationReparseKey === reparseKey;
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
@@ -621,12 +621,13 @@ export function migratePersistedState(
       // existing-row healing, so a receipt for this exact parser + market is
       // equivalent and can be restamped without another pass.
       return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
-        prior[1] === PARSER_VERSION && prior[2] === grammarMarketId;
+        Number.isSafeInteger(prior[1]) && Number(prior[1]) >= PARSER_BACKFILL_VERSION &&
+        prior[2] === grammarMarketId;
     };
     const completedRepair = healedUnderThisGrammar(parsed.hydrationReparseKey);
     const parserUpgradeWillUseHistory = options?.reuseCompletedReparse === true &&
       Platform.OS === 'android' && parsed.onboarded === true &&
-      parsed.parserVersion !== PARSER_VERSION;
+      (parsed.parserVersion ?? 0) < PARSER_BACKFILL_VERSION;
     const mustRepairSynchronously = options?.reuseCompletedReparse !== true ||
       (!completedRepair && !parserUpgradeWillUseHistory);
     if (mustRepairSynchronously) {
@@ -1005,7 +1006,7 @@ function reduceState(state: AppState, action: Action): AppState {
       if (
         Platform.OS === 'android' &&
         next.onboarded &&
-        next.parserVersion !== PARSER_VERSION &&
+        (next.parserVersion ?? 0) < PARSER_BACKFILL_VERSION &&
         (!next.historyImport || next.historyImport.status === 'complete')
       ) {
         next.historyImport = createHistoryImportProgress(Date.now());
@@ -1040,7 +1041,7 @@ function reduceState(state: AppState, action: Action): AppState {
         repairCardPaymentAccounts(accountsMerged),
       );
       if (action.type === 'hydrate') markLaunchPhase('ledger-repairs-complete');
-      const exactReparseKey = JSON.stringify([2, PARSER_VERSION, next.marketId]);
+      const exactReparseKey = JSON.stringify([2, PARSER_BACKFILL_VERSION, next.marketId]);
       // Build 262 predates hydrationFinalizeVersion, but every state carrying
       // BOTH of these exact receipts was already persisted after this same
       // decline/dedupe/payment cleanup. Accept that one legacy shape so users do

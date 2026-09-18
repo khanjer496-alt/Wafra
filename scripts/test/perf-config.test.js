@@ -942,15 +942,34 @@ function bodyOf(source, header) {
   ok('history planning and commit both honor the foreground navigation lease',
     /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
       /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*256/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*4/.test(historyImport) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*2/.test(historyImport) &&
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
       (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
+
+  const smsParserSource = stripComments(read('src/lib/sms-parser.ts'));
+  const captureSource = stripComments(read('src/lib/capture.ts'));
+  const ledgerImportSource = stripComments(read('src/lib/ledger-import.ts'));
+  ok('runtime parser revisions are decoupled from expensive historical backfill',
+      /PARSER_BACKFILL_VERSION\s*=\s*46/.test(smsParserSource) &&
+      /\(state\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(captureSource) &&
+      /parserRereadComplete \? PARSER_BACKFILL_VERSION/.test(ledgerImportSource) &&
+      /\(next\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(stripComments(read('src/lib/store.tsx'))),
+    'ordinary parser releases must not automatically force a full retained-inbox reread or launch-time saved-row reparse');
 
   const captureExecutor = stripComments(read('src/lib/capture-executor.ts'));
   ok('routine capture yields between collection and synchronous import planning',
     /collected\.parsed\.length > 0 \|\| collected\.declined\.length > 0/.test(captureExecutor) &&
       /await yieldForegroundTurn\(\)/.test(captureExecutor),
     'a completed native inbox read must give pending UI/input a turn before planning and reconciliation');
+
+  const ledgerPersistence = stripComments(read('src/lib/ledger-persistence.ts'));
+  ok('ledger persistence does not retain a second serialized copy of every transaction chunk',
+    !/previousChunks|chunkBodies|nextChunks/.test(ledgerPersistence) &&
+      /previousTransactions/.test(ledgerPersistence) &&
+      /chunkRowsUnchanged/.test(ledgerPersistence),
+    'keeping every JSON chunk string alive beside parsed transactions raises steady-state memory and GC pressure on large ledgers');
 
   const store = stripComments(read('src/lib/store.tsx'));
   ok('completed hydration maintenance is receipt-gated instead of walking the ledger every launch',

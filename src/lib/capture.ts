@@ -37,7 +37,7 @@ import {
   isRelayRevokedError,
   syncRelay,
 } from '@/lib/relay';
-import { PARSER_VERSION } from '@/lib/sms-parser';
+import { PARSER_BACKFILL_VERSION } from '@/lib/sms-parser';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
@@ -330,7 +330,7 @@ export async function collectNewMessages(
     // would stay filed as spending forever. When the parser has moved on,
     // re-read everything — existing rows are recognized by fingerprint and
     // healed in place, not duplicated.
-    const reread = !notificationOnly && state.parserVersion !== PARSER_VERSION;
+    const reread = !notificationOnly && (state.parserVersion ?? 0) < PARSER_BACKFILL_VERSION;
     // Parser-version migrations are handled by the resumable history job when
     // one is present. Keep routine foreground capture incremental so it does
     // not race the history coordinator through the same inbox.
@@ -369,7 +369,7 @@ export async function collectNewMessages(
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep
     // READ_SMS looking granted but return an empty provider cursor. Calling
-    // that a successful zero-change scan stamps PARSER_VERSION and strands all
+    // that a successful zero-change scan stamps the backfill receipt and strands all
     // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
     // ledger proves that zero rows is not a credible full-history result.
     const hasStoredInboxHistory = state.transactions.some(

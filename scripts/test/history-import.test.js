@@ -87,10 +87,19 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   ok(
     'foreground history uses small pages while background keeps throughput',
     /BACKGROUND_HISTORY_PAGE_SIZE = 1_000/.test(historyHookSource) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT = 2/.test(historyHookSource) &&
       /FOREGROUND_HISTORY_PAGE_SIZE = 256/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 4/.test(historyHookSource) &&
       /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
+      /maxInboxPages: foreground[\s\S]*?FOREGROUND_HISTORY_PAGES_PER_COMMIT[\s\S]*?BACKGROUND_HISTORY_PAGES_PER_COMMIT/.test(historyHookSource) &&
       /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
+  );
+  ok(
+    'history repair caches legacy review-key discovery for one durable run',
+    /legacyReviewKeys = useRef/.test(historyHookSource) &&
+      /cachedLegacyKeys\.generation !== generation/.test(historyHookSource) &&
+      /cachedLegacyKeys\.startedAt !== historyStartedAt/.test(historyHookSource),
   );
   ok(
     'returning to Wafra pauses history instead of silently restarting it',
