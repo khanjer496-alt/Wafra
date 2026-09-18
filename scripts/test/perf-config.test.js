@@ -940,8 +940,8 @@ function bodyOf(source, header) {
     'a saved history job may auto-start only on the genuine first run; Activity resume belongs to UI/input and pauses maintenance');
 
   ok('history planning and commit both honor the foreground navigation lease',
-    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*650/.test(historyImport) &&
-      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*64/.test(historyImport) &&
+    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*256/.test(historyImport) &&
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
       (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
@@ -1002,6 +1002,8 @@ function bodyOf(source, header) {
   const reminders = stripComments(read('src/lib/reminders.ts'));
   ok('automatic Android reminder setup never runs synchronous full-ledger recurrence detection',
       /detectSubscriptionsCooperatively\(/.test(notifications) &&
+      /historyImportIncomplete\(state\.historyImport\)/.test(notifications) &&
+      /detectedSubscriptions = \[\]/.test(notifications) &&
       /recordRuntimeOperation\('reminder-projection'/.test(notifications) &&
       /buildPaymentReminders\(state, now, MAX_REMINDERS, detectedSubscriptions\)/.test(notifications) &&
       /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*8_000/.test(autoImport) &&

@@ -3569,6 +3569,9 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/haptics') return { committed: () => {} };
+        if (id === '@/lib/history-import') {
+          return { historyImportIncomplete: (progress) => !!progress && progress.status !== 'complete' };
+        }
         if (id === '@/lib/i18n') return { t: (key) => key, tf: (key) => key };
         if (id === '@/lib/notifications') {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
@@ -3799,6 +3802,9 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/haptics') return { committed: () => {} };
+        if (id === '@/lib/history-import') {
+          return { historyImportIncomplete: (progress) => !!progress && progress.status !== 'complete' };
+        }
         if (id === '@/lib/i18n') return { t: (key) => key, tf: (key) => key };
         if (id === '@/lib/notifications') {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };

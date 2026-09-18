@@ -15,6 +15,7 @@ import { Platform } from 'react-native';
 import { buildDailySummary } from '@/lib/daily-summary';
 import { toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
+import { historyImportIncomplete } from '@/lib/history-import';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
@@ -161,6 +162,7 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
  */
 export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
+  const historyBusy = Platform.OS === 'android' && historyImportIncomplete(state.historyImport);
   configureHandler();
   // Not `perms.granted` — see notificationsAllowed. An iOS device that went
   // through setup is provisionally authorized, which reads as "undetermined"
@@ -184,19 +186,23 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
   // the same because it runs automatically once per app launch.
   let detectedSubscriptions: readonly Subscription[] | undefined;
   if (Platform.OS === 'android') {
-    const startedAt = Date.now();
-    const liveAccounts = liveAccountIds(state.accounts);
-    const internalTransfers = internalTransferIdsForState(state);
-    const detected = await detectSubscriptionsCooperatively(
-      state.transactions,
-      state.notSubscriptions,
-      now,
-      liveAccounts,
-      internalTransfers,
-    );
-    recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
-    if (detected === null) return;
-    detectedSubscriptions = detected;
+    if (historyBusy) {
+      detectedSubscriptions = [];
+    } else {
+      const startedAt = Date.now();
+      const liveAccounts = liveAccountIds(state.accounts);
+      const internalTransfers = internalTransferIdsForState(state);
+      const detected = await detectSubscriptionsCooperatively(
+        state.transactions,
+        state.notSubscriptions,
+        now,
+        liveAccounts,
+        internalTransfers,
+      );
+      recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
+      if (detected === null) return;
+      detectedSubscriptions = detected;
+    }
   }
 
   await Notifications.cancelAllScheduledNotificationsAsync();
@@ -212,7 +218,7 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
     });
   }
 
-  await syncDailySummary(state, now);
+  if (!historyBusy) await syncDailySummary(state, now);
 }
 
 /** The hour the day's summary is posted. Late enough to be the whole day. */
