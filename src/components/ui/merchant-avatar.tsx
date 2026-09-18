@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
@@ -78,7 +78,11 @@ function LogoTile({ id, source, tint, category, size }: {
       <Image
         source={source}
         contentFit="contain"
-        cachePolicy="memory-disk"
+        // Remote logos are decorative and can have very high cardinality on a
+        // long ledger. On Android keep the durable disk cache but do not grow
+        // Expo Image's process-wide decoded-image memory cache as the user
+        // scrolls through new merchants. Bundled assets stay memory-backed.
+        cachePolicy={Platform.OS === 'android' && typeof source !== 'number' ? 'disk' : 'memory-disk'}
         recyclingKey={id}
         transition={0}
         tintColor={tint === 'theme' || (tint === 'dark' && dark) ? theme.text : undefined}

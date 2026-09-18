@@ -1,6 +1,7 @@
 package expo.modules.notificationreader
 
 import android.app.Notification
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ComponentName
 import android.os.Build
+import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -16,6 +18,32 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.atomic.AtomicInteger
 
 class NotificationReaderModule : Module() {
+  private fun exitReasonLabel(reason: Int): String = when (reason) {
+    // Stable values from ApplicationExitInfo. Numeric matching lets a build
+    // with minSdk 24 label API 33/34 reasons without class-load/lint references
+    // to constants introduced after Android 11.
+    0 -> "unknown"
+    1 -> "exit-self"
+    2 -> "signaled"
+    3 -> "low-memory"
+    4 -> "crash"
+    5 -> "native-crash"
+    6 -> "anr"
+    7 -> "initialization-failure"
+    8 -> "permission-change"
+    9 -> "excessive-resource-usage"
+    10 -> "user-requested"
+    11 -> "user-stopped"
+    12 -> "dependency-died"
+    13 -> "other"
+    14 -> "freezer"
+    15 -> "package-state-change"
+    16 -> "package-updated"
+    17 -> "memory-limiter"
+    18 -> "anomaly"
+    else -> "unknown"
+  }
+
   private fun hasSystemAccess(context: Context): Boolean {
     val enabled = Settings.Secure.getString(
       context.contentResolver,
@@ -193,6 +221,63 @@ class NotificationReaderModule : Module() {
         "admissionCounts" to (admission["admissionCounts"] ?: emptyMap<String, Int>()),
         "adcbAdmissionCounts" to (admission["adcbAdmissionCounts"] ?: emptyMap<String, Int>()),
       )
+    }
+
+    /**
+     * Android 11+ keeps a bounded record of why this process died. This is the
+     * only reliable way a support report generated AFTER a relaunch can tell
+     * low-memory/OOM from ANR, Java crash or native crash. No descriptions,
+     * traces, process names or app data leave the phone — only reason/status,
+     * timestamp and OS-recorded PSS/RSS high-water values.
+     */
+    Function("getProcessExitDiagnostics") {
+      val context = appContext.reactContext ?: return@Function emptyList<Map<String, Any>>()
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        return@Function emptyList<Map<String, Any>>()
+      }
+      val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        ?: return@Function emptyList<Map<String, Any>>()
+      try {
+        manager.getHistoricalProcessExitReasons(context.packageName, 0, 5).map { info ->
+          mapOf(
+            "timestamp" to info.timestamp.toDouble(),
+            "reason" to info.reason,
+            "reasonLabel" to exitReasonLabel(info.reason),
+            "status" to info.status,
+            "importance" to info.importance,
+            "pssKb" to info.pss.toDouble(),
+            "rssKb" to info.rss.toDouble(),
+          )
+        }
+      } catch (_: Exception) {
+        emptyList<Map<String, Any>>()
+      }
+    }
+
+    /** Source-free memory snapshot captured only when the tester asks for diagnostics. */
+    Function("getProcessMemoryDiagnostics") {
+      val context = appContext.reactContext ?: return@Function emptyMap<String, Any>()
+      try {
+        val runtime = Runtime.getRuntime()
+        val process = Debug.MemoryInfo()
+        Debug.getMemoryInfo(process)
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val system = ActivityManager.MemoryInfo()
+        if (activityManager != null) activityManager.getMemoryInfo(system)
+        mapOf(
+          "javaHeapUsedBytes" to (runtime.totalMemory() - runtime.freeMemory()).toDouble(),
+          "javaHeapCommittedBytes" to runtime.totalMemory().toDouble(),
+          "javaHeapMaxBytes" to runtime.maxMemory().toDouble(),
+          "nativeHeapAllocatedBytes" to Debug.getNativeHeapAllocatedSize().toDouble(),
+          "totalPssKb" to process.totalPss,
+          "totalPrivateDirtyKb" to process.totalPrivateDirty,
+          "systemAvailMemBytes" to system.availMem.toDouble(),
+          "systemLowMemory" to system.lowMemory,
+          "systemLowMemoryThresholdBytes" to system.threshold.toDouble(),
+        )
+      } catch (_: Exception) {
+        emptyMap<String, Any>()
+      }
     }
 
     /**

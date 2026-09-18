@@ -38,7 +38,7 @@ function harness(kind, { privateMode = false, bundled = null, merchantCategory =
   const resolve = (...args) => { calls++; return resolveLogo(...args); };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { View: 'View', StyleSheet: { create: v => v } },
+    'react-native': { View: 'View', Platform: { OS: 'android' }, StyleSheet: { create: v => v } },
     'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {} },
     // Avatars subscribe to the narrow private-mode context, not the whole
     // store, so a ledger mutation cannot re-render every row's artwork.

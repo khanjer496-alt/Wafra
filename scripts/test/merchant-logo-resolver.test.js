@@ -158,5 +158,32 @@ const response = rows => ({ ok: true, json: async () => rows });
   assert.equal(await failing.resolveRemoteMerchantLogo('Global Example Merchant'), null);
   assert.equal(failures, 2, 'transient network failures are not cached as a 24-hour no-logo result');
 
+  const bounded = load({ fetchImpl: async () => response([]) });
+  for (let i = 0; i < 180; i++) {
+    // Keep the varying token away from the tail: terminal/location cleanup is
+    // intentionally allowed to remove trailing numeric POS/store identifiers.
+    await bounded.resolveRemoteMerchantLogo(`Synthetic ${i} Merchant`);
+  }
+  const cache = bounded.getMerchantLogoCacheDiagnostics();
+  assert.ok(cache.memoryEntries <= cache.memoryLimit, 'merchant logo metadata cache is bounded');
+  assert.equal(cache.memoryLimit, 128);
+  assert.ok(cache.peakMemoryEntries <= cache.memoryLimit, 'merchant logo cache never exceeds its ceiling even transiently');
+  assert.ok(cache.memoryEvictions > 0, 'older in-memory merchant metadata is evicted while its durable cache remains');
+
+  let releaseSaturated;
+  const saturatedGate = new Promise(resolve => { releaseSaturated = resolve; });
+  const saturated = load({ fetchImpl: async () => { await saturatedGate; return response([]); } });
+  const saturatedJobs = Array.from({ length: 40 }, (_, i) =>
+    saturated.resolveRemoteMerchantLogo(`Queued Merchant ${i}`));
+  await new Promise(resolve => setImmediate(resolve));
+  const duringSaturation = saturated.getMerchantLogoCacheDiagnostics();
+  assert.equal(duringSaturation.pendingEntries, duringSaturation.pendingLimit,
+    'fast scrolling cannot retain more unresolved merchant jobs than the ceiling');
+  assert.equal(duringSaturation.pendingLimit, 24);
+  assert.ok(duringSaturation.saturatedResolutionDrops > 0,
+    'off-screen enrichment falls back instead of creating an unbounded network backlog');
+  releaseSaturated();
+  await Promise.all(saturatedJobs);
+
   console.log('✓ merchant logos search globally from cleaned names, reject ambiguous/non-merchant matches, cache results, and keep artwork on the Brandfetch CDN');
 })().catch(error => { console.error(error); process.exitCode = 1; });

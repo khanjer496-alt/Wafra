@@ -175,6 +175,7 @@ try {
       await fits(page.getByTestId('entry-transfer-review'));
       await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);
+      await click(page.getByTestId('transfer-review-entry'));
       await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });
       await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
@@ -230,14 +231,15 @@ try {
       await page.screenshot({ path: path.join(OUT, `${name}-missing-entry.png`) });
       // All 3,106 old transfers remain reachable without creating 3,106 mounted actions.
       await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
-      assert.equal(await page.getByTestId('transfer-review-group').filter({ hasText: '4222' }).count(), 0, 'old records do not occupy the recent view');
-      await click(page.getByTestId('transfer-scope-all'));
+      const historic = page.getByTestId('transfer-review-group').filter({ hasText: '4222' });
+      assert.equal(await historic.count(), 1, 'old unresolved records remain reachable as one collapsed group');
+      assert.equal(await page.getByTestId('transfer-scope-all').count(), 0, 'there is no second transfer-history mode');
       await page.getByTestId('transfer-search').fill('4222');
-      await page.waitForFunction(() => document.querySelector('[data-testid="transfer-browse-summary"]')?.textContent
-        .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660)).replace(/[,٬]/g, '').includes('3106'));
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="transfer-review-group"]')]
+        .some(node => (node.textContent ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
+          .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '').includes('3106')));
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0);
       await page.screenshot({ path: path.join(OUT, `${name}-3106-history-collapsed.png`) });
-      const historic = page.getByTestId('transfer-review-group').filter({ hasText: '4222' });
       await click(historic.getByTestId('transfer-group-toggle'));
       assert.ok(await page.getByTestId('transfer-review-entry').count() <= 20, 'expanded records are bounded and virtualized');
       const beforeLeave = (await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]);

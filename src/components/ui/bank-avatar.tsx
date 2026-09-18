@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/ui/icon';
 import { Radius } from '@/constants/theme';
@@ -21,10 +21,17 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
     setLogo(null);
     setFailed(false);
     if (!allowRemote || !account.bankName) return () => { alive = false; };
-    void resolveBankLogo(account.bankName).then(value => {
-      if (alive) setLogo(value);
+    // Wallet can render many discovered accounts at once. Artwork is optional;
+    // defer its cache/network work until interaction has a chance to paint.
+    const idle = requestIdleCallback(() => {
+      void resolveBankLogo(account.bankName).then(value => {
+        if (alive) setLogo(value);
+      });
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      cancelIdleCallback(idle);
+    };
   }, [account.bankName, allowRemote]);
 
   if (!allowRemote || !logo || failed) {
@@ -55,7 +62,7 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
     <Image
       source={{ uri: logo.logoUrl }}
       contentFit="contain"
-      cachePolicy="memory-disk"
+      cachePolicy={Platform.OS === 'android' ? 'disk' : 'memory-disk'}
       recyclingKey={logo.id}
       transition={0}
       accessible={false}

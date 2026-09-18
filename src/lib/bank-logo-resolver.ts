@@ -18,8 +18,26 @@ const CACHE_PREFIX = 'wafra:bank-logo:v2:';
 const POSITIVE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
 const SEARCH_TIMEOUT_MS = 4_000;
+const MAX_MEMORY_CACHE_ENTRIES = 64;
+const MAX_PENDING_RESOLUTIONS = 8;
 const memory = new Map<string, CacheRecord>();
 const pending = new Map<string, Promise<ResolvedBankLogo | null>>();
+let peakMemoryEntries = 0;
+let peakPendingEntries = 0;
+let memoryEvictions = 0;
+let saturatedResolutionDrops = 0;
+
+function remember(key: string, record: CacheRecord): void {
+  memory.delete(key);
+  memory.set(key, record);
+  while (memory.size > MAX_MEMORY_CACHE_ENTRIES) {
+    const oldest = memory.keys().next().value as string | undefined;
+    if (!oldest) break;
+    memory.delete(oldest);
+    memoryEvictions += 1;
+  }
+  peakMemoryEntries = Math.max(peakMemoryEntries, memory.size);
+}
 
 function normalized(value: string): string {
   return value.normalize('NFKD').toLowerCase()
@@ -67,7 +85,10 @@ async function readCached(candidate: string, generation: number): Promise<Resolv
   const query = normalized(candidate);
   const key = cacheKey(candidate);
   const hot = memory.get(key);
-  if (hot && hot.expiresAt > Date.now() && hot.query === query) return safeCachedValue(hot.value);
+  if (hot && hot.expiresAt > Date.now() && hot.query === query) {
+    remember(key, hot);
+    return safeCachedValue(hot.value);
+  }
   if (hot) memory.delete(key);
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -79,7 +100,7 @@ async function readCached(candidate: string, generation: number): Promise<Resolv
       await mutateLogoCache(generation, () => AsyncStorage.removeItem(key)).catch(() => undefined);
       return undefined;
     }
-    memory.set(key, { query, value: safe, expiresAt: record.expiresAt });
+    remember(key, { query, value: safe, expiresAt: record.expiresAt });
     return safe;
   } catch {
     return undefined;
@@ -94,7 +115,7 @@ async function writeCached(candidate: string, value: ResolvedBankLogo | null, ge
   };
   try {
     await mutateLogoCache(generation, async () => {
-      memory.set(cacheKey(candidate), record);
+      remember(cacheKey(candidate), record);
       await AsyncStorage.setItem(cacheKey(candidate), JSON.stringify(record));
     });
   } catch {
@@ -177,6 +198,10 @@ export async function resolveBankLogo(bankName: string | undefined): Promise<Res
   const key = cacheKey(candidate);
   const active = pending.get(key);
   if (active) return active;
+  if (pending.size >= MAX_PENDING_RESOLUTIONS) {
+    saturatedResolutionDrops += 1;
+    return null;
+  }
   const request = (async () => {
     const cached = await readCached(candidate, generation);
     if (!isLogoCacheGenerationCurrent(generation)) return null;
@@ -189,12 +214,31 @@ export async function resolveBankLogo(bankName: string | undefined): Promise<Res
     if (pending.get(key) === request) pending.delete(key);
   });
   pending.set(key, request);
+  peakPendingEntries = Math.max(peakPendingEntries, pending.size);
   return request;
+}
+
+/** Source-free process-lifetime counters for tester diagnostics. */
+export function getBankLogoCacheDiagnostics() {
+  return {
+    memoryEntries: memory.size,
+    memoryLimit: MAX_MEMORY_CACHE_ENTRIES,
+    peakMemoryEntries,
+    pendingEntries: pending.size,
+    pendingLimit: MAX_PENDING_RESOLUTIONS,
+    peakPendingEntries,
+    memoryEvictions,
+    saturatedResolutionDrops,
+  };
 }
 
 export function clearBankLogoMemoryCache(): void {
   memory.clear();
   pending.clear();
+  peakMemoryEntries = 0;
+  peakPendingEntries = 0;
+  memoryEvictions = 0;
+  saturatedResolutionDrops = 0;
 }
 
 registerLogoCacheReset(clearBankLogoMemoryCache);

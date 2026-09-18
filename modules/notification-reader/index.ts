@@ -16,6 +16,29 @@ export interface NotificationReaderDiagnostics {
   adcbAdmissionCounts: Record<string, number>;
 }
 
+export interface ProcessExitDiagnostic {
+  timestamp: number;
+  reason: number;
+  reasonLabel: string;
+  status: number;
+  importance: number;
+  /** Android reports PSS/RSS in kilobytes. */
+  pssKb: number;
+  rssKb: number;
+}
+
+export interface ProcessMemoryDiagnostic {
+  javaHeapUsedBytes: number;
+  javaHeapCommittedBytes: number;
+  javaHeapMaxBytes: number;
+  nativeHeapAllocatedBytes: number;
+  totalPssKb: number;
+  totalPrivateDirtyKb: number;
+  systemAvailMemBytes: number;
+  systemLowMemory: boolean;
+  systemLowMemoryThresholdBytes: number;
+}
+
 export interface CapturedNotification {
   /** Opaque native queue identity used only for durable acknowledgement. */
   id: string;
@@ -50,6 +73,10 @@ interface NotificationReaderModule {
   openSettings(): boolean;
   /** Source-free local diagnostics; never returns notification text. */
   getDiagnostics(): Promise<NotificationReaderDiagnostics>;
+  /** Android 11+ process-death history; source-free and retained across relaunch. */
+  getProcessExitDiagnostics?(): ProcessExitDiagnostic[];
+  /** On-demand source-free process/heap snapshot for tester diagnostics. */
+  getProcessMemoryDiagnostics?(): ProcessMemoryDiagnostic;
   /** Explicit heavy recovery pass over notifications still visible in the shade. */
   sweepVisible(): Promise<boolean>;
   /** Visible Wafra confirmation after a parsed notification is durably stored. */

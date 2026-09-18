@@ -28,10 +28,44 @@ const POSITIVE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
 const SEARCH_TIMEOUT_MS = 4_000;
 const MAX_CONCURRENT_SEARCHES = 3;
+// Scrolling a long transaction history can surface hundreds of distinct
+// merchant strings in one session. Persistent cache entries belong on disk;
+// keeping every one of them alive in JS indefinitely turns a presentation
+// feature into process-lifetime memory growth.
+const MAX_MEMORY_CACHE_ENTRIES = 128;
+// A virtualized list can move much faster than a 4s network timeout. Bound the
+// number of unresolved logo jobs as well as the number actively fetching, so
+// fast scrolling cannot build an arbitrarily large queue of stale artwork work.
+const MAX_PENDING_RESOLUTIONS = 24;
 const memory = new Map<string, CacheRecord>();
 const pending = new Map<string, Promise<RemoteMerchantLogo | null>>();
 let activeSearches = 0;
 const searchWaiters: (() => void)[] = [];
+let peakMemoryEntries = 0;
+let peakPendingEntries = 0;
+let peakQueuedSearches = 0;
+let memoryEvictions = 0;
+let saturatedResolutionDrops = 0;
+
+function remember(key: string, record: CacheRecord): void {
+  // Map insertion order gives us a tiny allocation-free LRU. Touching a hit
+  // moves it to the end; adding a new value evicts the oldest metadata only.
+  // The durable AsyncStorage copy remains available if that merchant reappears.
+  memory.delete(key);
+  memory.set(key, record);
+  while (memory.size > MAX_MEMORY_CACHE_ENTRIES) {
+    const oldest = memory.keys().next().value as string | undefined;
+    if (!oldest) break;
+    memory.delete(oldest);
+    memoryEvictions += 1;
+  }
+  peakMemoryEntries = Math.max(peakMemoryEntries, memory.size);
+}
+
+function notePending(): void {
+  peakPendingEntries = Math.max(peakPendingEntries, pending.size);
+  peakQueuedSearches = Math.max(peakQueuedSearches, searchWaiters.length);
+}
 
 const LOCATION_TAIL = /\s+(?:dubai|dxb|abu dhabi|sharjah|ajman|al ain|riyadh|jeddah|dammam|doha|kuwait|manama|muscat|cairo|amman|beirut|london|paris|new york|uae|u\.a\.e\.?|are|ae|ksa|sau|sa|qa|qat|kw|kwt|bh|bhr|om|omn|eg|egy|jo|jor|lb|lbn|uk|gb|usa|us|دبي|أبوظبي|ابوظبي|أبو ظبي|ابو ظبي|الشارقة|عجمان|الرياض|جدة|الدوحة|الكويت|المنامة|مسقط)(?:\s+#?\d{1,12})?$/iu;
 const TERMINAL_TAIL = /\s+(?:store|branch|shop|terminal|kiosk|pos|t\d+|#?\d{3,12})$/iu;
@@ -144,7 +178,10 @@ async function readCached(candidate: string, generation: number): Promise<Remote
   const query = normalized(candidate);
   const key = cacheKey(candidate);
   const hot = memory.get(key);
-  if (hot && hot.expiresAt > Date.now() && hot.query === query) return safeCachedValue(hot.value);
+  if (hot && hot.expiresAt > Date.now() && hot.query === query) {
+    remember(key, hot);
+    return safeCachedValue(hot.value);
+  }
   if (hot) memory.delete(key);
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -157,7 +194,7 @@ async function readCached(candidate: string, generation: number): Promise<Remote
       return undefined;
     }
     // Publish a reconstructed CDN URL, never an arbitrary URL from storage.
-    memory.set(key, { query, value: safe, expiresAt: record.expiresAt });
+    remember(key, { query, value: safe, expiresAt: record.expiresAt });
     return safe;
   } catch {
     return undefined;
@@ -172,7 +209,7 @@ async function writeCached(candidate: string, value: RemoteMerchantLogo | null, 
   };
   try {
     await mutateLogoCache(generation, async () => {
-      memory.set(cacheKey(candidate), record);
+      remember(cacheKey(candidate), record);
       await AsyncStorage.setItem(cacheKey(candidate), JSON.stringify(record));
     });
   } catch {
@@ -219,7 +256,12 @@ function scoredSearchResult(
 }
 
 async function withSearchSlot<T>(task: () => Promise<T>): Promise<T> {
-  if (activeSearches >= MAX_CONCURRENT_SEARCHES) await new Promise<void>(resolve => searchWaiters.push(resolve));
+  if (activeSearches >= MAX_CONCURRENT_SEARCHES) {
+    await new Promise<void>(resolve => {
+      searchWaiters.push(resolve);
+      notePending();
+    });
+  }
   activeSearches += 1;
   try {
     return await task();
@@ -271,6 +313,12 @@ export async function resolveRemoteMerchantLogo(title: string): Promise<RemoteMe
   const key = cacheKey(candidate);
   const active = pending.get(key);
   if (active) return active;
+  // Presentation enrichment is optional. Prefer an immediate category fallback
+  // to retaining dozens/hundreds of off-screen promises after a fast scroll.
+  if (pending.size >= MAX_PENDING_RESOLUTIONS) {
+    saturatedResolutionDrops += 1;
+    return null;
+  }
   const request = (async () => {
     const cached = await readCached(candidate, generation);
     if (!isLogoCacheGenerationCurrent(generation)) return null;
@@ -283,12 +331,34 @@ export async function resolveRemoteMerchantLogo(title: string): Promise<RemoteMe
     if (pending.get(key) === request) pending.delete(key);
   });
   pending.set(key, request);
+  notePending();
   return request;
+}
+
+/** Source-free process-lifetime counters for tester diagnostics. */
+export function getMerchantLogoCacheDiagnostics() {
+  return {
+    memoryEntries: memory.size,
+    memoryLimit: MAX_MEMORY_CACHE_ENTRIES,
+    peakMemoryEntries,
+    pendingEntries: pending.size,
+    pendingLimit: MAX_PENDING_RESOLUTIONS,
+    peakPendingEntries,
+    queuedSearches: searchWaiters.length,
+    peakQueuedSearches,
+    memoryEvictions,
+    saturatedResolutionDrops,
+  };
 }
 
 export function clearMerchantLogoMemoryCache(): void {
   memory.clear();
   pending.clear();
+  peakMemoryEntries = 0;
+  peakPendingEntries = 0;
+  peakQueuedSearches = 0;
+  memoryEvictions = 0;
+  saturatedResolutionDrops = 0;
 }
 
 registerLogoCacheReset(clearMerchantLogoMemoryCache);
