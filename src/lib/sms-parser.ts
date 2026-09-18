@@ -3404,6 +3404,7 @@ export const STRUCTURAL_TITLES = new Set([
   'Telegraphic transfer',
   'Outward remittance',
   'Mobile recharge',
+  'Payment',
 ]);
 
 /**
@@ -4976,11 +4977,12 @@ function parseSmsInner(
     const amountFils = amountWithFx(raw);
     if (amountFils) {
       const insurance = /\bpremium\b|\bpolicy\s+(?:no\.?|number)\b/i.test(raw);
+      const gateway = /ajmanpay/i.test(options?.sender ?? '') ? 'AjmanPay' : 'Payment';
       return {
         kind: 'transaction',
         type: 'expense',
         amountFils,
-        merchant: insurance ? 'Insurance premium' : 'Payment',
+        merchant: insurance ? 'Insurance premium' : gateway,
         date,
         dueDay: null,
         minDueFils: null,

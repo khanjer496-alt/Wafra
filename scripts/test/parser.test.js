@@ -188,7 +188,8 @@ t('successful amount-only insurance transaction is posted spending',
   { type: 'expense', amountFils: 168000, merchant: 'Insurance premium' });
 t('successfully-paid amount-only gateway transaction is posted spending',
   'Your transaction with an amount of AED 353.50 has been successfully paid.',
-  { type: 'expense', amountFils: 35350, merchant: 'Payment' });
+  { type: 'expense', amountFils: 35350, merchant: 'AjmanPay' },
+  { sender: 'AJMANPAY' });
 
 t('noon minutes → groceries, stops at with',
   'AED 43.00 was debited for payment to NOON MINUTES with Card no. XX99',
