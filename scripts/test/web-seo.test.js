@@ -72,6 +72,10 @@ ok(
   /<strong>Manual-only<\/strong>[\s\S]{0,220}Leave automatic Message capture off/.test(landing) &&
     !/<strong>Private mode<\/strong>[\s\S]{0,220}Leave message access off/.test(landing),
 );
+ok(
+  'the landing links to dedicated privacy, terms and support pages',
+  ['/privacy/', '/terms/', '/support/'].every((route) => landing.includes(`href="${route}"`)),
+);
 
 try {
   const placeholder = spawnSync(process.execPath, [finalizer, output], {
@@ -102,6 +106,75 @@ try {
     fixtureOrigin.status === 1 && /No static Expo export found/i.test(fixtureOrigin.stderr),
     `${fixtureOrigin.status}: ${fixtureOrigin.stderr.trim()}`,
   );
+
+  const runtime = '<script src="/_expo/static/js/web/entry-fixture.js" defer></script>';
+  fs.writeFileSync(path.join(output, 'index.html'), `<html><body><h1>Wafra</h1>${runtime}</body></html>`);
+  fs.writeFileSync(path.join(output, 'robots.txt'), 'User-agent: *\nAllow: /\n');
+  fs.writeFileSync(path.join(output, 'settings.html'), `<meta name="robots" content="noindex, nofollow, noarchive">${runtime}`);
+  fs.mkdirSync(path.join(output, '(tabs)'));
+  fs.writeFileSync(path.join(output, '(tabs)', 'index.html'), 'duplicate');
+  const finalize = () => spawnSync(process.execPath, [finalizer, output], {
+    // Source documents must resolve relative to the script, not the caller.
+    cwd: os.tmpdir(), encoding: 'utf8',
+    env: { ...process.env, EXPO_PUBLIC_WAFRA_SITE_URL: 'https://wafra-seo-fixture.dev' },
+  });
+  const finalized = finalize();
+  ok('a valid export finalizes successfully from another working directory', finalized.status === 0, finalized.stderr);
+  const read = (file) => fs.existsSync(path.join(output, file)) ? fs.readFileSync(path.join(output, file), 'utf8') : '';
+  const routes = ['privacy', 'terms', 'support'];
+  for (const route of routes) {
+    const html = read(`${route}/index.html`);
+    ok(`${route} has a static accessible document and canonical URL`,
+      html.includes('<html lang="en">') && (html.match(/<h1(?:\s|>)/g) || []).length === 1 &&
+      html.includes(`<link rel="canonical" href="https://wafra-seo-fixture.dev/${route}/">`) &&
+      !/<script\b/i.test(html) && routes.every((target) => html.includes(`href="/${target}/"`)));
+  }
+  const privacy = read('privacy/index.html');
+  const terms = read('terms/index.html');
+  const support = read('support/index.html');
+  ok('wrapped Markdown bullets remain complete list items',
+    /<li><strong>Android:<\/strong> bank SMS and optional bank-app notifications are parsed on the device\. They are not sent to Wafra(?:&#39;|')s relay\.<\/li>/.test(privacy));
+  ok('numbered capture instructions remain one five-step ordered list',
+    /<ol>(?:<li>[\s\S]*?<\/li>){5}<\/ol>/.test(privacy) &&
+    /<li>The user chooses <strong>Message<\/strong>[\s\S]*?trigger\.<\/li>/.test(privacy));
+  ok('dates, code and source document links render as HTML',
+    /<em>Last updated:/.test(privacy) && privacy.includes('<code>READ_SMS</code>') &&
+    terms.includes('<a href="/privacy/">Privacy Policy</a>'));
+  ok('legal drafts and unresolved governing law remain visible',
+    privacy.includes('Launch draft.') && terms.includes('Launch draft') &&
+    terms.includes('[[GOVERNING LAW — PUBLISHER/COUNSEL TO CONFIRM]]'));
+  ok('terms accurately describe local iPhone capture',
+    terms.includes('No Message content is uploaded by this local capture path.') &&
+    !terms.includes('the relay transiently receives the selected alert'));
+  ok('support uses the existing contact and valid deletion and billing anchors',
+    support.includes('mailto:support@nasidaapps.com') &&
+    support.includes('/privacy/#your-choices-and-deletion') && privacy.includes('id="your-choices-and-deletion"') &&
+    support.includes('/terms/#wafra-pro-trial-and-billing') && terms.includes('id="wafra-pro-trial-and-billing"'));
+  const notFound = read('404.html');
+  ok('404 has its own noindex document with a home recovery link',
+    notFound.includes('That page is not here.') && notFound.includes('noindex, nofollow, noarchive') &&
+    notFound.includes('href="/"') && !/<script\b/i.test(notFound));
+  ok('only root runtime and duplicate route-group HTML are removed',
+    !read('index.html').includes(runtime) && read('settings.html').includes(runtime) &&
+    !fs.existsSync(path.join(output, '(tabs)')));
+  const sitemap = read('sitemap.xml');
+  ok('sitemap contains the public documents and excludes 404 and private routes',
+    routes.every((route) => sitemap.includes(`<loc>https://wafra-seo-fixture.dev/${route}/</loc>`)) &&
+    !/404|settings/.test(sitemap));
+  ok('repeated finalization keeps exactly one sitemap declaration',
+    finalize().status === 0 && (read('robots.txt').match(/^Sitemap:/gm) || []).length === 1);
+
+  const renderMarkdown = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { markdownToHtml } from ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/public-web-pages.mjs')).href)};
+    process.stdout.write(markdownToHtml(process.argv[1]));
+  `, '<script>alert("raw")</script>\n\n[Unsafe](javascript:alert)\n\n[Contact](mailto:help@wafra.dev?subject="hello")\n\n**Code: `READ_SMS`**'], {
+    cwd: root, encoding: 'utf8',
+  });
+  ok('Markdown escapes raw HTML and link attributes and never enables unsafe schemes',
+    renderMarkdown.status === 0 && renderMarkdown.stdout.includes('&lt;script&gt;') &&
+    !renderMarkdown.stdout.includes('href="javascript:') &&
+    renderMarkdown.stdout.includes('subject=&quot;hello&quot;') &&
+    renderMarkdown.stdout.includes('<strong>Code: <code>READ_SMS</code></strong>'));
 } finally {
   fs.rmSync(output, { recursive: true, force: true });
 }
