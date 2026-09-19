@@ -204,19 +204,19 @@ function buildPagedGraph({ columnar, rows = false }) {
     // One typed native call per Message. GUID/Body/Sender use the explicit
     // Text coercion proven on-device; the date is the raw property.
     //
-    // Device evidence (iPhone 16 Pro, iOS 26.6.2, 19 Sep 2026): a Wafra
-    // intent's `Date` parameter bound to the loop variable `Repeat Item`
-    // is treated as unfilled and Shortcuts prompts "Message date" for every
-    // row, while the same property bound from an action output (the Begin
-    // boundaries, Get Item from List) resolves silently with milliseconds.
-    // So the loop re-fetches its item by index and binds from that output.
+    // Device evidence (iPhone 16 Pro, iOS 26.6.2, 19 Sep 2026): this page
+    // loop is NESTED inside the outer work-budget Repeat, and Shortcuts names
+    // a nested loop's variables "Repeat Item 2" / "Repeat Index 2". A bare
+    // "Repeat Item" here is the OUTER loop's item, the number 1: that is why
+    // v2 formatted nonsense dates, why the v4 Date parameter prompted
+    // "Message date", and why an index bound to "Repeat Index" staged the
+    // first Message 51 times (staged=1 found=51). The row is fetched by the
+    // inner index and every field is bound from that action output.
     const each = uuid();
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 0, WFInput: attachment(variable('Page')) });
     const item = emit('is.workflow.actions.getitemfromlist', {
-      // WFItemIndex is a number field: Apple keeps only the attachment wrapper
-      // there (a scalar text token is discarded and the index falls back to 1,
-      // which staged the same Message 51 times on-device: staged=1 found=51).
-      WFItemSpecifier: 'Item At Index', WFItemIndex: attachment(variable('Repeat Index')), WFInput: attachment(variable('Page')),
+      // WFItemIndex is a number field: Apple keeps only the attachment wrapper there.
+      WFItemSpecifier: 'Item At Index', WFItemIndex: attachment(variable('Repeat Index 2')), WFInput: attachment(variable('Page')),
     });
     const guid = field(output(item), 'GUID');
     const body = field(output(item), 'Body');

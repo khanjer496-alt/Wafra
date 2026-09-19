@@ -57,7 +57,11 @@ test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   // Number fields keep only the attachment wrapper; a scalar token here fell
   // back to item 1 on-device and staged one Message 51 times.
   assert.deepEqual(rowItem.WFWorkflowActionParameters.WFItemIndex,
-    { Value: { Type: 'Variable', VariableName: 'Repeat Index' }, WFSerializationType: 'WFTextTokenAttachment' });
+    { Value: { Type: 'Variable', VariableName: 'Repeat Index 2' }, WFSerializationType: 'WFTextTokenAttachment' },
+    'the page loop is nested inside the work-budget Repeat, so its own index is "Repeat Index 2"');
+  // Nothing inside the nested page loop may read the outer loop's variables.
+  const loopBody = JSON.stringify(graph.WFWorkflowActions.slice(loopStart + 1, loopEnd));
+  assert.ok(!/"VariableName":"Repeat (Item|Index)"/.test(loopBody), 'outer-loop variables inside the nested page loop');
   assert.equal(rowItem.WFWorkflowActionParameters.WFInput.Value.VariableName, 'Page');
   typedDate(row.date, ref => { assert.equal(ref.Type, 'ActionOutput'); assert.equal(ref.OutputUUID, rowItem.WFWorkflowActionParameters.UUID); });
   assert.ok(!JSON.stringify(row).includes('Repeat Item'), 'no loop-variable binding on the row intent');
