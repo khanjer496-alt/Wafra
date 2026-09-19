@@ -20,35 +20,29 @@ const scaleByPage = new WeakMap();
 
 const copy = {
   en: {
-    headline: 'Your money. A clearer picture.', sample: 'INTERACTIVE EXAMPLE',
-    organize: 'Organize this alert', reset: 'See the alert again',
-    category: 'Dining · Card purchase', note: 'Example only. Nothing is saved.',
-    choose: 'Choose how to start', focus: 'What do you want to understand first?',
-    focusChoice: /^Bills & subscriptions\./, tracking: 'How do you track money today?',
-    trackingChoice: /^I check my bank apps\./, outcome: 'Wafra does the organizing.',
-    privacy: 'Your data stays under your control.', privacyContinue: 'Choose how to connect',
+    headline: 'Your money, finally clear.', firstLine: 'Your money,', example: 'Examples from your region',
+    choose: 'Build my money picture', nameTitle: 'What should we call you?', namePlaceholder: 'Your name',
+    nameSkip: 'Skip for now', namePrivacy: 'Used only to personalize Wafra on this device.',
+    focus: 'What do you want to understand first?', namedFocus: 'Sam, what do you want to understand first?',
+    focusChoice: 'Bills & subscriptions', tracking: 'How do you track money today?',
+    trackingChoice: 'I check my bank apps', intention: 'What would make money feel easier?', intentionChoice: 'Stay ahead of bills',
+    preview: 'Your starting view is ready.', namedPreview: 'Sam, your starting view is ready.',
     capture: 'Start your way', back: 'Back',
-    personalize: 'Make it yours', edit: 'Edit your preferences', goals: 'Your goals',
-    travel: 'A proper holiday. Flights, stays, and spending money',
-    budget: 'Your spending plan', flexible: 'More flexible. More room for dining and shopping',
-    next: 'Continue', save: 'Save plan', skipPlan: 'Set this up later',
-    manual: /^Start manually\./, complete: 'Begin with something real.',
+    next: 'Continue',
+    manual: /^Start manually\./, complete: 'Add your first entry.',
     add: 'Add my first entry', landing: 'Open Bills', landingPath: '/bills', saveTransaction: 'Save transaction',
   },
   ar: {
-    headline: 'أموالك. بصورة أوضح.', sample: 'مثال تفاعلي',
-    organize: 'نظّم هذا التنبيه', reset: 'شاهد التنبيه مجدداً',
-    category: 'مطاعم · شراء بالبطاقة', note: 'مثال فقط. لا يُحفظ شيء.',
-    choose: 'اختر كيف تبدأ', focus: 'ما الذي تريد فهمه أولاً؟',
-    focusChoice: /^الفواتير والاشتراكات\./, tracking: 'كيف تتابع أموالك اليوم؟',
-    trackingChoice: /^أراجع تطبيقات البنك\./, outcome: 'وفرة يتولى التنظيم.',
-    privacy: 'بياناتك تبقى تحت سيطرتك.', privacyContinue: 'اختر طريقة الربط',
+    headline: 'أموالك، واضحة أخيراً.', firstLine: 'أموالك،', example: 'أمثلة من منطقتك',
+    choose: 'ابنِ صورتي المالية', nameTitle: 'بماذا تحب أن نناديك؟', namePlaceholder: 'اسمك',
+    nameSkip: 'تخطي الآن', namePrivacy: 'يُستخدم فقط لتخصيص وفرة على هذا الجهاز.',
+    focus: 'ما الذي تريد فهمه أولاً؟', namedFocus: 'Sam، ما الذي تريد فهمه أولاً؟',
+    focusChoice: 'الفواتير والاشتراكات', tracking: 'كيف تتابع أموالك اليوم؟',
+    trackingChoice: 'أراجع تطبيقات البنك', intention: 'ما الذي سيجعل إدارة المال أسهل؟', intentionChoice: 'أبقى متقدماً على الفواتير',
+    preview: 'صورتك الأولى جاهزة.', namedPreview: 'Sam، صورتك الأولى جاهزة.',
     capture: 'ابدأ بطريقتك', back: 'رجوع',
-    personalize: 'خصّص تجربتك', edit: 'عدّل تفضيلاتك', goals: 'أهدافك',
-    travel: 'إجازة تستحقها. رحلات وإقامة ومصروف',
-    budget: 'خطة إنفاقك', flexible: 'أكثر مرونة. مساحة أكبر للمطاعم والتسوق',
-    next: 'متابعة', save: 'حفظ الخطة', skipPlan: 'إعداد هذا لاحقاً',
-    manual: /^ابدأ يدوياً\./, complete: 'ابدأ بعملية حقيقية.',
+    next: 'متابعة',
+    manual: /^ابدأ يدوياً\./, complete: 'أضف أول عملية.',
     add: 'أضف أول عملية لي', landing: 'افتح الفواتير', landingPath: '/bills', saveTransaction: 'حفظ العملية',
   },
 };
@@ -82,7 +76,7 @@ async function assertEmpty(page, { onboarded = false, optOut } = {}) {
   for (const field of ['transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'goals']) {
     assert.deepEqual(saved[field], [], `${field} must remain empty; examples/preferences are not money`);
   }
-  assert.equal(saved.ledgerMoney, null, 'the AED example must not establish ledger currency');
+  assert.equal(saved.ledgerMoney, null, 'regional examples must not establish ledger currency');
   assert.equal(saved.onboardingCurrencyEvidence, null, 'the example must not become currency evidence');
   assert.equal(saved.historyImport, null, 'browser/manual setup must not manufacture an import');
   assert.deepEqual(saved.reviewTray.pending, [], 'the sample must not create a pending alert');
@@ -220,23 +214,70 @@ async function capture(page, c, artifact) {
   const options = page.getByTestId('onboarding-start-options');
   assert.equal(await options.getByRole('button').count(), 1, 'web offers exactly one manual capture choice');
   await exposed(options.getByRole('button', { name: c.manual }));
-  assert.equal(await page.getByTestId('onboarding-example').count(), 0, 'setup follows the inline example');
+  assert.equal(await page.getByTestId('onboarding-market-money-scene').count(), 0, 'capture setup replaces the welcome examples');
   await assertEmpty(page);
 }
 
-async function reachCapture(page, c, artifact) {
+async function choose(page, name, groupId, artifact) {
+  await click(page, name, 'radio');
+  const group = page.getByTestId(groupId);
+  assert.equal(await group.getByRole('radio', { name, exact: true }).getAttribute('aria-checked'), 'true',
+    'The chosen option exposes its selected state to assistive technology');
+  assert.equal(await group.getByRole('radio', { checked: true }).count(), 1, 'Only one option is selected');
+  await textScale(page);
+  await noClippedText(page);
+  await shot(page, artifact);
+}
+
+async function reachCapture(page, c, artifact, { saveName = false, resume = false } = {}) {
   await click(page, c.choose);
-  await stage(page, c.focus, `${artifact}-focus`, c.next);
-  await click(page, c.focusChoice, 'radio');
+  await stage(page, c.nameTitle, `${artifact}-name`, c.nameSkip);
+  await exposed(page.getByText(c.namePrivacy, { exact: true }));
+  assert.equal(await control(page, c.next).isEnabled(), false, 'Blank name cannot be submitted');
+  if (saveName) {
+    await page.getByRole('textbox', { name: c.namePlaceholder, exact: true }).fill('  Sam  ');
+    await exposed(page.getByTestId('onboarding-name-preview'));
+    await click(page, c.next);
+    await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).userName === 'Sam', STATE_KEY);
+  } else {
+    await click(page, c.nameSkip);
+  }
+  await stage(page, saveName ? c.namedFocus : c.focus, `${artifact}-focus`, c.next);
+  if (resume) {
+    await page.reload({ waitUntil: 'networkidle' });
+    await stage(page, c.namedFocus, `${artifact}-name-resumed`, c.next);
+    assert.equal((await ledger(page)).userName, 'Sam', 'Personalization survives a fresh page load');
+  }
+  await choose(page, c.focusChoice, 'onboarding-focus-options', `${artifact}-focus-selected`);
   await click(page, c.next);
   await stage(page, c.tracking, `${artifact}-tracking`, c.next);
-  await click(page, c.trackingChoice, 'radio');
+  await choose(page, c.trackingChoice, 'onboarding-tracking-options', `${artifact}-tracking-selected`);
   await click(page, c.next);
-  await stage(page, c.outcome, `${artifact}-outcome`, c.next);
+  await stage(page, c.intention, `${artifact}-intention`, c.next);
+  await choose(page, c.intentionChoice, 'onboarding-intention-options', `${artifact}-intention-selected`);
   await click(page, c.next);
-  await stage(page, c.privacy, `${artifact}-privacy`, c.privacyContinue);
-  await click(page, c.privacyContinue);
+  await stage(page, saveName ? c.namedPreview : c.preview, `${artifact}-preview`, c.choose);
+  const preview = page.getByTestId('onboarding-product-preview').first();
+  await exposed(preview);
+  for (const day of ['12', '18']) {
+    const dayLabel = await exposed(preview.getByText(day, { exact: true }));
+    const lineCount = await dayLabel.evaluate(node => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const lines = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0)
+        .map(rect => Math.round(rect.top));
+      return new Set(lines).size;
+    });
+    assert.equal(lineCount, 1, `Due day ${day} must remain a single readable number at the current text size`);
+  }
+  await assertEmpty(page, { optOut: false });
+  await click(page, c.choose);
   await capture(page, c, `${artifact}-capture`);
+  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).onboardingProfile?.stage === 'capture', STATE_KEY);
+  const profile = (await ledger(page)).onboardingProfile;
+  assert.equal(profile.focus, 'bills');
+  assert.equal(profile.tracking, 'bank-apps');
+  assert.equal(profile.intention, 'stay-ahead');
 }
 
 async function completion(page, c, artifact, addFirstEntry = false) {
@@ -266,6 +307,11 @@ async function scenario(name, { language = 'en', width = 412, text = 1, reducedM
     colorScheme: 'light', reducedMotion: reducedMotion ? 'reduce' : 'no-preference',
   });
   const page = await context.newPage();
+  await context.route('**/*', route => {
+    const url = route.request().url();
+    return url.startsWith(BASE + '/') || url.startsWith('data:') || url.startsWith('blob:')
+      ? route.continue() : route.abort();
+  });
   scaleByPage.set(page, text);
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
@@ -275,7 +321,7 @@ async function scenario(name, { language = 'en', width = 412, text = 1, reducedM
       // alone could pass after an incorrectly animated reveal had finished.
       window.__wafraOnboardingExampleAnimations = [];
       document.addEventListener('animationstart', (event) => {
-        if (event.target?.closest?.('[data-testid="onboarding-example"]')) {
+        if (event.target?.closest?.('[data-testid="onboarding-market-money-scene"]')) {
           window.__wafraOnboardingExampleAnimations.push(event.animationName);
         }
       }, true);
@@ -286,12 +332,12 @@ async function scenario(name, { language = 'en', width = 412, text = 1, reducedM
     }, emptySeed(language));
     await page.goto(new URL('/', BASE).href, { waitUntil: 'networkidle' });
     const c = copy[language];
-    const originalHeadlineSize = await (await exposed(page.getByRole('heading', { name: c.headline, exact: true })))
+    const originalHeadlineSize = await (await exposed(page.getByText(c.firstLine, { exact: true })))
       .evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
     await stage(page, c.headline, `${name}-welcome`, c.choose);
     await assertEmpty(page, { optOut: false });
     if (text === 2) {
-      const size = await page.getByRole('heading', { name: c.headline }).evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+      const size = await page.getByText(c.firstLine, { exact: true }).evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
       assert.ok(Math.abs(size - originalHeadlineSize * 2) < 0.5,
         'the large-text case actually doubles the current design headline');
     }
@@ -313,58 +359,51 @@ async function scenario(name, { language = 'en', width = 412, text = 1, reducedM
 }
 
 try {
-  await scenario('example-preferences-resume', {}, async (page, c, name) => {
-    const example = page.getByTestId('onboarding-example');
+  await scenario('regional-example-name-choices-resume', {}, async (page, c, name) => {
+    const example = page.getByTestId('onboarding-market-money-scene');
     assert.equal(await example.count(), 1);
-    await exposed(example.getByText(c.sample, { exact: true }));
-    await exposed(example.getByText(c.note, { exact: true }));
+    await exposed(example.getByText(c.example, { exact: true }));
+    assert.equal(await example.locator('[aria-label]').count(), 3, 'The regional welcome shows three distinct sample alerts');
     assert.equal(await page.getByRole('dialog').count(), 0, 'the example is inline, without a modal');
-    await click(page, c.organize);
-    await exposed(example.getByText(c.category, { exact: true }));
-    await shot(page, `${name}-organized`);
     await assertExampleDidNotPersist(page);
-    await click(page, c.reset);
-    await exposed(control(page, c.organize));
-    await assertExampleDidNotPersist(page);
-    await reachCapture(page, c, name);
-    await click(page, c.personalize);
-    await stage(page, c.goals, `${name}-goals`, c.next);
+    await reachCapture(page, c, name, { saveName: true, resume: true });
     await click(page, c.back);
-    await capture(page, c, `${name}-goals-back`);
-    await click(page, c.personalize);
-    await click(page, c.travel, 'checkbox');
-    await click(page, c.next);
-    await stage(page, c.budget, `${name}-budget`, c.save);
+    await stage(page, c.namedPreview, `${name}-preview-back`, c.choose);
     await click(page, c.back);
-    await exposed(page.getByRole('heading', { name: c.goals, exact: true }));
-    assert.equal(await control(page, c.travel, 'checkbox').getAttribute('aria-checked'), 'true', 'Back retains chosen goals');
+    await stage(page, c.intention, `${name}-intention-back`, c.next);
+    assert.equal(await control(page, c.intentionChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the chosen intention');
+    await click(page, c.back);
+    await stage(page, c.tracking, `${name}-tracking-back`, c.next);
+    assert.equal(await control(page, c.trackingChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the tracking choice');
+    await click(page, c.back);
+    await stage(page, c.namedFocus, `${name}-focus-back`, c.next);
+    assert.equal(await control(page, c.focusChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the Bills destination');
     await click(page, c.next);
-    await click(page, c.flexible, 'radio');
-    await click(page, c.save);
+    await click(page, c.next);
+    await click(page, c.next);
+    await stage(page, c.namedPreview, `${name}-preview-restored`, c.choose);
+    await click(page, c.choose);
     await capture(page, c, `${name}-saved`);
-    await exposed(control(page, c.edit));
-    await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).onboardingPlan?.budgetId === 'flexible', STATE_KEY);
-    assert.deepEqual((await assertEmpty(page)).onboardingPlan, { goalIds: ['emergency', 'travel'], budgetId: 'flexible' });
+    assert.equal((await assertEmpty(page)).onboardingPlan, null, 'Journey choices must not fabricate a financial plan');
     await page.reload({ waitUntil: 'networkidle' });
     await capture(page, c, `${name}-resumed`);
-    await exposed(control(page, c.edit));
-    assert.deepEqual((await ledger(page)).onboardingPlan, { goalIds: ['emergency', 'travel'], budgetId: 'flexible' });
+    assert.equal((await ledger(page)).onboardingProfile.intention, 'stay-ahead');
     await completion(page, c, `${name}-manual`);
   });
 
-  await scenario('skip-example-first-entry', {}, async (page, c, name) => {
+  await scenario('skip-name-first-entry', {}, async (page, c, name) => {
     await reachCapture(page, c, name);
+    assert.equal((await ledger(page)).userName, 'there', 'Skipping the name does not invent personalization');
     assert.equal((await ledger(page)).onboardingPlan, null, 'personalization is optional');
     await completion(page, c, `${name}-manual`, true);
   });
 
   for (const language of ['en', 'ar']) {
     await scenario(`${language}-320-large-text-reduced-motion`, { language, width: 320, text: 2, reducedMotion: true }, async (page, c, name) => {
-      await click(page, c.organize);
-      await exposed(page.getByText(c.category, { exact: true }));
+      await exposed(page.getByTestId('onboarding-market-money-scene').getByText(c.example, { exact: true }));
       await textScale(page);
       await noClippedText(page);
-      const animations = await page.getByTestId('onboarding-example').evaluate((node) =>
+      const animations = await page.getByTestId('onboarding-market-money-scene').evaluate((node) =>
         node.getAnimations({ subtree: true }).filter((animation) => animation.playState === 'running').length);
       assert.equal(animations, 0, 'Reduce Motion suppresses sample reveal animation');
       await shot(page, `${name}-organized`);
@@ -372,16 +411,7 @@ try {
       assert.deepEqual(await page.evaluate(() => window.__wafraOnboardingExampleAnimations), [],
         'Reduce Motion must prevent sample CSS animation starts, including completed animations');
       await reachCapture(page, c, name);
-      await click(page, c.personalize);
-      await stage(page, c.goals, `${name}-goals`, c.skipPlan);
-      await click(page, c.skipPlan);
-      await capture(page, c, `${name}-skipped-plan`);
-      assert.equal((await ledger(page)).onboardingPlan, null, 'skipping preference setup leaves no plan');
-      await click(page, c.personalize);
-      await click(page, c.next);
-      await stage(page, c.budget, `${name}-budget`, c.save);
-      await click(page, c.save);
-      await capture(page, c, `${name}-saved`);
+      assert.equal((await ledger(page)).onboardingPlan, null, 'Journey choices leave financial plans empty');
       await completion(page, c, `${name}-manual`);
     });
   }
