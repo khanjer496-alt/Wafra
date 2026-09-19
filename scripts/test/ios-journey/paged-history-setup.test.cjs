@@ -48,16 +48,21 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(unverified.pagedHistoryEnabled(), true);
   assert.equal(unverified.PAGED_HISTORY_INSTALL_URL, null);
 });
-test('history-beta pins Baseline 200 while every iOS binary retains the native paging intents', () => {
+test('every iOS profile installs the typed-date v4 record and retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
-  const historyBeta = config.build['history-beta'].env;
-  for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
-    assert.equal(historyBeta[key], '0');
+  const v4 = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
+  for (const profile of ['history-beta', 'production', 'ios-parity-device']) {
+    assert.equal(config.build[profile].env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL, v4, profile);
   }
-  assert.equal(historyBeta.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
-    'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-baseline-200-20260917/Wafra-History-Baseline-200.signed.shortcut');
-  assert.equal(config.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
-    'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
+  // The paged surfaces follow the installed record, so the beta flag stays off.
+  for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
+    assert.equal(config.build['history-beta'].env[key], '0');
+  }
+  const v4Setup = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: { EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: v4 } } });
+  assert.equal(v4Setup.PAGED_HISTORY_SHORTCUT_NAME, 'Wafra-History-v4.signed');
+  assert.equal(v4Setup.PAGED_HISTORY_INSTALL_URL, v4);
+  assert.equal(v4Setup.pagedHistoryEnabled(), true);
+  assert.equal(new URL(v4Setup.pagedHistoryRunUrl()).searchParams.get('name'), 'Wafra-History-v4.signed');
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,

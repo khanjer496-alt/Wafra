@@ -4,9 +4,19 @@
 // by installed name, which is how an older duplicate was executed on-device.
 // The same record/name pair lives in IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS
 // (ios-history-setup.ts); this module stays dependency-free for its tests.
-export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date.signed';
+// Two verified paged records exist: the v2 iCloud record and the typed-date v4
+// release asset. The run name follows whichever record the build installs.
+const VERIFIED_PAGED_RECORDS: Readonly<Record<string, string>> = {
+  'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d': 'Wafra-History-v2-typed-date.signed',
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut': 'Wafra-History-v4.signed',
+};
+const configuredHistoryUrl = (): string | undefined => process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+export const PAGED_HISTORY_SHORTCUT_NAME: string =
+  VERIFIED_PAGED_RECORDS[configuredHistoryUrl() ?? ''] ?? 'Wafra-History-v2-typed-date.signed';
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v3';
-const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
+const VERIFIED_HISTORY_SHORTCUT_URL: string = configuredHistoryUrl() && VERIFIED_PAGED_RECORDS[configuredHistoryUrl()!]
+  ? configuredHistoryUrl()!
+  : 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
 // A build that installs the paged record runs the paged graph whether or not
 // the beta flag is set: production shipped `5a0da9b5…` without the flag, so its
 // users ran a paged Shortcut while the app still showed the legacy history UI

@@ -12,6 +12,9 @@ function fixture() {
     BeginWafraPagedImportIntent: action(2, { oldestGUID: 0, oldestDate: 0, newestGUID: 0, newestDate: 0 }),
     StageWafraPagedImportIntent: action(0, { request: 0, found: 2, frame: 0 }),
     StageWafraPagedColumnsIntent: action(0, { request: 0, found: 2, guids: 0, bodies: 0, senders: 0, dates: 0 }),
+    BeginWafraPagedImportV2Intent: action(2, { oldestGUID: 0, oldestDate: 8, newestGUID: 0, newestDate: 8 }),
+    StageWafraPagedRowIntent: action(0, { request: 0, guid: 0, body: 0, sender: 0, date: 8 }),
+    CommitWafraPagedPageIntent: action(0, { request: 0, found: 2 }),
   } };
 }
 test('built metadata verifier demands both paged receiver contracts and fails weakened/missing bindings', async () => {
@@ -23,7 +26,12 @@ test('built metadata verifier demands both paged receiver contracts and fails we
     m => { m.actions.StageWafraPagedImportIntent.parameters[2].isOptional = true; },
     m => { m.actions.StageWafraPagedImportIntent.openAppWhenRun = true; },
     m => { delete m.actions.StageWafraPagedColumnsIntent; },
-    m => { m.actions.StageWafraPagedColumnsIntent.parameters[3].valueType.primitive.wrapper.typeIdentifier = 2; }]) {
+    m => { m.actions.StageWafraPagedColumnsIntent.parameters[3].valueType.primitive.wrapper.typeIdentifier = 2; },
+    // The typed-date graph depends on `Date` parameters; a String date would reintroduce Shortcuts date text.
+    m => { m.actions.BeginWafraPagedImportV2Intent.parameters[1].valueType.primitive.wrapper.typeIdentifier = 0; },
+    m => { m.actions.StageWafraPagedRowIntent.parameters[4].valueType.primitive.wrapper.typeIdentifier = 0; },
+    m => { m.actions.StageWafraPagedRowIntent.authenticationPolicy = 2; },
+    m => { delete m.actions.CommitWafraPagedPageIntent; }]) {
     const data = fixture(); mutate(data); assert.throws(() => verifyPagedIntentMetadata(data));
   }
 });

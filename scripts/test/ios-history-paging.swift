@@ -311,6 +311,65 @@ struct PagedHistoryTests {
     let colRecord = try json(columnar.readChunk(sessionId: colSession, chunkIndex: 0)[0])
     try check("column-framed body survives the round trip unchanged", colRecord["text"] as! String == rows(100)[0].body)
     try check("column-framed sender survives the round trip unchanged", colRecord["sender"] as? String == "TEST")
+
+    // Typed-row path (v4): Begin with exact instants, one staged row per
+    // Message, one commit per page. No Shortcuts-formatted date text exists.
+    let rowSource = rows(120)
+    let rowStore = make("rows")
+    func beginTyped(_ store: WafraPagedHistoryStore) throws -> [String: Any] {
+      try json(store.begin(oldestGUID: rowSource.last!.guid, oldestInstant: rowSource.last!.date,
+        newestGUID: rowSource.first!.guid, newestInstant: rowSource.first!.date))
+    }
+    func stageTyped(_ store: WafraPagedHistoryStore, _ state: [String: Any], _ row: Row, body: String? = nil) throws -> [String: Any] {
+      try json(store.stageRow(sessionId: state["sessionId"] as! String,
+        authorizationSecret: state["authorizationSecret"] as! String, revision: state["revision"] as! Int,
+        guid: row.guid, body: body ?? row.body, sender: "TEST", instant: row.date))
+    }
+    func commitTyped(_ store: WafraPagedHistoryStore, _ state: [String: Any], found: Int) throws -> [String: Any] {
+      try json(store.commitRows(sessionId: state["sessionId"] as! String,
+        authorizationSecret: state["authorizationSecret"] as! String, revision: state["revision"] as! Int, found: found))
+    }
+    try rejected("typed begin refuses boundaries in the wrong order") {
+      _ = try make("rows-order").begin(oldestGUID: "a", oldestInstant: fixedNow, newestGUID: "b", newestInstant: fixedNow.addingTimeInterval(-10))
+    }
+    var rowState = try beginTyped(rowStore)
+    try check("typed begin exposes the exact newest instant as the first cursor",
+      (rowState["before"] as! String) == stamp(Date(timeIntervalSince1970: floor(rowSource.first!.date.timeIntervalSince1970) + 1)))
+    var rowPage = page(rowSource, rowState)
+    try rejected("a commit with no staged rows is refused") { _ = try commitTyped(rowStore, rowState, found: rowPage.count) }
+    for row in rowPage { _ = try stageTyped(rowStore, rowState, row) }
+    let duplicate = try stageTyped(rowStore, rowState, rowPage[0])
+    try check("re-staging a row of the same page is ignored, not double counted", duplicate["rows"] as! Int == rowPage.count)
+    try rejected("a commit whose Shortcuts count disagrees with the staged rows is refused") {
+      _ = try commitTyped(rowStore, rowState, found: rowPage.count - 1)
+    }
+    try check("a refused commit keeps the staged rows and cursor", try json(rowStore.status()!)["checked"] as! Int == 0)
+    let firstRowState = rowState
+    rowState = try commitTyped(rowStore, rowState, found: rowPage.count)
+    try check("typed rows advance the cursor exactly like a text frame", rowState["revision"] as! Int == 1 && (rowState["checked"] as! Int) > 0)
+    let replayed = try commitTyped(rowStore, firstRowState, found: rowPage.count)
+    try check("a lost commit acknowledgement is answered with the current cursor without advancing",
+      replayed["revision"] as! Int == 1 && replayed["checked"] as! Int == rowState["checked"] as! Int)
+    let staleRow = try stageTyped(rowStore, firstRowState, rowPage[0])
+    try check("a row for the already committed page is reported stale", staleRow["status"] as! String == "stale")
+    rowPage = page(rowSource, rowState)
+    let oversized = String(repeating: "x", count: 16 * 1024 + 1)
+    _ = try stageTyped(rowStore, rowState, rowPage[0], body: oversized)
+    for row in rowPage.dropFirst() { _ = try stageTyped(rowStore, rowState, row) }
+    rowState = try commitTyped(rowStore, rowState, found: rowPage.count)
+    try check("an oversized body is staged as skipped without refusing the page", (rowState["skipped"] as! Int) >= 1)
+    let resumedRows = make("rows")
+    let resumedRowState = try beginTyped(resumedRows)
+    try check("typed begin resumes the saved cursor", resumedRowState["checked"] as! Int == rowState["checked"] as! Int)
+    rowState = resumedRowState
+    while rowState["status"] as! String != "complete" {
+      rowPage = page(rowSource, rowState)
+      for row in rowPage { _ = try stageTyped(resumedRows, rowState, row) }
+      rowState = try commitTyped(resumedRows, rowState, found: rowPage.count)
+    }
+    try check("typed rows complete the full source", rowState["checked"] as! Int == rowSource.count)
+    let rowRecord = try json(resumedRows.readChunk(sessionId: rowState["sessionId"] as! String, chunkIndex: 0)[0])
+    try check("typed-row body survives the round trip unchanged", rowRecord["text"] as! String == rowSource[0].body)
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")
   }
 }

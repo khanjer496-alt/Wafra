@@ -21,9 +21,21 @@ export const COLUMNAR_SHORTCUT_NAME = 'Wafra History v3';
 // Printable and absent from real SMS; the native side counts items per column
 // against the page count and refuses any page where they disagree.
 export const COLUMN_SEPARATOR = '\u241E';
+// Typed-date graph. Every device run of v2 on iOS 26 has stalled on dates:
+// Shortcuts materialized the Message `date` property as the phone's display
+// string ("12 Sep 2026 at 9:22 PM") wherever the graph formatted it as text,
+// which loses seconds and breaks the whole-second cursor overlap. The one
+// binding that has physically delivered exact instants on this phone is a
+// `Date` App Intent parameter fed the property directly (the legacy
+// per-message graph). v4 therefore never formats a date in Shortcuts: the
+// Begin boundaries and every row hand the Message date to a typed parameter,
+// one native call per Message plus one commit per page. Slower than a pure
+// text frame, but it is built only from primitives proven on the device.
+export const ROW_SHORTCUT_NAME = 'Wafra History v4';
 export function buildPagedHistoryShortcut() { return buildPagedGraph({ columnar: false }); }
 export function buildColumnarHistoryShortcut() { return buildPagedGraph({ columnar: true }); }
-function buildPagedGraph({ columnar }) {
+export function buildRowHistoryShortcut() { return buildPagedGraph({ columnar: false, rows: true }); }
+function buildPagedGraph({ columnar, rows = false }) {
   let serial = 0;
   const actions = [];
   const uuid = () => `C17B0000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -89,13 +101,29 @@ function buildPagedGraph({ columnar }) {
   });
   condition(output(newestCount, 'Count'), 0, () => { alert('Messages changed', 'The initial queries disagreed. No history was started.'); stop(); });
   const oldestItem = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(oldest, 'Message')) });
-  const oldestGUID = field(output(oldestItem), 'GUID'); const oldestDate = dateText(output(oldestItem));
-  const newestItem = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(newest, 'Message')) });
-  const newestGUID = field(output(newestItem), 'GUID'); const newestDate = dateText(output(newestItem));
-  const initial = native('BeginWafraPagedImportIntent', {
-    oldestGUID: scalar(output(oldestGUID)), oldestDate: scalar(output(oldestDate)),
-    newestGUID: scalar(output(newestGUID)), newestDate: scalar(output(newestDate)),
-  });
+  const newestItemAction = () => emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(newest, 'Message')) });
+  // The Message `date` property bound straight into a typed `Date` parameter:
+  // the scalar token carries the property aggrandizement and nothing else.
+  const typedDate = value => scalar({ ...value, Aggrandizements: [property('date')] });
+  let initial;
+  if (rows) {
+    const newestItem = newestItemAction();
+    const oldestGUID = field(output(oldestItem), 'GUID');
+    const newestGUID = field(output(newestItem), 'GUID');
+    initial = native('BeginWafraPagedImportV2Intent', {
+      oldestGUID: scalar(output(oldestGUID)), oldestDate: typedDate(output(oldestItem)),
+      newestGUID: scalar(output(newestGUID)), newestDate: typedDate(output(newestItem)),
+    });
+  } else {
+    // Action order here is pinned by the published v2/v3 records; do not reorder.
+    const oldestGUID = field(output(oldestItem), 'GUID'); const oldestDate = dateText(output(oldestItem));
+    const newestItem = newestItemAction();
+    const newestGUID = field(output(newestItem), 'GUID'); const newestDate = dateText(output(newestItem));
+    initial = native('BeginWafraPagedImportIntent', {
+      oldestGUID: scalar(output(oldestGUID)), oldestDate: scalar(output(oldestDate)),
+      newestGUID: scalar(output(newestGUID)), newestDate: scalar(output(newestDate)),
+    });
+  }
   set('Request', output(initial)); nothing();
   const loop = uuid();
   emit('is.workflow.actions.repeat.count', { GroupingIdentifier: loop, WFControlFlowMode: 0, WFRepeatCount: 10000 });
@@ -172,6 +200,33 @@ function buildPagedGraph({ columnar }) {
         { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] }) },
       WFCondition: 4, WFConditionalActionString: 'rows' });
   }
+  if (rows) {
+    // One typed native call per Message. GUID/Body/Sender use the explicit
+    // Text coercion proven on-device; the date is the raw property.
+    const each = uuid();
+    emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 0, WFInput: attachment(variable('Page')) });
+    const guid = field(variable('Repeat Item'), 'GUID');
+    const body = field(variable('Repeat Item'), 'Body');
+    const sender = field(variable('Repeat Item'), 'Sender');
+    native('StageWafraPagedRowIntent', {
+      request: scalar(variable('Request')), guid: scalar(output(guid)), body: scalar(output(body)),
+      sender: scalar(output(sender)), date: typedDate(variable('Repeat Item')),
+    });
+    nothing();
+    emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
+    const committed = native('CommitWafraPagedPageIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')) });
+    set('Request', output(committed));
+    const releasedPage = emit('is.workflow.actions.list', { WFItems: [] });
+    set('Page', output(releasedPage, 'List')); nothing();
+    emit('is.workflow.actions.repeat.count', { GroupingIdentifier: loop, WFControlFlowMode: 2 });
+    alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
+    open('wafra://ios-setup?section=history'); stop();
+    const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
+    workflow.WFWorkflowName = ROW_SHORTCUT_NAME;
+    workflow.WFWorkflowActions = actions;
+    workflow.WFWorkflowImportQuestions = [];
+    return workflow;
+  }
   const empty = emit('is.workflow.actions.list', { WFItems: [] });
   set('Encoded Page', output(empty, 'List'));
   const each = uuid();
@@ -234,11 +289,18 @@ export function verifyPagedHistoryShortcut(workflow) {
 export function verifyColumnarHistoryShortcut(workflow) {
   return verifyBoundedSourceFreeGraph(workflow, buildColumnarHistoryShortcut(), 'Columnar');
 }
+export function verifyRowHistoryShortcut(workflow) {
+  verifyBoundedSourceFreeGraph(workflow, buildRowHistoryShortcut(), 'Row');
+  const text = JSON.stringify(workflow);
+  if (/format\.date|detect\.date|base64encode|text\.combine/.test(text)) throw new Error('Row graph must not format dates or frame text');
+  return true;
+}
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const columnar = process.argv.includes('--columnar');
+  const rows = process.argv.includes('--rows');
   const target = resolve(process.argv.filter(arg => !arg.startsWith('--'))[2]
-    ?? (columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
-  const workflow = columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
-  (columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
+    ?? (rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
+  const workflow = rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
+  (rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

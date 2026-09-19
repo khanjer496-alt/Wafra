@@ -234,9 +234,23 @@ public final class WafraPagedHistoryStore {
   /// A resume rotates the capability, fencing a previously suspended runner.
   public func begin(oldestGUID: String, oldestDate: String,
                     newestGUID: String, newestDate: String) throws -> String {
-    let oldest = try reference(guid: oldestGUID, dateText: oldestDate)
-    let newest = try reference(guid: newestGUID, dateText: newestDate)
+    try begin(oldest: try reference(guid: oldestGUID, dateText: oldestDate),
+              newest: try reference(guid: newestGUID, dateText: newestDate))
+  }
+  /// Typed-date variant. Shortcuts hands the Message `date` property to a
+  /// `Date` App Intent parameter exactly (the binding the legacy per-message
+  /// graph proved on-device), so no Shortcuts date formatting is parsed here.
+  public func begin(oldestGUID: String, oldestInstant: Date,
+                    newestGUID: String, newestInstant: Date) throws -> String {
+    try begin(oldest: try reference(guid: oldestGUID, instant: oldestInstant),
+              newest: try reference(guid: newestGUID, instant: newestInstant))
+  }
+  private func begin(oldest: WafraHistoryCursor.Reference,
+                     newest: WafraHistoryCursor.Reference) throws -> String {
     return try locked { directory in
+      // Every run starts its page from an empty row buffer.
+      let rows = directory.appendingPathComponent(Self.rowsFile)
+      if FileManager.default.fileExists(atPath: rows.path) { try FileManager.default.removeItem(at: rows) }
       var head: Head
       if FileManager.default.fileExists(atPath: directory.appendingPathComponent("head.json").path) {
         head = try load(directory)
@@ -257,6 +271,92 @@ public final class WafraPagedHistoryStore {
       try write(Self.encoded(head), to: directory.appendingPathComponent("head.json"))
       return try response(head, token: token)
     }
+  }
+
+  static let rowsFile = "rows.txt"
+  /// One typed row of the current page, staged by the per-message App Intent.
+  /// The date arrives as an exact `Date`, never as Shortcuts-formatted text.
+  /// Rows are buffered in the framed form `stage` already validates so the
+  /// commit reuses every cursor, size and journal rule unchanged. A row whose
+  /// GUID was already staged for this page is ignored, so a Shortcut retry of
+  /// the same page cannot double-count. Returns a JSON status.
+  public func stageRow(sessionId: String, authorizationSecret: String, revision: Int,
+                       guid: String, body: String, sender: String, instant: Date) throws -> String {
+    guard Self.validSession(sessionId), revision >= 0,
+          !guid.isEmpty, guid.utf8.count <= 1_024,
+          body.utf8.count <= 1024 * 1024, sender.utf8.count <= 64 * 1024,
+          let secret = Data(base64Encoded: authorizationSecret), secret.count == 32,
+          secret.base64EncodedString() == authorizationSecret else { throw Failure.invalidInput }
+    let milliseconds = Int64((instant.timeIntervalSince1970 * 1_000).rounded())
+    guard milliseconds > 0 else { throw Failure.fieldDate }
+    let encodedGuid = Data(guid.utf8).base64EncodedString()
+    let line = [encodedGuid, Data(body.utf8).base64EncodedString(),
+                Data(sender.utf8).base64EncodedString(),
+                Data(Self.utc(milliseconds).utf8).base64EncodedString()].joined(separator: "|")
+    return try locked { directory in
+      let head = try load(directory)
+      guard head.sessionId == sessionId, head.tokenHash == Self.hash(secret) else {
+        throw Failure.unauthorized
+      }
+      // The page this row belongs to was already committed; the runner's
+      // request is one revision behind and will be refreshed by its commit.
+      if revision == head.checkpoint.revision - 1 { return try Self.rowStatus(staged: 0, stale: true) }
+      guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
+      var lines = try stagedRows(directory)
+      if lines.contains(where: { $0.hasPrefix(encodedGuid + "|") }) {
+        return try Self.rowStatus(staged: lines.count, stale: false)
+      }
+      guard lines.count < WafraHistoryCursor.maximumLimit else { throw Failure.invalidInput }
+      lines.append(line)
+      try write(Data(lines.joined(separator: "\n").utf8), to: directory.appendingPathComponent(Self.rowsFile))
+      return try Self.rowStatus(staged: lines.count, stale: false)
+    }
+  }
+  /// Commits the rows staged for the current page as one bounded page.
+  /// `found` is Shortcuts' own count of the Messages query, so a dropped or
+  /// duplicated row is refused before any cursor arithmetic.
+  public func commitRows(sessionId: String, authorizationSecret: String,
+                         revision: Int, found: Int) throws -> String {
+    guard Self.validSession(sessionId), revision >= 0, found > 0,
+          found <= WafraHistoryCursor.maximumLimit,
+          let secret = Data(base64Encoded: authorizationSecret), secret.count == 32,
+          secret.base64EncodedString() == authorizationSecret else { throw Failure.invalidInput }
+    let frame: String? = try locked { directory in
+      let head = try load(directory)
+      guard head.sessionId == sessionId, head.tokenHash == Self.hash(secret) else {
+        throw Failure.unauthorized
+      }
+      let lines = try stagedRows(directory)
+      if revision == head.checkpoint.revision - 1, lines.isEmpty { return nil }
+      guard revision == head.checkpoint.revision else { throw Failure.staleRequest }
+      guard lines.count == found else {
+        throw FrameRefusal(reason: "invalid-input-rows staged=\(lines.count) found=\(found)")
+      }
+      return lines.joined(separator: "\n")
+    }
+    guard let frame else {
+      // Lost acknowledgement of an already committed page: answer with the
+      // current cursor without advancing.
+      return try locked { directory in try response(try load(directory), token: authorizationSecret) }
+    }
+    let result = try stage(sessionId: sessionId, authorizationSecret: authorizationSecret,
+                           revision: revision, found: found, frame: frame)
+    try locked { directory in
+      let rows = directory.appendingPathComponent(Self.rowsFile)
+      if FileManager.default.fileExists(atPath: rows.path) { try FileManager.default.removeItem(at: rows) }
+    }
+    return result
+  }
+  private func stagedRows(_ directory: URL) throws -> [String] {
+    let url = directory.appendingPathComponent(Self.rowsFile)
+    guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+    let text = String(decoding: try read(url, maximum: 8 * 1024 * 1024), as: UTF8.self)
+    return text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+  }
+  private static func rowStatus(staged: Int, stale: Bool) throws -> String {
+    let object: [String: Any] = ["status": stale ? "stale" : "staged", "rows": staged]
+    let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return String(decoding: bytes, as: UTF8.self)
   }
 
   /// Each line is an unwrapped base64 JSON object produced by Shortcuts.
