@@ -183,20 +183,20 @@
     {
       "file": "src/app/pro.tsx",
       "name": "buySelectedPlan",
-      "sha256": "ca9cc99b7a4f7fd9b2b926159691124af357d50e7bcb11f9dc93e8d3ac4c623d",
-      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro."
+      "sha256": "22bb868b4940d33a966d24b6b98093c9f6d11690226791cb4e91d967deaa4f44",
+      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a live store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro. A synchronous latch closes on the first tap so a second tap in the same frame cannot start an overlapping checkout, and it is released in a finally so a throwing store call cannot strand the screen."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "restore",
-      "sha256": "4090dd26f6b24c29aa7ef656fd877749d33ce290273903fd906af829bf2fc2ec",
-      "reviewedChange": "2026-09-19: Restore now reads the same checkoutReady guard as the purchase action, and retains its explicit no-purchase and unreachable-store states."
+      "sha256": "26acea8a497bcc1699c11441a37a95983f5837fa83ba8d3eccfbf645eec83e4f",
+      "reviewedChange": "2026-09-19: Restore reads the same checkoutReady guard and the same single-flight latch as the purchase action, and retains its explicit no-purchase and unreachable-store states."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "manage",
-      "sha256": "79a4d47c9a1a12026b34dea919515d646d9ef6080de7064b94ba9d5af628d737",
-      "reviewedChange": "2026-09-17: Subscription management remains an explicit external-link action after the Superwall migration, with the same failure disclosure and loading boundary."
+      "sha256": "37b175f86b616dcfdc73de2c6f141c7e0def8b596a31b4b72dd2186fd72a1176",
+      "reviewedChange": "2026-09-19: Subscription management remains an explicit external-link action with the same failure disclosure and loading boundary; it now shares the single-flight latch so it cannot run beside a purchase or restore."
     },
     {
       "file": "src/app/pro.tsx",
