@@ -119,8 +119,9 @@ export function createLedgerPersistence({
       const chunkOrder: ChunkOrder =
         parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
       let corrupt = false;
+      const hasInlineTransactions = Array.isArray(parsed.transactions);
 
-      if (!Array.isArray(parsed.transactions)) {
+      if (!hasInlineTransactions) {
         const count = Number(parsed.txChunks) || 0;
         const blocks: Transaction[][] = [];
         if (count > 0) {
@@ -156,7 +157,10 @@ export function createLedgerPersistence({
       // A partial/corrupt read must never become the identity baseline for a
       // later "unchanged chunk" decision. Force the next write to rebuild all
       // chunk keys from the recovered in-memory snapshot instead.
-      previousTransactions = corrupt ? null : parsed.transactions ?? [];
+      // Inline legacy rows also have no proven chunk baseline: the next save
+      // removes them from metadata, so every chunk must be written even when
+      // the row objects are unchanged or stale chunk keys already exist.
+      previousTransactions = corrupt || hasInlineTransactions ? null : parsed.transactions ?? [];
       return parsed;
     });
 
