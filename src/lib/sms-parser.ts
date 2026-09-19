@@ -371,8 +371,14 @@ export interface ParsedCard {
  * Correct new transaction, statement and balance reads; re-read retained
  * sources to repair matching contradictory minimums. Stored transaction
  * amounts and statement totals require separate reconciliation.
+ *
+ * 50: preserve original foreign money and FX provenance on purchase-shaped
+ * refunds, using the same local-amount precedence and plausibility safeguards
+ * as ordinary transactions. This corrects future captures only; the audited
+ * saved refunds already retain their foreign fields, so no full history
+ * reread is requested and PARSER_BACKFILL_VERSION remains unchanged.
  */
-export const PARSER_VERSION = 49;
+export const PARSER_VERSION = 50;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -3669,6 +3675,62 @@ function extractAmountFils(raw: string): number | null {
   return null;
 }
 
+/** Shared money reading for transactions and purchase-shaped refunds. */
+function transactionMoney(raw: string) {
+  // Read as two halves rather than through amountWithFx, so the row can record
+  // WHICH half produced the figure. `bankLocalFils !== null` beside a foreign
+  // amount means the bank quoted the local value itself and the implied rate is
+  // real; null means this file's cross-rate table guessed it. See ForeignAmount.
+  const bankLocalFils = extractAmountFils(raw);
+  const foreignCandidate = extractForeignAmount(raw);
+  /**
+   * A FOREIGN FIGURE THE LOCAL ONE CONTRADICTS IS NOT A CONVERSION.
+   *
+   * When the body states both halves, the implied rate between them is
+   * recorded as `fxSource: 'bank'` — the marker that tells fx.ts this rate is
+   * REAL and must not be corrected. That is the right reading of a genuine
+   * dual-currency alert, and the wrong reading of a merchant whose name
+   * happens to open with an ISO code and a number:
+   *
+   *   "AED 250.00 spent at CAD 3 TRADING LLC with Credit Card 1234"
+   *     -> a CAD 3.00 purchase at 83.33 AED/CAD, stamped as the bank's own rate.
+   *
+   * The total on that row is right; only the annotation is invented. So the
+   * annotation is dropped when the two halves cannot be the same money at any
+   * plausible rate. The band is deliberately wide — a factor of eight either
+   * side of this file's stale cross-rate table — because the table is a
+   * fallback and a real bank rate may drift a long way from it. The collisions
+   * this catches are off by 30x and 200x.
+   */
+  const fxImplausible =
+    !!foreignCandidate &&
+    bankLocalFils !== null &&
+    (() => {
+      const implied = bankLocalFils / foreignCandidate.amountMinor;
+      const table = foreignCandidate.rate;
+      if (!(implied > 0) || !(table > 0)) return true;
+      const ratio = implied / table;
+      return ratio > 8 || ratio < 1 / 8;
+    })();
+  const foreignAmount = fxImplausible ? null : foreignCandidate;
+  const amountFils = bankLocalFils ?? foreignAmount?.localFils ?? null;
+  if (!amountFils) return null;
+  return {
+    amountFils,
+    ...(foreignAmount
+      ? {
+          originalAmountMinor: foreignAmount.amountMinor,
+          originalCurrency: foreignAmount.currency,
+          fxRate:
+            bankLocalFils !== null
+              ? amountFils / foreignAmount.amountMinor
+              : foreignAmount.rate,
+          fxSource: bankLocalFils !== null ? ('bank' as const) : ('fallback' as const),
+        }
+      : {}),
+  };
+}
+
 function amountWithFx(raw: string): number | null {
   return extractAmountFils(raw) ?? extractForeignAmountFils(raw);
 }
@@ -5007,13 +5069,13 @@ function parseSmsInner(
     /\bpurchase(?:\s+(?:amount|amt))?\s+(?:of\s+)?(?:[A-Z]{3}|Dhs?)\s*[\d,.]+\s+at\s+(.+?)\s+on\s+your\s+(?:credit|debit|covered|prepaid)?\s*card\b[\s\S]{0,120}?\bhas\b[\s\S]{0,24}?\brefunded\b/i,
   );
   if (purchaseRefund) {
-    const amountFils = amountWithFx(raw);
-    if (amountFils) {
+    const money = transactionMoney(raw);
+    if (money) {
       const merchant = titleCase(purchaseRefund[1].trim().replace(/\s{2,}/g, ' '));
       return {
         kind: 'transaction',
         type: 'income',
-        amountFils,
+        ...money,
         merchant: merchant || 'Refund',
         date,
         dueDay: null,
@@ -5830,44 +5892,8 @@ function parseSmsInner(
     return null;
   }
 
-  // Read as two halves rather than through amountWithFx, so the row can record
-  // WHICH half produced the figure. `bankLocalFils !== null` beside a foreign
-  // amount means the bank quoted the local value itself and the implied rate is
-  // real; null means this file's cross-rate table guessed it. See ForeignAmount.
-  const bankLocalFils = extractAmountFils(raw);
-  const foreignCandidate = extractForeignAmount(raw);
-  /**
-   * A FOREIGN FIGURE THE LOCAL ONE CONTRADICTS IS NOT A CONVERSION.
-   *
-   * When the body states both halves, the implied rate between them is
-   * recorded as `fxSource: 'bank'` — the marker that tells fx.ts this rate is
-   * REAL and must not be corrected. That is the right reading of a genuine
-   * dual-currency alert, and the wrong reading of a merchant whose name
-   * happens to open with an ISO code and a number:
-   *
-   *   "AED 250.00 spent at CAD 3 TRADING LLC with Credit Card 1234"
-   *     -> a CAD 3.00 purchase at 83.33 AED/CAD, stamped as the bank's own rate.
-   *
-   * The total on that row is right; only the annotation is invented. So the
-   * annotation is dropped when the two halves cannot be the same money at any
-   * plausible rate. The band is deliberately wide — a factor of eight either
-   * side of this file's stale cross-rate table — because the table is a
-   * fallback and a real bank rate may drift a long way from it. The collisions
-   * this catches are off by 30x and 200x.
-   */
-  const fxImplausible =
-    !!foreignCandidate &&
-    bankLocalFils !== null &&
-    (() => {
-      const implied = bankLocalFils / foreignCandidate.amountMinor;
-      const table = foreignCandidate.rate;
-      if (!(implied > 0) || !(table > 0)) return true;
-      const ratio = implied / table;
-      return ratio > 8 || ratio < 1 / 8;
-    })();
-  const foreignAmount = fxImplausible ? null : foreignCandidate;
-  const amountFils = bankLocalFils ?? foreignAmount?.localFils ?? null;
-  if (!amountFils) return null;
+  const money = transactionMoney(raw);
+  if (!money) return null;
 
   // Direction is decided by the clause that says WHERE the money went, and
   // only falls back to the word lists when no clause said. An unordered race
@@ -6235,18 +6261,7 @@ function parseSmsInner(
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
     type,
-    amountFils,
-    ...(foreignAmount
-      ? {
-          originalAmountMinor: foreignAmount.amountMinor,
-          originalCurrency: foreignAmount.currency,
-          fxRate:
-            bankLocalFils !== null
-              ? amountFils / foreignAmount.amountMinor
-              : foreignAmount.rate,
-          fxSource: bankLocalFils !== null ? ('bank' as const) : ('fallback' as const),
-        }
-      : {}),
+    ...money,
     merchant,
     // A REMINDER's date is its deadline, so it reads the unblanked body. A
     // POSTING's is not, and reads the body with the deadline clause removed.

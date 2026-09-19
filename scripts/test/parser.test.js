@@ -185,6 +185,36 @@ t('purchase-shaped debit-card refund uses the purchase figure, not available bal
   'Purchase amount of AED 49.50 at SAMPLE STORE on your Debit Card ending 1234 has been successfully refunded. Available balance is AED 1,234.56.',
   { type: 'income', amountFils: 4950, merchant: 'Sample Store',
     card: { last4: '1234', kind: 'debit' } });
+// Derived from four corroborated foreign purchase-refund alerts; all private
+// merchant, card and money values are replaced. The AED footer is a snapshot.
+const foreignPurchaseRefund =
+  'Purchase amount of THB 340.00 at SAMPLE STORE on your Debit Card ending 1234 has been refunded to your card account. Avl Bal is AED 9,001.00.';
+t('foreign purchase refund preserves the original money and fallback provenance',
+  foreignPurchaseRefund,
+  { type: 'income', amountFils: 3673, currency: 'AED', merchant: 'Sample Store',
+    originalAmountMinor: 34000, originalCurrency: 'THB', fxSource: 'fallback',
+    snapshotFils: 900100, snapshotKind: 'balance' });
+{
+  const refund = parseSms(foreignPurchaseRefund);
+  ok('foreign purchase refund retains the fallback rate, not the balance ratio',
+    Math.abs(refund.fxRate - 3.6725 / 34) < 1e-12);
+  const localRefund = parseSms(foreignPurchaseRefund.replace('THB 340.00', 'AED 49.50'));
+  ok('local purchase refund has no invented foreign-money fields',
+    localRefund.amountFils === 4950 && localRefund.type === 'income' &&
+    localRefund.originalAmountMinor === undefined && localRefund.originalCurrency === undefined &&
+    localRefund.fxRate === undefined && localRefund.fxSource === undefined);
+}
+t('foreign purchase refund with a quoted local amount preserves the bank rate',
+  foreignPurchaseRefund.replace('has been refunded', 'has been refunded AED 37.40'),
+  { type: 'income', amountFils: 3740, originalAmountMinor: 34000,
+    originalCurrency: 'THB', fxSource: 'bank', snapshotFils: 900100 });
+{
+  const refund = parseSms(foreignPurchaseRefund.replace('has been refunded', 'has been refunded AED 37.40'));
+  ok('purchase refund records the quoted local-to-original ratio', refund.fxRate === 3740 / 34000);
+  const collision = parseSms(foreignPurchaseRefund.replace('THB 340.00', 'AED 495.00').replace('SAMPLE STORE', 'CAD 3 TRADING LLC'));
+  ok('purchase refund does not invent FX metadata from a merchant currency-code collision',
+    collision.amountFils === 49500 && collision.originalCurrency === undefined && collision.fxSource === undefined);
+}
 t('approved return credit is a refund even without the word refund',
   'Return: SAMPLE123456 is approved. AED 176.00 is now in your account.',
   { type: 'income', amountFils: 17600, merchant: 'Refund' });
