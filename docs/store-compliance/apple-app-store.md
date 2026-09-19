@@ -24,11 +24,12 @@ in `docs/privacy-policy.md`.
 ## Export compliance
 
 The binary contains application-level cryptography including X25519,
-HKDF-SHA-256, AES-256-GCM and SQLCipher. The previous hard-coded
-`ITSAppUsesNonExemptEncryption=false` answer has been removed. The publisher must
-complete Apple's export-compliance questions for the exact binary and record the
-approved result in `apple-export-compliance.json`; repository automation blocks a
-public store-release readiness pass while that decision remains pending.
+HKDF-SHA-256, AES-256-GCM and SQLCipher. Build 155 has a retained
+[application-specific exempt-use assessment](apple-export-assessment-155.md),
+recorded in `apple-export-compliance.json` and matched by
+`ITSAppUsesNonExemptEncryption=false` in the app configuration. This is not a
+no-encryption or OS-only declaration. Reassess it when the cryptographic scope
+changes; repository automation still rejects missing or inconsistent decisions.
 
 ## App Review notes
 

@@ -15,7 +15,7 @@ _Status snapshot: 10 September 2026._
 | Superwall production billing | BLOCKED-STORE | Configure both public SDK keys, products, `pro` entitlement and `pro_upgrade` campaign; verify store-formatted prices and restore. |
 | Public Privacy/Terms/Support URLs | BLOCKED-USER | Publisher must choose monitored contact and publish HTTPS pages. |
 | Governing law / counsel approval | BLOCKED-USER | Do not infer from Wyoming formation or user residence. |
-| Apple export compliance | BLOCKED-USER | Complete App Store Connect encryption determination and update `apple-export-compliance.json`. |
+| Apple export compliance | RECORDED (19 Sep 2026) | Build 155 application-specific exempt-use self-assessment retained in `apple-export-assessment-155.md`; reassess material cryptographic changes. |
 | Physical iOS capture/history proof | NEEDS-REAL-DEVICE | Test exact signed TestFlight build on a real iPhone. |
 | Physical Android capture/performance proof | NEEDS-REAL-DEVICE | Test exact Play/internal build, permissions, live alert capture and large-ledger responsiveness. |
 | Public production submission | BLOCKED-STORE | Explicit publisher authorization plus every blocker above. |

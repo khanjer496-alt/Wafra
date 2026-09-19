@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "status": "pending-publisher-review",
-  "itsAppUsesNonExemptEncryption": null,
+  "status": "approved",
+  "itsAppUsesNonExemptEncryption": false,
   "facts": {
     "applicationCryptography": [
       "X25519",
@@ -11,5 +11,16 @@
     ],
     "transportSecurity": "HTTPS/TLS is also used for optional network features"
   },
-  "instruction": "The publisher must answer App Store Connect export-compliance questions for the submitted binary and set this file to status=approved with the resulting boolean. Do not infer the answer from company location or from generic TLS exemptions."
+  "instruction": "Reopen this determination before adding general-purpose encryption, communications, encrypted file storage, user-accessible cryptographic controls, non-standard algorithms, or any materially different cryptographic use. Do not infer exemption merely from TLS, company location, or the finance category.",
+  "determinationType": "application-specific exempt-use self-assessment",
+  "reviewedAt": "2026-09-19",
+  "assessedBuild": {
+    "version": "1.0.0",
+    "buildNumber": "155",
+    "sourceCommit": "fe8064f182bdc9829fd2c1bb9a4f0dc8fd748173",
+    "ipaSha256": "0d30c5e9aa0a6374f9d47ec7c07cc9ce59805fd5109da3ce674b09c0b81548d6"
+  },
+  "authorization": "Publisher requested public TestFlight release and instructed the assistant to resolve the declaration. This is an authorized product-specific self-assessment, not a claim of regulator or counsel approval.",
+  "rationale": "Standard cryptography is limited to protecting Wafra financial records, structured financial imports and device authentication. The app does not expose general-purpose encryption, messaging, key management, or arbitrary encrypted file storage. See the retained assessment and official sources.",
+  "assessment": "docs/store-compliance/apple-export-assessment-155.md"
 }
