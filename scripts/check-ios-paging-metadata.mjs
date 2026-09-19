@@ -6,6 +6,10 @@ export function verifyPagedIntentMetadata(metadata) {
     BeginWafraPagedImportIntent: { policy: 2, params: { oldestGUID: 0, oldestDate: 0, newestGUID: 0, newestDate: 0 } },
     StageWafraPagedImportIntent: { policy: 0, params: { request: 0, found: 2, frame: 0 } },
     StageWafraPagedColumnsIntent: { policy: 0, params: { request: 0, found: 2, guids: 0, bodies: 0, senders: 0, dates: 0 } },
+    // Typed-date graph (v4): dates are `Date` (LNPrimitiveValueType 8), never Shortcuts-formatted text.
+    BeginWafraPagedImportV2Intent: { policy: 2, params: { oldestGUID: 0, oldestDate: 8, newestGUID: 0, newestDate: 8 } },
+    StageWafraPagedRowIntent: { policy: 0, params: { request: 0, guid: 0, body: 0, sender: 0, date: 8 } },
+    CommitWafraPagedPageIntent: { policy: 0, params: { request: 0, found: 2 } },
   };
   for (const [name, spec] of Object.entries(specs)) {
     const action = metadata?.actions?.[name]; assert.ok(action, 'Missing '+name);

@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '../../..');
 const PROGRESS = 'wafra/ios-message-setup-progress/v1';
 const HANDOFF = 'wafra/ios-history-handoff-started-at/v1';
 const ORIGIN = 'wafra/ios-history-return-origin/v1';
-const INSTALLED = 'wafra/ios-history-shortcut-installed/v1';
+const INSTALLED = 'wafra/ios-history-shortcut-installed/v2';
 const LIVE_URL = 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef';
 const HISTORY_URL = 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789';
 const deferred = () => {

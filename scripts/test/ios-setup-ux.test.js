@@ -401,7 +401,7 @@ async function historyCardTests() {
   // run URL resolves by installed name.
   const savedHistoryUrl = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
   const savedPagedFlag = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
-  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
   delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
   try {
     const production = execute('src/lib/ios-history-setup.ts', {
@@ -410,7 +410,7 @@ async function historyCardTests() {
     eq(
       'iOS history: a production build runs the name Apple installs for its configured record',
       [production.IOS_HISTORY_SHORTCUT_NAME, new URL(production.historyShortcutRunUrl()).searchParams.get('name')],
-      ['Wafra-History-v2-typed-date.signed', 'Wafra-History-v2-typed-date.signed'],
+      ['Wafra-History-v4.signed', 'Wafra-History-v4.signed'],
     );
     eq(
       'iOS history: Continue re-runs a paged graph because it resumes its saved cursor',
@@ -422,8 +422,8 @@ async function historyCardTests() {
     eq(
       'iOS history: the paged module and the public-record check name the same installed Shortcut',
       [
-        /PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date\.signed'/.test(pagedSetup),
-        /id: 'bc30c7ae89d6494c9ef0aea1a666d72d', installedName: 'Wafra-History-v2-typed-date\.signed'/.test(releaseCheck),
+        /Wafra-History-v4\.signed\.shortcut': 'Wafra-History-v4\.signed'/.test(pagedSetup),
+        /installedName: 'Wafra-History-v4\.signed'/.test(releaseCheck),
       ],
       [true, true],
     );
@@ -2313,7 +2313,7 @@ async function messageOnboardingProgressTests() {
   );
 
   values.clear();
-  values.set('wafra/ios-history-shortcut-installed/v1', 'true');
+  values.set('wafra/ios-history-shortcut-installed/v2', 'true');
   eq(
     'iOS message onboarding: the existing history install confirmation is reconciled without native status',
     await progress.loadIosMessageSetupProgress(storage),

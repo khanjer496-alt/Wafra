@@ -37,10 +37,22 @@ export interface IosHistoryShortcutRecord {
 export const IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS: Readonly<Record<string, IosHistoryShortcutRecord>> = {
   'bc30c7ae89d6494c9ef0aea1a666d72d': { name: 'Wafra-History-v2-typed-date.signed', resumesOnRerun: true },
 };
+/**
+ * Typed-date paged graph (v4), Apple-signed on a Mac and published as a
+ * release asset. Apple installs a signed file under its basename. Every date
+ * reaches Wafra as a typed `Date` App Intent parameter; Shortcuts never
+ * formats one as text (the v2 failure on iOS 26).
+ */
+export const IOS_HISTORY_V4_URL =
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
+export const IOS_HISTORY_V4_NAME = 'Wafra-History-v4.signed';
 export const IOS_HISTORY_SHORTCUT_DEFAULT_NAME = 'Wafra History Import';
 const iosHistoryShortcutRecord = (installUrl: unknown): IosHistoryShortcutRecord | null => {
   if (installUrl === IOS_HISTORY_BASELINE_200_URL) {
     return { name: IOS_HISTORY_SHORTCUT_DEFAULT_NAME, resumesOnRerun: false };
+  }
+  if (installUrl === IOS_HISTORY_V4_URL) {
+    return { name: IOS_HISTORY_V4_NAME, resumesOnRerun: true };
   }
   const id = typeof installUrl === 'string'
     ? /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(installUrl)?.[1]?.toLowerCase()
@@ -55,7 +67,7 @@ export const iosHistoryShortcutResumesOnRerun = (
 export const IOS_HISTORY_SHORTCUT_NAME = installedIosHistoryShortcutName(
   process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
 );
-export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v1';
+export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v2';
 export const IOS_HISTORY_HANDOFF_MARKER = 'wafra/ios-history-handoff-started-at/v1';
 export const IOS_HISTORY_RETURN_ORIGIN_MARKER = 'wafra/ios-history-return-origin/v1';
 
@@ -171,6 +183,7 @@ export const historyShortcutContinueUrl = (): string =>
 
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
   if (value === IOS_HISTORY_BASELINE_200_URL) return IOS_HISTORY_BASELINE_200_URL;
+  if (value === IOS_HISTORY_V4_URL) return IOS_HISTORY_V4_URL;
   if (typeof value !== 'string') return null;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;

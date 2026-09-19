@@ -4,9 +4,19 @@
 // by installed name, which is how an older duplicate was executed on-device.
 // The same record/name pair lives in IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS
 // (ios-history-setup.ts); this module stays dependency-free for its tests.
-export const PAGED_HISTORY_SHORTCUT_NAME = 'Wafra-History-v2-typed-date.signed';
-export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v3';
-const VERIFIED_HISTORY_SHORTCUT_URL = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
+// Two verified paged records exist: the v2 iCloud record and the typed-date v4
+// release asset. The run name follows whichever record the build installs.
+const VERIFIED_PAGED_RECORDS: Readonly<Record<string, string>> = {
+  'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d': 'Wafra-History-v2-typed-date.signed',
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut': 'Wafra-History-v4.signed',
+};
+const configuredHistoryUrl = (): string | undefined => process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+export const PAGED_HISTORY_SHORTCUT_NAME: string =
+  VERIFIED_PAGED_RECORDS[configuredHistoryUrl() ?? ''] ?? 'Wafra-History-v2-typed-date.signed';
+export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v4';
+const VERIFIED_HISTORY_SHORTCUT_URL: string = configuredHistoryUrl() && VERIFIED_PAGED_RECORDS[configuredHistoryUrl()!]
+  ? configuredHistoryUrl()!
+  : 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d';
 // A build that installs the paged record runs the paged graph whether or not
 // the beta flag is set: production shipped `5a0da9b5…` without the flag, so its
 // users ran a paged Shortcut while the app still showed the legacy history UI
@@ -52,7 +62,7 @@ export const pagedHistoryCopy = {
   en: {
     title: 'Import past messages', intro: 'One setup. Available history, read in small pages.',
     install: 'Add the history Shortcut', installed: 'I added it — start import', start: 'Start history import', resume: 'Resume saved import', review: 'Review transactions',
-    installHelp: 'Tap Add Shortcut on the iCloud page, then return here to start. Wafra will run only the canonical History shortcut from this link.',
+    installHelp: 'Safari downloads the signed shortcut file. Open it from Downloads (the share icon, then Shortcuts) and tap Add Shortcut, then return here to start. Wafra will run only the canonical History shortcut from this link.',
     privacy: 'Apple asks before reading Messages. Bank alerts are checked locally; nothing is uploaded. Only transactions you approve enter your ledger.',
     runningHelp: 'Keep Shortcuts open and the iPhone unlocked. If it stops, return here and resume; confirmed pages are retained for up to 24 hours.',
     counts: 'Messages checked', accepted: 'Readable', skipped: 'Unreadable or skipped',
@@ -68,7 +78,7 @@ export const pagedHistoryCopy = {
   ar: {
     title: 'استيراد الرسائل السابقة', intro: 'إعداد واحد. قراءة السجل المتاح على دفعات صغيرة.',
     install: 'إضافة اختصار السجل', installed: 'أضفته — بدء الاستيراد', start: 'بدء استيراد السجل', resume: 'متابعة الاستيراد المحفوظ', review: 'مراجعة العمليات',
-    installHelp: 'اضغط إضافة الاختصار في صفحة iCloud، ثم عد إلى هنا للبدء. سيشغّل وفرة فقط اختصار السجل المعتمد من هذا الرابط.',
+    installHelp: 'سيحمّل Safari ملف الاختصار الموقّع. افتحه من التنزيلات (أيقونة المشاركة ثم الاختصارات) واضغط إضافة الاختصار، ثم عد إلى هنا للبدء. سيشغّل وفرة فقط اختصار السجل المعتمد من هذا الرابط.',
     privacy: 'تطلب آبل إذنك قبل قراءة الرسائل. تُفحص التنبيهات المصرفية محلياً دون رفعها. تُحفظ في سجلك فقط العمليات التي توافق عليها.',
     runningHelp: 'اترك تطبيق الاختصارات مفتوحاً والآيفون غير مقفل. إذا توقف، عد إلى هنا للمتابعة. تُحفظ الدفعات المؤكدة لمدة تصل إلى 24 ساعة.',
     counts: 'الرسائل المفحوصة', accepted: 'قابلة للقراءة', skipped: 'غير مقروءة أو متجاوزة',
