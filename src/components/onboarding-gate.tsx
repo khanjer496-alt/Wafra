@@ -64,6 +64,7 @@ import {
   normalizePreferredName,
   onboardingHistoryGap,
   onboardingInsightKeys,
+  onboardingNoAutomaticCapture,
   onboardingLandingPath,
   onboardingPrefersNotificationCapture,
   onboardingResumeDestination,
@@ -1666,8 +1667,19 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         {showHistoryGapOffer && (
                           <View style={styles.proPreview} testID="onboarding-history-gap">
                             <View style={styles.proPreviewCopy}>
-                              <ThemedText style={styles.valueStepTitle}>{t('onboardHistoryGapTitle')}</ThemedText>
-                              <ThemedText style={styles.choiceDetail}>{t('onboardHistoryGapBody')}</ThemedText>
+                              {/* "Wafra catches everything from here" is true of a
+                                  bank that sends something. For one that sends
+                                  nothing it is a promise the app cannot keep. */}
+                              <ThemedText style={styles.valueStepTitle}>
+                                {t(onboardingNoAutomaticCapture(selectedAlerts)
+                                  ? 'onboardHistoryGapManualTitle'
+                                  : 'onboardHistoryGapTitle')}
+                              </ThemedText>
+                              <ThemedText style={styles.choiceDetail}>
+                                {t(onboardingNoAutomaticCapture(selectedAlerts)
+                                  ? 'onboardHistoryGapManualBody'
+                                  : 'onboardHistoryGapBody')}
+                              </ThemedText>
                             </View>
                             <Button
                               wrapLabel

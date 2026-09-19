@@ -155,7 +155,10 @@ async function screen(t, options = {}) {
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
+    // Real module, with only the two surfaces this harness pins overridden —
+    // a hand-listed stub silently drops functions setup later starts calling.
     '@/lib/onboarding': {
+      ...require('../build/onboarding'),
       onboardingLandingPath: () => '/',
       onboardingInsightKeys: () => ({
         title: 'onboardInsightOverviewTitle',

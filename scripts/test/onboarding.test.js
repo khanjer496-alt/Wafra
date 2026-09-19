@@ -215,6 +215,36 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   eq('re-answering replaces rather than stacks',
     withAlerts(updated, 'sms').alerts, 'sms');
 
+  /* A bank that sends nothing is not covered "from now on" either. Drawing or
+   * promising future capture there is the same false reassurance this question
+   * exists to remove, and AGENTS.md forbids claiming coverage we do not have. */
+  const noCapture = onboarding.onboardingNoAutomaticCapture;
+  eq('a bank that sends nothing has no automatic input at all', noCapture('neither'), true);
+  for (const answer of ['sms', 'notifications', 'unsure', null, undefined]) {
+    eq(`every other answer names a channel Wafra can follow (${answer})`, noCapture(answer), false);
+  }
+  ok('and the copy for that case promises no automatic future capture',
+    !/catch everything from here|on its own/i.test(i18n.t('onboardHistoryGapManualBody', 'en')) &&
+      /sends nothing/i.test(i18n.t('onboardHistoryGapManualBody', 'en')));
+  ok('every string that case needs is translated in both languages',
+    ['onboardHistoryGapManualTitle', 'onboardHistoryGapManualBody', 'onboardAlertsReachManual',
+      'statementImportNoCaptureDetail']
+      .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)));
+
+  /* Rebuilding the profile field by field is what erased these answers the
+   * moment an iPhone finished setup, because the reducer replaces the whole
+   * object. The stage helper must carry through anything it does not name. */
+  const atStage = onboarding.onboardingProfileAtStage;
+  const full = { v: 1, stage: 'capture', focus: 'bills', tracking: 'bank-apps',
+    intention: 'stay-ahead', alerts: 'notifications', country: 'AE', startedAt: 7 };
+  eq('completing setup keeps every answer and only moves the stage',
+    atStage(full, 'complete', 99), { ...full, stage: 'complete' });
+  eq('including a field this build does not name',
+    atStage({ ...full, somethingNewer: 1 }, 'complete', 99).somethingNewer, 1);
+  eq('and a ledger with no profile still gets a usable one', atStage(null, 'complete', 42).startedAt, 42);
+  ok('which is still a valid persisted profile',
+    backupValidation.isValidBackupState({ transactions: [], onboardingProfile: atStage(full, 'complete', 99) }));
+
   const prefersNotifications = onboarding.onboardingPrefersNotificationCapture;
   eq('capture setup leads with notifications only when that is the answer',
     prefersNotifications('notifications'), true);
@@ -481,6 +511,22 @@ ok(
     /alerts: nextAlerts,/.test(gateSource) &&
     /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
 );
+/* iOS has no completion screen in the gate — setup exits straight into the
+ * app — so the statement offer Android shows there had nowhere to appear, and
+ * the profile was being rebuilt without the new answers on the way out. */
+ok(
+  'finishing iPhone setup preserves the answers instead of rebuilding the profile',
+  /onboardingProfileAtStage\(state\.onboardingProfile, 'complete', Date\.now\(\)\)/.test(iosSource) &&
+    !/stage: 'complete',\s*\n\s*focus: onboardingFocus/.test(iosSource),
+);
+ok(
+  'and exits into the statement import when the bank leaves no history to read',
+  /const finishDestination = useCallback\([\s\S]{0,260}onboardingHistoryGap\(state\.onboardingProfile\?\.alerts\)/
+    .test(iosSource) &&
+    /\/statement-import' as const/.test(iosSource) &&
+    /exitToRoot\(finishDestination\(\)\)/.test(iosSource),
+);
+
 /* Settings is where an already-onboarded user finds this, so the question and
  * the fix it points at have to sit together — and the statement row has to say
  * WHY it is being suggested, or it reads as an unexplained upsell. */
@@ -818,8 +864,11 @@ ok(
 ok(
   'iOS checklist completion durably finishes onboarding before opening the selected first view',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
-    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?onboardingLandingPath\(onboardingFocus\)/.test(iosSource) &&
-    /setOnboardingProfile\(\{[\s\S]*?stage: 'complete'/.test(iosSource),
+    // The destination is resolved by finishDestination() now, so it can be the
+    // statement import for a bank that leaves no history; the ordering this
+    // assertion exists for — durable finish BEFORE the exit — is unchanged.
+    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?exitToRoot\(finishDestination\(\)\)/.test(iosSource) &&
+    /setOnboardingProfile\(\s*onboardingProfileAtStage\(state\.onboardingProfile, 'complete'/.test(iosSource),
 );
 ok(
   'manual exit durably opts out while automated completion still requires both outcomes',

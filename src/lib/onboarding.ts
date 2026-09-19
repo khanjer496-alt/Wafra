@@ -167,6 +167,20 @@ export function onboardingHistoryGap(
  * close to empty for their main bank. The capture step still offers both —
  * a second bank may well text — but the recommendation follows the answer.
  */
+/**
+ * Does this answer mean Wafra has NO automatic input from that bank at all?
+ *
+ * "Neither" is not a softer version of the notification answer: a bank that
+ * sends no message of any kind leaves nothing to read now and nothing to read
+ * later. Every other answer names a channel Wafra can follow going forward,
+ * so this is the one case where future coverage must not be drawn or promised.
+ */
+export function onboardingNoAutomaticCapture(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'neither';
+}
+
 export function onboardingPrefersNotificationCapture(
   alerts: OnboardingAlertDelivery | null | undefined,
 ): boolean {
@@ -186,6 +200,27 @@ export function onboardingPrefersNotificationCapture(
  * finished onboarding long ago, and a resumable stage would send its owner
  * back through a questionnaire they already answered.
  */
+/**
+ * Move a profile to a stage while keeping every answer it already holds.
+ *
+ * Rebuilding the object field by field is how the alert-delivery and country
+ * answers were silently dropped the moment an iPhone finished setup: the
+ * reducer replaces the whole profile, so any writer that forgets a field
+ * erases it. Spreading what is there means a field added later survives every
+ * writer by default, which is the only version of this that stays correct.
+ */
+export function onboardingProfileAtStage(
+  profile: OnboardingProfile | null | undefined,
+  stage: OnboardingJourneyStage,
+  now: number,
+): OnboardingProfile {
+  return {
+    ...(profile ?? { v: 1, stage, focus: null, tracking: null, startedAt: now }),
+    v: 1,
+    stage,
+  };
+}
+
 export function onboardingProfileWithAlerts(
   profile: OnboardingProfile | null | undefined,
   alerts: OnboardingAlertDelivery,

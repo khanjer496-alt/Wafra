@@ -152,7 +152,12 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' },
         trackGrowthEvent() {},
       },
+      // The real module, with only the two surfaces this harness pins overridden.
+      // Listing functions by hand is how this drifted: setup started calling
+      // onboardingHistoryGap and onboardingProfileAtStage, the stub had neither,
+      // and completion failed on an undefined call rather than on its own logic.
       '@/lib/onboarding': {
+        ...require('./build/onboarding'),
         onboardingLandingPath: () => '/',
         onboardingInsightKeys: () => ({
           title: 'onboardInsightOverviewTitle',

@@ -120,6 +120,7 @@ import type { OnboardingAlertDelivery } from '@/lib/types';
 import {
   ALERT_DELIVERY_PRESETS,
   onboardingHistoryGap,
+  onboardingNoAutomaticCapture,
   onboardingProfileWithAlerts,
 } from '@/lib/onboarding';
 import { ClearAllError, useStore } from '@/lib/store';
@@ -1294,9 +1295,11 @@ export default function SettingsScreen() {
             // The answer above decides which of these two sentences is true,
             // so the fix reads as the consequence of what the person just
             // told us rather than as an unexplained suggestion.
-            onboardingHistoryGap(alertsAnswer)
-              ? t('statementImportGapDetail')
-              : t('statementImportSettingsDetail'),
+            onboardingNoAutomaticCapture(alertsAnswer)
+              ? t('statementImportNoCaptureDetail')
+              : onboardingHistoryGap(alertsAnswer)
+                ? t('statementImportGapDetail')
+                : t('statementImportSettingsDetail'),
             () => router.push('/statement-import'),
           )}
           {Platform.OS === 'ios' && linkRow(
