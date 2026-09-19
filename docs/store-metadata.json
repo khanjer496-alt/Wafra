@@ -5,9 +5,16 @@
     "defaultLocale": "en-US",
     "ledgerCurrencySupport": {
       "standard": "ISO 4217",
-      "minorUnitExponents": [0, 2, 3]
+      "minorUnitExponents": [
+        0,
+        2,
+        3
+      ]
     },
-    "automaticImportMarketPacks": ["AE", "SA"],
+    "automaticImportMarketPacks": [
+      "AE",
+      "SA"
+    ],
     "reason": "Wafra's ledger and manual entry are global. A first manual entry requires an explicit supported ISO ledger currency. Automatic bank-alert posting remains limited to explicitly tested market/bank formats; unfamiliar global alerts are review-only or manual rather than guessed."
   },
   "positioning": {
@@ -18,14 +25,18 @@
   "apple": {
     "primaryCategory": "FINANCE",
     "secondaryCategory": "PRODUCTIVITY",
-    "launchLocales": ["en-US"],
-    "optionalLocales": ["ar-SA"],
+    "launchLocales": [
+      "en-US"
+    ],
+    "optionalLocales": [
+      "ar-SA"
+    ],
     "locales": {
       "en-US": {
         "name": "Wafra: Budget & Money Tracker",
-        "subtitle": "Expenses, bills & budgets",
-        "keywords": "spending,subscriptions,savings,cashflow,cards,reminders,recurring,card due,salary,cashbook",
-        "promotionalText": "See spending, bills, recurring charges and savings goals in one private ledger. Start manually; supported bank-alert imports are optional.",
+        "subtitle": "Private budget & statements",
+        "keywords": "no bank login,import statement,expense tracker,privacy,subscriptions,savings,cashflow,bills",
+        "promotionalText": "See spending, bills and savings in one private ledger. Import a statement or paste an alert—no bank login.",
         "description": "See what is left, where your money went, and what is due next—without connecting a bank account.\n\nWafra brings expenses, income, budgets, card dues, bills, recurring charges and savings goals into one clear private ledger. Start manually, paste an alert you choose, or use one of the optional import methods available on your device.\n\nWHAT WAFRA HELPS WITH\n• Track spending and income in a clean monthly view\n• Set category budgets and catch overspending early\n• Keep card statement dates and bill reminders together\n• Spot recurring charges and review changes over time\n• Organize cards, accounts and savings goals\n• Choose a salary-day money month instead of the calendar month\n• Export and restore a backup file you control\n\nPRIVATE BY DESIGN\nNo sign-up. No ads. Wafra does not connect to your bank account. Your ledger is encrypted on your device. Optional iPhone imports are user-configured and clearly explained before any data is processed. Support varies by bank and message format; the app always remains useful with manual entry.\n\nWAFRA PRO\nWafra includes three app days; they do not start a subscription or charge. After that, Pro keeps automatic capture active, while manual entry, pasted alerts and backup/restore remain free. Payment is charged by Apple in your local storefront currency. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the current period. You can restore purchases or manage your subscription from the app."
       },
       "ar-SA": {
@@ -66,7 +77,7 @@
         "languageCode": "en-US",
         "status": "launch",
         "title": "Wafra: Budget & Money Tracker",
-        "shortDescription": "Track expenses, budgets, bills, subscriptions and savings—privately.",
+        "shortDescription": "Track expenses, budgets & statements—privately.",
         "fullDescription": "See what is left, where your money went, and what is due next—without connecting a bank account.\n\nWafra is a private expense tracker and budget planner for spending, income, card dues, bills, recurring charges and savings goals. Choose your ledger currency, start manually, paste an alert you choose, or use an optional supported import.\n\nKEY FEATURES\n• Clear monthly spending and income\n• Category budgets with useful limits\n• Bills, card dues and recurring charges in one place\n• Savings goals and account organization\n• Salary-day or calendar money months\n• Backup and restore with a file you control\n• Optional app lock\n\nOPTIONAL ANDROID BANK-SMS TRACKING\nWhere a bank and message format are supported, Wafra can use READ_SMS after an in-app explanation and your permission to scan retained financial alerts on your phone and turn supported activity into ledger entries. SMS processing happens on your device; Wafra does not upload your SMS, and non-financial messages are ignored.\n\nRECEIVE_SMS is requested separately only if you choose instant transaction alerts. It lets Wafra inspect a newly delivered SMS on-device for financial activity so it can show the optional alert. You can decline either permission and continue using Wafra manually. Automatic bank-alert coverage varies by country, bank and exact message format.\n\nPRIVACY\nNo account registration. No ads. No bank login. Your main ledger is encrypted on your device. Optional relay-backed statement, email and trusted-device features are explained before use. Unsupported automatic bank formats are never presented as guaranteed coverage.\n\nAutomatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency. Manage or cancel your subscription through Google Play."
       },
       "global-ar": {
@@ -80,7 +91,7 @@
         "languageCode": "en-US",
         "status": "market-specific-custom-listing",
         "title": "Wafra: Budget & Money Tracker",
-        "shortDescription": "Track supported bank alerts, budgets, bills and subscriptions—privately.",
+        "shortDescription": "Track supported bank alerts, budgets, bills—privately.",
         "fullDescription": "Turn supported UAE and Saudi bank alerts into a clearer money picture—without sharing bank credentials.\n\nOn Android, SMS access is optional. Leave permission off and use manual entry whenever you prefer. If you choose automatic tracking, Android processes supported bank alerts locally on your phone; other content is discarded before Wafra storage and is never uploaded. READ_SMS imports retained alerts after you choose automatic tracking. The separate RECEIVE_SMS permission is requested only if you enable optional instant bank-alert banners.\n\nTrack expenses, income, budgets, card dues, utility bills, recurring charges, subscriptions and savings goals. Support depends on the bank and exact message format; review the supported list in the app.\n\nNo registration. No ads. No bank login. Wafra cannot reply to messages, approve payments or move money. Your ledger is encrypted on your device. Automatic capture requires Wafra Pro after three included app days; manual entry, pasted alerts and backup/restore remain free. No subscription or charge starts automatically. Wafra Pro is billed by Google Play in your local storefront currency."
       },
       "gulf-ar": {
@@ -92,32 +103,50 @@
       }
     },
     "launchDefaultListing": "global-en",
-    "launchListings": ["global-en"],
-    "optionalListings": ["global-ar", "gulf-en", "gulf-ar"],
-    "tags": ["Budgeting", "Expense tracker", "Personal finance"],
+    "launchListings": [
+      "global-en"
+    ],
+    "optionalListings": [
+      "global-ar",
+      "gulf-en",
+      "gulf-ar"
+    ],
+    "tags": [
+      "Budgeting",
+      "Expense tracker",
+      "Personal finance"
+    ],
     "subscriptionLocalizations": {
       "wafra_pro_monthly": {
         "en-US": {
           "title": "Wafra Pro Monthly",
           "description": "Automatic capture after three included app days, billed monthly.",
-          "benefits": ["Automatic capture"]
+          "benefits": [
+            "Automatic capture"
+          ]
         },
         "ar": {
           "title": "وفرة برو شهرياً",
           "description": "الالتقاط التلقائي بعد ثلاثة أيام مضمنة، بفوترة شهرية.",
-          "benefits": ["الالتقاط التلقائي"]
+          "benefits": [
+            "الالتقاط التلقائي"
+          ]
         }
       },
       "wafra_pro_yearly": {
         "en-US": {
           "title": "Wafra Pro Yearly",
           "description": "Automatic capture after three included app days, billed yearly.",
-          "benefits": ["Automatic capture"]
+          "benefits": [
+            "Automatic capture"
+          ]
         },
         "ar": {
           "title": "وفرة برو سنوياً",
           "description": "الالتقاط التلقائي بعد ثلاثة أيام مضمنة، بفوترة سنوية.",
-          "benefits": ["الالتقاط التلقائي"]
+          "benefits": [
+            "الالتقاط التلقائي"
+          ]
         }
       }
     }
@@ -126,111 +155,364 @@
     "apple": {
       "device": "6.9-inch iPhone",
       "pixels": "1320x2868",
-      "launchLocales": ["en-US"],
-      "locales": ["en-US", "ar-SA"],
+      "launchLocales": [
+        "en-US"
+      ],
+      "locales": [
+        "en-US",
+        "ar-SA"
+      ],
       "story": [
         {
           "route": "/",
-          "headline": { "en-US": "See where your money goes", "ar-SA": "شاهد أين تذهب أموالك" },
-          "altText": { "en-US": "Wafra Home showing spending, income and money left this month in the selected ledger currency.", "ar-SA": "شاشة وفرة الرئيسية تعرض المصاريف والدخل والمتبقي هذا الشهر بعملة السجل المختارة." }
+          "headline": {
+            "en-US": "See where your money goes",
+            "ar-SA": "شاهد أين تذهب أموالك"
+          },
+          "altText": {
+            "en-US": "Wafra Home showing spending, income and money left this month in the selected ledger currency.",
+            "ar-SA": "شاشة وفرة الرئيسية تعرض المصاريف والدخل والمتبقي هذا الشهر بعملة السجل المختارة."
+          }
         },
         {
           "route": "/import-sms",
-          "headline": { "en-US": "Start without linking a bank", "ar-SA": "ابدأ دون ربط حساب بنكي" },
-          "altText": { "en-US": "Import choices for manual paste and supported user-configured methods.", "ar-SA": "خيارات الاستيراد باللصق اليدوي والطرق المدعومة التي يهيئها المستخدم." }
+          "headline": {
+            "en-US": "Start without linking a bank",
+            "ar-SA": "ابدأ دون ربط حساب بنكي"
+          },
+          "altText": {
+            "en-US": "Import choices for manual paste and supported user-configured methods.",
+            "ar-SA": "خيارات الاستيراد باللصق اليدوي والطرق المدعومة التي يهيئها المستخدم."
+          }
         },
         {
           "route": "/bills",
-          "headline": { "en-US": "Bills and recurring charges, together", "ar-SA": "فواتيرك ورسومك المتكررة معاً" },
-          "altText": { "en-US": "Upcoming bills and recurring charges with dates and amounts.", "ar-SA": "الفواتير القادمة والرسوم المتكررة مع التواريخ والمبالغ." }
+          "headline": {
+            "en-US": "Bills and recurring charges, together",
+            "ar-SA": "فواتيرك ورسومك المتكررة معاً"
+          },
+          "altText": {
+            "en-US": "Upcoming bills and recurring charges with dates and amounts.",
+            "ar-SA": "الفواتير القادمة والرسوم المتكررة مع التواريخ والمبالغ."
+          }
         },
         {
           "route": "/bills",
           "state": "subscription-detail",
-          "headline": { "en-US": "Know what changed—and when", "ar-SA": "اعرف ما تغيّر ومتى" },
-          "altText": { "en-US": "Recurring-charge detail showing price history and the next expected date.", "ar-SA": "تفاصيل رسم متكرر تعرض سجل السعر والموعد المتوقع التالي." }
+          "headline": {
+            "en-US": "Know what changed—and when",
+            "ar-SA": "اعرف ما تغيّر ومتى"
+          },
+          "altText": {
+            "en-US": "Recurring-charge detail showing price history and the next expected date.",
+            "ar-SA": "تفاصيل رسم متكرر تعرض سجل السعر والموعد المتوقع التالي."
+          }
         },
         {
           "route": "/wallet",
-          "headline": { "en-US": "Card dues before they surprise you", "ar-SA": "مستحقات البطاقات قبل أن تفاجئك" },
-          "altText": { "en-US": "Wallet showing card statement balance, due date and linked accounts.", "ar-SA": "المحفظة تعرض رصيد كشف البطاقة وموعد الاستحقاق والحسابات." }
+          "headline": {
+            "en-US": "Card dues before they surprise you",
+            "ar-SA": "مستحقات البطاقات قبل أن تفاجئك"
+          },
+          "altText": {
+            "en-US": "Wallet showing card statement balance, due date and linked accounts.",
+            "ar-SA": "المحفظة تعرض رصيد كشف البطاقة وموعد الاستحقاق والحسابات."
+          }
         },
         {
           "route": "/flow",
-          "headline": { "en-US": "Numbers you can actually read", "ar-SA": "أرقام واضحة يمكنك فهمها" },
-          "altText": { "en-US": "Cash-flow view comparing this period with the previous period.", "ar-SA": "عرض التدفق النقدي يقارن الفترة الحالية بالفترة السابقة." }
+          "headline": {
+            "en-US": "Numbers you can actually read",
+            "ar-SA": "أرقام واضحة يمكنك فهمها"
+          },
+          "altText": {
+            "en-US": "Cash-flow view comparing this period with the previous period.",
+            "ar-SA": "عرض التدفق النقدي يقارن الفترة الحالية بالفترة السابقة."
+          }
         },
         {
           "route": "/flow",
           "state": "limits",
-          "headline": { "en-US": "Catch overspending early", "ar-SA": "انتبه للتجاوز قبل فوات الأوان" },
-          "altText": { "en-US": "Category budget limits with current spending progress.", "ar-SA": "حدود ميزانية الفئات مع تقدم الإنفاق الحالي." }
+          "headline": {
+            "en-US": "Catch overspending early",
+            "ar-SA": "انتبه للتجاوز قبل فوات الأوان"
+          },
+          "altText": {
+            "en-US": "Category budget limits with current spending progress.",
+            "ar-SA": "حدود ميزانية الفئات مع تقدم الإنفاق الحالي."
+          }
         },
         {
           "route": "/settings",
-          "headline": { "en-US": "Private by design", "ar-SA": "الخصوصية من البداية" },
-          "altText": { "en-US": "Privacy settings for an encrypted on-device ledger and clearly explained optional imports.", "ar-SA": "إعدادات الخصوصية لسجل مشفر على الجهاز وطرق استيراد اختيارية موضحة." }
+          "headline": {
+            "en-US": "Private by design",
+            "ar-SA": "الخصوصية من البداية"
+          },
+          "altText": {
+            "en-US": "Privacy settings for an encrypted on-device ledger and clearly explained optional imports.",
+            "ar-SA": "إعدادات الخصوصية لسجل مشفر على الجهاز وطرق استيراد اختيارية موضحة."
+          }
         }
       ]
     },
     "googleGlobal": {
       "status": "launch-required",
       "pixels": "1080x1920",
-      "locales": ["en", "ar"],
+      "locales": [
+        "en",
+        "ar"
+      ],
       "story": {
         "en": [
-          { "headline": "Money left this month", "altText": "Home view with income, spending and the amount left for the month." },
-          { "headline": "Start manually", "altText": "Manual transaction entry without connecting a bank account." },
-          { "headline": "Recurring charges", "altText": "Recurring payments grouped with expected dates and monthly totals." },
-          { "headline": "Bills and card dues", "altText": "Upcoming bills and credit-card statement due dates in one view." },
-          { "headline": "Category budgets", "altText": "Category limits showing current spending progress." },
-          { "headline": "Spending insights", "altText": "Cash-flow trends and spending composition for the selected period." },
-          { "headline": "Salary-day month", "altText": "Reporting period controls set to a salary-day money month." },
-          { "headline": "Encrypted ledger and explained imports", "altText": "Privacy settings for an encrypted ledger and optional import methods." }
+          {
+            "headline": "Money left this month",
+            "altText": "Home view with income, spending and the amount left for the month."
+          },
+          {
+            "headline": "Start manually",
+            "altText": "Manual transaction entry without connecting a bank account."
+          },
+          {
+            "headline": "Recurring charges",
+            "altText": "Recurring payments grouped with expected dates and monthly totals."
+          },
+          {
+            "headline": "Bills and card dues",
+            "altText": "Upcoming bills and credit-card statement due dates in one view."
+          },
+          {
+            "headline": "Category budgets",
+            "altText": "Category limits showing current spending progress."
+          },
+          {
+            "headline": "Spending insights",
+            "altText": "Cash-flow trends and spending composition for the selected period."
+          },
+          {
+            "headline": "Salary-day month",
+            "altText": "Reporting period controls set to a salary-day money month."
+          },
+          {
+            "headline": "Encrypted ledger and explained imports",
+            "altText": "Privacy settings for an encrypted ledger and optional import methods."
+          }
         ],
         "ar": [
-          { "headline": "المتبقي هذا الشهر", "altText": "الشاشة الرئيسية تعرض الدخل والمصاريف والمتبقي للشهر." },
-          { "headline": "ابدأ يدوياً", "altText": "إضافة عملية يدوياً دون ربط حساب بنكي." },
-          { "headline": "الرسوم المتكررة", "altText": "المدفوعات المتكررة مع المواعيد المتوقعة والمجموع الشهري." },
-          { "headline": "الفواتير ومستحقات البطاقات", "altText": "الفواتير القادمة ومواعيد سداد كشوف البطاقات في عرض واحد." },
-          { "headline": "ميزانية الفئات", "altText": "حدود فئات الإنفاق مع التقدم الحالي." },
-          { "headline": "تحليلات الإنفاق", "altText": "اتجاهات التدفق النقدي وتوزيع الإنفاق للفترة المختارة." },
-          { "headline": "شهر يبدأ يوم الراتب", "altText": "عناصر تحكم تضبط فترة التقارير وفق يوم الراتب." },
-          { "headline": "سجل مشفر واستيراد موضح", "altText": "إعدادات الخصوصية لسجل مشفر وطرق استيراد اختيارية." }
+          {
+            "headline": "المتبقي هذا الشهر",
+            "altText": "الشاشة الرئيسية تعرض الدخل والمصاريف والمتبقي للشهر."
+          },
+          {
+            "headline": "ابدأ يدوياً",
+            "altText": "إضافة عملية يدوياً دون ربط حساب بنكي."
+          },
+          {
+            "headline": "الرسوم المتكررة",
+            "altText": "المدفوعات المتكررة مع المواعيد المتوقعة والمجموع الشهري."
+          },
+          {
+            "headline": "الفواتير ومستحقات البطاقات",
+            "altText": "الفواتير القادمة ومواعيد سداد كشوف البطاقات في عرض واحد."
+          },
+          {
+            "headline": "ميزانية الفئات",
+            "altText": "حدود فئات الإنفاق مع التقدم الحالي."
+          },
+          {
+            "headline": "تحليلات الإنفاق",
+            "altText": "اتجاهات التدفق النقدي وتوزيع الإنفاق للفترة المختارة."
+          },
+          {
+            "headline": "شهر يبدأ يوم الراتب",
+            "altText": "عناصر تحكم تضبط فترة التقارير وفق يوم الراتب."
+          },
+          {
+            "headline": "سجل مشفر واستيراد موضح",
+            "altText": "إعدادات الخصوصية لسجل مشفر وطرق استيراد اختيارية."
+          }
         ]
       }
     },
     "googleGulf": {
       "status": "optional-market-specific",
       "pixels": "1080x1920",
-      "locales": ["en", "ar"],
+      "locales": [
+        "en",
+        "ar"
+      ],
       "story": {
         "en": [
-          { "headline": "Supported alert import", "altText": "Import review for supported UAE and Saudi bank alerts." },
-          { "headline": "Optional history scan", "altText": "Optional retained-alert scan with matched and skipped counts before filing." },
-          { "headline": "Recurring charges", "altText": "Subscriptions and other repeat payments grouped with expected dates." },
-          { "headline": "Card statement due dates", "altText": "Credit-card statement balances, minimums and due dates." },
-          { "headline": "Category budgets", "altText": "Category spending limits with progress toward each limit." },
-          { "headline": "Spending insights", "altText": "Period trends and spending composition from the private ledger." },
-          { "headline": "Android SMS processing on-device", "altText": "Android automatic-tracking setup explaining optional SMS access and on-device processing." },
-          { "headline": "Manual mode without bank login", "altText": "Manual and paste options that work without bank credentials." }
+          {
+            "headline": "Supported alert import",
+            "altText": "Import review for supported UAE and Saudi bank alerts."
+          },
+          {
+            "headline": "Optional history scan",
+            "altText": "Optional retained-alert scan with matched and skipped counts before filing."
+          },
+          {
+            "headline": "Recurring charges",
+            "altText": "Subscriptions and other repeat payments grouped with expected dates."
+          },
+          {
+            "headline": "Card statement due dates",
+            "altText": "Credit-card statement balances, minimums and due dates."
+          },
+          {
+            "headline": "Category budgets",
+            "altText": "Category spending limits with progress toward each limit."
+          },
+          {
+            "headline": "Spending insights",
+            "altText": "Period trends and spending composition from the private ledger."
+          },
+          {
+            "headline": "Android SMS processing on-device",
+            "altText": "Android automatic-tracking setup explaining optional SMS access and on-device processing."
+          },
+          {
+            "headline": "Manual mode without bank login",
+            "altText": "Manual and paste options that work without bank credentials."
+          }
         ],
         "ar": [
-          { "headline": "استيراد التنبيهات المدعومة", "altText": "مراجعة استيراد لتنبيهات بنوك إماراتية وسعودية مدعومة." },
-          { "headline": "فحص اختياري للسجل", "altText": "فحص اختياري للتنبيهات المحتفظ بها يعرض المطابق والمتخطى قبل التسجيل." },
-          { "headline": "الرسوم المتكررة", "altText": "الاشتراكات والمدفوعات المتكررة مع المواعيد المتوقعة." },
-          { "headline": "مواعيد كشوف البطاقات", "altText": "أرصدة كشوف البطاقات والحدود الدنيا ومواعيد السداد." },
-          { "headline": "ميزانية الفئات", "altText": "حدود فئات الإنفاق مع التقدم نحو كل حد." },
-          { "headline": "تحليلات الإنفاق", "altText": "اتجاهات الفترة وتوزيع الإنفاق من السجل الخاص." },
-          { "headline": "معالجة رسائل أندرويد على الجهاز", "altText": "إعداد المتابعة التلقائية يشرح وصول الرسائل الاختياري والمعالجة على الجهاز." },
-          { "headline": "وضع يدوي دون دخول بنكي", "altText": "خيارات الإدخال اليدوي واللصق تعمل دون بيانات دخول بنكية." }
+          {
+            "headline": "استيراد التنبيهات المدعومة",
+            "altText": "مراجعة استيراد لتنبيهات بنوك إماراتية وسعودية مدعومة."
+          },
+          {
+            "headline": "فحص اختياري للسجل",
+            "altText": "فحص اختياري للتنبيهات المحتفظ بها يعرض المطابق والمتخطى قبل التسجيل."
+          },
+          {
+            "headline": "الرسوم المتكررة",
+            "altText": "الاشتراكات والمدفوعات المتكررة مع المواعيد المتوقعة."
+          },
+          {
+            "headline": "مواعيد كشوف البطاقات",
+            "altText": "أرصدة كشوف البطاقات والحدود الدنيا ومواعيد السداد."
+          },
+          {
+            "headline": "ميزانية الفئات",
+            "altText": "حدود فئات الإنفاق مع التقدم نحو كل حد."
+          },
+          {
+            "headline": "تحليلات الإنفاق",
+            "altText": "اتجاهات الفترة وتوزيع الإنفاق من السجل الخاص."
+          },
+          {
+            "headline": "معالجة رسائل أندرويد على الجهاز",
+            "altText": "إعداد المتابعة التلقائية يشرح وصول الرسائل الاختياري والمعالجة على الجهاز."
+          },
+          {
+            "headline": "وضع يدوي دون دخول بنكي",
+            "altText": "خيارات الإدخال اليدوي واللصق تعمل دون بيانات دخول بنكية."
+          }
         ]
       }
     },
     "featureGraphics": {
       "pixels": "1024x500",
-      "global": { "en": "Money clarity, without a bank login", "ar": "وضوح مالي دون دخول بنكي" },
-      "gulf": { "en": "Supported bank alerts → a clear money picture", "ar": "تنبيهات بنكية مدعومة ← صورة مالية أوضح" }
+      "global": {
+        "en": "Money clarity, without a bank login",
+        "ar": "وضوح مالي دون دخول بنكي"
+      },
+      "gulf": {
+        "en": "Supported bank alerts → a clear money picture",
+        "ar": "تنبيهات بنكية مدعومة ← صورة مالية أوضح"
+      }
+    }
+  },
+  "asoGeoVariants": {
+    "schemaVersion": 1,
+    "notes": "Growth-room ASO subtitle/keyword leans for ME/US/EU/IN. Canonical Apple title stays 'Wafra: Budget & Money Tracker'. Outside ME, promo leads with statement/paste/on-device; bank alerts stay in body, not the first claim. Apple subtitle ≤30; Play shortDescription ≤80.",
+    "canonicalTitle": "Wafra: Budget & Money Tracker",
+    "bioLinks": {
+      "testFlightPublic": "https://testflight.apple.com/join/jbwzCgZ6",
+      "landing": "https://wafra-app-azg.pages.dev",
+      "privacy": "https://wafra-app-azg.pages.dev/privacy",
+      "terms": "https://wafra-app-azg.pages.dev/terms",
+      "support": "https://wafra-app-azg.pages.dev/support"
+    },
+    "geos": {
+      "ME": {
+        "markets": [
+          "AE",
+          "SA"
+        ],
+        "apple": {
+          "subtitle": "Bank alerts → private ledger",
+          "keywords": "bank alerts,SMS expenses,private budget,spending,subscriptions,savings,cashflow,card due"
+        },
+        "google": {
+          "shortDescription": "Track supported bank alerts, budgets, bills—privately.",
+          "keywordLean": [
+            "bank alerts",
+            "SMS expenses",
+            "ميزانية",
+            "مصاريف",
+            "private budget"
+          ]
+        },
+        "promoLead": "bank-alerts"
+      },
+      "US": {
+        "markets": [
+          "US"
+        ],
+        "apple": {
+          "subtitle": "Private budget & statements",
+          "keywords": "no bank login,import statement,expense tracker,privacy,subscriptions,savings,cashflow,bills"
+        },
+        "google": {
+          "shortDescription": "Track expenses, budgets & statements—privately.",
+          "keywordLean": [
+            "no bank login",
+            "import bank statement",
+            "expense tracker privacy",
+            "subscriptions"
+          ]
+        },
+        "promoLead": "statement-paste-on-device"
+      },
+      "EU": {
+        "markets": [
+          "EU"
+        ],
+        "apple": {
+          "subtitle": "On-device, no bank login",
+          "keywords": "private finance,CSV import,no ads,budget app,subscriptions,expense tracker,savings,bills"
+        },
+        "google": {
+          "shortDescription": "On-device budget tracker. No bank login.",
+          "keywordLean": [
+            "private finance",
+            "CSV statement import",
+            "no ads budget app",
+            "subscriptions tracker"
+          ]
+        },
+        "promoLead": "statement-paste-on-device"
+      },
+      "IN": {
+        "markets": [
+          "IN"
+        ],
+        "apple": {
+          "subtitle": "Expenses & statements",
+          "keywords": "expense tracker,import statement,private money,budget app,no signup,subscriptions,savings,bills"
+        },
+        "google": {
+          "shortDescription": "Track expenses & import statements—privately.",
+          "keywordLean": [
+            "expense tracker",
+            "import statement",
+            "private money app",
+            "budget without signup"
+          ]
+        },
+        "promoLead": "statement-paste-on-device"
+      }
     }
   }
 }
