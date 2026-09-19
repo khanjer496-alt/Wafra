@@ -13,7 +13,10 @@ const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node
   ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const text = node => Array.isArray(node) ? node.map(text).join(' ') : node && typeof node === 'object'
   ? text(node.props?.children) : typeof node === 'string' || typeof node === 'number' ? String(node) : '';
-const profile = (stage, focus = 'spending', tracking = 'bank-apps', intention = 'control') => ({ v: 1, stage, focus, tracking, intention, startedAt: 123 });
+// A resumed profile answers every question the journey asks, so a test that
+// starts mid-flow finds each Continue enabled exactly as a returning user would.
+const profile = (stage, focus = 'spending', tracking = 'bank-apps', intention = 'control', alerts = 'sms') =>
+  ({ v: 1, stage, focus, tracking, intention, alerts, startedAt: 123 });
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -133,6 +136,9 @@ async function gate(options = {}) {
     '@/hooks/use-reduced-motion': { useMotionPreference: () => ({ ready: options.motionReady ?? true, reducedMotion: options.reducedMotion ?? true }) },
     '@/components/storage-recovery': { StorageRecovery: 'StorageRecovery' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/bottom-sheet': { BottomSheet: 'BottomSheet' },
+    // The welcome country control reads the app palette for its sheet rows; the
+    // overlay itself stays night-themed, so nothing here depends on the values.
+    '@/hooks/use-theme': { useTheme: () => ({ primary: '#57B894', text: '#F3F1EC' }) },
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' }, '@/components/ui/controls': { Button: 'Button' },
     '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/wafra-logo': { WafraMark: 'WafraMark' }, '@/constants/theme': theme,
@@ -158,6 +164,10 @@ async function gate(options = {}) {
   };
   // The choosers are real source: the journey below picks options through their radio semantics.
   dependencies['@/components/onboarding/alive-scenes'] = load(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), dependencies);
+  // Same for the welcome country control: its sheet chrome is already stubbed
+  // above, so the row renders from real source like every other choice here.
+  dependencies['@/components/onboarding/country-confirm'] =
+    load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
@@ -210,7 +220,8 @@ module.exports = { gate, profile };
 
 if (require.main === module) {
 const stageHeading = { welcome: 'onboardHeadline', focus: 'onboardFocusTitle', tracking: 'onboardTrackingTitle',
-  intention: 'onboardIntentionTitle', preview: 'onboardPersonalizedTitle', capture: 'onboardCaptureTitleIos' };
+  alerts: 'onboardAlertsTitle', intention: 'onboardIntentionTitle', preview: 'onboardPersonalizedTitle',
+  capture: 'onboardCaptureTitleIos' };
 const normalizeVisible = value => String(value).replace(/\s+/g, ' ').trim();
 const at = (h, stage) => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t(stageHeading[stage]))), `Expected ${stage}; ${h.text()}`);
 const atName = h => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t('onboardNameTitle'))), `Expected name personalization; ${h.text()}`);
@@ -223,18 +234,22 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.control('continueWord').disabled, true);
     await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
     assert.equal(h.control('continueWord').disabled, true);
-    await h.choose(2); await h.press('continueWord'); at(h, 'intention');
+    await h.choose(2); await h.press('continueWord'); at(h, 'alerts');
+    assert.equal(h.control('continueWord').disabled, true);
+    await h.choose(1); await h.press('continueWord'); at(h, 'intention');
     assert.equal(h.control('continueWord').disabled, true);
     await h.choose(3); await h.press('continueWord'); at(h, 'preview');
     await h.press('onboardConnectMyMoney'); at(h, 'capture');
-    for (const stage of ['preview', 'intention', 'tracking', 'focus']) { await h.press('onboardBack'); at(h, stage); }
+    for (const stage of ['preview', 'intention', 'alerts', 'tracking', 'focus']) { await h.press('onboardBack'); at(h, stage); }
     await h.press('onboardBack'); atName(h);
     await h.press('onboardNameSkip'); await h.advance(400); assert.equal(h.control('continueWord').disabled, false);
+    await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); assert.equal(h.control('continueWord').disabled, false);
     await h.press('continueWord'); await h.press('onboardConnectMyMoney'); at(h, 'capture');
     assert.equal(h.state.onboardingProfile.focus, 'bills'); assert.equal(h.state.onboardingProfile.tracking, 'finance-app');
     assert.equal(h.state.onboardingProfile.intention, 'build-buffer');
+    assert.equal(h.state.onboardingProfile.alerts, 'notifications');
     assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
     assert.deepEqual(h.state.transactions, []); assert.equal(calls(h, 'setCaptureOptOut').length, 0);
   });
@@ -276,6 +291,7 @@ test('welcome animates in without Reduce Motion and still exposes the market sce
   assert.ok(walk(h.tree).some(node => node.props?.testID === 'onboarding-market-money-scene'));
   await h.press('onboardChooseStart'); atName(h); await h.press('onboardNameSkip'); at(h, 'focus');
   await h.choose(1); await h.press('continueWord'); at(h, 'tracking');
+  await h.choose(0); await h.press('continueWord'); at(h, 'alerts');
   await h.choose(0); await h.press('continueWord'); at(h, 'intention');
   await h.choose(0); await h.press('continueWord'); at(h, 'preview');
   assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
@@ -437,11 +453,13 @@ test('six full Back/Next cycles preserve the latest answers without starting cap
     await h.choose(cycle % 4); await h.press('continueWord');
     await h.choose((cycle + 1) % 4); await h.press('continueWord');
     await h.choose((cycle + 2) % 4); await h.press('continueWord');
+    await h.choose((cycle + 3) % 4); await h.press('continueWord');
     await h.press('onboardConnectMyMoney'); at(h, 'capture');
     assert.equal(h.state.onboardingProfile.focus, ['spending', 'bills', 'cashflow', 'overview'][cycle % 4]);
     assert.equal(h.state.onboardingProfile.tracking, ['bank-apps', 'spreadsheet', 'finance-app', 'none'][(cycle + 1) % 4]);
-    assert.equal(h.state.onboardingProfile.intention, ['control', 'spend-intentionally', 'stay-ahead', 'build-buffer'][(cycle + 2) % 4]);
-    for (const stage of ['preview', 'intention', 'tracking', 'focus']) {
+    assert.equal(h.state.onboardingProfile.alerts, ['sms', 'notifications', 'neither', 'unsure'][(cycle + 2) % 4]);
+    assert.equal(h.state.onboardingProfile.intention, ['control', 'spend-intentionally', 'stay-ahead', 'build-buffer'][(cycle + 3) % 4]);
+    for (const stage of ['preview', 'intention', 'alerts', 'tracking', 'focus']) {
       await h.press('onboardBack'); at(h, stage);
       assert.equal(h.state.onboardingProfile.stage, stage);
     }
@@ -492,6 +510,7 @@ test('ordinary profile save failure cannot be turned into a successful final com
     setCaptureOptOut: async () => { throw new Error('synthetic encrypted persistence failure'); },
   } });
   await h.choose(0); await h.press('continueWord'); await h.choose(0); await h.press('continueWord');
+  await h.choose(0); await h.press('continueWord');
   await h.choose(0);
   await h.setFailure({ operation: 'write', message: 'synthetic profile persistence failure' });
   await h.press('continueWord'); await h.press('onboardConnectMyMoney');

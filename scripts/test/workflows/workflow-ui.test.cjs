@@ -83,7 +83,10 @@ test('bank-payment nicknames learn by bill identity and never write a merchant-w
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{8:true}}),tree=h.renderScreen('onboarding');
+ // states[10] is the gate's `resumeReady`, by hook order. Inserting a useState
+ // above it in onboarding-gate.tsx moves this index; the screen renders its
+ // loading branch instead of Welcome when it is wrong.
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{10:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
  assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
  const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');

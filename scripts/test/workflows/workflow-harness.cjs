@@ -34,6 +34,10 @@ function createWorkflowHarness(options={}) {
  h.local('@/lib/onboarding-bank-examples','src/lib/onboarding-bank-examples.ts');
  h.local('@/lib/onboarding-alert-examples','src/lib/onboarding-alert-examples.ts');
  h.local('@/components/onboarding/alive-scenes');
+ // The country control renders for real; only its sheet chrome is a boundary,
+ // so the closed state renders exactly the row a first-run user sees.
+ d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
+ h.local('@/components/onboarding/country-confirm');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
