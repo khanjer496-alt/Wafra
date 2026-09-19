@@ -17,7 +17,7 @@ const checks = [
 // `buildRowHistoryShortcut`, verified at signing time on the Mac.
 const assets = [
   { kind: 'history', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut',
-    installedName: 'Wafra-History-v4.signed', sha256: 'd0a4073435cb5541557ad4c2dba9a7b53465cdff3df98342002484ff8b069fc9', bytes: 31839 },
+    installedName: 'Wafra-History-v4.signed', sha256: '828b410c78e7d286422831306f8654e3db56d62ba3ed7ce3f851f72f0f3a79d5', bytes: 31788 },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');

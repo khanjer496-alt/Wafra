@@ -54,7 +54,10 @@ test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   const rowItem = graph.WFWorkflowActions[rowIndex - 4];
   assert.equal(rowItem.WFWorkflowActionIdentifier, 'is.workflow.actions.getitemfromlist');
   assert.equal(rowItem.WFWorkflowActionParameters.WFItemSpecifier, 'Item At Index');
-  assert.equal(rowItem.WFWorkflowActionParameters.WFItemIndex.Value.attachmentsByRange['{0, 1}'].VariableName, 'Repeat Index');
+  // Number fields keep only the attachment wrapper; a scalar token here fell
+  // back to item 1 on-device and staged one Message 51 times.
+  assert.deepEqual(rowItem.WFWorkflowActionParameters.WFItemIndex,
+    { Value: { Type: 'Variable', VariableName: 'Repeat Index' }, WFSerializationType: 'WFTextTokenAttachment' });
   assert.equal(rowItem.WFWorkflowActionParameters.WFInput.Value.VariableName, 'Page');
   typedDate(row.date, ref => { assert.equal(ref.Type, 'ActionOutput'); assert.equal(ref.OutputUUID, rowItem.WFWorkflowActionParameters.UUID); });
   assert.ok(!JSON.stringify(row).includes('Repeat Item'), 'no loop-variable binding on the row intent');

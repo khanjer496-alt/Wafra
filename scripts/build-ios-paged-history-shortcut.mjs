@@ -213,7 +213,10 @@ function buildPagedGraph({ columnar, rows = false }) {
     const each = uuid();
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 0, WFInput: attachment(variable('Page')) });
     const item = emit('is.workflow.actions.getitemfromlist', {
-      WFItemSpecifier: 'Item At Index', WFItemIndex: scalar(variable('Repeat Index')), WFInput: attachment(variable('Page')),
+      // WFItemIndex is a number field: Apple keeps only the attachment wrapper
+      // there (a scalar text token is discarded and the index falls back to 1,
+      // which staged the same Message 51 times on-device: staged=1 found=51).
+      WFItemSpecifier: 'Item At Index', WFItemIndex: attachment(variable('Repeat Index')), WFInput: attachment(variable('Page')),
     });
     const guid = field(output(item), 'GUID');
     const body = field(output(item), 'Body');
