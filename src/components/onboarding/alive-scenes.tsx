@@ -22,7 +22,7 @@ import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
 import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
-import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap } from '@/lib/onboarding';
+import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap, onboardingNoAutomaticCapture } from '@/lib/onboarding';
 import type {
   OnboardingAlertDelivery,
   OnboardingFocus,
@@ -374,6 +374,10 @@ export function TrackingChooser({ value, onChange, marketId, country, reducedMot
 function AlertReach({ alerts }: { alerts: OnboardingAlertDelivery }) {
   const pastCovered = alerts === 'sms';
   const pastUnknown = alerts === 'unsure';
+  // A bank that sends nothing is not covered "from now on" either. Drawing a
+  // tick there would promise a capture that cannot happen, which is the exact
+  // false reassurance this whole question exists to remove.
+  const futureCovered = !onboardingNoAutomaticCapture(alerts);
   const rows: { key: string; label: string; detail: string; covered: boolean }[] = [
     {
       key: 'past',
@@ -386,8 +390,8 @@ function AlertReach({ alerts }: { alerts: OnboardingAlertDelivery }) {
     {
       key: 'future',
       label: t('onboardAlertsReachFuture'),
-      detail: t('onboardAlertsReachCovered'),
-      covered: true,
+      detail: futureCovered ? t('onboardAlertsReachCovered') : t('onboardAlertsReachManual'),
+      covered: futureCovered,
     },
   ];
   return <View style={styles.alertReach}>

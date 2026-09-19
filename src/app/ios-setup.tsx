@@ -58,7 +58,12 @@ import {
   type IosMessageSetupProgress,
 } from '@/lib/ios-message-onboarding';
 import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
-import { onboardingInsightKeys, onboardingLandingPath } from '@/lib/onboarding';
+import {
+  onboardingHistoryGap,
+  onboardingInsightKeys,
+  onboardingLandingPath,
+  onboardingProfileAtStage,
+} from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { canFinishIosMessageSetup, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
@@ -270,7 +275,23 @@ export default function IosSetupScreen() {
   // navigators end up mounted: two Home screens, doubled scans and a first
   // screen that flickers. Pop to the existing root and switch tabs there. A
   // cold deep-link launch with nothing beneath this screen keeps the replace.
-  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath>) => {
+  /**
+   * Where setup lets go of the user.
+   *
+   * Normally the view they chose. But an iPhone has no completion screen in
+   * the gate — setup exits straight into the app — so the statement offer that
+   * Android shows there has nowhere to appear. For a bank that leaves no
+   * history to read, this exit IS the offer: it finishes the sentence the
+   * alert question started rather than dropping them on Home having been told
+   * their past is missing and then shown nothing about it. One tap backs out.
+   */
+  const finishDestination = useCallback(() => (
+    onboardingHistoryGap(state.onboardingProfile?.alerts)
+      ? '/statement-import' as const
+      : onboardingLandingPath(state.onboardingProfile?.focus ?? null)
+  ), [state.onboardingProfile?.alerts, state.onboardingProfile?.focus]);
+
+  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath> | '/statement-import') => {
     if (router.canGoBack()) {
       router.dismissAll();
       router.navigate(href);
@@ -626,15 +647,11 @@ export default function IosSetupScreen() {
       if (fromOnboarding) {
         const onboardingFocus = state.onboardingProfile?.focus ?? null;
         const onboardingTracking = state.onboardingProfile?.tracking ?? null;
-        const onboardingIntention = state.onboardingProfile?.intention ?? null;
-        setOnboardingProfile({
-          v: 1,
-          stage: 'complete',
-          focus: onboardingFocus,
-          tracking: onboardingTracking,
-          intention: onboardingIntention,
-          startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
-        });
+        // Keep every answer the profile already holds. Rebuilding it here is
+        // what erased the alert-delivery and country answers on completion.
+        setOnboardingProfile(
+          onboardingProfileAtStage(state.onboardingProfile, 'complete', Date.now()),
+        );
         const outcome = await completeIosMessageOnboardingAttempt({
           retryRequired: finishRetryRequired,
           ensureDurable,
@@ -657,7 +674,7 @@ export default function IosSetupScreen() {
           outcome: 'automatic',
           placement: GROWTH_PLACEMENTS.onboarding,
         });
-        exitToRoot(onboardingLandingPath(onboardingFocus));
+        exitToRoot(finishDestination());
         return;
       }
       if (router.canGoBack()) {
@@ -669,6 +686,7 @@ export default function IosSetupScreen() {
   }, [
     ensureDurable,
     exitToRoot,
+    finishDestination,
     finishRetryRequired,
     fromOnboarding,
     setupComplete,
@@ -699,15 +717,10 @@ export default function IosSetupScreen() {
 
       const onboardingFocus = state.onboardingProfile?.focus ?? null;
       const onboardingTracking = state.onboardingProfile?.tracking ?? null;
-      const onboardingIntention = state.onboardingProfile?.intention ?? null;
-      setOnboardingProfile({
-        v: 1,
-        stage: 'complete',
-        focus: onboardingFocus,
-        tracking: onboardingTracking,
-        intention: onboardingIntention,
-        startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
-      });
+      // Same here: preserve the answers rather than reconstructing the profile.
+      setOnboardingProfile(
+        onboardingProfileAtStage(state.onboardingProfile, 'complete', Date.now()),
+      );
       const outcome = await completeIosMessageOnboardingAttempt({
         retryRequired: finishRetryRequired,
         ensureDurable,
@@ -730,12 +743,13 @@ export default function IosSetupScreen() {
         outcome: 'manual',
         placement: GROWTH_PLACEMENTS.onboarding,
       });
-      exitToRoot(onboardingLandingPath(onboardingFocus));
+      exitToRoot(finishDestination());
     }, t('iosMessageFinishFailed'));
   }, [
     busy,
     ensureDurable,
     exitToRoot,
+    finishDestination,
     finishRetryRequired,
     fromOnboarding,
     runOperation,
