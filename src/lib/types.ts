@@ -727,6 +727,16 @@ export interface AppState {
  * genuinely changed are present; an absent field is left alone.
  */
 export interface TxHealUpdate {
+  /** Exact original Message proof for the reproduced transposed receipt date. */
+  sourceDateCorrection?: {
+    from: string;
+    to: string;
+    sourceKey: string;
+    observedAt: number;
+    amountFils: number;
+    accountId: string;
+    instrument: Pick<CaptureInstrument, 'last4' | 'kind' | 'bankIdentity'>;
+  };
   transferEvidence?: TransferEvidence;
   clearTransferEvidence?: true;
   id: string;

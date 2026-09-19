@@ -979,7 +979,7 @@ function bodyOf(source, header) {
   ok('history checkpoints merge into the already-sorted ledger without a full re-sort',
     /transactions:\s*mergeSortedTransactions\(batch\.transactions, existing\)/.test(ledgerImportSource) &&
       !/transactions:\s*incrementalFastPath[\s\S]*?sortTransactions\(\[\.\.\.batch\.transactions, \.\.\.existing\]\)/.test(ledgerImportSource),
-    'heal updates cannot change date, so sorting the complete ledger again on every history page is wasted synchronous JS');
+    'ordinary healing preserves dates; only an admitted source-date correction needs to restore order before the linear merge');
   // A deliberate historical repair can advance this independent version.
   // Pin the separate numeric contract, not a particular release number.
   const backfillRevision = smsParserSource.match(/const PARSER_BACKFILL_VERSION\s*=\s*(\d+)\s*;/);

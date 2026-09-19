@@ -236,6 +236,7 @@ export const interpretBankAlert = ({
   sender,
   market,
   overrides = {},
+  observedAt,
 }: InterpretBankAlertInput): BankAlertInterpretation => {
   if (isExpectedFutureMoneyNotice(source)) {
     return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
@@ -252,7 +253,7 @@ export const interpretBankAlert = ({
     return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
   }
   const legacy = withMarketPackForParsing(market, () =>
-    parseSms(source, overrides, { sender }));
+    parseSms(source, overrides, { sender, observedAt }));
   // Application/financing copy may be appended to a real purchase alert. The
   // mature regional parser gets first right of refusal: only a message that it
   // did NOT prove as a posting may be suppressed by this sales-offer shape.

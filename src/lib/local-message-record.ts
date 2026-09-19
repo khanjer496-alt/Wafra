@@ -232,6 +232,9 @@ function sanitizedRefusal(
       row: {
         smsTs: observedAt,
         channel: 'inbox',
+        // Message timestamps can collide at whole-second precision. Preserve
+        // exact Apple identity so a decline cannot sweep an unrelated posting.
+        ...(SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
         reason: decision.reason,
       },
       milestone: 'decline-candidate',
@@ -280,6 +283,7 @@ export function parseLocalMessageRecord(
       envelope.sender,
       inspection,
       expectedMarket,
+      observedAt,
     );
     if (!parsed) {
       return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection);
