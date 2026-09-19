@@ -909,6 +909,7 @@ const S = {
   paidOfTotal: { en: 'Paid {paid} of {total}', ar: 'دُفع {paid} من {total}' },
   minimumShort: { en: 'Min {amount}', ar: 'الحد الأدنى {amount}' },
   minimumDueLabel: { en: 'Minimum due', ar: 'الحد الأدنى' },
+  statementMinimumUnconfirmed: { en: 'Minimum not confirmed in this alert', ar: 'الحد الأدنى غير مؤكد في هذا التنبيه' },
   card: { en: 'Card', ar: 'البطاقة' },
   matched: { en: 'Matched', ar: 'المطابقة' },
   chargesAcross: { en: '{amount} across {count} charge{s}', ar: '{amount} عبر {count} عملية' },

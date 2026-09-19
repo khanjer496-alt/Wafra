@@ -115,7 +115,7 @@ import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
-import { PARSER_VERSION } from '@/lib/sms-parser';
+import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
 import { useStore } from '@/lib/store';
@@ -1175,14 +1175,31 @@ export default function ImportSmsScreen() {
     () => (plan?.batch.transactions ?? []).slice(0, PREVIEW_LIMIT),
     [plan],
   );
+  const previewDues = useMemo(
+    () => (plan?.batch.newDues ?? []).slice(0, PREVIEW_LIMIT),
+    [plan],
+  );
 
-  /** Rows the parser had to guess at — the ones worth reporting. */
+  // Match the accuracy report's distinction: retained source text may mean a
+  // missing merchant or only a missing category. It does not mean no money
+  // was read, and a stored category/structural title is already an answer.
+  const previewAttention = useMemo(() => {
+    let unread = 0;
+    let uncategorized = 0;
+    for (const tx of plan?.batch.transactions ?? []) {
+      if (!tx.raw || tx.category !== 'other' || isDeliberateOtherTitle(tx.title)) continue;
+      if (tx.title === 'Card purchase') unread++;
+      else uncategorized++;
+    }
+    return { unread, uncategorized };
+  }, [plan]);
   const unreadCount = useMemo(
     () => historyResult
       ? historySourceSummary?.unread ?? 0
-      : (plan?.batch.transactions ?? []).filter((tx) => tx.raw).length,
-    [historyResult, historySourceSummary, plan],
+      : previewAttention.unread,
+    [historyResult, historySourceSummary, previewAttention],
   );
+  const categoryOnlyCount = history ? 0 : previewAttention.uncategorized;
 
   const newBills = useMemo(() => {
     const existing = new Set(state.bills.map((b) => b.title.toLowerCase()));
@@ -1526,9 +1543,9 @@ export default function ImportSmsScreen() {
                       [plan.txCount, t('matchedLabel'), theme.text],
                       [plan.newAccountCount, t('cardsTitle'), theme.text],
                       [
-                        unreadCount,
-                        history ? t('skippedLabel') : t('unreadLabel'),
-                        unreadCount > 0 ? theme.warning : theme.textTertiary,
+                        unreadCount + categoryOnlyCount,
+                        history ? t('skippedLabel') : categoryOnlyCount > 0 ? t('review') : t('unreadLabel'),
+                        unreadCount + categoryOnlyCount > 0 ? theme.warning : theme.textTertiary,
                       ],
                     ] as const
                   ).map(([value, label, color], i) => (
@@ -1561,6 +1578,46 @@ export default function ImportSmsScreen() {
                   </ThemedText>
                 )}
               </Section>
+
+              {plan.batch.newDues.length > 0 && (
+                <Section index={2}>
+                  <SectionHeader title={plan.batch.newDues.length > PREVIEW_LIMIT
+                    ? `${t('statements')} · ${PREVIEW_LIMIT}/${plan.batch.newDues.length}`
+                    : t('statements')} />
+                  {previewDues.map((due, i) => (
+                    <Block key={`${due.accountId}-${due.dueDate}-${i}`}>
+                      <Row>
+                        <View style={styles.rowText}>
+                          <ThemedText type="smallBold">{accountName(due.accountId) || t('card')}</ThemedText>
+                          <ThemedText type="meta" themeColor="textSecondary">
+                            {tf('dueDate', { date: `${shortDate(due.dueDate)} ${due.dueDate.slice(0, 4)}` })}
+                          </ThemedText>
+                        </View>
+                      </Row>
+                      <Row>
+                        <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
+                          {t('genericStatementTotal')}
+                        </ThemedText>
+                        <Money fils={due.totalDueFils} moneySpec={plan.batch.importMoney} decimals />
+                      </Row>
+                      <Row last>
+                        {due.minDueEstimated ? (
+                          <ThemedText type="meta" themeColor="textSecondary">
+                            {t('statementMinimumUnconfirmed')}
+                          </ThemedText>
+                        ) : (
+                          <>
+                            <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
+                              {t('minimumDueLabel')}
+                            </ThemedText>
+                            <Money fils={due.minDueFils} moneySpec={plan.batch.importMoney} decimals />
+                          </>
+                        )}
+                      </Row>
+                    </Block>
+                  ))}
+                </Section>
+              )}
 
               {newBills.length > 0 && (
                 <Section index={2}>
@@ -1603,11 +1660,9 @@ export default function ImportSmsScreen() {
                 <Section index={3}>
                   <SectionHeader
                     title={
-                      history
-                        ? t('readyToFile')
-                        : plan.txCount > PREVIEW_LIMIT
-                        ? tf('justFiledFirst', { shown: PREVIEW_LIMIT, total: plan.txCount })
-                        : t('justFiled')
+                      plan.txCount > PREVIEW_LIMIT
+                        ? `${t('readyToFile')} · ${PREVIEW_LIMIT}/${plan.txCount}`
+                        : t('readyToFile')
                     }
                   />
                   {previewRows.map((tx, i) => (
@@ -1638,6 +1693,19 @@ export default function ImportSmsScreen() {
                       </Row>
                     </Animated.View>
                   ))}
+                </Section>
+              )}
+
+              {categoryOnlyCount > 0 && (
+                <Section index={4}>
+                  <Block>
+                    <View style={styles.unreadRow}>
+                      <Icon name="alert" size={17} color={theme.warning} />
+                      <ThemedText type="small" style={styles.rowText}>
+                        {categoryOnlyCount} · {t('noCategoryYet')}
+                      </ThemedText>
+                    </View>
+                  </Block>
                 </Section>
               )}
 
