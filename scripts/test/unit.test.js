@@ -990,6 +990,31 @@ ok('trial: expires after day 3',
 ok('trial: purchase beats an expired trial',
   purch.isProActive({ pro: true, trialStartTs: T0 }, T0 + 30 * DAY));
 
+// ── Pro plans: only what the storefront actually returned ──
+const playOffers = purch.proOffersFromProducts([
+  { productIdentifier: 'wafra_pro_monthly:p1m', localizedPrice: 'AED 36.99' },
+  { productIdentifier: 'wafra_pro_yearly:p1y', localizedPrice: 'AED 274.99' },
+]);
+ok('plans: a Play base-plan suffix still resolves to Wafra\'s two plans',
+  playOffers.length === 2 &&
+    playOffers.every((offer) => offer.productId.includes(':')) &&
+    playOffers.find((offer) => offer.plan === 'yearly').priceString === 'AED 274.99');
+ok('plans: the App Store identifiers resolve unchanged',
+  JSON.stringify(purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_monthly', localizedPrice: 'AED 36.99' },
+  ])) === JSON.stringify([
+    { plan: 'monthly', productId: 'wafra_pro_monthly', priceString: 'AED 36.99' },
+  ]));
+ok('plans: a plan the store priced blank is dropped rather than shown priceless',
+  purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_yearly', localizedPrice: '  ' },
+  ]).length === 0);
+ok('plans: a foreign product is never sold as a Wafra plan',
+  purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_monthly_legacy', localizedPrice: 'AED 1.00' },
+    { productIdentifier: 'some_other_app_yearly', localizedPrice: 'AED 2.00' },
+  ]).length === 0);
+
 // ── market packs: automatic localization (runs last: mutates globals) ──
 const markets = require('./build/markets');
 const mparser = require('./build/sms-parser');
