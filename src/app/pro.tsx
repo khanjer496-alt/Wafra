@@ -5,7 +5,11 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import { useWafraBilling, type ProPlanOffer } from '@/components/superwall-billing-context';
+import {
+  useWafraBilling,
+  type ProPlanOffer,
+  type ProPurchaseOutcome,
+} from '@/components/superwall-billing-context';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -66,6 +70,10 @@ export default function ProScreen() {
   const [selectedPlan, setSelectedPlan] = useState<ProPlan>('yearly');
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const offerRequest = useRef(0);
+  // `billingAction` is React state, so it is not visible to a second tap that
+  // lands in the same frame. A money action needs a guard that closes on the
+  // first call, not on the next render.
+  const actionLatch = useRef(false);
   const trial = trialDaysLeft(state);
   const entitled = state.pro || state.founderPro;
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
@@ -90,6 +98,10 @@ export default function ProScreen() {
     }
     const request = ++offerRequest.current;
     setOfferState('loading');
+    // Drop what the last fetch returned before asking again. A price left on
+    // screen while its refresh is in flight is a price the CTA could still
+    // charge, and the storefront it came from may no longer be this one.
+    setOffers([]);
     const loaded = await billingRef.current.fetchProOffers();
     if (request !== offerRequest.current) return;
     setOffers(loaded);
@@ -103,7 +115,11 @@ export default function ProScreen() {
     return () => { offerRequest.current += 1; };
   }, [loadOffers]);
 
-  const selectedOffer = offers.find((offer) => offer.plan === selectedPlan) ?? null;
+  const selectedOffer = offerState === 'ready'
+    ? offers.find((offer) => offer.plan === selectedPlan) ?? null
+    : null;
+  const missingPlans = PLAN_ORDER.filter(
+    (plan) => !offers.some((offer) => offer.plan === plan));
 
   /**
    * The one action that can charge money. It refuses before the store is asked
@@ -113,6 +129,7 @@ export default function ProScreen() {
    * `pro` entitlement has not confirmed says so rather than claiming Pro.
    */
   const buySelectedPlan = useCallback(async () => {
+    if (actionLatch.current) return;
     setNotice(null);
     if (!legalReady) {
       setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') });
@@ -129,9 +146,15 @@ export default function ProScreen() {
       setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
       return;
     }
+    actionLatch.current = true;
     setBillingAction('purchase');
-    const outcome = await billing.purchasePro(selectedOffer.productId);
-    setBillingAction(null);
+    let outcome: ProPurchaseOutcome;
+    try {
+      outcome = await billing.purchasePro(selectedOffer.productId);
+    } finally {
+      actionLatch.current = false;
+      setBillingAction(null);
+    }
     if (outcome === 'cancelled') return;
     if (outcome === 'purchased') {
       setNotice({ title: t('proPurchaseSuccessTitle'), body: t('proPurchaseSuccessBody') });
@@ -149,14 +172,21 @@ export default function ProScreen() {
   }, [billing, checkoutReady, legalReady, selectedOffer]);
 
   const restore = async () => {
+    if (actionLatch.current) return;
     setNotice(null);
     if (!checkoutReady) {
       setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
       return;
     }
+    actionLatch.current = true;
     setBillingAction('restore');
-    const restored = await billing.restorePro();
-    setBillingAction(null);
+    let restored: boolean | null;
+    try {
+      restored = await billing.restorePro();
+    } finally {
+      actionLatch.current = false;
+      setBillingAction(null);
+    }
     if (restored === null) {
       setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
     } else if (!restored) {
@@ -167,7 +197,9 @@ export default function ProScreen() {
   };
 
   const manage = async () => {
+    if (actionLatch.current) return;
     setNotice(null);
+    actionLatch.current = true;
     setBillingAction('manage');
     const url = await subscriptionManagementUrl();
     try {
@@ -179,6 +211,7 @@ export default function ProScreen() {
     } catch {
       setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
     } finally {
+      actionLatch.current = false;
       setBillingAction(null);
     }
   };
@@ -255,6 +288,34 @@ export default function ProScreen() {
     );
   };
 
+  /**
+   * A plan the store did not return. It is drawn rather than dropped: a
+   * catalogue missing one SKU is a storefront or configuration fault, and
+   * silently showing a single plan hides it from the only person who can see
+   * it happen. The row carries no price and cannot be selected.
+   */
+  const unavailablePlanRow = (plan: ProPlan) => (
+    <View
+      key={`unavailable-${plan}`}
+      accessibilityRole="summary"
+      style={[
+        styles.planRow,
+        { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+      ]}>
+      <View style={styles.featureText}>
+        <ThemedText type="smallBold">{plan === 'yearly' ? t('yearly') : t('monthly')}</ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary">{t('priceUnavailable')}</ThemedText>
+      </View>
+      <Icon name="alert" size={16} color={theme.warning} />
+    </View>
+  );
+
+  const retryPrices = (
+    <Pressable accessibilityRole="button" onPress={() => void loadOffers()} hitSlop={8}>
+      <ThemedText type="micro" style={{ color: theme.primary }}>{t('retryPrices')}</ThemedText>
+    </Pressable>
+  );
+
   return (
     <ScreenScaffold
       headerMode="native"
@@ -310,10 +371,18 @@ export default function ProScreen() {
             <ThemedText type="small" themeColor="textSecondary">{t('priceLoading')}</ThemedText>
           ) : offerState === 'ready' ? (
             <>
-              {PLAN_ORDER
-                .map((plan) => offers.find((offer) => offer.plan === plan))
-                .filter((offer): offer is ProPlanOffer => offer != null)
-                .map(planRow)}
+              {PLAN_ORDER.map((plan) => {
+                const offer = offers.find((candidate) => candidate.plan === plan);
+                return offer ? planRow(offer) : unavailablePlanRow(plan);
+              })}
+              {missingPlans.length > 0 && (
+                <View style={styles.featureText}>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {t('priceUnavailableBody')}
+                  </ThemedText>
+                  {retryPrices}
+                </View>
+              )}
               {selectedOffer && (
                 <ThemedText type="meta" themeColor="textTertiary">
                   {tf(
@@ -346,16 +415,7 @@ export default function ProScreen() {
                 <ThemedText type="meta" themeColor="textTertiary">
                   {checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
                 </ThemedText>
-                {checkoutReady && (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => void loadOffers()}
-                    hitSlop={8}>
-                    <ThemedText type="micro" style={{ color: theme.primary }}>
-                      {t('retryPrices')}
-                    </ThemedText>
-                  </Pressable>
-                )}
+                {checkoutReady && retryPrices}
               </View>
             </View>
           )}

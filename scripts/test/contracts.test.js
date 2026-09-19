@@ -1982,6 +1982,17 @@ ok('the spoken label agrees with the sign on screen',
       /'unconfirmed'/.test(provider) &&
       /outcome === 'purchased'/.test(code(pro)) &&
       /t\('purchaseFailed'\)/.test(pro));
+  ok('a price refresh cannot leave a stale figure the CTA would charge',
+    /setOffers\(\[\]\);/.test(code(pro)) &&
+      /const selectedOffer = offerState === 'ready'/.test(code(pro)));
+  ok('a second tap in the same frame cannot start a second checkout',
+    /if \(actionLatch\.current\) return;/.test(code(pro)) &&
+      (code(pro).match(/actionLatch\.current = false;/g) ?? []).length === 3 &&
+      (code(pro).match(/if \(actionLatch\.current\) return;/g) ?? []).length === 3);
+  ok('a plan the storefront did not return is drawn as unavailable, not dropped',
+    /unavailablePlanRow/.test(code(pro)) &&
+      /missingPlans/.test(code(pro)) &&
+      !/\.filter\(\(offer\): offer is ProPlanOffer => offer != null\)/.test(pro));
   ok('a cancelled purchase and a deferred one are not reported as failures',
     /outcome === 'cancelled'\) return;/.test(code(pro)) &&
       /purchasePendingTitle/.test(pro) &&
