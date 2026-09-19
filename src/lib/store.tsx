@@ -894,9 +894,14 @@ function reducer(state: AppState, action: Action): AppState {
         // until the final history page performs canonical reconciliation once.
         historyImportIncomplete(reduced.historyImport)
       );
-    const needsTransferNormalization = !persistedTransferGraphIsCurrent && (accountsChanged || (
-      transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
-    ));
+    // Import owns both its account and transaction changes: intermediate
+    // history pages deliberately defer this work, and final/live pages already
+    // normalize in applyMaterializedImportBatch. An account snapshot must not
+    // bypass that policy. Other account actions still normalize immediately.
+    const needsTransferNormalization = action.type !== 'importBatch' &&
+      !persistedTransferGraphIsCurrent && (accountsChanged || (
+        transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
+      ));
     const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;

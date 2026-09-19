@@ -210,16 +210,23 @@ const isMetadataOnlyImportBatch = (batch: MaterializedImportBatch): boolean =>
   Object.keys(batch.cardTypes).length === 0 &&
   batch.updates.length === 0;
 
+/** Preserve immutable collection identity when an import learned no new facts. */
+const reuseUnchangedRows = <T>(prior: T[], next: T[]): T[] =>
+  prior.length === next.length && next.every((row, index) => row === prior[index]) ? prior : next;
+
 export const applyMaterializedImportBatch = (
   state: AppState,
   batch: MaterializedImportBatch,
 ): AppState => {
   assertImportBatchMoney(state, batch);
+  // An empty final provider page is still the boundary that must replace the
+  // provisional history receipt with canonical reconciliation of every row.
+  const finishingHistory = batch.parserRereadComplete || batch.historyImport?.status === 'complete';
   // A history page containing only already-known rows still has useful cursor
   // and parser progress, but it does not justify running every account,
   // duplicate, payment, and transfer reconciliation over the complete ledger.
   // Preserve the collection references so persistence can write metadata only.
-  if (isMetadataOnlyImportBatch(batch)) {
+  if (isMetadataOnlyImportBatch(batch) && !finishingHistory) {
     return {
       ...state,
       onboardingCurrencyEvidence:
@@ -229,7 +236,7 @@ export const applyMaterializedImportBatch = (
       parserVersion: batch.parserRereadComplete ? PARSER_BACKFILL_VERSION : state.parserVersion,
     };
   }
-  const accounts = [...state.accounts, ...batch.newAccounts].map((account) => {
+  const accounts = reuseUnchangedRows(state.accounts, [...state.accounts, ...batch.newAccounts].map((account) => {
     const snapshot = batch.snapshots[account.id];
     const bankName = !account.bankName ? batch.bankNames[account.id] : undefined;
     const learnedType = batch.cardTypes[account.id];
@@ -254,12 +261,12 @@ export const applyMaterializedImportBatch = (
       next = { ...next, snapshotKind: 'limit' };
     }
     return next;
-  });
-  const dues = mergeImportedCardDues(state.cardDues, batch.newDues, accounts);
-  const bills = mergeImportedBills(state.bills, batch.newBills);
+  }));
+  const dues = reuseUnchangedRows(state.cardDues, mergeImportedCardDues(state.cardDues, batch.newDues, accounts));
+  const bills = reuseUnchangedRows(state.bills, mergeImportedBills(state.bills, batch.newBills));
   const existing = applyHealUpdates(state.transactions, batch.updates);
   const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
-  const incrementalFastPath = !historyStillRunning && canUseIncrementalCaptureFastPath(state, batch);
+  const incrementalFastPath = !historyStillRunning && !finishingHistory && canUseIncrementalCaptureFastPath(state, batch);
   const pageState: AppState = {
     ...state,
     ...(batch.importMoney && !state.ledgerMoney && changesImportMoney(batch)
@@ -271,7 +278,7 @@ export const applyMaterializedImportBatch = (
     // re-sorting the entire 10k+ ledger on every history checkpoint.
     transactions: mergeSortedTransactions(batch.transactions, existing),
     accounts,
-    accountHints: { ...state.accountHints, ...batch.newHints },
+    accountHints: Object.keys(batch.newHints).length ? { ...state.accountHints, ...batch.newHints } : state.accountHints,
     cardDues: dues,
     bills,
     lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
