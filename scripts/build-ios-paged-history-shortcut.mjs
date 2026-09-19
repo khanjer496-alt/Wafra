@@ -32,9 +32,14 @@ export const COLUMN_SEPARATOR = '\u241E';
 // one native call per Message plus one commit per page. Slower than a pure
 // text frame, but it is built only from primitives proven on the device.
 export const ROW_SHORTCUT_NAME = 'Wafra History v4';
+// v5: the column-framed page path (a handful of Apple list actions and one
+// native call per page) with the typed-row v4 path as the per-page fallback.
+// Both native receivers ship in build 152, so this is a graph-only change.
+export const FAST_SHORTCUT_NAME = 'Wafra History v5';
 export function buildPagedHistoryShortcut() { return buildPagedGraph({ columnar: false }); }
 export function buildColumnarHistoryShortcut() { return buildPagedGraph({ columnar: true }); }
 export function buildRowHistoryShortcut() { return buildPagedGraph({ columnar: false, rows: true }); }
+export function buildFastHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true }); }
 function buildPagedGraph({ columnar, rows = false }) {
   let serial = 0;
   const actions = [];
@@ -67,6 +72,14 @@ function buildPagedGraph({ columnar, rows = false }) {
       : value;
     emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 0, WFInput: { Type: 'Variable', Variable: attachment(typedValue) }, WFCondition: 4,
       ...(typeof comparison === 'number' ? { WFNumberValue: comparison } : { WFConditionalActionString: comparison }) });
+    operation(); emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 2 });
+  };
+  // "contains" (WFCondition 99) for reason codes that carry counts.
+  const conditionContains = (value, needle, operation) => {
+    const group = uuid();
+    const typedValue = { ...value, Aggrandizements: [...(value.Aggrandizements ?? []),
+      { Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }] };
+    emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 0, WFInput: { Type: 'Variable', Variable: attachment(typedValue) }, WFCondition: 99, WFConditionalActionString: needle });
     operation(); emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 2 });
   };
   const find = (limit, order, before) => emit('com.apple.MobileSMS.MessageEntity', {
@@ -190,6 +203,9 @@ function buildPagedGraph({ columnar, rows = false }) {
       for (const reason of ['frame-columns', 'invalid-input']) {
         condition(output(columnsReason), reason, () => { set('Frame Mode', literal('rows')); });
       }
+      // v5: every framing/field/date refusal of the column path (they carry
+      // counts, e.g. `invalid-input-date bytes=…`) falls back to typed rows.
+      if (rows) conditionContains(output(columnsReason), 'invalid-input-', () => { set('Frame Mode', literal('rows')); });
     });
     condition(variable('Frame Mode'), 'columns', () => { set('Request', variable('Columns Result')); });
   }
@@ -229,13 +245,16 @@ function buildPagedGraph({ columnar, rows = false }) {
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
     const committed = native('CommitWafraPagedPageIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')) });
     set('Request', output(committed));
+    if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });
     const releasedPage = emit('is.workflow.actions.list', { WFItems: [] });
-    set('Page', output(releasedPage, 'List')); nothing();
+    set('Page', output(releasedPage, 'List'));
+    if (columnar) set('Columns Result', output(releasedPage, 'List'));
+    nothing();
     emit('is.workflow.actions.repeat.count', { GroupingIdentifier: loop, WFControlFlowMode: 2 });
     alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
     open('wafra://ios-setup?section=history'); stop();
     const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
-    workflow.WFWorkflowName = ROW_SHORTCUT_NAME;
+    workflow.WFWorkflowName = columnar ? FAST_SHORTCUT_NAME : ROW_SHORTCUT_NAME;
     workflow.WFWorkflowActions = actions;
     workflow.WFWorkflowImportQuestions = [];
     return workflow;
@@ -302,6 +321,12 @@ export function verifyPagedHistoryShortcut(workflow) {
 export function verifyColumnarHistoryShortcut(workflow) {
   return verifyBoundedSourceFreeGraph(workflow, buildColumnarHistoryShortcut(), 'Columnar');
 }
+export function verifyFastHistoryShortcut(workflow) {
+  verifyBoundedSourceFreeGraph(workflow, buildFastHistoryShortcut(), 'Fast');
+  const text = JSON.stringify(workflow);
+  if (/detect\.date|base64encode|appendvariable|StageWafraPagedImportIntent/.test(text)) throw new Error('Fast graph must not use the v2 text frame');
+  return true;
+}
 export function verifyRowHistoryShortcut(workflow) {
   verifyBoundedSourceFreeGraph(workflow, buildRowHistoryShortcut(), 'Row');
   const text = JSON.stringify(workflow);
@@ -311,9 +336,10 @@ export function verifyRowHistoryShortcut(workflow) {
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const columnar = process.argv.includes('--columnar');
   const rows = process.argv.includes('--rows');
+  const fast = process.argv.includes('--fast');
   const target = resolve(process.argv.filter(arg => !arg.startsWith('--'))[2]
-    ?? (rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
-  const workflow = rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
-  (rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
+    ?? (fast ? '/tmp/WafraHistoryFast.json' : rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
+  const workflow = fast ? buildFastHistoryShortcut() : rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
+  (fast ? verifyFastHistoryShortcut : rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

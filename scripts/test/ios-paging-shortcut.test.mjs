@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  COLUMN_SEPARATOR, ROW_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut,
-  verifyColumnarHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut,
+  COLUMN_SEPARATOR, FAST_SHORTCUT_NAME, ROW_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildFastHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut,
+  verifyColumnarHistoryShortcut, verifyFastHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut,
 } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 import { buildColumnFrameProbe } from '../build-ios-column-frame-check.mjs';
@@ -89,6 +89,42 @@ test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   assert.deepEqual(queries.map(a => a.WFWorkflowActionParameters.WFContentItemLimitNumber), [1, 1, 51, 102, 204, 408]);
 });
 
+test('fast graph tries column framing per page and falls back to typed rows for that page only', () => {
+  const graph = buildFastHistoryShortcut();
+  assert.equal(graph.WFWorkflowName, FAST_SHORTCUT_NAME);
+  assert.equal(verifyFastHistoryShortcut(graph), true);
+  assert.deepEqual(graph, buildFastHistoryShortcut());
+  const ids = graph.WFWorkflowActions.map(a => a.WFWorkflowActionIdentifier);
+  assert.ok(ids.includes('app.wafra.ios.BeginWafraPagedImportV2Intent'));
+  assert.ok(ids.includes('app.wafra.ios.StageWafraPagedColumnsIntent'));
+  assert.ok(ids.includes('app.wafra.ios.StageWafraPagedRowIntent'));
+  assert.ok(ids.includes('app.wafra.ios.CommitWafraPagedPageIntent'));
+  assert.ok(!ids.includes('app.wafra.ios.StageWafraPagedImportIntent'));
+  assert.ok(!ids.includes('app.wafra.ios.BeginWafraPagedImportIntent'));
+  // The column attempt runs before the row loop; the row loop sits inside the
+  // Frame Mode == rows branch and reads its own nested index.
+  const columns = ids.indexOf('app.wafra.ios.StageWafraPagedColumnsIntent');
+  const rowsBranch = graph.WFWorkflowActions.findIndex(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
+    a.WFWorkflowActionParameters.WFConditionalActionString === 'rows' && a.WFWorkflowActionParameters.WFControlFlowMode === 0);
+  const loopStart = ids.indexOf('is.workflow.actions.repeat.each');
+  const rowIndex = ids.indexOf('app.wafra.ios.StageWafraPagedRowIntent');
+  const commitIndex = ids.indexOf('app.wafra.ios.CommitWafraPagedPageIntent');
+  assert.ok(columns < rowsBranch && rowsBranch < loopStart && loopStart < rowIndex && rowIndex < commitIndex);
+  const loopEnd = ids.lastIndexOf('is.workflow.actions.repeat.each');
+  const loopBody = JSON.stringify(graph.WFWorkflowActions.slice(loopStart + 1, loopEnd));
+  assert.ok(!/"VariableName":"Repeat (Item|Index)"/.test(loopBody));
+  assert.ok(loopBody.includes('"VariableName":"Repeat Index 2"'));
+  // Every framing/field/date refusal of the column path falls back to rows.
+  const text = JSON.stringify(graph);
+  assert.match(text, /"WFCondition":99,"WFConditionalActionString":"invalid-input-"/);
+  assert.match(text, /"WFConditionalActionString":"frame-columns"/);
+  for (const reason of ['unauthorized', 'stale-request', 'staging-full', 'source-changed']) {
+    assert.doesNotMatch(text, new RegExp(`"WFConditionalActionString":"${reason}"`));
+  }
+  // v2/v3/v4 outputs are untouched by the v5 flag.
+  assert.equal(buildPagedHistoryShortcut().WFWorkflowActions.length, 98);
+  assert.equal(buildRowHistoryShortcut().WFWorkflowActions.length, 87);
+});
 test('saved paging cursor is returned by Wafra as a typed date; Shortcuts never reparses it', () => {
   const actions = buildPagedHistoryShortcut().WFWorkflowActions;
   assert.equal(actions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.detect.date').length, 0);
@@ -214,7 +250,7 @@ test('a published plist may reorder dictionary keys without changing its action 
   assert.equal(verifyPagedHistoryShortcut(reorder(buildPagedHistoryShortcut())), true);
 });
 test('every generated action reference resolves and all action IDs are unique', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     const ids = graph.WFWorkflowActions.map(a => a.WFWorkflowActionParameters.UUID);
     assert.equal(new Set(ids).size, ids.length);
     walk(graph, value => {
@@ -223,7 +259,7 @@ test('every generated action reference resolves and all action IDs are unique', 
   }
 });
 test('all scalar text variable ranges actually cover the placeholder', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
     if (value.WFSerializationType !== 'WFTextTokenString') return;
     for (const range of Object.keys(value.Value.attachmentsByRange || {})) {
       const match = /^\{(\d+), (\d+)\}$/.exec(range);
@@ -233,7 +269,7 @@ test('all scalar text variable ranges actually cover the placeholder', () => {
   });
 });
 test('conditional subjects are explicitly typed for Shortcuts on-device comparisons', () => {
-  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions]
+  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions]
     .filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
       action.WFWorkflowActionParameters.WFControlFlowMode === 0);
   assert.ok(actions.length > 0);
@@ -251,7 +287,7 @@ test('conditional subjects are explicitly typed for Shortcuts on-device comparis
 });
 
 test('repeat and conditional blocks are nested and closed correctly', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut()]) {
   const stack = [];
   for (const action of graph.WFWorkflowActions) {
     const p = action.WFWorkflowActionParameters;
@@ -314,7 +350,7 @@ test('empty pages and the safety work budget cannot be advertised as completion'
   assert.equal(graph.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url' && JSON.stringify(a).includes('import-sms')).length, 1);
 });
 test('no raw source leaves through files, network, clipboard, mail, or messages', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     assert.doesNotMatch(JSON.stringify(graph), /https?:/);
     // Inspect executable identifiers, not explanatory comments such as
     // "no clipboard". The exact-graph validator independently pins parameters.
