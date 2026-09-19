@@ -1,6 +1,7 @@
 const {
   parseSms,
   parseSmsBatch,
+  classifyMerchantDescription,
   bankProfileForSender,
   extractOutgoingTransferParties,
   isDeclinedMessage,
@@ -358,6 +359,55 @@ if (payout && payout.type === 'income' && payout.merchant === 'Talabat Middle Ea
 const salaryStill = parseSms('Salary of AED 18,500.00 has been credited to your account ending 5678');
 if (salaryStill && salaryStill.categoryGuess === 'salary') { pass++; console.log('✓ salary keyword still wins for income'); }
 else { fail++; console.log('✗ salary keyword still wins for income', JSON.stringify(salaryStill && salaryStill.categoryGuess)); }
+
+for (const [label, body] of [
+  ['WPS', 'WPS payment AED 7,500.00 successfully credited to account 1234.'],
+  ['monthly pay', 'Monthly pay AED 7,500.00 was credited into your account 1234.'],
+  ['remuneration', 'Remuneration of AED 7,500.00 was deposited into your account 1234.'],
+  ['emoluments', 'Emoluments AED 7,500.00 were credited to your account 1234.'],
+  ['wage credit', 'Wage credit AED 7,500.00 posted to account 1234.'],
+  ['paycheck', 'Paycheck AED 7,500.00 deposited into account 1234.'],
+  ['pay cheque', 'Pay cheque AED 7,500.00 deposited into account 1234.'],
+  ['net pay', 'Net pay AED 7,500.00 credited into account 1234.'],
+]) {
+  t(`${label} salary wording is income categorized as salary`, body,
+    { kind: 'transaction', type: 'income', amountFils: 750000, merchant: 'Salary', category: 'salary', deliberate: true });
+}
+
+for (const [label, description] of [
+  ['WPS statement', 'WPS payment AED 7,500.00 credited to account 1234'],
+  ['monthly pay statement', 'Monthly pay AED 7,500.00'],
+  ['remuneration statement', 'Remuneration AED 7,500.00'],
+  ['emoluments statement', 'Emoluments AED 7,500.00'],
+  ['paycheck statement', 'Paycheck AED 7,500.00'],
+  ['pay cheque statement', 'Pay cheque AED 7,500.00'],
+  ['net pay statement', 'Net pay AED 7,500.00'],
+]) {
+  const classified = classifyMerchantDescription(description, 'income', 'AE');
+  ok(`${label} classifies as salary during statement/import parsing`,
+    classified.categoryGuess === 'salary' && classified.categoryDeliberate === true,
+    JSON.stringify(classified));
+}
+
+t('a future paycheck is not posted salary yet',
+  'Your paycheck of AED 7,500.00 will be deposited into account 1234 tomorrow.', null);
+t('future net pay is not posted salary yet',
+  'Net pay AED 7,500.00 will be credited to your account 1234 on 25 Sep.', null);
+{
+  const payrollFee = parseSms('Payroll service fee of AED 25.00 was debited from your account 1234.');
+  ok('a payroll service fee is an expense, never salary income',
+    payrollFee?.type === 'expense' && payrollFee.categoryGuess !== 'salary', JSON.stringify(payrollFee));
+}
+{
+  const paycheckCafe = parseSms('Purchase of AED 45.00 with Debit Card ending 1234 at PAYCHECK CAFE, DUBAI.');
+  ok('a merchant named Paycheck cannot turn a card purchase into salary',
+    paycheckCafe?.type === 'expense' && paycheckCafe.categoryGuess !== 'salary', JSON.stringify(paycheckCafe));
+}
+{
+  const eos = parseSms('End of service benefit AED 20,000.00 was credited to your account 1234.');
+  ok('end-of-service benefit remains income but is not monthly salary',
+    eos?.type === 'income' && eos.categoryGuess !== 'salary', JSON.stringify(eos));
+}
 
 const spendStill = parseSms('Purchase of AED 55.00 at TALABAT with Debit Card ending 1234');
 if (spendStill && spendStill.type === 'expense' && spendStill.categoryGuess === 'dining') {

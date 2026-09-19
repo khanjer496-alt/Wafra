@@ -354,8 +354,16 @@ export interface ParsedCard {
  * statement deadlines; refuse incorrect-CVV attempts; and keep the ADIB
  * account-side Covered Card payment as a transfer funding leg rather than
  * spending. Re-read retained Android history so legacy rows heal in place.
+ *
+ * 48: salary-language consistency repair. WPS, monthly/net pay, remuneration,
+ * emoluments, paycheck/pay-cheque and singular wage credits now resolve to the
+ * same Salary title/category across SMS parsing, semantic interpretation and
+ * statement/import classification. Explicit salary wording also outranks the
+ * generic "deposited into account" cash-deposit title. Existing parser-owned
+ * salary rows are repaired through the resumable Android history coordinator;
+ * future/offers/security messages remain non-posting.
  */
-export const PARSER_VERSION = 47;
+export const PARSER_VERSION = 48;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -365,7 +373,7 @@ export const PARSER_VERSION = 47;
  * Bump this only when an existing persisted row/obligation is known to need
  * source-backed repair.
  */
-export const PARSER_BACKFILL_VERSION = 47;
+export const PARSER_BACKFILL_VERSION = 48;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -2402,7 +2410,7 @@ const feeTitle = (raw: string): string => {
  * and "end of service" is not: a gratuity is income but it is not the monthly
  * salary the user is looking for.
  */
-const SALARY_RE = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bwps\b|راتب|الراتب/i;
+const SALARY_RE = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bwps\b|\bsal(?:ary)?\s+pay\b|\bmonthly\s+pay\b|\bnet\s+pay\b|\bremuneration\b|\bemoluments?\b|\bpay[ -]?cheques?\b|\bpaychecks?\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور/i;
 const DEPOSIT_RE = /cash\s+deposit|\bcdm\b|deposit(?:ed)?\s+(?:in|into|to)\b|ايداع نقدي|جهاز الايداع/i;
 /**
  * A prepaid AIRTIME top-up, which names no shop and never will.
@@ -3116,7 +3124,7 @@ function categoryOf(
   // income" is a claim about the user's tax position that nothing in the
   // message supports.
   if (type === 'income') {
-    if (/salary|payroll|wages|راتب|الراتب|مرتب|رواتب|اجر شهري/i.test(text)) {
+    if (SALARY_RE.test(text)) {
       return { id: 'salary', deliberate: true };
     }
     if (
@@ -3259,7 +3267,7 @@ export function classifyMerchantDescription(
   const merchant = normalizeServiceName(normalized) ?? normalized;
 
   if (type === 'income') {
-    if (/\bsalary\b|\bpayroll\b|\bwages?\b|راتب|الراتب|مرتب|رواتب|اجر شهري/i.test(normalized)) {
+    if (SALARY_RE.test(normalized)) {
       return { merchant, categoryGuess: 'salary', categoryDeliberate: true };
     }
     if (/\brefund\b|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|\bcashback\b|\binterest\b|\bprofit\b/i.test(normalized)) {
@@ -6075,18 +6083,17 @@ function parseSmsInner(
           ? 'Cashback'
           : /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw)
           ? 'Refund'
-          : DEPOSIT_RE.test(raw)
-          ? 'Cash deposit'
-          : /inward\s+remittance/i.test(raw)
-            ? 'Inward remittance'
-            // A salary credit is the single most recognisable row in the whole
-            // ledger and it was titled "Incoming transfer" — the generic
-            // fallback — while the category beside it already said Salary. The
-            // month's largest row should say what it is, and this is the one
-            // structural title the user reads every month.
-            : SALARY_RE.test(raw)
-              ? 'Salary'
-              : /\b(?:profit|interest)\b/i.test(raw)
+          // Salary/remuneration/paycheck wording is stronger than the generic
+          // deposit verb. "Remuneration ... was deposited into your account"
+          // and "Paycheck ... deposited into account" are salary credits, not
+          // cash-deposit events merely because the bank used "deposited".
+          : SALARY_RE.test(raw)
+            ? 'Salary'
+            : DEPOSIT_RE.test(raw)
+              ? 'Cash deposit'
+              : /inward\s+remittance/i.test(raw)
+                ? 'Inward remittance'
+                : /\b(?:profit|interest)\b/i.test(raw)
                 ? 'Bank profit'
               : 'Incoming transfer'
         : transferHint
