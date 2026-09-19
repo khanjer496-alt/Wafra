@@ -2313,7 +2313,7 @@ async function messageOnboardingProgressTests() {
   );
 
   values.clear();
-  values.set('wafra/ios-history-shortcut-installed/v1', 'true');
+  values.set('wafra/ios-history-shortcut-installed/v2', 'true');
   eq(
     'iOS message onboarding: the existing history install confirmation is reconciled without native status',
     await progress.loadIosMessageSetupProgress(storage),

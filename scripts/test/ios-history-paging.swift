@@ -368,6 +368,60 @@ struct PagedHistoryTests {
       rowState = try commitTyped(resumedRows, rowState, found: rowPage.count)
     }
     try check("typed rows complete the full source", rowState["checked"] as! Int == rowSource.count)
+    // Apple returns a blank GUID for some real-device rows: the typed path must
+    // derive the same local identity `preparedRow` does and keep the page whole.
+    let blankSource = rows(60)
+    let blankStore = make("rows-blank-guid")
+    var blankState = try json(blankStore.begin(oldestGUID: blankSource.last!.guid, oldestInstant: blankSource.last!.date,
+      newestGUID: blankSource.first!.guid, newestInstant: blankSource.first!.date))
+    var blankPage = page(blankSource, blankState)
+    for (index, row) in blankPage.enumerated() {
+      _ = try json(blankStore.stageRow(sessionId: blankState["sessionId"] as! String,
+        authorizationSecret: blankState["authorizationSecret"] as! String, revision: blankState["revision"] as! Int,
+        guid: index == 3 ? "" : row.guid, body: row.body, sender: "TEST", instant: row.date))
+    }
+    let blankDuplicate = try json(blankStore.stageRow(sessionId: blankState["sessionId"] as! String,
+      authorizationSecret: blankState["authorizationSecret"] as! String, revision: blankState["revision"] as! Int,
+      guid: "", body: blankPage[3].body, sender: "TEST", instant: blankPage[3].date))
+    try check("a re-staged blank-GUID row is recognised by its derived identity", blankDuplicate["rows"] as! Int == blankPage.count)
+    blankState = try commitTyped(blankStore, blankState, found: blankPage.count)
+    // A full page withholds its final second as overlap, so compare the
+    // committed count with what the same page commits when every GUID is set.
+    let controlStore = make("rows-control")
+    var controlState = try json(controlStore.begin(oldestGUID: blankSource.last!.guid, oldestInstant: blankSource.last!.date,
+      newestGUID: blankSource.first!.guid, newestInstant: blankSource.first!.date))
+    for row in page(blankSource, controlState) {
+      _ = try controlStore.stageRow(sessionId: controlState["sessionId"] as! String,
+        authorizationSecret: controlState["authorizationSecret"] as! String, revision: controlState["revision"] as! Int,
+        guid: row.guid, body: row.body, sender: "TEST", instant: row.date)
+    }
+    controlState = try commitTyped(controlStore, controlState, found: page(blankSource, controlState).count)
+    try check("a blank-GUID row is staged under a derived identity instead of stalling the page",
+      blankState["revision"] as! Int == 1 && blankState["checked"] as! Int == controlState["checked"] as! Int)
+    // A row refusal is named on the commit's alert, since the Shortcut only sees the commit.
+    blankPage = page(blankSource, blankState)
+    for row in blankPage.dropFirst() {
+      _ = try blankStore.stageRow(sessionId: blankState["sessionId"] as! String,
+        authorizationSecret: blankState["authorizationSecret"] as! String, revision: blankState["revision"] as! Int,
+        guid: row.guid, body: row.body, sender: "TEST", instant: row.date)
+    }
+    try rejected("a row with an invalid date is refused") {
+      _ = try blankStore.stageRow(sessionId: blankState["sessionId"] as! String,
+        authorizationSecret: blankState["authorizationSecret"] as! String, revision: blankState["revision"] as! Int,
+        guid: blankPage[0].guid, body: blankPage[0].body, sender: "TEST", instant: Date(timeIntervalSince1970: -5))
+    }
+    var namedReason = ""
+    do { _ = try commitTyped(blankStore, blankState, found: blankPage.count) }
+    catch let refusal as WafraPagedHistoryStore.FrameRefusal { namedReason = refusal.reason }
+    try check("the commit refusal names the last row refusal", namedReason.contains("invalid-input-rows") && namedReason.contains("last-row=invalid-input-date"))
+    // An interrupted commit cannot leak its rows into the next page: buffers are revision-named.
+    let leakStore = make("rows-blank-guid")
+    let leakState = try json(leakStore.begin(oldestGUID: blankSource.last!.guid, oldestInstant: blankSource.last!.date,
+      newestGUID: blankSource.first!.guid, newestInstant: blankSource.first!.date))
+    try check("a new run starts from an empty row buffer",
+      try json(leakStore.stageRow(sessionId: leakState["sessionId"] as! String,
+        authorizationSecret: leakState["authorizationSecret"] as! String, revision: leakState["revision"] as! Int,
+        guid: blankPage[0].guid, body: blankPage[0].body, sender: "TEST", instant: blankPage[0].date))["rows"] as! Int == 1)
     let rowRecord = try json(resumedRows.readChunk(sessionId: rowState["sessionId"] as! String, chunkIndex: 0)[0])
     try check("typed-row body survives the round trip unchanged", rowRecord["text"] as! String == rowSource[0].body)
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")

@@ -62,6 +62,23 @@ per-message graph (builds 39/44) imported real history that way, and Apple's
   installs it; the release check pins its SHA-256
   `740e24e6a001718ebcf9fc06f0d88a29a10718c85350582acb30c54e4d9f5fad`.
 
+## Independent review findings applied
+
+- A blank Message GUID (Apple returns one for some real-device rows) is
+  staged under the same derived local identity `preparedRow` uses instead of
+  being dropped, which would have refused every commit of that page.
+- Row buffers are named by revision and cleared on Begin and after commit, so
+  an interrupted commit cannot leak rows into the next page; the buffer is
+  bounded at 6 MiB with a named refusal.
+- The Shortcut discards per-row results, so the store remembers the last row
+  refusal and the commit refusal names it (`… last-row=<reason>`).
+- Install-confirmed markers moved to new keys so a build 150 user who confirmed
+  the v2 record is asked to add the v4 record rather than running a missing
+  name.
+- Install copy describes the Safari download step for the release asset.
+- Release readiness accepts exactly the v4 asset URL for every iOS profile
+  (the first TestFlight dispatch, run 35440140874, was refused by that rule).
+
 ## Verification performed
 
 | Check | Result |
