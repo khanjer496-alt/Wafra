@@ -116,6 +116,38 @@ shortcut with an existing name creates a duplicate ("… 1"), so the earlier
 `Wafra-History-v4.signed` must be deleted from Shortcuts before the file is
 added again.
 
+## Root cause found on the phone: nested loop variables
+
+Three further diagnostics on the same phone (no Wafra intents except where
+stated) pinned it down:
+
+- A loop probe over five Messages printed `i=1 … i=5` with distinct GUIDs
+  for `Repeat Item`, for Get Item from List bound to `Repeat Index` as an
+  attachment, and for the same bound as a scalar. The loop and both index
+  wrappers work in a **top-level** Repeat With Each.
+- A diagnostic copy of the real v4 graph that logged each
+  `StageWafraPagedRowIntent` reply printed `i=1` and the **same** GUID for
+  every row (`{"rows":1,"status":"staged"}` each time).
+
+The difference is nesting. The page loop sits inside the outer work-budget
+`Repeat` (count). Shortcuts names a nested loop's variables `Repeat Item 2`
+and `Repeat Index 2`; a bare `Repeat Item` / `Repeat Index` inside the inner
+loop refers to the **outer** Repeat, whose item is the number 1. That single
+fact explains every symptom since the paged graph shipped: v2 formatted the
+outer loop's item as a date (the "display string" dates), the first v4 run
+prompted "Message date" because the Date parameter received a number, and
+the by-index rows staged the first Message 51 times. The v2/v3 generators
+carry the same latent defect; their published records are unchanged and
+retired by the app in favor of v4.
+
+v4 now fetches each row with Get Item from List at `Repeat Index 2` and binds
+GUID/Body/Sender/date from that output. A test refuses any outer-loop
+variable inside the nested page loop. The release asset at the unchanged
+URL was replaced (SHA-256
+`6b34bc3563ec86e228db32cd7d0fdb443f6e7e9c074fe55e3ec0c84deef909b6`,
+31,795 bytes). On the first run of that file the import proceeded page after
+page without any alert.
+
 ## New-transaction capture: automation trigger verified on the phone
 
 On the owner's iPhone (iOS 26.6.2) the Message automation's Next button stays
