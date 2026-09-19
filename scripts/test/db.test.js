@@ -1792,6 +1792,34 @@ asyncSuites.push((async () => {
         legacyLoaded.transactions.map((row) => row.id).join(',') === 'new-1,new-2,old-1,old-2');
   }
 
+  for (const edit of ['metadata-only', 'one-row']) {
+    // Inline snapshots have no durable chunk bodies, even when their metadata
+    // names the current layout. Reusing unchanged row identities here used to
+    // replace the only full snapshot with metadata referencing missing chunks.
+    const original = Array.from({ length: 5 }, (_, index) => ({
+      id: `inline-${index}`, amountFils: 1000 + index,
+    }));
+    const memory = memoryStorage({
+      [LEDGER_KEY]: JSON.stringify({
+        transactions: original, txChunks: 0, txChunkOrder: 'oldest-first',
+      }),
+    });
+    const persistence = createPersistence(memory);
+    const loaded = await persistence.load();
+    const transactions = edit === 'metadata-only' ? loaded.transactions
+      : loaded.transactions.map((row, index) => index === 0
+        ? { ...row, transferDecision: { ownership: 'external' } } : row);
+    await persistence.save(snapshot('converted', transactions));
+    const reloaded = await createPersistence(memory).load();
+    ok(`inline ledger survives ${edit} save and a fresh persistence instance`,
+      JSON.stringify(reloaded.transactions) === JSON.stringify(transactions) &&
+        reloaded.transactions.length === 5,
+      `expected 5 rows, reloaded ${reloaded.transactions.length}`);
+    ok(`inline ${edit} conversion keeps exact money and row identities`,
+      JSON.stringify(reloaded.transactions.map(({ id, amountFils }) => [id, amountFils])) ===
+        JSON.stringify(original.map(({ id, amountFils }) => [id, amountFils])));
+  }
+
   {
     // Chunk bodies are reused by ROW IDENTITY, not by re-serializing the whole
     // ledger on every save. Store snapshots are immutable, so a chunk made of
