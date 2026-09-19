@@ -90,6 +90,32 @@ per-message graph (builds 39/44) imported real history that way, and Apple's
 | `node scripts/release/ios-public-shortcut-check.mjs` | v2 record, capture record and the v4 asset all `passed` |
 | Mac Shortcuts engine | The previous owner's status probes reproduce the old `Please choose a value for each parameter` error and its coercion fix; the v2 graph with Messages and Wafra intents stubbed runs its whole loop to the completion branch (`sim2-listpages`). |
 
+## First device run of v4 (build 152) and the loop-variable finding
+
+The first v4 run on build 152 passed Begin silently (both typed boundary
+dates resolved) and then prompted **"Message date"** with a date picker for
+every row: Shortcuts treated the row intent's `Date` parameter as unfilled
+when it was bound to the loop variable `Repeat Item`. Two diagnostic
+Shortcuts (`ios-date-probe-20260919`, no Wafra intents) then showed on the
+same phone that Format Date returns the exact instant with milliseconds
+(`2026-09-19T13:51:17.905+04:00`) for every binding tried, including
+`Repeat Item`, Detect Dates, a named variable, an explicit Date coercion and
+Get Item from List by `Repeat Index`, and that the GUID is a 36-character
+value. Apple's own parameter metadata on macOS 26.1 confirms a Date App
+Intent parameter is a `WFDateFieldParameter` that accepts only the scalar
+token wrapper the graph uses.
+
+The failure is therefore specific to a Wafra `Date` parameter fed the loop
+variable. The v4 graph now re-fetches each row with Get Item from List
+(`Item At Index` = `Repeat Index`) and binds GUID/Body/Sender/date from that
+action output, the same shape as the Begin boundaries that resolved
+silently. 87 actions; the release asset at the unchanged URL was replaced
+(SHA-256 `d0a4073435cb5541557ad4c2dba9a7b53465cdff3df98342002484ff8b069fc9`,
+31,839 bytes). No app rebuild is needed for this change. Re-adding a
+shortcut with an existing name creates a duplicate ("… 1"), so the earlier
+`Wafra-History-v4.signed` must be deleted from Shortcuts before the file is
+added again.
+
 ## New-transaction capture: automation trigger verified on the phone
 
 On the owner's iPhone (iOS 26.6.2) the Message automation's Next button stays

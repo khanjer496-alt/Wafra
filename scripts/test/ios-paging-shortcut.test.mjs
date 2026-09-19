@@ -49,7 +49,15 @@ test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   assert.equal(ids.filter(id => id === 'app.wafra.ios.StageWafraPagedRowIntent').length, 1);
   assert.equal(ids.filter(id => id === 'app.wafra.ios.CommitWafraPagedPageIntent').length, 1);
   const row = graph.WFWorkflowActions[rowIndex].WFWorkflowActionParameters;
-  typedDate(row.date, ref => { assert.equal(ref.Type, 'Variable'); assert.equal(ref.VariableName, 'Repeat Item'); });
+  // The loop variable itself must never feed a Wafra Date parameter: on iOS 26
+  // Shortcuts prompts "Message date" for it. The row is re-fetched by index.
+  const rowItem = graph.WFWorkflowActions[rowIndex - 4];
+  assert.equal(rowItem.WFWorkflowActionIdentifier, 'is.workflow.actions.getitemfromlist');
+  assert.equal(rowItem.WFWorkflowActionParameters.WFItemSpecifier, 'Item At Index');
+  assert.equal(rowItem.WFWorkflowActionParameters.WFItemIndex.Value.attachmentsByRange['{0, 1}'].VariableName, 'Repeat Index');
+  assert.equal(rowItem.WFWorkflowActionParameters.WFInput.Value.VariableName, 'Page');
+  typedDate(row.date, ref => { assert.equal(ref.Type, 'ActionOutput'); assert.equal(ref.OutputUUID, rowItem.WFWorkflowActionParameters.UUID); });
+  assert.ok(!JSON.stringify(row).includes('Repeat Item'), 'no loop-variable binding on the row intent');
   for (const key of ['guid', 'body', 'sender']) {
     const source = graph.WFWorkflowActions.find(a => a.WFWorkflowActionParameters.UUID === row[key].Value.attachmentsByRange['{0, 1}'].OutputUUID);
     assert.equal(source.WFWorkflowActionIdentifier, 'is.workflow.actions.gettext');

@@ -203,14 +203,24 @@ function buildPagedGraph({ columnar, rows = false }) {
   if (rows) {
     // One typed native call per Message. GUID/Body/Sender use the explicit
     // Text coercion proven on-device; the date is the raw property.
+    //
+    // Device evidence (iPhone 16 Pro, iOS 26.6.2, 19 Sep 2026): a Wafra
+    // intent's `Date` parameter bound to the loop variable `Repeat Item`
+    // is treated as unfilled and Shortcuts prompts "Message date" for every
+    // row, while the same property bound from an action output (the Begin
+    // boundaries, Get Item from List) resolves silently with milliseconds.
+    // So the loop re-fetches its item by index and binds from that output.
     const each = uuid();
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 0, WFInput: attachment(variable('Page')) });
-    const guid = field(variable('Repeat Item'), 'GUID');
-    const body = field(variable('Repeat Item'), 'Body');
-    const sender = field(variable('Repeat Item'), 'Sender');
+    const item = emit('is.workflow.actions.getitemfromlist', {
+      WFItemSpecifier: 'Item At Index', WFItemIndex: scalar(variable('Repeat Index')), WFInput: attachment(variable('Page')),
+    });
+    const guid = field(output(item), 'GUID');
+    const body = field(output(item), 'Body');
+    const sender = field(output(item), 'Sender');
     native('StageWafraPagedRowIntent', {
       request: scalar(variable('Request')), guid: scalar(output(guid)), body: scalar(output(body)),
-      sender: scalar(output(sender)), date: typedDate(variable('Repeat Item')),
+      sender: scalar(output(sender)), date: typedDate(output(item)),
     });
     nothing();
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
