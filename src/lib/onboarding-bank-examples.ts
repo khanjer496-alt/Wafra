@@ -1,4 +1,5 @@
 import { MARKETS } from '@/lib/markets';
+import type { StringKey } from '@/lib/i18n';
 import type { UniversalMarket } from '@/lib/alert-market-pack-types';
 
 export interface OnboardingBankExample {
@@ -86,9 +87,67 @@ const launchPreview = (id: 'AE' | 'SA'): OnboardingBankRegion => {
   };
 };
 
-const REGION_IDS = new Set<PreviewMarket>([
-  'AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
-]);
+/**
+ * Every country onboarding can illustrate, in the order a picker shows them.
+ *
+ * Ordered by how close the country is to the ledgers Wafra was built against
+ * rather than alphabetically: the two launch markets, then the Gulf and wider
+ * MENA, then the remaining institution markets. A country is listed here only
+ * once it has real bank identities above, so the list can never promise a
+ * preview it cannot draw.
+ */
+export const ONBOARDING_REGION_IDS: readonly PreviewMarket[] = [
+  'AE', 'SA', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO', 'IN', 'GB', 'US', 'FR', 'DE', 'ES', 'IT', 'NL',
+] as const;
+
+/**
+ * "Somewhere else" — ISO 3166-1's user-assigned code for an unspecified place.
+ *
+ * It has to be storable and distinct from "never answered", because those two
+ * states differ: an unanswered country still follows the device locale, while
+ * this one is the user saying the locale guess is wrong AND that their country
+ * is not one Wafra can illustrate. Both end at neutral bank glyphs, which is
+ * the honest drawing, but only one of them should stop deferring to the phone.
+ */
+export const ONBOARDING_REGION_ELSEWHERE = 'ZZ';
+
+/** Display name per country. Flags are decorative; the name carries meaning. */
+export const ONBOARDING_REGION_LABELS: Readonly<Record<string, { flag: string; labelKey: StringKey }>> =
+  Object.freeze({
+    AE: { flag: '🇦🇪', labelKey: 'onboardCountryAE' },
+    SA: { flag: '🇸🇦', labelKey: 'onboardCountrySA' },
+    QA: { flag: '🇶🇦', labelKey: 'onboardCountryQA' },
+    KW: { flag: '🇰🇼', labelKey: 'onboardCountryKW' },
+    BH: { flag: '🇧🇭', labelKey: 'onboardCountryBH' },
+    OM: { flag: '🇴🇲', labelKey: 'onboardCountryOM' },
+    EG: { flag: '🇪🇬', labelKey: 'onboardCountryEG' },
+    JO: { flag: '🇯🇴', labelKey: 'onboardCountryJO' },
+    IN: { flag: '🇮🇳', labelKey: 'onboardCountryIN' },
+    GB: { flag: '🇬🇧', labelKey: 'onboardCountryGB' },
+    US: { flag: '🇺🇸', labelKey: 'onboardCountryUS' },
+    FR: { flag: '🇫🇷', labelKey: 'onboardCountryFR' },
+    DE: { flag: '🇩🇪', labelKey: 'onboardCountryDE' },
+    ES: { flag: '🇪🇸', labelKey: 'onboardCountryES' },
+    IT: { flag: '🇮🇹', labelKey: 'onboardCountryIT' },
+    NL: { flag: '🇳🇱', labelKey: 'onboardCountryNL' },
+    [ONBOARDING_REGION_ELSEWHERE]: { flag: '🌍', labelKey: 'onboardCountryElsewhere' },
+  });
+
+/**
+ * Accept a stored or chosen country, or nothing.
+ *
+ * Deliberately tolerant of a code this build cannot illustrate: a ledger
+ * written by a newer build that knows more countries must still restore here,
+ * and an unknown code already resolves to neutral glyphs rather than to the
+ * wrong country's banks.
+ */
+export function normalizeOnboardingCountry(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const code = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : null;
+}
+
+const REGION_IDS = new Set<PreviewMarket>(ONBOARDING_REGION_IDS);
 
 export function onboardingLocaleRegion(): PreviewMarket | null {
   try {

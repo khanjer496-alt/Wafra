@@ -402,6 +402,18 @@ export interface OnboardingProfile {
   intention?: OnboardingIntention | null;
   /** Optional for ledgers created before the alert-delivery step existed. */
   alerts?: OnboardingAlertDelivery | null;
+  /**
+   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   *
+   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
+   * draws, and nothing else — it never selects a parser market pack, never
+   * pins `ledgerCurrency`, and never decides how a message is read. Those
+   * follow evidence from the alerts themselves, which is why a UAE resident
+   * whose phone is set to another country still parses as UAE.
+   *
+   * Absent means nobody has said, and the device locale is still the guess.
+   */
+  country?: string | null;
   startedAt: number;
 }
 

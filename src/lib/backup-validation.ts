@@ -107,6 +107,10 @@ const onboardingProfile: Check = (value) => record(value) && required(value, {
 }) && optional(value, {
   intention: oneOf(null, 'control', 'spend-intentionally', 'stay-ahead', 'build-buffer'),
   alerts: oneOf(null, 'sms', 'notifications', 'neither', 'unsure'),
+  // Any well-formed region code, not just the ones this build can illustrate:
+  // a ledger written by a newer build that knows more countries must still
+  // restore, and an unknown code already falls back to neutral bank glyphs.
+  country: (value) => value === null || (typeof value === 'string' && /^[A-Z]{2}$/.test(value)),
 });
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>

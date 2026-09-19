@@ -4,6 +4,8 @@ const onboarding = require('./build/onboarding');
 const i18n = require('./build/i18n');
 const growth = require('./build/growth-funnel');
 const backupValidation = require('./build/backup-validation');
+const bankExamples = require('./build/onboarding-bank-examples');
+const markets = require('./build/markets');
 
 let pass = 0;
 let fail = 0;
@@ -115,6 +117,66 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   eq('backup validation accepts the alert-delivery stage',
     backupValidation.isValidBackupState({ ...profileState,
       onboardingProfile: { ...profileState.onboardingProfile, stage: 'alerts' } }), true);
+  // The confirmed country is optional and tolerant: a ledger written by a build
+  // that illustrates more countries has to restore on this one too.
+  for (const country of ['AE', 'GB', 'ZZ', 'PK', null]) {
+    eq(`backup validation accepts a confirmed onboarding country (${country})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), true);
+  }
+  for (const country of ['gb', 'GBR', 'G1', '', 7]) {
+    eq(`backup validation rejects a malformed onboarding country (${JSON.stringify(country)})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), false);
+  }
+}
+
+/* The country a person confirms outranks the phone, and outranks it everywhere
+ * — the whole complaint was a UAE resident being shown British banks because
+ * his store account was British. It must also stay display-only: no country
+ * chosen here may select a parser market or pin a currency. */
+{
+  const region = bankExamples.onboardingBankRegion;
+  const gb = region('AE', 'GB');
+  const ae = region('AE', 'AE');
+  eq('a confirmed country wins over the launch market fallback', gb?.id, 'GB');
+  ok('and brings that country\'s own banks with it',
+    gb?.banks?.some((bank) => /HSBC/i.test(bank.name)) === true);
+  eq('confirming the market you are already in stays on it', ae?.id, 'AE');
+  eq('a country Wafra cannot illustrate stays neutral rather than guessing',
+    region('AE', 'ZZ'), null);
+  eq('and so does an explicit somewhere-else',
+    region('AE', bankExamples.ONBOARDING_REGION_ELSEWHERE), null);
+
+  // Display only: the parser's market pack is a closed set of two, and nothing
+  // the picker can return may widen it.
+  ok('no confirmable country can select a parser market beyond the two tested ones',
+    bankExamples.ONBOARDING_REGION_IDS
+      .filter((id) => markets.canSelectMarket(id))
+      .join(',') === 'AE,SA');
+  eq('and somewhere-else selects no market at all',
+    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE), false);
+
+  eq('a stored country is normalized to an ISO region code',
+    bankExamples.normalizeOnboardingCountry(' gb '), 'GB');
+  for (const bad of ['GBR', 'g', '', null, undefined, 12, {}]) {
+    eq(`a malformed stored country is dropped rather than drawn (${JSON.stringify(bad)})`,
+      bankExamples.normalizeOnboardingCountry(bad), null);
+  }
+
+  ok('every pickable country has a flag and a name in both languages',
+    [...bankExamples.ONBOARDING_REGION_IDS, bankExamples.ONBOARDING_REGION_ELSEWHERE]
+      .every((id) => {
+        const entry = bankExamples.ONBOARDING_REGION_LABELS[id];
+        return !!entry?.flag && ['en', 'ar'].every((lang) =>
+          i18n.t(entry.labelKey, lang) && i18n.t(entry.labelKey, lang) !== entry.labelKey);
+      }));
+  ok('every illustrable country can actually be picked',
+    ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO']
+      .every((id) => bankExamples.ONBOARDING_REGION_IDS.includes(id)));
+  ok('the country sheet says it only changes examples, not what Wafra can read',
+    /only picks the example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+      /come from your alerts/i.test(i18n.t('onboardCountrySheetBody', 'en')));
 }
 
 /* Which answers owe the user a statement.
@@ -400,6 +462,32 @@ ok(
     /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
 );
 ok(
+  'the country a person confirms reaches every onboarding scene, not just the first',
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource) &&
+    /<FocusChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<TrackingChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<IntentionChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<PersonalizedProductPreview[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<CaptureMarketScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource),
+);
+ok(
+  'the scenes resolve one device Region, shared with the control that corrects it',
+  /export const onboardingDeviceRegion/.test(aliveScenesSource) &&
+    /const previewRegion = \(country\?: string \| null\): string \| null => country \?\? deviceRegion\(\)/
+      .test(aliveScenesSource) &&
+    aliveScenesSource.split('deviceRegion()').length - 1 === 1 &&
+    /onboardingDeviceRegion/.test(gateSource),
+);
+ok(
+  'the country control reports what is drawn and is durable without rewinding setup',
+  /const drawnRegionId = useMemo\([\s\S]{0,200}onboardingBankRegion\(state\.marketId, selectedCountry \?\? onboardingDeviceRegion\(\)\)/
+    .test(gateSource) &&
+    /resolved=\{drawnRegionId\}/.test(gateSource) &&
+    /saveJourney\(\s*state\.onboardingProfile\?\.stage \?\? 'welcome',/.test(gateSource) &&
+    /setCountry\(normalizeOnboardingCountry\(state\.onboardingProfile\.country\)\)/.test(gateSource) &&
+    /country: nextCountry,/.test(gateSource),
+);
+ok(
   'the alert scene states what Wafra can reach rather than naming a bank',
   /export function AlertDeliveryChooser/.test(aliveScenesSource) &&
     /onboardAlertsReachPast/.test(aliveScenesSource) &&
@@ -453,7 +541,7 @@ ok(
 );
 ok(
   'welcome uses real Wafra identity and market-aware bank examples without ledger writes',
-  /<WelcomeMoneyScene marketId=\{state\.marketId\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
     /WafraMark/.test(aliveScenesSource) &&
     /onboardingBankRegion/.test(aliveScenesSource) &&
     /verifiedLogoUrl/.test(aliveScenesSource) &&
