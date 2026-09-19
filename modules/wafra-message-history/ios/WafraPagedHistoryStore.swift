@@ -226,6 +226,8 @@ public final class WafraPagedHistoryStore {
       "expiresAtMs": head.expiresAt.timeIntervalSince1970 * 1_000,
     ]
     if let token { object["authorizationSecret"] = token }
+    // Exclusive lower bound of the next Messages query; absent once complete.
+    if let windowStart = head.checkpoint.windowStart { object["after"] = Self.utc(windowStart) }
     let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return String(decoding: bytes, as: UTF8.self)
   }
@@ -254,6 +256,8 @@ public final class WafraPagedHistoryStore {
       if FileManager.default.fileExists(atPath: directory.appendingPathComponent("head.json").path) {
         head = try load(directory)
         guard head.checkpoint.oldest == oldest else { throw Failure.sourceChanged }
+        // Sessions saved before windows existed resume with a window.
+        if head.checkpoint.windowStart == nil { head.checkpoint = WafraHistoryCursor.windowed(head.checkpoint) }
       } else {
         let created = now()
         head = Head(sessionId: "PAGED-\(UUID().uuidString)", createdAt: created,
@@ -354,7 +358,7 @@ public final class WafraPagedHistoryStore {
   /// duplicated row is refused before any cursor arithmetic.
   public func commitRows(sessionId: String, authorizationSecret: String,
                          revision: Int, found: Int) throws -> String {
-    guard Self.validSession(sessionId), revision >= 0, found > 0,
+    guard Self.validSession(sessionId), revision >= 0, found >= 0,
           found <= WafraHistoryCursor.maximumLimit,
           let secret = Data(base64Encoded: authorizationSecret), secret.count == 32,
           secret.base64EncodedString() == authorizationSecret else { throw Failure.invalidInput }
@@ -410,7 +414,9 @@ public final class WafraPagedHistoryStore {
   public func stage(sessionId: String, authorizationSecret: String,
                     revision: Int, found: Int, frame: String) throws -> String {
     guard Self.validSession(sessionId), frame.utf8.count <= 8 * 1024 * 1024,
-          revision >= 0, found > 0, found <= WafraHistoryCursor.maximumLimit,
+          revision >= 0, found >= 0, found <= WafraHistoryCursor.maximumLimit,
+          // An empty page is only the empty-window case; a text frame with 0 found is malformed.
+          found > 0 || frame.isEmpty,
           let secret = Data(base64Encoded: authorizationSecret), secret.count == 32,
           secret.base64EncodedString() == authorizationSecret else { throw Failure.invalidInput }
     let payload = Data("wafra.paged.v1\u{0}\(sessionId)\u{0}\(revision)\u{0}\(found)\u{0}\(frame)".utf8)

@@ -169,6 +169,34 @@ struct WafraPagedCursorDateIntent: AppIntent {
 }
 
 @available(iOS 26.0, *)
+struct WafraPagedWindowStartDateIntent: AppIntent {
+  static let title: LocalizedStringResource = "Read Wafra history window start"
+  static let description = IntentDescription("Returns the lower bound of the next Messages query as a typed date, so the query never covers the whole inbox.")
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let supportedModes: IntentModes = .background
+  @Parameter(title: "Import request") var request: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<Date> {
+    do {
+      guard request.utf8.count <= 16_384,
+            WafraMessageHistoryStore.hasUniqueJSONMemberNames(Data(request.utf8)),
+            let object = try JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any],
+            object["status"] as? String == "continue",
+            let after = object["after"] as? String,
+            after.utf8.count <= 64 else {
+        throw WafraPagedIntentError.cursor
+      }
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      guard let value = formatter.date(from: after) else { throw WafraPagedIntentError.cursor }
+      return .result(value: value)
+    } catch {
+      throw WafraPagedIntentError.cursor
+    }
+  }
+}
+
+@available(iOS 26.0, *)
 struct StageWafraPagedImportIntent: AppIntent {
   static let title: LocalizedStringResource = "Save Wafra history page"
   static let description = IntentDescription("Checks a bounded page and saves it with its next cursor. Never reads Messages directly.")

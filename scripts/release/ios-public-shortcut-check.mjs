@@ -16,7 +16,9 @@ const checks = [
 // it is pinned by exact byte digest: the generator graph it was signed from is
 // `buildRowHistoryShortcut`, verified at signing time on the Mac.
 const assets = [
-  { kind: 'history', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut',
+  { kind: 'history', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
+    installedName: 'Wafra-History-v6.signed', sha256: 'de2364c4eb98a36547129ffdfc1328915f112db9a4adb95f1b52b950d6a44ad7', bytes: 43703 },
+  { kind: 'history-v4', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut',
     installedName: 'Wafra-History-v4.signed', sha256: '6b34bc3563ec86e228db32cd7d0fdb443f6e7e9c074fe55e3ec0c84deef909b6', bytes: 31795 },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
