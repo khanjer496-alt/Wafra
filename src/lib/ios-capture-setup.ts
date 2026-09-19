@@ -125,11 +125,14 @@ const iosVersionMajor = (): number => {
 };
 
 // The guided automation. Apple's Sender picker lists Contacts only and bank
-// SMS IDs are not Contacts, so the trigger is left unfiltered and Wafra keeps
-// only supported bank alerts on-device.
+// SMS IDs are not Contacts. iOS 26 refuses a Message automation with neither
+// filter (Next stays disabled, verified on the owner's iPhone on 25 August and
+// 19 September 2026), so the guide asks for a single space in "Message
+// Contains": every message with a space matches, and Wafra keeps only
+// supported bank alerts on-device.
 const UNFILTERED_MESSAGE_TRIGGER = {
   selectedSenderCount: 0,
-  messageContains: null,
+  messageContains: ' ',
 } as const;
 
 const defaultDependencies = (): IosSetupDependencies => ({
@@ -155,15 +158,19 @@ export function resolveIosSetupReadiness(
 /**
  * A Message automation Wafra can process. Zero selected senders is the guided
  * configuration (Apple cannot select bank SMS IDs); explicitly selected
- * Contacts are still accepted. A "Message Contains" text filter is not: it
- * would silently drop alerts that do not contain the chosen keyword.
+ * Contacts are still accepted. "Message Contains" may be empty or the guided
+ * whitespace-only filter, which every bank alert satisfies. A keyword filter
+ * is not accepted: it would silently drop alerts without that keyword.
  */
 export const isSupportedIosMessageAutomationTrigger = (
   trigger: IosMessageAutomationTrigger,
 ): boolean =>
   Number.isSafeInteger(trigger.selectedSenderCount) &&
   Number(trigger.selectedSenderCount) >= 0 &&
-  trigger.messageContains === null;
+  (trigger.messageContains === null ||
+    (typeof trigger.messageContains === 'string' &&
+      trigger.messageContains.length > 0 &&
+      trigger.messageContains.trim().length === 0));
 
 export const resolveIosFutureSetupStep = (
   progress: {
