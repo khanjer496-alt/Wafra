@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
 import { Colors, Fonts, Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
@@ -51,6 +52,7 @@ export function OnboardingCountryConfirm({ country, resolved, onChange }: {
   onChange(country: string): void;
 }) {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const [open, setOpen] = useState(false);
   const shown = country ?? resolved;
   const name = countryName(shown);
@@ -67,10 +69,19 @@ export function OnboardingCountryConfirm({ country, resolved, onChange }: {
         accessibilityLabel={`${label}. ${t('onboardCountryChange')}`}
         testID="onboarding-country-confirm"
         onPress={() => { tapped(); setOpen(true); }}
-        style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+        style={({ pressed }) => [
+          styles.row,
+          largeText && styles.rowStacked,
+          { opacity: pressed ? 0.7 : 1 },
+        ]}>
         <ThemedText style={styles.flag} accessible={false}>{countryFlag(shown)}</ThemedText>
-        <ThemedText style={styles.label} numberOfLines={1}>{label}</ThemedText>
-        <ThemedText style={styles.change}>{t('onboardCountryChange')}</ThemedText>
+        {/* Never one clipped line: a country name is long in Arabic, longer at
+            2x text on a 320pt screen, and a truncated country is the very
+            confusion this control exists to end. It wraps and the row grows. */}
+        <ThemedText style={[styles.label, largeText && styles.labelStacked]}>{label}</ThemedText>
+        <ThemedText style={[styles.change, largeText && styles.changeStacked]}>
+          {t('onboardCountryChange')}
+        </ThemedText>
       </Pressable>
 
       <BottomSheet
@@ -117,14 +128,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
+    paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
     borderRadius: Radius.control,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: night.cardBorder,
   },
+  rowStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: Spacing.one },
   flag: { fontSize: 17 },
   label: { flex: 1, minWidth: 0, color: night.textSecondary, fontSize: 13, lineHeight: 18 },
+  labelStacked: { flex: 0, alignSelf: 'stretch' },
   change: { color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 13 },
+  changeStacked: { alignSelf: 'flex-start' },
   list: { paddingBottom: Spacing.two },
   option: {
     minHeight: 48,
