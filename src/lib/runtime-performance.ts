@@ -80,6 +80,43 @@ export type RuntimeOperationTag =
   | 'wallet-reissues'
   | 'wallet-activity';
 
+// Runtime validation also protects callers crossing untyped/native boundaries.
+// Record makes additions to the public tag union require an explicit allowlist.
+const OPERATION_TAGS: Record<RuntimeOperationTag, true> = {
+  'ask-total': true,
+  'ask-plan': true,
+  'ask-transfer-scope': true,
+  'ask-execute': true,
+  'ask-evidence': true,
+  'bills-projection': true,
+  'bills-open-dues': true,
+  'bills-paid-cards': true,
+  'bills-transfer-scope': true,
+  'bills-manual': true,
+  'bills-agenda-items': true,
+  'bills-agenda-window': true,
+  'notification-drain': true,
+  'capture-collect': true,
+  'capture-plan': true,
+  'capture-save': true,
+  'auto-import': true,
+  'daily-summary': true,
+  'reminder-projection': true,
+  'history-scan-page': true,
+  'history-plan-page': true,
+  'history-apply-page': true,
+  'history-persist-page': true,
+  'history-save-page': true,
+  'home-insight': true,
+  'wallet-balances': true,
+  'wallet-dues': true,
+  'wallet-reissues': true,
+  'wallet-activity': true,
+};
+const SLOW_OPERATION_MS = 100;
+const OPERATION_TRACE_INTERVAL_MS = 1_000;
+const lastOperationTraceAt = new Map<RuntimeOperationTag, number>();
+
 export interface RuntimeOperationSnapshot {
   count: number;
   maxMs: number;
@@ -254,7 +291,8 @@ export function recordRuntimeInteraction(tag: RuntimeInteractionTag): void {
  * contents.
  */
 export function recordRuntimeOperation(tag: RuntimeOperationTag, elapsedMs: number): void {
-  if (Platform.OS !== 'android' || !Number.isFinite(elapsedMs) || elapsedMs < 0) return;
+  if (Platform.OS !== 'android' || typeof tag !== 'string' ||
+      !Object.hasOwn(OPERATION_TAGS, tag) || !Number.isFinite(elapsedMs) || elapsedMs < 0) return;
   const ms = Math.round(elapsedMs);
   const previous = operationStats.get(tag) ?? { count: 0, maxMs: 0, totalMs: 0, recentMs: [] };
   operationStats.set(tag, {
@@ -263,6 +301,20 @@ export function recordRuntimeOperation(tag: RuntimeOperationTag, elapsedMs: numb
     totalMs: previous.totalMs + ms,
     recentMs: [...previous.recentMs, ms].slice(-OPERATION_RECENT_MAX),
   });
+
+  if (process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE !== '1' || elapsedMs < SLOW_OPERATION_MS) return;
+  const at = now();
+  if (!nonnegativeFinite(at)) return;
+  const last = lastOperationTraceAt.get(tag);
+  if (last !== undefined && at - last < OPERATION_TRACE_INTERVAL_MS) return;
+  // The allowlist bounds this map. Rate-limit even a failing logging sink so
+  // diagnostics cannot turn a hot operation into another source of work.
+  lastOperationTraceAt.set(tag, at);
+  try {
+    console.info('[WafraRuntimeOperation]', tag, ms);
+  } catch {
+    // Local diagnostics must never change application behavior.
+  }
 }
 
 export function measureRuntimeOperation<T>(tag: RuntimeOperationTag, work: () => T): T {
