@@ -153,7 +153,7 @@ test('Theme identity remains stable, but palette and contrast changes remain rea
   const Colors = { light: { text: 'ink', controlBorder: 'normal', controlBorderHigh: 'strong' },
     dark: { text: 'paper', controlBorder: 'dark-normal', controlBorderHigh: 'dark-strong' } };
   const { useTheme: renderThemeHook } = load(path.join(root, 'src/hooks/use-theme.ts'), {
-    react: hooks, '@/constants/theme': { Colors },
+    react: { ...hooks, createContext: value => ({ value }), useContext: context => context.value }, '@/constants/theme': { Colors },
     '@/hooks/use-color-scheme': { useColorScheme: () => scheme },
     '@/hooks/use-increased-contrast': { useIncreasedContrast: () => increasedContrast },
   });

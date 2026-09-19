@@ -37,6 +37,7 @@ function createWorkflowHarness(options={}) {
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
+ d['@/components/onboarding/setup-shell']={SetupShell:p=>jsx('SetupShell',p),SetupHeader:p=>d['@/components/ui/screen-header'].ScreenHeader(p)};
  d['@/components/themed-view']={ThemedView:p=>jsx('View',{...p,style:[{backgroundColor:h.theme.background},p.style]})};
  d['@/components/storage-recovery']={StorageRecovery:p=>jsx('Boundary',{name:'StorageRecovery',...p})};
  d['@/components/ledger-currency-sheet']={LedgerCurrencySheet:p=>jsx('LedgerCurrencySheet',p),suggestedLedgerCurrency:()=> 'AED'};

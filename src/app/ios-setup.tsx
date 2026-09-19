@@ -20,7 +20,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Block } from '@/components/ui/layout';
-import { ScreenHeader } from '@/components/ui/screen-header';
+import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
@@ -847,8 +847,10 @@ export default function IosSetupScreen() {
     }
   }
 
+  const onboardingPresentation = fromOnboarding || progress.returnToOnboarding;
   return (
-    <ThemedView style={styles.root}>
+    <SetupShell onboarding={onboardingPresentation}>
+    <ThemedView style={[styles.root, onboardingPresentation && { backgroundColor: 'transparent' }]}>
       <Stack.Screen options={{ gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScrollView
@@ -856,8 +858,8 @@ export default function IosSetupScreen() {
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
-          <ScreenHeader
-            mode="inline"
+          <SetupHeader
+            onboarding={onboardingPresentation}
             title={t('iosMessageSetupHeading')}
             subtitle={t('iosMessageSetupSubtitle')}
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
@@ -1114,6 +1116,7 @@ export default function IosSetupScreen() {
         />
       </SafeAreaView>
     </ThemedView>
+    </SetupShell>
   );
 }
 

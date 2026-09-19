@@ -35,11 +35,12 @@ function importExitProgram(fixtureNames) {
       for (const name of bindings(declaration.name)) declarations.set(name, declaration);
   }
   function scan(node) {
-    if (ts.isJsxSelfClosingElement(node) && ['ScreenHeader', 'ConfirmSheet'].includes(node.tagName.getText(ast))) fragments.push(node);
+    if (ts.isConditionalExpression(node) && node.condition.getText(ast) === 'onboardingPresentation' && ts.isJsxSelfClosingElement(node.whenTrue)) { fragments.push(node); return; }
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'ConfirmSheet') fragments.push(node);
     ts.forEachChild(node, scan);
   }
   scan(component.body);
-  assert.equal(fragments.filter(node => node.tagName.getText(ast) === 'ScreenHeader').length, 1,
+  assert.equal(fragments.filter(node => ts.isConditionalExpression(node)).length, 1,
     'Exactly one real import header is tested');
   function collect(node) {
     if (ts.isIdentifier(node) && !fixtureNames.has(node.text)) {
@@ -129,7 +130,7 @@ function screen(options = {}) {
     dispatchIosMessageSetup: async event => { changes.push(event); events.push('mark-history'); return { returnToOnboarding: true }; },
     setHistoryCommitState: value => { input.historyCommitState = value; }, setNotice: value => notices.push(value),
     router: { replace: route => routes.push(['replace', route]), back: () => routes.push(['back']) },
-    t: key => key, ScreenHeader: 'ScreenHeader', ConfirmSheet: confirm,
+    onboardingPresentation: options.onboarding === true, t: key => key, SetupHeader: 'SetupHeader', ScreenHeader: 'ScreenHeader', ConfirmSheet: confirm,
     require: name => { assert.equal(name, 'react/jsx-runtime'); return { jsx, jsxs: jsx, Fragment: 'Fragment' }; },
   };
   const renderActual = vm.runInNewContext(importExitProgram(new Set(Object.keys(fixtures))), fixtures, { filename: sourceFile });
@@ -143,8 +144,8 @@ function screen(options = {}) {
     assert.equal(buttons.length, 2, 'Real ConfirmSheet exposes cancel and confirm'); return buttons[1].props;
   };
   return { input, services, nativeCalls, changes, routes, notices, events, controller, lock, flush, render, dialog, confirmButton,
-    header: () => walk(tree).find(node => node.type === 'ScreenHeader').props,
-    async back() { const header = this.header(); header.onBack(); await flush(); },
+    header: () => walk(tree).find(node => ['SetupHeader', 'ScreenHeader'].includes(node.type)).props,
+    async back() { const header = this.header(); (header.back?.onPress ?? header.onBack)(); await flush(); },
     async cancel() { const sheet = dialog(); assert.ok(sheet); sheet.props.onClose(); await flush(); },
     async confirm() { confirmButton().onPress(); await flush(); },
     async replaceSession(id) { input.history = id; input.historyResult = { sessionId: id }; render(); await flush(); },
@@ -166,7 +167,7 @@ test('dismissing import Back confirmation keeps the session and review open', as
 });
 
 test('twenty rapid Back taps open one choice and never discard without consent', async () => {
-  const h = screen(); const back = h.header().onBack;
+  const h = screen(); const back = (h.header().back?.onPress ?? h.header().onBack);
   await Promise.all(Array.from({ length: 20 }, () => back())); await h.flush();
   assert.deepEqual(h.nativeCalls, []); assert.deepEqual(h.routes, []); assert.ok(h.dialog());
 });
@@ -243,4 +244,12 @@ test('ordinary paste Back keeps its existing navigation and respects the write l
     const locked = screen({ history, locked: true }); await locked.back();
     assert.deepEqual(locked.routes, []); assert.deepEqual(locked.nativeCalls, []);
   }
+});
+
+test('first-run styled header retains the same protected Back confirmation', async () => {
+  const h = screen({ onboarding: true });
+  assert.equal(typeof h.header().back.onPress, 'function');
+  await h.back();
+  assert.deepEqual(h.nativeCalls, []); assert.deepEqual(h.routes, []);
+  assert.ok(h.dialog());
 });

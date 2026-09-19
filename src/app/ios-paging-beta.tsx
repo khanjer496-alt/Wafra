@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { ScreenHeader } from '@/components/ui/screen-header';
+import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
@@ -19,11 +19,15 @@ import { PAGED_HISTORY_INSTALL_KEY, PAGED_HISTORY_INSTALL_URL, pagedHistoryCopy,
 
 const nativeModule = async () => (await import('../../modules/wafra-message-history')).default;
 function PagedHistoryScreen() {
-  const theme = useTheme(); const language = useLanguage(); const w = pagedHistoryCopy[language === 'ar' ? 'ar' : 'en'];
+  const language = useLanguage(); const w = pagedHistoryCopy[language === 'ar' ? 'ar' : 'en'];
   const router = useRouter(); const params = useLocalSearchParams<{ origin?: string; blocked?: string }>();
   const origin = iosHistoryReturnOriginFromParam(params.origin) ?? 'ios-setup';
   const blockedOnReturn = params.blocked === '1';
-  const { getStateGeneration } = useStore();
+  const { state, getStateGeneration } = useStore();
+  const [restoredOnboarding, setRestoredOnboarding] = useState(false);
+  const onboarding = origin === 'onboarding' || restoredOnboarding ||
+    (state.hydrated === true && state.onboarded === false);
+  const theme = useTheme(onboarding ? 'dark' : undefined);
   const [progress, setProgress] = useState<PagedHistoryProgress | null>(null);
   const [installed, setInstalled] = useState(false); const [adding, setAdding] = useState(false);
   const [ready, setReady] = useState(false); const [busy, setBusy] = useState(false);
@@ -37,9 +41,9 @@ function PagedHistoryScreen() {
     try {
       const native = await nativeModule();
       if (!native?.getPagedStatus || !native.discardSession) throw new Error('missing_paged_receiver');
-      const [raw, confirmed] = await Promise.all([native.getPagedStatus(), AsyncStorage.getItem(PAGED_HISTORY_INSTALL_KEY)]);
+      const [raw, confirmed, setup] = await Promise.all([native.getPagedStatus(), AsyncStorage.getItem(PAGED_HISTORY_INSTALL_KEY), loadIosMessageSetupProgress()]);
       const next = parsePagedHistoryProgress(raw);
-      if (current()) { setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(blockedOnReturn ? w.paused : null); }
+      if (current()) { setRestoredOnboarding(setup.returnToOnboarding); setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(blockedOnReturn ? w.paused : null); }
     } catch { if (current()) { setProgress(null); setReady(false); setError(w.error); } }
   }, [blockedOnReturn, getStateGeneration, w.error, w.paused]);
   useEffect(() => {
@@ -58,7 +62,8 @@ function PagedHistoryScreen() {
     finally { operation.current = false; if (alive.current) setBusy(false); }
   };
   const install = () => void run(async () => {
-    if (!await Linking.canOpenURL('shortcuts://')) { setError(w.missing); return; }
+    // The signed HTTPS download opens in Safari even when iOS cannot probe
+    // the Shortcuts scheme. Probe only when actually running the Shortcut.
     if (!PAGED_HISTORY_INSTALL_URL) { setError(w.missing); return; }
     await Linking.openURL(PAGED_HISTORY_INSTALL_URL);
     if (alive.current) setAdding(true);
@@ -110,10 +115,10 @@ function PagedHistoryScreen() {
   const label = progress?.status === 'complete' ? w.review
     : !canRunShortcut ? w.install : adding && !installed ? w.installed
       : progress ? w.resume : w.start;
-  return <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+  return <SetupShell onboarding={onboarding}><SafeAreaView style={{ flex: 1, backgroundColor: onboarding ? 'transparent' : theme.background }}>
     <Stack.Screen options={{ title: w.title, gestureEnabled: !busy }} />
     <ScrollView contentContainerStyle={{ width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', padding: ScreenPadding, gap: Spacing.four }}>
-      <ScreenHeader mode="inline" title={w.title} subtitle={w.intro} back={{ label: w.back, onPress: leave, disabled: busy }} />
+      <SetupHeader onboarding={onboarding} title={w.title} subtitle={w.intro} back={{ label: w.back, onPress: leave, disabled: busy }} />
       <View testID="paged-history-setup" style={{ gap: Spacing.three }}>
         <ThemedText>{w.privacy}</ThemedText>
         {!installed && progress?.status !== 'complete' && <ThemedText type="small" themeColor="textSecondary">{w.installHelp}</ThemedText>}
@@ -134,7 +139,7 @@ function PagedHistoryScreen() {
     </ScrollView>
     <ConfirmSheet visible={confirmDiscard} onClose={() => setConfirmDiscard(false)} question={w.discardTitle}
       body={w.discardBody} confirmLabel={w.confirm} onConfirm={discard} />
-  </SafeAreaView>;
+  </SafeAreaView></SetupShell>;
 }
 export default function IosPagingBeta() {
   return Platform.OS === 'ios' && iosSupportsMessageHistory(Platform.Version) && pagedHistoryEnabled()
