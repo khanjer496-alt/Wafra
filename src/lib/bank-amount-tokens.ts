@@ -9,6 +9,17 @@ export interface MalformedMoneyToken {
 const VALID_LOCAL_NUMBER = /^(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?|\.\d{1,2})$/;
 const scanners = new Map<string, { prefix: RegExp; suffix: RegExp; localCode: RegExp }>();
 
+/** Share the currency/number boundary between extraction and validation.
+ * An alias's optional terminal dot (Dhs\\.?) must not consume the decimal
+ * in Dhs.99. A label's full stop is punctuation only before whitespace.
+ * Internal dots in Arabic currency symbols retain their original meaning.
+ */
+export function localMoneyPrefixPattern(currencyAliases: readonly string[]): string {
+  const aliases = currencyAliases.map((alias) =>
+    alias.endsWith(String.raw`\.?`) ? alias.slice(0, -3) : alias);
+  return String.raw`(?:${aliases.join('|')})(?:\.(?=\s))?`;
+}
+
 /**
  * Inspect complete AED/SAR-style tokens rather than trusting a regex prefix.
  * Input and currency aliases are already orthography-normalized by the caller.
@@ -25,7 +36,7 @@ export function malformedLocalMoneyTokens(
     const currency = `(?:${key})`;
     const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
     scanner = {
-      prefix: new RegExp(String.raw`(?<![\p{L}])${currency}(?![\p{L}])\s*(${number})`, 'giu'),
+      prefix: new RegExp(String.raw`(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
       suffix: new RegExp(String.raw`(${number})\s*${currency}(?![\p{L}])`, 'giu'),
       localCode: new RegExp(`^${currency}$`, 'iu'),
     };

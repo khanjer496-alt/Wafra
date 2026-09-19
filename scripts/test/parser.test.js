@@ -5354,6 +5354,47 @@ ok('a generic pending notice carries bounded repair evidence',
 t('a currency-anchored local figure may omit its leading zero',
   'Purchase of AED .99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
   { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+// Spacing mutation of the existing sub-unit fixture: the decimal belongs to
+// the amount even when it immediately follows the currency code.
+t('an unspaced local sub-unit figure keeps its decimal point',
+  'Purchase of AED.99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+t('an optional dot in the Dhs alias cannot swallow a sub-unit decimal',
+  'Purchase of Dhs.99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+// Currency punctuation mutations of the established purchase format must
+// still validate the whole money token before converting it.
+for (const amount of ['AED. 3,50', 'AED. 42.123', 'Dhs. 3,50', 'Dhs. 42.123']) {
+  t(`punctuated currency does not bypass amount validation: ${amount}`,
+    `Purchase of ${amount} with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.`,
+    null);
+}
+t('the Dhs punctuation alias preserves a grouped whole-unit amount',
+  'Purchase of Dhs. 3,500.00 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 350000, merchant: 'Test Merchant' });
+// The statement paths must obey the same currency/decimal boundary as purchases.
+for (const currency of ['AED', 'Dhs']) {
+  t(`a sub-unit statement total retains its decimal for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}.99. Minimum due AED 0.50 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 99, minDueFils: 50 });
+  t(`a sub-unit statement minimum retains its decimal for ${currency}`,
+    `Your credit card statement is ready. Total due AED 100.00. Minimum due ${currency}.99 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 10000, minDueFils: 99 });
+  t(`a punctuated statement total and minimum retain their amounts for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}. 3,500.00. Minimum due ${currency}. 42.10 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 350000, minDueFils: 4210 });
+  t(`a punctuated malformed statement total is refused for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}. 3,50. Minimum due AED 42.10 by 05/08/2026`,
+    null);
+  for (const label of ['Avl Balance is', 'Balance', 'Outstanding balance']) {
+    t(`a sub-unit ${label} snapshot retains its decimal for ${currency}`,
+      `Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. ${label} ${currency}.99`,
+      { kind: 'transaction', amountFils: 5000, snapshotFils: 99 });
+    t(`a punctuated ${label} snapshot retains its grouped amount for ${currency}`,
+      `Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. ${label} ${currency}. 3,500.00`,
+      { kind: 'transaction', amountFils: 5000, snapshotFils: 350000 });
+  }
+}
 t('a currency-anchored foreign figure may omit its leading zero',
   'Purchase of USD .99 with Debit Card ending 8783 at TEST MERCHANT, NEW YORK. Avl Balance is AED 900.00.',
   { type: 'expense', amountFils: 364, originalCurrency: 'USD', originalAmountMinor: 99,
@@ -5554,6 +5595,10 @@ ok('ADIB deposit-machine clearing notice carries repairable pending evidence',
 t('ADIB cleared cheque accepts punctuated AED label only after settlement',
   'Dear Customer, Chq No.123456 has been cleared. AED. 42.10 deposited to a/c. ****1234',
   { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Cash deposit' });
+// Amount mutation of the same source-backed cheque format.
+t('a punctuated AED label preserves a grouped whole-unit deposit',
+  'Dear Customer, Chq No.123456 has been cleared. AED. 3,500.00 deposited to a/c. ****1234',
+  { kind: 'transaction', type: 'income', amountFils: 350000, merchant: 'Cash deposit' });
 
 t('ADIB account profit credit is genuine income, not an unresolved incoming transfer',
   'Dear Customer, profit of AED 42.10 was credited to your account ****1234.',
@@ -5583,10 +5628,29 @@ t('ADIB account merchant debit keeps the merchant transaction separate from bala
 t('ADIB terse account merchant transaction remains a posted expense',
   'Trx. of AED 42.10 on your a/c ****1234 at ABU DHABI NATIONAL OIL ABU DHABI AE. Avl Bal is AED 1234.56',
   { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
+// The original privacy-sanitized values contradicted each other. Keep that
+// input as a safety regression, then exercise sane values in the same grammar.
+t('ADIB mini statement drops a minimum larger than its stated total',
+  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 1234.56 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: null, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
 t('ADIB mini statement keeps total and minimum due separate',
   'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 4.21 by 25SEP26. Please pay before due date.',
   { kind: 'cardStatement', amountFils: 4210, minDueFils: 421, dueDay: 25,
     card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('ADIB mini statement keeps a consistent total and minimum due separate',
+  'ADIB Covered card Mini stmt. Total amount due AED 1234.56 on card ending **1234. Min due AED 42.10 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 123456, minDueFils: 4210, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('a cardless statement also drops an over-total minimum',
+  'Your credit card statement is ready. Total amount due AED 42.10. Minimum due AED 1234.56 by 05/08/2026',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: null });
+t('a zero statement total never promotes a positive minimum into debt',
+  'Your credit card statement for card 1234 is ready. Total due AED 0.00. Minimum due AED 425.00 by 18/08/2026',
+  null);
+t('a statement credit balance never promotes a positive minimum into debt',
+  'Your credit card statement for card 1234 is ready. Total due AED -425.00. Minimum due AED 425.00 by 18/08/2026',
+  null);
 t('ADIB ATM cash withdrawal is posted cash movement, not a balance amount',
   'Dear Customer, ATM Cash Withdrawal for AED 42.10 was debited from your account ****1234. Your Avl Bal is AED 1234.56.',
   { kind: 'transaction', type: 'expense', amountFils: 4210, category: 'cash-withdrawal' },
