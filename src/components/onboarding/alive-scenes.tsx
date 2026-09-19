@@ -22,7 +22,13 @@ import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
 import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
-import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
+import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap } from '@/lib/onboarding';
+import type {
+  OnboardingAlertDelivery,
+  OnboardingFocus,
+  OnboardingIntention,
+  OnboardingTracking,
+} from '@/lib/types';
 
 const night = Colors.dark;
 const deviceRegion = (): string | null => {
@@ -343,6 +349,83 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
   </View>;
 }
 
+/**
+ * The answer's consequence, drawn as reach rather than as a promise.
+ *
+ * Every other onboarding question is about taste, so its scene can be
+ * aspirational. This one is about what Wafra can and cannot retrieve, and the
+ * honest answer for a notification-only bank is that the past is missing. The
+ * two rows say so plainly, which is also what makes the statement offer at the
+ * end of setup read as a fix rather than an upsell.
+ */
+function AlertReach({ alerts }: { alerts: OnboardingAlertDelivery }) {
+  const pastCovered = alerts === 'sms';
+  const pastUnknown = alerts === 'unsure';
+  const rows: { key: string; label: string; detail: string; covered: boolean }[] = [
+    {
+      key: 'past',
+      label: t('onboardAlertsReachPast'),
+      detail: pastCovered
+        ? t('onboardAlertsReachCovered')
+        : pastUnknown ? t('onboardAlertsReachUnknown') : t('onboardAlertsReachStatement'),
+      covered: pastCovered,
+    },
+    {
+      key: 'future',
+      label: t('onboardAlertsReachFuture'),
+      detail: t('onboardAlertsReachCovered'),
+      covered: true,
+    },
+  ];
+  return <View style={styles.alertReach}>
+    {rows.map(row => <View key={row.key} style={styles.alertReachRow}>
+      <Icon
+        name={row.covered ? 'check' : 'upload'}
+        size={15}
+        color={row.covered ? night.primary : night.textTertiary}
+      />
+      <ThemedText style={styles.alertReachLabel}>{row.label}</ThemedText>
+      <ThemedText style={[styles.alertReachDetail, row.covered && styles.alertReachDetailCovered]}>
+        {row.detail}
+      </ThemedText>
+    </View>)}
+  </View>;
+}
+
+export function AlertDeliveryChooser({ value, onChange, reducedMotion = false }: {
+  value: OnboardingAlertDelivery | null;
+  onChange(value: OnboardingAlertDelivery): void;
+  reducedMotion?: boolean;
+}) {
+  const current = value ?? 'sms';
+  return <View style={styles.chooser} testID="onboarding-alerts-options">
+    <Animated.View key={current} entering={reducedMotion ? undefined : FadeIn.duration(180)}
+      style={styles.trackingScene} accessibilityLiveRegion="polite">
+      <AlertReach alerts={current} />
+      <View style={styles.outcome}>
+        <Icon name={onboardingHistoryGap(value) ? 'upload' : 'check'} size={14} color={night.primary} />
+        <ThemedText style={styles.outcomeText}>
+          {t(ALERT_DELIVERY_PRESETS.find(preset => preset.id === current)!.detailKey)}
+        </ThemedText>
+      </View>
+    </Animated.View>
+    <View style={styles.optionList}>
+      {ALERT_DELIVERY_PRESETS.map(preset => {
+        const label = t(preset.titleKey);
+        const selected = value === preset.id;
+        return <Pressable key={preset.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
+          aria-checked={selected} accessibilityLabel={label}
+          onPress={() => { tapped(); onChange(preset.id); }}
+          style={({ pressed }) => [styles.optionRow, selected && styles.optionRowSelected, { opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name={preset.icon} size={17} color={selected ? night.primary : night.textTertiary} />
+          <ThemedText style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</ThemedText>
+          {selected && <Icon name="check" size={14} color={night.primary} />}
+        </Pressable>;
+      })}
+    </View>
+  </View>;
+}
+
 function IntentionVisual({ intention, currency }: { intention: OnboardingIntention; currency: string }) {
   const focus: OnboardingFocus = intention === 'spend-intentionally' ? 'spending'
     : intention === 'stay-ahead' ? 'bills'
@@ -538,6 +621,11 @@ const styles = StyleSheet.create({
   trackingFresh: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12 },
   trackingFreshTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
   trackingFreshBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17, paddingTop: 2 },
+  alertReach: { minHeight: 70, justifyContent: 'center', gap: 4 },
+  alertReachRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  alertReachLabel: { flexShrink: 1, color: night.text, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18 },
+  alertReachDetail: { marginStart: 'auto', flexShrink: 1, color: night.textTertiary, fontSize: 12, lineHeight: 17 },
+  alertReachDetailCovered: { color: night.textSecondary },
   intentionScene: { gap: 7 },
   intentionSceneLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 2 },
   intentionSceneCopy: { flex: 1, color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18 },

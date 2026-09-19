@@ -4,6 +4,7 @@ import type {
   Budget,
   CategoryId,
   Goal,
+  OnboardingAlertDelivery,
   OnboardingFocus,
   OnboardingJourneyStage,
   OnboardingPlanPreferences,
@@ -99,6 +100,77 @@ export const TRACKING_PRESETS: readonly OnboardingTrackingPreset[] = [
     icon: 'phone',
   },
 ] as const;
+
+export interface OnboardingAlertDeliveryPreset {
+  id: OnboardingAlertDelivery;
+  titleKey: StringKey;
+  detailKey: StringKey;
+  icon: 'phone' | 'alert' | 'mail' | 'search';
+}
+
+/**
+ * Ordered so the two answers that decide the follow-up sit at the top. The
+ * wording asks what the bank DOES, never which bank it is.
+ */
+export const ALERT_DELIVERY_PRESETS: readonly OnboardingAlertDeliveryPreset[] = [
+  {
+    id: 'sms',
+    titleKey: 'onboardAlertsSms',
+    detailKey: 'onboardAlertsSmsDetail',
+    icon: 'phone',
+  },
+  {
+    id: 'notifications',
+    titleKey: 'onboardAlertsNotifications',
+    detailKey: 'onboardAlertsNotificationsDetail',
+    icon: 'alert',
+  },
+  {
+    id: 'neither',
+    titleKey: 'onboardAlertsNeither',
+    detailKey: 'onboardAlertsNeitherDetail',
+    icon: 'mail',
+  },
+  {
+    id: 'unsure',
+    titleKey: 'onboardAlertsUnsure',
+    detailKey: 'onboardAlertsUnsureDetail',
+    icon: 'search',
+  },
+] as const;
+
+/**
+ * Does this answer mean the first run cannot reconstruct the past on its own?
+ *
+ * Only a texting bank leaves an archive Wafra can read: the SMS inbox still
+ * holds last year's alerts, so a history scan genuinely recovers history. An
+ * app notification is on screen or it is gone — capturing it works from the
+ * moment access is granted and never backwards. A bank that does neither
+ * leaves nothing at all.
+ *
+ * So `sms` is the single answer that needs no statement, and an unanswered
+ * question is NOT treated as a gap: an absent answer is the state of every
+ * ledger onboarded before this step existed, and those users already have
+ * their history. Only a deliberate "I'm not sure" asks to be shown the option.
+ */
+export function onboardingHistoryGap(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'notifications' || alerts === 'neither' || alerts === 'unsure';
+}
+
+/**
+ * Should first-run capture setup lead with bank notifications rather than SMS?
+ *
+ * Answering "notifications" is the user telling us the SMS inbox will be
+ * close to empty for their main bank. The capture step still offers both —
+ * a second bank may well text — but the recommendation follows the answer.
+ */
+export function onboardingPrefersNotificationCapture(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'notifications';
+}
 
 export function onboardingLandingPath(focus: OnboardingFocus | null | undefined): '/' | '/flow' | '/bills' {
   if (focus === 'spending') return '/flow';

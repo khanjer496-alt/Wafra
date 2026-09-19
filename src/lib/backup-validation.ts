@@ -100,12 +100,13 @@ const goal: Check = (value) => record(value) && required(value, {
 });
 const onboardingProfile: Check = (value) => record(value) && required(value, {
   v: oneOf(1),
-  stage: oneOf('welcome', 'focus', 'tracking', 'intention', 'preview', 'privacy', 'capture', 'complete'),
+  stage: oneOf('welcome', 'focus', 'tracking', 'alerts', 'intention', 'preview', 'privacy', 'capture', 'complete'),
   focus: oneOf(null, 'spending', 'bills', 'cashflow', 'overview'),
   tracking: oneOf(null, 'none', 'bank-apps', 'spreadsheet', 'finance-app'),
   startedAt: nonnegative,
 }) && optional(value, {
   intention: oneOf(null, 'control', 'spend-intentionally', 'stay-ahead', 'build-buffer'),
+  alerts: oneOf(null, 'sms', 'notifications', 'neither', 'unsure'),
 });
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>

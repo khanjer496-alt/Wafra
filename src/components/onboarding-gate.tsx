@@ -22,6 +22,7 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import {
+  AlertDeliveryChooser,
   CaptureMarketScene,
   FocusChooser,
   IntentionChooser,
@@ -59,26 +60,36 @@ import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   MAX_PREFERRED_NAME_LENGTH,
   normalizePreferredName,
+  onboardingHistoryGap,
   onboardingInsightKeys,
   onboardingLandingPath,
+  onboardingPrefersNotificationCapture,
   onboardingResumeDestination,
 } from '@/lib/onboarding';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
-import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
+import type {
+  OnboardingAlertDelivery,
+  OnboardingFocus,
+  OnboardingIntention,
+  OnboardingTracking,
+} from '@/lib/types';
 import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'alerts'
   | 'intention'
   | 'preview'
   | 'capture'
   | 'complete';
-const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview'];
+const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview'];
+/** Routes the gate may hand to expo-router once onboarding commits. */
+type OnboardingExit = '/pro' | '/statement-import';
 const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
@@ -245,6 +256,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [focus, setFocus] = useState<OnboardingFocus | null>(null);
   const [tracking, setTracking] = useState<OnboardingTracking | null>(null);
   const [intention, setIntention] = useState<OnboardingIntention | null>(null);
+  const [alerts, setAlerts] = useState<OnboardingAlertDelivery | null>(null);
   const [resumeReady, setResumeReady] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
   const [resumeAttempt, setResumeAttempt] = useState(0);
@@ -265,11 +277,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [finishing, setFinishing] = useState(false);
   const [finishSaveFailed, setFinishSaveFailed] = useState(false);
   const requestedFirstEntry = useRef(false);
-  const requestedDestination = useRef<'/pro' | undefined>(undefined);
+  const requestedDestination = useRef<OnboardingExit | undefined>(undefined);
   const notificationDecisionMade = useRef(false);
   const [pendingOpen, setPendingOpen] = useState<{
     addFirstEntry: boolean;
-    destination?: '/pro';
+    destination?: OnboardingExit;
     outcomeOverride?: CompletionOutcome;
   } | null>(null);
   const startedEventSent = useRef(false);
@@ -305,6 +317,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setFocus(null);
     setTracking(null);
     setIntention(null);
+    setAlerts(null);
     setStep('welcome');
   }, [previewMode]);
 
@@ -325,6 +338,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setFocus(null);
     setTracking(null);
     setIntention(null);
+    setAlerts(null);
     setStep('welcome');
     router.setParams({ onboarding: undefined });
   };
@@ -347,10 +361,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const saveJourney = (
-    stage: 'welcome' | 'focus' | 'tracking' | 'intention' | 'preview' | 'capture' | 'complete',
+    stage: 'welcome' | 'focus' | 'tracking' | 'alerts' | 'intention' | 'preview' | 'capture' | 'complete',
     nextFocus: OnboardingFocus | null = focus,
     nextTracking: OnboardingTracking | null = tracking,
     nextIntention: OnboardingIntention | null = intention,
+    nextAlerts: OnboardingAlertDelivery | null = alerts,
   ) => {
     if (previewMode) return;
     setOnboardingProfile({
@@ -359,6 +374,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       focus: nextFocus,
       tracking: nextTracking,
       intention: nextIntention,
+      alerts: nextAlerts,
       startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
     });
   };
@@ -385,6 +401,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(null);
       setTracking(null);
       setIntention(null);
+      setAlerts(null);
       setResumeFailed(false);
       setAndroidSmsReady(false);
       setAndroidNotificationReady(false);
@@ -406,6 +423,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(state.onboardingProfile.focus);
       setTracking(state.onboardingProfile.tracking);
       setIntention(state.onboardingProfile.intention ?? null);
+      setAlerts(state.onboardingProfile.alerts ?? null);
     }
     if (state.onboarded) {
       resumeHandled.current = true;
@@ -530,6 +548,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const chooseAlerts = (id: OnboardingAlertDelivery) => {
+    setAlerts(id);
+    saveJourney('alerts', focus, tracking, intention, id);
+    trackOnboardingEvent('onboarding_alerts_selected', {
+      focus,
+      tracking,
+      // The answer itself, never a bank name: this is the delivery channel.
+      alerts: id,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
   const chooseIntention = (id: OnboardingIntention) => {
     setIntention(id);
     saveJourney('intention', focus, tracking, id);
@@ -543,6 +573,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const selectedFocus = focus ?? state.onboardingProfile?.focus ?? null;
   const selectedTracking = tracking ?? state.onboardingProfile?.tracking ?? null;
   const selectedIntention = intention ?? state.onboardingProfile?.intention ?? null;
+  const selectedAlerts = alerts ?? state.onboardingProfile?.alerts ?? null;
 
   const openNamePersonalization = () => {
     if (!beginStepTransition()) return;
@@ -558,11 +589,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     const resumedFocus = selectedFocus;
     const resumedTracking = selectedTracking;
     const resumedIntention = selectedIntention;
+    const resumedAlerts = selectedAlerts;
     if (previewMode) {
       setFocus(resumedFocus);
       setTracking(resumedTracking);
       setIntention(resumedIntention);
-      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
+      setAlerts(resumedAlerts);
+      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention, resumedAlerts);
       if (!beginStepTransition()) return;
       setStep('focus');
       return;
@@ -576,6 +609,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(resumedFocus);
       setTracking(resumedTracking);
       setIntention(resumedIntention);
+      setAlerts(resumedAlerts);
       if (
         state.onboardingProfile?.stage === 'remote-handoff' &&
         resumedFocus &&
@@ -585,14 +619,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         // The remote Flow already asked Focus → Tracking → Intention and showed
         // the personalized value preview. Name is the only local personalization
         // step between that Flow and OS-specific capture setup.
-        saveJourney('capture', resumedFocus, resumedTracking, resumedIntention);
+        saveJourney('capture', resumedFocus, resumedTracking, resumedIntention, resumedAlerts);
         await ensureDurable();
         if (!beginStepTransition()) return;
         setCollectingName(false);
         setStep('capture');
         return;
       }
-      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
+      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention, resumedAlerts);
       // Persist the lightweight profile/name together. If the process dies on
       // the next screen, onboarding resumes at Focus with the same greeting.
       await ensureDurable();
@@ -892,6 +926,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setStep('intention');
       saveJourney('intention');
     } else if (activeStep === 'intention') {
+      setStep('alerts');
+      saveJourney('alerts');
+    } else if (activeStep === 'alerts') {
       setStep('tracking');
       saveJourney('tracking');
     } else if (activeStep === 'tracking') {
@@ -911,7 +948,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const openWafra = async (
     addFirstEntry = false,
-    destination?: '/pro',
+    destination?: OnboardingExit,
     outcomeOverride?: CompletionOutcome,
   ) => {
     if (previewMode) {
@@ -1037,6 +1074,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     : focus === 'bills'
       ? t('onboardOpenBills')
       : t('onboardOpenHome');
+  /**
+   * The statement offer is earned by the user's own answer, not by a guess.
+   *
+   * It is deliberately NOT shown when setup failed or SMS was refused: those
+   * states already own the screen with their own recovery, and stacking a
+   * second "here is what is missing" card on top reads as the app giving up.
+   * Web has no capture to fall short of, so it has no gap to fill either.
+   */
+  const showHistoryGapOffer = activeStep === 'complete' &&
+    Platform.OS !== 'web' &&
+    onboardingHistoryGap(selectedAlerts) &&
+    !failedCompletion &&
+    !finishSaveFailed &&
+    !smsDenied;
   const discoveredResult = result ?? (
     state.transactions.length > 0 || state.accounts.length > 0 || state.bills.length > 0 || state.cardDues.length > 0
       ? {
@@ -1256,7 +1307,33 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           onPress={() => {
                             if (!selectedTracking || !beginStepTransition()) return;
                             setTracking(selectedTracking);
-                            saveJourney('intention', selectedFocus, selectedTracking, selectedIntention);
+                            saveJourney('alerts', selectedFocus, selectedTracking, selectedIntention, selectedAlerts);
+                            setStep('alerts');
+                          }}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'alerts' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardAlertsTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardAlertsBody')}</ThemedText>
+                      </View>
+                      <AlertDeliveryChooser value={selectedAlerts} onChange={chooseAlerts} reducedMotion={reducedMotion} />
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          disabled={!selectedAlerts || transitioning}
+                          onPress={() => {
+                            if (!selectedAlerts || !beginStepTransition()) return;
+                            setAlerts(selectedAlerts);
+                            saveJourney('intention', selectedFocus, selectedTracking, selectedIntention, selectedAlerts);
                             setStep('intention');
                           }}
                           labelColor={night.onPrimary}
@@ -1317,6 +1394,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           {t(capture.title)}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
+                        {Platform.OS === 'android' && onboardingPrefersNotificationCapture(selectedAlerts) && (
+                          <ThemedText style={styles.captureAnswerHint} testID="onboarding-capture-notification-hint">
+                            {t('onboardAlertsNotificationHint')}
+                          </ThemedText>
+                        )}
                       </View>
                       {Platform.OS !== 'web' && <CaptureMarketScene marketId={state.marketId} />}
                       {Platform.OS !== 'web' && <View style={styles.contextTrustCard} testID="onboarding-context-trust">
@@ -1529,6 +1611,30 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             <ThemedText style={styles.deferredPlanText}>
                               {t('onboardPlanPending')}
                             </ThemedText>
+                          </View>
+                        )}
+                        {showHistoryGapOffer && (
+                          <View style={styles.proPreview} testID="onboarding-history-gap">
+                            <View style={styles.proPreviewCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t('onboardHistoryGapTitle')}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t('onboardHistoryGapBody')}</ThemedText>
+                            </View>
+                            <Button
+                              wrapLabel
+                              variant="outline"
+                              label={t('onboardHistoryGapAction')}
+                              labelColor={night.text}
+                              style={styles.ghost}
+                              onPress={() => void runSetupAction(async () => {
+                                trackOnboardingEvent('onboarding_history_gap_import_opened', {
+                                  focus,
+                                  tracking,
+                                  alerts: selectedAlerts,
+                                  placement: GROWTH_PLACEMENTS.onboarding,
+                                });
+                                await openWafra(false, '/statement-import');
+                              })}
+                            />
                           </View>
                         )}
                         {discoveredResult && discoveredResult.tx > 0 && !failedCompletion && !smsDenied && (
@@ -1782,6 +1888,7 @@ const styles = StyleSheet.create({
   permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { backgroundColor: night.primary },
   captureHero: { gap: 5, alignItems: 'flex-start' },
+  captureAnswerHint: { color: night.primary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18, paddingTop: 2 },
   captureActions: { marginTop: 'auto', paddingTop: 10, gap: 8 },
   skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
