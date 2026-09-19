@@ -2,7 +2,6 @@ import {
   SuperwallProvider,
   usePlacement,
   useSuperwall,
-  useUser,
   type CustomCallback,
   type CustomCallbackResult,
   type SubscriptionStatus,
@@ -142,8 +141,26 @@ function onboardingCallbackValue<T>(
 
 function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   const { state, ensureDurable, setOnboardingProfile, setPro } = useStore();
-  const superwall = useSuperwall();
-  const { refresh: refreshUser } = useUser();
+  // Attribute writes replace the SDK's `user` snapshot even when its values
+  // are unchanged. Subscribing to that snapshot and depending on the whole
+  // store in a writing effect creates an endless native write/event loop.
+  const {
+    isConfigured, configurationError, subscriptionStatus, customerInfo,
+    setUserAttributes, setEventTrackingBehavior, getUserAttributes,
+    getCustomerInfo, getEntitlements, restorePurchases, dismiss,
+  } = useSuperwall((sdk) => ({
+    isConfigured: sdk.isConfigured,
+    configurationError: sdk.configurationError,
+    subscriptionStatus: sdk.subscriptionStatus,
+    customerInfo: sdk.customerInfo,
+    setUserAttributes: sdk.setUserAttributes,
+    setEventTrackingBehavior: sdk.setEventTrackingBehavior,
+    getUserAttributes: sdk.getUserAttributes,
+    getCustomerInfo: sdk.getCustomerInfo,
+    getEntitlements: sdk.getEntitlements,
+    restorePurchases: sdk.restorePurchases,
+    dismiss: sdk.dismiss,
+  }));
   const proPlacement = usePlacement();
   const currentPro = useRef(state.pro);
   const latestSnapshot = useRef<EntitlementSnapshot | null>(null);
@@ -183,16 +200,17 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     }
 
     if (!state.privateMode) {
-      void superwall.setUserAttributes({
+      void setUserAttributes({
         wafra_onboarding_focus: focus,
         wafra_onboarding_tracking: tracking,
         wafra_onboarding_intention: intention,
         wafra_onboarding_value_flow_complete: true,
       }).catch(() => {});
     }
-    void superwall.dismiss().catch(() => {});
+    void dismiss().catch(() => {});
     return { status: 'success', data: { next: 'native_name_then_capture' } };
-  }, [ensureDurable, setOnboardingProfile, state.onboardingProfile?.startedAt, state.privateMode, superwall]);
+  }, [ensureDurable, setOnboardingProfile, state.onboardingProfile?.startedAt, state.privateMode,
+    dismiss, setUserAttributes]);
 
   const onboardingPlacement = usePlacement({
     onCustomCallback: finishRemoteOnboarding,
@@ -217,31 +235,31 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   }, [setPro]);
 
   useEffect(() => {
-    if (!state.hydrated || !superwall.isConfigured) return;
+    if (!state.hydrated || !isConfigured) return;
     void applySnapshot(entitlementSnapshot(
-      superwall.subscriptionStatus,
-      superwall.customerInfo,
+      subscriptionStatus,
+      customerInfo,
       Date.now(),
     ));
   }, [
     applySnapshot,
     state.hydrated,
-    superwall.customerInfo,
-    superwall.isConfigured,
-    superwall.subscriptionStatus,
+    customerInfo,
+    isConfigured,
+    subscriptionStatus,
   ]);
 
   const refresh = useCallback(async () => {
-    if (!superwall.isConfigured) return;
+    if (!isConfigured) return;
     try {
-      await refreshUser();
+      await getUserAttributes();
       // `UNKNOWN` is a real state. Never synthesize INACTIVE from an empty or
       // partial entitlement fetch during foreground refresh.
-      await superwall.getCustomerInfo();
+      await getCustomerInfo();
     } catch {
       // Unreachable store/configuration is UNKNOWN, not evidence of cancellation.
     }
-  }, [refreshUser, superwall]);
+  }, [getCustomerInfo, getUserAttributes, isConfigured]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -262,15 +280,17 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   // The saved local-only preference keeps purchases available but disables
   // optional Superwall event collection and Wafra-supplied targeting metadata.
   useEffect(() => {
-    if (!superwall.isConfigured || !state.hydrated) return;
-    void superwall.setEventTrackingBehavior(state.privateMode ? 'none' : 'all').catch(() => {});
-  }, [state.hydrated, state.privateMode, superwall, superwall.isConfigured]);
+    if (!isConfigured || !state.hydrated) return;
+    void setEventTrackingBehavior(state.privateMode ? 'none' : 'all').catch(() => {});
+  }, [state.hydrated, state.privateMode, isConfigured, setEventTrackingBehavior]);
+
+  const trialDaysRemaining = trialDaysLeft(state);
 
   // Product/onboarding metadata only. Never ledger rows, balances, transaction
   // amounts, SMS bodies, account/card identifiers, or the user's name.
   useEffect(() => {
-    if (!superwall.isConfigured || !state.hydrated || state.privateMode) return;
-    void superwall.setUserAttributes({
+    if (!isConfigured || !state.hydrated || state.privateMode) return;
+    void setUserAttributes({
       wafra_language: state.language === 'ar' ? 'ar' : 'en',
       wafra_market: state.marketId,
       wafra_onboarded: state.onboarded,
@@ -278,7 +298,7 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
       wafra_onboarding_tracking: state.onboardingProfile?.tracking ?? null,
       wafra_onboarding_intention: state.onboardingProfile?.intention ?? null,
       wafra_capture_choice: state.captureOptOut ? 'manual' : 'automatic',
-      wafra_trial_days_left: trialDaysLeft(state),
+      wafra_trial_days_left: trialDaysRemaining,
     }).catch(() => {});
   }, [
     state.captureOptOut,
@@ -290,13 +310,13 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     state.onboardingProfile?.focus,
     state.onboardingProfile?.intention,
     state.onboardingProfile?.tracking,
-    state.trialStartTs,
-    superwall,
-    superwall.isConfigured,
+    trialDaysRemaining,
+    setUserAttributes,
+    isConfigured,
   ]);
 
   const presentProPaywall = useCallback(async (params: Record<string, unknown> = {}) => {
-    if (!superwall.isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
+    if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await proPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.pro,
       params: {
@@ -314,11 +334,11 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     state.marketId,
     state.onboardingProfile?.focus,
     state.onboardingProfile?.intention,
-    superwall.isConfigured,
+    isConfigured,
   ]);
 
   const presentOnboardingFlow = useCallback(async () => {
-    if (!superwall.isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
+    if (!isConfigured) throw new Error('SUPERWALL_NOT_CONFIGURED');
     await onboardingPlacement.registerPlacement({
       placement: SUPERWALL_PLACEMENTS.onboarding,
       params: {
@@ -332,17 +352,17 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     onboardingPlacement,
     state.language,
     state.marketId,
-    superwall.isConfigured,
+    isConfigured,
   ]);
 
   const restorePro = useCallback(async (): Promise<boolean | null> => {
-    if (!superwall.isConfigured) return null;
+    if (!isConfigured) return null;
     try {
-      const restored = await superwall.restorePurchases();
+      const restored = await restorePurchases();
       if (restored.result === 'failed') return null;
       const [info, entitlements] = await Promise.all([
-        superwall.getCustomerInfo(),
-        superwall.getEntitlements(),
+        getCustomerInfo(),
+        getEntitlements(),
       ]);
       const active = entitlements.active.some((item) => item.id === ENTITLEMENT_ID);
       const resolved: SubscriptionStatus = active
@@ -353,13 +373,14 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     } catch {
       return null;
     }
-  }, [applySnapshot, superwall]);
+  }, [applySnapshot, getCustomerInfo, getEntitlements,
+    isConfigured, restorePurchases]);
 
   const value = useMemo<WafraBillingValue>(() => ({
     available: true,
-    configured: superwall.isConfigured,
-    configurationError: superwall.configurationError,
-    subscriptionStatus: statusLabel(superwall.subscriptionStatus),
+    configured: isConfigured,
+    configurationError: configurationError,
+    subscriptionStatus: statusLabel(subscriptionStatus),
     paywallStatus: proPlacement.state.status,
     onboardingFlowStatus: onboardingPlacement.state.status,
     presentProPaywall,
@@ -373,9 +394,9 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     proPlacement.state.status,
     refresh,
     restorePro,
-    superwall.configurationError,
-    superwall.isConfigured,
-    superwall.subscriptionStatus,
+    configurationError,
+    isConfigured,
+    subscriptionStatus,
   ]);
 
   return (

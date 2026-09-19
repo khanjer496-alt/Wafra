@@ -546,9 +546,9 @@ function ktSources(dir) {
     /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
       /if \(!snapshot\) return/.test(provider));
   ok('resolved entitlements are re-checked and mirrored on launch/foreground',
-    /superwall\.subscriptionStatus/.test(provider) &&
+    /entitlementSnapshot\(\s*subscriptionStatus,\s*customerInfo,/.test(provider) &&
       /AppState\.addEventListener\('change'/.test(provider) &&
-      /refreshUser\(\)/.test(provider) &&
+      /await getUserAttributes\(\)/.test(provider) &&
       /setPro\(snapshot\.active\)/.test(provider));
   ok('foreground refresh never synthesizes inactive from an empty entitlement fetch',
     !/const resolved: SubscriptionStatus = entitlements\.active/.test(
