@@ -23,14 +23,14 @@ import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const BACKGROUND_HISTORY_PAGE_SIZE = 1_000;
+const BACKGROUND_HISTORY_PAGE_SIZE = 512;
 const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1;
 // Foreground pages are intentionally much smaller than background pages. Even
 // with a cooperative parser, planning + reducer work is synchronous JS; a 500
 // row page can monopolise Hermes long enough for taps and navigation to look
 // dead on a large ledger. Background keeps the throughput-oriented page size.
-const FOREGROUND_HISTORY_PAGE_SIZE = 256;
-const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 2;
+const FOREGROUND_HISTORY_PAGE_SIZE = 128;
+const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 1;
 const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
 // A brand-new first run may begin by itself, but a previously paused history
 // job must never restart merely because the user returned to Wafra. Re-entry is
@@ -121,6 +121,8 @@ export function useHistoryImport(): void {
             : BACKGROUND_HISTORY_PAGES_PER_COMMIT,
           pageSize: foreground ? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE,
           legacyReviewSourceKeys: requestedLegacyReviewKeys,
+          historyRepair: true,
+          includeNotificationQueue: false,
         },
       );
       recordRuntimeOperation('history-scan-page', Date.now() - scanStartedAt);
@@ -174,13 +176,18 @@ export function useHistoryImport(): void {
       }
       if (!canCommit()) return false;
       const saveStartedAt = Date.now();
-      try {
-        await importBatch({
+      const applyStartedAt = Date.now();
+      const receipt = importBatch({
           ...plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,
           historyImport: next,
-        }).durable;
+      });
+      recordRuntimeOperation('history-apply-page', Date.now() - applyStartedAt);
+      const persistStartedAt = Date.now();
+      try {
+        await receipt.durable;
       } finally {
+        recordRuntimeOperation('history-persist-page', Date.now() - persistStartedAt);
         recordRuntimeOperation('history-save-page', Date.now() - saveStartedAt);
       }
       markLaunchPhase('first-history-page');
@@ -226,18 +233,11 @@ export function useHistoryImport(): void {
     return () => { unsubscribe(); historyBackground.cancel(); };
   }, [run]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
-      // Returning to Wafra means the UI wins immediately. A history service
-      // that was running while the app was away stops at its next safe
-      // coordinator boundary and persists `paused`; it is never restarted just
-      // because Android restored the Activity.
-      historyBackground.cancel();
-    });
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+  // Do not cancel a running history job merely because the Activity becomes
+  // foreground again. scanInbox dynamically switches to the smaller foreground
+  // page and 4ms/64-row parse budget, while navigation taps extend the shared
+  // foreground-history lease. The previous foreground cancellation made a
+  // multi-hour migration bounce between running/paused every time the user
+  // reopened Wafra, which is both confusing and needlessly prolongs the heavy
+  // parser-backfill state.
 }

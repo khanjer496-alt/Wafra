@@ -302,10 +302,21 @@ export function applyHealUpdates(
 ): Transaction[] {
   if (updates.length === 0) return transactions;
   const patches = new Map(updates.map((update) => [update.id, update]));
-  return transactions
-    .filter((transaction) => transaction.userEdited || transaction.transferDecision || !patches.get(transaction.id)?.remove)
-    .map((transaction) => {
-      const patch = patches.get(transaction.id);
-      return patch ? applyHealPatch(transaction, patch) : transaction;
-    });
+  const next: Transaction[] = [];
+  let changed = false;
+  for (const transaction of transactions) {
+    const patch = patches.get(transaction.id);
+    if (patch?.remove && !transaction.userEdited && !transaction.transferDecision) {
+      changed = true;
+      continue;
+    }
+    if (!patch) {
+      next.push(transaction);
+      continue;
+    }
+    const healed = applyHealPatch(transaction, patch);
+    if (healed !== transaction) changed = true;
+    next.push(healed);
+  }
+  return changed ? next : transactions;
 }

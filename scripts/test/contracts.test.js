@@ -1005,10 +1005,11 @@ function ktSources(dir) {
       scan.includes("const background = RNAppState?.currentState === 'background'") &&
       scan.includes('Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS)') &&
       scan.includes('state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE)') &&
-      // Inbox parsing, its proven-duplicate fast path, the retired delivery
-      // buffer, the notification promotional fast path and ordinary bank
-      // notifications each keep the same UI yield.
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 5,
+      // Every parsing path keeps the same UI yield. History repair also has a
+      // cheap pre-parser rejection branch now, so do not pin the exact number
+      // of call sites: adding another safe early exit must not fail this
+      // contract as long as the bounded yield remains present throughout.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length >= 5,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive, liveEvent\)/.test(home) &&

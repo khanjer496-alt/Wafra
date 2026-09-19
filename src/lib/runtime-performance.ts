@@ -71,6 +71,8 @@ export type RuntimeOperationTag =
   | 'reminder-projection'
   | 'history-scan-page'
   | 'history-plan-page'
+  | 'history-apply-page'
+  | 'history-persist-page'
   | 'history-save-page'
   | 'home-insight'
   | 'wallet-balances'

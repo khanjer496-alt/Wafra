@@ -86,10 +86,10 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
   // larger throughput-oriented page size because no visible UI is competing.
   ok(
     'foreground history uses small pages while background keeps throughput',
-    /BACKGROUND_HISTORY_PAGE_SIZE = 1_000/.test(historyHookSource) &&
+    /BACKGROUND_HISTORY_PAGE_SIZE = 512/.test(historyHookSource) &&
       /BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGE_SIZE = 256/.test(historyHookSource) &&
-      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 2/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE = 128/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 1/.test(historyHookSource) &&
       /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
       /maxInboxPages: foreground[\s\S]*?FOREGROUND_HISTORY_PAGES_PER_COMMIT[\s\S]*?BACKGROUND_HISTORY_PAGES_PER_COMMIT/.test(historyHookSource) &&
       /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
@@ -102,11 +102,12 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       /cachedLegacyKeys\.startedAt !== historyStartedAt/.test(historyHookSource),
   );
   ok(
-    'returning to Wafra pauses history instead of silently restarting it',
+    'foregrounding Wafra no longer cancels a running history repair',
     /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000/.test(historyHookSource) &&
       /progress\.scanned > 0/.test(historyHookSource) &&
-      /if \(next !== 'active'\) return;[\s\S]*?historyBackground\.cancel\(\)/.test(historyHookSource) &&
-      !/FOREGROUND_HISTORY_RESUME_GRACE_MS/.test(historyHookSource),
+      !/RNAppState\.addEventListener\('change'/.test(historyHookSource) &&
+      /historyRepair:\s*true/.test(historyHookSource) &&
+      /includeNotificationQueue:\s*false/.test(historyHookSource),
   );
   ok(
     'tab touch-down reserves foreground JS time before navigation renders',
@@ -125,6 +126,8 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     'history page timings separate scan, planning, and durable save',
     /recordRuntimeOperation\('history-scan-page'/.test(historyHookSource) &&
       /recordRuntimeOperation\('history-plan-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-apply-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-persist-page'/.test(historyHookSource) &&
       /recordRuntimeOperation\('history-save-page'/.test(historyHookSource),
   );
   ok(
