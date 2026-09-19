@@ -25,12 +25,14 @@ for (const theme of ['light', 'dark']) {
     assert.deepEqual(h.events, [['route', '/assistant']]);
   });
 
-  for (const view of ['categories', 'trends']) {
-    test(`${theme}/${view}: Explain this opens a question without replacing the active spending period`, () => {
+  for (const language of ['en', 'ar']) for (const view of ['categories', 'trends']) {
+    test(`${language}/${theme}/${view}: localized Explain action preserves the question and spending period`, () => {
       const period = { mode: 'range', start: '2026-08-15', end: '2026-09-05' };
-      const h = createHarness({ theme, period, params: { view } });
+      const h = createHarness({ language, theme, period, params: { view } });
       const action = actionIn(h.render('flow'), 'spending-ask-wafra');
-      assert.equal(action.props.accessibilityLabel, 'Explain this');
+      const label = language === 'ar' ? 'اشرح هذا' : 'Explain this';
+      assert.equal(action.props.accessibilityLabel, label);
+      assert.ok(walk(action).some(node => node.props?.children === label), 'the visible and accessible labels agree');
       action.props.onPress();
       assert.deepEqual(JSON.parse(JSON.stringify(h.events)), [['route', {
         pathname: '/assistant', params: { question: 'Why did my spending change?' },

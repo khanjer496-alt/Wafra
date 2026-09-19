@@ -176,7 +176,7 @@ export default function FlowScreen() {
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
         onPeriod={() => setPeriodOpen(true)} onCategory={openCategory} onNewLimit={() => setLimitFor('new')}
         assistantSlot={<View testID="spending-ask-wafra" style={styles.assistantAction}>
-          <Button label={assistantCopy.explain} variant="ghost" icon="spark"
+          <Button label={w.explain} variant="ghost" icon="spark"
             onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
         </View>} />}
       {view === 'categories' && <MerchantSpendingLink />}
@@ -214,10 +214,10 @@ export default function FlowScreen() {
       </View>}
       {view === 'trends' && analysis && <>
         <View style={styles.trendsToolbar}>
-          <Button label={periodLabel(period)} variant="ghost" icon="calendar" inline style={styles.trendsToolbarButton}
+          <Button label={periodLabel(period)} variant="ghost" icon="calendar" style={styles.trendsToolbarButton}
             onPress={() => setPeriodOpen(true)} />
           <View testID="spending-ask-wafra" style={styles.trendsToolbarAction}>
-            <Button label={assistantCopy.explain} variant="ghost" icon="spark" inline style={styles.trendsToolbarButton}
+            <Button label={w.explain} variant="ghost" icon="spark" style={styles.trendsToolbarButton}
               onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
           </View>
         </View>
@@ -340,8 +340,8 @@ export default function FlowScreen() {
 const styles = StyleSheet.create({
   assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
   trendsToolbar: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  trendsToolbarAction: { flex: 1, minWidth: 150 },
-  trendsToolbarButton: { minHeight: 44 },
+  trendsToolbarAction: { alignSelf: 'flex-start', maxWidth: '100%' },
+  trendsToolbarButton: { minHeight: 44, maxWidth: '100%', paddingHorizontal: 12 },
   foreignEntry: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   foreignCopy: { flex: 1, minWidth: 0, gap: 2 },
