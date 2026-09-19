@@ -136,9 +136,9 @@ const futureGuideKeys = [
 eq('iOS message setup: Future guide tells the user to leave Sender empty because bank SMS IDs are not Contacts',
   futureGuideKeys.map((key) => translated(key, 'en')), [
     'Message',
-    'Sender: leave empty — bank SMS IDs are not Contacts',
-    'Run Immediately',
-    'Run {shortcut} · full Received Message',
+    'Sender: leave empty · Message Contains: one space',
+    'Choose Run Immediately, turn off Notify When Run, tap Next',
+    'Pick {shortcut} from the list (not New Blank Automation), then Done',
   ]);
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
