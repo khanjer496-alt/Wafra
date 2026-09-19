@@ -325,7 +325,12 @@ export function buildImportPlan(
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
   const priorBySmsKey = new Map<string, Transaction>();
-  const priorsBySmsKey = new Map<string, Transaction[]>();
+  // Most ledgers have one row per source identity. Do not allocate a one-item
+  // array for every transaction just so the rare collision case can call
+  // Array.find(). Keep collision buckets only when a duplicate key actually
+  // exists; the build-311 diagnostic had 14,773 source-bound rows and zero
+  // repeated source identities.
+  const collidingPriorsBySmsKey = new Map<string, Transaction[]>();
   let priorByIdCache: Map<string, Transaction> | null = null;
   const priorById = (): Map<string, Transaction> => {
     if (priorByIdCache) return priorByIdCache;
@@ -342,10 +347,13 @@ export function buildImportPlan(
     if (t.smsKey && t.source === 'sms') {
       const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
       if (isUnboundAndroidSourceKey(sourceKey)) continue;
+      const prior = priorBySmsKey.get(sourceKey);
+      if (prior) {
+        const rows = collidingPriorsBySmsKey.get(sourceKey);
+        if (rows) rows.push(t);
+        else collidingPriorsBySmsKey.set(sourceKey, [prior, t]);
+      }
       priorBySmsKey.set(sourceKey, t);
-      const rows = priorsBySmsKey.get(sourceKey) ?? [];
-      rows.push(t);
-      priorsBySmsKey.set(sourceKey, rows);
     }
   }
   // Statement healing must still consider legacy SMS rows that predate
@@ -365,9 +373,17 @@ export function buildImportPlan(
     return result;
   };
   const compatiblePrior = (key: string, p: ScannedSms): Transaction | undefined => {
-    const candidates = priorsBySmsKey.get(key) ?? [];
-    return candidates.find((t) => key.startsWith('h') ||
-      compatibleCaptureInstrument(t.captureInstrument, captureInstrumentOf(p)));
+    const candidates = collidingPriorsBySmsKey.get(key);
+    if (candidates) {
+      return candidates.find((t) => key.startsWith('h') ||
+        compatibleCaptureInstrument(t.captureInstrument, captureInstrumentOf(p)));
+    }
+    const prior = priorBySmsKey.get(key);
+    if (!prior) return undefined;
+    return key.startsWith('h') ||
+      compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p))
+      ? prior
+      : undefined;
   };
   /**
    * Stable identity for a local SMS across parser money corrections.

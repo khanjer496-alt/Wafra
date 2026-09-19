@@ -933,20 +933,31 @@ function bodyOf(source, header) {
     'a duplicate preflight followed by append decrypted the same AndroidKeyStore queue twice for every visible bank notification');
 
   const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
-  ok('Android history repair never auto-restarts when the user returns to Wafra',
+  ok('Android history repair keeps running across foreground transitions without auto-starting old paused jobs',
     /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS\s*=\s*8_000/.test(historyImport) &&
       /progress\.scanned > 0/.test(historyImport) &&
-      /if \(next !== 'active'\) return;[\s\S]*?historyBackground\.cancel\(\)/.test(historyImport),
-    'a saved history job may auto-start only on the genuine first run; Activity resume belongs to UI/input and pauses maintenance');
+      !/RNAppState\.addEventListener\('change'/.test(historyImport) &&
+      /historyRepair:\s*true/.test(historyImport) &&
+      /includeNotificationQueue:\s*false/.test(historyImport),
+    'a saved paused job still needs explicit Continue, but a job already running must not pause every time Android foregrounds the Activity');
 
   ok('history planning and commit both honor the foreground navigation lease',
     /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
-      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*256/.test(historyImport) &&
-      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*2/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*128/.test(historyImport) &&
+      /BACKGROUND_HISTORY_PAGE_SIZE\s*=\s*512/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*1/.test(historyImport) &&
       /BACKGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*1/.test(historyImport) &&
       /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
       (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
     'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
+
+  const autoImportSource = stripComments(read('src/lib/auto-import.ts'));
+  ok('history repair rejects impossible personal/non-money rows before heavy parsing',
+    /historyRepair\?: boolean/.test(autoImportSource) &&
+      /if \(options\.historyRepair\)/.test(autoImportSource) &&
+      /!hasBankAlertMoneyHint\(sms\.body\)/.test(autoImportSource) &&
+      /launchSenderMarket === null && !hasGenericBankAlertContext\(sms\.body, sms\.address\)/.test(autoImportSource),
+    'a multi-year repair must not run regional/worldwide grammars over ordinary personal SMS that cannot produce ledger money');
 
   const importPlanSource = stripComments(read('src/lib/import-plan.ts'));
   ok('history exact-source repairs keep generalized duplicate indexes lazy',
@@ -956,9 +967,19 @@ function bodyOf(source, header) {
       /let transferRepairCandidatesCache: Map<string, Transaction\[\]> \| null = null/.test(importPlanSource),
     'an exact retained-message identity should heal directly instead of allocating every cross-channel/title/timestamp index over a large ledger');
 
+  ok('source-identity planning allocates collision arrays only for actual collisions',
+    /const collidingPriorsBySmsKey = new Map<string, Transaction\[\]>\(\)/.test(importPlanSource) &&
+      !/const priorsBySmsKey = new Map<string, Transaction\[\]>\(\)/.test(importPlanSource) &&
+      /if \(prior\) \{[\s\S]*?collidingPriorsBySmsKey\.set\(sourceKey, \[prior, t\]\)/.test(importPlanSource),
+    'a 15k-row ledger with unique source identities must not allocate 15k single-item arrays on every history checkpoint');
+
   const smsParserSource = stripComments(read('src/lib/sms-parser.ts'));
   const captureSource = stripComments(read('src/lib/capture.ts'));
   const ledgerImportSource = stripComments(read('src/lib/ledger-import.ts'));
+  ok('history checkpoints merge into the already-sorted ledger without a full re-sort',
+    /transactions:\s*mergeSortedTransactions\(batch\.transactions, existing\)/.test(ledgerImportSource) &&
+      !/transactions:\s*incrementalFastPath[\s\S]*?sortTransactions\(\[\.\.\.batch\.transactions, \.\.\.existing\]\)/.test(ledgerImportSource),
+    'heal updates cannot change date, so sorting the complete ledger again on every history page is wasted synchronous JS');
   ok('runtime parser revisions are decoupled from expensive historical backfill',
       /PARSER_BACKFILL_VERSION\s*=\s*46/.test(smsParserSource) &&
       /\(state\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(captureSource) &&

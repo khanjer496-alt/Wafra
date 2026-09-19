@@ -295,6 +295,12 @@ export interface ScanInboxOptions {
    * scans keep draining both local sources exactly as before.
    */
   includeNotificationQueue?: boolean;
+  /**
+   * Parser-version history repair only. Skip rows that cannot possibly produce
+   * a ledger result before invoking the expensive regional/worldwide grammar.
+   * Routine live capture keeps its broader review behavior unchanged.
+   */
+  historyRepair?: boolean;
 }
 
 export interface ScanResult {
@@ -1007,6 +1013,21 @@ export async function scanInbox(
         }
         continue;
       }
+      const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
+      if (options.historyRepair) {
+        // Every production parser path requires explicit money evidence before
+        // it can materialize a transaction/card payment. Unknown senders also
+        // need bank-alert context; this drops personal conversations carrying
+        // prices/currency without weakening global bank support.
+        if (!hasBankAlertMoneyHint(sms.body) ||
+            (launchSenderMarket === null && !hasGenericBankAlertContext(sms.body, sms.address))) {
+          if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+            await yieldToUi();
+            resetParseYieldState(pageYield);
+          }
+          continue;
+        }
+      }
       // The sender ID is the ONLY thing that says which bank sent a message —
       // no UAE bank but HSBC names itself in the body — so it is passed INTO
       // the parser, not merely recorded on the row. Three rules need it and
@@ -1015,7 +1036,6 @@ export async function scanInbox(
       // the bank's own savings pot rather than a shop, and money moving to the
       // bank's own brand name is moving inside your own bank.
       const worldwide = inspectWorldwide(sms.body, sms.address);
-      const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
       // Global SMS sender IDs stay review-first. Sender strings are useful
       // issuer evidence, but unlike an Android package identity they are not a
       // device-installed trust anchor. UAE/Saudi retain their mature automatic

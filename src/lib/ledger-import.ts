@@ -266,9 +266,10 @@ export const applyMaterializedImportBatch = (
       ? { ledgerMoney: batch.importMoney } : {}),
     onboardingCurrencyEvidence:
       batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
-    transactions: incrementalFastPath
-      ? mergeSortedTransactions(batch.transactions, existing)
-      : sortTransactions([...batch.transactions, ...existing]),
+    // Heal updates never change a transaction's date, so `existing` remains
+    // newest-first. Merge incoming history/live rows linearly instead of
+    // re-sorting the entire 10k+ ledger on every history checkpoint.
+    transactions: mergeSortedTransactions(batch.transactions, existing),
     accounts,
     accountHints: { ...state.accountHints, ...batch.newHints },
     cardDues: dues,
