@@ -145,8 +145,16 @@ GUID/Body/Sender/date from that output. A test refuses any outer-loop
 variable inside the nested page loop. The release asset at the unchanged
 URL was replaced (SHA-256
 `6b34bc3563ec86e228db32cd7d0fdb443f6e7e9c074fe55e3ec0c84deef909b6`,
-31,795 bytes). On the first run of that file the import proceeded page after
-page without any alert.
+31,795 bytes). On the first run of that file the import ran page after page with no
+alert and completed: **1,694 Messages read, 262 bank alerts matched**, in
+about 17 minutes (roughly 0.6 s per Message, the cost of one App Intent
+call per row), ending on Wafra's "Import past alerts" review screen. This
+is the first completed paged history import on this device.
+
+Follow-up worth measuring: with the nested-loop variables fixed, the v2
+text-frame shape (no per-Message intent call) may now also work and would be
+several times faster; it should be tried as a v5 candidate on the same phone
+before replacing v4.
 
 ## New-transaction capture: automation trigger verified on the phone
 
