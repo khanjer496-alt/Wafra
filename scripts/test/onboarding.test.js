@@ -4,6 +4,8 @@ const onboarding = require('./build/onboarding');
 const i18n = require('./build/i18n');
 const growth = require('./build/growth-funnel');
 const backupValidation = require('./build/backup-validation');
+const bankExamples = require('./build/onboarding-bank-examples');
+const markets = require('./build/markets');
 
 let pass = 0;
 let fail = 0;
@@ -100,6 +102,148 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
     backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'usd' }), false);
   eq('backup validation rejects ISO currencies whose exponent the ledger cannot represent',
     backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'CLF' }), false);
+  // The alert-delivery answer is optional: every ledger onboarded before the
+  // step existed restores without it, and must keep restoring without it.
+  eq('backup validation still accepts a profile with no alert-delivery answer',
+    backupValidation.isValidBackupState(profileState), true);
+  for (const alerts of ['sms', 'notifications', 'neither', 'unsure', null]) {
+    eq(`backup validation accepts the alert-delivery answer (${alerts})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, alerts } }), true);
+  }
+  eq('backup validation rejects an unknown alert-delivery answer',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, alerts: 'whatsapp' } }), false);
+  eq('backup validation accepts the alert-delivery stage',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, stage: 'alerts' } }), true);
+  // The confirmed country is optional and tolerant: a ledger written by a build
+  // that illustrates more countries has to restore on this one too.
+  for (const country of ['AE', 'GB', 'ZZ', 'PK', null]) {
+    eq(`backup validation accepts a confirmed onboarding country (${country})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), true);
+  }
+  for (const country of ['gb', 'GBR', 'G1', '', 7]) {
+    eq(`backup validation rejects a malformed onboarding country (${JSON.stringify(country)})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), false);
+  }
+}
+
+/* The country a person confirms outranks the phone, and outranks it everywhere
+ * — the whole complaint was a UAE resident being shown British banks because
+ * his store account was British. It must also stay display-only: no country
+ * chosen here may select a parser market or pin a currency. */
+{
+  const region = bankExamples.onboardingBankRegion;
+  const gb = region('AE', 'GB');
+  const ae = region('AE', 'AE');
+  eq('a confirmed country wins over the launch market fallback', gb?.id, 'GB');
+  ok('and brings that country\'s own banks with it',
+    gb?.banks?.some((bank) => /HSBC/i.test(bank.name)) === true);
+  eq('confirming the market you are already in stays on it', ae?.id, 'AE');
+  eq('a country Wafra cannot illustrate stays neutral rather than guessing',
+    region('AE', 'ZZ'), null);
+  eq('and so does an explicit somewhere-else',
+    region('AE', bankExamples.ONBOARDING_REGION_ELSEWHERE), null);
+
+  // Display only: the parser's market pack is a closed set of two, and nothing
+  // the picker can return may widen it.
+  ok('no confirmable country can select a parser market beyond the two tested ones',
+    bankExamples.ONBOARDING_REGION_IDS
+      .filter((id) => markets.canSelectMarket(id))
+      .join(',') === 'AE,SA');
+  eq('and somewhere-else selects no market at all',
+    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE), false);
+
+  eq('a stored country is normalized to an ISO region code',
+    bankExamples.normalizeOnboardingCountry(' gb '), 'GB');
+  for (const bad of ['GBR', 'g', '', null, undefined, 12, {}]) {
+    eq(`a malformed stored country is dropped rather than drawn (${JSON.stringify(bad)})`,
+      bankExamples.normalizeOnboardingCountry(bad), null);
+  }
+
+  ok('every pickable country has a flag and a name in both languages',
+    [...bankExamples.ONBOARDING_REGION_IDS, bankExamples.ONBOARDING_REGION_ELSEWHERE]
+      .every((id) => {
+        const entry = bankExamples.ONBOARDING_REGION_LABELS[id];
+        return !!entry?.flag && ['en', 'ar'].every((lang) =>
+          i18n.t(entry.labelKey, lang) && i18n.t(entry.labelKey, lang) !== entry.labelKey);
+      }));
+  ok('every illustrable country can actually be picked',
+    ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO']
+      .every((id) => bankExamples.ONBOARDING_REGION_IDS.includes(id)));
+  ok('the country sheet says it only changes examples, not what Wafra can read',
+    /only picks the example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+      /come from your alerts/i.test(i18n.t('onboardCountrySheetBody', 'en')));
+}
+
+/* Which answers owe the user a statement.
+ *
+ * The rule exists because only an SMS inbox is an archive. A notification is
+ * gone the moment it is dismissed, so "notifications" means Wafra can follow
+ * the future and not the past — exactly the case this tester hit with a bank
+ * that never texted him. An ABSENT answer is not a gap: that is every ledger
+ * onboarded before the question existed, and those already have their history. */
+{
+  const gap = onboarding.onboardingHistoryGap;
+  eq('a texting bank needs no statement', gap('sms'), false);
+  eq('a notification-only bank cannot reach the past', gap('notifications'), true);
+  eq('a bank that does neither cannot either', gap('neither'), true);
+  eq('an unsure answer is offered the import rather than guessed at', gap('unsure'), true);
+  eq('an unanswered question is not a gap', gap(null), false);
+  eq('and neither is a profile saved before the step existed', gap(undefined), false);
+
+  /* The answer has to be giveable AFTER setup, because the person it was
+   * written for finished setup before the question existed. A ledger with no
+   * profile at all is the normal case there, not an edge one. */
+  const withAlerts = onboarding.onboardingProfileWithAlerts;
+  const fresh = withAlerts(null, 'notifications', 1234);
+  eq('a ledger that never had a profile still records the answer', fresh.alerts, 'notifications');
+  eq('and is stamped complete, never sent back through the questionnaire', fresh.stage, 'complete');
+  eq('with a clock rather than a missing one', fresh.startedAt, 1234);
+  ok('and stays a valid persisted profile',
+    backupValidation.isValidBackupState({ transactions: [], onboardingProfile: fresh }));
+
+  const existing = { v: 1, stage: 'complete', focus: 'bills', tracking: 'bank-apps',
+    intention: 'stay-ahead', country: 'AE', startedAt: 99 };
+  const updated = withAlerts(existing, 'neither', 5678);
+  eq('answering later changes the answer and nothing else',
+    updated, { ...existing, alerts: 'neither' });
+  eq('and never rewrites the original start clock', updated.startedAt, 99);
+  eq('re-answering replaces rather than stacks',
+    withAlerts(updated, 'sms').alerts, 'sms');
+
+  const prefersNotifications = onboarding.onboardingPrefersNotificationCapture;
+  eq('capture setup leads with notifications only when that is the answer',
+    prefersNotifications('notifications'), true);
+  eq('a texting bank keeps the SMS-first capture recommendation',
+    prefersNotifications('sms'), false);
+  eq('an unanswered question changes no capture default', prefersNotifications(null), false);
+
+  eq('every alert-delivery answer has exactly one preset',
+    onboarding.ALERT_DELIVERY_PRESETS.map((preset) => preset.id),
+    ['sms', 'notifications', 'neither', 'unsure']);
+  ok('every alert-delivery preset is translated in both languages',
+    onboarding.ALERT_DELIVERY_PRESETS.every((preset) =>
+      ['en', 'ar'].every((lang) =>
+        i18n.t(preset.titleKey, lang) && i18n.t(preset.detailKey, lang) &&
+        i18n.t(preset.titleKey, lang) !== preset.titleKey &&
+        i18n.t(preset.detailKey, lang) !== preset.detailKey)));
+}
+
+/* The question is about delivery, never about which bank. Onboarding copy that
+ * named a provider would be a partnership claim Wafra has not made. */
+{
+  const alertCopy = ['onboardAlertsTitle', 'onboardAlertsBody', 'onboardHistoryGapTitle',
+    'onboardHistoryGapBody', 'onboardHistoryGapAction']
+    .flatMap((key) => ['en', 'ar'].map((lang) => i18n.t(key, lang)));
+  ok('the alert question and statement offer name no bank',
+    alertCopy.every((line) => !/HSBC|Emirates NBD|FAB|ADCB|Liv|Barclays|Lloyds/i.test(line)));
+  ok('the statement offer promises future capture without promising past capture',
+    /catch everything from here/i.test(i18n.t('onboardHistoryGapBody', 'en')) &&
+      /import a statement/i.test(i18n.t('onboardHistoryGapBody', 'en')));
 }
 
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {
@@ -306,14 +450,93 @@ const onboardingBankExamplesSource = fs.readFileSync(
 
 ok(
   'first-run personalization is one integrated journey without the optional goals/budget wizard',
-  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
+  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
     gateSource.includes('<FocusChooser value={selectedFocus} onChange={chooseFocus}') &&
     gateSource.includes('<TrackingChooser value={selectedTracking} onChange={chooseTracking}') &&
+    gateSource.includes('<AlertDeliveryChooser value={selectedAlerts} onChange={chooseAlerts}') &&
     gateSource.includes('<IntentionChooser value={selectedIntention} onChange={chooseIntention}') &&
     !gateSource.includes('PLAN_STEPS') &&
     !gateSource.includes("activeStep === 'goals'") &&
     !gateSource.includes("activeStep === 'budget'") &&
     !gateSource.includes('onboardPersonalizeOptional'),
+);
+/* The statement offer has to follow the answer, and has to stay out of the way
+ * of the two screens that are already recovery surfaces. Stacking it on top of
+ * a failed setup or a refused SMS permission reads as the app giving up. */
+ok(
+  'the completion statement offer follows the alert answer and yields to recovery states',
+  /const showHistoryGapOffer = activeStep === 'complete' &&[\s\S]{0,400}onboardingHistoryGap\(selectedAlerts\)/.test(gateSource) &&
+    /onboardingHistoryGap\(selectedAlerts\) &&\s*!failedCompletion &&\s*!finishSaveFailed &&\s*!smsDenied/.test(gateSource) &&
+    /\{showHistoryGapOffer && \(/.test(gateSource) &&
+    /await openWafra\(false, '\/statement-import'\)/.test(gateSource),
+);
+ok(
+  'a back step from the intention question returns to the alert question',
+  /activeStep === 'intention'\) \{\s*setStep\('alerts'\);/.test(gateSource) &&
+    /activeStep === 'alerts'\) \{\s*setStep\('tracking'\);/.test(gateSource),
+);
+ok(
+  'the alert answer is durable, so an interrupted setup resumes with it',
+  /setAlerts\(state\.onboardingProfile\.alerts \?\? null\)/.test(gateSource) &&
+    /alerts: nextAlerts,/.test(gateSource) &&
+    /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
+);
+/* Settings is where an already-onboarded user finds this, so the question and
+ * the fix it points at have to sit together — and the statement row has to say
+ * WHY it is being suggested, or it reads as an unexplained upsell. */
+ok(
+  'Settings can answer the alert question after setup, beside the statement it points at',
+  /settingsAlertDeliveryTitle/.test(settingsSource) &&
+    /setPreferenceSheet\('alerts'\)/.test(settingsSource) &&
+    /onboardingProfileWithAlerts\(state\.onboardingProfile, next, Date\.now\(\)\)/.test(settingsSource) &&
+    /onboardingHistoryGap\(alertsAnswer\)\s*\?\s*t\('statementImportGapDetail'\)/.test(settingsSource),
+);
+ok(
+  'the after-setup sheet keeps the question out of the caps header',
+  /title=\{t\('settingsAlertDeliveryHeader'\)\}/.test(settingsSource) &&
+    /question=\{t\('onboardAlertsTitle'\)\}/.test(settingsSource),
+);
+ok(
+  'and every string it adds is translated in both languages',
+  ['settingsAlertDeliveryHeader', 'settingsAlertDeliveryTitle', 'settingsAlertDeliveryUnset',
+    'statementImportGapDetail']
+    .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)),
+);
+ok(
+  'the country stays out of Settings, where it would change nothing after setup',
+  !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
+);
+ok(
+  'the country a person confirms reaches every onboarding scene, not just the first',
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource) &&
+    /<FocusChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<TrackingChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<IntentionChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<PersonalizedProductPreview[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<CaptureMarketScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource),
+);
+ok(
+  'the scenes resolve one device Region, shared with the control that corrects it',
+  /export const onboardingDeviceRegion/.test(aliveScenesSource) &&
+    /const previewRegion = \(country\?: string \| null\): string \| null => country \?\? deviceRegion\(\)/
+      .test(aliveScenesSource) &&
+    aliveScenesSource.split('deviceRegion()').length - 1 === 1 &&
+    /onboardingDeviceRegion/.test(gateSource),
+);
+ok(
+  'the country control reports what is drawn and is durable without rewinding setup',
+  /const drawnRegionId = useMemo\([\s\S]{0,200}onboardingBankRegion\(state\.marketId, selectedCountry \?\? onboardingDeviceRegion\(\)\)/
+    .test(gateSource) &&
+    /resolved=\{drawnRegionId\}/.test(gateSource) &&
+    /saveJourney\(\s*state\.onboardingProfile\?\.stage \?\? 'welcome',/.test(gateSource) &&
+    /setCountry\(normalizeOnboardingCountry\(state\.onboardingProfile\.country\)\)/.test(gateSource) &&
+    /country: nextCountry,/.test(gateSource),
+);
+ok(
+  'the alert scene states what Wafra can reach rather than naming a bank',
+  /export function AlertDeliveryChooser/.test(aliveScenesSource) &&
+    /onboardAlertsReachPast/.test(aliveScenesSource) &&
+    /onboardAlertsReachFuture/.test(aliveScenesSource),
 );
 ok(
   'Settings can replay the latest name-personalized onboarding without mutating app state',
@@ -330,13 +553,13 @@ eq('Settings explains onboarding replay is read-only',
   i18n.t('settingsViewOnboardingDetail', 'en'),
   'Replay the welcome flow without changing your data or settings');
 ok(
-  'name personalization morphs inside Welcome instead of becoming a fifth progress step',
+  'name personalization morphs inside Welcome instead of becoming a progress step of its own',
   gateSource.includes('testID="onboarding-name-input"') &&
     gateSource.includes('testID="onboarding-name-preview"') &&
     /onboardChooseStart[\s\S]*?openNamePersonalization/.test(gateSource) &&
     /onboardNameSkip/.test(gateSource) &&
     /setUserName\(nextName\)[\s\S]*?saveJourney\('focus'\)[\s\S]*?ensureDurable\(\)/.test(gateSource) &&
-    gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview']") &&
+    gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
     !/JOURNEY_STEPS[^\n]*name/.test(gateSource),
 );
 ok(
@@ -363,7 +586,7 @@ ok(
 );
 ok(
   'welcome uses real Wafra identity and market-aware bank examples without ledger writes',
-  /<WelcomeMoneyScene marketId=\{state\.marketId\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
     /WafraMark/.test(aliveScenesSource) &&
     /onboardingBankRegion/.test(aliveScenesSource) &&
     /verifiedLogoUrl/.test(aliveScenesSource) &&

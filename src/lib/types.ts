@@ -353,6 +353,20 @@ export type OnboardingFocus = 'spending' | 'bills' | 'cashflow' | 'overview';
 /** How the person tracked money before Wafra. No provider/account identity. */
 export type OnboardingTracking = 'none' | 'bank-apps' | 'spreadsheet' | 'finance-app';
 
+/**
+ * How the person's main bank tells them a payment happened.
+ *
+ * This is the one answer Wafra cannot infer before it has read anything: a
+ * bank that only pushes an app notification leaves no retrievable history,
+ * because Android hands over the notifications that are on screen now and
+ * never the ones from last March. SMS is the opposite — the inbox IS the
+ * archive. So the answer decides whether the first run owes the user a
+ * statement import to fill the past, not whether Wafra can follow the future.
+ *
+ * Deliberately about delivery, never about which bank: no provider identity.
+ */
+export type OnboardingAlertDelivery = 'sms' | 'notifications' | 'neither' | 'unsure';
+
 /** Android capture sources are independently user-selectable after onboarding. */
 export interface AndroidCaptureSources {
   sms: boolean;
@@ -371,6 +385,7 @@ export type OnboardingJourneyStage =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'alerts'
   | 'intention'
   | 'preview'
   | 'remote-handoff'
@@ -385,6 +400,20 @@ export interface OnboardingProfile {
   tracking: OnboardingTracking | null;
   /** Optional for ledgers created before the visual-intention step existed. */
   intention?: OnboardingIntention | null;
+  /** Optional for ledgers created before the alert-delivery step existed. */
+  alerts?: OnboardingAlertDelivery | null;
+  /**
+   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   *
+   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
+   * draws, and nothing else — it never selects a parser market pack, never
+   * pins `ledgerCurrency`, and never decides how a message is read. Those
+   * follow evidence from the alerts themselves, which is why a UAE resident
+   * whose phone is set to another country still parses as UAE.
+   *
+   * Absent means nobody has said, and the device locale is still the guess.
+   */
+  country?: string | null;
   startedAt: number;
 }
 

@@ -1,7 +1,7 @@
 import { useLanguage } from '@/hooks/use-language';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState as RNAppState,
   Linking,
@@ -22,15 +22,18 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import {
+  AlertDeliveryChooser,
   CaptureMarketScene,
   FocusChooser,
   IntentionChooser,
   OnboardingAtmosphere,
+  onboardingDeviceRegion,
   PersonalizedProductPreview,
   TrackingChooser,
   WafraTile,
   WelcomeMoneyScene,
 } from '@/components/onboarding/alive-scenes';
+import { OnboardingCountryConfirm } from '@/components/onboarding/country-confirm';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -59,26 +62,38 @@ import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   MAX_PREFERRED_NAME_LENGTH,
   normalizePreferredName,
+  onboardingHistoryGap,
   onboardingInsightKeys,
   onboardingLandingPath,
+  onboardingPrefersNotificationCapture,
   onboardingResumeDestination,
 } from '@/lib/onboarding';
+import { normalizeOnboardingCountry, onboardingBankRegion } from '@/lib/onboarding-bank-examples';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
-import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
+import type {
+  OnboardingAlertDelivery,
+  OnboardingFocus,
+  OnboardingIntention,
+  OnboardingJourneyStage,
+  OnboardingTracking,
+} from '@/lib/types';
 import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'alerts'
   | 'intention'
   | 'preview'
   | 'capture'
   | 'complete';
-const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'intention', 'preview'];
+const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview'];
+/** Routes the gate may hand to expo-router once onboarding commits. */
+type OnboardingExit = '/pro' | '/statement-import';
 const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
@@ -245,6 +260,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [focus, setFocus] = useState<OnboardingFocus | null>(null);
   const [tracking, setTracking] = useState<OnboardingTracking | null>(null);
   const [intention, setIntention] = useState<OnboardingIntention | null>(null);
+  const [alerts, setAlerts] = useState<OnboardingAlertDelivery | null>(null);
+  const [country, setCountry] = useState<string | null>(null);
   const [resumeReady, setResumeReady] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
   const [resumeAttempt, setResumeAttempt] = useState(0);
@@ -265,11 +282,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [finishing, setFinishing] = useState(false);
   const [finishSaveFailed, setFinishSaveFailed] = useState(false);
   const requestedFirstEntry = useRef(false);
-  const requestedDestination = useRef<'/pro' | undefined>(undefined);
+  const requestedDestination = useRef<OnboardingExit | undefined>(undefined);
   const notificationDecisionMade = useRef(false);
   const [pendingOpen, setPendingOpen] = useState<{
     addFirstEntry: boolean;
-    destination?: '/pro';
+    destination?: OnboardingExit;
     outcomeOverride?: CompletionOutcome;
   } | null>(null);
   const startedEventSent = useRef(false);
@@ -305,6 +322,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setFocus(null);
     setTracking(null);
     setIntention(null);
+    setAlerts(null);
+    setCountry(null);
     setStep('welcome');
   }, [previewMode]);
 
@@ -325,6 +344,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setFocus(null);
     setTracking(null);
     setIntention(null);
+    setAlerts(null);
+    setCountry(null);
     setStep('welcome');
     router.setParams({ onboarding: undefined });
   };
@@ -347,10 +368,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const saveJourney = (
-    stage: 'welcome' | 'focus' | 'tracking' | 'intention' | 'preview' | 'capture' | 'complete',
+    stage: OnboardingJourneyStage,
     nextFocus: OnboardingFocus | null = focus,
     nextTracking: OnboardingTracking | null = tracking,
     nextIntention: OnboardingIntention | null = intention,
+    nextAlerts: OnboardingAlertDelivery | null = alerts,
+    nextCountry: string | null = country,
   ) => {
     if (previewMode) return;
     setOnboardingProfile({
@@ -359,6 +382,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       focus: nextFocus,
       tracking: nextTracking,
       intention: nextIntention,
+      alerts: nextAlerts,
+      country: nextCountry,
       startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
     });
   };
@@ -385,6 +410,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(null);
       setTracking(null);
       setIntention(null);
+      setAlerts(null);
+      setCountry(null);
       setResumeFailed(false);
       setAndroidSmsReady(false);
       setAndroidNotificationReady(false);
@@ -406,6 +433,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(state.onboardingProfile.focus);
       setTracking(state.onboardingProfile.tracking);
       setIntention(state.onboardingProfile.intention ?? null);
+      setAlerts(state.onboardingProfile.alerts ?? null);
+      setCountry(normalizeOnboardingCountry(state.onboardingProfile.country));
     }
     if (state.onboarded) {
       resumeHandled.current = true;
@@ -530,6 +559,34 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     });
   };
 
+  /**
+   * Correcting the country is a preference, not a questionnaire answer, so it
+   * does not advance or rewind the journey: it saves against whatever stage is
+   * already durable. Someone who fixes this on the welcome screen and force
+   * quits must come back to the welcome screen, not be pushed forward.
+   */
+  const chooseCountry = (id: string) => {
+    const next = normalizeOnboardingCountry(id);
+    if (!next) return;
+    setCountry(next);
+    saveJourney(
+      state.onboardingProfile?.stage ?? 'welcome',
+      focus, tracking, intention, alerts, next,
+    );
+  };
+
+  const chooseAlerts = (id: OnboardingAlertDelivery) => {
+    setAlerts(id);
+    saveJourney('alerts', focus, tracking, intention, id);
+    trackOnboardingEvent('onboarding_alerts_selected', {
+      focus,
+      tracking,
+      // The answer itself, never a bank name: this is the delivery channel.
+      alerts: id,
+      placement: GROWTH_PLACEMENTS.onboarding,
+    });
+  };
+
   const chooseIntention = (id: OnboardingIntention) => {
     setIntention(id);
     saveJourney('intention', focus, tracking, id);
@@ -543,6 +600,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const selectedFocus = focus ?? state.onboardingProfile?.focus ?? null;
   const selectedTracking = tracking ?? state.onboardingProfile?.tracking ?? null;
   const selectedIntention = intention ?? state.onboardingProfile?.intention ?? null;
+  const selectedAlerts = alerts ?? state.onboardingProfile?.alerts ?? null;
+  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country);
+  /**
+   * The country onboarding is actually drawing, so the control reports what is
+   * on screen rather than what was asked for. Resolving it through the same
+   * function the scenes use means the row can never name a country whose banks
+   * are not the ones beside it — including a device guess Wafra has no
+   * illustration for, which reads as "choose your country" instead.
+   *
+   * Memoized because reading the device Region is a native call and this sits
+   * above the gate's early returns, where a hook is still legal.
+   */
+  const drawnRegionId = useMemo(
+    () => onboardingBankRegion(state.marketId, selectedCountry ?? onboardingDeviceRegion())?.id ?? null,
+    [selectedCountry, state.marketId],
+  );
 
   const openNamePersonalization = () => {
     if (!beginStepTransition()) return;
@@ -558,11 +631,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     const resumedFocus = selectedFocus;
     const resumedTracking = selectedTracking;
     const resumedIntention = selectedIntention;
+    const resumedAlerts = selectedAlerts;
+    const resumedCountry = selectedCountry;
     if (previewMode) {
       setFocus(resumedFocus);
       setTracking(resumedTracking);
       setIntention(resumedIntention);
-      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
+      setAlerts(resumedAlerts);
+      setCountry(resumedCountry);
+      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention, resumedAlerts, resumedCountry);
       if (!beginStepTransition()) return;
       setStep('focus');
       return;
@@ -576,6 +653,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setFocus(resumedFocus);
       setTracking(resumedTracking);
       setIntention(resumedIntention);
+      setAlerts(resumedAlerts);
+      setCountry(resumedCountry);
       if (
         state.onboardingProfile?.stage === 'remote-handoff' &&
         resumedFocus &&
@@ -585,14 +664,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         // The remote Flow already asked Focus → Tracking → Intention and showed
         // the personalized value preview. Name is the only local personalization
         // step between that Flow and OS-specific capture setup.
-        saveJourney('capture', resumedFocus, resumedTracking, resumedIntention);
+        saveJourney('capture', resumedFocus, resumedTracking, resumedIntention, resumedAlerts, resumedCountry);
         await ensureDurable();
         if (!beginStepTransition()) return;
         setCollectingName(false);
         setStep('capture');
         return;
       }
-      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention);
+      saveJourney('focus', resumedFocus, resumedTracking, resumedIntention, resumedAlerts, resumedCountry);
       // Persist the lightweight profile/name together. If the process dies on
       // the next screen, onboarding resumes at Focus with the same greeting.
       await ensureDurable();
@@ -892,6 +971,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setStep('intention');
       saveJourney('intention');
     } else if (activeStep === 'intention') {
+      setStep('alerts');
+      saveJourney('alerts');
+    } else if (activeStep === 'alerts') {
       setStep('tracking');
       saveJourney('tracking');
     } else if (activeStep === 'tracking') {
@@ -911,7 +993,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const openWafra = async (
     addFirstEntry = false,
-    destination?: '/pro',
+    destination?: OnboardingExit,
     outcomeOverride?: CompletionOutcome,
   ) => {
     if (previewMode) {
@@ -1037,6 +1119,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     : focus === 'bills'
       ? t('onboardOpenBills')
       : t('onboardOpenHome');
+  /**
+   * The statement offer is earned by the user's own answer, not by a guess.
+   *
+   * It is deliberately NOT shown when setup failed or SMS was refused: those
+   * states already own the screen with their own recovery, and stacking a
+   * second "here is what is missing" card on top reads as the app giving up.
+   * Web has no capture to fall short of, so it has no gap to fill either.
+   */
+  const showHistoryGapOffer = activeStep === 'complete' &&
+    Platform.OS !== 'web' &&
+    onboardingHistoryGap(selectedAlerts) &&
+    !failedCompletion &&
+    !finishSaveFailed &&
+    !smsDenied;
   const discoveredResult = result ?? (
     state.transactions.length > 0 || state.accounts.length > 0 || state.bills.length > 0 || state.cardDues.length > 0
       ? {
@@ -1095,7 +1191,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     {t('onboardWelcomeBody')}
                   </ThemedText>
                 </View>
-                <WelcomeMoneyScene marketId={state.marketId} reducedMotion={reducedMotion} />
+                <WelcomeMoneyScene marketId={state.marketId} country={selectedCountry} reducedMotion={reducedMotion} />
+                <OnboardingCountryConfirm
+                  country={selectedCountry}
+                  resolved={drawnRegionId}
+                  onChange={chooseCountry}
+                />
                 <View style={styles.welcomeActions}>
                   <Button wrapLabel
                     label={t('onboardChooseStart')}
@@ -1222,7 +1323,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardFocusBody')}</ThemedText>
                       </View>
-                      <FocusChooser value={selectedFocus} onChange={chooseFocus} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <FocusChooser value={selectedFocus} onChange={chooseFocus} marketId={state.marketId} country={selectedCountry} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -1248,7 +1349,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardTrackingBody')}</ThemedText>
                       </View>
-                      <TrackingChooser value={selectedTracking} onChange={chooseTracking} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <TrackingChooser value={selectedTracking} onChange={chooseTracking} marketId={state.marketId} country={selectedCountry} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -1256,7 +1357,33 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           onPress={() => {
                             if (!selectedTracking || !beginStepTransition()) return;
                             setTracking(selectedTracking);
-                            saveJourney('intention', selectedFocus, selectedTracking, selectedIntention);
+                            saveJourney('alerts', selectedFocus, selectedTracking, selectedIntention, selectedAlerts);
+                            setStep('alerts');
+                          }}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'alerts' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardAlertsTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>{t('onboardAlertsBody')}</ThemedText>
+                      </View>
+                      <AlertDeliveryChooser value={selectedAlerts} onChange={chooseAlerts} reducedMotion={reducedMotion} />
+                      <View style={styles.questionActions}>
+                        <Button wrapLabel
+                          label={t('continueWord')}
+                          disabled={!selectedAlerts || transitioning}
+                          onPress={() => {
+                            if (!selectedAlerts || !beginStepTransition()) return;
+                            setAlerts(selectedAlerts);
+                            saveJourney('intention', selectedFocus, selectedTracking, selectedIntention, selectedAlerts);
                             setStep('intention');
                           }}
                           labelColor={night.onPrimary}
@@ -1274,7 +1401,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardIntentionBody')}</ThemedText>
                       </View>
-                      <IntentionChooser value={selectedIntention} onChange={chooseIntention} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <IntentionChooser value={selectedIntention} onChange={chooseIntention} marketId={state.marketId} country={selectedCountry} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t('continueWord')}
@@ -1297,7 +1424,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t('onboardPersonalizedBody')}</ThemedText>
                       </View>
-                      <PersonalizedProductPreview focus={selectedFocus} tracking={selectedTracking} intention={selectedIntention} marketId={state.marketId} reducedMotion={reducedMotion} />
+                      <PersonalizedProductPreview focus={selectedFocus} tracking={selectedTracking} intention={selectedIntention} marketId={state.marketId} country={selectedCountry} reducedMotion={reducedMotion} />
                       <View style={styles.questionActions}>
                         <Button wrapLabel
                           label={t(Platform.OS === 'web' ? 'onboardChooseStart' : 'onboardConnectMyMoney')}
@@ -1317,8 +1444,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           {t(capture.title)}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
+                        {Platform.OS === 'android' && onboardingPrefersNotificationCapture(selectedAlerts) && (
+                          <ThemedText style={styles.captureAnswerHint} testID="onboarding-capture-notification-hint">
+                            {t('onboardAlertsNotificationHint')}
+                          </ThemedText>
+                        )}
                       </View>
-                      {Platform.OS !== 'web' && <CaptureMarketScene marketId={state.marketId} />}
+                      {Platform.OS !== 'web' && <CaptureMarketScene marketId={state.marketId} country={selectedCountry} />}
                       {Platform.OS !== 'web' && <View style={styles.contextTrustCard} testID="onboarding-context-trust">
                         {([
                           ['lock', 'onboardPrivacyLocalTitle', Platform.OS === 'ios' ? 'onboardCapturePrivacyIos' : 'onboardCapturePrivacyAndroid'],
@@ -1529,6 +1661,30 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             <ThemedText style={styles.deferredPlanText}>
                               {t('onboardPlanPending')}
                             </ThemedText>
+                          </View>
+                        )}
+                        {showHistoryGapOffer && (
+                          <View style={styles.proPreview} testID="onboarding-history-gap">
+                            <View style={styles.proPreviewCopy}>
+                              <ThemedText style={styles.valueStepTitle}>{t('onboardHistoryGapTitle')}</ThemedText>
+                              <ThemedText style={styles.choiceDetail}>{t('onboardHistoryGapBody')}</ThemedText>
+                            </View>
+                            <Button
+                              wrapLabel
+                              variant="outline"
+                              label={t('onboardHistoryGapAction')}
+                              labelColor={night.text}
+                              style={styles.ghost}
+                              onPress={() => void runSetupAction(async () => {
+                                trackOnboardingEvent('onboarding_history_gap_import_opened', {
+                                  focus,
+                                  tracking,
+                                  alerts: selectedAlerts,
+                                  placement: GROWTH_PLACEMENTS.onboarding,
+                                });
+                                await openWafra(false, '/statement-import');
+                              })}
+                            />
                           </View>
                         )}
                         {discoveredResult && discoveredResult.tx > 0 && !failedCompletion && !smsDenied && (
@@ -1782,6 +1938,7 @@ const styles = StyleSheet.create({
   permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { backgroundColor: night.primary },
   captureHero: { gap: 5, alignItems: 'flex-start' },
+  captureAnswerHint: { color: night.primary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18, paddingTop: 2 },
   captureActions: { marginTop: 'auto', paddingTop: 10, gap: 8 },
   skipCaptureButton: { alignSelf: 'center', paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   skipCaptureText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },

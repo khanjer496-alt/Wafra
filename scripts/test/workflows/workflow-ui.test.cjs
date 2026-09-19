@@ -33,6 +33,33 @@ test('privacy details open explicitly without changing saved preferences',()=>{
  assert.equal(h.events[0][0],'state');
  assert.equal(h.events[0][2],true);
 });
+/* The tester whose bank never texted him was already onboarded, so the answer
+ * and the statement it points at have to be reachable from Settings. Render it
+ * for real: the row exists, it is honest about being unanswered, and answering
+ * writes the profile rather than a questionnaire stage. */
+test('Settings asks how the bank reaches you and says a statement fills the gap',()=>{
+ const t=createWorkflowHarness().deps['@/lib/i18n'].t;
+ const unset=createWorkflowHarness(),unsetTree=unset.renderScreen('settings');
+ const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('settingsAlertDeliveryTitle'));
+ assert.ok(row,'the alert-delivery row is on the Settings screen');
+ assert.ok(text(unsetTree).includes(t('settingsAlertDeliveryUnset')),'an unanswered question says so');
+ assert.ok(text(unsetTree).includes(t('statementImportSettingsDetail')));
+ assert.ok(!text(unsetTree).includes(t('statementImportGapDetail')),
+  'no gap is claimed before the person has said anything');
+ // Opening a sheet moves local UI state, which the harness records like any
+ // other setter. What must not happen is a ledger write before a choice.
+ row.props.onPress();
+ assert.deepEqual(unset.events.filter(e=>e[0]!=='state'),[],'opening the sheet writes nothing durable');
+ assert.ok(!unset.events.some(e=>e[0]==='setOnboardingProfile'),'and saves no answer nobody gave');
+
+ const answered=createWorkflowHarness({state:{onboardingProfile:{v:1,stage:'complete',focus:null,
+  tracking:null,alerts:'notifications',startedAt:1}}});
+ const answeredTree=answered.renderScreen('settings');
+ assert.ok(text(answeredTree).includes(t('onboardAlertsNotifications')),'the saved answer is shown back');
+ assert.ok(text(answeredTree).includes(t('statementImportGapDetail')),
+  'and the statement row explains why it is being suggested');
+ assert.ok(!text(answeredTree).includes(t('statementImportSettingsDetail')));
+});
 test('unknown settings deep-links retain the complete screen without acting on the value',()=>{
  const h=createWorkflowHarness({params:{section:'erase-now'}}),tree=h.renderScreen('settings');
  assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
@@ -83,7 +110,10 @@ test('bank-payment nicknames learn by bill identity and never write a merchant-w
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{8:true}}),tree=h.renderScreen('onboarding');
+ // states[10] is the gate's `resumeReady`, by hook order. Inserting a useState
+ // above it in onboarding-gate.tsx moves this index; the screen renders its
+ // loading branch instead of Welcome when it is wrong.
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{10:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
  assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
  const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');

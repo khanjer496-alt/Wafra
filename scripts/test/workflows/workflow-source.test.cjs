@@ -55,8 +55,9 @@ const onboardingAction=(name,inputs,transitionAllowed=true)=>{
 };
 test('main onboarding Back actions follow the integrated journey',()=>{
  const cases=[
-  ['capture','preview','preview'],['preview','intention','intention'],['intention','tracking','tracking'],
-  ['tracking','focus','focus'],['focus','welcome','welcome'],['complete','capture','capture'],
+  ['capture','preview','preview'],['preview','intention','intention'],['intention','alerts','alerts'],
+  ['alerts','tracking','tracking'],['tracking','focus','focus'],['focus','welcome','welcome'],
+  ['complete','capture','capture'],
  ];
   for(const[activeStep,expected,journey]of cases){
    const events=[];

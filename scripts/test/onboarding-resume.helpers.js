@@ -25,7 +25,7 @@ class EffectHarness {
   constructor() {
     this.input = { state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null }, pathname: '/',
       params: {}, hydrationFailed: false, resumeAttempt: 0 };
-    this.ui = { ready: false, failed: false, step: 'welcome', focus: null, tracking: null, intention: null,
+    this.ui = { ready: false, failed: false, step: 'welcome', focus: null, tracking: null, intention: null, alerts: null, country: null,
       collectingName: false, nameDraft: '', nameSaving: false, nameSaveFailed: false,
       smsReady: false, notificationReady: false, awaitingNotification: false };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
@@ -42,6 +42,10 @@ class EffectHarness {
       setFocus: value => { this.ui.focus = value; },
       setTracking: value => { this.ui.tracking = value; },
       setIntention: value => { this.ui.intention = value; },
+      setAlerts: value => { this.ui.alerts = value; },
+      setCountry: value => { this.ui.country = value; },
+      normalizeOnboardingCountry: value => (typeof value === 'string' &&
+        /^[A-Z]{2}$/.test(value.trim().toUpperCase()) ? value.trim().toUpperCase() : null),
       setCollectingName: value => { this.ui.collectingName = value; },
       setNameDraft: value => { this.ui.nameDraft = value; },
       setNameSaving: value => { this.ui.nameSaving = value; },
@@ -78,19 +82,31 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   retry.loader = async () => ({ returnToOnboarding: true }); retry.render({ resumeAttempt: 1 }); await flush();
   assert.equal(retry.ui.failed, false); assert.deepEqual(retry.routes, ['/ios-setup?fromOnboarding=1']); ok('read failure holds gate and retry resumes');
   const erase = new EffectHarness(); erase.ui.step = 'complete'; erase.ui.intention = 'stay-ahead';
+  erase.ui.alerts = 'notifications'; erase.ui.country = 'GB';
   erase.render({ state: { hydrated: true, onboarded: true, onboardingPlan: null, onboardingProfile: null } });
   erase.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null } }); await flush();
   assert.equal(erase.ui.step, 'welcome');
   assert.equal(erase.ui.focus, null); assert.equal(erase.ui.tracking, null); assert.equal(erase.ui.intention, null);
+  assert.equal(erase.ui.alerts, null); assert.equal(erase.ui.country, null);
   assert.equal(erase.ui.smsReady, false); assert.equal(erase.ui.notificationReady, false);
   ok('erase in same mounted gate clears completion and integrated preferences');
   const staged = new EffectHarness();
   staged.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null,
-    onboardingProfile: { v: 1, stage: 'tracking', focus: 'bills', tracking: null, intention: 'stay-ahead', startedAt: 123 } } });
+    onboardingProfile: { v: 1, stage: 'tracking', focus: 'bills', tracking: null, intention: 'stay-ahead',
+      alerts: 'notifications', country: 'AE', startedAt: 123 } } });
   await flush();
   assert.equal(staged.ui.step, 'tracking'); assert.equal(staged.ui.focus, 'bills');
   assert.equal(staged.ui.tracking, null); assert.equal(staged.ui.intention, 'stay-ahead');
+  assert.equal(staged.ui.alerts, 'notifications'); assert.equal(staged.ui.country, 'AE');
   ok('saved integrated stage, focus and intention resume without restarting');
+  // A corrected country is the whole point of the control: it cannot be the one
+  // answer a resume drops, or the wrong country returns on the next launch.
+  const legacy = new EffectHarness();
+  legacy.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null,
+    onboardingProfile: { v: 1, stage: 'focus', focus: null, tracking: null, startedAt: 9 } } });
+  await flush();
+  assert.equal(legacy.ui.country, null); assert.equal(legacy.ui.alerts, null);
+  ok('a profile saved before either answer existed resumes with neither invented');
   const canceled = new EffectHarness(); let release;
   canceled.loader = () => new Promise(resolve => { release = resolve; });
   canceled.render(); canceled.render({ pathname: '/import-sms' });

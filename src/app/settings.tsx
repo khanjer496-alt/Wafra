@@ -116,6 +116,12 @@ import {
   buildExpenseReportHtml,
   reportExpenses,
 } from '@/lib/reimbursement-report';
+import type { OnboardingAlertDelivery } from '@/lib/types';
+import {
+  ALERT_DELIVERY_PRESETS,
+  onboardingHistoryGap,
+  onboardingProfileWithAlerts,
+} from '@/lib/onboarding';
 import { ClearAllError, useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
@@ -161,6 +167,7 @@ export default function SettingsScreen() {
     clearAll,
     setThemePreference,
     unlockFounderPro,
+    setOnboardingProfile,
   } = useStore();
 
   const themeChoice: ThemePreference =
@@ -554,7 +561,7 @@ export default function SettingsScreen() {
   /** Per-charge Wafra alerts default on; the OS remains the final sound/banner control. */
   const [chargeAlerts, setChargeAlerts] = useState(true);
   /** Which compact preference picker is open, if any. Only one can be. */
-  const [preferenceSheet, setPreferenceSheet] = useState<'appearance' | 'language' | null>(null);
+  const [preferenceSheet, setPreferenceSheet] = useState<'appearance' | 'language' | 'alerts' | null>(null);
   /**
    * The one confirmation on this screen, whichever is currently being asked.
    *
@@ -729,6 +736,25 @@ export default function SettingsScreen() {
       label: LANGUAGE_NAMES[code],
     })),
   ];
+  /**
+   * The alert-delivery answer, after setup.
+   *
+   * Onboarding asks it, but the people it was written for are already
+   * onboarded — the tester whose bank never texted him had finished setup
+   * months before the question existed. Leaving it in the first run only
+   * would have answered nobody's actual problem, so it lives here too, in the
+   * section that holds the fix it points at.
+   */
+  const alertsAnswer = state.onboardingProfile?.alerts ?? null;
+  const alertDeliveryChoices = ALERT_DELIVERY_PRESETS.map((preset) => ({
+    value: preset.id,
+    label: t(preset.titleKey),
+    detail: t(preset.detailKey),
+  }));
+  const chooseAlertDelivery = (next: OnboardingAlertDelivery) => {
+    setOnboardingProfile(onboardingProfileWithAlerts(state.onboardingProfile, next, Date.now()));
+  };
+
   const appearanceChoices: { value: ThemePreference; label: string; detail?: string }[] = [
     { value: 'system', label: t('themeSystem'), detail: t('themeSystemDetail') },
     { value: 'light', label: t('themeLight') },
@@ -1257,8 +1283,20 @@ export default function SettingsScreen() {
         }} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
           {linkRow(
+            t('settingsAlertDeliveryTitle'),
+            alertsAnswer
+              ? t(ALERT_DELIVERY_PRESETS.find((preset) => preset.id === alertsAnswer)!.titleKey)
+              : t('settingsAlertDeliveryUnset'),
+            () => setPreferenceSheet('alerts'),
+          )}
+          {linkRow(
             t('statementImportTitle'),
-            t('statementImportSettingsDetail'),
+            // The answer above decides which of these two sentences is true,
+            // so the fix reads as the consequence of what the person just
+            // told us rather than as an unexplained suggestion.
+            onboardingHistoryGap(alertsAnswer)
+              ? t('statementImportGapDetail')
+              : t('statementImportSettingsDetail'),
             () => router.push('/statement-import'),
           )}
           {Platform.OS === 'ios' && linkRow(
@@ -1570,6 +1608,18 @@ export default function SettingsScreen() {
         </View>
       </BottomSheet>
 
+      <ChoiceSheet
+        visible={preferenceSheet === 'alerts'}
+        onClose={() => setPreferenceSheet(null)}
+        // The caps header takes the noun; the question and its reason go in
+        // the slots written for a sentence, or the sheet shouts the question.
+        title={t('settingsAlertDeliveryHeader')}
+        question={t('onboardAlertsTitle')}
+        body={t('onboardAlertsBody')}
+        options={alertDeliveryChoices}
+        value={alertsAnswer ?? undefined}
+        onSelect={chooseAlertDelivery}
+      />
       <ChoiceSheet
         visible={preferenceSheet === 'appearance'}
         onClose={() => setPreferenceSheet(null)}

@@ -302,14 +302,14 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "f1c12ddd9955111cc636decf66e260679781caff82020f4dd62e3a823d532000",
-      "reviewedChange": "2026-09-17: Back follows the integrated welcome → name → focus → tracking → intention → preview → capture journey. Returning from Focus reopens the in-Welcome name personalization state without adding a fifth progress step; completion callback cleanup remains unchanged."
+      "sha256": "63a06ae42c18c5d622ec15a89afb5c108eb348ae351b0d7d23cb9b64887f366f",
+      "reviewedChange": "2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey. The alert-delivery question is inserted between Tracking and Intention and steps back through both; returning from Focus still reopens the in-Welcome name personalization without adding a progress step, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "209008cf98d5c60c19e067937e4f5d906212e79bba54d7a14db93ec6bbe40271",
-      "reviewedChange": "2026-09-12: Preserve the requested Pro destination along with first-entry intent for durable-save retry; completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
+      "sha256": "d5fd65446fe8a51dd42dc07102b6c5af02545cec556b9b09cd246291cb69b43b",
+      "reviewedChange": "2026-09-19: The completion destination widens from the Pro route alone to the OnboardingExit union, so a ledger whose bank does not text can be sent to /statement-import. Destination is still only ever carried, never chosen here, and completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
     },
     {
       "file": "src/app/review-alerts.tsx",

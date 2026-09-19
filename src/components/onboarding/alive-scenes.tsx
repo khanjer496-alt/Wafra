@@ -22,12 +22,31 @@ import { t } from '@/lib/i18n';
 import { onboardingAlertExamples, type OnboardingAlertExample } from '@/lib/onboarding-alert-examples';
 import { onboardingBankRegion, type OnboardingBankExample } from '@/lib/onboarding-bank-examples';
 import { verifiedLogoUrl } from '@/lib/verified-logo-identities';
-import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
+import { ALERT_DELIVERY_PRESETS, onboardingHistoryGap } from '@/lib/onboarding';
+import type {
+  OnboardingAlertDelivery,
+  OnboardingFocus,
+  OnboardingIntention,
+  OnboardingTracking,
+} from '@/lib/types';
 
 const night = Colors.dark;
-const deviceRegion = (): string | null => {
+/**
+ * The phone's own Region. One reader, shared with the gate's country control,
+ * so the guess a scene draws and the guess the control offers to correct can
+ * never come from two different sources and disagree on screen.
+ */
+export const onboardingDeviceRegion = (): string | null => {
   try { return getLocales()[0]?.regionCode ?? null; } catch { return null; }
 };
+const deviceRegion = onboardingDeviceRegion;
+/**
+ * A country the user confirmed outranks the device Region, which is only ever
+ * a guess — and for an expatriate routinely the wrong one. Every scene below
+ * resolves its examples through here so one correction on the first screen
+ * carries through the whole of setup.
+ */
+const previewRegion = (country?: string | null): string | null => country ?? deviceRegion();
 
 /** Quiet, full-screen ground shared by every onboarding step. */
 export function OnboardingAtmosphere() {
@@ -156,8 +175,8 @@ function PosterAlertCard({ example, index, reducedMotion }: {
 }
 
 /** Three regional alerts resolve into one Wafra summary. Display-only. */
-export function WelcomeMoneyScene({ marketId, reducedMotion }: { marketId: string; reducedMotion: boolean }) {
-  const region = useMemo(() => onboardingBankRegion(marketId, deviceRegion()), [marketId]);
+export function WelcomeMoneyScene({ marketId, country, reducedMotion }: { marketId: string; country?: string | null; reducedMotion: boolean }) {
+  const region = useMemo(() => onboardingBankRegion(marketId, previewRegion(country)), [marketId, country]);
   const examples = useMemo(() => onboardingAlertExamples(region, {
     grocery: t('onboardSceneGroceryStore'),
     electricity: t('onboardSceneElectricity'),
@@ -253,10 +272,10 @@ function OptionTab({ label, selected, onPress }: { label: string; selected: bool
 }
 
 /** The chosen view drawn small, with the four choices as quiet tabs underneath. */
-export function FocusChooser({ value, onChange, marketId, reducedMotion = false }: {
-  value: OnboardingFocus | null; onChange(value: OnboardingFocus): void; marketId?: string | null; reducedMotion?: boolean;
+export function FocusChooser({ value, onChange, marketId, country, reducedMotion = false }: {
+  value: OnboardingFocus | null; onChange(value: OnboardingFocus): void; marketId?: string | null; country?: string | null; reducedMotion?: boolean;
 }) {
-  const region = useMemo(() => onboardingBankRegion(marketId ?? null, deviceRegion()), [marketId]);
+  const region = useMemo(() => onboardingBankRegion(marketId ?? null, previewRegion(country)), [marketId, country]);
   const current: OnboardingFocus = value ?? 'spending';
   const options: { id: OnboardingFocus; title: string }[] = [
     { id: 'spending', title: t('onboardFocusSpending') },
@@ -276,10 +295,10 @@ export function FocusChooser({ value, onChange, marketId, reducedMotion = false 
   </View>;
 }
 
-export function TrackingChooser({ value, onChange, marketId, reducedMotion = false }: {
-  value: OnboardingTracking | null; onChange(value: OnboardingTracking): void; marketId: string; reducedMotion?: boolean;
+export function TrackingChooser({ value, onChange, marketId, country, reducedMotion = false }: {
+  value: OnboardingTracking | null; onChange(value: OnboardingTracking): void; marketId: string; country?: string | null; reducedMotion?: boolean;
 }) {
-  const region = useMemo(() => onboardingBankRegion(marketId, deviceRegion()), [marketId]);
+  const region = useMemo(() => onboardingBankRegion(marketId, previewRegion(country)), [marketId, country]);
   const banks = region?.banks ?? [];
   const options: { id: OnboardingTracking; label: string; icon: IconName; outcome: string }[] = [
     { id: 'bank-apps', label: t('onboardTrackingBankApps'), icon: 'bank', outcome: t('onboardTrackingOneView') },
@@ -343,6 +362,83 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
   </View>;
 }
 
+/**
+ * The answer's consequence, drawn as reach rather than as a promise.
+ *
+ * Every other onboarding question is about taste, so its scene can be
+ * aspirational. This one is about what Wafra can and cannot retrieve, and the
+ * honest answer for a notification-only bank is that the past is missing. The
+ * two rows say so plainly, which is also what makes the statement offer at the
+ * end of setup read as a fix rather than an upsell.
+ */
+function AlertReach({ alerts }: { alerts: OnboardingAlertDelivery }) {
+  const pastCovered = alerts === 'sms';
+  const pastUnknown = alerts === 'unsure';
+  const rows: { key: string; label: string; detail: string; covered: boolean }[] = [
+    {
+      key: 'past',
+      label: t('onboardAlertsReachPast'),
+      detail: pastCovered
+        ? t('onboardAlertsReachCovered')
+        : pastUnknown ? t('onboardAlertsReachUnknown') : t('onboardAlertsReachStatement'),
+      covered: pastCovered,
+    },
+    {
+      key: 'future',
+      label: t('onboardAlertsReachFuture'),
+      detail: t('onboardAlertsReachCovered'),
+      covered: true,
+    },
+  ];
+  return <View style={styles.alertReach}>
+    {rows.map(row => <View key={row.key} style={styles.alertReachRow}>
+      <Icon
+        name={row.covered ? 'check' : 'upload'}
+        size={15}
+        color={row.covered ? night.primary : night.textTertiary}
+      />
+      <ThemedText style={styles.alertReachLabel}>{row.label}</ThemedText>
+      <ThemedText style={[styles.alertReachDetail, row.covered && styles.alertReachDetailCovered]}>
+        {row.detail}
+      </ThemedText>
+    </View>)}
+  </View>;
+}
+
+export function AlertDeliveryChooser({ value, onChange, reducedMotion = false }: {
+  value: OnboardingAlertDelivery | null;
+  onChange(value: OnboardingAlertDelivery): void;
+  reducedMotion?: boolean;
+}) {
+  const current = value ?? 'sms';
+  return <View style={styles.chooser} testID="onboarding-alerts-options">
+    <Animated.View key={current} entering={reducedMotion ? undefined : FadeIn.duration(180)}
+      style={styles.trackingScene} accessibilityLiveRegion="polite">
+      <AlertReach alerts={current} />
+      <View style={styles.outcome}>
+        <Icon name={onboardingHistoryGap(value) ? 'upload' : 'check'} size={14} color={night.primary} />
+        <ThemedText style={styles.outcomeText}>
+          {t(ALERT_DELIVERY_PRESETS.find(preset => preset.id === current)!.detailKey)}
+        </ThemedText>
+      </View>
+    </Animated.View>
+    <View style={styles.optionList}>
+      {ALERT_DELIVERY_PRESETS.map(preset => {
+        const label = t(preset.titleKey);
+        const selected = value === preset.id;
+        return <Pressable key={preset.id} accessibilityRole="radio" accessibilityState={{ checked: selected }}
+          aria-checked={selected} accessibilityLabel={label}
+          onPress={() => { tapped(); onChange(preset.id); }}
+          style={({ pressed }) => [styles.optionRow, selected && styles.optionRowSelected, { opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name={preset.icon} size={17} color={selected ? night.primary : night.textTertiary} />
+          <ThemedText style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</ThemedText>
+          {selected && <Icon name="check" size={14} color={night.primary} />}
+        </Pressable>;
+      })}
+    </View>
+  </View>;
+}
+
 function IntentionVisual({ intention, currency }: { intention: OnboardingIntention; currency: string }) {
   const focus: OnboardingFocus = intention === 'spend-intentionally' ? 'spending'
     : intention === 'stay-ahead' ? 'bills'
@@ -360,13 +456,14 @@ function IntentionVisual({ intention, currency }: { intention: OnboardingIntenti
   </View>;
 }
 
-export function IntentionChooser({ value, onChange, marketId, reducedMotion = false }: {
+export function IntentionChooser({ value, onChange, marketId, country, reducedMotion = false }: {
   value: OnboardingIntention | null;
   onChange(value: OnboardingIntention): void;
   marketId?: string | null;
+  country?: string | null;
   reducedMotion?: boolean;
 }) {
-  const region = useMemo(() => onboardingBankRegion(marketId ?? null, deviceRegion()), [marketId]);
+  const region = useMemo(() => onboardingBankRegion(marketId ?? null, previewRegion(country)), [marketId, country]);
   const options: { id: OnboardingIntention; label: string; icon: IconName }[] = [
     { id: 'control', label: t('onboardIntentionControl'), icon: 'spark' },
     { id: 'spend-intentionally', label: t('onboardIntentionSpend'), icon: 'chart' },
@@ -408,14 +505,15 @@ function intentionResult(intention: OnboardingIntention | null): string {
 }
 
 /** The preview step: the user's old money habit visibly resolves into the Wafra view they chose. */
-export function PersonalizedProductPreview({ focus, tracking, intention, marketId, reducedMotion = false }: {
+export function PersonalizedProductPreview({ focus, tracking, intention, marketId, country, reducedMotion = false }: {
   focus: OnboardingFocus | null;
   tracking: OnboardingTracking | null;
   intention: OnboardingIntention | null;
   marketId?: string | null;
+  country?: string | null;
   reducedMotion?: boolean;
 }) {
-  const region = useMemo(() => onboardingBankRegion(marketId ?? null, deviceRegion()), [marketId]);
+  const region = useMemo(() => onboardingBankRegion(marketId ?? null, previewRegion(country)), [marketId, country]);
   const current = focus ?? 'overview';
   const sourceIcon: IconName = tracking === 'spreadsheet' ? 'chart'
     : tracking === 'finance-app' ? 'phone'
@@ -449,8 +547,8 @@ export function PersonalizedProductPreview({ focus, tracking, intention, marketI
 /* Capture: which banks this phone will read                           */
 /* ------------------------------------------------------------------ */
 
-export function CaptureMarketScene({ marketId }: { marketId: string }) {
-  const region = useMemo(() => onboardingBankRegion(marketId, deviceRegion()), [marketId]);
+export function CaptureMarketScene({ marketId, country }: { marketId: string; country?: string | null }) {
+  const region = useMemo(() => onboardingBankRegion(marketId, previewRegion(country)), [marketId, country]);
   const banks = region?.banks ?? [];
   return <View style={styles.captureScene} testID="onboarding-capture-market-scene">
     <View style={styles.bankRow}>
@@ -538,6 +636,11 @@ const styles = StyleSheet.create({
   trackingFresh: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12 },
   trackingFreshTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 14, lineHeight: 19 },
   trackingFreshBody: { color: night.textTertiary, fontSize: 12, lineHeight: 17, paddingTop: 2 },
+  alertReach: { minHeight: 70, justifyContent: 'center', gap: 4 },
+  alertReachRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  alertReachLabel: { flexShrink: 1, color: night.text, fontFamily: Fonts.sansMedium, fontSize: 13, lineHeight: 18 },
+  alertReachDetail: { marginStart: 'auto', flexShrink: 1, color: night.textTertiary, fontSize: 12, lineHeight: 17 },
+  alertReachDetailCovered: { color: night.textSecondary },
   intentionScene: { gap: 7 },
   intentionSceneLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, paddingHorizontal: 2 },
   intentionSceneCopy: { flex: 1, color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 18 },

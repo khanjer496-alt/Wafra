@@ -12,21 +12,21 @@ const open = async (t, options) => {
 };
 
 for (const reducedMotion of [false, true]) {
-  test(`tracking Continue double tap 30ms apart retains Intention: reducedMotion=${reducedMotion}`, async t => {
+  test(`tracking Continue double tap 30ms apart retains Alerts: reducedMotion=${reducedMotion}`, async t => {
     const h = await open(t, { profile: profile('tracking'), reducedMotion });
-    await h.press('continueWord'); stage(h, 'intention');
+    await h.press('continueWord'); stage(h, 'alerts');
     await h.advance(30);
     // Read the newly rendered same-position button, not the old callback.
     // Calling it also protects against a queued native press after disabling.
     h.control('continueWord').onPress(); await h.flush();
-    stage(h, 'intention');
+    stage(h, 'alerts');
     assert.equal(h.control('continueWord').disabled, true);
     assert.equal(h.control('onboardBack').disabled, true);
     await h.advance(319);
     assert.equal(h.control('continueWord').disabled, true);
     await h.advance(1);
     assert.equal(h.control('continueWord').disabled, false);
-    await h.press('continueWord'); stage(h, 'preview');
+    await h.press('continueWord'); stage(h, 'intention');
     assert.deepEqual(writes(h), []);
   });
 }
@@ -38,21 +38,21 @@ test('rapid Back taps use one transition and deliberate Back remains available a
   h.control('onboardBack').onPress(); await h.flush(); stage(h, 'intention');
   await h.advance(320);
   assert.equal(h.control('onboardBack').disabled, false);
-  await h.press('onboardBack'); stage(h, 'tracking');
+  await h.press('onboardBack'); stage(h, 'alerts');
   assert.equal(h.state.onboardingProfile.focus, 'spending');
   assert.equal(h.state.onboardingProfile.tracking, 'bank-apps');
 });
 
 test('rapid alternating Next and Back cannot undo a transition before its screen settles', async t => {
   const h = await open(t, { profile: profile('tracking') });
-  await h.press('continueWord'); stage(h, 'intention');
+  await h.press('continueWord'); stage(h, 'alerts');
   await h.advance(30);
-  h.control('onboardBack').onPress(); await h.flush(); stage(h, 'intention');
+  h.control('onboardBack').onPress(); await h.flush(); stage(h, 'alerts');
   await h.advance(320);
   await h.press('onboardBack'); stage(h, 'tracking');
   h.control('continueWord').onPress(); await h.flush(); stage(h, 'tracking');
   await h.advance(350);
-  await h.press('continueWord'); stage(h, 'intention');
+  await h.press('continueWord'); stage(h, 'alerts');
 });
 
 test('Preview second tap cannot start automatic or manual capture on the next screen', async t => {
@@ -73,14 +73,14 @@ test('Preview second tap cannot start automatic or manual capture on the next sc
 
 test('transition timer is cleared on unmount and is not inherited by a fresh gate', async t => {
   const h = await open(t, { profile: profile('tracking') });
-  await h.press('continueWord'); stage(h, 'intention');
+  await h.press('continueWord'); stage(h, 'alerts');
   assert.equal(h.clock.pending, 1);
   const saved = JSON.parse(JSON.stringify(h.state.onboardingProfile));
   h.unmount(); assert.equal(h.clock.pending, 0);
   const restored = await open(t, { profile: saved });
   assert.equal(restored.control('continueWord').disabled, false);
   assert.equal(restored.clock.pending, 0);
-  await restored.press('continueWord'); stage(restored, 'preview');
+  await restored.press('continueWord'); stage(restored, 'intention');
 });
 
 test('unanswered Continue does not start a transition or bypass the question', async t => {

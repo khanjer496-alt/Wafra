@@ -25,7 +25,9 @@ const copy = {
     nameSkip: 'Skip for now', namePrivacy: 'Used only to personalize Wafra on this device.',
     focus: 'What do you want to understand first?', namedFocus: 'Sam, what do you want to understand first?',
     focusChoice: 'Bills & subscriptions', tracking: 'How do you track money today?',
-    trackingChoice: 'I check my bank apps', intention: 'What would make money feel easier?', intentionChoice: 'Stay ahead of bills',
+    trackingChoice: 'I check my bank apps',
+    alerts: 'How does your bank tell you about a payment?', alertsChoice: 'App notifications only',
+    intention: 'What would make money feel easier?', intentionChoice: 'Stay ahead of bills',
     preview: 'Your starting view is ready.', namedPreview: 'Sam, your starting view is ready.',
     capture: 'Start your way', back: 'Back',
     next: 'Continue',
@@ -38,7 +40,9 @@ const copy = {
     nameSkip: 'تخطي الآن', namePrivacy: 'يُستخدم فقط لتخصيص وفرة على هذا الجهاز.',
     focus: 'ما الذي تريد فهمه أولاً؟', namedFocus: 'Sam، ما الذي تريد فهمه أولاً؟',
     focusChoice: 'الفواتير والاشتراكات', tracking: 'كيف تتابع أموالك اليوم؟',
-    trackingChoice: 'أراجع تطبيقات البنك', intention: 'ما الذي سيجعل إدارة المال أسهل؟', intentionChoice: 'أبقى متقدماً على الفواتير',
+    trackingChoice: 'أراجع تطبيقات البنك',
+    alerts: 'كيف يخبرك بنكك بعملية الدفع؟', alertsChoice: 'إشعارات التطبيق فقط',
+    intention: 'ما الذي سيجعل إدارة المال أسهل؟', intentionChoice: 'أبقى متقدماً على الفواتير',
     preview: 'صورتك الأولى جاهزة.', namedPreview: 'Sam، صورتك الأولى جاهزة.',
     capture: 'ابدأ بطريقتك', back: 'رجوع',
     next: 'متابعة',
@@ -253,6 +257,9 @@ async function reachCapture(page, c, artifact, { saveName = false, resume = fals
   await stage(page, c.tracking, `${artifact}-tracking`, c.next);
   await choose(page, c.trackingChoice, 'onboarding-tracking-options', `${artifact}-tracking-selected`);
   await click(page, c.next);
+  await stage(page, c.alerts, `${artifact}-alerts`, c.next);
+  await choose(page, c.alertsChoice, 'onboarding-alerts-options', `${artifact}-alerts-selected`);
+  await click(page, c.next);
   await stage(page, c.intention, `${artifact}-intention`, c.next);
   await choose(page, c.intentionChoice, 'onboarding-intention-options', `${artifact}-intention-selected`);
   await click(page, c.next);
@@ -277,6 +284,7 @@ async function reachCapture(page, c, artifact, { saveName = false, resume = fals
   const profile = (await ledger(page)).onboardingProfile;
   assert.equal(profile.focus, 'bills');
   assert.equal(profile.tracking, 'bank-apps');
+  assert.equal(profile.alerts, 'notifications');
   assert.equal(profile.intention, 'stay-ahead');
 }
 
@@ -373,11 +381,15 @@ try {
     await stage(page, c.intention, `${name}-intention-back`, c.next);
     assert.equal(await control(page, c.intentionChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the chosen intention');
     await click(page, c.back);
+    await stage(page, c.alerts, `${name}-alerts-back`, c.next);
+    assert.equal(await control(page, c.alertsChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains how the bank delivers alerts');
+    await click(page, c.back);
     await stage(page, c.tracking, `${name}-tracking-back`, c.next);
     assert.equal(await control(page, c.trackingChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the tracking choice');
     await click(page, c.back);
     await stage(page, c.namedFocus, `${name}-focus-back`, c.next);
     assert.equal(await control(page, c.focusChoice, 'radio').getAttribute('aria-checked'), 'true', 'Back retains the Bills destination');
+    await click(page, c.next);
     await click(page, c.next);
     await click(page, c.next);
     await click(page, c.next);

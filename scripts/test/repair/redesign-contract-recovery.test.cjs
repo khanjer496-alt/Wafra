@@ -61,7 +61,8 @@ for(const language of ['en','ar']) {
   // Name personalization plus focus/tracking/intention now sit ahead of
   // resumeReady; slot 8 represents the hydrated/resume-ready gate in this
   // source-executed harness.
-  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{8:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
+  // states[10] is the gate's `resumeReady`, by hook order — see workflow-ui.test.cjs.
+  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{10:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
   const scene=walk(tree).find(n=>n.props.testID==='onboarding-market-money-scene');assert.ok(scene);
   assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===t('onboardChooseStart')));
   // Region-aware examples come from the market pack, not an invented partner list.
