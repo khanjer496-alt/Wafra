@@ -166,8 +166,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "ac1ab6eb72d04bf5270c5c7cf56c6fa1aa8c52a4bb7802b67bf19c80c0bb097e",
-      "reviewedChange": "2026-09-17: Preserve the new source-free onboarding intention when iOS setup rewrites the completion profile. Existing durable completion order and dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-navigation and setup UX tests."
+      "sha256": "cc4314b3056c9683e7b92a85c0ca7266e804acdf45d201e93b7b4d253303e6db",
+      "reviewedChange": "2026-09-19: Stop rewriting the completion profile field by field. The prior note here was about preserving `intention` the same way, and the same omission then silently erased the alert-delivery and country answers, because the reducer replaces the whole profile — so a writer that forgets a field deletes it. onboardingProfileAtStage spreads what is already there, which makes every future field survive by default. The exit destination now resolves through finishDestination(), so a bank that leaves no history to read lands on /statement-import instead of Home; iPhone setup has no completion screen, so this exit is where that offer can exist. Durable completion order and the dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-setup, onboarding-extreme-navigation and the setup UX tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
