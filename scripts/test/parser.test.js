@@ -5584,8 +5584,8 @@ t('ADIB terse account merchant transaction remains a posted expense',
   'Trx. of AED 42.10 on your a/c ****1234 at ABU DHABI NATIONAL OIL ABU DHABI AE. Avl Bal is AED 1234.56',
   { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
 t('ADIB mini statement keeps total and minimum due separate',
-  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 1234.56 by 25SEP26. Please pay before due date.',
-  { kind: 'cardStatement', amountFils: 4210, minDueFils: 123456, dueDay: 25,
+  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 4.21 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: 421, dueDay: 25,
     card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
 t('ADIB ATM cash withdrawal is posted cash movement, not a balance amount',
   'Dear Customer, ATM Cash Withdrawal for AED 42.10 was debited from your account ****1234. Your Avl Bal is AED 1234.56.',

@@ -3813,6 +3813,8 @@ const S = {
   titleOutgoingTransfer: { en: 'Outgoing transfer', ar: 'تحويل صادر' },
   titleIncomingTransfer: { en: 'Incoming transfer', ar: 'تحويل وارد' },
   titleRefund: { en: 'Refund', ar: 'استرداد' },
+  titleCreditReversal: { en: 'Credit reversal', ar: 'عكس قيد دائن' },
+  titleInvoicePayment: { en: 'Invoice payment', ar: 'سداد فاتورة' },
   titleInwardRemittance: { en: 'Inward remittance', ar: 'حوالة واردة' },
   titleOutwardRemittance: { en: 'Outward remittance', ar: 'حوالة صادرة' },
   titleTelegraphicTransfer: { en: 'Telegraphic transfer', ar: 'حوالة برقية' },
@@ -3958,6 +3960,8 @@ const STRUCTURAL_TITLE_KEYS: Record<string, StringKey> = {
   'Mobile recharge': 'titleMobileRecharge',
   'Card statement': 'titleCardStatement',
   'Bill payment': 'titleBillPayment',
+  'Credit reversal': 'titleCreditReversal',
+  'Invoice payment': 'titleInvoicePayment',
   Salary: 'titleSalary',
 };
 

@@ -980,8 +980,13 @@ function bodyOf(source, header) {
     /transactions:\s*mergeSortedTransactions\(batch\.transactions, existing\)/.test(ledgerImportSource) &&
       !/transactions:\s*incrementalFastPath[\s\S]*?sortTransactions\(\[\.\.\.batch\.transactions, \.\.\.existing\]\)/.test(ledgerImportSource),
     'heal updates cannot change date, so sorting the complete ledger again on every history page is wasted synchronous JS');
+  // A deliberate historical repair can advance this independent version.
+  // Pin the separate numeric contract, not a particular release number.
+  const backfillRevision = smsParserSource.match(/const PARSER_BACKFILL_VERSION\s*=\s*(\d+)\s*;/);
+  const runtimeRevision = smsParserSource.match(/const PARSER_VERSION\s*=\s*(\d+)\s*;/);
   ok('runtime parser revisions are decoupled from expensive historical backfill',
-      /PARSER_BACKFILL_VERSION\s*=\s*48/.test(smsParserSource) &&
+      backfillRevision !== null && runtimeRevision !== null &&
+      Number(backfillRevision[1]) > 0 && Number(backfillRevision[1]) <= Number(runtimeRevision[1]) &&
       /\(state\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(captureSource) &&
       /parserRereadComplete \? PARSER_BACKFILL_VERSION/.test(ledgerImportSource) &&
       /\(next\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(stripComments(read('src/lib/store.tsx'))),
