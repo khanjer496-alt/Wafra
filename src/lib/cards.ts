@@ -596,14 +596,114 @@ interface ObservedSettlementCluster {
   receipt?: Transaction;
 }
 
-interface MatchScore {
-  count: number;
-  distance: number;
-  pairs: [number, number][];
+function isoDay(date: string): number {
+  return Date.parse(`${date}T12:00:00Z`) / 86_400_000;
 }
 
-function isoDayDistance(a: string, b: string): number {
-  return Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
+/**
+ * Iterative form of the old suffix DP: match wins ties, then skip left, then
+ * skip right. Keep that order even for unmatched rows outside the window:
+ * skipping an earlier unmatched receipt can change which equal-date debit
+ * wins a later tie, so independent date groups cannot simply be concatenated.
+ *
+ * Precompute dates and possible row windows once. Score checkpoints retain
+ * only one block of one-byte backtracking decisions instead of a matrix of
+ * recursively copied pair lists. For n-by-m streams the worst case remains
+ * O(n*m) work, with O(m * sqrt(n)) memory and a constant call-stack depth.
+ */
+function preferredDatedPairs(
+  left: number[][],
+  right: number[][],
+  windowDays: number,
+): [number, number][] {
+  if (!left.length || !right.length) return [];
+  // The index covers the inclusive +/-day window. Invalid dates retain their
+  // old nonmatching behavior, including clusters with one invalid bank date.
+  const rightByDay = new Map<number, { first: number; last: number }>();
+  right.forEach((days, index) => {
+    if (!days.every(Number.isFinite)) return;
+    for (const day of days) {
+      const span = rightByDay.get(day);
+      if (span) span.last = index;
+      else rightByDay.set(day, { first: index, last: index });
+    }
+  });
+  const windows = left.map((days) => {
+    let first = right.length;
+    let last = -1;
+    if (days.every(Number.isFinite)) {
+      for (const day of days) {
+        for (let offset = -windowDays; offset <= windowDays; offset++) {
+          const span = rightByDay.get(day + offset);
+          if (span) { first = Math.min(first, span.first); last = Math.max(last, span.last); }
+        }
+      }
+    }
+    return { first, last };
+  });
+  if (windows.every((window) => window.last < 0)) return [];
+  const n = left.length;
+  const m = right.length;
+  const blockSize = Math.ceil(Math.sqrt(n));
+  type Scores = { counts: Uint32Array; distances: Float64Array };
+  const empty = (): Scores => ({ counts: new Uint32Array(m + 1), distances: new Float64Array(m + 1) });
+  const checkpoints = new Map<number, Scores>([[n, empty()]]);
+  const fillBlock = (start: number, end: number, tail: Scores, decisions?: Uint8Array): Scores => {
+    let next = tail;
+    let current = empty();
+    // Do not write through a saved checkpoint when the rolling rows swap.
+    let spare = empty();
+    for (let i = end - 1; i >= start; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        let distance = Infinity;
+        if (j >= windows[i].first && j <= windows[i].last) {
+          for (const a of left[i]) {
+            for (const b of right[j]) distance = Math.min(distance, Math.abs(a - b));
+          }
+        }
+        const canMatch = distance <= windowDays;
+        let count = canMatch ? next.counts[j + 1] + 1 : -1;
+        let skew = canMatch ? next.distances[j + 1] + distance : Infinity;
+        let decision = 1;
+        if (next.counts[j] > count || (next.counts[j] === count && next.distances[j] < skew)) {
+          count = next.counts[j]; skew = next.distances[j]; decision = 2;
+        }
+        if (current.counts[j + 1] > count || (current.counts[j + 1] === count && current.distances[j + 1] < skew)) {
+          count = current.counts[j + 1]; skew = current.distances[j + 1]; decision = 3;
+        }
+        current.counts[j] = count;
+        current.distances[j] = skew;
+        if (decisions) decisions[(i - start) * m + j] = decision;
+      }
+      next = current;
+      current = spare;
+      spare = next;
+    }
+    return next;
+  };
+  // The final partial block ends at n; every other checkpoint is a multiple
+  // of blockSize. Each score row is retained only at a block boundary.
+  for (let end = n; end > blockSize;) {
+    const start = Math.floor((end - 1) / blockSize) * blockSize;
+    checkpoints.set(start, fillBlock(start, end, checkpoints.get(end)!));
+    end = start;
+  }
+  const pairs: [number, number][] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    const end = Math.min(i + blockSize, n);
+    const decisions = new Uint8Array((end - i) * m);
+    const start = i;
+    fillBlock(start, end, checkpoints.get(end)!, decisions);
+    while (i < end && j < m) {
+      const decision = decisions[(i - start) * m + j];
+      if (decision === 1) { pairs.push([i, j]); i++; j++; }
+      else if (decision === 2) i++;
+      else j++;
+    }
+  }
+  return pairs;
 }
 
 /**
@@ -616,39 +716,11 @@ function preferredObservedPairs(
   debits: Transaction[],
   receipts: Transaction[],
 ): [number, number][] {
-  const memo = new Map<string, MatchScore>();
-  const solve = (debitIndex: number, receiptIndex: number): MatchScore => {
-    if (debitIndex >= debits.length || receiptIndex >= receipts.length) {
-      return { count: 0, distance: 0, pairs: [] };
-    }
-    const key = `${debitIndex}:${receiptIndex}`;
-    const cached = memo.get(key);
-    if (cached) return cached;
-
-    const distance = isoDayDistance(debits[debitIndex].date, receipts[receiptIndex].date);
-    let best: MatchScore | null = null;
-    if (distance <= OBSERVED_COLLAPSE_DAYS) {
-      const tail = solve(debitIndex + 1, receiptIndex + 1);
-      best = {
-        count: tail.count + 1,
-        distance: tail.distance + distance,
-        pairs: [[debitIndex, receiptIndex], ...tail.pairs],
-      };
-    }
-    const consider = (candidate: MatchScore) => {
-      if (
-        best === null ||
-        candidate.count > best.count ||
-        (candidate.count === best.count && candidate.distance < best.distance)
-      ) best = candidate;
-    };
-    consider(solve(debitIndex + 1, receiptIndex));
-    consider(solve(debitIndex, receiptIndex + 1));
-    const resolved = best ?? { count: 0, distance: 0, pairs: [] };
-    memo.set(key, resolved);
-    return resolved;
-  };
-  return solve(0, 0).pairs;
+  return preferredDatedPairs(
+    debits.map((row) => [isoDay(row.date)]),
+    receipts.map((row) => [isoDay(row.date)]),
+    OBSERVED_COLLAPSE_DAYS,
+  );
 }
 
 function observedSettlementClusters(ordered: Transaction[]): ObservedSettlementCluster[] {
@@ -730,46 +802,17 @@ function preferredManualMatches(rows: Transaction[]): ReadonlyMap<string, string
       (a, b) => a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
     );
     const manuals = ordered.filter((row) => settlementLeg(row) === 'manual');
+    if (!manuals.length) continue;
     const clusters = observedSettlementClusters(ordered);
+    const pairs = preferredDatedPairs(
+      manuals.map((row) => [isoDay(row.date)]),
+      clusters.map((cluster) => [cluster.debit, cluster.receipt]
+        .filter((row): row is Transaction => row !== undefined)
+        .map((row) => isoDay(row.date))),
+      ASSERTED_COLLAPSE_DAYS,
+    );
 
-    const memo = new Map<string, MatchScore>();
-    const solve = (manualIndex: number, clusterIndex: number): MatchScore => {
-      if (manualIndex >= manuals.length || clusterIndex >= clusters.length) {
-        return { count: 0, distance: 0, pairs: [] };
-      }
-      const key = `${manualIndex}:${clusterIndex}`;
-      const cached = memo.get(key);
-      if (cached) return cached;
-      const manual = manuals[manualIndex];
-      const cluster = clusters[clusterIndex];
-      const observed = [cluster.debit, cluster.receipt].filter(
-        (row): row is Transaction => row !== undefined,
-      );
-      const distance = Math.min(...observed.map((row) => isoDayDistance(manual.date, row.date)));
-      let best: MatchScore | null = null;
-      if (distance <= ASSERTED_COLLAPSE_DAYS) {
-        const tail = solve(manualIndex + 1, clusterIndex + 1);
-        best = {
-          count: tail.count + 1,
-          distance: tail.distance + distance,
-          pairs: [[manualIndex, clusterIndex], ...tail.pairs],
-        };
-      }
-      const consider = (candidate: MatchScore) => {
-        if (
-          best === null ||
-          candidate.count > best.count ||
-          (candidate.count === best.count && candidate.distance < best.distance)
-        ) best = candidate;
-      };
-      consider(solve(manualIndex + 1, clusterIndex));
-      consider(solve(manualIndex, clusterIndex + 1));
-      const resolved = best ?? { count: 0, distance: 0, pairs: [] };
-      memo.set(key, resolved);
-      return resolved;
-    };
-
-    for (const [manualIndex, clusterIndex] of solve(0, 0).pairs) {
+    for (const [manualIndex, clusterIndex] of pairs) {
       const manualId = manuals[manualIndex].id;
       const cluster = clusters[clusterIndex];
       if (cluster.debit) result.set(cluster.debit.id, manualId);
