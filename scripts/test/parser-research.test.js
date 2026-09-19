@@ -228,12 +228,16 @@ ok('a production deep link cannot bypass the internal-build gate',
   /const enabled = isParserResearchBuild\(\)/.test(screen) &&
     /const blocked = state\.privateMode \|\| !enabled/.test(screen) &&
     /\{enabled && !automaticInbox/.test(screen));
-const jobEnv = workflow.slice(workflow.indexOf('    env:'), workflow.indexOf('    steps:'));
-ok('the coding-agent job does not inherit relay or GitHub credentials',
-  !/FEEDBACK_READ_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|GH_TOKEN/.test(jobEnv) &&
-    /persist-credentials: false/.test(workflow) &&
-    /- name: Run the agent[\s\S]{0,400}CLAUDE_CODE_OAUTH_TOKEN/.test(workflow) &&
-    /- name: Open a draft pull request[\s\S]{0,220}GH_TOKEN/.test(workflow));
+const jobs = require('yaml').parse(workflow).jobs;
+ok('generation and publication run on separate hosts with scoped credentials',
+  jobs.generate.permissions.contents === 'read' &&
+    jobs.validate.permissions.contents === 'read' &&
+    jobs.publish.permissions.contents === 'write' &&
+    !JSON.stringify(jobs.generate).includes('GH_TOKEN') &&
+    jobs.publish.needs.includes('validate') &&
+    jobs.publish.steps.some(step => /feedback-publish\.mjs/.test(step.run ?? '')) &&
+    Object.values(jobs).every(job => job.steps.some(step =>
+      step.uses?.startsWith('actions/checkout@') && step.with['persist-credentials'] === false)));
 ok('research is internal/test only and production is compiled closed',
   eas.build.preview.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1' &&
     eas.build['corpus-preview'].env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1' &&

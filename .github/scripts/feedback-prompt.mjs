@@ -15,6 +15,7 @@
  * report: Actions logs are as public as the repository.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { validateFeedbackItem } from './feedback-input.mjs';
 
 const [itemPath, outPath, workDir] = process.argv.slice(2);
 if (!itemPath || !outPath || !workDir) {
@@ -22,7 +23,14 @@ if (!itemPath || !outPath || !workDir) {
   process.exit(1);
 }
 
-const item = JSON.parse(readFileSync(itemPath, 'utf8'));
+let item;
+try {
+  item = JSON.parse(readFileSync(itemPath, 'utf8'));
+  await validateFeedbackItem(item, process.env.FEEDBACK_ID);
+} catch {
+  console.error('::error::invalid feedback identity, redaction schema, or AI consent');
+  process.exit(1);
+}
 if (typeof item.text !== 'string' || !item.text.trim()) {
   console.error('::error::the relay returned a feedback item with no text');
   process.exit(1);
@@ -39,10 +47,10 @@ if (item.aiReviewConsent !== true || item.diagnostic?.delivery?.thirdPartyAi !==
 }
 
 // Bounded even though the relay already bounds it, because this file is the
-// last thing between a payload and a model context, and 8 KiB of aggregates is
-// already more diagnostic than any real bug needs.
+// last thing between a payload and a model context. The exact relay validator
+// above checks its byte limit; never truncate a validated diagnostic mid-JSON.
 const diagnostic = item.diagnostic
-  ? JSON.stringify(item.diagnostic, null, 2).slice(0, 8_000)
+  ? JSON.stringify(item.diagnostic, null, 2)
   : '(none sent)';
 const parserResearch = item.diagnostic?.kind === 'parser-research';
 const researchInstructions = parserResearch
@@ -99,16 +107,17 @@ ${researchInstructions}
    breaking another. \`npm test\` must be green when you are done. Do NOT run
    \`npm run test:e2e\`.
 
-4. **Never quote the user.** The report above may be a real bank message with a
-   real card number in it. Your test must use a SYNTHETIC message that
-   reproduces the SHAPE of the problem — same wording pattern, invented amount,
-   invented merchant, invented last four — in the style the existing corpus
-   already uses. The workflow scans your diff for verbatim runs from the report
-   and fails the run when it finds one, so copying does not merely look bad; it
-   stops the pull request from existing.
+4. **Do not copy the diagnostic.** This input contains a fixed report label
+   and validated, redacted parser-research templates. Digits and free text are
+   masked; do not infer the original values. Your test must use a SYNTHETIC
+   message that reproduces the wording pattern with invented amounts, merchants,
+   and last four digits, in the style the existing corpus already uses.
+   Do not quote the report label or diagnostic templates in tests, source, or
+   your summary. The workflow scans changed files and your summary for copied
+   report or diagnostic text and refuses publication when it detects a match.
 
 5. **Write ${workDir}/SUMMARY.md.** Three short sections, in your own words,
-   quoting nothing from the report:
+   quoting nothing from the report or diagnostic:
    - **What was wrong** — the defect, described from the code.
    - **The reproduction** — which test you added and what it asserts.
    - **The fix** — what you changed, and why that is the right place for it.
@@ -116,19 +125,22 @@ ${researchInstructions}
    If you could not fix it, say that plainly in SUMMARY.md and explain what you
    found. An honest dead end is worth more than a plausible wrong change.
 
-6. **Ignore the coordination protocol.** AGENTS.md will tell you to claim paths
-   with \`scripts/coord.mjs\` before editing them. That exists for the human's
-   local checkout, where two agents share one working copy. You are alone in a
-   throwaway CI clone that is deleted when this job ends, so there is nobody to
-   collide with and nothing to claim. Edit directly. Everything else in
-   AGENTS.md still applies.
+6. **Stay within the parser repair scope.** Modify existing source files under
+   src/ or server/src/ and existing scripts/test/*.test.js or
+   server/test/*.test.cjs files. New files, deletions, dependency files,
+   workflows, tooling, test runners, and native modules cannot be published
+   through this workflow. A fix requiring them needs human follow-up.
+
+   This is an exported disposable checkout without a Git directory. There is
+   no other repository writer and no branch or remote to manage. Do not try to
+   create a Git repository, bypass the sandbox, or change its permissions.
 
 Do not commit, push, or open a pull request. The workflow does that part.
 
 ## What you can and cannot do here
 
 You may edit files, and you may run shell commands — \`npm test\` is expected of
-you above. You may write anywhere in this checkout and in ${workDir}.
+you above. Limit source edits to the paths listed above. Write the summary in ${workDir}.
 
 If some action is refused, that is a real boundary and not a hint to work
 around it: say so in ${workDir}/SUMMARY.md and finish what you can. But note

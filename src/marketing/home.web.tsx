@@ -194,7 +194,10 @@ export default function MarketingHome() {
 
         <footer className={styles.footer}>
           <div className={styles.footerBrand}><WafraMark size={30} color="#1F6B52" /><span>Wafra</span></div>
-          <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
+          <div>
+            <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
+            <p><a href="/privacy/">Privacy</a> · <a href="/terms/">Terms</a> · <a href="/support/">Support</a></p>
+          </div>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
         </footer>
       </main>

@@ -142,8 +142,8 @@ function PosterAlertCard({ example, index, reducedMotion }: {
       <BankLogo bank={example.bank} size={40} />
     </View>
     <View style={styles.posterAlertCopy}>
-      <ThemedText numberOfLines={1} style={styles.posterBank}>{bankName}</ThemedText>
-      <ThemedText numberOfLines={1} style={styles.posterMerchant}>{merchant}</ThemedText>
+      <ThemedText style={styles.posterBank}>{bankName}</ThemedText>
+      <ThemedText style={styles.posterMerchant}>{merchant}</ThemedText>
       <View style={styles.posterKindLine}>
         <View style={[styles.posterKindDot, example.income && styles.posterKindDotIncome]} />
         <ThemedText style={styles.posterKind}>{posterKindLabel(example)}</ThemedText>
@@ -201,7 +201,7 @@ function focusTitle(focus: OnboardingFocus): string {
 function MiniRow({ lead, label, pill, amount, tone }: { lead?: string; label: string; pill?: string; amount: string; tone?: 'income' | 'expense' }) {
   return <View style={styles.miniRow}>
     {lead ? <ThemedText style={styles.miniLead} tabular>{lead}</ThemedText> : null}
-    <ThemedText numberOfLines={1} style={styles.miniLabel}>{label}</ThemedText>
+    <ThemedText style={styles.miniLabel}>{label}</ThemedText>
     {pill ? <View style={styles.miniPill}><ThemedText style={styles.miniPillText}>{pill}</ThemedText></View> : null}
     <ThemedText style={[styles.miniAmount, tone === 'income' && { color: night.income }, tone === 'expense' && { color: night.expense }]} tabular>{amount}</ThemedText>
   </View>;
@@ -244,7 +244,7 @@ export function FocusPreviewCard({ focus, currency }: { focus: OnboardingFocus; 
 /* ------------------------------------------------------------------ */
 
 function OptionTab({ label, selected, onPress }: { label: string; selected: boolean; onPress(): void }) {
-  return <Pressable accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={label}
+  return <Pressable accessibilityRole="radio" accessibilityState={{ checked: selected }} aria-checked={selected} accessibilityLabel={label}
     onPress={() => { tapped(); onPress(); }}
     style={({ pressed }) => [styles.optionTab, selected && styles.optionTabSelected, { opacity: pressed ? 0.7 : 1 }]}>
     <ThemedText style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</ThemedText>
@@ -294,7 +294,7 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
       {current.id === 'bank-apps' ? <View style={styles.bankRow}>
         {[0, 1, 2].map(i => <View key={i} style={styles.bankItem}>
           <BankLogo bank={banks[i] ?? null} size={40} />
-          <ThemedText numberOfLines={1} style={styles.bankName}>{banks[i]?.name ?? t('onboardRegionalBankGeneric')}</ThemedText>
+          <ThemedText style={styles.bankName}>{banks[i]?.name ?? t('onboardRegionalBankGeneric')}</ThemedText>
         </View>)}
       </View> : current.id === 'spreadsheet' ? <View style={styles.trackingSheet}>
         <View style={styles.trackingSheetRow}>
@@ -331,7 +331,7 @@ export function TrackingChooser({ value, onChange, marketId, reducedMotion = fal
     <View style={styles.optionList}>
       {options.map(option => {
         const selected = value === option.id;
-        return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={option.label}
+        return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} aria-checked={selected} accessibilityLabel={option.label}
           onPress={() => { tapped(); onChange(option.id); }}
           style={({ pressed }) => [styles.optionRow, selected && styles.optionRowSelected, { opacity: pressed ? 0.7 : 1 }]}>
           <Icon name={option.icon} size={17} color={selected ? night.primary : night.textTertiary} />
@@ -381,7 +381,7 @@ export function IntentionChooser({ value, onChange, marketId, reducedMotion = fa
     <View style={styles.optionList}>
       {options.map(option => {
         const selected = value === option.id;
-        return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={option.label}
+        return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected }} aria-checked={selected} accessibilityLabel={option.label}
           onPress={() => { tapped(); onChange(option.id); }}
           style={({ pressed }) => [styles.optionRow, selected && styles.optionRowSelected, { opacity: pressed ? 0.7 : 1 }]}>
           <Icon name={option.icon} size={17} color={selected ? night.primary : night.textTertiary} />
@@ -482,20 +482,22 @@ const styles = StyleSheet.create({
 
   welcomeScene: { gap: 8 },
   posterStage: { minHeight: 204, justifyContent: 'center', gap: 6 },
-  posterAlert: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(15,23,20,0.88)' },
-  posterAlertCopy: { flex: 1, minWidth: 0, gap: 1 },
+  posterAlert: { minHeight: 64, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(15,23,20,0.88)' },
+  // Keep identity readable at large text sizes; the amount can use the next
+  // line instead of squeezing bank and merchant names down to one character.
+  posterAlertCopy: { flexGrow: 1, flexShrink: 1, flexBasis: 104, minWidth: 104, gap: 1 },
   posterBank: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 13, lineHeight: 17 },
   posterMerchant: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12, lineHeight: 16 },
   posterKindLine: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 3 },
   posterKindDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: night.expense },
   posterKindDotIncome: { backgroundColor: night.income },
-  posterKind: { color: night.textTertiary, fontSize: 10, lineHeight: 14 },
-  posterAmount: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 14, writingDirection: 'ltr' },
+  posterKind: { color: night.textTertiary, fontSize: 10, lineHeight: 14, flexShrink: 1 },
+  posterAmount: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 14, writingDirection: 'ltr', maxWidth: '100%' },
   posterAmountIncome: { color: night.income },
   posterResult: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong },
   posterResultKicker: { color: night.textTertiary, fontFamily: Fonts.monoMedium, letterSpacing: 0.9 },
   posterNetLine: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
-  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 26, lineHeight: 32, letterSpacing: -0.6, writingDirection: 'ltr' },
+  posterNet: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 26, lineHeight: 32, letterSpacing: -0.6, writingDirection: 'ltr', flexShrink: 1, maxWidth: '100%' },
   posterNetNote: { color: night.textSecondary, fontSize: 12 },
   posterFootnoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   posterFootnote: { color: night.textTertiary, fontSize: 11, lineHeight: 15 },
@@ -505,12 +507,12 @@ const styles = StyleSheet.create({
   miniBigLine: { flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', paddingBottom: 2 },
   miniBig: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 28, letterSpacing: -0.5, writingDirection: 'ltr' },
   miniBigNote: { color: night.textSecondary, fontSize: 12 },
-  miniRow: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
-  miniLead: { width: 22, color: night.warning, fontFamily: Fonts.monoMedium, fontSize: 13 },
-  miniLabel: { flexShrink: 1, color: night.textSecondary, fontSize: 13 },
-  miniPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: Radius.full, borderWidth: 1, borderColor: night.cardBorderStrong },
+  miniRow: { minHeight: 36, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },
+  miniLead: { minWidth: 22, flexShrink: 0, color: night.warning, fontFamily: Fonts.monoMedium, fontSize: 13 },
+  miniLabel: { flexGrow: 1, flexShrink: 1, flexBasis: 80, minWidth: 80, color: night.textSecondary, fontSize: 13 },
+  miniPill: { maxWidth: '100%', paddingHorizontal: 7, paddingVertical: 2, borderRadius: Radius.full, borderWidth: 1, borderColor: night.cardBorderStrong },
   miniPillText: { color: night.textTertiary, fontSize: 10 },
-  miniAmount: { marginStart: 'auto', color: night.text, fontFamily: Fonts.monoMedium, fontSize: 13, writingDirection: 'ltr' },
+  miniAmount: { marginStart: 'auto', maxWidth: '100%', color: night.text, fontFamily: Fonts.monoMedium, fontSize: 13, writingDirection: 'ltr' },
   miniTrio: { flexDirection: 'row', gap: 8 },
   miniStat: { flex: 1, gap: 4, paddingVertical: 8, borderTopWidth: 1, borderColor: night.cardBorderStrong },
   miniStatValue: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 18, writingDirection: 'ltr' },
@@ -520,7 +522,7 @@ const styles = StyleSheet.create({
   optionCell: { width: '50%', paddingHorizontal: 6 },
   optionTab: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 2, borderBottomWidth: 1, borderColor: night.cardBorderStrong },
   optionTabSelected: { borderBottomWidth: 2, borderColor: night.primary },
-  optionText: { flex: 1, color: night.textTertiary, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 19 },
+  optionText: { flex: 1, minWidth: 0, color: night.textTertiary, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 19 },
   optionTextSelected: { color: night.text },
   optionList: { gap: 0 },
   optionRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorder },

@@ -95,14 +95,39 @@ check('social card', fs.existsSync(path.join(outputDir, 'wafra-social.png')));
 check('home product image', fs.existsSync(path.join(outputDir, 'wafra-app-home.png')));
 check('bills product image', fs.existsSync(path.join(outputDir, 'wafra-app-bills.png')));
 
-const privatePages = findHtmlFiles(outputDir).filter((file) => file !== 'index.html');
+const publicPages = ['privacy/index.html', 'terms/index.html', 'support/index.html'];
+const readOptional = (file) => fs.existsSync(path.join(outputDir, file)) ? read(file) : '';
+const privatePages = findHtmlFiles(outputDir).filter((file) => file !== 'index.html' &&
+  file !== '404.html' && !publicPages.includes(file));
 check(
-  'every non-root HTML route is noindex',
+  'dedicated public legal and support pages',
+  publicPages.every((file) => /name="robots" content="index, follow"/.test(readOptional(file))),
+);
+check(
+  'public pages are static and cross-linked',
+  publicPages.every((file) => {
+    const html = readOptional(file);
+    return !/<script\b/i.test(html) && ['/privacy/', '/terms/', '/support/'].every((route) => html.includes(`href="${route}"`)) &&
+      (html.match(/<h1(?:\s|>)/g) ?? []).length === 1;
+  }),
+);
+check(
+  'landing links to legal and support pages',
+  ['/privacy/', '/terms/', '/support/'].every((route) => index.includes(`href="${route}"`)),
+);
+check(
+  'custom 404 is static, noindex, and offers recovery',
+  /name="robots" content="noindex, nofollow, noarchive"/.test(readOptional('404.html')) &&
+  readOptional('404.html').includes('That page is not here.') && readOptional('404.html').includes('href="/"') &&
+  !/<script\b/i.test(readOptional('404.html')),
+);
+check(
+  'every private app route is noindex',
   privatePages.length > 0 &&
   privatePages.every((file) => /name="robots" content="noindex, nofollow, noarchive"/.test(read(file))),
 );
 check(
-  'non-root app routes retain JavaScript',
+  'private app routes retain JavaScript',
   privatePages.every((file) => /<script\b[^>]*\bsrc=/.test(read(file))),
 );
 
@@ -112,6 +137,11 @@ if (siteUrl) {
   check('absolute social image', index.includes(`content="${siteUrl}/wafra-social.png"`));
   check('production sitemap', fs.existsSync(path.join(outputDir, 'sitemap.xml')));
   check('sitemap declared in robots', read('robots.txt').includes(`Sitemap: ${siteUrl}/sitemap.xml`));
+  check('public page canonicals', publicPages.every((file) =>
+    readOptional(file).includes(`rel="canonical" href="${siteUrl}/${file.replace('index.html', '')}"`)));
+  const sitemapLocations = [...readOptional('sitemap.xml').matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  check('sitemap contains only the four public routes', sitemapLocations.length === 4 &&
+    ['/', '/privacy/', '/terms/', '/support/'].every((route) => sitemapLocations.includes(`${siteUrl}${route}`)));
 }
 
 for (const result of checks) {

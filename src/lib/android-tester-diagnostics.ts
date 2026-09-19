@@ -182,7 +182,14 @@ function fitDiagnostic(report: Record<string, unknown>): Record<string, unknown>
   return report;
 }
 
-export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Record<string, unknown>> {
+export type TesterDiagnosticProgress =
+  | { stage: 'checking'; checked: number; included: number }
+  | { stage: 'sending' };
+
+export async function buildAndroidTesterDiagnostic(
+  state: AppState,
+  onProgress?: (checked: number, included: number) => void,
+): Promise<Record<string, unknown>> {
   if (Platform.OS !== 'android') throw new Error('tester_diagnostic_android_only');
   const now = Date.now();
   // Snapshot responsiveness before diagnostic generation starts doing its own
@@ -272,6 +279,7 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
           overrides: state.merchantOverrides,
           shouldContinue: () => true,
           maxChecked: DIAGNOSTIC_SMS_CHECK_LIMIT,
+          onProgress,
         },
       );
       let parsedExpectedLedger = 0;
@@ -450,8 +458,12 @@ export async function buildAndroidTesterDiagnostic(state: AppState): Promise<Rec
   return fitDiagnostic(report);
 }
 
-export async function sendAndroidTesterDiagnostic(state: AppState) {
-  const diagnostic = await buildAndroidTesterDiagnostic(state);
+export async function sendAndroidTesterDiagnostic(
+  state: AppState,
+  onProgress?: (progress: TesterDiagnosticProgress) => void,
+) {
+  const diagnostic = await buildAndroidTesterDiagnostic(state, (checked, included) =>
+    onProgress?.({ stage: 'checking', checked, included }));
   const wire: TesterDiagnosticWirePayload = {
     schema: 1,
     text: DIAGNOSTIC_TEXT,
@@ -461,5 +473,6 @@ export async function sendAndroidTesterDiagnostic(state: AppState) {
     aiReviewConsent: false,
     diagnostic,
   };
+  onProgress?.({ stage: 'sending' });
   return submitTesterDiagnostics(wire);
 }

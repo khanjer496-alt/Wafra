@@ -1090,7 +1090,8 @@ struct WafraBankSenderRegistryParityTests {
         : { status: -1, stderr: paritySwiftBuild.stderr || paritySwiftBuild.stdout };
       ok('Swift matches TypeScript for combining-mark and escaped sender aliases',
         paritySwiftRun.status === 0,
-        paritySwiftBuild.stderr || paritySwiftBuild.stdout || paritySwiftRun.stderr || paritySwiftRun.stdout);
+        paritySwiftBuild.error?.code || paritySwiftRun.error?.code ||
+          paritySwiftBuild.stderr || paritySwiftBuild.stdout || paritySwiftRun.stderr || paritySwiftRun.stdout);
 
       const swiftTest = path.join(tempDirectory, 'WafraBankSenderRegistryTests.swift');
       const swiftBinary = path.join(tempDirectory, 'WafraBankSenderRegistryTests');
@@ -1113,7 +1114,8 @@ struct WafraBankSenderRegistryTests {
         ? spawnSync(swiftBinary, [], { encoding: 'utf8' })
         : { status: -1, stderr: swiftBuild.stderr || swiftBuild.stdout };
       ok('generated Swift exactly admits and refuses sender aliases', swiftRun.status === 0,
-        swiftBuild.stderr || swiftBuild.stdout || swiftRun.stderr || swiftRun.stdout);
+        swiftBuild.error?.code || swiftRun.error?.code ||
+          swiftBuild.stderr || swiftBuild.stdout || swiftRun.stderr || swiftRun.stdout);
 
       eq('generated Swift is current', fs.readFileSync(generatedSwift, 'utf8'),
         fs.readFileSync(generatedSwiftPath, 'utf8'));
@@ -1121,7 +1123,7 @@ struct WafraBankSenderRegistryTests {
         fs.readFileSync(generatedTypeScriptPath, 'utf8'));
       const swiftTypecheck = spawnSync('swiftc', ['-typecheck', generatedSwift], { encoding: 'utf8' });
       ok('generated Swift sender registry type-checks', swiftTypecheck.status === 0,
-        swiftTypecheck.stderr || swiftTypecheck.stdout);
+        swiftTypecheck.error?.code || swiftTypecheck.stderr || swiftTypecheck.stdout);
     } finally {
       fs.rmSync(tempDirectory, { recursive: true, force: true });
     }

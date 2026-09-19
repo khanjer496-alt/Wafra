@@ -36,8 +36,29 @@ async function decoded(scope) {
 }
 
 try {
+  // Build the normal demo fixture once with every external request blocked,
+  // then exercise bundled/offline artwork with the saved local-only preference.
+  // Online BankAvatar requests are intentional and belong to separate coverage.
+  const bootstrap = await browser.newContext();
+  await bootstrap.route('**/*', route => route.request().url().startsWith(base + '/')
+    ? route.continue() : route.abort());
+  const seedPage = await bootstrap.newPage();
+  await seedPage.goto(base + '/', { waitUntil: 'networkidle' });
+  await seedPage.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
+  await seedPage.waitForFunction(() => localStorage.getItem('wafra/state/v1') !== null);
+  const localOnlySeed = await seedPage.evaluate(() => {
+    const stateKey = 'wafra/state/v1';
+    const state = JSON.parse(localStorage.getItem(stateKey));
+    if (!state?.onboarded) throw new Error('Expected a persisted synthetic demo before setting local-only mode');
+    localStorage.setItem(stateKey, JSON.stringify({ ...state, privateMode: true }));
+    return Object.entries(localStorage);
+  });
+  await bootstrap.close();
   for (const mode of ['light', 'dark']) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: mode, reducedMotion: 'reduce' });
+    await context.addInitScript(entries => {
+      for (const [key, value] of entries) localStorage.setItem(key, value);
+    }, localOnlySeed);
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
     page.on('pageerror', error => errors.push(String(error)));
@@ -51,6 +72,8 @@ try {
     });
     await page.goto(base + '/', { waitUntil: 'networkidle' });
     await page.getByTestId('reference-home-summary').waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1')).privateMode), true,
+      'Bundled/offline logo verification uses the saved local-only preference');
     await check(`Home ${mode}: bundled logos decode`, () => decoded(page));
     await page.screenshot({ path: path.join(out, `home-${mode}.png`) });
 
@@ -74,7 +97,7 @@ try {
       await dialog.getByTestId(identity).waitFor({ state: 'visible' });
       await decoded(dialog);
       const size = await dialog.getByTestId(identity).boundingBox();
-      assert.equal(size.width, 64); assert.equal(size.height, 64);
+      assert.equal(size.width, 52); assert.equal(size.height, 52);
     });
     await page.screenshot({ path: path.join(out, `detail-${mode}.png`) });
     await page.keyboard.press('Escape');
