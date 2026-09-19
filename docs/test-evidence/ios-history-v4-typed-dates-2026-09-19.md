@@ -90,6 +90,23 @@ per-message graph (builds 39/44) imported real history that way, and Apple's
 | `node scripts/release/ios-public-shortcut-check.mjs` | v2 record, capture record and the v4 asset all `passed` |
 | Mac Shortcuts engine | The previous owner's status probes reproduce the old `Please choose a value for each parameter` error and its coercion fix; the v2 graph with Messages and Wafra intents stubbed runs its whole loop to the completion branch (`sim2-listpages`). |
 
+## New-transaction capture: automation trigger verified on the phone
+
+On the owner's iPhone (iOS 26.6.2) the Message automation's Next button stays
+disabled with Sender and "Message Contains" both empty, so the 13 September
+guidance ("leave both empty") could not be followed. With Sender empty and a
+**single space** in "Message Contains", Next enables and the automation can be
+attached to the capture shortcut with Run Immediately. Every SMS contains a
+space, so this is an unfiltered trigger in practice; Wafra keeps only bank
+alerts on-device. The guide copy, the help sheet copy and
+`isSupportedIosMessageAutomationTrigger` now describe and accept exactly this
+configuration (whitespace-only filter), while keyword filters are still
+refused. The capture shortcut was not installed on the owner's phone (only the
+history one was); it was installed from the production record `9a85d5f8…`
+(`WafraLocalCapture`) and the automation was created against it. Live arrival
+of a real bank SMS through that automation has not yet been observed in this
+session.
+
 ## Not verified here
 
 - No iPhone run of v4: build 150 does not contain the v4 intents, so the

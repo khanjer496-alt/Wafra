@@ -4145,10 +4145,17 @@ struct WafraBankSenderRegistryTests {
       selectedSenderCount: 1,
       messageContains: null,
     }), true);
+  // iOS 26 keeps Next disabled with both filters empty; the guided filter is a
+  // single space, which every bank alert contains.
+  eq('setup trigger guard: the guided single-space filter is supported',
+    setupModule.isSupportedIosMessageAutomationTrigger({
+      selectedSenderCount: 0,
+      messageContains: ' ',
+    }), true);
   for (const [name, trigger] of [
     ['non-numeric sender count', { selectedSenderCount: 'any', messageContains: null }],
     ['negative sender count', { selectedSenderCount: -1, messageContains: null }],
-    ['space trigger', { selectedSenderCount: 0, messageContains: ' ' }],
+    ['empty-string filter', { selectedSenderCount: 0, messageContains: '' }],
     ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
     ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
   ]) {

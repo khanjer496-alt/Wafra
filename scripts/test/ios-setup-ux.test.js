@@ -142,7 +142,7 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
   ]);
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('empty') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
     translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
     translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
     !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
@@ -300,8 +300,9 @@ ok('iOS message setup: sender guide is explicit that Sender stays empty in both 
   /iosMessageGuideNoFilter/.test(read('src/components/ios-message-setup/automation-guide.tsx')) &&
     translated('iosMessageGuideSender', 'en').includes('leave empty') &&
     translated('iosMessageGuideSender', 'ar').includes('فارغاً') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('empty') &&
-    translated('iosMessageGuideNoFilter', 'ar').includes('فارغاً'));
+    // iOS 26 keeps Next disabled with both filters empty: the guide asks for a single space.
+    translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
+    translated('iosMessageGuideNoFilter', 'ar').includes('مسافة واحدة'));
 ok('iOS local setup: readiness and failures are announced to VoiceOver',
   /previousReadiness\.current !== setup\.readiness/.test(screen) &&
     /AccessibilityInfo\.announceForAccessibility\(futureReadyLabel\)/.test(screen) &&
