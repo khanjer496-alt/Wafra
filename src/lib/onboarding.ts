@@ -8,6 +8,7 @@ import type {
   OnboardingFocus,
   OnboardingJourneyStage,
   OnboardingPlanPreferences,
+  OnboardingProfile,
   OnboardingTracking,
   Transaction,
 } from '@/lib/types';
@@ -170,6 +171,37 @@ export function onboardingPrefersNotificationCapture(
   alerts: OnboardingAlertDelivery | null | undefined,
 ): boolean {
   return alerts === 'notifications';
+}
+
+/**
+ * Set the alert-delivery answer on a ledger that may never have been asked.
+ *
+ * The person this question was written for is already onboarded: his import
+ * finished months of SMS and still missed the bank that only pushes
+ * notifications. Reaching him means letting the answer be given — and changed
+ * — after setup, which in turn means tolerating a profile that does not exist
+ * yet, because ledgers created before the profile did carry none.
+ *
+ * A profile invented here is stamped `complete`, never `welcome`: this ledger
+ * finished onboarding long ago, and a resumable stage would send its owner
+ * back through a questionnaire they already answered.
+ */
+export function onboardingProfileWithAlerts(
+  profile: OnboardingProfile | null | undefined,
+  alerts: OnboardingAlertDelivery,
+  now: number,
+): OnboardingProfile {
+  return {
+    ...(profile ?? {
+      v: 1,
+      stage: 'complete',
+      focus: null,
+      tracking: null,
+      startedAt: now,
+    }),
+    v: 1,
+    alerts,
+  };
 }
 
 export function onboardingLandingPath(focus: OnboardingFocus | null | undefined): '/' | '/flow' | '/bills' {

@@ -195,6 +195,26 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   eq('an unanswered question is not a gap', gap(null), false);
   eq('and neither is a profile saved before the step existed', gap(undefined), false);
 
+  /* The answer has to be giveable AFTER setup, because the person it was
+   * written for finished setup before the question existed. A ledger with no
+   * profile at all is the normal case there, not an edge one. */
+  const withAlerts = onboarding.onboardingProfileWithAlerts;
+  const fresh = withAlerts(null, 'notifications', 1234);
+  eq('a ledger that never had a profile still records the answer', fresh.alerts, 'notifications');
+  eq('and is stamped complete, never sent back through the questionnaire', fresh.stage, 'complete');
+  eq('with a clock rather than a missing one', fresh.startedAt, 1234);
+  ok('and stays a valid persisted profile',
+    backupValidation.isValidBackupState({ transactions: [], onboardingProfile: fresh }));
+
+  const existing = { v: 1, stage: 'complete', focus: 'bills', tracking: 'bank-apps',
+    intention: 'stay-ahead', country: 'AE', startedAt: 99 };
+  const updated = withAlerts(existing, 'neither', 5678);
+  eq('answering later changes the answer and nothing else',
+    updated, { ...existing, alerts: 'neither' });
+  eq('and never rewrites the original start clock', updated.startedAt, 99);
+  eq('re-answering replaces rather than stacks',
+    withAlerts(updated, 'sms').alerts, 'sms');
+
   const prefersNotifications = onboarding.onboardingPrefersNotificationCapture;
   eq('capture setup leads with notifications only when that is the answer',
     prefersNotifications('notifications'), true);
@@ -460,6 +480,31 @@ ok(
   /setAlerts\(state\.onboardingProfile\.alerts \?\? null\)/.test(gateSource) &&
     /alerts: nextAlerts,/.test(gateSource) &&
     /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
+);
+/* Settings is where an already-onboarded user finds this, so the question and
+ * the fix it points at have to sit together — and the statement row has to say
+ * WHY it is being suggested, or it reads as an unexplained upsell. */
+ok(
+  'Settings can answer the alert question after setup, beside the statement it points at',
+  /settingsAlertDeliveryTitle/.test(settingsSource) &&
+    /setPreferenceSheet\('alerts'\)/.test(settingsSource) &&
+    /onboardingProfileWithAlerts\(state\.onboardingProfile, next, Date\.now\(\)\)/.test(settingsSource) &&
+    /onboardingHistoryGap\(alertsAnswer\)\s*\?\s*t\('statementImportGapDetail'\)/.test(settingsSource),
+);
+ok(
+  'the after-setup sheet keeps the question out of the caps header',
+  /title=\{t\('settingsAlertDeliveryHeader'\)\}/.test(settingsSource) &&
+    /question=\{t\('onboardAlertsTitle'\)\}/.test(settingsSource),
+);
+ok(
+  'and every string it adds is translated in both languages',
+  ['settingsAlertDeliveryHeader', 'settingsAlertDeliveryTitle', 'settingsAlertDeliveryUnset',
+    'statementImportGapDetail']
+    .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)),
+);
+ok(
+  'the country stays out of Settings, where it would change nothing after setup',
+  !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
 );
 ok(
   'the country a person confirms reaches every onboarding scene, not just the first',

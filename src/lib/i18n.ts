@@ -1287,6 +1287,13 @@ const S = {
     en: 'Add history from one or several PDF, CSV, or TSV statements',
     ar: 'أضف السجل من كشف واحد أو عدة كشوف PDF أو CSV أو TSV',
   },
+  settingsAlertDeliveryHeader: { en: 'Bank alerts', ar: 'تنبيهات البنك' },
+  settingsAlertDeliveryTitle: { en: 'How your bank reaches you', ar: 'كيف يصلك بنكك' },
+  settingsAlertDeliveryUnset: { en: 'Not set — this decides how far back Wafra can go', ar: 'غير محدد — هذا يحدد إلى أي مدى يستطيع وفرة الرجوع' },
+  statementImportGapDetail: {
+    en: 'Your bank leaves no history to read, so a statement is how earlier months get in',
+    ar: 'بنكك لا يترك سجلاً يمكن قراءته، لذا فإن كشف الحساب هو طريقة إدخال الأشهر السابقة',
+  },
   launchMetricsInternal: { en: 'Launch metrics (internal)', ar: 'مقاييس التشغيل (داخلية)' },
   launchMetricsDetail: {
     en: 'Fixed timings only · no ledger data',
