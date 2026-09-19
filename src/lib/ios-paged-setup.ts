@@ -9,6 +9,7 @@
 const VERIFIED_PAGED_RECORDS: Readonly<Record<string, string>> = {
   'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d': 'Wafra-History-v2-typed-date.signed',
   'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut': 'Wafra-History-v4.signed',
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut': 'Wafra-History-v6.signed',
 };
 const configuredHistoryUrl = (): string | undefined => process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_SHORTCUT_NAME: string =

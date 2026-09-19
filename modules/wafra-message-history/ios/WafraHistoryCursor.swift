@@ -23,6 +23,11 @@ public enum WafraHistoryCursor {
     public var checked: Int
     public var overlap: [Reference]
     public var complete: Bool
+    /// Lower bound (whole second, exclusive) of the Messages query the runner
+    /// must issue next, so Apple never materializes the whole inbox: at most
+    /// `windowMilliseconds` behind `before`, never past the oldest anchor. Absent
+    /// on checkpoints written before windows existed; `windowed` fills it.
+    public var windowStart: Int64?
   }
 
   public struct Decision {
@@ -43,6 +48,14 @@ public enum WafraHistoryCursor {
 
   public static let initialLimit = 51
   public static let maximumLimit = 408
+  public static let windowMilliseconds: Int64 = 90 * 24 * 60 * 60 * 1_000
+  private static func oldestFloor(_ state: Checkpoint) -> Int64 { (state.oldest.milliseconds / 1_000) * 1_000 }
+  /// The window the runner must query next: `date > windowStart && date < before`.
+  public static func windowed(_ state: Checkpoint) -> Checkpoint {
+    var next = state
+    next.windowStart = state.complete ? nil : max(state.before - windowMilliseconds, oldestFloor(state) - 1_000)
+    return next
+  }
   public static let maximumRecords = 1_000_000
   private static let maximumTimestamp: Int64 = 253_402_300_798_999
 
@@ -58,9 +71,9 @@ public enum WafraHistoryCursor {
       throw Failure.invalidCheckpoint
     }
     let upper = (newest.milliseconds / 1_000 + 1) * 1_000
-    return Checkpoint(version: 1, oldest: oldest, newest: newest, frozenBefore: upper,
+    return windowed(Checkpoint(version: 1, oldest: oldest, newest: newest, frozenBefore: upper,
       before: upper, limit: initialLimit, revision: 0, checked: 0,
-      overlap: [newest], complete: false)
+      overlap: [newest], complete: false, windowStart: nil))
   }
 
   public static func validate(_ state: Checkpoint) throws {
@@ -72,7 +85,10 @@ public enum WafraHistoryCursor {
           [51, 102, 204, 408].contains(state.limit),
           state.revision >= 0, state.revision < 1_000_000,
           state.checked >= 0, state.checked <= maximumRecords,
-          !state.overlap.isEmpty, state.overlap.count <= maximumLimit,
+          // A windowed short page can withhold nothing; the window edge itself is the continuity.
+          state.overlap.count <= maximumLimit,
+          state.revision == 0 || state.windowStart != nil || state.complete || !state.overlap.isEmpty,
+          state.windowStart.map({ $0 % 1_000 == 0 && $0 < state.before && $0 >= oldestFloor(state) - 1_000 }) ?? true,
           Set(state.overlap.map(\.id)).count == state.overlap.count,
           state.overlap.allSatisfy({ valid($0) && $0.milliseconds < state.before &&
             $0.milliseconds >= state.oldest.milliseconds }) else {
@@ -93,13 +109,15 @@ public enum WafraHistoryCursor {
   public static func advance(_ state: Checkpoint, records: [Reference]) throws -> Decision {
     try validate(state)
     guard !state.complete else { throw Failure.alreadyComplete }
-    guard !records.isEmpty, records.count <= state.limit,
+    // Only a windowed query may legitimately return nothing: the window was empty.
+    guard records.isEmpty ? state.windowStart != nil : true, records.count <= state.limit,
           Set(records.map(\.id)).count == records.count,
           records.allSatisfy(valid) else { throw Failure.invalidPage }
     var previous = state.before
     for row in records {
       guard row.milliseconds < state.before,
             row.milliseconds >= state.oldest.milliseconds,
+            state.windowStart.map({ row.milliseconds > $0 }) ?? true,
             row.milliseconds <= previous else { throw Failure.wrongDateRange }
       previous = row.milliseconds
     }
@@ -112,11 +130,27 @@ public enum WafraHistoryCursor {
     var next = state
     next.revision += 1
     if records.count < state.limit {
+      if let windowStart = state.windowStart, windowStart > oldestFloor(state) - 1_000 {
+        // The window is exhausted but has not reached the oldest anchor: move
+        // the cursor to the window edge. The edge second is withheld as overlap
+        // and re-read by the next window (`date < windowStart + 1s`), so a row
+        // on the exact boundary instant can never be skipped.
+        let boundary = windowStart + 1_000
+        let committed = records.prefix { $0.milliseconds >= boundary }.count
+        next.before = boundary
+        next.limit = initialLimit
+        next.checked += committed
+        next.overlap = Array(records.dropFirst(committed))
+        next = windowed(next)
+        try validate(next)
+        return Decision(next: next, commitCount: committed)
+      }
       guard observed[state.oldest.id] == state.oldest.milliseconds else {
         throw Failure.missingOldest
       }
       next.checked += records.count
       next.complete = true
+      next.windowStart = nil
       return Decision(next: next, commitCount: records.count)
     }
     let boundary = (records[records.count - 1].milliseconds / 1_000 + 1) * 1_000
@@ -134,6 +168,7 @@ public enum WafraHistoryCursor {
       next.checked += committed
       next.overlap = Array(records.dropFirst(committed))
     }
+    next = windowed(next)
     try validate(next)
     return Decision(next: next, commitCount: committed)
   }
