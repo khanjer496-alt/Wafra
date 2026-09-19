@@ -95,6 +95,8 @@ const S = {
   },
   testerDiagnosticsSend: { en: 'Send test diagnostics', ar: 'إرسال تشخيص الاختبار' },
   testerDiagnosticsCollecting: { en: 'Collecting diagnostics…', ar: 'جارٍ جمع التشخيص…' },
+  testerDiagnosticsChecked: { en: '{count} messages checked', ar: 'تم فحص {count} رسالة' },
+  testerDiagnosticsSending: { en: 'Sending diagnostics…', ar: 'جارٍ إرسال التشخيص…' },
   testerDiagnosticsDetail: {
     en: 'Sends one privacy-safe report to Wafra Cloudflare with performance, parser/category, SMS import and bank-notification health. Raw SMS, names, card/account numbers and exact amounts are not uploaded.',
     ar: 'يرسل تقريراً واحداً آمناً للخصوصية إلى Cloudflare يتضمن الأداء والمحلل والتصنيفات واستيراد SMS وحالة إشعارات البنوك. لا يتم رفع نص الرسائل أو الأسماء أو أرقام البطاقات/الحسابات أو المبالغ الدقيقة.',
@@ -106,8 +108,8 @@ const S = {
   },
   testerDiagnosticsFailedTitle: { en: 'Could not send diagnostics', ar: 'تعذر إرسال التشخيص' },
   testerDiagnosticsFailedBody: {
-    en: 'The report stayed on this phone. Check your connection and try again.',
-    ar: 'بقي التقرير على هذا الهاتف. تحقق من الاتصال وحاول مرة أخرى.',
+    en: 'Delivery could not be confirmed. Check your connection and try again.',
+    ar: 'تعذر تأكيد وصول التقرير. تحقق من الاتصال وحاول مرة أخرى.',
   },
   filterUpdating: { en: 'Updating results…', ar: 'جارٍ تحديث النتائج…' },
   incomeAccountReview: { en: 'Account needs review', ar: 'الحساب بحاجة إلى مراجعة' },
@@ -3647,10 +3649,10 @@ const S = {
     en: 'This build has no server address, so waiting will not help. Install a newer Wafra test build to send directly.',
     ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لن يفيد الانتظار. ثبّت نسخة اختبار أحدث من وفرة للإرسال المباشر.',
   },
-  feedbackOfflineTitle: { en: 'No connection', ar: 'لا يوجد اتصال' },
+  feedbackOfflineTitle: { en: 'Delivery unconfirmed', ar: 'لم يتأكد وصول التقرير' },
   feedbackOfflineBody: {
-    en: 'The phone could not reach the server. Nothing was sent. This one is worth trying again once you are back online.',
-    ar: 'تعذّر على الهاتف الوصول إلى الخادم، ولم يُرسل شيء. تستحق هذه المحاولة إعادةً عند عودة الاتصال.',
+    en: 'Wafra could not confirm that the server received your report. Check your connection and try again.',
+    ar: 'تعذّر على وفرة تأكيد استلام الخادم لتقريرك. تحقق من الاتصال وحاول مرة أخرى.',
   },
   feedbackTooLargeTitle: { en: 'Too much attached', ar: 'المرفقات كبيرة جداً' },
   feedbackTooLargeBody: {
