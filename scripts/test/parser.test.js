@@ -303,6 +303,11 @@ const ownTransfer = parseSms('AED 5,000.00 was debited from your account for own
 if (ownTransfer && ownTransfer.transferHint === true) { pass++; console.log('✓ own-account transfer flagged'); }
 else { fail++; console.log('✗ own-account transfer flagged', JSON.stringify(ownTransfer)); }
 
+t('owned destination transfer is titled as an own-account transfer, never a card payment',
+  'AED 5,000.00 was debited from your account XX9012 and credited to your other account XX7788',
+  { type: 'expense', amountFils: 500000, merchant: 'Own account transfer', transfer: true,
+    category: 'other', deliberate: true });
+
 const normalSpend = parseSms('Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026');
 if (normalSpend && normalSpend.transferHint === false) { pass++; console.log('✓ normal purchase not flagged as transfer'); }
 else { fail++; console.log('✗ normal purchase not flagged as transfer'); }
@@ -1876,6 +1881,11 @@ t('an invoice payment received from a client is business income',
   { type: 'income', amountFils: 1000000, merchant: 'Acme Llc', category: 'business',
     card: { last4: '1234', kind: 'account' } });
 
+t('a source-proven paid invoice is business income even when the payer name is absent',
+  'Invoice INV-9921 was paid. AED 2,400.00 credited to your account ending 0099',
+  { type: 'income', amountFils: 240000, merchant: 'Invoice payment', category: 'business',
+    card: { last4: '0099', kind: 'account' }, deliberate: true });
+
 t('a refund paid BACK to your card is income, not a second purchase',
   'AED 300.00 refund from NOON has been paid back to your Card 1234.',
   { type: 'income', amountFils: 30000, merchant: 'Noon', category: 'other',
@@ -2095,6 +2105,11 @@ t('the NOUN form of the same reversal reads identically',
   'A reversal of AED 500.00 has been credited to your account 1234.',
   { type: 'income', amountFils: 50000, merchant: 'Refund', category: 'other',
     card: { last4: '1234', kind: 'account' } });
+
+t('a reversed incoming salary credit is money leaving again, not a refund',
+  'Salary credit of AED 10,000.00 was reversed from your account ending 0099',
+  { type: 'expense', amountFils: 1000000, merchant: 'Credit reversal', category: 'other',
+    card: { last4: '0099', kind: 'account' }, transfer: false, deliberate: true });
 
 // A chargeback is an offset against an earlier expense. Filing it as Business
 // invents revenue, which is a claim about the user's tax position.
@@ -2374,7 +2389,7 @@ t('a salary payment credited to a BANK-named account is still income',
   { type: 'income', amountFils: 1200000, merchant: 'Salary', category: 'salary' });
 t('profit credited to an Islamic savings account is income',
   'Profit of AED 34.22 has been credited to your ADIB Savings Account 1234.',
-  { type: 'income', amountFils: 3422, merchant: 'Incoming transfer' });
+  { type: 'income', amountFils: 3422, merchant: 'Bank profit' });
 
 // ── Paying a biller is spending, whatever verb the biller chose ──
 // The first pass covered "credited" only, so the rest of the family still
@@ -3486,7 +3501,7 @@ fmt('RECON', 'salary credited to the account',
 // not business revenue.
 fmt('RECON', 'profit credited is income but never business revenue',
   'Profit of AED 34.22 has been credited to your ADIB Savings Account XXXX1234. Available Balance AED 20,034.22',
-  { type: 'income', amountFils: 3422, category: 'other', merchant: 'Incoming transfer',
+  { type: 'income', amountFils: 3422, category: 'other', merchant: 'Bank profit',
     card: { last4: '1234', kind: 'account' }, snapshotFils: 2003422 });
 
 fmt('RECON', 'Covered Card statement with a total, a minimum and a due day',
@@ -5465,6 +5480,119 @@ t('Etisalat branded-card fixture with furniture payee follows the shop, not plas
 t('an Etisalat merchant containing Card Services remains telecom',
   'Purchase of AED 45.00 with Credit Card ending 1234 at ETISALAT CARD SERVICES.',
   { kind: 'transaction', amountFils: 4500, category: 'telecom' });
+
+// ── USER-PROVIDED ADIB HISTORY DATASET: REAL TEMPLATE REGRESSIONS ──
+// Source identifiers/amounts are replaced, but the bank's grammar and word
+// order are retained exactly enough to pin the parser behaviour.
+t('ADIB subject-first credited card repayment is settlement, not fresh spending',
+  'Dear Customer, your payment of AED 42.10 on 11/09/2026 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', type: 'expense', amountFils: 4210, merchant: 'Card •1234 payment',
+    transfer: true, side: 'receipt', card: { last4: '1234', kind: 'credit' } });
+
+t('ADIB cheque received and sent for clearing is not posted income yet',
+  'Dear Customer, Chq No. 123456 for AED 42.10 received for a/c ****1234 and sent for clearing. We will inform you once the Chq is cleared. Thank you',
+  null);
+ok('ADIB sent-for-clearing cheque carries repairable pending evidence',
+  nonPostingReason('Dear Customer, Chq No. 123456 for AED 42.10 received for a/c ****1234 and sent for clearing. We will inform you once the Chq is cleared. Thank you') === 'pending-processing');
+
+t('ADIB deposit-machine cheque awaiting confirmation is not posted income yet',
+  'Dear customer cheque no:123456 has been deposited to your account ****1234 through deposit machine. Deposit will be confirmed after successful cheque clearing 11-09-2026 17:10:20',
+  null);
+ok('ADIB deposit-machine clearing notice carries repairable pending evidence',
+  nonPostingReason('Dear customer cheque no:123456 has been deposited to your account ****1234 through deposit machine. Deposit will be confirmed after successful cheque clearing 11-09-2026 17:10:20') === 'pending-processing');
+
+t('ADIB cleared cheque accepts punctuated AED label only after settlement',
+  'Dear Customer, Chq No.123456 has been cleared. AED. 42.10 deposited to a/c. ****1234',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Cash deposit' });
+
+t('ADIB account profit credit is genuine income, not an unresolved incoming transfer',
+  'Dear Customer, profit of AED 42.10 was credited to your account ****1234.',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Bank profit',
+    category: 'other', deliberate: true });
+
+// The uploaded workbook contains ~4.5k historical ADIB messages which collapse
+// to ~70 privacy-sanitized recurring shapes. Pin the remaining high-risk shape
+// classes here so the corpus protects posting semantics, not just the four v45
+// fixes above. Values/ids are synthetic replacements; grammar/word order match
+// the source dataset families.
+t('ADIB generic account debit keeps the movement amount separate from balance',
+  'Dear Customer, AED 42.10 was debited from your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, snapshotFils: 123456,
+    snapshotKind: 'balance' }, { sender: 'ADIB' });
+t('ADIB generic account credit keeps the movement amount separate from balance',
+  'Dear Customer, AED 42.10 was credited to your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'income', amountFils: 4210, snapshotFils: 123456,
+    snapshotKind: 'balance' }, { sender: 'ADIB' });
+t('ADIB approved card grammar posts the purchase and not the available card balance',
+  'Trx. of AED 42.10 on your card ending **1234 at SMILES, UAE is Approved. Avl. card bal is 1234.56. Trx Date: 11/09/26 17:10',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, date: '2026-09-11',
+    card: { last4: '1234', kind: 'unknown' } }, { sender: 'ADIB' });
+t('ADIB account merchant debit keeps the merchant transaction separate from balance',
+  'Transaction of AED 42.10 debited from your a/c ****1234 at GULF PASTRY LLC ABU DHABI AE. Avl Bal is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB terse account merchant transaction remains a posted expense',
+  'Trx. of AED 42.10 on your a/c ****1234 at ABU DHABI NATIONAL OIL ABU DHABI AE. Avl Bal is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB mini statement keeps total and minimum due separate',
+  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 1234.56 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: 123456, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('ADIB ATM cash withdrawal is posted cash movement, not a balance amount',
+  'Dear Customer, ATM Cash Withdrawal for AED 42.10 was debited from your account ****1234. Your Avl Bal is AED 1234.56.',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, category: 'cash-withdrawal' },
+  { sender: 'ADIB' });
+t('ADIB explicit salary credit keeps salary semantics',
+  'Dear Customer, your Salary of AED 42.10 was credited to your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Salary', category: 'salary' },
+  { sender: 'ADIB' });
+t('ADIB rejected Covered Card transaction never posts',
+  'Trx. for Covered Card ending **1234 at TALABAT, UAE on 11/09/26 17:10 for AED 42.10 has been rejected due to insufficient balance',
+  null, { sender: 'ADIB' });
+t('ADIB OTP transaction challenge never posts',
+  'Please do not share your OTP with anyone. One-Time-Password for Online Trx Etisalat Digital AE for AED 42.10 using ADIB card ending **1234. OTP is:123456',
+  null, { sender: 'ADIB' });
+t('ADIB Apple Pay enrollment OTP never posts',
+  'Dear Customer, 123456 is the OTP for adding your card ending 1234 into Apple Pay. Please DO NOT share your one time password with anyone. Thank you',
+  null, { sender: 'ADIB' });
+t('ADIB completed Apple Pay setup is service information, not money movement',
+  'Dear Customer, your card ending 1234 has been added into Apple Pay. If you did not initiate this, please call 123456',
+  null, { sender: 'ADIB' });
+t('ADIB card reversal is a posted refund, not another purchase',
+  'Trx. of AED 42.10 on your card ending **1234 at SMART DUBAI GOVE, UAE is Reversed. Trx Date: 11/09/26 17:10',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB POS account reversal is a posted refund',
+  'A POS Trxn on your Account No ****1234 at Smart Dubai Government, Dubai in AE on 11/09/26 for AED 42.10 is reversed.',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB Covered Card payment debit stays a transfer funding leg, not spending',
+  'Dear Customer, AED 42.10 payment for your Covered Card was debited from your account ****1234. Your available account balance is AED -1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, merchant: 'Card payment', transfer: true },
+  { sender: 'ADIB' });
+t('ADIB explicit Covered Card refund is income',
+  'Dear Customer, a transaction of AED 42.10 at Hotel at Booking on your Covered Card ending with **1234 has been refunded.',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB incorrect-CVV attempt never posts',
+  'Dear Customer, the CVV entered for the attempted transaction of AED 42.10 at bank.example on your Covered Card ending with **1234 was incorrect. Please try again with the correct CVV.',
+  null, { sender: 'ADIB' });
+t('ADIB transfer-request OTP never posts the requested transfer',
+  'You have requested to transfer funds AED 42.10 to SAMPLE BENEFICIARY. Do not share the one-time password (OTP) with anyone. Your OTP is: 123456',
+  null, { sender: 'ADIB' });
+t('ADIB fee-reversal service request is not a refund until money actually posts',
+  'Dear Customer, We received your request pertaining to Annual Fees reversal on your card ending with **1234. Reference ID REF123456.',
+  null, { sender: 'ADIB' });
+t('ADIB rejected fee-reversal request is not money movement',
+  'We are unable to proceed with your fee reversal request # 123456 for card ending with **1234, as we are unable to reach you.',
+  null, { sender: 'ADIB' });
+t('ADIB closed fee-reversal request is not money movement',
+  'Dear Customer, your request # 123456 pertaining to fee reversal on your card # ending with **1234 has been closed.',
+  null, { sender: 'ADIB' });
+t('ADIB account-created notice is not a transaction',
+  'Account ****1234 has been created for you.', null, { sender: 'ADIB' });
+t('ADIB account-opening welcome is not a transaction',
+  'Dear Customer, thank you for opening a new AED account with ADIB. Your a/c number is: ****1234. For any assistance please call 123456 or visit bank.example.',
+  null, { sender: 'ADIB' });
+t('ADIB chequebook request is not a transaction',
+  'Dear Customer, thank you for requesting a new chequebook for your A/C NO: ****1234. Your request will be fulfilled at the earliest. Sincerely, ADIB',
+  null, { sender: 'ADIB' });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
