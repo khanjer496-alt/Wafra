@@ -460,12 +460,20 @@ export function bankFromSender(
  * their own name in promo footers ("download the new FAB mobile banking app"),
  * and co-branded cards name a partner that is not the issuer.
  */
+// Cache grammar only, never message text or inferred identities. The registry
+// expression is stable across market switches; replacing it earns a new rule.
+const bankMessagePatterns = new WeakMap<RegExp, RegExp>();
+
 export function bankFromMessage(
   text: string | undefined,
 ): { name: string; color: string; domain?: string } | null {
   if (!text) return null;
   for (const b of active.banks) {
-    const re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+    let re = bankMessagePatterns.get(b.re);
+    if (!re) {
+      re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+      bankMessagePatterns.set(b.re, re);
+    }
     if (re.test(text)) return { name: b.name, color: b.color, domain: b.domain };
   }
   return null;

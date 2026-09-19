@@ -195,6 +195,44 @@ function confirmedLedgerCurrency(rows: readonly ScannedSms[]): string | undefine
   return observed.size === 1 ? [...observed][0] : undefined;
 }
 
+interface SourceIdentityIndex {
+  readonly priorBySmsKey: ReadonlyMap<string, Transaction>;
+  readonly collidingPriorsBySmsKey: ReadonlyMap<string, readonly Transaction[]>;
+}
+
+// History checkpoints preserve the transaction array when no money changed.
+// Reuse its source index across those pages instead of validating and indexing
+// every retained row again. Healing, edits, restore and new rows replace the
+// array, so they cannot reuse stale identities. Weak keys let retired ledger
+// snapshots and their indexes be collected together.
+const sourceIdentityIndexes = new WeakMap<readonly Transaction[], SourceIdentityIndex>();
+
+function sourceIdentityIndex(transactions: readonly Transaction[]): SourceIdentityIndex {
+  const cached = sourceIdentityIndexes.get(transactions);
+  if (cached) return cached;
+  const priorBySmsKey = new Map<string, Transaction>();
+  // Preserve input order in collision buckets: exact healing chooses the first
+  // compatible collision, while direct source lookup retains the last row.
+  const collidingPriorsBySmsKey = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (!isUsableCaptureSourceIdentity(t.smsKey, t.ts)) continue;
+    if (t.smsKey && t.source === 'sms') {
+      const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
+      if (isUnboundAndroidSourceKey(sourceKey)) continue;
+      const prior = priorBySmsKey.get(sourceKey);
+      if (prior) {
+        const rows = collidingPriorsBySmsKey.get(sourceKey);
+        if (rows) rows.push(t);
+        else collidingPriorsBySmsKey.set(sourceKey, [prior, t]);
+      }
+      priorBySmsKey.set(sourceKey, t);
+    }
+  }
+  const index: SourceIdentityIndex = { priorBySmsKey, collidingPriorsBySmsKey };
+  sourceIdentityIndexes.set(transactions, index);
+  return index;
+}
+
 /**
  * Turns parsed messages into a single importable batch:
  * maps card hints to accounts (auto-creating unseen cards), skips duplicates,
@@ -324,13 +362,7 @@ export function buildImportPlan(
   };
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
-  const priorBySmsKey = new Map<string, Transaction>();
-  // Most ledgers have one row per source identity. Do not allocate a one-item
-  // array for every transaction just so the rare collision case can call
-  // Array.find(). Keep collision buckets only when a duplicate key actually
-  // exists; the build-311 diagnostic had 14,773 source-bound rows and zero
-  // repeated source identities.
-  const collidingPriorsBySmsKey = new Map<string, Transaction[]>();
+  const { priorBySmsKey, collidingPriorsBySmsKey } = sourceIdentityIndex(state.transactions);
   let priorByIdCache: Map<string, Transaction> | null = null;
   const priorById = (): Map<string, Transaction> => {
     if (priorByIdCache) return priorByIdCache;
@@ -342,20 +374,6 @@ export function buildImportPlan(
   let transferRepairCandidatesCache: Map<string, Transaction[]> | null = null;
   const transferRepairKey = (accountId: string, type: Transaction['type'], amountFils: number, date: string) =>
     `${accountId}|${type}|${amountFils}|${date}`;
-  for (const t of state.transactions) {
-    if (!sourceIdentityMatchable(t)) continue;
-    if (t.smsKey && t.source === 'sms') {
-      const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
-      if (isUnboundAndroidSourceKey(sourceKey)) continue;
-      const prior = priorBySmsKey.get(sourceKey);
-      if (prior) {
-        const rows = collidingPriorsBySmsKey.get(sourceKey);
-        if (rows) rows.push(t);
-        else collidingPriorsBySmsKey.set(sourceKey, [prior, t]);
-      }
-      priorBySmsKey.set(sourceKey, t);
-    }
-  }
   // Statement healing must still consider legacy SMS rows that predate
   // portable source identity, but index them once instead of filtering the
   // entire ledger for every incoming statement row.
@@ -1096,11 +1114,18 @@ export function buildImportPlan(
         p.minDueFils === null &&
         existingDue.minDueEstimated === true &&
         existingDue.minDueFils !== 0;
+      const removesContradictoryMinimum =
+        existingDue !== undefined &&
+        p.minDueFils === null &&
+        existingDue.minDueFils > existingDue.totalDueFils;
       // A parser-version rescan of an identical obligation is idempotent. A
       // newly authoritative minimum, or removing the old UAE-only 5% fallback
       // from a Saudi due, is the reason to re-offer it to the reducer's
       // monotonic due merge.
-      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate) continue;
+      // v47 could retain a contradictory minimum above this exact statement's
+      // total. Re-offer the corrected unknown minimum so the merge can repair
+      // it without resetting payment evidence or weakening a valid minimum.
+      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate && !removesContradictoryMinimum) continue;
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.

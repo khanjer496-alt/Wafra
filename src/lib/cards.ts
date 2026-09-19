@@ -144,6 +144,14 @@ export function mergeImportedCardDues(
     const prior = merged[at];
     const priorKnown = !prior.minDueEstimated;
     const nextKnown = !due.minDueEstimated;
+    // A re-read of the same total can disprove an old impossible minimum.
+    // Restrict this exception to an unchanged obligation: a different total
+    // or another estimate cannot erase an otherwise valid bank-stated figure.
+    const repairsContradictoryMinimum =
+      prior.totalDueFils === due.totalDueFils &&
+      prior.minDueFils > prior.totalDueFils &&
+      Number.isSafeInteger(due.minDueFils) &&
+      due.minDueFils >= 0 && due.minDueFils <= due.totalDueFils;
     // A figure the bank stated always beats one this app guessed. Between two
     // figures the bank BOTH stated, the later one is its correction of the
     // earlier — `existing` is walked before `incoming`, so `due` is the fresher
@@ -154,7 +162,7 @@ export function mergeImportedCardDues(
     // to show. A newer zero estimate is different: zero is the explicit
     // "minimum not stated" sentinel used where no market-specific estimate is
     // valid, so it removes an older invented fallback instead of merging it.
-    const minimum =
+    const minimum = repairsContradictoryMinimum ? due.minDueFils :
       priorKnown && !nextKnown
         ? prior.minDueFils
         : !priorKnown && nextKnown
@@ -173,7 +181,9 @@ export function mergeImportedCardDues(
       ...prior,
       totalDueFils: Math.max(prior.totalDueFils, due.totalDueFils),
       minDueFils: minimum,
-      minDueEstimated: priorKnown || nextKnown ? undefined : true,
+      minDueEstimated: repairsContradictoryMinimum
+        ? due.minDueEstimated
+        : priorKnown || nextKnown ? undefined : true,
       paidFils: Math.max(prior.paidFils, due.paidFils),
       settledAt,
     };

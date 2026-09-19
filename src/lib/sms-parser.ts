@@ -7,7 +7,7 @@ import {
   keywordsForMarket,
 } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
-import { malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
+import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -362,8 +362,17 @@ export interface ParsedCard {
  * generic "deposited into account" cash-deposit title. Existing parser-owned
  * salary rows are repaired through the resumable Android history coordinator;
  * future/offers/security messages remain non-posting.
+ *
+ * 49: distinguish a punctuated currency label ("AED. 3,500.00") from an
+ * unspaced sub-unit amount ("AED.99"); v47 could inflate the latter 100x.
+ * Apply that boundary to aliases such as Dhs and to full-token validation,
+ * so punctuation cannot hide malformed grouping or excess decimal places.
+ * Keep statement totals but discard contradictory minimums above that total.
+ * Correct new transaction, statement and balance reads; re-read retained
+ * sources to repair matching contradictory minimums. Stored transaction
+ * amounts and statement totals require separate reconciliation.
  */
-export const PARSER_VERSION = 48;
+export const PARSER_VERSION = 49;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -373,7 +382,7 @@ export const PARSER_VERSION = 48;
  * Bump this only when an existing persisted row/obligation is known to need
  * source-backed repair.
  */
-export const PARSER_BACKFILL_VERSION = 48;
+export const PARSER_BACKFILL_VERSION = 49;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -1664,15 +1673,18 @@ function ensureCurrencyPatterns(): void {
   // lands: the pack writes "د\.إ", the input becomes "د.ا", and they stop
   // matching. Folding only touches Arabic letters, digits and separators —
   // never a backslash or a dot — so folding a regex SOURCE is safe.
-  const CUR = m.currency.aliases.map(foldOrthography).join('|');
+  const aliases = m.currency.aliases.map(foldOrthography);
+  const CUR = aliases.join('|');
+  const PREFIX = localMoneyPrefixPattern(aliases);
   // Some banks omit the leading zero for sub-unit purchases ("AED .99").
   // Keep that form currency-anchored: accepting a bare ".99" anywhere would
   // turn decimal fragments in references and balances into transactions.
   const FIGURE = String.raw`(?:[\d,]+(?:\.\d{1,2})?|\.\d{1,2})`;
   // A few real bank templates punctuate the currency code itself ("AED.
   // 3,500.00 deposited to a/c"). Treat that full stop as label punctuation,
-  // not as part of the amount. Currency anchoring keeps this narrow.
-  AED_AMOUNT_RE = new RegExp(`(?:${CUR})\\.?\\s*(${FIGURE})`, 'gi');
+  // not as part of the amount. Require whitespace after label punctuation:
+  // without it, "AED.99" loses its decimal and inflates 99 fils to AED 99.
+  AED_AMOUNT_RE = new RegExp(`${PREFIX}\\s*(${FIGURE})`, 'gi');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
   // first two letters as the currency symbol and invent an amount.
   AED_SUFFIX_RE = new RegExp(
@@ -1681,7 +1693,7 @@ function ensureCurrencyPatterns(): void {
   // figure. Without it that block had no minimum, and a statement with no
   // minimum raises no reminder for the payment the user actually has to make.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1707,28 +1719,28 @@ function ensureCurrencyPatterns(): void {
     `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
     `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
     `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
-    `(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   TOTAL_DUE_LABEL_RE = new RegExp(TOTAL_DUE_LABEL, 'i');
   // Arabic renders the currency AFTER the figure as often as before it
   // ("3,240.00 درهم"), so both due patterns make it optional on the left.
   // MIN_DUE_RE was English-only, which left every Arabic statement with a null
   // minimum — and a statement with no minimum produces no reminder.
   AR_MIN_DUE_RE = new RegExp(
-    `(?:الحد الادني للدفع|الحد الادني المستحق|الحد الادني)\\s*(?:هو|:)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `(?:الحد الادني للدفع|الحد الادني المستحق|الحد الادني)\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
   const AR_TOTAL_DUE_LABEL =
     `(?:اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|اجمالي المستحق` +
     // The existing Arabic statement heading names amount due immediately
     // after the card. A minimum qualifier in between must not match it.
     `|كشف حساب البطاقه(?: الايتمانيه)?\\s+\\d{4}\\s+المبلغ المستحق)`;
   AR_TOTAL_DUE_RE = new RegExp(
-    `${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
   AR_TOTAL_DUE_LABEL_RE = new RegExp(AR_TOTAL_DUE_LABEL, 'i');
   OUTSTANDING_RE = new RegExp(
-    `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
   // A bare "Balance AED 9774.87" line. This is the balance footer of the
   // BIGGEST family in the real corpus (the multi-line block, #6/#13/#42/#101…)
   // and of every Wio shape, and neither SNAPSHOT_RE (which wants an
@@ -1742,7 +1754,7 @@ function ensureCurrencyPatterns(): void {
   // updated") quotes nothing. A masked figure ("Balance AED ····5193.16")
   // fails the digit class and stays unknown rather than being guessed at.
   BARE_BALANCE_RE = new RegExp(
-    `(?:^|[\\n.;])\\s*bal(?:ance)?\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `(?:^|[\\n.;])\\s*bal(?:ance)?\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // WHAT SEPARATES A BALANCE NOUN FROM ITS FIGURE, and nothing else.
   //
   // This used to be a bounded run of "any character that is not a digit or a
@@ -1774,7 +1786,7 @@ function ensureCurrencyPatterns(): void {
   const SNAPSHOT_FIGURE =
     BALANCE_REF_CLAUSE +
     `\\s*(?:is|:|\\.|-|,)?\\s*(?:now|currently)?\\s*` +
-    `(?:(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)|([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}]))`;
+    `(?:(?:${PREFIX})\\s*(${FIGURE})|(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}]))`;
   // "Avl. Cr.limit is AED4417.96" is how ADCB writes the available headroom on
   // every card alert it sends — six of them in the real corpus — and the
   // separator after "Cr" is a FULL STOP, not a space. Requiring whitespace
@@ -3735,6 +3747,17 @@ function statementTotalFils(raw: string): number | null {
   return totalMatch ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100) : null;
 }
 
+/** A contradictory minimum cannot become a payment obligation. Keep the
+ * explicitly stated total; leave its minimum unknown instead of capping it
+ * or inventing a replacement. Both numbered and cardless statements use this.
+ */
+function statementMinimumFils(raw: string, totalFils: number): number | null {
+  const match = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
+  if (!match) return null;
+  const minimum = Math.round(Number(match[1].replace(/,/g, '')) * 100);
+  return Number.isSafeInteger(minimum) && minimum >= 0 && minimum <= totalFils ? minimum : null;
+}
+
 function extractMerchant(raw: string, re: RegExp): string {
   re.lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -5688,10 +5711,9 @@ function parseSmsInner(
     BILL_DUE_WORDS.test(raw) &&
     !STATEMENT_TXN_BLOCK_RE.test(raw)
   ) {
-    const minMatch = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-    const minDueFils = minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null;
     const amountFils = statementTotalFils(raw);
     if (!amountFils) return null;
+    const minDueFils = statementMinimumFils(raw, amountFils);
     const dueDate = extractDueDate(raw);
     return {
       kind: 'cardStatement',
@@ -5723,10 +5745,9 @@ function parseSmsInner(
     // Arabic states both figures the same way English does, and if the total
     // is not read the row records the MINIMUM instead — AED 162 for a AED
     // 3,240 statement.
-    const minMatch = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-    const minDueFils = minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null;
     const amountFils = statementTotalFils(raw);
     if (!amountFils) return null;
+    const minDueFils = statementMinimumFils(raw, amountFils);
     const statementDue = extractDueDate(raw);
     return {
       kind: 'cardStatement',

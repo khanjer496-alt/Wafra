@@ -981,7 +981,7 @@ function bodyOf(source, header) {
       !/transactions:\s*incrementalFastPath[\s\S]*?sortTransactions\(\[\.\.\.batch\.transactions, \.\.\.existing\]\)/.test(ledgerImportSource),
     'heal updates cannot change date, so sorting the complete ledger again on every history page is wasted synchronous JS');
   ok('runtime parser revisions are decoupled from expensive historical backfill',
-      /PARSER_BACKFILL_VERSION\s*=\s*48/.test(smsParserSource) &&
+      /PARSER_BACKFILL_VERSION\s*=\s*49/.test(smsParserSource) &&
       /\(state\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(captureSource) &&
       /parserRereadComplete \? PARSER_BACKFILL_VERSION/.test(ledgerImportSource) &&
       /\(next\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(stripComments(read('src/lib/store.tsx'))),
