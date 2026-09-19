@@ -182,7 +182,8 @@ v6 bounds every query:
   windowed run across a 400-day silence that commits every row exactly once.
 - `Wafra-History-v6.signed` (167 actions, release asset
   `ios-history-v6-20260919`) is the record every iOS profile installs from
-  build 155; v4 stays recognized for phones that already added it.
+  build 156 (public TestFlight, IN_BETA_TESTING, 19 Sep 2026 20:16 UTC); v4 stays
+  recognized for phones that already added it.
 
 The support diagnostic `Wafra Messages Check` (`scripts/build-ios-messages-check.mjs`,
 release `ios-messages-check-20260919`) runs the six query shapes one at a
