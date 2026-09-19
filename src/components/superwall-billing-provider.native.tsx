@@ -12,6 +12,8 @@ import { AppState, Platform } from 'react-native';
 import {
   WafraBillingContext,
   unavailableBilling,
+  type ProPlanOffer,
+  type ProPurchaseOutcome,
   type SuperwallBillingStatus,
   type WafraBillingValue,
 } from '@/components/superwall-billing-context';
@@ -25,7 +27,13 @@ import {
   setIosLocalCaptureEntitlementLease,
   subscribeIosCaptureEntitlementReset,
 } from '@/lib/capture';
-import { ENTITLEMENT_ID, localCaptureEntitlementLease, trialDaysLeft } from '@/lib/purchases';
+import {
+  ENTITLEMENT_ID,
+  PRO_SKUS,
+  localCaptureEntitlementLease,
+  proOffersFromProducts,
+  trialDaysLeft,
+} from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import type { OnboardingFocus, OnboardingIntention, OnboardingTracking } from '@/lib/types';
 
@@ -148,6 +156,7 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     isConfigured, configurationError, subscriptionStatus, customerInfo,
     setUserAttributes, setEventTrackingBehavior, getUserAttributes,
     getCustomerInfo, getEntitlements, restorePurchases, dismiss,
+    products, purchase,
   } = useSuperwall((sdk) => ({
     isConfigured: sdk.isConfigured,
     configurationError: sdk.configurationError,
@@ -160,6 +169,8 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     getEntitlements: sdk.getEntitlements,
     restorePurchases: sdk.restorePurchases,
     dismiss: sdk.dismiss,
+    products: sdk.products,
+    purchase: sdk.purchase,
   }));
   const proPlacement = usePlacement();
   const currentPro = useRef(state.pro);
@@ -355,26 +366,74 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     isConfigured,
   ]);
 
+  /**
+   * Ask the store — not the checkout sheet — whether `pro` is really active.
+   *
+   * A completed transaction is not an entitlement: a product that is not
+   * attached to `pro` in Superwall charges successfully and grants nothing.
+   * Both restore and purchase resolve through this one verification so neither
+   * can unlock Pro on the strength of a receipt alone.
+   */
+  const verifyProEntitlement = useCallback(async (): Promise<boolean> => {
+    const [info, entitlements] = await Promise.all([
+      getCustomerInfo(),
+      getEntitlements(),
+    ]);
+    const active = entitlements.active.some((item) => item.id === ENTITLEMENT_ID);
+    const resolved: SubscriptionStatus = active
+      ? { status: 'ACTIVE', entitlements: entitlements.active }
+      : { status: 'INACTIVE' };
+    await applySnapshot(entitlementSnapshot(resolved, info, Date.now()));
+    return active;
+  }, [applySnapshot, getCustomerInfo, getEntitlements]);
+
   const restorePro = useCallback(async (): Promise<boolean | null> => {
     if (!isConfigured) return null;
     try {
       const restored = await restorePurchases();
       if (restored.result === 'failed') return null;
-      const [info, entitlements] = await Promise.all([
-        getCustomerInfo(),
-        getEntitlements(),
-      ]);
-      const active = entitlements.active.some((item) => item.id === ENTITLEMENT_ID);
-      const resolved: SubscriptionStatus = active
-        ? { status: 'ACTIVE', entitlements: entitlements.active }
-        : { status: 'INACTIVE' };
-      await applySnapshot(entitlementSnapshot(resolved, info, Date.now()));
-      return active;
+      return await verifyProEntitlement();
     } catch {
       return null;
     }
-  }, [applySnapshot, getCustomerInfo, getEntitlements,
-    isConfigured, restorePurchases]);
+  }, [isConfigured, restorePurchases, verifyProEntitlement]);
+
+  /**
+   * The prices Wafra's own Pro screen shows. Every figure comes from the
+   * device's storefront through the SDK; a plan the store does not return is
+   * simply absent rather than advertised at a price nobody will be charged.
+   */
+  const fetchProOffers = useCallback(async (): Promise<ProPlanOffer[]> => {
+    if (!isConfigured) return [];
+    try {
+      return proOffersFromProducts(await products(Object.values(PRO_SKUS)));
+    } catch {
+      return [];
+    }
+  }, [isConfigured, products]);
+
+  /** Native checkout: the store's own sheet, opened from Wafra's Pro screen. */
+  const purchasePro = useCallback(async (
+    productId: string,
+  ): Promise<ProPurchaseOutcome> => {
+    if (!isConfigured) return 'unavailable';
+    let result: Awaited<ReturnType<typeof purchase>>;
+    try {
+      result = await purchase(productId);
+    } catch {
+      return 'failed';
+    }
+    if (result.type === 'cancelled') return 'cancelled';
+    // Deferred approval (Ask to Buy, a pending Play payment). Nothing is
+    // entitled yet and nothing has failed; the store finishes it later.
+    if (result.type === 'pending') return 'pending';
+    if (result.type !== 'purchased') return 'failed';
+    try {
+      return (await verifyProEntitlement()) ? 'purchased' : 'unconfirmed';
+    } catch {
+      return 'unconfirmed';
+    }
+  }, [isConfigured, purchase, verifyProEntitlement]);
 
   const value = useMemo<WafraBillingValue>(() => ({
     available: true,
@@ -383,15 +442,19 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     subscriptionStatus: statusLabel(subscriptionStatus),
     paywallStatus: proPlacement.state.status,
     onboardingFlowStatus: onboardingPlacement.state.status,
+    fetchProOffers,
+    purchasePro,
     presentProPaywall,
     presentOnboardingFlow,
     restorePro,
     refresh,
   }), [
+    fetchProOffers,
     onboardingPlacement.state.status,
     presentOnboardingFlow,
     presentProPaywall,
     proPlacement.state.status,
+    purchasePro,
     refresh,
     restorePro,
     configurationError,
@@ -406,7 +469,12 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Native monetization root. Superwall owns checkout, restore and remote UX. */
+/**
+ * Native monetization root. Superwall supplies storefront products, checkout,
+ * restore and entitlements; Wafra's own `/pro` screen is the purchase UI. The
+ * remote `pro_upgrade` paywall stays reachable for campaigns but is not what
+ * the app presents when someone asks to subscribe.
+ */
 export function SuperwallBillingProvider({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
   const key = platformApiKey();

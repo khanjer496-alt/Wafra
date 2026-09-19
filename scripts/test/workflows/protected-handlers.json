@@ -182,15 +182,15 @@
     },
     {
       "file": "src/app/pro.tsx",
-      "name": "openPaywall",
-      "sha256": "8e26828e82fd7bf21db8e0b41171e3e16b75629fbc8ea566d548d36ba012ec80",
-      "reviewedChange": "2026-09-17: Superwall now owns the canonical purchase presentation. The protected native action validates legal readiness and billing configuration before presenting the remote Pro paywall, and preserves explicit error recovery."
+      "name": "buySelectedPlan",
+      "sha256": "ca9cc99b7a4f7fd9b2b926159691124af357d50e7bcb11f9dc93e8d3ac4c623d",
+      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "restore",
-      "sha256": "e3b55cc51a27ad7f8c737f2e7972d52d898c20306da4e15607b488b2802daae2",
-      "reviewedChange": "2026-09-17: Restore is routed through the shared Superwall billing context and retains explicit no-purchase and failure states."
+      "sha256": "4090dd26f6b24c29aa7ef656fd877749d33ce290273903fd906af829bf2fc2ec",
+      "reviewedChange": "2026-09-19: Restore now reads the same checkoutReady guard as the purchase action, and retains its explicit no-purchase and unreachable-store states."
     },
     {
       "file": "src/app/pro.tsx",

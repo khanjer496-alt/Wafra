@@ -1,7 +1,15 @@
 # Wafra billing and Superwall setup
 
-Wafra uses Apple/Google for payment and **Superwall** for native paywalls,
-campaigns, restore, subscription status and remote onboarding/value flows.
+Wafra uses Apple/Google for payment and **Superwall** as the storefront seam:
+it supplies the localized products, runs the platform checkout sheet, restores
+purchases, answers for the `pro` entitlement, and hosts the remote
+onboarding/value flow.
+
+**The Pro purchase screen is Wafra's own native `/pro` screen.** It reads the
+plan prices from the device's storefront through Superwall's `products()` and
+buys through `purchase(productId)`; it never presents the remote `pro_upgrade`
+paywall. A plan the store does not return is shown as unavailable with a retry,
+never advertised at a price from this repository.
 
 ## Product contract
 
@@ -25,9 +33,14 @@ clock and updates every paywall/listing claim together.
 1. Add the Wafra iOS and Android apps and connect their store products.
 2. Use the entitlement named exactly `pro`.
 3. Attach both monthly and yearly products to `pro` on both platforms.
-4. Create placement `pro_upgrade` and publish its campaign/paywall.
-5. Create placement `onboarding` using `docs/superwall-flow-spec.md`.
-6. Keep `post_import_pro` reserved until its experiment is intentionally enabled.
+4. Create placement `onboarding` using `docs/superwall-flow-spec.md`.
+5. Keep `pro_upgrade` and `post_import_pro` reserved: the app does not register
+   either one, so publishing a campaign on them changes nothing a user sees.
+
+Both plan products must be fetchable by the SKUs above. On Play the SDK may
+return `wafra_pro_monthly:<base plan id>`; Wafra matches on the first segment,
+so either identifier works — but a product that is not connected to the app in
+Superwall returns nothing, and `/pro` then reports the price as unavailable.
 
 A product purchase that is not attached to `pro` is misconfigured: the store
 may charge successfully while Wafra correctly remains non-Pro.
@@ -89,7 +102,13 @@ reporting/audit; it is not the new runtime source.
 - Test Restore for subscriptions created before the Superwall migration.
 - Test cancel/refund/expiry and verify revocation occurs only on confirmed inactive state.
 - Launch offline after a confirmed subscription and verify cached access is preserved.
-- Check EN/AR and RTL on onboarding and every paywall variant.
-- Verify Privacy, Terms, Restore and renewal wording on each published paywall.
+- Verify `/pro` lists both plans at storefront prices, and that pulling a product
+  out of the Superwall app config makes it read "Price unavailable" with a retry
+  rather than a guessed figure.
+- Verify a cancelled checkout leaves no error, and that a completed purchase whose
+  `pro` entitlement is not attached reports "Purchase not confirmed".
+- Check EN/AR and RTL on onboarding and on `/pro`.
+- Verify Privacy, Terms, Restore and renewal wording on `/pro` and on the published
+  onboarding flow.
 - Verify iOS native capture entitlement stops after the real subscription expires.
 - Never use a side-loaded Android APK as final Play Billing evidence.

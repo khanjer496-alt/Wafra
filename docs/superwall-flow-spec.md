@@ -9,7 +9,7 @@ requires a matching app update.
 | placement | purpose |
 | --- | --- |
 | `onboarding` | First-run value journey and non-sensitive personalization |
-| `pro_upgrade` | Canonical Wafra Pro subscription paywall |
+| `pro_upgrade` | Reserved. Wafra's native `/pro` screen owns Pro checkout; the app does not register this placement |
 | `post_import_pro` | Reserved post-import conversion experiment |
 
 ## `onboarding` Flow
