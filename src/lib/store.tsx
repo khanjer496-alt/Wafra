@@ -1109,6 +1109,11 @@ function reduceState(state: AppState, action: Action): AppState {
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray': {
+      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string }>();
+      for (const update of action.sourceKeyUpdates ?? []) {
+        // Match the former find(): the first update for an ID wins.
+        if (!sourceKeyUpdates.has(update.id)) sourceKeyUpdates.set(update.id, update);
+      }
       const learned = action.learnedNotificationPackage &&
         /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
         ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
@@ -1118,7 +1123,7 @@ function reduceState(state: AppState, action: Action): AppState {
         reviewTray: action.reviewTray,
         trustedNotificationPackages: learned,
         ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
-          const update = action.sourceKeyUpdates!.find((candidate) => candidate.id === transaction.id);
+          const update = sourceKeyUpdates.get(transaction.id);
           return update ? { ...transaction, smsKey: update.smsKey } : transaction;
         }) } : {}),
         ...(action.localCaptureQualifications
