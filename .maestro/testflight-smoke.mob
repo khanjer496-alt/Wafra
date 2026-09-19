@@ -1,0 +1,4 @@
+# Intentionally tiny: catch native build/launch regressions before a signed archive.
+app "app.wafra.ios" fresh
+assert_exists "onboarding-welcome" timeout:240000
+screenshot
