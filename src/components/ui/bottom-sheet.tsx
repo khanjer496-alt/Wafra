@@ -24,7 +24,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -221,7 +221,10 @@ export function BottomSheet({
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [0, screenHeight], [1, 0], Extrapolation.CLAMP),
   }));
-  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom);
+  const windowBottomInset = Platform.OS === 'ios'
+    ? Math.min(insets.bottom, initialWindowMetrics?.insets.bottom ?? insets.bottom)
+    : insets.bottom;
+  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : windowBottomInset);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
 
   // Keep the dismissal lifecycle, but do not build hidden native sheet trees.

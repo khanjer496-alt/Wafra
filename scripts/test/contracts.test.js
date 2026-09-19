@@ -210,6 +210,12 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   );
   const jsPackages = read('src/lib/trusted-bank-notification-packages.ts');
   const scanner = code(read('src/lib/auto-import.ts'));
+  ok('a moneyRejected verdict records whether a currency word, a digit, and a text field were present',
+    service.includes('recordAdmission("moneyRejected"') &&
+      service.includes('private val MONEY_CURRENCY_WORD_RE') &&
+      service.includes('recordAdmission("mrCurrencyWord"') &&
+      service.includes('recordAdmission("mrDigit"') &&
+      service.includes('recordAdmission("mrNoTextField"'));
   ok('notification bodies are sealed with AndroidKeyStore AES-GCM before persistence',
     store.includes('AndroidKeyStore') && store.includes('AES/GCM/NoPadding') &&
       store.includes('.put("ct"') && !service.includes('getSharedPreferences('));
@@ -1082,6 +1088,26 @@ function ktSources(dir) {
     /function CaptureOwner/.test(tabsLayout) &&
       /useAutoImport\(true, false\)/.test(tabsLayout) &&
       /<CaptureOwner \/>/.test(tabsLayout));
+  const iosTabsLayout = read('src/components/app-tabs-layout.ios.tsx');
+  const tabClearance = read('src/hooks/use-tab-bar-clearance.ts');
+  ok('the iOS tabs shell also owns parser migrations',
+    /function CaptureOwner/.test(iosTabsLayout) &&
+      /useAutoImport\(true, false\)/.test(iosTabsLayout) &&
+      /<CaptureOwner \/>/.test(iosTabsLayout));
+  ok('the iOS tabs shell uses native tabs with the same four destinations',
+    /from 'expo-router\/unstable-native-tabs'/.test(iosTabsLayout) &&
+      ['index', 'flow', 'bills', 'wallet'].every((name) => iosTabsLayout.includes(`name: '${name}'`)));
+  ok('iOS native tabs leave content insets to ScreenScaffold',
+    /disableAutomaticContentInsets/.test(code(iosTabsLayout)));
+  ok('the iOS shell declares native chrome so clearance reads the inset, not the custom bar height',
+    /<TabBarMetricsProvider nativeChrome>/.test(iosTabsLayout) &&
+      /if \(nativeChrome\) \{[\s\S]*?return Math\.max\(insets\.bottom, NATIVE_TAB_BAR_FLOOR\) \+ Spacing\.three;/.test(code(tabClearance)));
+  ok('bottom sheets pad for the window inset, not the per-tab inset that includes the iOS tab bar',
+    /Math\.min\(insets\.bottom, initialWindowMetrics\?\.insets\.bottom \?\? insets\.bottom\)/.test(read('src/components/ui/bottom-sheet.tsx')));
+  ok('iOS native tab icons come from the shared SF Symbol vocabulary',
+    ['house', 'chart.bar.xaxis', 'doc.text', 'wallet.pass'].every((sf) => iosTabsLayout.includes(`'${sf}'`)));
+  ok('iOS uses the Icon Composer asset',
+    JSON.parse(read('app.json')).expo.ios.icon === './assets/wafra.icon');
   ok('Home observes status without registering a second foreground scan',
     /useAutoImport\(false, true\)/.test(home));
   ok('a hidden SMS access failure reaches Home unless bank notifications remain available',
