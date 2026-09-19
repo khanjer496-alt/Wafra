@@ -7,6 +7,18 @@ import { Spacing } from '@/constants/theme';
 export const TAB_BAR_HEIGHT = 58;
 
 /**
+ * Floor for the iOS system tab bar plus a home indicator (49pt + 34pt).
+ *
+ * Under native tabs the safe-area inset a tab screen receives already
+ * contains the bar: Expo Router mounts a `SafeAreaProvider` per tab, and a
+ * `UITabBarController` child's bottom safe area includes its tab bar. That
+ * inset is the source of truth. The floor exists so that if a future
+ * navigator stops reporting the bar, the last row is padded rather than
+ * hidden; it can only over-pad by the height of a home indicator.
+ */
+const NATIVE_TAB_BAR_FLOOR = 83;
+
+/**
  * Bottom padding a tab screen's scroll content needs so the floating tab bar
  * never covers the last row.
  *
@@ -16,7 +28,12 @@ export const TAB_BAR_HEIGHT = 58;
  */
 export function useTabBarClearance() {
   const insets = useSafeAreaInsets();
-  const { measuredHeight } = useTabBarMetrics();
+  const { measuredHeight, nativeChrome } = useTabBarMetrics();
+  if (nativeChrome) {
+    // Do not add TAB_BAR_HEIGHT here: the inset is the bar. Adding the custom
+    // bar's height on top produced a blank band above the system bar.
+    return Math.max(insets.bottom, NATIVE_TAB_BAR_FLOOR) + Spacing.three;
+  }
   const fallbackHeight = TAB_BAR_HEIGHT + Math.max(insets.bottom, Spacing.two);
   return (measuredHeight ?? fallbackHeight) + Spacing.three;
 }
