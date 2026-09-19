@@ -150,6 +150,14 @@ const validFixture = () => {
     });
     ok('store release rejects an iOS encryption flag that disagrees with the retained decision',
       report.findings.some(({ code }) => code === 'apple-export-compliance-config'));
+    write(root, 'docs/store-compliance/apple-export-compliance.json', {
+      schemaVersion: 1, status: 'approved', itsAppUsesNonExemptEncryption: false,
+    });
+    const exemptReport = await assessReleaseReadiness({
+      root, intent: { kind: 'store-release', platform: 'ios' },
+    });
+    ok('an approved exempt declaration is a valid false value, not a missing decision',
+      !exemptReport.findings.some(({ code }) => code.startsWith('apple-export-compliance')));
     fs.rmSync(root, { recursive: true, force: true });
   }
 
