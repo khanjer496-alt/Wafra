@@ -2,9 +2,11 @@
  * Billing contracts for Wafra Pro, surfaced through Superwall.
  *
  * Superwall rather than separate client checkout adapters: one entitlement
- * model and remote purchase surface cover both stores. Wafra has no account-linking system,
- * so anonymous purchases do not automatically transfer between an Android
- * install and a separate iPhone install.
+ * model and one product/purchase API cover both stores. The purchase SURFACE is
+ * Wafra's own `/pro` screen, which shows the prices the storefront returned and
+ * buys the selected product. Wafra has no account-linking system, so anonymous
+ * purchases do not automatically transfer between an Android install and a
+ * separate iPhone install.
  *
  * The three moving parts, and which of them is the truth:
  *
@@ -29,7 +31,7 @@
  *   2. Superwall → Apps/Products → connect both storefront apps/products.
  *   3. Superwall → Entitlements → attach both products to `pro`.
  *   4. Put the public Superwall keys in the EAS production environment.
- * Until step 4, the native fallback explains that purchases are unavailable.
+ * Until step 4, `/pro` explains that purchases are unavailable in this build.
  */
 import { Platform } from 'react-native';
 
@@ -42,6 +44,45 @@ export const PRO_SKUS = {
 } as const;
 
 export type ProPlan = keyof typeof PRO_SKUS;
+
+/**
+ * One plan as the device's own storefront describes it. `priceString` is the
+ * localized price the store returned; Wafra never composes a price itself.
+ */
+export interface ProPlanOffer {
+  plan: ProPlan;
+  productId: string;
+  priceString: string;
+}
+
+/** The subset of a store product Wafra reads. */
+export interface StoreProductLike {
+  productIdentifier: string;
+  localizedPrice: string;
+}
+
+/**
+ * Match what the store returned to Wafra's two plans.
+ *
+ * Play returns a subscription as `<product id>` on some accounts and
+ * `<product id>:<base plan id>` on others, and either is the same plan. The
+ * identifier is compared on its first segment for that reason, and a product
+ * without a localized price is dropped rather than shown priceless — a plan
+ * button with no price is exactly the invented-price failure this avoids.
+ */
+export function proOffersFromProducts(products: readonly StoreProductLike[]): ProPlanOffer[] {
+  const offers: ProPlanOffer[] = [];
+  for (const [plan, sku] of Object.entries(PRO_SKUS) as [ProPlan, string][]) {
+    const match = products.find((product) => {
+      const identifier = product.productIdentifier?.trim() ?? '';
+      return identifier === sku || identifier.split(':')[0] === sku;
+    });
+    const priceString = match?.localizedPrice?.trim() ?? '';
+    if (!match || !priceString) continue;
+    offers.push({ plan, productId: match.productIdentifier, priceString });
+  }
+  return offers;
+}
 
 /**
  * USD reference prices used only by web previews and web screenshots. Native

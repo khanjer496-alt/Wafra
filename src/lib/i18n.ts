@@ -2203,6 +2203,13 @@ const S = {
     en: 'Your purchase has not been checked yet. Check your connection and try again.',
     ar: 'لم يتم التحقق من عملية الشراء بعد. تحقق من الاتصال وحاول مرة أخرى.',
   },
+  // Ask to Buy, or a Play payment the bank has not settled. Nothing is owed
+  // yet and nothing failed: the store decides later, on its own.
+  purchasePendingTitle: { en: 'Waiting on the store', ar: 'بانتظار المتجر' },
+  purchasePendingBody: {
+    en: 'The store has not completed this purchase yet. Wafra Pro switches on by itself once it does.',
+    ar: 'لم يُكمل المتجر عملية الشراء بعد. سيُفعَّل وفرة برو تلقائياً بمجرد اكتمالها.',
+  },
   purchaseFailed: { en: 'Purchase not confirmed', ar: 'لم يتم تأكيد الشراء' },
   purchaseFailedBody: {
     en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',

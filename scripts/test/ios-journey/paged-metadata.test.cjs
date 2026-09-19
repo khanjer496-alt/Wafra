@@ -4,10 +4,10 @@ const path = require('node:path'); const { pathToFileURL } = require('node:url')
 const load = () => import(pathToFileURL(path.resolve(__dirname, '../../check-ios-paging-metadata.mjs')));
 function fixture() {
   const primitive = id => ({ primitive: { wrapper: { typeIdentifier: id } } });
-  const action = (policy, params) => ({ authenticationPolicy: policy, isAuthPolExplicit: true,
+  const action = (policy, params, output = 0) => ({ authenticationPolicy: policy, isAuthPolExplicit: true,
     supportedModes: 1, openAppWhenRun: false,
     availabilityAnnotations: { LNPlatformNameIOS: { introducedVersion: '26.0' } },
-    outputType: primitive(0), parameters: Object.entries(params).map(([name, type]) => ({ name, isOptional: false, valueType: primitive(type) })) });
+    outputType: primitive(output), parameters: Object.entries(params).map(([name, type]) => ({ name, isOptional: false, valueType: primitive(type) })) });
   return { actions: {
     BeginWafraPagedImportIntent: action(2, { oldestGUID: 0, oldestDate: 0, newestGUID: 0, newestDate: 0 }),
     StageWafraPagedImportIntent: action(0, { request: 0, found: 2, frame: 0 }),
@@ -15,6 +15,7 @@ function fixture() {
     BeginWafraPagedImportV2Intent: action(2, { oldestGUID: 0, oldestDate: 8, newestGUID: 0, newestDate: 8 }),
     StageWafraPagedRowIntent: action(0, { request: 0, guid: 0, body: 0, sender: 0, date: 8 }),
     CommitWafraPagedPageIntent: action(0, { request: 0, found: 2 }),
+    WafraPagedWindowStartDateIntent: action(0, { request: 0 }, 8),
   } };
 }
 test('built metadata verifier demands both paged receiver contracts and fails weakened/missing bindings', async () => {
@@ -31,7 +32,8 @@ test('built metadata verifier demands both paged receiver contracts and fails we
     m => { m.actions.BeginWafraPagedImportV2Intent.parameters[1].valueType.primitive.wrapper.typeIdentifier = 0; },
     m => { m.actions.StageWafraPagedRowIntent.parameters[4].valueType.primitive.wrapper.typeIdentifier = 0; },
     m => { m.actions.StageWafraPagedRowIntent.authenticationPolicy = 2; },
-    m => { delete m.actions.CommitWafraPagedPageIntent; }]) {
+    m => { delete m.actions.CommitWafraPagedPageIntent; },
+    m => { m.actions.WafraPagedWindowStartDateIntent.outputType.primitive.wrapper.typeIdentifier = 0; }]) {
     const data = fixture(); mutate(data); assert.throws(() => verifyPagedIntentMetadata(data));
   }
 });

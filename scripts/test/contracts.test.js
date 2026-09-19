@@ -402,16 +402,22 @@ function ktSources(dir) {
       /backup\/restore remain free/.test(listingCopy) &&
       /backup\/restore keep working without Pro/.test(releaseGuide));
 
-  ok('the native Pro screen delegates storefront pricing and checkout to Superwall',
-    /presentProPaywall/.test(pro) &&
+  ok('the native Pro screen owns checkout and never presents the remote paywall',
+    /billing\.purchasePro\(/.test(pro) &&
+      /fetchProOffers\(\)/.test(pro) &&
       /useWafraBilling/.test(pro) &&
       /subscriptionManagementUrl/.test(pro) &&
+      !/presentProPaywall/.test(pro) &&
       !/loadStorePrices|PRO_REFERENCE_PRICE_STRINGS|PRO_PRICES/.test(pro));
-  ok('the native fallback never invents a local price or local checkout catalog',
-    !/priceStatus|setPriceRequest|storePrices|priceString/.test(pro));
+  ok('every price on the native screen is the string the storefront returned',
+    /offer\.priceString/.test(pro) &&
+      /t\('priceUnavailable'\)/.test(pro) &&
+      !/PRO_PRICES|formatAED|\bfils\b/.test(pro) &&
+      /localizedPrice/.test(read('src/lib/purchases.ts')) &&
+      !/localizedPrice\s*\?\?\s*['"`]/.test(read('src/lib/purchases.ts')));
   ok('an unconfigured Superwall build explains itself instead of disabling both actions',
-    /if \(!billing\.available \|\| !billing\.configured\)/.test(pro) &&
-      !/disabled=\{billingAction !== null \|\| !billing\.available \|\| !billing\.configured\}/.test(pro));
+    /const checkoutReady = billing\.available && billing\.configured/.test(pro) &&
+      !/disabled=\{billingAction !== null \|\| !checkoutReady\}/.test(pro));
   ok('the purchase contract keeps store subscription management reachable',
     /manageSubscription/.test(pro) && /subscriptionManagementUrl/.test(pro));
 
@@ -1969,8 +1975,17 @@ ok('the spoken label agrees with the sign on screen',
   ok('the paywall tells an unreachable-store restore apart from no purchase found',
     /restored === null/.test(code(pro)) && /restoreFailed/.test(pro) &&
       /!restored/.test(code(pro)) && /noPurchaseFound/.test(pro));
-  ok('the purchase UI is a Superwall placement rather than a local checkout',
-    /presentProPaywall/.test(pro) && !/purchasePackage|purchasePro/.test(pro));
+  ok('the purchase UI is Wafra\'s own screen driving the storefront checkout',
+    /billing\.purchasePro\(/.test(code(pro)) && !/presentProPaywall/.test(pro));
+  ok('a completed transaction is not Pro until the entitlement confirms it',
+    /verifyProEntitlement/.test(provider) &&
+      /'unconfirmed'/.test(provider) &&
+      /outcome === 'purchased'/.test(code(pro)) &&
+      /t\('purchaseFailed'\)/.test(pro));
+  ok('a cancelled purchase and a deferred one are not reported as failures',
+    /outcome === 'cancelled'\) return;/.test(code(pro)) &&
+      /purchasePendingTitle/.test(pro) &&
+      /result\.type === 'pending'\) return 'pending'/.test(code(provider)));
   ok('an unconfirmed entitlement never guarantees that the store charged nothing',
     !/Nothing has been charged/.test(strings) && !/لم يتم خصم أي مبلغ/.test(strings));
   ok('the paywall exposes one live announcement path instead of announcing twice',

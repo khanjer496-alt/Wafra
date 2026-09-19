@@ -10,6 +10,8 @@ export function verifyPagedIntentMetadata(metadata) {
     BeginWafraPagedImportV2Intent: { policy: 2, params: { oldestGUID: 0, oldestDate: 8, newestGUID: 0, newestDate: 8 } },
     StageWafraPagedRowIntent: { policy: 0, params: { request: 0, guid: 0, body: 0, sender: 0, date: 8 } },
     CommitWafraPagedPageIntent: { policy: 0, params: { request: 0, found: 2 } },
+    // Windowed queries (v6): the lower bound is a typed Date read from the request.
+    WafraPagedWindowStartDateIntent: { policy: 0, params: { request: 0 }, output: 8 },
   };
   for (const [name, spec] of Object.entries(specs)) {
     const action = metadata?.actions?.[name]; assert.ok(action, 'Missing '+name);
@@ -18,7 +20,7 @@ export function verifyPagedIntentMetadata(metadata) {
     assert.equal(action.supportedModes, 1, name);
     assert.equal(action.openAppWhenRun, false, name);
     assert.equal(action.availabilityAnnotations?.LNPlatformNameIOS?.introducedVersion, '26.0', name);
-    assert.equal(action.outputType?.primitive?.wrapper?.typeIdentifier, 0, name);
+    assert.equal(action.outputType?.primitive?.wrapper?.typeIdentifier, spec.output ?? 0, name);
     assert.deepEqual(Object.fromEntries(action.parameters.map(param => [param.name, param.valueType?.primitive?.wrapper?.typeIdentifier])), spec.params, name);
     assert.ok(action.parameters.every(param => param.isOptional === false), name);
   }

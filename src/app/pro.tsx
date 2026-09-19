@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import { useWafraBilling } from '@/components/superwall-billing-context';
+import { useWafraBilling, type ProPlanOffer } from '@/components/superwall-billing-context';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -15,7 +15,7 @@ import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t, tf } from '@/lib/i18n';
-import { autoCaptureMethod, trialDaysLeft } from '@/lib/purchases';
+import { autoCaptureMethod, billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { subscriptionManagementUrl } from '@/lib/billing';
 import { useStore } from '@/lib/store';
@@ -26,7 +26,11 @@ type FeatureRow = {
   textKey: Parameters<typeof t>[0];
 };
 
-type BillingAction = 'paywall' | 'restore' | 'manage' | null;
+type BillingAction = 'purchase' | 'restore' | 'manage' | null;
+type OfferState = 'loading' | 'ready' | 'unavailable';
+
+/** Yearly first: it is the plan the screen recommends when the store has both. */
+const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 
 function features(): FeatureRow[] {
   return [
@@ -41,9 +45,14 @@ function features(): FeatureRow[] {
 }
 
 /**
- * Superwall owns the canonical remote purchase UI. This native screen remains a
- * resilient, localized shell for active status, restore/manage, legal links and
- * the case where a remote campaign is missing or cannot load.
+ * Wafra's own Pro screen owns the subscription purchase.
+ *
+ * Superwall stays the storefront seam — it supplies the localized product
+ * prices, runs the platform checkout sheet, restores purchases and answers for
+ * the `pro` entitlement — but the surface a customer reads and taps is this
+ * native, localized screen rather than a remote paywall. Every price on it is
+ * the string the device's own store returned; a plan the store does not return
+ * is shown as unavailable instead of being advertised at a guessed figure.
  */
 export default function ProScreen() {
   const words = workflowCopy(useLanguage());
@@ -52,65 +61,96 @@ export default function ProScreen() {
   const { state } = useStore();
   const billing = useWafraBilling();
   const [billingAction, setBillingAction] = useState<BillingAction>(null);
+  const [offers, setOffers] = useState<ProPlanOffer[]>([]);
+  const [offerState, setOfferState] = useState<OfferState>('loading');
+  const [selectedPlan, setSelectedPlan] = useState<ProPlan>('yearly');
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
-  const openedAutomatically = useRef(false);
+  const offerRequest = useRef(0);
   const trial = trialDaysLeft(state);
   const entitled = state.pro || state.founderPro;
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
   const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
+  const store = billingStore();
+  const checkoutReady = billing.available && billing.configured;
   const proHeader: ScreenHeaderProps = {
     title: t('wafraPro'),
     back: { label: t('back'), onPress: () => router.back() },
   };
 
-  const openPaywall = useCallback(async (source: string) => {
+  // Read through a ref so a new billing snapshot (a status refresh, a customer
+  // info event) cannot restart a price fetch that is already in flight.
+  const billingRef = useRef(billing);
+  billingRef.current = billing;
+
+  const loadOffers = useCallback(async () => {
+    if (entitled || !checkoutReady) {
+      setOfferState('unavailable');
+      return;
+    }
+    const request = ++offerRequest.current;
+    setOfferState('loading');
+    const loaded = await billingRef.current.fetchProOffers();
+    if (request !== offerRequest.current) return;
+    setOffers(loaded);
+    setOfferState(loaded.length > 0 ? 'ready' : 'unavailable');
+    setSelectedPlan((current) =>
+      loaded.some((offer) => offer.plan === current) ? current : loaded[0]?.plan ?? current);
+  }, [checkoutReady, entitled]);
+
+  useEffect(() => {
+    void loadOffers();
+    return () => { offerRequest.current += 1; };
+  }, [loadOffers]);
+
+  const selectedOffer = offers.find((offer) => offer.plan === selectedPlan) ?? null;
+
+  /**
+   * The one action that can charge money. It refuses before the store is asked
+   * when the required legal links or the storefront itself are missing, and it
+   * reports the store's answer literally: a cancellation is not a failure, a
+   * deferred approval is not a purchase, and a completed transaction that the
+   * `pro` entitlement has not confirmed says so rather than claiming Pro.
+   */
+  const buySelectedPlan = useCallback(async () => {
     setNotice(null);
     if (!legalReady) {
       setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') });
       return;
     }
-    if (!billing.available || !billing.configured) {
+    if (!checkoutReady) {
       setNotice({
         title: t('purchaseUnavailable'),
         body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody'),
       });
       return;
     }
-    setBillingAction('paywall');
-    try {
-      await billing.presentProPaywall({ source });
-    } catch {
-      setNotice({ title: t('purchaseUnavailable'), body: t('purchaseFailedBody') });
-    } finally {
-      setBillingAction(null);
+    if (!selectedOffer) {
+      setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
+      return;
     }
-  }, [billing, legalReady]);
-
-  useEffect(() => {
-    if (
-      entitled ||
-      openedAutomatically.current ||
-      !legalReady ||
-      !billing.available ||
-      !billing.configured
-    ) return;
-    openedAutomatically.current = true;
-    void openPaywall('pro_screen_open');
-  }, [billing.available, billing.configured, entitled, legalReady, openPaywall]);
-
-  // A dashboard campaign can be absent/skipped even while the SDK itself is
-  // configured. Never leave /pro looking like a tap that did nothing.
-  useEffect(() => {
-    if (!openedAutomatically.current || entitled) return;
-    if (billing.paywallStatus === 'error' || billing.paywallStatus === 'skipped') {
-      setNotice({ title: t('purchaseUnavailable'), body: t('purchaseFailedBody') });
+    setBillingAction('purchase');
+    const outcome = await billing.purchasePro(selectedOffer.productId);
+    setBillingAction(null);
+    if (outcome === 'cancelled') return;
+    if (outcome === 'purchased') {
+      setNotice({ title: t('proPurchaseSuccessTitle'), body: t('proPurchaseSuccessBody') });
+      return;
     }
-  }, [billing.paywallStatus, entitled]);
+    if (outcome === 'pending') {
+      setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') });
+      return;
+    }
+    if (outcome === 'unavailable') {
+      setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') });
+      return;
+    }
+    setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
+  }, [billing, checkoutReady, legalReady, selectedOffer]);
 
   const restore = async () => {
     setNotice(null);
-    if (!billing.available || !billing.configured) {
+    if (!checkoutReady) {
       setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
       return;
     }
@@ -181,6 +221,40 @@ export default function ProScreen() {
     );
   };
 
+  const planRow = (offer: ProPlanOffer) => {
+    const selected = offer.plan === selectedPlan;
+    const label = offer.plan === 'yearly' ? t('yearly') : t('monthly');
+    const period = offer.plan === 'yearly' ? t('perYear') : t('perMonth');
+    return (
+      <Pressable
+        key={offer.productId}
+        accessibilityRole="radio"
+        accessibilityState={{ selected }}
+        accessibilityLabel={`${label} · ${offer.priceString}`}
+        onPress={() => setSelectedPlan(offer.plan)}
+        style={[
+          styles.planRow,
+          {
+            borderColor: selected ? theme.primary : theme.cardBorder,
+            backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
+          },
+        ]}>
+        <View style={styles.featureText}>
+          <ThemedText type="smallBold">{label}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">{period}</ThemedText>
+        </View>
+        <ThemedText type="smallBold">{offer.priceString}</ThemedText>
+        <View
+          style={[
+            styles.planMark,
+            { borderColor: selected ? theme.primary : theme.cardBorder },
+          ]}>
+          {selected && <Icon name="check" size={13} color={theme.primary} />}
+        </View>
+      </Pressable>
+    );
+  };
+
   return (
     <ScreenScaffold
       headerMode="native"
@@ -229,7 +303,66 @@ export default function ProScreen() {
         ))}
       </Section>
 
-      <Section index={2}>
+      {!entitled && (
+        <Section index={2} style={styles.plans}>
+          <ThemedText type="meta" themeColor="textTertiary">{t('proChoosePlan')}</ThemedText>
+          {offerState === 'loading' ? (
+            <ThemedText type="small" themeColor="textSecondary">{t('priceLoading')}</ThemedText>
+          ) : offerState === 'ready' ? (
+            <>
+              {PLAN_ORDER
+                .map((plan) => offers.find((offer) => offer.plan === plan))
+                .filter((offer): offer is ProPlanOffer => offer != null)
+                .map(planRow)}
+              {selectedOffer && (
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {tf(
+                    selectedPlan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth',
+                    { price: selectedOffer.priceString },
+                  )}
+                </ThemedText>
+              )}
+              <ThemedText type="meta" themeColor="textTertiary">
+                {store === 'appStore'
+                  ? t('subscriptionRenewalTermsIos')
+                  : store === 'play'
+                    ? t('subscriptionRenewalTermsAndroid')
+                    : t('proStoreConfirmsPrice')}
+              </ThemedText>
+            </>
+          ) : (
+            <View
+              style={[
+                styles.freeNote,
+                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              ]}>
+              <View style={styles.featureIcon}>
+                <Icon name="alert" size={19} color={theme.warning} />
+              </View>
+              <View style={styles.featureText}>
+                <ThemedText type="small">
+                  {checkoutReady ? t('priceUnavailable') : t('playOnlyTitle')}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+                </ThemedText>
+                {checkoutReady && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadOffers()}
+                    hitSlop={8}>
+                    <ThemedText type="micro" style={{ color: theme.primary }}>
+                      {t('retryPrices')}
+                    </ThemedText>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          )}
+        </Section>
+      )}
+
+      <Section index={3}>
         <View
           style={[
             styles.freeNote,
@@ -274,9 +407,16 @@ export default function ProScreen() {
         ) : (
           <>
             <Button
-              label={billingAction === 'paywall' ? t('purchaseInProgress') : t('getPro')}
+              label={billingAction === 'purchase'
+                ? t('purchaseInProgress')
+                : selectedOffer
+                  ? tf('startPlanWithPrice', {
+                      plan: selectedPlan === 'yearly' ? t('yearly') : t('monthly'),
+                      price: selectedOffer.priceString,
+                    })
+                  : t('getPro')}
               disabled={billingAction !== null}
-              onPress={() => void openPaywall('pro_screen_cta')}
+              onPress={() => void buySelectedPlan()}
             />
             <Button
               variant="ghost"
@@ -309,6 +449,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   featureText: { flex: 1, gap: 3 },
+  plans: { gap: Spacing.two },
+  planMark: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planRow: {
+    minHeight: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
   statusPill: {
     minHeight: 32,
     flexDirection: 'row',

@@ -102,6 +102,7 @@ function createWorkflowHarness(options={}) {
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({
     available:false,configured:false,configurationError:null,paywallStatus:'idle',
+    fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',
     presentProPaywall:async()=>{},restorePro:async()=>null,
    })};
    store.setPro=record('setPro');
