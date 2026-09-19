@@ -26,6 +26,14 @@ for (const profile of ['history-beta', 'production', 'ios-parity-device']) {
 if (historyBeta.EXPO_PUBLIC_WAFRA_SHORTCUT_URL !== expectedLive) {
   throw new Error('history-beta must keep the current Wafra Capture v2 Shortcut');
 }
+const production = eas.build?.production?.env ?? {};
+if (production.EXPO_PUBLIC_WAFRA_SHORTCUT_URL !== expectedLive ||
+    production.EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION !== '1') {
+  throw new Error('production must install the verified Capture v2 graph with its matching setup-check branch');
+}
+if (eas.build?.['production-candidate']?.extends !== 'production') {
+  throw new Error('production-candidate must inherit the same published Shortcut configuration');
+}
 const historySetup = readFileSync(path.join(__dirname, '../../src/lib/ios-history-setup.ts'), 'utf8');
 if (!historySetup.includes('IOS_HISTORY_V4_URL') || !historySetup.includes(expectedHistory)) {
   throw new Error('the app must explicitly whitelist the exact signed v4 release asset');
@@ -35,4 +43,4 @@ if (!pagedSetup.includes(expectedHistory) || !pagedSetup.includes("'Wafra-Histor
   throw new Error('the paged module must run the name Apple installs for the v4 asset');
 }
 
-console.log('ios-shortcuts-config.test.js: 5 passed');
+console.log('ios-shortcuts-config.test.js: 7 passed');

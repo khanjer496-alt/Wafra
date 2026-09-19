@@ -5,6 +5,32 @@ import {
 } from '@/lib/sms-parser';
 import type { Transaction, TxHealUpdate } from '@/lib/types';
 import { isCompletedCashbackCredit } from '@/lib/bank-alert-semantic-rules';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+
+/** Recheck source-owned facts at application time; a date alone is not proof. */
+export function canApplySourceDateCorrection(
+  tx: Transaction,
+  proof: TxHealUpdate['sourceDateCorrection'],
+): boolean {
+  if (!proof || tx.source !== 'sms' || tx.userEdited || tx.transferDecision ||
+      tx.type !== 'income' || tx.isTransfer !== true || tx.cardPaymentSide !== 'receipt' ||
+      !proof.accountId || tx.accountId !== proof.accountId || !proof.instrument || !tx.captureInstrument ||
+      proof.instrument.last4 !== tx.captureInstrument.last4 || proof.instrument.kind !== tx.captureInstrument.kind ||
+      proof.instrument.bankIdentity !== tx.captureInstrument.bankIdentity ||
+      !/^h[a-f0-9]{64}$/.test(proof.sourceKey) || !tx.smsKey ||
+      canonicalCaptureSourceKey(tx.smsKey, tx.ts) !== proof.sourceKey ||
+      !Number.isSafeInteger(proof.observedAt) || proof.observedAt < 0 ||
+      !Number.isFinite(new Date(proof.observedAt).getTime()) || tx.ts !== proof.observedAt ||
+      !Number.isSafeInteger(proof.amountFils) || proof.amountFils <= 0 || tx.amountFils !== proof.amountFils ||
+      tx.date !== proof.from || proof.from === proof.to) return false;
+  const valid = (value: string): boolean => {
+    if (!/^20\d{2}-\d{2}-\d{2}$/.test(value)) return false;
+    const time = Date.parse(`${value}T00:00:00Z`);
+    return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+  };
+  return valid(proof.from) && valid(proof.to) &&
+    proof.to === `${proof.from.slice(0, 4)}-${proof.from.slice(8, 10)}-${proof.from.slice(5, 7)}`;
+}
 
 /**
  * What a rescan should change about a row it has already imported.
@@ -236,6 +262,13 @@ export function healPatch(
  * `remove` is not handled here; a caller drops those rows before applying.
  */
 export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transaction {
+  // This evidence class admits exactly one field. Never smuggle unrelated
+  // account, ownership, source identity or classification edits with it.
+  if (patch.sourceDateCorrection) {
+    return patch.id === tx.id && canApplySourceDateCorrection(tx, patch.sourceDateCorrection)
+      ? { ...tx, date: patch.sourceDateCorrection.to }
+      : tx;
+  }
   // Planning and applying are separated by inbox/relay I/O. A user can edit
   // the row in that gap, so the apply boundary must enforce the pin again
   // even when the patch was valid for the older snapshot.
@@ -302,11 +335,26 @@ export function applyHealUpdates(
 ): Transaction[] {
   if (updates.length === 0) return transactions;
   const patches = new Map(updates.map((update) => [update.id, update]));
+  const correctedSources = new Map<string, number>();
+  for (const update of updates) {
+    if (update.sourceDateCorrection) correctedSources.set(update.sourceDateCorrection.sourceKey, 0);
+  }
+  if (correctedSources.size) {
+    // A source collision introduced after planning invalidates its uniqueness.
+    for (const tx of transactions) {
+      const key = tx.smsKey ? canonicalCaptureSourceKey(tx.smsKey, tx.ts) : '';
+      if (correctedSources.has(key)) correctedSources.set(key, correctedSources.get(key)! + 1);
+    }
+  }
   const next: Transaction[] = [];
   let changed = false;
   for (const transaction of transactions) {
     const patch = patches.get(transaction.id);
-    if (patch?.remove && !transaction.userEdited && !transaction.transferDecision) {
+    if (patch?.sourceDateCorrection && correctedSources.get(patch.sourceDateCorrection.sourceKey) !== 1) {
+      next.push(transaction);
+      continue;
+    }
+    if (patch?.remove && !patch.sourceDateCorrection && !transaction.userEdited && !transaction.transferDecision) {
       changed = true;
       continue;
     }

@@ -59,6 +59,7 @@ import { Fonts, EASE, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import {
   buildImportPlan,
   isSmsScanningAvailable,
@@ -244,7 +245,6 @@ function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
 }
 
 export default function ImportSmsScreen() {
-  const theme = useTheme();
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
   const reducedMotion = useReducedMotion();
@@ -259,6 +259,20 @@ export default function ImportSmsScreen() {
   const usePagedHistory = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26 &&
     pagedHistoryEnabled();
   const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
+
+  const [restoredOnboarding, setRestoredOnboarding] = useState(false);
+  const onboardingPresentation = Platform.OS === 'ios' &&
+    (restoredOnboarding || (state.hydrated === true && state.onboarded === false));
+  const theme = useTheme(onboardingPresentation ? 'dark' : undefined);
+  useEffect(() => {
+    let current = true;
+    if (Platform.OS === 'ios') {
+      void loadIosMessageSetupProgress().then(progress => {
+        if (current) setRestoredOnboarding(progress.returnToOnboarding);
+      }).catch(() => { /* The durable store still supplies first-run scope. */ });
+    }
+    return () => { current = false; };
+  }, [history]);
 
   const [text, setText] = useState('');
   const pasteRunning = useRef(false);
@@ -1213,7 +1227,8 @@ export default function ImportSmsScreen() {
   };
 
   return (
-    <ThemedView style={styles.root}>
+    <SetupShell onboarding={onboardingPresentation}>
+    <ThemedView style={[styles.root, onboardingPresentation && { backgroundColor: 'transparent' }]}>
       <Stack.Screen options={{ gestureEnabled: !validIosHistorySessionId(history) }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
@@ -1222,7 +1237,9 @@ export default function ImportSmsScreen() {
               "Read my inbox" named something the screen cannot do there. This
               key is deliberately platform-neutral rather than branched on
               Platform.OS — it is true on both, and it has an Arabic value. */}
-          <ScreenHeader title={t('importBankActivity')} onBack={requestLeaveScreen} />
+          {onboardingPresentation ? <SetupHeader onboarding title={t('importBankActivity')}
+            back={{ label: t('back'), onPress: requestLeaveScreen }} />
+            : <ScreenHeader title={t('importBankActivity')} onBack={requestLeaveScreen} />}
         </View>
 
         <ScrollView
@@ -1826,6 +1843,7 @@ export default function ImportSmsScreen() {
         />
       </SafeAreaView>
     </ThemedView>
+    </SetupShell>
   );
 }
 

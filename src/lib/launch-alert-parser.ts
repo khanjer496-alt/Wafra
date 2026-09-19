@@ -168,6 +168,7 @@ export interface LaunchAlertSession {
     sender: string,
     inspection?: UniversalAlertReview | null,
     forcedMarket?: string,
+    observedAt?: number,
   ): ParsedSms | null;
   detectedMarket(): 'AE' | 'SA' | null;
 }
@@ -225,6 +226,7 @@ export const createLaunchAlertSession = ({
     sender: string,
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
+    observedAt?: number,
   ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null => {
     if (pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR') return null;
     // Most phone inbox rows are ordinary conversations, OTP-free service
@@ -262,6 +264,7 @@ export const createLaunchAlertSession = ({
       sender,
       market: desired,
       overrides,
+      observedAt,
     });
     const result = interpretation.outcome === 'parsed' ? interpretation : null;
     if (result && routed) {
@@ -276,8 +279,9 @@ export const createLaunchAlertSession = ({
     sender: string,
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
+    observedAt?: number,
   ): ParsedSms | null => {
-    const local = parseRegionalEvidence(source, sender, inspection, forcedMarket)?.parsed ?? null;
+    const local = parseRegionalEvidence(source, sender, inspection, forcedMarket, observedAt)?.parsed ?? null;
     if (local) return local;
     // The worldwide parser is intentionally broader and therefore more
     // expensive. Ordinary conversations, delivery updates and generic service

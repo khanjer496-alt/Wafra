@@ -3,15 +3,19 @@
  * https://docs.expo.dev/guides/color-schemes/
  */
 
-import { useMemo } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useIncreasedContrast } from '@/hooks/use-increased-contrast';
 
-export function useTheme() {
+// Presentation-only scope: never changes the saved theme preference.
+export const ThemeScope = createContext<'light' | 'dark' | undefined>(undefined);
+
+export function useTheme(override?: 'light' | 'dark') {
+  const scope = useContext(ThemeScope);
   const scheme = useColorScheme();
-  const theme = scheme === 'unspecified' ? 'light' : scheme;
+  const theme = override ?? scope ?? (scheme === 'unspecified' ? 'light' : scheme);
   const increasedContrast = useIncreasedContrast();
   const palette = Colors[theme];
 

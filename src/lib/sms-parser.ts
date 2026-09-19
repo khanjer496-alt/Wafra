@@ -5,6 +5,7 @@ import {
   getActiveMarket,
   globalCategoryKeywords,
   keywordsForMarket,
+  MARKETS,
 } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
@@ -377,8 +378,14 @@ export interface ParsedCard {
  * as ordinary transactions. This corrects future captures only; the audited
  * saved refunds already retain their foreign fields, so no full history
  * reread is requested and PARSER_BACKFILL_VERSION remains unchanged.
+ *
+ * 51: read the known ADIB subject-first card receipt's numeric date as MM/DD
+ * only with ADIB sender evidence or its original UAE received day corroborating
+ * that date. Expose the previous interpretation for exact-source repair during
+ * re-import; retain generic DD/MM and all obligation deadlines. No automatic
+ * Android history reread is requested; PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 50;
+export const PARSER_VERSION = 51;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -414,6 +421,8 @@ export interface ParsedSms {
   merchant: string;
   /** ISO date if the message contained one, otherwise null (caller defaults to today). */
   date: string | null;
+  /** Prior date from this exact receipt template, only when source context proves a correction. */
+  dateRepairFrom?: string;
   /** For billDue/cardStatement: the day of month it's due, when present. */
   dueDay: number | null;
   /** For cardStatement: minimum amount due, when present. */
@@ -575,6 +584,8 @@ export interface ParseOptions {
    * disambiguate — never to decide that a message is or is not a transaction.
    */
   sender?: string;
+  /** Original source received timestamp in milliseconds, never the import time. */
+  observedAt?: number;
 }
 
 /**
@@ -1577,6 +1588,7 @@ let BARE_BALANCE_RE = /x^/;
 let SNAPSHOT_RE = /x^/;
 let PLAIN_BALANCE_RE = /x^/;
 let CARD_PAYMENT_RE = /x^/;
+let CARD_RECEIPT_DATE_RE = /x^/;
 let DEBIT_WORDS = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
@@ -1857,6 +1869,10 @@ function ensureCurrencyPatterns(): void {
       // dedupe.ts's settlement pairing had one of its two legs permanently
       // invisible.
       `|towards?\\s+(?:the\\s+)?(?:payment|settlement|repayment)\\s+of\\s+(?:your\\s+)?${CARD_GAP}`, 'i');
+  // The exact subject-first receipt alternative above, with its own date
+  // captured. No other card-payment wording inherits this bank's date order.
+  CARD_RECEIPT_DATE_RE = new RegExp(
+    `\\b(?:your\\s+)?payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+on\\s+(\\d{1,2})[/-](\\d{1,2})[/-](\\d{2}|\\d{4})\\s+for\\s+(?:your\\s+)?${CARD_GAP}\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•-]{0,20}\\s+(?:has\\s+been|was|is)\\s+credited\\b`, 'i');
   // "Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit
   // Card ending with 4110." The payee sits BEFORE the amount with none of the
   // prepositions MERCHANT_RE looks for, so every message in this format
@@ -4592,6 +4608,38 @@ function numericDate(d: string, m: string, yRaw: string): string | null {
   return isoDate(y, second, first) ?? isoDate(y, first, second);
 }
 
+/** The ADIB receipt template is MM/DD; unknown senders need original-day proof. */
+function sourceBackedReceiptDate(
+  raw: string,
+  previous: string | null,
+  options?: ParseOptions,
+): { date: string; dateRepairFrom: string } | null {
+  if (!previous || getActiveMarket().id !== 'AE') return null;
+  const match = raw.match(CARD_RECEIPT_DATE_RE);
+  if (!match || numericDate(match[1], match[2], match[3]) !== previous) return null;
+  const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+  const date = isoDate(year, Number(match[1]), Number(match[2]));
+  if (!date || date === previous) return null;
+  const bank = bankFromSender(options?.sender);
+  // bankFromSender sees only the active pack and returns its first match.
+  // Reject every competing known issuer, including cross-market and mixed
+  // identities such as "ADIB SNB", before trusting ADIB or received-day proof.
+  const sender = options?.sender?.trim() ?? '';
+  if (sender && MARKETS.some((market) => market.banks.some(
+    (candidate) => candidate.name !== 'ADIB' && candidate.re.test(sender),
+  ))) return null;
+  if (bank && bank.name !== 'ADIB') return null;
+  if (!bank) {
+    const observedAt = options?.observedAt;
+    if (typeof observedAt !== 'number' || !Number.isFinite(observedAt)) return null;
+    // UAE has a fixed UTC+4 offset. Never infer order from device timezone or
+    // Date.now(): re-import may happen years after the message was received.
+    const received = new Date(observedAt + 4 * 60 * 60 * 1000);
+    if (!Number.isFinite(received.getTime()) || received.toISOString().slice(0, 10) !== date) return null;
+  }
+  return { date, dateRepairFrom: previous };
+}
+
 function extractDate(raw: string): string | null {
   // Each format falls through to the next: a numeric date that matched but
   // could not be resolved must not stop the named-month form from being read.
@@ -4644,10 +4692,10 @@ function extractDate(raw: string): string | null {
  * Parses a single bank-alert SMS. Returns null for non-transaction messages.
  *
  * `options.sender` is the SMS sender ID or notification package the message
- * arrived under. It is entirely optional and purely additive: with no sender,
- * or with one no market pack recognises, every message takes exactly the path
- * it took before senders existed. It is never allowed to decide WHETHER a
- * message is a transaction — only to disambiguate one that already is.
+ * arrived under. With no sender or received-time context, messages retain the
+ * default interpretation. Context may disambiguate a proven transaction's
+ * fields; it never decides WHETHER a message is a transaction. `observedAt`
+ * must be the source's original received timestamp, not when it was imported.
  */
 function parseSmsInner(
   message: string,
@@ -5170,16 +5218,19 @@ function parseSmsInner(
   if (card?.kind !== 'account' && card && CARD_PAYMENT_RE.test(raw)) {
     const amountFils = amountWithFx(raw);
     if (!amountFils) return null;
+    const side = cardPaymentLeg(raw);
+    const correctedDate = side === 'receipt' ? sourceBackedReceiptDate(raw, date, options) : null;
     return {
       kind: 'cardPayment',
       type: 'expense',
       amountFils,
       merchant: `Card •${card.last4} payment`,
       date,
+      ...correctedDate,
       dueDay: null,
       minDueFils: null,
       card: { ...card, kind: 'credit' },
-      cardPaymentSide: cardPaymentLeg(raw),
+      cardPaymentSide: side,
       transferHint: true,
       snapshotFils: cardPaymentSnapshotFils,
       snapshotKind: cardPaymentSnapshotKind,

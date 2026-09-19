@@ -5610,6 +5610,20 @@ t('ADIB subject-first credited card repayment is settlement, not fresh spending'
   { kind: 'cardPayment', type: 'expense', amountFils: 4210, merchant: 'Card •1234 payment',
     transfer: true, side: 'receipt', card: { last4: '1234', kind: 'credit' } });
 
+// Date-only mutations of that source-backed template. Context must prove the
+// month-first reading; the senderless legacy path remains day-first.
+t('subject-first receipt uses original UAE received day to disambiguate January 10',
+  'Dear Customer, your payment of AED 42.10 on 01/10/2021 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2021-01-10' },
+  { observedAt: Date.parse('2021-01-10T12:00:00Z') });
+t('confirmed ADIB receipt reads September 8 even when imported much later',
+  'Dear Customer, your payment of AED 42.10 on 09/08/2020 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2020-09-08' },
+  { sender: 'ADIB', observedAt: Date.parse('2026-09-19T12:00:00Z') });
+t('unknown receipt sender without received-day evidence preserves existing date order',
+  'Dear Customer, your payment of AED 42.10 on 01/10/2021 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2021-10-01' });
+
 t('ADIB cheque received and sent for clearing is not posted income yet',
   'Dear Customer, Chq No. 123456 for AED 42.10 received for a/c ****1234 and sent for clearing. We will inform you once the Chq is cleared. Thank you',
   null);

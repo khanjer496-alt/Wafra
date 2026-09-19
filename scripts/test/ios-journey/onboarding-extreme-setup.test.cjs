@@ -144,6 +144,7 @@ async function screen(t, options = {}) {
     '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
     '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
     '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },
+    '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
     '@/components/themed-view': { ThemedView: 'ThemedView' },
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' },
     '@/components/ui/layout': { Block: 'Block' },

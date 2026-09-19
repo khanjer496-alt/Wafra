@@ -133,6 +133,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' },
       '@/components/ui/layout': { Block: 'Block' },
       '@/components/ui/screen-header': { ScreenHeader: 'ScreenHeader' },
+      '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
       '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/components/workflows/workflow-copy': execute('src/lib/workflow-copy.ts'),

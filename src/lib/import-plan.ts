@@ -5,6 +5,8 @@ import {
   bankFromSender,
   bankIdentityForName,
   bankFromName,
+  getActiveMarket,
+  withMarketPackForParsing,
 } from '@/lib/markets';
 import {
   bodyPrint,
@@ -15,7 +17,7 @@ import {
 } from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
 import { toISODate } from '@/lib/format';
-import { healPatch } from '@/lib/heal';
+import { canApplySourceDateCorrection, healPatch } from '@/lib/heal';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { isUnassignedTransferAccount, unassignedTransferAccountId } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
@@ -207,6 +209,23 @@ interface SourceIdentityIndex {
 // snapshots and their indexes be collected together.
 const sourceIdentityIndexes = new WeakMap<readonly Transaction[], SourceIdentityIndex>();
 
+// Date repair needs stricter uniqueness than ordinary healing, including
+// collisions with manual rows. Pay for this extra index only for date evidence.
+const sourceDateCounts = new WeakMap<readonly Transaction[], ReadonlyMap<string, number>>();
+function sourceDateCount(transactions: readonly Transaction[], key: string): number {
+  let counts = sourceDateCounts.get(transactions);
+  if (!counts) {
+    const next = new Map<string, number>();
+    for (const tx of transactions) {
+      const source = tx.smsKey ? canonicalCaptureSourceKey(tx.smsKey, tx.ts) : '';
+      if (/^h[a-f0-9]{64}$/.test(source)) next.set(source, (next.get(source) ?? 0) + 1);
+    }
+    counts = next;
+    sourceDateCounts.set(transactions, counts);
+  }
+  return counts.get(key) ?? 0;
+}
+
 function sourceIdentityIndex(transactions: readonly Transaction[]): SourceIdentityIndex {
   const cached = sourceIdentityIndexes.get(transactions);
   if (cached) return cached;
@@ -251,6 +270,28 @@ export function buildImportPlan(
    * against an empty ledger) are correct with the default.
    */
   declined: DeclinedSms[] = [],
+): ImportPlan {
+  // Source-free iOS history cannot recover a lost issuer from the sender
+  // later. Resolve banks in the batch's proven money system, just as Android
+  // does after detecting its inbox market. Do not change device preferences.
+  const currency = parsed[0]?.currency;
+  const market = currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : undefined;
+  if (state.hydrated && market && market !== getActiveMarket().id &&
+      parsed.every((row) => row.currency === currency)) {
+    const plan = withMarketPackForParsing(market, () =>
+      buildImportPlanInMarket(parsed, state, newestTs, today, declined));
+    if (!plan) throw new ImportMoneyError();
+    return plan;
+  }
+  return buildImportPlanInMarket(parsed, state, newestTs, today, declined);
+}
+
+function buildImportPlanInMarket(
+  parsed: ScannedSms[],
+  state: AppState,
+  newestTs: number,
+  today: Date,
+  declined: DeclinedSms[],
 ): ImportPlan {
   // An unhydrated store is not an empty ledger, it is an unknown one — and
   // every duplicate check below is a lookup against `state.transactions`.
@@ -727,7 +768,8 @@ export function buildImportPlan(
           return { accountId: hinted, confident: true };
         }
         if (createMissing) {
-          const bank = bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
+          const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ??
+            bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
           const bankName = bank?.name ?? evidence.sourceBank;
           const idx = newAccounts.length;
           newAccounts.push({
@@ -1147,6 +1189,27 @@ export function buildImportPlan(
     if (p.kind === 'cardPayment') {
       const smsKey = smsKeyOf(p);
       const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
+      if (exactPrior) {
+        // Admit a date-only correction before account discovery or snapshots;
+        // new issuer evidence must not create an unused account as a side effect.
+        // A re-import may change this one date only when the parser reproduced
+        // the known template error from the exact original Apple Message.
+        // Keep this separate from fuzzy healing and from account/role repairs.
+        const proof = p.dateRepairFrom && p.date && p.sourceEventId &&
+          /^[a-f0-9]{64}$/.test(p.sourceEventId) && p.smsTs !== undefined && exactPrior.captureInstrument
+          ? { from: p.dateRepairFrom, to: p.date, sourceKey: `h${p.sourceEventId}`,
+              observedAt: p.smsTs, amountFils: p.amountFils, accountId: exactPrior.accountId,
+              instrument: { last4: exactPrior.captureInstrument.last4, kind: exactPrior.captureInstrument.kind,
+                ...(exactPrior.captureInstrument.bankIdentity ? { bankIdentity: exactPrior.captureInstrument.bankIdentity } : {}) } }
+          : undefined;
+        if (proof && sourceDateCount(state.transactions, proof.sourceKey) === 1 &&
+            p.cardPaymentSide === 'receipt' && exactPrior.captureInstrument && p.card &&
+            compatibleCaptureInstrument(exactPrior.captureInstrument, captureInstrumentOf(p)) &&
+            canApplySourceDateCorrection(exactPrior, proof)) {
+          updates.push({ id: exactPrior.id, sourceDateCorrection: proof });
+          continue;
+        }
+      }
       const stablePrior = exactPrior ?? stableLocalPrior(p);
       const prior = stablePrior;
       const resolution = resolveAccount(p, prior?.accountId);

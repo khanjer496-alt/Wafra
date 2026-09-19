@@ -1041,7 +1041,7 @@ export async function scanInbox(
       // device-installed trust anchor. UAE/Saudi retain their mature automatic
       // parser; other markets use the sanitized worldwide Review path below.
       const p = launchSenderMarket
-        ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+        ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
         : null;
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
@@ -1135,7 +1135,7 @@ export async function scanInbox(
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
           const p = launchSenderMarket
-            ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket)
+            ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
             : null;
           const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
@@ -1258,8 +1258,8 @@ export async function scanInbox(
         // country may then use the universal structured parser in native ISO
         // currency. Only genuinely ambiguous app identity remains Review-first.
         const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
-          ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
-          : parseLaunchAlert(source, sender, worldwide);
+          ? parseLaunchAlert(source, sender, worldwide, trustedMarket, n.ts)
+          : parseLaunchAlert(source, sender, worldwide, undefined, n.ts);
         const universalEvent = !launchParsed && autoAuthorized
           ? inspectGenericBankEventForReview(source, sender)
           : null;

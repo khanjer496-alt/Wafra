@@ -264,7 +264,13 @@ export const applyMaterializedImportBatch = (
   }));
   const dues = reuseUnchangedRows(state.cardDues, mergeImportedCardDues(state.cardDues, batch.newDues, accounts));
   const bills = reuseUnchangedRows(state.bills, mergeImportedBills(state.bills, batch.newBills));
-  const existing = applyHealUpdates(state.transactions, batch.updates);
+  const healed = applyHealUpdates(state.transactions, batch.updates);
+  // Only an admitted exact-source date repair can invalidate existing order.
+  // Ordinary history pages retain the linear merge without a full sort.
+  const hasDateCorrection = batch.updates.some((patch) => patch.sourceDateCorrection !== undefined);
+  const priorDates = hasDateCorrection ? new Map(state.transactions.map((row) => [row.id, row.date])) : undefined;
+  const changedDate = priorDates !== undefined && healed.some((row) => row.date !== priorDates.get(row.id));
+  const existing = changedDate ? sortTransactions(healed) : healed;
   const historyStillRunning = batch.historyImport?.status === 'running' && !batch.parserRereadComplete;
   const incrementalFastPath = !historyStillRunning && !finishingHistory && canUseIncrementalCaptureFastPath(state, batch);
   const pageState: AppState = {
@@ -273,8 +279,8 @@ export const applyMaterializedImportBatch = (
       ? { ledgerMoney: batch.importMoney } : {}),
     onboardingCurrencyEvidence:
       batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
-    // Heal updates never change a transaction's date, so `existing` remains
-    // newest-first. Merge incoming history/live rows linearly instead of
+    // `existing` is newest-first, including after a source-proven date repair.
+    // Merge incoming history/live rows linearly instead of
     // re-sorting the entire 10k+ ledger on every history checkpoint.
     transactions: mergeSortedTransactions(batch.transactions, existing),
     accounts,
