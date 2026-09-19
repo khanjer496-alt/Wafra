@@ -4328,9 +4328,10 @@ struct WafraBankSenderRegistryTests {
     const harness = controllerHarness();
     await harness.controller.send({ type: 'load' });
     await harness.controller.send({ type: 'open-automation' });
-    eq('setup controller: opening automation does not enable native admission',
+    // The button lands on Shortcuts' New Automation trigger picker directly.
+    eq('setup controller: opening automation lands on the New Automation picker and does not enable native admission',
       { checks: harness.capabilityChecks, opens: harness.opened, enable: harness.enableCalls },
-      { checks: ['shortcuts://'], opens: ['shortcuts://'], enable: [] });
+      { checks: ['shortcuts://'], opens: ['shortcuts://create-automation'], enable: [] });
     harness.controller.dispose();
   }
 

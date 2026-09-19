@@ -130,6 +130,8 @@ const iosVersionMajor = (): number => {
 // 19 September 2026), so the guide asks for a single space in "Message
 // Contains": every message with a space matches, and Wafra keeps only
 // supported bank alerts on-device.
+/** Shortcuts' own route to the New Automation trigger picker. */
+export const IOS_CREATE_AUTOMATION_URL = 'shortcuts://create-automation';
 const UNFILTERED_MESSAGE_TRIGGER = {
   selectedSenderCount: 0,
   messageContains: ' ',
@@ -367,11 +369,20 @@ export function createIosCaptureSetup({
       }
       return;
     }
+    // `shortcuts://create-automation` lands on the New Automation trigger
+    // picker (one screen away from "Message"), sparing the Automation tab and
+    // "+" taps. It is an undocumented but stable Shortcuts route; Apple offers
+    // no way to pre-fill a trigger or create the automation itself. Fall back
+    // to plainly opening Shortcuts if the route is refused.
     try {
-      await dependencies.openUrl('shortcuts://');
+      await dependencies.openUrl(IOS_CREATE_AUTOMATION_URL);
     } catch {
-      if (!disposed && generation === operationGeneration) {
-        publish({ failure: 'shortcut-run' });
+      try {
+        await dependencies.openUrl('shortcuts://');
+      } catch {
+        if (!disposed && generation === operationGeneration) {
+          publish({ failure: 'shortcut-run' });
+        }
       }
     }
   });
