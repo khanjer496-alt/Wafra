@@ -1492,19 +1492,77 @@ async function queueItem(id, row, publicKey) {
         }),
       });
 
-    const accepted = await shortcutPost(ADIB_CARD, 'ADIB');
+    // A valid random nonce may spell a bank name in base64. Exercise that
+    // deterministically while keeping the real encryption/decryption path.
+    const originalRandom = webcrypto.getRandomValues;
+    let fixedNonceUsed = false;
+    webcrypto.getRandomValues = function (bytes) {
+      if (!fixedNonceUsed && bytes instanceof Uint8Array && bytes.byteLength === 12) {
+        fixedNonceUsed = true;
+        bytes.set(Buffer.from('ADIBAAAAAAAAAAAA', 'base64'));
+        return bytes;
+      }
+      return originalRandom.call(this, bytes);
+    };
+    let accepted;
+    try { accepted = await shortcutPost(ADIB_CARD, 'ADIB'); }
+    finally { webcrypto.getRandomValues = originalRandom; }
     eq('e2e: the relay accepts a bank message', accepted.status, 202);
     const ignored = await shortcutPost(NOT_A_TRANSACTION, 'Careem');
     eq('e2e: and stores nothing for a message that is not one', ignored.status, 204);
     eq('e2e: the queue holds exactly the one transaction',
       db.prepare('SELECT COUNT(*) n FROM queue').get().n, 1);
-    const dumpAll = () =>
-      JSON.stringify([
-        db.prepare('SELECT * FROM queue').all(),
-        db.prepare('SELECT * FROM devices').all(),
-        db.prepare('SELECT * FROM ingest_receipts').all(),
-        db.prepare('SELECT * FROM push_registrations').all(),
-      ]);
+    eq('e2e: a valid opaque nonce can contain a bank-name substring',
+      db.prepare('SELECT iv FROM queue').get().iv, 'ADIBAAAAAAAAAAAA');
+    // Inspect readable database fields without confusing random base64 with
+    // plaintext. Validate known binary fields and render their identical bytes
+    // as hex; unexpected columns remain visible to the plaintext checks. The
+    // real sync below still authenticates/decrypts the stored ciphertext.
+    const binaryColumns = {
+      queue: { epk: 32, iv: 12, ct: null },
+      devices: { public_key: 32, ingest_token_hash: 32, sync_token_hash: 32,
+        admin_token_hash: 32, email_token_hash: 32 },
+      ingest_receipts: {},
+      push_registrations: { token_iv: 12, token_ct: null },
+    };
+    const binaryHex = (field, value, length) => {
+      if (typeof value !== 'string') throw new Error(`Missing binary field ${field}`);
+      const bytes = Buffer.from(value, 'base64');
+      if (bytes.toString('base64') !== value ||
+          (length === null ? bytes.length < 16 : bytes.length !== length)) {
+        throw new Error(`Invalid binary field ${field}`);
+      }
+      return bytes.toString('hex');
+    };
+    const readableRow = (table, row) => {
+      const fields = { ...row };
+      for (const [column, length] of Object.entries(binaryColumns[table])) {
+        const value = row[column];
+        if (table === 'devices' && column === 'email_token_hash' && value === null) continue;
+        fields[column] = binaryHex(`${table}.${column}`, value, length);
+      }
+      if (table === 'ingest_receipts') {
+        const parts = /^([^:]+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(row.replay_key);
+        if (!parts) throw new Error('Invalid replay-key structure');
+        fields.replay_key = `${binaryHex('ingest_receipts.replay_key', parts[1], 32)}:${parts[2]}`;
+      }
+      return fields;
+    };
+    const dumpAll = () => JSON.stringify(Object.keys(binaryColumns).map(table =>
+      db.prepare(`SELECT * FROM ${table}`).all().map(row => readableRow(table, row))));
+    const storedQueue = db.prepare('SELECT * FROM queue').get();
+    ok('e2e: readable bank and merchant metadata would still fail the privacy guard',
+      JSON.stringify(readableRow('queue', { ...storedQueue, leaked: 'ADIB LULU' })).includes('ADIB LULU'));
+    let rejectsPlaintextCrypto = false;
+    try { readableRow('queue', { ...storedQueue, ct: 'ADIB' }); }
+    catch { rejectsPlaintextCrypto = true; }
+    ok('e2e: plaintext cannot replace a cryptographic field', rejectsPlaintextCrypto);
+    const opaqueBankPrefix = 'ADIB' + 'A'.repeat(39) + '=';
+    const storedDevice = db.prepare('SELECT * FROM devices').get();
+    ok('e2e: opaque bearer digests may contain the same bank-name prefix',
+      !JSON.stringify(readableRow('devices', { ...storedDevice, ingest_token_hash: opaqueBankPrefix })).includes('ADIB'));
+    ok('e2e: opaque replay fingerprints may contain the same bank-name prefix',
+      !JSON.stringify(readableRow('ingest_receipts', { replay_key: `${opaqueBankPrefix}:${storedDevice.id}` })).includes('ADIB'));
     ok('e2e: with the message text nowhere in the database', !dumpAll().includes('LULU'));
     ok('e2e: and the bank that sent it nowhere either — it is inside the seal',
       !dumpAll().includes('ADIB'));
