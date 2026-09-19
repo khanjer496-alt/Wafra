@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  COLUMN_SEPARATOR, FAST_SHORTCUT_NAME, ROW_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildFastHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut,
-  verifyColumnarHistoryShortcut, verifyFastHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut,
+  COLUMN_SEPARATOR, FAST_SHORTCUT_NAME, ROW_SHORTCUT_NAME, WINDOWED_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildFastHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut, buildWindowedHistoryShortcut,
+  verifyColumnarHistoryShortcut, verifyFastHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut, verifyWindowedHistoryShortcut,
 } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 import { buildColumnFrameProbe } from '../build-ios-column-frame-check.mjs';
@@ -89,6 +89,58 @@ test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   assert.deepEqual(queries.map(a => a.WFWorkflowActionParameters.WFContentItemLimitNumber), [1, 1, 51, 102, 204, 408]);
 });
 
+test('windowed graph never asks Apple for the whole inbox', () => {
+  // A tester's iOS 26 iPhone failed our unbounded "oldest first" query with
+  // Apple's own "unknown error" while a plain Find Messages worked: Find
+  // Messages materializes every match before sorting. v6 bounds every query.
+  const graph = buildWindowedHistoryShortcut();
+  assert.equal(graph.WFWorkflowName, WINDOWED_SHORTCUT_NAME);
+  assert.equal(verifyWindowedHistoryShortcut(graph), true);
+  assert.deepEqual(graph, buildWindowedHistoryShortcut());
+  const A = graph.WFWorkflowActions; const ids = A.map(a => a.WFWorkflowActionIdentifier);
+  const queries = A.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity');
+  assert.equal(queries.length, 12);
+  const probes = queries.filter(a => a.WFWorkflowActionParameters.WFContentItemLimitNumber === 1);
+  const pages = queries.filter(a => a.WFWorkflowActionParameters.WFContentItemLimitNumber > 1);
+  assert.equal(probes.length, 8); assert.deepEqual(pages.map(a => a.WFWorkflowActionParameters.WFContentItemLimitNumber), [51, 102, 204, 408]);
+  // Seven of the eight boundary probes are bounded by age. Only the newest
+  // ladder ends unbounded (an inbox silent for three years), and it runs only
+  // if every bounded band was empty.
+  const unbounded = probes.filter(a => a.WFWorkflowActionParameters.WFContentItemFilter.Value.WFActionParameterFilterTemplates.length === 0);
+  assert.equal(unbounded.length, 1);
+  for (const probe of probes) {
+    const before = A[A.indexOf(probe) - 1];
+    assert.equal(before.WFWorkflowActionIdentifier, 'is.workflow.actions.conditional');
+    assert.equal(before.WFWorkflowActionParameters.WFNumberValue, 0, 'each probe runs only while its ladder is still empty');
+  }
+  // Every page query carries both bounds: after = Wafra's window start, before = Wafra's cursor.
+  const cursor = A.find(a => a.WFWorkflowActionIdentifier === 'app.wafra.ios.WafraPagedCursorDateIntent');
+  const windowStart = A.find(a => a.WFWorkflowActionIdentifier === 'app.wafra.ios.WafraPagedWindowStartDateIntent');
+  assert.ok(cursor && windowStart);
+  for (const page of pages) {
+    const rows = page.WFWorkflowActionParameters.WFContentItemFilter.Value.WFActionParameterFilterTemplates;
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].Operator, 2); assert.equal(rows[0].Values.Date.Value.attachmentsByRange['{0, 1}'].OutputUUID, windowStart.WFWorkflowActionParameters.UUID);
+    assert.equal(rows[1].Operator, 0); assert.equal(rows[1].Values.Date.Value.attachmentsByRange['{0, 1}'].OutputUUID, cursor.WFWorkflowActionParameters.UUID);
+    assert.equal(page.WFWorkflowActionParameters.WFContentItemSortOrder, 'Latest First');
+  }
+  // An empty window is committed (found = 0) instead of pausing the import,
+  // and the page work runs only inside the "found is not 0" branch.
+  assert.equal(ids.filter(id => id === 'app.wafra.ios.CommitWafraPagedPageIntent').length, 2);
+  assert.doesNotMatch(JSON.stringify(graph), /No page was returned at the saved position/);
+  const notZero = A.find(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' && a.WFWorkflowActionParameters.WFCondition === 5 && a.WFWorkflowActionParameters.WFNumberValue === 0);
+  assert.ok(notZero);
+  const loopStart = ids.indexOf('is.workflow.actions.repeat.each');
+  assert.ok(A.indexOf(notZero) < loopStart);
+  const loopEnd = ids.lastIndexOf('is.workflow.actions.repeat.each');
+  const loopBody = JSON.stringify(A.slice(loopStart + 1, loopEnd));
+  assert.ok(!/"VariableName":"Repeat (Item|Index)"/.test(loopBody));
+  assert.ok(loopBody.includes('"VariableName":"Repeat Index 2"'));
+  // v2/v4/v5 outputs are untouched.
+  assert.equal(buildPagedHistoryShortcut().WFWorkflowActions.length, 98);
+  assert.equal(buildRowHistoryShortcut().WFWorkflowActions.length, 87);
+  assert.equal(buildFastHistoryShortcut().WFWorkflowActions.length, 119);
+});
 test('fast graph tries column framing per page and falls back to typed rows for that page only', () => {
   const graph = buildFastHistoryShortcut();
   assert.equal(graph.WFWorkflowName, FAST_SHORTCUT_NAME);
@@ -250,7 +302,7 @@ test('a published plist may reorder dictionary keys without changing its action 
   assert.equal(verifyPagedHistoryShortcut(reorder(buildPagedHistoryShortcut())), true);
 });
 test('every generated action reference resolves and all action IDs are unique', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     const ids = graph.WFWorkflowActions.map(a => a.WFWorkflowActionParameters.UUID);
     assert.equal(new Set(ids).size, ids.length);
     walk(graph, value => {
@@ -259,7 +311,7 @@ test('every generated action reference resolves and all action IDs are unique', 
   }
 });
 test('all scalar text variable ranges actually cover the placeholder', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
     if (value.WFSerializationType !== 'WFTextTokenString') return;
     for (const range of Object.keys(value.Value.attachmentsByRange || {})) {
       const match = /^\{(\d+), (\d+)\}$/.exec(range);
@@ -269,7 +321,7 @@ test('all scalar text variable ranges actually cover the placeholder', () => {
   });
 });
 test('conditional subjects are explicitly typed for Shortcuts on-device comparisons', () => {
-  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions]
+  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions, ...buildWindowedHistoryShortcut().WFWorkflowActions]
     .filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
       action.WFWorkflowActionParameters.WFControlFlowMode === 0);
   assert.ok(actions.length > 0);
@@ -287,7 +339,7 @@ test('conditional subjects are explicitly typed for Shortcuts on-device comparis
 });
 
 test('repeat and conditional blocks are nested and closed correctly', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut()]) {
   const stack = [];
   for (const action of graph.WFWorkflowActions) {
     const p = action.WFWorkflowActionParameters;
@@ -350,7 +402,7 @@ test('empty pages and the safety work budget cannot be advertised as completion'
   assert.equal(graph.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url' && JSON.stringify(a).includes('import-sms')).length, 1);
 });
 test('no raw source leaves through files, network, clipboard, mail, or messages', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     assert.doesNotMatch(JSON.stringify(graph), /https?:/);
     // Inspect executable identifiers, not explanatory comments such as
     // "no clipboard". The exact-graph validator independently pins parameters.

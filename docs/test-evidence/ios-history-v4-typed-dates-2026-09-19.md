@@ -156,6 +156,39 @@ text-frame shape (no per-Message intent call) may now also work and would be
 several times faster; it should be tried as a v5 candidate on the same phone
 before replacing v4.
 
+## A second phone: Apple's query fails on a large inbox (v6)
+
+A public tester's iPhone (iOS 26) ran v4 and stopped at the very first
+action with Apple's own alert: *The action "Find Message" could not run
+because an unknown error occurred.* Wafra was never called. On the same
+phone a plain Find Messages (no sort, limit 2) works. Find Messages loads
+every matching Message before sorting, so an unbounded "oldest first" query
+over a large inbox fails inside Apple's action; the owner's 1,694-message
+inbox never reached that limit.
+
+v6 bounds every query:
+
+- The two boundary probes become ladders of age bands (older than 10 years;
+  10 to 3 years; 3 years to 1; newer than 1 year for the oldest anchor; the
+  last 90 days, 1 year, 3 years, then unbounded for the newest), each run only
+  while the previous band was empty.
+- The store issues a window with every cursor (`after`, 90 days behind
+  `before`, never past the oldest anchor), returned as a typed Date by the new
+  `WafraPagedWindowStartDateIntent`; every page query carries both bounds.
+- An empty window is committed as a page of zero rows (`found = 0`) and the
+  cursor moves to the window edge, whose second is withheld as overlap so a
+  row on the exact boundary instant cannot be skipped. Only a window that
+  reaches the anchor can complete. Native harness: 306 checks, including a
+  windowed run across a 400-day silence that commits every row exactly once.
+- `Wafra-History-v6.signed` (167 actions, release asset
+  `ios-history-v6-20260919`) is the record every iOS profile installs from
+  build 155; v4 stays recognized for phones that already added it.
+
+The support diagnostic `Wafra Messages Check` (`scripts/build-ios-messages-check.mjs`,
+release `ios-messages-check-20260919`) runs the six query shapes one at a
+time behind "Step N" alerts so a tester's screenshot identifies the failing
+shape without relaying steps.
+
 ## New-transaction capture: automation trigger verified on the phone
 
 On the owner's iPhone (iOS 26.6.2) the Message automation's Next button stays

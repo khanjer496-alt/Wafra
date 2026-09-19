@@ -36,11 +36,21 @@ export const ROW_SHORTCUT_NAME = 'Wafra History v4';
 // native call per page) with the typed-row v4 path as the per-page fallback.
 // Both native receivers ship in build 152, so this is a graph-only change.
 export const FAST_SHORTCUT_NAME = 'Wafra History v5';
+// v6: v5 plus date-windowed queries. Apple's Find Messages loads every
+// matching Message before sorting, and on a large inbox that fails with an
+// "unknown error" before Wafra is involved (tester iPhone, iOS 26, 19 Sep
+// 2026). Every v6 query carries a lower bound: the boundary probes are
+// bounded by age, and each page query is bounded by the window start Wafra
+// returns with the cursor (90 days behind it, never past the oldest anchor).
+// An empty window is committed as a page of zero rows and the cursor moves on.
+export const WINDOWED_SHORTCUT_NAME = 'Wafra History v6';
+export const WINDOW_DAYS = 90;
 export function buildPagedHistoryShortcut() { return buildPagedGraph({ columnar: false }); }
 export function buildColumnarHistoryShortcut() { return buildPagedGraph({ columnar: true }); }
 export function buildRowHistoryShortcut() { return buildPagedGraph({ columnar: false, rows: true }); }
 export function buildFastHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true }); }
-function buildPagedGraph({ columnar, rows = false }) {
+export function buildWindowedHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true, windowed: true }); }
+function buildPagedGraph({ columnar, rows = false, windowed = false }) {
   let serial = 0;
   const actions = [];
   const uuid = () => `C17B0000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -82,11 +92,15 @@ function buildPagedGraph({ columnar, rows = false }) {
     emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 0, WFInput: { Type: 'Variable', Variable: attachment(typedValue) }, WFCondition: 99, WFConditionalActionString: needle });
     operation(); emit('is.workflow.actions.conditional', { GroupingIdentifier: group, WFControlFlowMode: 2 });
   };
-  const find = (limit, order, before) => emit('com.apple.MobileSMS.MessageEntity', {
+  // Operator 0 = "is before", 2 = "is after" (the legacy graph's proven rows).
+  const find = (limit, order, before, after) => emit('com.apple.MobileSMS.MessageEntity', {
     AppIntentDescriptor: { TeamIdentifier: '0000000000', BundleIdentifier: 'com.apple.MobileSMS', Name: 'Messages', AppIntentIdentifier: 'MessageEntity', ActionRequiresAppInstallation: true },
     WFContentItemFilter: { WFSerializationType: 'WFContentPredicateTableTemplate', Value: {
       WFActionParameterFilterPrefix: 1, WFContentPredicateBoundedDate: false,
-      WFActionParameterFilterTemplates: before ? [{ Property: 'date', Operator: 0, Removable: true, Values: { Unit: 4, Date: scalar(before) } }] : [],
+      WFActionParameterFilterTemplates: [
+        ...(after ? [{ Property: 'date', Operator: 2, Removable: true, Values: { Unit: 4, Date: scalar(after) } }] : []),
+        ...(before ? [{ Property: 'date', Operator: 0, Removable: true, Values: { Unit: 4, Date: scalar(before) } }] : []),
+      ],
     } },
     WFContentItemSortProperty: 'date', WFContentItemSortOrder: order,
     WFContentItemLimitEnabled: true, WFContentItemLimitNumber: limit,
@@ -106,15 +120,49 @@ function buildPagedGraph({ columnar, rows = false }) {
   };
 
   alert('Import your message history', 'Wafra transfers history in local pages instead of sending one message at a time. Keep this iPhone unlocked while Apple reads Messages. Finished pages are checkpointed so an interrupted import can resume. Nothing is uploaded.', true);
-  const oldest = find(1, 'Oldest First'); const oldestCount = count(output(oldest, 'Message'));
-  const newest = find(1, 'Latest First'); const newestCount = count(output(newest, 'Message'));
+  let oldest, newest;
+  if (windowed) {
+    // Bounded boundary probes. Each query covers one age band, so Apple never
+    // has to load the whole inbox to answer "oldest" or "newest". The first
+    // non-empty band holds the answer; only a tiny inbox reaches the final
+    // unbounded query.
+    const now = emit('is.workflow.actions.date', { WFDateActionMode: 'Current Date' });
+    const ago = days => output(emit('is.workflow.actions.adjustdate', {
+      WFDate: scalar(output(now, 'Current Date')), WFAdjustOperation: 'Subtract',
+      WFDuration: { Value: { Magnitude: days, Unit: 'days' }, WFSerializationType: 'WFQuantityFieldValue' },
+    }), 'Adjusted Date');
+    const y1 = ago(365), y3 = ago(3 * 365), y10 = ago(10 * 365), d90 = ago(90);
+    const probe = (name, bands) => {
+      const empty = emit('is.workflow.actions.list', { WFItems: [] });
+      set(name, output(empty, 'List'));
+      for (const [order, before, after] of bands) {
+        condition(output(count(variable(name)), 'Count'), 0, () => {
+          const query = find(1, order, before, after);
+          set(name, output(query, 'Message'));
+        });
+      }
+    };
+    probe('Oldest Probe', [['Oldest First', y10, null], ['Oldest First', y3, y10], ['Oldest First', y1, y3], ['Oldest First', null, y1]]);
+    probe('Newest Probe', [['Latest First', null, d90], ['Latest First', null, y1], ['Latest First', null, y3], ['Latest First', null, null]]);
+    oldest = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(variable('Oldest Probe')) });
+    newest = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(variable('Newest Probe')) });
+  }
+  let oldestCount, newestCount;
+  if (windowed) {
+    oldestCount = count(output(oldest));
+    newestCount = count(output(newest));
+  } else {
+    // Action order here is pinned by the published v2/v3 records.
+    oldest = find(1, 'Oldest First'); oldestCount = count(output(oldest, 'Message'));
+    newest = find(1, 'Latest First'); newestCount = count(output(newest, 'Message'));
+  }
   condition(output(oldestCount, 'Count'), 0, () => {
     condition(output(newestCount, 'Count'), 0, () => { alert('No available messages', 'Messages returned no available history. Nothing was added to Wafra.'); stop(); });
     alert('Messages changed', 'The two initial queries disagreed. No history was started.'); stop();
   });
   condition(output(newestCount, 'Count'), 0, () => { alert('Messages changed', 'The initial queries disagreed. No history was started.'); stop(); });
-  const oldestItem = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(oldest, 'Message')) });
-  const newestItemAction = () => emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(newest, 'Message')) });
+  const oldestItem = windowed ? oldest : emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(oldest, 'Message')) });
+  const newestItemAction = () => windowed ? newest : emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(output(newest, 'Message')) });
   // The Message `date` property bound straight into a typed `Date` parameter:
   // the scalar token carries the property aggrandizement and nothing else.
   const typedDate = value => scalar({ ...value, Aggrandizements: [property('date')] });
@@ -159,17 +207,31 @@ function buildPagedGraph({ columnar, rows = false }) {
   // produced both unresolved parameters and empty Detect Dates results for
   // valid cursors. Wafra returns the exact same cursor as a typed Date.
   const date = native('WafraPagedCursorDateIntent', { request: scalar(variable('Request')) });
+  const windowStart = windowed ? native('WafraPagedWindowStartDateIntent', { request: scalar(variable('Request')) }) : null;
   const noPage = emit('is.workflow.actions.list', { WFItems: [] });
   set('Page', output(noPage, 'List'));
   // Four literal bounds avoid relying on dynamic limit-field serialization.
   for (const n of [51, 102, 204, 408]) {
-    condition(output(limit), n, () => { const page = find(n, 'Latest First', output(date)); set('Page', output(page, 'Message')); });
+    condition(output(limit), n, () => { const page = find(n, 'Latest First', output(date), windowStart ? output(windowStart) : undefined); set('Page', output(page, 'Message')); });
   }
   const found = count(variable('Page'));
   condition(output(found, 'Count'), 0, () => {
-    alert('History paused safely', 'No page was returned at the saved position. This is not proof that history is complete. Your saved progress is retained.');
-    open('wafra://ios-setup?section=history'); stop();
+    if (windowed) {
+      // An empty window is a page of zero rows: commit it and move the cursor.
+      const advanced = native('CommitWafraPagedPageIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')) });
+      set('Request', output(advanced));
+    } else {
+      alert('History paused safely', 'No page was returned at the saved position. This is not proof that history is complete. Your saved progress is retained.');
+      open('wafra://ios-setup?section=history'); stop();
+    }
   });
+  const nonEmpty = windowed ? uuid() : null;
+  if (windowed) {
+    // Everything below runs only for a non-empty page.
+    emit('is.workflow.actions.conditional', { GroupingIdentifier: nonEmpty, WFControlFlowMode: 0,
+      WFInput: { Type: 'Variable', Variable: attachment({ ...output(found, 'Count'), Aggrandizements: [{ Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFNumberContentItem' }] }) },
+      WFCondition: 5, WFNumberValue: 0 });
+  }
   // Column framing first. Every list-wide action here is Apple's own: the
   // property aggrandizement maps over each Message and Combine Text joins the
   // results, so no per-message action runs and no App Intent array parameter
@@ -246,6 +308,7 @@ function buildPagedGraph({ columnar, rows = false }) {
     const committed = native('CommitWafraPagedPageIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')) });
     set('Request', output(committed));
     if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });
+    if (windowed) emit('is.workflow.actions.conditional', { GroupingIdentifier: nonEmpty, WFControlFlowMode: 2 });
     const releasedPage = emit('is.workflow.actions.list', { WFItems: [] });
     set('Page', output(releasedPage, 'List'));
     if (columnar) set('Columns Result', output(releasedPage, 'List'));
@@ -254,7 +317,7 @@ function buildPagedGraph({ columnar, rows = false }) {
     alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
     open('wafra://ios-setup?section=history'); stop();
     const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
-    workflow.WFWorkflowName = columnar ? FAST_SHORTCUT_NAME : ROW_SHORTCUT_NAME;
+    workflow.WFWorkflowName = windowed ? WINDOWED_SHORTCUT_NAME : columnar ? FAST_SHORTCUT_NAME : ROW_SHORTCUT_NAME;
     workflow.WFWorkflowActions = actions;
     workflow.WFWorkflowImportQuestions = [];
     return workflow;
@@ -312,7 +375,16 @@ function verifyBoundedSourceFreeGraph(workflow, expected, label) {
   const text = JSON.stringify(workflow);
   if (/https?:|downloadurl|clipboard|savefile|appendfile|sendmessage|sendemail/.test(text)) throw new Error('Forbidden external/source-output action');
   const queries = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity');
-  if (queries.length !== 6 || queries.some(a => ![1, 51, 102, 204, 408].includes(a.WFWorkflowActionParameters.WFContentItemLimitNumber))) throw new Error('Unbounded query');
+  const windowedGraph = workflow.WFWorkflowName === WINDOWED_SHORTCUT_NAME;
+  if (queries.length !== (windowedGraph ? 12 : 6) || queries.some(a => ![1, 51, 102, 204, 408].includes(a.WFWorkflowActionParameters.WFContentItemLimitNumber))) throw new Error('Unbounded query');
+  return true;
+}
+export function verifyWindowedHistoryShortcut(workflow) {
+  verifyBoundedSourceFreeGraph(workflow, buildWindowedHistoryShortcut(), 'Windowed');
+  const text = JSON.stringify(workflow);
+  if (/detect\.date|base64encode|appendvariable|StageWafraPagedImportIntent/.test(text)) throw new Error('Windowed graph must not use the v2 text frame');
+  const pages = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity' && a.WFWorkflowActionParameters.WFContentItemLimitNumber > 1);
+  if (pages.some(a => a.WFWorkflowActionParameters.WFContentItemFilter.Value.WFActionParameterFilterTemplates.length !== 2)) throw new Error('Every page query must carry both date bounds');
   return true;
 }
 export function verifyPagedHistoryShortcut(workflow) {
@@ -337,9 +409,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const columnar = process.argv.includes('--columnar');
   const rows = process.argv.includes('--rows');
   const fast = process.argv.includes('--fast');
+  const windowedFlag = process.argv.includes('--windowed');
   const target = resolve(process.argv.filter(arg => !arg.startsWith('--'))[2]
-    ?? (fast ? '/tmp/WafraHistoryFast.json' : rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
-  const workflow = fast ? buildFastHistoryShortcut() : rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
-  (fast ? verifyFastHistoryShortcut : rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
+    ?? (windowedFlag ? '/tmp/WafraHistoryWindowed.json' : fast ? '/tmp/WafraHistoryFast.json' : rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
+  const workflow = windowedFlag ? buildWindowedHistoryShortcut() : fast ? buildFastHistoryShortcut() : rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
+  (windowedFlag ? verifyWindowedHistoryShortcut : fast ? verifyFastHistoryShortcut : rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

@@ -424,6 +424,52 @@ struct PagedHistoryTests {
         guid: blankPage[0].guid, body: blankPage[0].body, sender: "TEST", instant: blankPage[0].date))["rows"] as! Int == 1)
     let rowRecord = try json(resumedRows.readChunk(sessionId: rowState["sessionId"] as! String, chunkIndex: 0)[0])
     try check("typed-row body survives the round trip unchanged", rowRecord["text"] as! String == rowSource[0].body)
+    // Windowed queries (v6): every response carries `after`, the exclusive lower
+    // bound of the next query, at most 90 days behind `before` and never past
+    // the oldest anchor. An empty or short window advances the cursor; only a
+    // window that reaches the anchor can complete.
+    let day: TimeInterval = 86_400
+    // 220 rows: a dense recent month, a 400-day silence, then a sparse old year.
+    var windowSource: [Row] = (0..<120).map { Row(guid: "recent-\($0)", date: fixedNow.addingTimeInterval(-Double($0) * 3_600), body: "recent \($0)") }
+    windowSource += (0..<100).map { Row(guid: "old-\($0)", date: fixedNow.addingTimeInterval(-430 * day - Double($0) * 3 * day), body: "old \($0)") }
+    let windowStore = make("windows")
+    var windowState = try json(windowStore.begin(oldestGUID: windowSource.last!.guid, oldestInstant: windowSource.last!.date,
+      newestGUID: windowSource.first!.guid, newestInstant: windowSource.first!.date))
+    func windowPage(_ rows: [Row], _ state: [String: Any]) throws -> [Row] {
+      let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      let before = f.date(from: state["before"] as! String)!
+      try check("every continue response carries a window start", state["after"] is String)
+      let after = f.date(from: state["after"] as! String)!
+      try check("the window never exceeds 90 days", before.timeIntervalSince(after) <= 90 * day + 1)
+      return Array(rows.filter { $0.date < before && $0.date > after }.sorted { $0.date > $1.date }.prefix(state["limit"] as! Int))
+    }
+    var windowsSeen = 0; var emptyWindows = 0
+    while windowState["status"] as! String != "complete" {
+      let rowsInWindow = try windowPage(windowSource, windowState)
+      if rowsInWindow.isEmpty { emptyWindows += 1 }
+      for row in rowsInWindow {
+        _ = try windowStore.stageRow(sessionId: windowState["sessionId"] as! String,
+          authorizationSecret: windowState["authorizationSecret"] as! String, revision: windowState["revision"] as! Int,
+          guid: row.guid, body: row.body, sender: "TEST", instant: row.date)
+      }
+      windowState = try commitTyped(windowStore, windowState, found: rowsInWindow.count)
+      windowsSeen += 1
+      try check("windowed run stays bounded", windowsSeen < 200)
+    }
+    try check("windowed run crosses a 400-day silence with empty windows and completes", emptyWindows >= 3 && windowState["checked"] as! Int == windowSource.count)
+    try check("a completed windowed session no longer advertises a window", windowState["after"] == nil)
+    let windowRecords = try (0..<(try windowStore.completedSession(sessionId: windowState["sessionId"] as! String)!.chunkIndices.count)).flatMap {
+      try windowStore.readChunk(sessionId: windowState["sessionId"] as! String, chunkIndex: $0)
+    }
+    try check("windowed run commits every row exactly once", Set(windowRecords.map { try! json($0)["id"] as! String }).count == windowSource.count && windowRecords.count == windowSource.count)
+    try rejected("a row outside the issued window is refused") {
+      let fresh = make("windows-outside")
+      let s = try json(fresh.begin(oldestGUID: windowSource.last!.guid, oldestInstant: windowSource.last!.date,
+        newestGUID: windowSource.first!.guid, newestInstant: windowSource.first!.date))
+      _ = try fresh.stageRow(sessionId: s["sessionId"] as! String, authorizationSecret: s["authorizationSecret"] as! String,
+        revision: s["revision"] as! Int, guid: "old-5", body: "x", sender: "TEST", instant: windowSource[125].date)
+      _ = try commitTyped(fresh, s, found: 1)
+    }
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")
   }
 }
