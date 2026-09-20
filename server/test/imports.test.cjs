@@ -1264,6 +1264,83 @@ function wideTextPdf(lines) {
     readablePdf.rows.length === 1 && readablePdf.layout === null,
     JSON.stringify([readablePdf.rows.length, readablePdf.layout]));
 
+
+  // ── The header list is a CLOSED set, not a filtered one ──
+  //
+  // Two heuristics leaked before this. "Contains a column word" emitted an
+  // employer (`GULF PAYMENTS SERVICES LLC` carries "payments"). "Ends in a
+  // column noun" emitted a person: `ALICE CREDIT` and `MOHAMMED TOTAL` are a
+  // name followed by a column noun and pass that test exactly as a real header
+  // does. No test over free text can separate the two, because the strings are
+  // the same shape — so nothing is reported that was not already a constant in
+  // the parser.
+  const leakProbes = [
+    'ALICE CREDIT', 'MOHAMMED TOTAL', 'ACME PAYMENTS', 'GULF PAYMENTS SERVICES LLC',
+    'EXAMPLE BALANCE ADVISORS LTD', 'NORTHBANK SETTLEMENTS PJSC', 'MS SAMPLE CARDHOLDER',
+  ];
+  const leakedNames = leakProbes.filter((probe) => {
+    const print = statementLayoutFingerprint([
+      'Credit Card Statement', probe, 'Transaction Date', 'Original Amount', 'Total Amount',
+    ].join('\n'), 'AED');
+    return print.headers.includes(probe.toLowerCase());
+  });
+  ok('a name or company ending in a column noun is never reported as a header',
+    leakedNames.length === 0, `leaked ${JSON.stringify(leakedNames)}`);
+  // ...and the real labels beside them still are, so the diagnostic keeps working.
+  const alongside = statementLayoutFingerprint([
+    'Credit Card Statement', 'ALICE CREDIT', 'MS SAMPLE CARDHOLDER',
+    'Transaction Date', 'Posting Date', 'Original Amount', 'Total Amount',
+  ].join('\n'), 'AED');
+  ok('the known labels beside a name are still reported, and the rest counted',
+    alongside.headers.includes('transaction date') &&
+      alongside.headers.includes('original amount') &&
+      alongside.headers.includes('total amount') &&
+      alongside.otherHeaderLines >= 2,
+    JSON.stringify([alongside.headers, alongside.otherHeaderLines]));
+
+  // ── A stated ZERO balance is a balance ──
+  //
+  // `0.00` is a placeholder in a transaction cell — an empty debit or credit
+  // column prints exactly that — but a fully paid card and a newly opened
+  // account both legitimately state zero. Rejecting it left such a statement
+  // `unknown` even when its rows reached the stated figure exactly.
+  const fromZero = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 0.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 0.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    'Total Outstanding', '100.00',
+  ].join('\n'), 'AED');
+  ok('a statement opening at zero reconciles instead of reading as unstated',
+    fromZero.reconciliation.verdict === 'proven' && fromZero.reconciliation.openingMinor === 0,
+    JSON.stringify(fromZero.reconciliation));
+  // A bare dash really is an empty cell and must stay unreadable as an anchor.
+  const dashed = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance -',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('an empty-cell dash is not a zero balance',
+    dashed.reconciliation.verdict === 'unknown', JSON.stringify(dashed.reconciliation));
+
+  // ── A date-led summary row is ambiguous, so decline rather than accuse ──
+  //
+  // `01/07/2026 NEW BALANCE 100.00 - 4,900.00` reads as a summary line, so it is
+  // neither accepted nor rejected and the sum is short by a transaction that may
+  // well be real. Reporting that as the parse contradicting itself accuses a
+  // reading that did nothing wrong.
+  const datedSummary = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 NEW BALANCE 100.00 - 4,900.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a date-led summary row makes the verdict unknown, never contradicted',
+    datedSummary.reconciliation.verdict === 'unknown',
+    JSON.stringify([datedSummary.rows.length, datedSummary.rejectedRows, datedSummary.reconciliation]));
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

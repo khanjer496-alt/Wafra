@@ -211,6 +211,7 @@ export function SupplementImports() {
     if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
     if (value.code === 'pdf_password_incorrect') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
+    if (value.code === 'statement_does_not_reconcile') return copy.errReconcile;
     if (value.code === 'rate_limited' || value.code === 'queue_full') return copy.errRate;
     if (value.code === 'service') return copy.serviceError;
     return copy.errUnexpected;

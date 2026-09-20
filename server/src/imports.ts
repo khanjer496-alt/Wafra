@@ -1365,7 +1365,15 @@ function signedBalance(
   if (trailing) words.pop();
   const split = splitDirectionSuffix(words.at(-1) ?? '');
   const figure = classifyMoneyToken(split.figure, currency);
-  if (!figure || figure.kind === 'placeholder') return null;
+  // `0.00` is a PLACEHOLDER in a transaction cell — an empty debit or credit
+  // column prints exactly that — but it is a real figure in a balance anchor: a
+  // fully paid card and a newly opened account both legitimately state zero.
+  // Rejecting it left such a statement `unknown` even when its rows reached the
+  // stated zero exactly. A bare `-` or `--` really is an empty cell and stays out.
+  if (figure?.kind === 'placeholder') {
+    return /^0(?:\.0{1,3})?$/.test(split.figure) ? 0 : null;
+  }
+  if (!figure) return null;
   trailing = trailing ?? split.marker;
   if (!trailing && figure.kind === 'signed') {
     trailing = figure.type === 'income' ? 'CR' : 'DR';
@@ -1421,7 +1429,18 @@ function unaccountedDateLedLines(lines: string[], currency: StatementCurrency): 
   for (const line of lines) {
     if (!line || line.length > 400) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
-    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
+    if (!prefixed) continue;
+    if (SUMMARY_DESCRIPTION.test(prefixed[2])) {
+      // A DATE-LED summary line is ambiguous, and both readings are plausible: a
+      // balance row the table dated, or a transaction at a payee whose name
+      // starts with a balance word. `01/07/2026 NEW BALANCE 100.00 - 4,900.00`
+      // is read as a summary and so is neither accepted nor rejected, which
+      // leaves the sum short by a transaction that may well be real. Counting it
+      // here is what keeps that from being reported as the parse contradicting
+      // itself. An undated summary line is the normal shape and is not counted.
+      if (LOOKS_LIKE_MONEY_LINE.test(line)) unaccounted += 1;
+      continue;
+    }
     if (LOOKS_LIKE_MONEY_LINE.test(line)) continue;
     // A line with no description under its date is a period or a heading, not a
     // transaction this parser lost. See `hasDescriptionUnderDate`.
@@ -1549,32 +1568,48 @@ export interface StatementLayoutFingerprint {
  * a name, an employer or a street cannot satisfy it. Anything else is counted
  * and not named, so the count still says how much was passed over.
  */
-const COLUMN_NOUN =
-  /\b(?:amounts?|dates?|balances?|descriptions?|details?|debits?|credits?|references?|totals?|charges?|values?|postings?|narration|particulars|withdrawals?|deposits?|transactions?|billing|settlements?|currency|rate|vat|tax|fees?|limits?|payments?|outstanding)\b/i;
-const MAX_FINGERPRINT_LABEL_WORDS = 4;
+const KNOWN_COLUMN_LABELS = [
+  'transaction date', 'posting date', 'post date', 'value date', 'date',
+  'transaction details', 'transaction description', 'description', 'details',
+  'narration', 'particulars', 'reference', 'reference number',
+  'debit', 'credit', 'debit amount', 'credit amount', 'withdrawal', 'withdrawals',
+  'deposit', 'deposits', 'amount', 'balance', 'running balance', 'closing balance',
+  'opening balance', 'previous balance', 'new balance', 'statement balance',
+  'total outstanding', 'minimum payment', 'minimum amount due', 'payment due date',
+  'credit limit', 'available limit', 'finance charges', 'vat', 'tax', 'fees',
+  'currency', 'rate', 'exchange rate', 'card number', 'total', 'charges',
+  // Seen on real statements and added here deliberately: this list is how a new
+  // bank's column vocabulary enters the diagnostic, and every entry is generic
+  // column wording rather than anything out of anyone's file.
+  'other debits', 'other credits', 'start date', 'end date', 'transaction',
+  'statement date', 'due date', 'amount due', 'total amount due', 'payments',
+];
 
 /**
- * Whether a label NAMES a column rather than merely containing a column word.
+ * Whether a label is one this parser already knows the name of.
  *
- * Containing one is not enough, and the gap is a company name: `GULF PAYMENTS
- * SERVICES LLC` carries "payments", is four words, and went into the report
- * verbatim - the very leak the noun filter was added to stop, surviving it.
+ * A CLOSED SET, and it has to be, because every heuristic tried here leaked. A
+ * bare "does the line contain a column word" emitted a cardholder's employer
+ * (`GULF PAYMENTS SERVICES LLC` carries "payments"). Requiring the noun to be
+ * the LAST word emitted their name (`ALICE CREDIT`, `MOHAMMED TOTAL` - a name
+ * followed by a column noun passes that test exactly as a real header does).
  *
- * A column label ENDS in its noun - "Original Amount", "Posting Date", "Closing
- * Balance", "Debit" - while a trading name ends in what it is: LLC, Ltd, PJSC,
- * Bank, Services. So the noun has to be the last word, allowing the currency
- * parenthetical a header may carry after it. Labels this parser already knows
- * are admitted outright: they are a closed set, so they cannot be anyone's name,
- * and letting them through keeps "Amount in AED" reportable.
+ * There is no test over free text that separates "a column called X" from "a
+ * person called X", because the strings are the same shape. So the only
+ * defensible rule is to report nothing that did not already exist in this file:
+ * a label is named only when it matches a constant here, which makes the output
+ * PROVABLY content-free rather than carefully filtered. Everything else is
+ * counted, so the count still says how much was passed over.
+ *
+ * The cost is that a bank's novel word for a column is no longer learned from
+ * the fingerprint. The row shapes still show the table's structure, which is the
+ * actionable half, and a new label can be added here once someone has seen it.
+ * That is a smaller loss than a name in a diagnostic.
  */
 function namesAColumn(label: string, currency: StatementCurrency): boolean {
-  if (CHARGED_AMOUNT_LABELS.includes(label) || settlementAmountLabels(currency).includes(label)) {
-    return true;
-  }
-  const words = label.split(' ');
-  if (words.length > MAX_FINGERPRINT_LABEL_WORDS) return false;
-  const last = words.at(-1) ?? '';
-  return COLUMN_NOUN.test(last);
+  return KNOWN_COLUMN_LABELS.includes(label)
+    || CHARGED_AMOUNT_LABELS.includes(label)
+    || settlementAmountLabels(currency).includes(label);
 }
 
 function reportableColumnLabels(

@@ -196,5 +196,31 @@ ok('both languages define the filing progress line',
   (copySource.match(/acceptedFiling:/g) || []).length === 2,
   'a missing Arabic string would fall through to an undefined status');
 
+
+// A parse that provably does not add up is refused by the Worker, so the client
+// has to recognise the refusal rather than fall through to "unexpected" — the
+// user is told nothing was imported, which is the whole point of refusing.
+ok('a non-reconciling statement is a known refusal, not an unexpected error',
+  pdfImportError(422, { error: 'statement_does_not_reconcile' }).code ===
+    'statement_does_not_reconcile');
+ok('and it has copy in both languages',
+  (copySource.match(/errReconcile:/g) || []).length === 2,
+  'a missing Arabic string would show the user an undefined error');
+
+// The layout fingerprint a Worker returns with an unsupported statement is
+// carried, not dropped at the boundary. It held only the code and status before,
+// so nothing downstream could ever report why a file read nothing.
+const unsupported = pdfImportError(422, {
+  error: 'unsupported_statement_format',
+  layout: { headers: ['transaction date'], shapes: [{ shape: 'DATE WORD+ MONEY', count: 3 }] },
+});
+ok('the layout survives the client error boundary',
+  unsupported.code === 'unsupported_statement_format' &&
+    JSON.stringify(unsupported.layout) ===
+      '{"headers":["transaction date"],"shapes":[{"shape":"DATE WORD+ MONEY","count":3}]}',
+  JSON.stringify(unsupported.layout));
+ok('an error with no layout still constructs',
+  pdfImportError(429, { error: 'rate_limited' }).layout === undefined);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
