@@ -22,7 +22,10 @@ acceptance gate is claimed as met.
    gives 27.0% coverage and **3 unsafe imports** on Saudi.
 6. The deterministic layer is what actually produces zero unsafe imports —
    and on real bank-alert formats it reaches **0 unsafe / 0 decoy picks /
-   95.0% exact coverage**.
+   97.0% exact coverage** across 14 markets, while matching the shipping
+   parser exactly (11/11) on the markets the app actually ships.
+7. **A representation tuned on the in-pool transfer proxy generalized to the
+   sealed dialects**, which is evidence the proxy is worth keeping.
 
 The architecture this supports is **deterministic-first**: exact extraction
 authorizes an import, and the semantic model narrows and routes. That is close
@@ -200,15 +203,14 @@ consented customer evidence (`results/amount-role-deterministic.json`).
 
 | metric | result |
 |---|---|
-| amounts selected | 189 / 199 |
+| amounts selected | 193 / 199 |
 | **unsafe selections** | **0** |
 | **decoy amounts picked** (balance / limit / statement / minimum-due) | **0** |
-| exact amount + currency coverage | **95.0%** |
-| decoy-present subset | 34 rows, 25 selected, 0 unsafe |
+| exact amount + currency coverage | **97.0%** |
 | latency | 0.08 ms mean, 0.19 ms max |
 
-The 10 abstentions are 8 statement/minimum-due rows and 2 multi-currency FX
-rows. All of those should abstain.
+The 6 abstentions are all Arabic card statements whose only amount is the
+minimum due. A statement is not a ledger row, so abstaining is right.
 
 Getting here required real fixes, each caught by the corpus rather than
 assumed:
@@ -229,6 +231,77 @@ assumed:
 - **Family-conditioned roles.** A fee alert's fee *is* the transaction; a
   purchase alert's fee line is not. This alone moved coverage from 73.9% to
   84.4%.
+- **Clause inheritance for multi-line headers.** A FAB alert puts the event
+  kind on its own line, so the amount's clause said nothing about what it was.
+- **Ledger-currency resolution.** `INR 270 (AED 10.96)` is not ambiguous once
+  the ledger currency is known.
+
+## 9. Against the shipping parser
+
+"No regression versus current deterministic parser" is an acceptance gate and
+it had never been measured. `production_parser_baseline.cjs` runs the shipping
+`parseSms` over the same fixtures (`results/production-parser-baseline.json`).
+
+Scope decides whether this comparison means anything. The app ships market
+packs for **AE and SA only**. Handed a US or French alert it still parses, but
+converts the amount into the ledger currency — so comparing its AED output
+against a USD fixture measures FX conversion, not extraction. The 188
+out-of-scope rows are reported separately and never counted as a regression.
+
+| | rows | selected | unsafe | exact coverage |
+|---|---|---|---|---|
+| shipping parser, in scope | 11 | 11 | 0 | 100% |
+| research extractor, in scope | 11 | 11 | 0 | 100% |
+| research extractor, all 14 markets | 199 | 193 | 0 | 97.0% |
+
+The research extractor **started at 7 of 11** — a real regression, found by
+running the comparison rather than reasoning about it. Four distinct causes,
+all listed in §8 above. It now matches the shipping parser exactly in scope
+while also covering markets the shipping parser does not target.
+
+That is not a reason to replace anything. It means the broader extractor is a
+viable *candidate*, measured against the thing it would have to beat, on the
+corpus that thing was built for.
+
+## 10. The robust representation, and pretrained encoders
+
+`linear-robust` is the representation `dialect_shift_dev.py` selected on the
+MSA↔PAL proxy, evaluated once on the sealed sets
+(`results/benchmark-robust.json`). Joint accuracy, full test sets:
+
+| split | linear | linear-robust | delta |
+|---|---|---|---|
+| MSA | 0.9292 | 0.9281 | −0.11pt |
+| PAL | 0.9110 | 0.9133 | +0.23pt |
+| **Saudi** | 0.8187 | **0.8318** | **+1.31pt** |
+| **Moroccan** | 0.7420 | **0.7529** | **+1.09pt** |
+| Tunisian | 0.5606 | 0.5676 | +0.70pt |
+
+The proxy predicted +1.17pt on MSA→PAL. The sealed dialects delivered +1.31,
++1.09 and +0.70. **The proxy's prediction transferred**, which is the point of
+having it: dialect robustness can be tuned without spending a holdout.
+
+A compact pretrained Arabic encoder used as a *frozen* feature extractor
+(`Geotrend/distilbert-base-ar-cased`, 48.5M parameters) is far worse than a
+64K-parameter char-CNN trained from scratch:
+
+| split | linear-robust joint | Geotrend frozen joint |
+|---|---|---|
+| MSA | 0.9281 | 0.8402 |
+| Saudi | 0.8318 | 0.6793 |
+| Moroccan | 0.7529 | 0.5476 |
+| Tunisian | 0.5676 | 0.3483 |
+
+That is the expected result for mean-pooled features from a model never
+trained to produce sentence embeddings, and it is a lower bound rather than a
+verdict on pretraining. The fine-tuning run is what would answer the question
+properly; it is still in progress.
+
+Worth recording for whoever picks this up: `UBC-NLP/MARBERTv2` tokenizes
+Maghrebi dialect as whole words (`كيفاش`, `نلقى`, `ديالي`) where the Geotrend
+Arabic BERT fragments it into three pieces. If dialect-aware pretraining helps
+anywhere, that is where to look — at 163M parameters it is too large to ship,
+but it would establish the ceiling.
 
 ## What this means for the architecture
 
@@ -263,7 +336,7 @@ financial evidence"; drop the "and/or".
   regression versus current deterministic parser" is a stated gate and it has
   not been measured. It needs `scripts/test/build.sh` and a harness that runs
   `parseSms` over the same corpus.
-- **Pretrained encoder results** — see `results/benchmark-robust.json` once
-  that run lands.
+- **A fine-tuned compact encoder.** The frozen-feature run is done and is
+  much worse than the char models (§10); the fine-tune is still running.
 - **Tunisian remains unexplained.** 64 high-risk rows is too little evidence
   to act on, and the trained model is worse than the lexicon on family there.

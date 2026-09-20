@@ -605,7 +605,7 @@ class EvidenceRules:
                 totals[feat] += 1
 
         kept: dict[str, list[tuple[str, float, int]]] = defaultdict(list)
-        for feat, total in totals.items():
+        for feat, total in sorted(totals.items()):
             if total < min_support:
                 continue
             label, hits = support[feat].most_common(1)[0]
@@ -632,7 +632,11 @@ class EvidenceRules:
         }}
         for label, feats in kept.items():
             survivors = []
-            for feat, precision, total in sorted(feats, key=lambda x: (-x[1], -x[2])):
+            # The feature string is the final tie-break. Without it, markers of
+            # equal precision and support come out in set-iteration order,
+            # which varies between runs -- and since the list is truncated at
+            # max_per_class, that can silently change which markers ship.
+            for feat, precision, total in sorted(feats, key=lambda x: (-x[1], -x[2], x[0])):
                 vt = val_totals.get(feat, 0)
                 if vt < min_val_support:
                     continue
