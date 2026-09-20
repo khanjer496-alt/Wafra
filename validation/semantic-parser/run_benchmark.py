@@ -144,6 +144,12 @@ def main() -> int:
     parser.add_argument("--tag", default="run")
     parser.add_argument("--latency-repeats", type=int, default=200)
     parser.add_argument("--rules", default="", help="reuse a saved evidence-rules JSON")
+    parser.add_argument(
+        "--dump-proba",
+        action="store_true",
+        help="also write each model's per-split probability matrix, so gate "
+        "policy can be explored later without refitting anything",
+    )
     args = parser.parse_args()
 
     set_all_seeds(SEED)
@@ -190,6 +196,14 @@ def main() -> int:
             print(f"  scored {split} ({len(rows)}) in {time.time() - t0:.1f}s", flush=True)
         model._fit_seconds = fit_seconds  # noqa: SLF001 - recorded in the result file
         print(f"  fit in {fit_seconds:.0f}s", flush=True)
+        if args.dump_proba:
+            path = RESULTS / f"proba-{args.tag}-{name.replace(':', '_').replace('/', '_')}.npz"
+            np.savez_compressed(
+                path,
+                labels=np.array(model.labels),
+                **{f"proba_{split}": matrix for split, matrix in proba_cache[name].items()},
+            )
+            print(f"  wrote {path.name}", flush=True)
 
     secondary_name = args.secondary if args.secondary in fitted else None
     if secondary_name is None and args.secondary:
@@ -248,6 +262,7 @@ def main() -> int:
             state_rules=rules["state"],
             family_rules=rules["family"],
             base=hybrid_base,
+            grid_family_corroboration=(True, False),
         )
         hybrid_cfg = gate_mod.GateConfig(**tuning["selected"])
 

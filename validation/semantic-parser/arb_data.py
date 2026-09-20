@@ -140,6 +140,43 @@ def load_split(
     return rows
 
 
+def dialect_provenance(data_root: Path = DEFAULT_DATA_ROOT) -> dict[str, str]:
+    """Normalized training-pool text -> "msa" or "pal".
+
+    ``Banking77_full_corpus.csv`` keeps the MSA and Palestinian renderings of
+    each source question in separate columns, so the MSA+PAL training pool can
+    be split by dialect.  That makes an honest dialect-shift development setup
+    possible -- fit on MSA, measure transfer on PAL -- without ever touching the
+    sealed Saudi / Moroccan / Tunisian sets.
+    """
+    msa: set[str] = set()
+    pal: set[str] = set()
+    with open(data_root / "Banking77_full_corpus.csv", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            for column in ("Question_MSA1", "Question_MSA2"):
+                value = (row.get(column) or "").strip()
+                if value and value != "NULL":
+                    msa.add(normalize(value))
+            for column in ("Question_PAL1", "Question_PAL2"):
+                value = (row.get(column) or "").strip()
+                if value and value != "NULL":
+                    pal.add(normalize(value))
+    shared = msa & pal
+    return {
+        **{text: "msa" for text in msa - shared},
+        **{text: "pal" for text in pal - shared},
+    }
+
+
+def by_dialect(rows: list[Example], data_root: Path = DEFAULT_DATA_ROOT) -> dict[str, list[Example]]:
+    """Partition fitting-pool rows into ``msa``, ``pal`` and ``unknown``."""
+    provenance = dialect_provenance(data_root)
+    out: dict[str, list[Example]] = {"msa": [], "pal": [], "unknown": []}
+    for row in rows:
+        out[provenance.get(row.text, "unknown")].append(row)
+    return out
+
+
 def split_digest(rows: list[Example]) -> str:
     """Stable content hash so a stored result can be tied to exact data."""
     digest = hashlib.sha256()
