@@ -14,18 +14,20 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.3
-      - name: Read Companion TestFlight state
+          node-version: 22
+      - name: Query Companion TestFlight builds
+        shell: bash
         run: |
           node --input-type=module <<'NODE'
           import {createPrivateKey,sign} from 'node:crypto';
-          const raw=process.env.EXPO_ASC_API_KEY_P8||'', kid=process.env.EXPO_ASC_KEY_ID, iss=process.env.EXPO_ASC_ISSUER_ID, APP='6814258840';
-          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8'); const key=createPrivateKey(pem); const b64=v=>Buffer.from(JSON.stringify(v)).toString('base64url');
-          const token=()=>{const n=Math.floor(Date.now()/1000),s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:n,exp:n+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
-          async function get(p){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${p}`,{headers:{Authorization:`Bearer ${token()}`}});const t=await r.text();if(!r.ok)throw new Error(`${r.status} ${t}`);return JSON.parse(t)}
-          const builds=await get(`builds?filter[app]=${APP}&sort=-uploadedDate&limit=10&include=preReleaseVersion,buildBetaDetail`);
-          const inc=new Map((builds.included||[]).map(x=>[`${x.type}:${x.id}`,x]));
-          const rows=(builds.data||[]).map(b=>{const pr=b.relationships?.preReleaseVersion?.data,bd=b.relationships?.buildBetaDetail?.data;return {id:b.id,buildNumber:b.attributes.version,processingState:b.attributes.processingState,uploadedDate:b.attributes.uploadedDate,usesNonExemptEncryption:b.attributes.usesNonExemptEncryption,version:pr?inc.get(`${pr.type}:${pr.id}`)?.attributes?.version:null,externalBuildState:bd?inc.get(`${bd.type}:${bd.id}`)?.attributes?.externalBuildState:null,autoNotifyEnabled:bd?inc.get(`${bd.type}:${bd.id}`)?.attributes?.autoNotifyEnabled:null}});
-          const groups=await get(`apps/${APP}/betaGroups?limit=100`);
-          console.log(JSON.stringify({builds:rows,groups:(groups.data||[]).map(g=>({id:g.id,name:g.attributes.name,internal:g.attributes.isInternalGroup,publicLinkEnabled:g.attributes.publicLinkEnabled,publicLink:g.attributes.publicLink||null}))},null,2));
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'',kid=process.env.EXPO_ASC_KEY_ID,iss=process.env.EXPO_ASC_ISSUER_ID;
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem),b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const now=Math.floor(Date.now()/1000),u=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;
+          const token=`${u}.${sign('sha256',Buffer.from(u),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`;
+          const res=await fetch('https://api.appstoreconnect.apple.com/v1/builds?filter[app]=6814258840&sort=-uploadedDate&limit=10&include=preReleaseVersion,buildBetaDetail',{headers:{Authorization:`Bearer ${token}`}});
+          const text=await res.text(); if(!res.ok) throw new Error(`${res.status} ${text}`); const j=JSON.parse(text);
+          const inc=new Map((j.included||[]).map(x=>[`${x.type}:${x.id}`,x]));
+          const out=j.data.map(b=>{const pr=b.relationships?.preReleaseVersion?.data,bd=b.relationships?.buildBetaDetail?.data;return {id:b.id,buildNumber:b.attributes.version,processingState:b.attributes.processingState,uploadedDate:b.attributes.uploadedDate,version:pr?inc.get(`${pr.type}:${pr.id}`)?.attributes?.version:null,externalBuildState:bd?inc.get(`${bd.type}:${bd.id}`)?.attributes?.externalBuildState:null,internalBuildState:bd?inc.get(`${bd.type}:${bd.id}`)?.attributes?.internalBuildState:null};});
+          console.log(JSON.stringify(out,null,2));
           NODE
