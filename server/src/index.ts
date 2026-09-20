@@ -2034,9 +2034,15 @@ export default {
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
       if (extracted.rows.length === 0) {
+        // The layout, never the contents. Every token that could carry a
+        // merchant, an amount, a balance, a card number or a name is reported
+        // as its class only, so a bank whose table defeats this parser can be
+        // diagnosed and fixed without anyone having to send in a statement.
+        // See statementLayoutFingerprint.
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
+          ...(extracted.layout ? { layout: extracted.layout } : {}),
         }, 422);
       }
       if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
