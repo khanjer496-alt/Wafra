@@ -285,6 +285,7 @@ def select_thresholds(
             require_agreement=base.require_agreement,
             require_family_corroboration=corroborate,
             honour_state_veto=base.honour_state_veto,
+            require_financial_evidence=base.require_financial_evidence,
         )
         records = []
         for i, row in enumerate(val_rows):

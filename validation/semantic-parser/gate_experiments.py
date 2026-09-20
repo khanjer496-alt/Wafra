@@ -103,12 +103,15 @@ def main() -> int:
     rules = deterministic.load_rules(RESULTS / "evidence-rules.json")
 
     p_labels, p_proba = load_proba(args.tag, args.primary)
-    s_labels, s_proba = load_proba(args.tag, args.secondary)
-    third = None
-    if args.third:
-        third = load_proba(args.tag, args.third)
+    loaded: dict[str, tuple[tuple[str, ...], dict]] = {args.primary: (p_labels, p_proba)}
+    for name in {args.secondary, args.third} - {"", args.primary}:
+        loaded[name] = load_proba(args.tag, name)
+    s_labels, s_proba = loaded[args.secondary]
 
-    def intents_from(labels, proba, split):
+    def intents_for(model: str, split: str, n: int) -> list[str | None]:
+        if not model:
+            return [None] * n
+        labels, proba = loaded[model]
         return [labels[int(i)] for i in proba[split].argmax(1)]
 
     ens_labels, ens_proba = p_labels, {}
@@ -121,7 +124,7 @@ def main() -> int:
         "A-confidence-only": {
             "proba": p_proba,
             "labels": p_labels,
-            "secondary": None,
+            "secondary": "",
             "base": GateConfig(require_agreement=False, require_family_corroboration=False,
                                honour_state_veto=False),
             "search_corroboration": False,
@@ -130,7 +133,7 @@ def main() -> int:
         "B-deterministic-veto": {
             "proba": p_proba,
             "labels": p_labels,
-            "secondary": None,
+            "secondary": "",
             "base": GateConfig(require_agreement=False, require_family_corroboration=False,
                                honour_state_veto=True),
             "search_corroboration": False,
@@ -155,6 +158,19 @@ def main() -> int:
             "description": "agreement + marker veto + optional family corroboration",
         },
     }
+    if args.third:
+        policies["G-agreement-with-different-architecture"] = {
+            "proba": p_proba,
+            "labels": p_labels,
+            "secondary": args.third,
+            "base": GateConfig(require_agreement=True, require_family_corroboration=False,
+                               honour_state_veto=True),
+            "search_corroboration": False,
+            "description": (
+                f"agreement with {args.third}, the most architecturally different "
+                "second opinion available"
+            ),
+        }
     policies["F-deterministic-evidence-required"] = {
         "proba": p_proba,
         "labels": p_labels,
@@ -191,9 +207,7 @@ def main() -> int:
     }
 
     for name, spec in policies.items():
-        sec_val = (
-            intents_from(s_labels, s_proba, "val") if spec["secondary"] else [None] * len(val)
-        )
+        sec_val = intents_for(spec["secondary"], "val", len(val))
         tuning = select_thresholds(
             val,
             spec["proba"]["val"],
@@ -208,17 +222,14 @@ def main() -> int:
 
         entry = {
             "description": spec["description"],
+            "secondary_model": spec["secondary"] or None,
             "selected_config": tuning["selected"],
             "val": tuning["selected_val_metrics"],
             "zero_unsafe_configs_on_val": tuning["zero_unsafe_configs_on_val"],
             "splits": {},
         }
         for split, rows in tests.items():
-            sec = (
-                intents_from(s_labels, s_proba, split)
-                if spec["secondary"]
-                else [None] * len(rows)
-            )
+            sec = intents_for(spec["secondary"], split, len(rows))
             records = run_policy(
                 rows, spec["proba"][split], spec["labels"], sec, config,
                 state_rules=rules["state"], family_rules=rules["family"],
