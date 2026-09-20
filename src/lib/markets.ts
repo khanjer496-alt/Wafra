@@ -479,6 +479,67 @@ export function bankFromMessage(
   return null;
 }
 
+/**
+ * The one bank a message body claims as the reader's own, in bankFromSender's
+ * shape, or null when it claims none or more than one.
+ *
+ * iOS 26's Find Messages entity exposes a message's body, identifier and date
+ * but no sender (device probes, 2026-09-20), so an imported alert can arrive
+ * with nothing for bankFromSender to read. Bank alerts usually name their bank
+ * next to the instrument ("your ADIB Covered Card", "Your FAB account") or as
+ * a leading header ("ADCB: …", "RAKBANK" on its own first line), and those
+ * two shapes are the only bank identity such a record has. A transfer's
+ * destination ("to your FAB Account") is named by the sending bank, so a
+ * claim preceded by "to" is not one. A bank named anywhere else is not the issuer:
+ * another bank's ATM, a remitter, or a merchant whose name contains a bank
+ * token ("ADIBA FLOWERS") must not become the account's bank, because the
+ * import planner would then mint a wrong-bank account and refuse to bind the
+ * row to the real one. Two banks claimed as yours in one body resolve to null
+ * rather than a guess.
+ */
+const bankClaimedPatterns = new WeakMap<RegExp, RegExp>();
+function bankClaimedPattern(re: RegExp): RegExp {
+  let claimed = bankClaimedPatterns.get(re);
+  if (!claimed) {
+    const bank = `(?:${re.source})\\b\\.?`;
+    // Group 1 captures a leading "to"/"into": "to your FAB Account" is a transfer's
+    // destination, which the sending bank's alert names without naming
+    // itself, so that claim is discarded by bankClaimed below. The header
+    // form deliberately has no `m` flag: only the body's first line counts.
+    // The cached pattern is global; only bankClaimed may use it, and it resets
+    // lastIndex before every scan.
+    claimed = new RegExp(
+      `(?:\\b(to|into|unto)\\s+)?\\byour\\s+${bank}[^\\n.]{0,24}?\\b(?:card|account|acc|a\\/c|acct|wallet)\\b` +
+      `|^\\s*${bank}\\s*(?:[:\\-\u2013|]|alert\\b|\\n)`,
+      'ig',
+    );
+    bankClaimedPatterns.set(re, claimed);
+  }
+  return claimed;
+}
+
+function bankClaimed(re: RegExp, text: string): boolean {
+  const pattern = bankClaimedPattern(re);
+  pattern.lastIndex = 0;
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    if (!match[1]) return true;
+  }
+  return false;
+}
+
+export function soleBankNamedInText(
+  text: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!text) return null;
+  let found: { name: string; color: string; domain?: string } | null = null;
+  for (const b of active.banks) {
+    if (!bankClaimed(b.re, text)) continue;
+    if (found) return null;
+    found = { name: b.name, color: b.color, domain: b.domain };
+  }
+  return found;
+}
+
 /** The active market's entry for a bank name, in bankFromSender's shape. */
 export function bankFromName(
   name: string | undefined,
