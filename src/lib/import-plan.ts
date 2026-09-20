@@ -1182,6 +1182,10 @@ function buildImportPlanInMarket(
           p.minDueFils ?? (p.currency === 'AED' ? estimatedMinimumFils(p.amountFils) : 0),
         minDueEstimated: p.minDueFils === null ? true : undefined,
         dueDate: p.date,
+        // What the bank said it closed this statement on, when it said so. The
+        // allocator reads it to keep the previous cycle's payment off this
+        // statement; see `computePaymentAllocations`.
+        ...(p.statementDate ? { statementDate: p.statementDate } : {}),
         paidFils: 0,
       });
       continue;

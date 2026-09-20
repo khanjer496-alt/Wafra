@@ -176,6 +176,11 @@ export function mergeImportedCardDues(
       .filter((value): value is string => Boolean(value))
       .sort()
       .at(-1);
+    // A statement date is a fact about the cycle, not a figure to reconcile.
+    // `existing` is walked before `incoming`, so a fresher reading supersedes an
+    // older one, and a reminder that omits it never erases what a statement
+    // already stated.
+    const statementDate = due.statementDate ?? prior.statementDate;
 
     merged[at] = {
       ...prior,
@@ -185,6 +190,7 @@ export function mergeImportedCardDues(
         ? due.minDueEstimated
         : priorKnown || nextKnown ? undefined : true,
       paidFils: Math.max(prior.paidFils, due.paidFils),
+      ...(statementDate ? { statementDate } : {}),
       settledAt,
     };
   }
@@ -963,6 +969,14 @@ function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardP
 /** A card's statements: one per due date, however many rows describe each. */
 interface Statement {
   dueDate: string;
+  /**
+   * The LATEST statement date any copy of this statement quotes, or null when
+   * none does. Latest, for the same reason `totalFils` takes the largest: it is
+   * the narrower allocation window, and under-crediting leaves a balance the
+   * user can clear with Mark paid, while over-crediting quietly settles a bill
+   * they still owe.
+   */
+  statementDate: string | null;
   /** The largest figure any copy of this statement quotes. */
   totalFils: number;
   /** Allocated so far — seeded with manual "Mark paid" amounts. */
@@ -980,6 +994,47 @@ interface Allocation {
   payments: Transaction[];
 }
 
+/** How far before a deadline a statement is assumed to have been issued. */
+const ASSUMED_STATEMENT_DAYS = 25;
+
+/**
+ * The longest statement-to-deadline gap a stated statement date may claim.
+ *
+ * A stated date is trusted over the approximation, so a corrupt or
+ * mis-parsed one must not widen the window without limit. UAE and Saudi cards
+ * quote 20-25 days; 60 leaves generous room for a longer cycle while refusing
+ * a figure that would reach back into the cycle before last.
+ */
+const MAX_STATEMENT_GAP_DAYS = 60;
+
+/**
+ * The statement date this due states, or null when it states none usable.
+ *
+ * A statement is closed BEFORE it is due, so a date on or after the deadline is
+ * not this statement's issue date whatever the row says, and one further back
+ * than a plausible cycle is not either.
+ */
+function statedIssueDate(due: CardDue): string | null {
+  const stated = due.statementDate;
+  if (!stated) return null;
+  if (stated >= due.dueDate) return null;
+  if (stated < shiftISO(due.dueDate, -MAX_STATEMENT_GAP_DAYS)) return null;
+  return stated;
+}
+
+/**
+ * When this statement came into existence — stated, or approximated.
+ *
+ * One function for both edges of a statement's allocation window: the day it
+ * opens for its OWN statement, and the day it closes the previous one's. They
+ * were two different figures, and the overlap between them is where a payment
+ * could be credited to a cycle it had nothing to do with. Deriving both from
+ * here means one statement's window ends exactly where the next one's begins.
+ */
+function issueDateOf(s: Statement): string {
+  return s.statementDate ?? shiftISO(s.dueDate, -ASSUMED_STATEMENT_DAYS);
+}
+
 /**
  * Payments spread across a card's statements, each payment counted once.
  *
@@ -990,7 +1045,14 @@ interface Allocation {
  * vanished from the app while it was still owed.
  *
  * Payments are walked oldest-first and poured into the oldest statement they
- * could belong to, so an overpayment still spills onto the next one.
+ * could belong to.
+ *
+ * An overpayment does NOT spill onto the next statement, and used to. A
+ * statement total is the card's balance on the day the bank closed it, so a
+ * surplus paid before that day is already netted off the figure the bank
+ * printed — crediting it again is one payment counted twice, which settles a
+ * bill nobody paid. Each payment belongs to the cycle it was made in, and the
+ * cycle boundary is `issueDateOf`.
  *
  * Three things the plain window got wrong, all of which read to the user as
  * "I paid this and it still says I owe it":
@@ -1029,6 +1091,7 @@ function computePaymentAllocations(
     if (!s) {
       byDate.set(d.dueDate, {
         dueDate: d.dueDate,
+        statementDate: statedIssueDate(d),
         totalFils: d.totalDueFils,
         paidFils: d.paidFils,
         settledOn,
@@ -1040,6 +1103,8 @@ function computePaymentAllocations(
     s.totalFils = Math.max(s.totalFils, d.totalDueFils);
     // Manual "Mark paid" happened once, to the statement, not to each copy.
     s.paidFils = Math.max(s.paidFils, d.paidFils);
+    const stated = statedIssueDate(d);
+    if (stated && (!s.statementDate || stated > s.statementDate)) s.statementDate = stated;
     if (settledOn && (!s.settledOn || settledOn > s.settledOn)) s.settledOn = settledOn;
     s.dueIds.push(d.id);
   }
@@ -1051,13 +1116,26 @@ function computePaymentAllocations(
       const s = statements[i];
       const outstanding = s.totalFils - s.paidFils;
       if (outstanding <= 0) continue;
-      if (payment.date < shiftISO(s.dueDate, -40)) continue;
-      const next = statements[i + 1]?.dueDate;
+      // Nothing paid before this statement was issued can be a payment of it.
+      // Its total IS the balance as of that day, so an earlier payment is
+      // either already inside that figure or was settling the previous cycle —
+      // whose unpaid remainder this statement carries forward anyway. This is
+      // the mirror of the `until` rule below, and it was missing: the window
+      // opened 40 days before the deadline while the same statement's ISSUE was
+      // approximated 25 days before it, so 15 days belonged to both cycles.
+      // Emirates NBD's gap is exactly 25 days ("Statement date 28/08/26 ...
+      // Due Date 22/09/26"), so a payment made for the August bill landed on
+      // the September statement and settled AED 2,469.92 nobody had paid —
+      // whenever the August statement could not absorb it first, which is every
+      // time it was marked paid by hand, never reached the app, or recorded a
+      // total lower than the payment.
+      if (payment.date < issueDateOf(s)) continue;
+      const next = statements[i + 1];
       // A newer statement closes this one's allocation window when it was
       // issued. The newest known statement has no arbitrary +20-day cutoff:
       // people pay late, and until a replacement exists that payment still
       // settles the only balance Wafra knows about.
-      let until = next ? shiftISO(next, -25) : null;
+      let until = next ? issueDateOf(next) : null;
       if (s.settledOn && (!until || s.settledOn > until)) until = s.settledOn;
       if (until && payment.date > until) continue;
       const take = Math.min(outstanding, left);

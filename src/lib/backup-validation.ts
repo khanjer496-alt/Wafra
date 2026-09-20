@@ -90,7 +90,7 @@ const billAlias: Check = (value) => record(value) &&
 const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
-}) && optional(value, { minDueEstimated: boolean, settledAt: isoDate });
+}) && optional(value, { minDueEstimated: boolean, statementDate: isoDate, settledAt: isoDate });
 const statementCoverageEntry: Check = (value) => record(value) && required(value, {
   id, sourceKey: id, label: text, startDate: isoDate, endDate: isoDate, importedAt: nonnegative,
   format: oneOf('pdf', 'csv'),

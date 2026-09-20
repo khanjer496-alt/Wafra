@@ -427,6 +427,13 @@ export interface ParsedSms {
   dueDay: number | null;
   /** For cardStatement: minimum amount due, when present. */
   minDueFils: number | null;
+  /**
+   * For `cardStatement`: the day the bank closed the statement, when it states
+   * one. Never a deadline — `date` is the deadline. Payment allocation reads it
+   * to know when this statement's balance started existing; see
+   * `extractStatementDate` and `computePaymentAllocations`.
+   */
+  statementDate?: string;
   /** Card/account the message refers to, when identifiable. */
   card: ParsedCard | null;
   /**
@@ -4498,6 +4505,66 @@ function namedDate(monthWord: string, day: string, year: string): string | null 
   return month ? isoDate(y, month, Number(day)) : null;
 }
 
+// Three spellings, and the gap in the last two is what makes them dangerous:
+// "statement ... due date 26Aug26" would read the DEADLINE as the closing day,
+// which is worse than reading nothing, so the gap may not cross a "due" and
+// only the unambiguous words — "dated", "generated on" — are reachable through
+// one. `invariants.test.js` holds the whole corpus to statementDate < date.
+const STATEMENT_DATE_LABEL = String.raw`(?:\b(?:statement|stmt)\.?\s*dat(?:e|ed)\b` +
+  String.raw`|\b(?:statement|stmt)\b(?:(?!\bdue\b)[^.\n]){0,48}?\bdated\b` +
+  String.raw`|\b(?:statement|stmt)\b(?:(?!\bdue\b)[^.\n]){0,24}?\bgenerated\s+on\b)`;
+const STATEMENT_DATE_NUMERIC_RE = new RegExp(
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?!\\d)`, 'i');
+const STATEMENT_DATE_ISO_RE = new RegExp(
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{4})-(\\d{1,2})-(\\d{1,2})(?!\\d)`, 'i');
+const STATEMENT_DATE_NAMED_RE = new RegExp(
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[-\\s]*([A-Za-z]{3,9})\\.?[-\\s]*(\\d{2,4})(?!\\d)`, 'i');
+
+/**
+ * THE DAY THE BANK CLOSED THIS STATEMENT, or null when it names none.
+ *
+ * Not a deadline and never used as one. A statement's total is its balance as
+ * of this date, so money paid BEFORE it is already inside that total —
+ * `computePaymentAllocations` needs the figure to stop crediting last cycle's
+ * payment to this cycle's bill. Emirates NBD states it 25 days ahead of the
+ * deadline ("Statement date 28/08/26 ... Due Date 22/09/26"), and without it
+ * allocation had to approximate the issue date from the deadline alone.
+ *
+ * Label-anchored, and only to the labels that name THIS date. A bare date
+ * elsewhere in a statement is as likely to be the deadline, and reading the
+ * deadline here would open the window after the money was already owed —
+ * which is the exact failure this function exists to close.
+ *
+ * Arabic statements and the banks that state no statement date at all keep the
+ * deadline-derived approximation; there is no corpus sample of an Arabic
+ * statement-date label to anchor a pattern to.
+ *
+ * "Generated on" is the same fact under a verb, and `extractDueDate` already
+ * refuses to read it as a deadline — a statement that says "generated on
+ * 20/12/2026 ... Payment due on 05/01/2027" states both days, and its cycle is
+ * 16 days, not the 25 the approximation would assume.
+ */
+function extractStatementDate(raw: string): string | null {
+  // ISO first: "28-08-2026" and "2026-08-28" both satisfy the numeric shape,
+  // and reading the four-digit year as a day yields nothing at all.
+  const iso = raw.match(STATEMENT_DATE_ISO_RE);
+  if (iso) {
+    const value = isoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+    if (value) return value;
+  }
+  const numeric = raw.match(STATEMENT_DATE_NUMERIC_RE);
+  if (numeric) {
+    const value = numericDate(numeric[1], numeric[2], numeric[3]);
+    if (value) return value;
+  }
+  const named = raw.match(STATEMENT_DATE_NAMED_RE);
+  if (named) {
+    const value = namedDate(named[2], named[1], named[3]);
+    if (value) return value;
+  }
+  return null;
+}
+
 /**
  * The date a statement says it must be paid by, or null when it states none.
  * Statement-generation dates and message receipt dates are not deadlines.
@@ -5828,6 +5895,7 @@ function parseSmsInner(
     if (!amountFils) return null;
     const minDueFils = statementMinimumFils(raw, amountFils);
     const dueDate = extractDueDate(raw);
+    const statementDate = extractStatementDate(raw);
     return {
       kind: 'cardStatement',
       type: 'expense',
@@ -5836,6 +5904,7 @@ function parseSmsInner(
       date: dueDate,
       dueDay: dueDate ? Number(dueDate.slice(8)) : extractDueDay(raw),
       minDueFils,
+      ...(statementDate ? { statementDate } : {}),
       card: null,
       transferHint: false,
       snapshotFils,
@@ -5862,6 +5931,7 @@ function parseSmsInner(
     if (!amountFils) return null;
     const minDueFils = statementMinimumFils(raw, amountFils);
     const statementDue = extractDueDate(raw);
+    const statementDate = extractStatementDate(raw);
     return {
       kind: 'cardStatement',
       type: 'expense',
@@ -5878,6 +5948,7 @@ function parseSmsInner(
       date: statementDue,
       dueDay: statementDue ? Number(statementDue.slice(8)) : extractDueDay(raw),
       minDueFils,
+      ...(statementDate ? { statementDate } : {}),
       card: { ...card, kind: 'credit' },
       transferHint: false,
       snapshotFils,

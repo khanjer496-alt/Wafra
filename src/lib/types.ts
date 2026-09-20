@@ -321,6 +321,16 @@ export interface CardDue {
   minDueEstimated?: boolean;
   /** ISO date the payment is due by. */
   dueDate: string;
+  /**
+   * ISO date the bank closed this statement, when it stated one.
+   *
+   * Not a deadline: `dueDate` is the deadline. This is when the balance in
+   * `totalDueFils` came into existence, which is what tells payment allocation
+   * that money paid earlier was paying the PREVIOUS cycle. Absent on rows
+   * imported before the parser read it and on banks that state no such date;
+   * allocation approximates it from `dueDate` in that case.
+   */
+  statementDate?: string;
   /** Fils paid toward this due so far. */
   paidFils: number;
   /** User-recorded payment time; allocation evidence, never proof that the current total is paid. */

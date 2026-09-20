@@ -194,6 +194,27 @@ const hits = parsed.filter((x) => x.p);
     bad.slice(0, 2).map((x) => `${x.p.minDueFils} of ${x.p.amountFils}`).join(' | '));
 }
 
+// A statement date is the day the bank CLOSED the statement, and the whole
+// point of reading it is that it is not the deadline. A label-anchored pattern
+// with any gap in it can reach the deadline's own label instead ("statement ...
+// due date 26Aug26"), and that error is silent: payment allocation would open
+// the statement's window after the money was already owed, and credit the
+// following cycle's payment to it. So hold the whole corpus to the ordering.
+{
+  const dated = hits.filter((x) => x.p.statementDate !== undefined);
+  const malformed = dated.filter((x) => !/^\d{4}-\d{2}-\d{2}$/.test(x.p.statementDate));
+  ok('a stated statement date is a well-formed ISO day', malformed.length === 0,
+    malformed.slice(0, 2).map((x) => String(x.p.statementDate)).join(' | '));
+  const notBefore = dated.filter((x) => x.p.date !== null && !(x.p.statementDate < x.p.date));
+  ok('a statement date always falls before the deadline it states', notBefore.length === 0,
+    notBefore.slice(0, 2).map((x) => `${x.p.statementDate} !< ${x.p.date}`).join(' | '));
+  // Only a statement has one. Reading it off a purchase alert would attach a
+  // closing day to a row that has no cycle at all.
+  const wrongKind = dated.filter((x) => x.p.kind !== 'cardStatement');
+  ok('only a card statement reports a statement date', wrongKind.length === 0,
+    wrongKind.slice(0, 2).map((x) => x.p.kind).join(' | '));
+}
+
 {
   const bad = hits.filter((x) => x.p.card && !/^\d{3,4}$/.test(x.p.card.last4));
   ok('a card is identified by three or four digits, nothing else', bad.length === 0,

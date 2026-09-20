@@ -163,7 +163,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     accounts: state.accounts.map(account => fields(account, ACCOUNT_FIELDS)), transactions,
     budgets: state.budgets.map(row => fields(row, 'category limitFils')),
     bills: state.bills.map(row => ({ ...fields(row, 'id title category importIdentity amountFils dueDay yearlyOnISO accountId autoDetected'), paidMonths: row.paidMonths.filter(v => typeof v === 'string') })),
-    cardDues: state.cardDues.map(row => fields(row, 'id accountId totalDueFils minDueFils minDueEstimated paidFils dueDate settledAt')),
+    cardDues: state.cardDues.map(row => fields(row, 'id accountId totalDueFils minDueFils minDueEstimated paidFils dueDate statementDate settledAt')),
     goals: state.goals.map(row => fields(row, 'id title emoji targetFils savedFils')),
     merchantOverrides: dictionary(state.merchantOverrides), accountHints: dictionary(state.accountHints),
     notSubscriptions: (state.notSubscriptions ?? []).filter(v => typeof v === 'string'),

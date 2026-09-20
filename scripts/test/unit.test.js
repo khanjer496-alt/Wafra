@@ -684,9 +684,11 @@ ok('openDues: recent overdue credit due still shows',
     cardsGuardLib.duePaidFils(compatOnly, compatOnly.cardDues[0]) === 564507);
 
   // Two REAL payments of the same amount on different days stay two payments.
-  // Both statements are dated so that both payments fall inside their windows —
-  // otherwise this would pass for the wrong reason, with the second payment
-  // dropped as too early rather than counted.
+  // Counted against ONE statement big enough to absorb both, deliberately: a
+  // second statement would only prove this through the spill, and a payment can
+  // no longer reach a cycle that had not started when it was made. This asks
+  // the collapsing rule the question directly — one payment or two — and the
+  // dates stay a day apart, which is what makes it a question at all.
   const twoDays = {
     ...dupState,
     transactions: [
@@ -694,12 +696,12 @@ ok('openDues: recent overdue credit due still shows',
       { ...dupState.transactions[1], id: 'later', date: '2026-08-06' },
     ],
     cardDues: [
-      { id: 'aug', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-08-26', paidFils: 0 },
-      { id: 'sep', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-09-10', paidFils: 0 },
+      { id: 'aug', accountId: 'c', totalDueFils: 1129014, minDueFils: 56450, dueDate: '2026-08-26', paidFils: 0 },
     ],
   };
   ok('pairing: same amount on different days is two payments, not one',
-    cardsGuardLib.duePaidFils(twoDays, twoDays.cardDues[1]) === 564507);
+    cardsGuardLib.duePaidFils(twoDays, twoDays.cardDues[0]) === 1129014,
+    String(cardsGuardLib.duePaidFils(twoDays, twoDays.cardDues[0])));
 }
 
 // The same statement stored twice — a reminder SMS read as a fresh statement —
@@ -1124,10 +1126,20 @@ ok('dues: a single payment settles only the statement it covers',
 ok('dues: the unpaid second statement stays open',
   allocLib.openDues(oneCoversOne, new Date(2026, 6, 20)).length === 1);
 
+// ── An overpayment stops at the end of the cycle it was made in ──
+//
+// This used to spill: AED 500 over a AED 1,000 June bill was credited to July
+// as well. A statement total is the card's balance on the day the bank closed
+// it, so July's own figure ALREADY nets that surplus off — crediting it again
+// is one payment counted twice, which is how a bill nobody paid gets marked
+// paid. June is settled, July owes its stated total.
 const overpay = mkAlloc([{ amountFils: 150000, date: '2026-06-10' }]);
-ok('dues: an overpayment spills onto the next statement',
-  allocLib.duePaidFils(overpay, overpay.cardDues[0]) === 100000 &&
-  allocLib.duePaidFils(overpay, overpay.cardDues[1]) === 50000);
+ok('dues: an overpayment settles its own statement in full',
+  allocLib.duePaidFils(overpay, overpay.cardDues[0]) === 100000,
+  String(allocLib.duePaidFils(overpay, overpay.cardDues[0])));
+ok('dues: and does not reach the next cycle, whose total already nets it',
+  allocLib.duePaidFils(overpay, overpay.cardDues[1]) === 0,
+  String(allocLib.duePaidFils(overpay, overpay.cardDues[1])));
 
 const bothPaid = mkAlloc([
   { amountFils: 100000, date: '2026-06-10' },
@@ -1167,14 +1179,26 @@ ok('dues: July stays open after June is marked paid',
 const legCard = {
   id: 'c1', name: 'Card •1234', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff',
 };
-const mkLegs = (rows) => ({
+const mkLegs = (rows, dues) => ({
   accounts: [legCard],
-  cardDues: [
+  cardDues: dues ?? [
     { id: 'jul', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-07-15', paidFils: 0, settledAt: '2026-07-10T18:00:00Z' },
     { id: 'aug', accountId: 'c1', totalDueFils: 80000, minDueFils: 4000, dueDate: '2026-08-15', paidFils: 0 },
   ],
   transactions: rows,
 });
+// One July statement, wide enough to hold two payments of the same amount.
+//
+// Two alerts for one movement must still read as one payment against it, and
+// two genuine payments as two. That used to be asked of a SECOND statement's
+// balance, which no longer answers it: a payment cannot reach a cycle that had
+// not started when it was made (see the cycle boundary in cards.ts). So ask the
+// collapsing rule itself — no settledAt and no successor here, which leaves the
+// window open on both sides, and the only thing left to measure is whether the
+// two rows are one payment or two.
+const wideJul = [
+  { id: 'jul', accountId: 'c1', totalDueFils: 200000, minDueFils: 5000, dueDate: '2026-07-15', paidFils: 0 },
+];
 const manualJul10 = {
   id: 'm1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
   date: '2026-07-10', category: 'other', title: 'Card •1234 payment', source: 'manual',
@@ -1209,17 +1233,19 @@ const twoBankLegs = mkLegs([
     date: '2026-07-08', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'debit' },
   { id: 'b2', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date: '2026-07-12', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'receipt' },
-]);
+], wideJul);
 ok('dues: two bank alerts four days apart stay two payments',
-  allocLib.duePaidFils(twoBankLegs, twoBankLegs.cardDues[1]) === 80000);
+  allocLib.duePaidFils(twoBankLegs, twoBankLegs.cardDues[0]) === 200000,
+  String(allocLib.duePaidFils(twoBankLegs, twoBankLegs.cardDues[0])));
 const adjacentBankLegs = mkLegs([
   { id: 'b1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date: '2026-07-09', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'debit' },
   { id: 'b2', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date: '2026-07-10', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'receipt' },
-]);
+], wideJul);
 ok('dues: the two legs of one settlement a night apart are still one payment',
-  allocLib.duePaidFils(adjacentBankLegs, adjacentBankLegs.cardDues[1]) === 0);
+  allocLib.duePaidFils(adjacentBankLegs, adjacentBankLegs.cardDues[0]) === 100000,
+  String(allocLib.duePaidFils(adjacentBankLegs, adjacentBankLegs.cardDues[0])));
 
 // The invariant the whole allocator exists for, restated over the wider window:
 // two overlapping statements, one payment, counted exactly once.
@@ -1251,7 +1277,9 @@ eq('dues: each statement names only the payment credited to it',
   [allocLib.duePayments(matchedState, matchedState.cardDues[0]).map((t) => t.id),
    allocLib.duePayments(matchedState, matchedState.cardDues[1]).map((t) => t.id)],
   [['p_jun'], ['p_jul']]);
-// An overpayment really does pay into both, so it is named against both.
+// An overpayment is named against the statement it paid, and only that one.
+// "Paid into both" was the old reading of a surplus, and the July statement it
+// named was already stated net of that surplus by the bank.
 const spillState = {
   ...matchedState,
   transactions: [{
@@ -1259,10 +1287,10 @@ const spillState = {
     date: '2026-06-10', category: 'other', title: 'card payment', source: 'sms',
   }],
 };
-eq('dues: a payment that spills is named against both statements it paid',
+eq('dues: an overpayment is named against its own statement only',
   [allocLib.duePayments(spillState, spillState.cardDues[0]).map((t) => t.id),
    allocLib.duePayments(spillState, spillState.cardDues[1]).map((t) => t.id)],
-  [['big'], ['big']]);
+  [['big'], []]);
 // The reported symptom, stated as a number: six monthly payments, and the
 // statement one of them settled says one — not six.
 const sixMonths = {
@@ -1300,26 +1328,62 @@ ok('dues: the compat expense-side settlement row is a matched payment',
   allocLib.duePayments(compatState, compatState.cardDues[0]).length === 1 &&
   allocLib.duePaidFils(compatState, compatState.cardDues[0]) === 100000);
 
-// ── The 40-day floor is deliberate, and stays ──
+// ── A statement takes no payment made before it existed ──
 //
-// A payment more than ~40 days before a due date belongs to the PREVIOUS
-// statement's cycle, not this one. When that earlier statement was never
-// captured — a first import, a card added late — crediting this one instead
-// would say "nothing owed" about a balance that is genuinely owed, which is
-// the expensive direction of error this whole file is written against. Leaving
-// it uncredited leaves a balance the user can clear with Mark paid.
-const floorState = (date) => ({
+// A payment made before the bank closed a statement belongs to the PREVIOUS
+// cycle, not this one: this statement's total IS the balance on its closing
+// day, so anything paid earlier is either inside that figure already or was
+// settling the cycle before — whose unpaid remainder this total carries
+// forward anyway. When that earlier statement was never captured — a first
+// import, a card added late — crediting this one instead says "nothing owed"
+// about a balance that is genuinely owed, which is the expensive direction of
+// error this whole file is written against. Leaving it uncredited leaves a
+// balance the user can clear with Mark paid.
+//
+// The floor used to sit 40 days before the DEADLINE while the same statement's
+// issue was approximated at 25, so 15 days belonged to two cycles at once. An
+// Emirates NBD card states both dates and its gap is exactly 25 days
+// ("Statement date 28/08/26 ... Due Date 22/09/26"), so the August bill's
+// payment was credited to the September statement and settled AED 2,469.92
+// nobody had paid.
+const floorState = (date, statementDate) => ({
   accounts: [legCard],
-  cardDues: [{ id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-15', paidFils: 0 }],
+  cardDues: [{
+    id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000,
+    dueDate: '2026-08-15', paidFils: 0,
+    ...(statementDate ? { statementDate } : {}),
+  }],
   transactions: [{
     id: 'p', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date, category: 'other', title: 'card payment', source: 'sms',
   }],
 });
-ok('dues: a payment inside the 40-day window settles the statement',
-  allocLib.duePaidFils(floorState('2026-07-06'), floorState('2026-07-06').cardDues[0]) === 100000);
-ok('dues: a payment from the previous cycle does not settle this statement',
-  allocLib.duePaidFils(floorState('2026-07-05'), floorState('2026-07-05').cardDues[0]) === 0);
+const floorPaid = (date, statementDate) =>
+  allocLib.duePaidFils(floorState(date, statementDate), floorState(date, statementDate).cardDues[0]);
+// No stated statement date: the issue day is approximated 25 days before the
+// deadline, the same approximation used to close the previous cycle's window.
+ok('dues: a payment on the approximated issue day settles the statement',
+  floorPaid('2026-07-21') === 100000, String(floorPaid('2026-07-21')));
+ok('dues: a payment the day before it is the previous cycle, and is not credited',
+  floorPaid('2026-07-20') === 0, String(floorPaid('2026-07-20')));
+ok('dues: a payment 40 days early no longer settles the statement',
+  floorPaid('2026-07-06') === 0, String(floorPaid('2026-07-06')));
+// A STATED statement date replaces the approximation in both directions: it
+// admits a payment the approximation would have refused...
+ok('dues: a stated statement date admits a payment the approximation refused',
+  floorPaid('2026-07-18', '2026-07-18') === 100000, String(floorPaid('2026-07-18', '2026-07-18')));
+// ...and refuses one the approximation would have taken.
+ok('dues: a stated statement date refuses a payment made before it',
+  floorPaid('2026-07-22', '2026-07-25') === 0, String(floorPaid('2026-07-22', '2026-07-25')));
+// A statement date is never a deadline. One on or after the due date cannot be
+// this statement's issue day whatever the row says, so the approximation stands.
+ok('dues: a statement date on or after the deadline is ignored',
+  floorPaid('2026-07-21', '2026-08-15') === 100000, String(floorPaid('2026-07-21', '2026-08-15')));
+// Nor may a corrupt one reach back into the cycle before last. Asked with the
+// payment ON that date, so trusting it would credit the statement and the
+// assertion cannot pass just because the payment is old.
+ok('dues: a statement date further back than a plausible cycle is ignored',
+  floorPaid('2026-04-30', '2026-04-30') === 0, String(floorPaid('2026-04-30', '2026-04-30')));
 
 // The one-payment case above makes the floor look like an arbitrary one-day
 // cliff worth removing. It is not: the floor is the ONLY thing bounding the
