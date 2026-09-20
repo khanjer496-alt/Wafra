@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 results/wafra-alert-fixtures.json
+# Built model artifacts. build_e5_artifact.py regenerates them from the fixed
+# seed, and the measured sizes live in results/e5-int8-artifact-*.json, so the
+# binaries themselves have no business in a mobile app's git history.
+artifacts/
