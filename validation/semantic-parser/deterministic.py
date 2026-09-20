@@ -116,6 +116,8 @@ AMOUNT_ROLE_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "transaction": (
         "purchase of", "purchase", "payment of", "paid", "withdrawal of", "withdrawn",
+        "was used for", "was used at", "used for", "used at", "spent at", "spend of",
+        "was done at", "transaction of", "transaction on",
         "withdrawal", "transfer of", "transferred", "debited with", "debited",
         "credited with", "credited", "spent", "charged with", "charged", "amount of",
         "شراء", "سحب", "تحويل", "دفع", "خصم", "إيداع", "ايداع", "بمبلغ", "مبلغ",
@@ -318,6 +320,26 @@ def _clause_for(spans: list[tuple[int, int]], pos: int) -> tuple[int, int]:
     return spans[-1]
 
 
+def _role_in_span(lower: str, span: tuple[int, int], start: int, end: int) -> tuple[float, int, str] | None:
+    lo, hi = span
+    best: tuple[float, int, str] | None = None
+    for role, words in AMOUNT_ROLE_MARKERS.items():
+        for word in words:
+            offset = lower.find(word, lo, hi)
+            while offset != -1:
+                if offset < start:
+                    distance = max(start - (offset + len(word)), 0.0)
+                    side = 0  # a marker before the amount wins ties
+                else:
+                    distance = max(offset - end, 0.0)
+                    side = 1
+                key = (distance, side, role)
+                if best is None or key < best:
+                    best = key
+                offset = lower.find(word, offset + 1, hi)
+    return best
+
+
 def _roles_for(text: str, lower: str, span: tuple[int, int], start: int, end: int) -> tuple[str, ...]:
     """Role of an amount = nearest role marker inside its own clause.
 
@@ -325,24 +347,7 @@ def _roles_for(text: str, lower: str, span: tuple[int, int], start: int, end: in
     balance AED 12,300" must not mark the purchase as a balance.  A marker that
     precedes the amount beats an equally distant one that follows it.
     """
-    lo, hi = span
-    best: tuple[float, int, str] | None = None
-    for role, words in AMOUNT_ROLE_MARKERS.items():
-        for word in words:
-            offset = lower.find(word, lo, hi)
-            while offset != -1:
-                mid = offset + len(word) / 2
-                if offset < start:
-                    distance = start - (offset + len(word))
-                    side = 0  # preceding marker wins ties
-                else:
-                    distance = offset - end
-                    side = 1
-                distance = max(distance, 0.0)
-                key = (distance, side, role)
-                if best is None or key < best:
-                    best = key
-                offset = lower.find(word, offset + 1, hi)
+    best = _role_in_span(lower, span, start, end)
     return (best[2],) if best else ()
 
 
@@ -359,6 +364,47 @@ def _looks_like_identifier(lower: str, start: int) -> bool:
     trailing = left.split()[-1] if left.split() else ""
     trailing = trailing.strip("*#:.,-")
     return any(trailing == tok.strip() or trailing.endswith(tok.strip()) for tok in _IDENTIFIER_LEFT)
+
+
+_HAS_DIGIT = re.compile(r"\d")
+
+
+def _inherited_roles(
+    lower: str,
+    masked: str,
+    spans: list[tuple[int, int]],
+    span: tuple[int, int],
+    start: int,
+) -> tuple[str, ...]:
+    """Borrow a role from a preceding header line that carries no amount.
+
+    Multi-line alerts put the kind of event on its own line:
+
+        Credit Card Purchase
+        Card No XXXX4711
+        AED 76.50
+
+    The amount's own clause says nothing about what it is, so without this the
+    whole message reads as role-less and the parser abstains. Only clauses that
+    hold no money of their own can lend a role, which keeps a neighbouring
+    balance or limit line from claiming the transaction amount.  The test runs
+    against the identifier-masked text, so a "Card No XXXX4711" line counts as
+    digit-free and does not block the header behind it.
+    """
+    index = next((i for i, sp in enumerate(spans) if sp == span), None)
+    if index is None:
+        return ()
+    for step in range(1, 3):
+        previous = index - step
+        if previous < 0:
+            break
+        lo, hi = spans[previous]
+        if _HAS_DIGIT.search(masked[lo:hi]):
+            break
+        best = _role_in_span(lower, (lo, hi), start, start)
+        if best:
+            return (best[2],)
+    return ()
 
 
 def extract_amounts(text: str) -> list[AmountCandidate]:
@@ -390,6 +436,9 @@ def extract_amounts(text: str) -> list[AmountCandidate]:
         if minor is None:
             continue
         span = _clause_for(spans, start)
+        roles = _roles_for(text, lower, span, start, end)
+        if not roles:
+            roles = _inherited_roles(lower, scan, spans, span, start)
         out.append(
             AmountCandidate(
                 raw=match.group(0).strip(),
@@ -397,7 +446,7 @@ def extract_amounts(text: str) -> list[AmountCandidate]:
                 currency=currency,
                 start=start,
                 end=end,
-                roles=_roles_for(text, lower, span, start, end),
+                roles=roles,
                 clause=text[span[0] : span[1]].strip(),
             )
         )
@@ -417,25 +466,23 @@ DEFAULT_TRANSACTION_ROLES = frozenset({"transaction"})
 
 
 def select_amount_role(
-    candidates: list[AmountCandidate], family: str | None = None
+    candidates: list[AmountCandidate],
+    family: str | None = None,
+    ledger_currency: str | None = None,
 ) -> tuple[int | None, str]:
     """Pick the transaction amount, or abstain.
 
     Returns ``(index_or_None, reason)``.  ``family`` is the family the semantic
     layer proposed; it only ever *narrows* what may be selected, and passing
-    nothing keeps the strictest reading.  The safety rule is that an amount is
+    nothing keeps the strictest reading.  ``ledger_currency`` is the currency
+    the ledger is kept in, which is what lets an FX alert that prints its own
+    local equivalent resolve instead of abstaining.  The safety rule is that an amount is
     selected only when exactly one candidate carries a role that counts as the
     transaction for that family, or when the message holds a single money value
     and no decoy role anywhere.
     """
     if not candidates:
         return None, "no-amount"
-
-    currencies = {c.currency for c in candidates if c.currency}
-    if len(currencies) > 1:
-        # An FX alert quotes both the billed and the settled amount.  Nothing
-        # in the body says which one the ledger uses, so never pick one.
-        return None, "multi-currency-ambiguous"
 
     accepted = TRANSACTION_ROLES_BY_FAMILY.get(family or "", DEFAULT_TRANSACTION_ROLES)
     transactional = [i for i, c in enumerate(candidates) if accepted & set(c.roles)]
@@ -447,6 +494,17 @@ def select_amount_role(
         values = {candidates[i].minor_units for i in transactional}
         if len(values) == 1:
             return transactional[0], "repeated-transaction-amount"
+        # An FX alert prints the same payment twice: the billed amount and the
+        # bank's own equivalent in the account currency.  Told which currency
+        # the ledger keeps, that is not ambiguous -- the ledger's own figure is
+        # the one to record, and it is the bank's number, not a conversion.
+        currencies = {candidates[i].currency for i in transactional}
+        if ledger_currency and len(currencies) > 1:
+            local = [i for i in transactional if candidates[i].currency == ledger_currency]
+            if len(local) == 1:
+                return local[0], "ledger-currency-equivalent"
+        if len(currencies) > 1:
+            return None, "multi-currency-ambiguous"
         return None, "multiple-transaction-roles"
     if len(candidates) == 1 and not decoyed:
         # Exactly one money value in the whole message and nothing anywhere in

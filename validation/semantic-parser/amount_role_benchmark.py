@@ -31,7 +31,7 @@ HERE = Path(__file__).parent
 RESULTS = HERE / "results"
 
 
-def run(rows: list[dict], *, use_family: bool = False) -> dict:
+def run(rows: list[dict], *, use_family: bool = False, ledger_currency: str | None = "AED") -> dict:
     per_row = []
     timings = []
     for row in rows:
@@ -39,7 +39,9 @@ def run(rows: list[dict], *, use_family: bool = False) -> dict:
         started = time.perf_counter()
         candidates = extract_amounts(row["body"])
         index, reason = select_amount_role(
-            candidates, expected.get("family") if use_family else None
+            candidates,
+            expected.get("family") if use_family else None,
+            ledger_currency=ledger_currency,
         )
         timings.append((time.perf_counter() - started) * 1000.0)
 
@@ -47,12 +49,25 @@ def run(rows: list[dict], *, use_family: bool = False) -> dict:
         want_currency = expected.get("currency")
         decoy_minor = expected.get("decoyMinorUnits")
 
+        # When the app converted an FX amount with its own rate table
+        # (fxSource "fallback"), the converted figure appears nowhere in the
+        # body. Deterministic extraction cannot produce it and should not: it
+        # reports the bank's own amount and currency, and conversion stays a
+        # separate, explicit step. Score extraction against what is written.
+        accepted = [(want_minor, want_currency)]
+        if expected.get("fxSource") == "fallback" and expected.get("originalMinorUnits"):
+            accepted.append((expected["originalMinorUnits"], expected.get("originalCurrency")))
+
         selected = candidates[index] if index is not None else None
         got_minor = str(selected.minor_units) if selected else None
         got_currency = selected.currency if selected else None
 
-        amount_ok = selected is not None and want_minor is not None and got_minor == want_minor
-        currency_ok = selected is not None and got_currency == want_currency
+        amount_ok = selected is not None and any(
+            minor is not None and got_minor == minor for minor, _ in accepted
+        )
+        currency_ok = selected is not None and any(
+            got_minor == minor and got_currency == currency for minor, currency in accepted
+        )
         picked_decoy = bool(selected and decoy_minor and got_minor == decoy_minor)
 
         # A candidate whose role is a decoy role is present in the body.
@@ -75,6 +90,7 @@ def run(rows: list[dict], *, use_family: bool = False) -> dict:
                 "expected_minor": want_minor,
                 "got_minor": got_minor,
                 "expected_currency": want_currency,
+                "accepted": [list(a) for a in accepted],
                 "got_currency": got_currency,
                 "candidates": [c.as_dict() for c in candidates],
                 "body": row["body"][:200],

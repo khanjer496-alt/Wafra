@@ -1,60 +1,134 @@
 {
   "experiment": "amount-role-safety",
-  "tag": "deterministic",
-  "created": "2026-09-20T19:24:22Z",
+  "tag": "check2",
+  "created": "2026-09-20T19:23:54Z",
   "corpus_note": "Wafra repository fixtures: privacy-safe near-real templates and standard-derived reconstructions, not consented customer evidence.",
   "fixture_count": 199,
   "overall_family_blind": {
     "n": 199,
-    "selected": 171,
-    "selection_rate": 0.8592964824120602,
-    "abstained": 28,
-    "unsafe_selections": 0,
-    "unsafe_amount_selections": 0,
+    "selected": 170,
+    "selection_rate": 0.8542713567839196,
+    "abstained": 29,
+    "unsafe_selections": 1,
+    "unsafe_amount_selections": 1,
     "picked_decoy": 0,
-    "amount_precision": 1.0,
-    "exact_amount_and_currency_coverage": 0.8592964824120602,
+    "amount_precision": 0.9941176470588236,
+    "exact_amount_and_currency_coverage": 0.8492462311557789,
     "decoy_subset": {
       "n": 34,
       "selected": 6,
-      "unsafe": 0,
+      "unsafe": 1,
       "picked_decoy": 0
     },
     "abstain_reasons": {
-      "only-decoy-roles": 28
+      "only-decoy-roles": 28,
+      "multi-currency-ambiguous": 1
     },
     "latency_ms": {
-      "mean": 0.07047739698398015,
-      "p95": 0.11720899999545509,
-      "max": 0.3521660000274096
+      "mean": 0.06664688944693813,
+      "p95": 0.10538300000462186,
+      "max": 0.3408040000181245
     },
-    "failures": []
+    "failures": [
+      {
+        "id": "mashreq-foreign-compact-date",
+        "corpus": "uae-bank-formats",
+        "market": "AE",
+        "status": "posted",
+        "reason": "unique-transaction-role",
+        "selected": true,
+        "amount_correct": false,
+        "currency_correct": false,
+        "picked_decoy": false,
+        "decoy_present": true,
+        "expected_minor": "8814",
+        "got_minor": "2400",
+        "expected_currency": "AED",
+        "got_currency": "USD",
+        "candidates": [
+          {
+            "raw": "USD 24.00",
+            "minor_units": 2400,
+            "currency": "USD",
+            "roles": [
+              "transaction"
+            ]
+          },
+          {
+            "raw": "AED 2207.33",
+            "minor_units": 220733,
+            "currency": "AED",
+            "roles": [
+              "limit"
+            ]
+          }
+        ],
+        "body": "Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at GOOGLE *Domains g.co/helppay# US on 22Jan18 09:"
+      }
+    ]
   },
   "overall_family_conditioned": {
     "n": 199,
-    "selected": 193,
-    "selection_rate": 0.9698492462311558,
-    "abstained": 6,
-    "unsafe_selections": 0,
-    "unsafe_amount_selections": 0,
+    "selected": 192,
+    "selection_rate": 0.964824120603015,
+    "abstained": 7,
+    "unsafe_selections": 1,
+    "unsafe_amount_selections": 1,
     "picked_decoy": 0,
-    "amount_precision": 1.0,
-    "exact_amount_and_currency_coverage": 0.9698492462311558,
+    "amount_precision": 0.9947916666666666,
+    "exact_amount_and_currency_coverage": 0.9597989949748744,
     "decoy_subset": {
       "n": 34,
       "selected": 28,
-      "unsafe": 0,
+      "unsafe": 1,
       "picked_decoy": 0
     },
     "abstain_reasons": {
-      "only-decoy-roles": 6
+      "only-decoy-roles": 6,
+      "multi-currency-ambiguous": 1
     },
     "latency_ms": {
-      "mean": 0.06835712060511291,
-      "p95": 0.10016699997095202,
-      "max": 0.16707499997892228
+      "mean": 0.06445045728560674,
+      "p95": 0.09953900001846705,
+      "max": 0.17417300000488467
     },
-    "failures": []
+    "failures": [
+      {
+        "id": "mashreq-foreign-compact-date",
+        "corpus": "uae-bank-formats",
+        "market": "AE",
+        "status": "posted",
+        "reason": "unique-transaction-role",
+        "selected": true,
+        "amount_correct": false,
+        "currency_correct": false,
+        "picked_decoy": false,
+        "decoy_present": true,
+        "expected_minor": "8814",
+        "got_minor": "2400",
+        "expected_currency": "AED",
+        "got_currency": "USD",
+        "candidates": [
+          {
+            "raw": "USD 24.00",
+            "minor_units": 2400,
+            "currency": "USD",
+            "roles": [
+              "transaction"
+            ]
+          },
+          {
+            "raw": "AED 2207.33",
+            "minor_units": 220733,
+            "currency": "AED",
+            "roles": [
+              "limit"
+            ]
+          }
+        ],
+        "body": "Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at GOOGLE *Domains g.co/helppay# US on 22Jan18 09:"
+      }
+    ]
   },
   "by_corpus": {
     "global-alert-formats": {
@@ -77,9 +151,9 @@
         "only-decoy-roles": 6
       },
       "latency_ms": {
-        "mean": 0.06396027127392061,
-        "p95": 0.0845099999651211,
-        "max": 0.1182640000365609
+        "mean": 0.06043807446770459,
+        "p95": 0.08472000001802371,
+        "max": 0.10890400000107547
       }
     },
     "saudi-bank-formats": {
@@ -100,32 +174,34 @@
       },
       "abstain_reasons": {},
       "latency_ms": {
-        "mean": 0.12772349998613208,
-        "p95": 0.10464799998999297,
-        "max": 0.1507989999822712
+        "mean": 0.12601949998725104,
+        "p95": 0.10358800000176416,
+        "max": 0.14845099997273792
       }
     },
     "uae-bank-formats": {
       "n": 9,
-      "selected": 9,
-      "selection_rate": 1.0,
-      "abstained": 0,
-      "unsafe_selections": 0,
-      "unsafe_amount_selections": 0,
+      "selected": 8,
+      "selection_rate": 0.8888888888888888,
+      "abstained": 1,
+      "unsafe_selections": 1,
+      "unsafe_amount_selections": 1,
       "picked_decoy": 0,
-      "amount_precision": 1.0,
-      "exact_amount_and_currency_coverage": 1.0,
+      "amount_precision": 0.875,
+      "exact_amount_and_currency_coverage": 0.7777777777777778,
       "decoy_subset": {
         "n": 5,
         "selected": 5,
-        "unsafe": 0,
+        "unsafe": 1,
         "picked_decoy": 0
       },
-      "abstain_reasons": {},
+      "abstain_reasons": {
+        "multi-currency-ambiguous": 1
+      },
       "latency_ms": {
-        "mean": 0.1147251111130269,
-        "p95": 0.1488289999542758,
-        "max": 0.15505999999732012
+        "mean": 0.10894655556133633,
+        "p95": 0.15377799996940666,
+        "max": 0.17852399997764223
       }
     }
   },
@@ -144,12 +220,6 @@
       "expected_minor": "2486",
       "got_minor": "2486",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "2486",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -177,12 +247,6 @@
       "expected_minor": "85000",
       "got_minor": "85000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "85000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -210,12 +274,6 @@
       "expected_minor": "6120",
       "got_minor": "6120",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "6120",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -243,12 +301,6 @@
       "expected_minor": "7500",
       "got_minor": "7500",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "7500",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -276,12 +328,6 @@
       "expected_minor": "143218",
       "got_minor": "143218",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "143218",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -309,12 +355,6 @@
       "expected_minor": "50000",
       "got_minor": "50000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "50000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -342,12 +382,6 @@
       "expected_minor": "51000",
       "got_minor": "51000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "51000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -375,12 +409,6 @@
       "expected_minor": "52000",
       "got_minor": "52000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "52000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -408,12 +436,6 @@
       "expected_minor": "7500",
       "got_minor": "7500",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "7500",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -441,12 +463,6 @@
       "expected_minor": "53000",
       "got_minor": "53000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "53000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -474,12 +490,6 @@
       "expected_minor": "1845",
       "got_minor": "1845",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "1845",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -507,12 +517,6 @@
       "expected_minor": "32000",
       "got_minor": "32000",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "32000",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -540,12 +544,6 @@
       "expected_minor": "4790",
       "got_minor": "4790",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "4790",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -573,12 +571,6 @@
       "expected_minor": "62500",
       "got_minor": "62500",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "62500",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -604,12 +596,6 @@
       "expected_minor": "210517",
       "got_minor": "210517",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "210517",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -637,12 +623,6 @@
       "expected_minor": "3270",
       "got_minor": "3270",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "3270",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -668,12 +648,6 @@
       "expected_minor": "48000",
       "got_minor": "48000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "48000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -699,12 +673,6 @@
       "expected_minor": "7615",
       "got_minor": "7615",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "7615",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -730,12 +698,6 @@
       "expected_minor": "1999",
       "got_minor": "1999",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1999",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -761,12 +723,6 @@
       "expected_minor": "124060",
       "got_minor": "124060",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "124060",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -792,12 +748,6 @@
       "expected_minor": "2240",
       "got_minor": "2240",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2240",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -823,12 +773,6 @@
       "expected_minor": "2340",
       "got_minor": "2340",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2340",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -854,12 +798,6 @@
       "expected_minor": "2440",
       "got_minor": "2440",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2440",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -885,12 +823,6 @@
       "expected_minor": "2540",
       "got_minor": "2540",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2540",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -916,12 +848,6 @@
       "expected_minor": "2840",
       "got_minor": "2840",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2840",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -947,12 +873,6 @@
       "expected_minor": "95000",
       "got_minor": "95000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "95000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -978,12 +898,6 @@
       "expected_minor": "4325",
       "got_minor": "4325",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "4325",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1009,12 +923,6 @@
       "expected_minor": "51000",
       "got_minor": "51000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "51000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1040,12 +948,6 @@
       "expected_minor": "322109",
       "got_minor": "322109",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "322109",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1071,12 +973,6 @@
       "expected_minor": "2460",
       "got_minor": "2460",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2460",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1102,12 +998,6 @@
       "expected_minor": "2560",
       "got_minor": "2560",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2560",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1133,12 +1023,6 @@
       "expected_minor": "1780",
       "got_minor": "1780",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1780",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1164,12 +1048,6 @@
       "expected_minor": "6500",
       "got_minor": "6500",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "6500",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1195,12 +1073,6 @@
       "expected_minor": "9210",
       "got_minor": "9210",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "9210",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1226,12 +1098,6 @@
       "expected_minor": "1299",
       "got_minor": "1299",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1299",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1257,12 +1123,6 @@
       "expected_minor": "200644",
       "got_minor": "200644",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "200644",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1288,12 +1148,6 @@
       "expected_minor": "2680",
       "got_minor": "2680",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2680",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1319,12 +1173,6 @@
       "expected_minor": "2780",
       "got_minor": "2780",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2780",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1350,12 +1198,6 @@
       "expected_minor": "2880",
       "got_minor": "2880",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2880",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1381,12 +1223,6 @@
       "expected_minor": "2980",
       "got_minor": "2980",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2980",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1412,12 +1248,6 @@
       "expected_minor": "2635",
       "got_minor": "2635",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2635",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1443,12 +1273,6 @@
       "expected_minor": "74000",
       "got_minor": "74000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "74000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1474,12 +1298,6 @@
       "expected_minor": "5890",
       "got_minor": "5890",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "5890",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1505,12 +1323,6 @@
       "expected_minor": "849",
       "got_minor": "849",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "849",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1536,12 +1348,6 @@
       "expected_minor": "190872",
       "got_minor": "190872",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "190872",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1567,12 +1373,6 @@
       "expected_minor": "2370",
       "got_minor": "2370",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2370",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1598,12 +1398,6 @@
       "expected_minor": "2470",
       "got_minor": "2470",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2470",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1629,12 +1423,6 @@
       "expected_minor": "2570",
       "got_minor": "2570",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2570",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1660,12 +1448,6 @@
       "expected_minor": "2160",
       "got_minor": "2160",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2160",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1691,12 +1473,6 @@
       "expected_minor": "38500",
       "got_minor": "38500",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "38500",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1722,12 +1498,6 @@
       "expected_minor": "3995",
       "got_minor": "3995",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "3995",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1753,12 +1523,6 @@
       "expected_minor": "1400",
       "got_minor": "1400",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1400",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1784,12 +1548,6 @@
       "expected_minor": "248011",
       "got_minor": "248011",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "248011",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1815,12 +1573,6 @@
       "expected_minor": "2050",
       "got_minor": "2050",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2050",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1846,12 +1598,6 @@
       "expected_minor": "2150",
       "got_minor": "2150",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2150",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -1877,12 +1623,6 @@
       "expected_minor": "124950",
       "got_minor": "124950",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "124950",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -1908,12 +1648,6 @@
       "expected_minor": "250000",
       "got_minor": "250000",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "250000",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -1939,12 +1673,6 @@
       "expected_minor": "309900",
       "got_minor": "309900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "309900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -1972,12 +1700,6 @@
       "expected_minor": "79900",
       "got_minor": "79900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "79900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -2005,12 +1727,6 @@
       "expected_minor": "4521075",
       "got_minor": "4521075",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "4521075",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -2038,12 +1754,6 @@
       "expected_minor": "12450",
       "got_minor": "12450",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "12450",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -2071,12 +1781,6 @@
       "expected_minor": "80000",
       "got_minor": "80000",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "80000",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -2104,12 +1808,6 @@
       "expected_minor": "7525",
       "got_minor": "7525",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "7525",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -2137,12 +1835,6 @@
       "expected_minor": "9900",
       "got_minor": "9900",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "9900",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -2170,12 +1862,6 @@
       "expected_minor": "342010",
       "got_minor": "342010",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "342010",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -2203,12 +1889,6 @@
       "expected_minor": "12345",
       "got_minor": "12345",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "12345",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -2236,12 +1916,6 @@
       "expected_minor": "250000",
       "got_minor": "250000",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "250000",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -2269,12 +1943,6 @@
       "expected_minor": "8750",
       "got_minor": "8750",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "8750",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -2302,12 +1970,6 @@
       "expected_minor": "15000",
       "got_minor": "15000",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "15000",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -2335,12 +1997,6 @@
       "expected_minor": "1100500",
       "got_minor": "1100500",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "1100500",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -2368,12 +2024,6 @@
       "expected_minor": "21300",
       "got_minor": "21300",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "21300",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -2401,12 +2051,6 @@
       "expected_minor": "400000",
       "got_minor": "400000",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "400000",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -2434,12 +2078,6 @@
       "expected_minor": "33750",
       "got_minor": "33750",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "33750",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -2467,12 +2105,6 @@
       "expected_minor": "12000",
       "got_minor": "12000",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "12000",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -2500,12 +2132,6 @@
       "expected_minor": "980250",
       "got_minor": "980250",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "980250",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -2533,12 +2159,6 @@
       "expected_minor": "18450",
       "got_minor": "18450",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "18450",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -2566,12 +2186,6 @@
       "expected_minor": "320000",
       "got_minor": "320000",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "320000",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -2599,12 +2213,6 @@
       "expected_minor": "42750",
       "got_minor": "42750",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "42750",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -2632,12 +2240,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "10000",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -2665,12 +2267,6 @@
       "expected_minor": "1750125",
       "got_minor": "1750125",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "1750125",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -2698,12 +2294,6 @@
       "expected_minor": "14575",
       "got_minor": "14575",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "14575",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -2731,12 +2321,6 @@
       "expected_minor": "200000",
       "got_minor": "200000",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "200000",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -2764,12 +2348,6 @@
       "expected_minor": "31050",
       "got_minor": "31050",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "31050",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -2797,12 +2375,6 @@
       "expected_minor": "8500",
       "got_minor": "8500",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "8500",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -2830,12 +2402,6 @@
       "expected_minor": "1242030",
       "got_minor": "1242030",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "1242030",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -2863,12 +2429,6 @@
       "expected_minor": "24500",
       "got_minor": "24500",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "24500",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -2896,12 +2456,6 @@
       "expected_minor": "150000",
       "got_minor": "150000",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "150000",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -2929,12 +2483,6 @@
       "expected_minor": "19750",
       "got_minor": "19750",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "19750",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -2962,12 +2510,6 @@
       "expected_minor": "7000",
       "got_minor": "7000",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "7000",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -2995,12 +2537,6 @@
       "expected_minor": "2100250",
       "got_minor": "2100250",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "2100250",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -3028,12 +2564,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "10000",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3061,12 +2591,6 @@
       "expected_minor": "1825",
       "got_minor": "1825",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "1825",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3094,12 +2618,6 @@
       "expected_minor": "1200",
       "got_minor": "1200",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "1200",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3127,12 +2645,6 @@
       "expected_minor": "8640",
       "got_minor": "8640",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "8640",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3160,12 +2672,6 @@
       "expected_minor": "1499",
       "got_minor": "1499",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "1499",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3193,12 +2699,6 @@
       "expected_minor": "7500",
       "got_minor": "7500",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "7500",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3226,12 +2726,6 @@
       "expected_minor": "4210",
       "got_minor": "4210",
       "expected_currency": "USD",
-      "accepted": [
-        [
-          "4210",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -3259,12 +2753,6 @@
       "expected_minor": "8000",
       "got_minor": "8000",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "8000",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3292,12 +2780,6 @@
       "expected_minor": "1150",
       "got_minor": "1150",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "1150",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3325,12 +2807,6 @@
       "expected_minor": "700",
       "got_minor": "700",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "700",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3358,12 +2834,6 @@
       "expected_minor": "6425",
       "got_minor": "6425",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "6425",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3391,12 +2861,6 @@
       "expected_minor": "999",
       "got_minor": "999",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "999",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3424,12 +2888,6 @@
       "expected_minor": "5500",
       "got_minor": "5500",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "5500",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3457,12 +2915,6 @@
       "expected_minor": "3120",
       "got_minor": "3120",
       "expected_currency": "GBP",
-      "accepted": [
-        [
-          "3120",
-          "GBP"
-        ]
-      ],
       "got_currency": "GBP",
       "candidates": [
         {
@@ -3490,12 +2942,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "10000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3521,12 +2967,6 @@
       "expected_minor": "1640",
       "got_minor": "1640",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1640",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3552,12 +2992,6 @@
       "expected_minor": "800",
       "got_minor": "800",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "800",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3583,12 +3017,6 @@
       "expected_minor": "7230",
       "got_minor": "7230",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "7230",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3614,12 +3042,6 @@
       "expected_minor": "1399",
       "got_minor": "1399",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1399",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3645,12 +3067,6 @@
       "expected_minor": "6000",
       "got_minor": "6000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "6000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3676,12 +3092,6 @@
       "expected_minor": "2750",
       "got_minor": "2750",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2750",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3707,12 +3117,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "10000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3738,12 +3142,6 @@
       "expected_minor": "1420",
       "got_minor": "1420",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1420",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3769,12 +3167,6 @@
       "expected_minor": "600",
       "got_minor": "600",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "600",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3800,12 +3192,6 @@
       "expected_minor": "7910",
       "got_minor": "7910",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "7910",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3831,12 +3217,6 @@
       "expected_minor": "1099",
       "got_minor": "1099",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1099",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3862,12 +3242,6 @@
       "expected_minor": "4800",
       "got_minor": "4800",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "4800",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3893,12 +3267,6 @@
       "expected_minor": "3580",
       "got_minor": "3580",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "3580",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3924,12 +3292,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "10000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3955,12 +3317,6 @@
       "expected_minor": "2130",
       "got_minor": "2130",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2130",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -3986,12 +3342,6 @@
       "expected_minor": "900",
       "got_minor": "900",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "900",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4017,12 +3367,6 @@
       "expected_minor": "6875",
       "got_minor": "6875",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "6875",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4048,12 +3392,6 @@
       "expected_minor": "1249",
       "got_minor": "1249",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1249",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4079,12 +3417,6 @@
       "expected_minor": "5200",
       "got_minor": "5200",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "5200",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4110,12 +3442,6 @@
       "expected_minor": "2990",
       "got_minor": "2990",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2990",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4141,12 +3467,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "10000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4172,12 +3492,6 @@
       "expected_minor": "1760",
       "got_minor": "1760",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1760",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4203,12 +3517,6 @@
       "expected_minor": "750",
       "got_minor": "750",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "750",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4236,12 +3544,6 @@
       "expected_minor": "7420",
       "got_minor": "7420",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "7420",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4267,12 +3569,6 @@
       "expected_minor": "1199",
       "got_minor": "1199",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1199",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4298,12 +3594,6 @@
       "expected_minor": "5700",
       "got_minor": "5700",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "5700",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4329,12 +3619,6 @@
       "expected_minor": "3340",
       "got_minor": "3340",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "3340",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4360,12 +3644,6 @@
       "expected_minor": "10000",
       "got_minor": "10000",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "10000",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4391,12 +3669,6 @@
       "expected_minor": "1980",
       "got_minor": "1980",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "1980",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4422,12 +3694,6 @@
       "expected_minor": "550",
       "got_minor": "550",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "550",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4453,12 +3719,6 @@
       "expected_minor": "7040",
       "got_minor": "7040",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "7040",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4484,12 +3744,6 @@
       "expected_minor": "899",
       "got_minor": "899",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "899",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4515,12 +3769,6 @@
       "expected_minor": "4600",
       "got_minor": "4600",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "4600",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4546,12 +3794,6 @@
       "expected_minor": "2570",
       "got_minor": "2570",
       "expected_currency": "EUR",
-      "accepted": [
-        [
-          "2570",
-          "EUR"
-        ]
-      ],
       "got_currency": "EUR",
       "candidates": [
         {
@@ -4577,12 +3819,6 @@
       "expected_minor": "500000",
       "got_minor": "500000",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "500000",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4610,12 +3846,6 @@
       "expected_minor": "74900",
       "got_minor": "74900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "74900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4643,12 +3873,6 @@
       "expected_minor": "49900",
       "got_minor": "49900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "49900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4676,12 +3900,6 @@
       "expected_minor": "186000",
       "got_minor": "186000",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "186000",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4707,12 +3925,6 @@
       "expected_minor": "29900",
       "got_minor": "29900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "29900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4740,12 +3952,6 @@
       "expected_minor": "240000",
       "got_minor": "240000",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "240000",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4773,12 +3979,6 @@
       "expected_minor": "129900",
       "got_minor": "129900",
       "expected_currency": "INR",
-      "accepted": [
-        [
-          "129900",
-          "INR"
-        ]
-      ],
       "got_currency": "INR",
       "candidates": [
         {
@@ -4806,12 +4006,6 @@
       "expected_minor": "50000",
       "got_minor": "50000",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "50000",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -4839,12 +4033,6 @@
       "expected_minor": "4550",
       "got_minor": "4550",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "4550",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -4870,12 +4058,6 @@
       "expected_minor": "1000",
       "got_minor": "1000",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "1000",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -4903,12 +4085,6 @@
       "expected_minor": "22075",
       "got_minor": "22075",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "22075",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -4936,12 +4112,6 @@
       "expected_minor": "3900",
       "got_minor": "3900",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "3900",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -4969,12 +4139,6 @@
       "expected_minor": "15000",
       "got_minor": null,
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "15000",
-          "QAR"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -5002,12 +4166,6 @@
       "expected_minor": "8825",
       "got_minor": "8825",
       "expected_currency": "QAR",
-      "accepted": [
-        [
-          "8825",
-          "QAR"
-        ]
-      ],
       "got_currency": "QAR",
       "candidates": [
         {
@@ -5035,12 +4193,6 @@
       "expected_minor": "100000",
       "got_minor": "100000",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "100000",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5068,12 +4220,6 @@
       "expected_minor": "12500",
       "got_minor": "12500",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "12500",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5099,12 +4245,6 @@
       "expected_minor": "5000",
       "got_minor": "5000",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "5000",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5132,12 +4272,6 @@
       "expected_minor": "30750",
       "got_minor": "30750",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "30750",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5165,12 +4299,6 @@
       "expected_minor": "9990",
       "got_minor": "9990",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "9990",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5198,12 +4326,6 @@
       "expected_minor": "40000",
       "got_minor": null,
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "40000",
-          "KWD"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -5231,12 +4353,6 @@
       "expected_minor": "16250",
       "got_minor": "16250",
       "expected_currency": "KWD",
-      "accepted": [
-        [
-          "16250",
-          "KWD"
-        ]
-      ],
       "got_currency": "KWD",
       "candidates": [
         {
@@ -5264,12 +4380,6 @@
       "expected_minor": "100000",
       "got_minor": "100000",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "100000",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5297,12 +4407,6 @@
       "expected_minor": "14500",
       "got_minor": "14500",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "14500",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5328,12 +4432,6 @@
       "expected_minor": "4000",
       "got_minor": "4000",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "4000",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5361,12 +4459,6 @@
       "expected_minor": "28750",
       "got_minor": "28750",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "28750",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5394,12 +4486,6 @@
       "expected_minor": "8990",
       "got_minor": "8990",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "8990",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5427,12 +4513,6 @@
       "expected_minor": "35000",
       "got_minor": null,
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "35000",
-          "BHD"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -5460,12 +4540,6 @@
       "expected_minor": "17250",
       "got_minor": "17250",
       "expected_currency": "BHD",
-      "accepted": [
-        [
-          "17250",
-          "BHD"
-        ]
-      ],
       "got_currency": "BHD",
       "candidates": [
         {
@@ -5493,12 +4567,6 @@
       "expected_minor": "100000",
       "got_minor": "100000",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "100000",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5526,12 +4594,6 @@
       "expected_minor": "13500",
       "got_minor": "13500",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "13500",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5557,12 +4619,6 @@
       "expected_minor": "3000",
       "got_minor": "3000",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "3000",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5590,12 +4646,6 @@
       "expected_minor": "26750",
       "got_minor": "26750",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "26750",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5623,12 +4673,6 @@
       "expected_minor": "7990",
       "got_minor": "7990",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "7990",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5656,12 +4700,6 @@
       "expected_minor": "30000",
       "got_minor": null,
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "30000",
-          "OMR"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -5689,12 +4727,6 @@
       "expected_minor": "18250",
       "got_minor": "18250",
       "expected_currency": "OMR",
-      "accepted": [
-        [
-          "18250",
-          "OMR"
-        ]
-      ],
       "got_currency": "OMR",
       "candidates": [
         {
@@ -5722,12 +4754,6 @@
       "expected_minor": "100000",
       "got_minor": "100000",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "100000",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5755,12 +4781,6 @@
       "expected_minor": "12050",
       "got_minor": "12050",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "12050",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5786,12 +4806,6 @@
       "expected_minor": "3000",
       "got_minor": "3000",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "3000",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5819,12 +4833,6 @@
       "expected_minor": "45075",
       "got_minor": "45075",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "45075",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5852,12 +4860,6 @@
       "expected_minor": "9900",
       "got_minor": "9900",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "9900",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5885,12 +4887,6 @@
       "expected_minor": "60000",
       "got_minor": null,
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "60000",
-          "EGP"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -5918,12 +4914,6 @@
       "expected_minor": "24025",
       "got_minor": "24025",
       "expected_currency": "EGP",
-      "accepted": [
-        [
-          "24025",
-          "EGP"
-        ]
-      ],
       "got_currency": "EGP",
       "candidates": [
         {
@@ -5951,12 +4941,6 @@
       "expected_minor": "100000",
       "got_minor": "100000",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "100000",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -5984,12 +4968,6 @@
       "expected_minor": "11500",
       "got_minor": "11500",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "11500",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -6015,12 +4993,6 @@
       "expected_minor": "2000",
       "got_minor": "2000",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "2000",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -6048,12 +5020,6 @@
       "expected_minor": "24750",
       "got_minor": "24750",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "24750",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -6081,12 +5047,6 @@
       "expected_minor": "6990",
       "got_minor": "6990",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "6990",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -6114,12 +5074,6 @@
       "expected_minor": "25000",
       "got_minor": null,
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "25000",
-          "JOD"
-        ]
-      ],
       "got_currency": null,
       "candidates": [
         {
@@ -6147,12 +5101,6 @@
       "expected_minor": "19250",
       "got_minor": "19250",
       "expected_currency": "JOD",
-      "accepted": [
-        [
-          "19250",
-          "JOD"
-        ]
-      ],
       "got_currency": "JOD",
       "candidates": [
         {
@@ -6180,12 +5128,6 @@
       "expected_minor": "8950",
       "got_minor": "8950",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "8950",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6221,12 +5163,6 @@
       "expected_minor": "30000",
       "got_minor": "30000",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "30000",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6262,12 +5198,6 @@
       "expected_minor": "7650",
       "got_minor": "7650",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "7650",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6303,12 +5233,6 @@
       "expected_minor": "1500000",
       "got_minor": "1500000",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "1500000",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6327,23 +5251,13 @@
       "status": "posted",
       "reason": "unique-transaction-role",
       "selected": true,
-      "amount_correct": true,
-      "currency_correct": true,
+      "amount_correct": false,
+      "currency_correct": false,
       "picked_decoy": false,
       "decoy_present": true,
       "expected_minor": "8814",
       "got_minor": "2400",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "8814",
-          "AED"
-        ],
-        [
-          "2400",
-          "USD"
-        ]
-      ],
       "got_currency": "USD",
       "candidates": [
         {
@@ -6379,12 +5293,6 @@
       "expected_minor": "4250",
       "got_minor": "4250",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "4250",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6412,12 +5320,6 @@
       "expected_minor": "12000",
       "got_minor": "12000",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "12000",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6453,12 +5355,6 @@
       "expected_minor": "4500",
       "got_minor": "4500",
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "4500",
-          "AED"
-        ]
-      ],
       "got_currency": "AED",
       "candidates": [
         {
@@ -6477,22 +5373,16 @@
       "corpus": "uae-bank-formats",
       "market": "AE",
       "status": "posted",
-      "reason": "ledger-currency-equivalent",
-      "selected": true,
-      "amount_correct": true,
-      "currency_correct": true,
+      "reason": "multi-currency-ambiguous",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
       "picked_decoy": false,
       "decoy_present": false,
       "expected_minor": "1096",
-      "got_minor": "1096",
+      "got_minor": null,
       "expected_currency": "AED",
-      "accepted": [
-        [
-          "1096",
-          "AED"
-        ]
-      ],
-      "got_currency": "AED",
+      "got_currency": null,
       "candidates": [
         {
           "raw": "INR 270",
@@ -6527,12 +5417,6 @@
       "expected_minor": "1200",
       "got_minor": "1200",
       "expected_currency": "SAR",
-      "accepted": [
-        [
-          "1200",
-          "SAR"
-        ]
-      ],
       "got_currency": "SAR",
       "candidates": [
         {
@@ -6568,12 +5452,6 @@
       "expected_minor": "3400",
       "got_minor": "3400",
       "expected_currency": "SAR",
-      "accepted": [
-        [
-          "3400",
-          "SAR"
-        ]
-      ],
       "got_currency": "SAR",
       "candidates": [
         {

@@ -187,7 +187,7 @@ class PretrainedEncoderClassifier:
                 )
                 opt.step()
                 sched.step()
-                running += float(loss) * len(idx)
+                running += float(loss.detach()) * len(idx)
             acc = self._val_accuracy(texts_va, yva)
             self._history.append(
                 {

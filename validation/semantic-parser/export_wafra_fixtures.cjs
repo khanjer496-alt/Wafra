@@ -36,6 +36,15 @@ for (const [corpus, mod] of sources) {
         : x.amountFils != null ? String(x.amountFils) : null,
       decoyMinorUnits: x.snapshotFils != null ? String(x.snapshotFils) : null,
       decoyKind: x.snapshotKind ?? null,
+      // An FX alert records what the bank printed and what the app stored.
+      // fxSource 'bank' means the local equivalent is in the body; 'fallback'
+      // means the app converted with a rate table and the body has no local
+      // figure at all. Extraction can only be scored against what is written.
+      originalCurrency: x.originalCurrency ?? e.sourceCurrency ?? null,
+      originalMinorUnits:
+        x.originalAmountMinor != null ? String(x.originalAmountMinor)
+        : e.sourceMinorUnits != null ? String(e.sourceMinorUnits) : null,
+      fxSource: x.fxSource ?? null,
     };
     rows.push({
       corpus,
