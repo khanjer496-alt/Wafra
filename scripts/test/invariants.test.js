@@ -15,9 +15,8 @@
  * grammar probes are labelled at their definitions; no unredacted customer
  * message belongs in this suite.
  */
-const fs = require('fs');
-const path = require('path');
 const parser = require('./build/sms-parser');
+const { corpusMessages } = require('./corpus-messages.cjs');
 const { CATEGORIES } = require('./build/categories');
 
 let pass = 0;
@@ -35,53 +34,11 @@ const ok = (name, cond, detail) => {
 /* ── The corpus ──────────────────────────────────────────────────────── */
 
 /**
- * Both accuracy exports. The second one's headers carry the merchant and
- * category the shipped app produced ("#12 (seen 4x, read as "Bloomfield
- * Treat" / Other):"), so its header line is a little longer — the same split
- * handles both, and the leading `#` comment block of the second file is
- * dropped because it has no `(seen ` header.
+ * Assembled in corpus-messages.cjs, which scripts/parser-benchmark reads too.
+ * Keeping one definition is what stops a benchmark from reporting accuracy
+ * over a set of messages this gate never sees.
  */
-function fixtureMessages() {
-  const out = [];
-  for (const name of ['uae-accuracy-report.txt', 'uae-accuracy-report-2.txt']) {
-    const file = path.join(__dirname, 'fixtures', name);
-    if (!fs.existsSync(file)) continue;
-    for (const block of fs.readFileSync(file, 'utf8').split(/\n(?=#\d+ \(seen )/)) {
-      const body = block.replace(/^#\d+ \(seen [^)]*\):\n/, '').trim();
-      // The commentary header of report 2 is not a message.
-      if (!body || /^#/.test(body)) continue;
-      out.push(body);
-    }
-  }
-  return out;
-}
-
-/**
- * Every string literal passed to parseSms in the test file. Read as source
- * rather than executed, so this picks up the inputs of tests that assert a
- * null result too — those are exactly the messages most likely to trip a
- * helper that assumes it has something to work with.
- */
-function testFileMessages() {
-  const src = fs.readFileSync(path.join(__dirname, 'parser.test.js'), 'utf8');
-  const out = [];
-  // Single-quoted literals, allowing escaped quotes and \n inside.
-  //
-  // The character class must exclude a RAW newline. A JavaScript string
-  // cannot contain one, so allowing it let the match run from one quote,
-  // across the code between, and on to a quote several lines later —
-  // scraping the test file's own source into the corpus. 151 of the 593
-  // "messages" were JavaScript, and nine of them PARSED, so the suite was
-  // reporting merchants like "{ Category })" and counting its own source as
-  // unreadable bank formats. Every coverage figure this printed was fiction.
-  for (const m of src.matchAll(/'((?:[^'\\\n]|\\.){40,})'/g)) {
-    const body = m[1].replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\\\/g, '\\');
-    if (/\d/.test(body) && /[A-Za-z]{3}/.test(body)) out.push(body);
-  }
-  return out;
-}
-
-const corpus = [...new Set([...fixtureMessages(), ...testFileMessages()])];
+const corpus = corpusMessages();
 console.log(`corpus: ${corpus.length} distinct messages\n`);
 ok('corpus is large enough to be worth running', corpus.length >= 150, `only ${corpus.length}`);
 

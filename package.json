@@ -47,6 +47,7 @@
     "check:launch": "bash scripts/check-launch.sh",
     "benchmark:launch:fixtures": "bash scripts/generate-launch-benchmark-fixtures.sh",
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
+    "bench:parser": "node scripts/parser-benchmark/run.mjs",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
