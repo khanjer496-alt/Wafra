@@ -150,18 +150,76 @@ A candidate that improves only the category label should be scored as such and
 compared against the cheaper alternative (a merchant table), not against the
 parser.
 
-### On `trycua/cua` specifically
+### Measured: CUA-S1 (`trycua/cua`)
 
-It is not a fit for this problem. `trycua/cua` is a computer-use agent
-framework: cloud Linux desktops, a desktop driver for macOS/Windows/Linux, and
-local macOS VMs on Apple Silicon. Its CUA-S1 models are small **System 1**
-models for bounded decisions over structured *interface* elements — which value
-belongs in which form field — driven from screenshots and UI trees, in Python.
-There is no mobile target, nothing that runs inside a React Native app, and no
-text-extraction model for message bodies. Running it would mean a desktop or
-cloud VM in the loop, which also breaks the on-device privacy position.
+Asked and answered with numbers rather than argument. The released
+`cua-ai/cua-s1-forms` checkpoint (706,048 parameters, 2.8 MB, 224-token
+context) was scored zero-shot on the same 188 labelled global alert rows used
+above. Reproduce with `validation/cua-s1-wafra-benchmark.py` on the
+`research/cua-s1-wafra-benchmark` branch. Note that the CI run of the paired
+domain-adaptation script fails before it trains: the Hugging Face repo ships
+`cua-s1-forms.safetensors`, while `cua-s1-wafra-finetune.py` hands the
+directory to `load_checkpoint`, which looks for `model.safetensors`. Pass the
+`.safetensors` file directly. The benchmark script above is unaffected — its
+`discover_checkpoint` helper resolves the real filename.
 
-If an on-device model is still wanted, the runtime question (ExecuTorch,
-ONNX Runtime Mobile, MediaPipe LLM Inference, llama.cpp via a native module)
-is a separate decision from the accuracy question, and this harness answers
-only the second.
+| Field | Choices | CUA-S1 zero-shot | Shipped rules |
+| --- | --- | --- | --- |
+| decision | 2 | 91/188 — **48.4%** | 100% |
+| status | 5 | 19/188 — **10.1%** | 100% |
+| family | 11 | 16/188 — **8.5%** | 100% |
+| direction | 3 | 54/188 — **28.7%** | 100% |
+
+`decision` is a two-way choice, so 48.4% is below chance. Mean confidence on
+that field was 0.885 and it was wrong with high confidence on **83 of 188** —
+a calibration failure, not just an accuracy one. An engine that is confidently
+wrong is worse than one that abstains, because the review tray cannot tell
+which rows to doubt.
+
+Amount disambiguation scored 0/0: of 188 messages, 72 produced no amount
+candidate and 116 produced exactly one, so there was never a choice to make.
+That is the architectural point. CUA-S1 scores a fixed list of options against
+a context — it selects, it does not extract. Every amount, currency, merchant
+and date in a Wafra alert would still have to be found by the regex layer
+before the model could rank anything, which leaves the model unable to address
+the part of the parser that carries money.
+
+CPU latency was fine (median 2.5 ms, p95 2.8 ms). Latency was never the
+problem.
+
+### Why `trycua/cua` was never a fit
+
+Independent of the scores: `trycua/cua` is a computer-use agent framework —
+cloud Linux desktops, a desktop driver for macOS/Windows/Linux, and local
+macOS VMs on Apple Silicon. CUA-S1 is its family of small **System 1** models
+for bounded decisions over structured *interface* elements, driven from
+screenshots and UI trees, in Python. There is no mobile target, nothing that
+runs inside a React Native app, and no text-extraction model for message
+bodies. Running it would put a desktop or cloud VM in the loop, which also
+breaks the on-device privacy position.
+
+### Other runtimes considered
+
+| Option | Verdict |
+| --- | --- |
+| **Locally AI** | A consumer iOS/macOS app for chatting with local models. No SDK, nothing embeddable in Wafra. |
+| **LocalAI** (localai.io) | A self-hosted OpenAI-compatible *server*. Runs on a machine, not inside a phone app; calling it means bank message bodies leave the device. |
+| **classifier.dev / Jev** | Hosted Cloudflare Worker, classification only — no extraction. Useful the way Jev was already used here (offline, to harden rules and generate a merchant table), not as a runtime dependency. |
+| **Gemma 4 E2B** | The only viable on-device candidate. Edge-optimised, LiteRT-LM builds exist, fits a phone where E4B does not. |
+
+### The latency ceiling for any on-device LLM
+
+The shipped rules read 5,000 messages in ~1.07 s — 0.21 ms each. An on-device
+LLM needs roughly 0.5–2 s per message, which turns the same import into 40
+minutes to 3 hours. No amount of accuracy fixes a three-order-of-magnitude
+regression on the import path.
+
+This is a constraint on *where* a model can sit, not on whether one is worth
+having. A model cannot be the import-path parser. It can run in the background
+over the ~375 messages the rules leave unresolved (258 refused plus 117
+uncategorised), which at 1 s each is a single ~6-minute pass.
+
+If an on-device model is still wanted, the runtime question (ExecuTorch, ONNX
+Runtime Mobile, MediaPipe/LiteRT-LM, llama.cpp via a native module, or Apple's
+on-device Foundation Models on iOS 26+) is a separate decision from the
+accuracy question, and this harness answers only the second.
