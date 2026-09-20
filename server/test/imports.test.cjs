@@ -749,6 +749,205 @@ function wideTextPdf(lines) {
   ].join('\n'), 'AED');
   ok('a three-word line without a fourth column name is not trusted to flip the order',
     shortHeaderless.rows.length === 1 && shortHeaderless.rows[0].type === 'expense');
+
+  // Real HSBC UAE credit-card PDF shape (sanitized). The table is not a
+  // Debit/Credit table: ordinary purchases have no direction label, credits
+  // carry CR, and the PDF exposes both Original Amount and Total Amount. The
+  // posting date is a second leading date and descriptions can wrap before the
+  // two amount cells. This used to reject every purchase as "two positives"
+  // and polluted the merchant on the few CR rows that happened to parse.
+  const cardTotalAmountTable = parseStatementLines([
+    'HSBC Live+ Credit Card Statement',
+    'Statement Period: From 11 August 26 to 10 September 26',
+    'Minimum Payment Due AED 120.44',
+    'Number Card Credit',
+    '4111-2222-3333-4821',
+    'Details of your transactions this month',
+    'Transaction Date Posting Date Transaction Details Original Amount VAT Total Amount (AED)',
+    '10-Aug-26 11-Aug-26 CASHBACK 13.92 CR 13.92CR',
+    '09-Aug-26 11-Aug-26 NFC - (G-PAY)- ASTER PHARMACY 177 BR',
+    'DUBAI AE',
+    '25.00 25.00',
+    '09-Aug-26 11-Aug-26 Talabat DUBAI AE 33.99 33.99',
+    '23-Aug-26 24-Aug-26 Amazon.ae Dubai AE 44.99 CR 44.99CR',
+    '30-Aug-26 31-Aug-26 Amazon Grocery Dubai AE 15.57 15.57',
+  ].join('\n'), 'AED');
+  ok('card total-amount tables read unlabelled purchases and CR exceptions without guessing an account statement',
+    cardTotalAmountTable.rows.length === 5 && cardTotalAmountTable.rejectedRows === 0 &&
+      cardTotalAmountTable.rows[0].merchant === 'CASHBACK' &&
+      cardTotalAmountTable.rows[0].type === 'income' && cardTotalAmountTable.rows[0].amountFils === 1392 &&
+      cardTotalAmountTable.rows[0].card?.last4 === '4821' && cardTotalAmountTable.rows[0].card?.kind === 'credit' &&
+      cardTotalAmountTable.rows[0].bankHint === 'HSBC' &&
+      /ASTER PHARMACY 177 BR/.test(cardTotalAmountTable.rows[1].merchant) &&
+      cardTotalAmountTable.rows[1].type === 'expense' && cardTotalAmountTable.rows[1].amountFils === 2500 &&
+      /Talabat/i.test(cardTotalAmountTable.rows[2].merchant) &&
+      cardTotalAmountTable.rows[2].type === 'expense' && cardTotalAmountTable.rows[2].amountFils === 3399 &&
+      cardTotalAmountTable.rows[3].merchant === 'Amazon' &&
+      cardTotalAmountTable.rows[3].type === 'income' && cardTotalAmountTable.rows[3].amountFils === 4499 &&
+      /Amazon Grocery/i.test(cardTotalAmountTable.rows[4].merchant) &&
+      cardTotalAmountTable.rows.every((row) => !/^\d{1,2}-[A-Za-z]{3}-\d{2}\b/.test(row.merchant)),
+    JSON.stringify(cardTotalAmountTable));
+
+  const bilingualCardIdentity = parseStatementLines([
+    'HSBC Live+ Credit Card Statement',
+    'Statement Period: From 01 August 26 to 31 August 26',
+    'Minimum Payment Due AED 50.00',
+    'Credit Card Number رقم البطاقة الائتمانية 4111-2222-3333-9876',
+    'Transaction Date Posting Date Transaction Details Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 SHOP DUBAI AE 10.00 10.00',
+  ].join('\n'), 'AED');
+  ok('bilingual card labels retain only terminal card identity',
+    bilingualCardIdentity.rows.length === 1 &&
+      bilingualCardIdentity.rows[0].card?.last4 === '9876' &&
+      bilingualCardIdentity.rows[0].card?.kind === 'credit',
+    JSON.stringify(bilingualCardIdentity.rows[0]?.card));
+
+  // PDF.js is allowed to return an entire visual page as one text line. This
+  // mirrors the real HSBC extraction shape where rows are separated by hyphens
+  // rather than EOLs, and where "TransactionDate" can be emitted without a
+  // space between the two header words.
+  const packedCardTable = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 MERCHANT ONE DUBAI AE 10.00 10.00 -' +
+      '03-Aug-26 04-Aug-26 REFUND SHOP DUBAI AE 7.25 CR 7.25CR -' +
+      '05-Aug-26 06-Aug-26 MERCHANT TWO DUBAI AE 100.00 5.00 105.00 -' +
+      '07-Aug-26 08-Aug-26 FOREIGN SHOP USD 12.00 44.10',
+  ].join('\n'), 'AED');
+  ok('packed card-table extraction is split into rows before amount parsing',
+    packedCardTable.rows.length === 4 && packedCardTable.rejectedRows === 0 &&
+      packedCardTable.rows[0].type === 'expense' && packedCardTable.rows[0].amountFils === 1000 &&
+      packedCardTable.rows[1].type === 'income' && packedCardTable.rows[1].amountFils === 725 &&
+      packedCardTable.rows[2].type === 'expense' && packedCardTable.rows[2].amountFils === 10500 &&
+      packedCardTable.rows[2].merchant === 'MERCHANT TWO DUBAI AE' &&
+      packedCardTable.rows[3].type === 'expense' && packedCardTable.rows[3].amountFils === 4410 &&
+      /FOREIGN SHOP/.test(packedCardTable.rows[3].merchant),
+    JSON.stringify(packedCardTable));
+
+  const packedWrappedCardTable = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 ENOC SITE - 6519 DUBAI AE 653.48 DR',
+    '653.48 DR -03-Aug-26 04-Aug-26 SECOND SHOP DUBAI AE 25.00 25.00 -' +
+      '05-Aug-26 06-Aug-26 THIRD SHOP DUBAI AE',
+    '30.00 30.00 -07-Aug-26 08-Aug-26 FOURTH SHOP DUBAI AE 40.00 40.00',
+  ].join('\n'), 'AED');
+  ok('wrapped amount cells inside a packed page keep the row separator out of the amount tail',
+    packedWrappedCardTable.rows.length === 4 && packedWrappedCardTable.rejectedRows === 0 &&
+      packedWrappedCardTable.rows.map((row) => row.amountFils).join(',') === '65348,2500,3000,4000',
+    JSON.stringify(packedWrappedCardTable));
+
+  const postingDateLineBreak = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 FIRST SHOP DUBAI AE 10.00 10.00 -03-Aug-26 04-Aug-26',
+    'SECOND SHOP DUBAI AE 20.00 20.00 -05-Aug-26 06-Aug-26 THIRD SHOP DUBAI AE 30.00 30.00',
+  ].join('\n'), 'AED');
+  ok('a row whose description wraps immediately after Posting Date is retained',
+    postingDateLineBreak.rows.length === 3 && postingDateLineBreak.rejectedRows === 0 &&
+      postingDateLineBreak.rows.map((row) => row.amountFils).join(',') === '1000,2000,3000',
+    JSON.stringify(postingDateLineBreak));
+
+  const merchantDateLineBreak = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '07-Aug-26 08-Aug-26 HOTEL STAY 10-Aug-26',
+    '11-Aug-26 DUBAI AE 2,471.40 2,471.40',
+  ].join('\n'), 'AED');
+  ok('an unmarked two-date merchant continuation fails closed instead of moving money to the embedded date',
+    merchantDateLineBreak.rows.length === 0 && merchantDateLineBreak.rejectedRows === 1,
+    JSON.stringify(merchantDateLineBreak));
+
+  const vatTotalLineBreak = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '12-Aug-26 13-Aug-26 STORE 2026 LLC DUBAI AE 1,979.92 42.86',
+    '2,022.78',
+  ].join('\n'), 'AED');
+  ok('a Total Amount wrapped after populated VAT reconciles before the row is accepted',
+    vatTotalLineBreak.rows.length === 1 && vatTotalLineBreak.rejectedRows === 0 &&
+      vatTotalLineBreak.rows[0].amountFils === 202278 &&
+      vatTotalLineBreak.rows[0].merchant === 'STORE 2026 LLC DUBAI AE',
+    JSON.stringify(vatTotalLineBreak));
+
+  const datesInsideMerchant = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 HOTEL STAY 10-Aug-26 11-Aug-26 DUBAI AE 20.00 20.00 -' +
+      '03-Aug-26 04-Aug-26 NEXT SHOP DUBAI AE 30.00 30.00',
+  ].join('\n'), 'AED');
+  ok('two unmarked dates inside merchant text fail closed while the next proven row survives',
+    datesInsideMerchant.rows.length === 1 && datesInsideMerchant.rejectedRows === 1 &&
+      datesInsideMerchant.rows[0].date === '2026-08-03' &&
+      datesInsideMerchant.rows[0].amountFils === 3000 &&
+      !datesInsideMerchant.rows.some((row) => row.date === '2026-08-10'),
+    JSON.stringify(datesInsideMerchant));
+
+  const cardTableWithTrailers = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    '01-Aug-26 02-Aug-26 PAYMENT 101.75 CR 101.75 CR - 4111 2222 3333 4444 CARDHOLDER NAME -' +
+      '03-Aug-26 04-Aug-26 SHOP DUBAI AE 25.00 25.00 - Get rewards with your card',
+  ].join('\n'), 'AED');
+  ok('visual card subheaders and page footers after completed rows are ignored',
+    cardTableWithTrailers.rows.length === 2 && cardTableWithTrailers.rejectedRows === 0 &&
+      cardTableWithTrailers.rows[0].type === 'income' && cardTableWithTrailers.rows[0].amountFils === 10175 &&
+      cardTableWithTrailers.rows[1].type === 'expense' && cardTableWithTrailers.rows[1].amountFils === 2500 &&
+      !cardTableWithTrailers.rows.some((row) => /CARDHOLDER|rewards/i.test(row.merchant)),
+    JSON.stringify(cardTableWithTrailers));
+
+  const conflictingCardDirection = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'Transaction Date Posting Date Transaction Details Original Amount VAT Total Amount',
+    '01-Aug-26 02-Aug-26 CONFLICT 10.00 CR 10.00 DR',
+  ].join('\n'), 'AED');
+  ok('conflicting CR/DR evidence in a card table is rejected rather than guessed',
+    conflictingCardDirection.rows.length === 0 && conflictingCardDirection.rejectedRows === 1,
+    JSON.stringify(conflictingCardDirection));
+
+  const accountLookalike = parseStatementLines([
+    'Statement of Account',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount',
+    '01-Aug-26 02-Aug-26 AMBIGUOUS 10.00 10.00',
+  ].join('\n'), 'AED');
+  ok('the card convention never turns a lookalike account table into spending',
+    accountLookalike.rows.length === 0 && accountLookalike.rejectedRows === 1,
+    JSON.stringify(accountLookalike));
+
+  const manyCardRows = Array.from({ length: 70 }, (_, index) => {
+    const day = String((index % 28) + 1).padStart(2, '0');
+    const next = String(((index + 1) % 28) + 1).padStart(2, '0');
+    const amount = (10 + index / 100).toFixed(2);
+    return `${day}-Aug-26 ${next}-Aug-26 TEST MERCHANT ${index} DUBAI AE ${amount} ${amount}`;
+  });
+  const manyCardTable = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due AED 50.00',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+    manyCardRows.join(' -'),
+  ].join('\n'), 'AED');
+  ok('a packed 70-row card statement does not lose, merge, or duplicate rows',
+    manyCardTable.rows.length === 70 && manyCardTable.rejectedRows === 0 &&
+      new Set(manyCardTable.rows.map((row) => `${row.date}|${row.merchant}|${row.amountFils}`)).size === 70,
+    JSON.stringify({ rows: manyCardTable.rows.length, rejected: manyCardTable.rejectedRows }));
+
+  const jpyCardTable = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due JPY 500',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (JPY)',
+    '01-Aug-26 02-Aug-26 TOKYO STORE JP 1,250 1,250',
+    '03-Aug-26 04-Aug-26 REFUND JP 500 CR 500CR',
+  ].join('\n'), 'JPY');
+  const kwdCardTable = parseStatementLines([
+    'Credit Card Statement Minimum Payment Due KWD 5.000',
+    'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (KWD)',
+    '01-Aug-26 02-Aug-26 KUWAIT STORE KW 12.345 0.617 12.962',
+  ].join('\n'), 'KWD');
+  ok('card Total Amount tables honor zero- and three-decimal ledger currencies',
+    jpyCardTable.rows.length === 2 && jpyCardTable.rejectedRows === 0 &&
+      jpyCardTable.rows[0].amountFils === 1250 && jpyCardTable.rows[1].amountFils === 500 &&
+      jpyCardTable.rows[1].type === 'income' &&
+      kwdCardTable.rows.length === 1 && kwdCardTable.rejectedRows === 0 &&
+      kwdCardTable.rows[0].amountFils === 12962,
+    JSON.stringify({ jpy: jpyCardTable, kwd: kwdCardTable }));
   const summaryLines = parseStatementLines([
     '01/07/2026 Opening Balance 10,000.00',
     '01/07/2026 Balance B/F 1,000.00 CR',
