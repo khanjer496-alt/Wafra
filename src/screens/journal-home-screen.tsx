@@ -23,6 +23,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { projectDashboard, projectDashboardInsight } from '@/lib/dashboard-projection';
+import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
@@ -107,6 +108,7 @@ export default function JournalHomeScreen() {
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
+  const [homeInsight, setHomeInsight] = useState<Insight | null>(null);
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
   // The clock is refreshed on every foreground resume for greeting/review
   // freshness, but Home's money projections are day-based. Keep the derived
@@ -232,16 +234,30 @@ export default function JournalHomeScreen() {
   const payments = dashboard.upcoming.items;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
-  const homeInsight = useMemo(() =>
-    homeAnalysisReady && insightWidgetVisible && !historyAnalysisBlocked
-      ? measureRuntimeOperation('home-insight', () => projectDashboardInsight(state, period, now))
-      : null,
+  useEffect(() => {
+    if (!homeAnalysisReady || !insightWidgetVisible || historyAnalysisBlocked) {
+      setHomeInsight(null);
+      return;
+    }
+    let cancelled = false;
+    // Keep the previous card on screen while this recomputes. A 14k-row
+    // insight must not hitch the same React turn that just painted a new SMS.
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      const next = measureRuntimeOperation('home-insight', () =>
+        projectDashboardInsight(state, period, now));
+      if (!cancelled) setHomeInsight(next);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
     // Capture/progress state must not restart historical analysis. The optional
     // insight is computed only after Home is already interactive and only while
     // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
-      state.notSubscriptions, state.marketId, period, projectionDay]);
+  }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
+    state.notSubscriptions, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -258,7 +274,12 @@ export default function JournalHomeScreen() {
 
   useEffect(() => {
     if (!state.hydrated || state.privateMode) return;
-    const pending = state.transactions.filter((transaction) => transaction.fxSource === 'fallback').slice(0, 16);
+    const pending: typeof state.transactions = [];
+    for (const transaction of state.transactions) {
+      if (transaction.fxSource !== 'fallback') continue;
+      pending.push(transaction);
+      if (pending.length === 16) break;
+    }
     if (pending.length === 0) return;
     const signature = pending.map((transaction) => `${transaction.id}:${transaction.originalCurrency}:${transaction.date}`).join('|');
     if (signature === lastFxAttempt.current) return;
