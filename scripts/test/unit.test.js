@@ -172,6 +172,14 @@ eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Dat
     /25%/.test(s4.body) && !/525%/.test(s4.body), s4.body);
   ok('summary: no limits set means no budget line',
     !/%/.test(ds.buildDailySummary(day, '2026-08-06').body));
+
+  const unsorted = { ...base, transactions: [
+    row('today-a', 'Coffee', 1500, { date: '2026-08-06' }),
+    row('last-month', 'Old', 9000, { date: '2026-07-01' }),
+    row('today-b', 'Lunch', 4000, { date: '2026-08-06' }),
+  ] };
+  eq('summary: a sorted prefix cannot drop a later in-day row',
+    ds.buildDailySummary(unsorted, '2026-08-06').totalFils, 5500);
 }
 
 // ── a fixed bill reconciles against the charge that paid it ──
