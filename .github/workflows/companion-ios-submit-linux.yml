@@ -34,13 +34,14 @@ jobs:
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Download exact verified Companion IPA artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: companion-ios-signed-14-35532632660
-          path: ${{ runner.temp }}/companion-signed
-          run-id: 35532632660
-          github-token: ${{ github.token }}
+      - name: Download exact verified Companion IPA from private release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/companion-signed"
+          gh release download companion-ios-signed-14-74f1804 --repo khanjer496-alt/Wafra --pattern 'Companion-1.1.0-14.ipa' --pattern 'verification.json' --dir "$RUNNER_TEMP/companion-signed"
+          test -f "$RUNNER_TEMP/companion-signed/Companion-1.1.0-14.ipa"
+          test -f "$RUNNER_TEMP/companion-signed/verification.json"
 
       - name: Download exact Companion source config
         shell: bash
@@ -55,6 +56,13 @@ jobs:
           tar -xzf "$ROOT/companion-source-74f1804c59f9.tgz" -C "$ROOT"
           test -f "$ROOT/mobile/app.json" && test -f "$ROOT/mobile/eas.json"
           echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
+
+      - name: Install Companion runtime dependencies for Expo config resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
       - name: Verify exact IPA and source identity
         id: ipa
@@ -87,6 +95,7 @@ jobs:
             printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"
           fi
           chmod 600 "$KEY"; grep -q 'BEGIN PRIVATE KEY' "$KEY"
+          export EXPO_ASC_API_KEY_PATH="$KEY"
           echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
           cd "$APP_DIR"
           node - <<'NODE'
