@@ -870,6 +870,59 @@ function wideTextPdf(lines) {
     print.cardStatement === true && print.originalTotalColumns === true &&
       print.dateLedLines === 2 && print.moneyLines === 2,
     JSON.stringify(print));
+  // ── Three ways the money could still come out wrong ──
+  //
+  // Found by reviewing this change adversarially rather than by a failing
+  // statement, and each one reaches the ledger rather than merely refusing.
+  //
+  // An empty VAT cell used to end the tail walk, and a refusal fell through to
+  // parseColumnTail, which takes the LEFTMOST figure — the FOREIGN one. So the
+  // header-order guard protected only the rows this branch happened to accept,
+  // and `10.00 - 47.50` filed GBP 10.00 as AED 10.00.
+  const vatEmpty = parseStatementLines(
+    [...cardHead, 'Transaction Amount', '(+) VAT', 'Billing Amount',
+      '09-Aug-26 11-Aug-26 FOREIGN SHOP LONDON GB 10.00 - 47.50'].join('\n'), 'AED');
+  ok('an empty VAT cell still reads the settlement figure, not the foreign one',
+    vatEmpty.rows.length === 1 && vatEmpty.rows[0].amountFils === 4750,
+    JSON.stringify(vatEmpty.rows.map((row) => row.amountFils)));
+  const vatPresent = parseStatementLines(
+    [...cardHead, 'Transaction Amount', '(+) VAT', 'Billing Amount',
+      '09-Aug-26 11-Aug-26 FOREIGN SHOP LONDON GB 10.00 2.25 47.50'].join('\n'), 'AED');
+  ok('...and a stated VAT reads the same figure',
+    vatPresent.rows.length === 1 && vatPresent.rows[0].amountFils === 4750,
+    JSON.stringify(vatPresent.rows.map((row) => row.amountFils)));
+
+  // A trailing CR does not make a reference number into money. This ran before
+  // the decimal-point guard and read AED 123,456.00 of income out of a cheque
+  // reference — invented outright, and not even counted as rejected.
+  const referenceNumber = parseStatementLines('01/07/2026 CHEQUE DEPOSIT REF 123456CR', 'AED');
+  ok('a glued CR on a bare reference number is not money',
+    referenceNumber.rows.length === 0 && referenceNumber.rejectedRows === 1,
+    JSON.stringify([referenceNumber.rows, referenceNumber.rejectedRows]));
+
+  // A refusal in this layout is final, so a row whose reading was never
+  // ambiguous must be answered rather than dropped: one figure has no second
+  // column to pick wrongly, and losing it would be the cost of the guard.
+  const loneFigure = parseStatementLines(
+    [...cardHead, 'Transaction Amount', 'Billing Amount',
+      '09-Aug-26 11-Aug-26 SINGLE FIGURE SHOP DUBAI AE 68.93'].join('\n'), 'AED');
+  ok('a single-figure row on this layout is still read as a charge',
+    loneFigure.rows.length === 1 && loneFigure.rows[0].amountFils === 6893 &&
+      loneFigure.rows[0].type === 'expense',
+    JSON.stringify(loneFigure.rows.map((row) => [row.merchant, row.amountFils])));
+
+  // A statement PERIOD is date-led and carries no money, exactly like the first
+  // line of a wrapped row. Joining it onto the figure beneath filed a
+  // transaction against a merchant called "to 09-Sept-26".
+  const periodLine = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Date Description Amount',
+    '10-Aug-26 to 09-Sept-26',
+    '1,567.10',
+  ].join('\n'), 'AED');
+  ok('a statement period is never joined onto the figure beneath it',
+    periodLine.rows.length === 0,
+    JSON.stringify(periodLine.rows.map((row) => [row.merchant, row.amountFils])));
 
   // A run ends on a line of nothing but figures. A summary line carries money
   // too, and joining a date-led line onto one would put a figure nobody spent

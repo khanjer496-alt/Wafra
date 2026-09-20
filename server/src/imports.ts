@@ -738,12 +738,23 @@ function classifyMoneyToken(token: string, currency: StatementCurrency): MoneyTo
   if (MONEY_PLACEHOLDER.test(token)) return { kind: 'placeholder' };
   const spec = ledgerMoneySpec(currency);
   if (!spec) return null;
+  // Flattened PDF rows lose column boundaries. For decimal currencies, a bare
+  // integer at the tail is more likely a cheque/reference number than money;
+  // preserve the old conservative requirement for a decimal point. Zero-decimal
+  // ledgers (JPY/KRW/etc.) necessarily use whole-unit money and are the exception.
+  const numericSurface = token.replace(/[()\sA-Za-z+\-]/g, '');
+  if (spec.exponent > 0 && !numericSurface.includes('.')) return null;
   // `21.40CR` — the accounting suffix printed hard against its figure, with no
   // space for the row lexer to split on. HSBC's card statement writes every
   // credit this way, so ROW_END_DIRECTION (which needs DR/CR as its own final
   // token) matched none of them. The suffix says the direction outright, which
   // is the one thing this parser will not guess at, so it is read wherever it
   // appears rather than behind a layout flag.
+  //
+  // BELOW the decimal-point guard, not above it: a trailing CR does not make a
+  // reference number into money. `CHEQUE DEPOSIT REF 123456CR` read as income of
+  // AED 123,456.00 when this branch ran first — money invented outright, and the
+  // row not even counted as rejected.
   const suffixed = /^([\d,]+(?:\.\d{1,3})?)(DR|CR)$/i.exec(token);
   if (suffixed) {
     const minor = amountMinor(suffixed[1], currency, false);
@@ -751,12 +762,6 @@ function classifyMoneyToken(token: string, currency: StatementCurrency): MoneyTo
       return { kind: 'signed', minor, type: suffixed[2].toUpperCase() === 'CR' ? 'income' : 'expense' };
     }
   }
-  // Flattened PDF rows lose column boundaries. For decimal currencies, a bare
-  // integer at the tail is more likely a cheque/reference number than money;
-  // preserve the old conservative requirement for a decimal point. Zero-decimal
-  // ledgers (JPY/KRW/etc.) necessarily use whole-unit money and are the exception.
-  const numericSurface = token.replace(/[()\sA-Za-z+\-]/g, '');
-  if (spec.exponent > 0 && !numericSurface.includes('.')) return null;
   const unsigned = amountMinor(token, currency, false);
   if (unsigned !== null) return { kind: 'unsigned', minor: unsigned };
   const signed = amountMinor(token, currency, true);
@@ -926,12 +931,35 @@ function isMoneyOnlyLine(line: string, currency: StatementCurrency): boolean {
   return figures > 0;
 }
 
+/**
+ * Whether a date-led line has a DESCRIPTION under its date, rather than more
+ * date.
+ *
+ * `10-Aug-26 to 09-Sept-26` is a statement period, and a wrapped row's first
+ * line is a merchant. Both are date-led and carry no money, so without this the
+ * period line joined onto the `1,567.10` under it and filed a transaction
+ * against a merchant called "to 09-Sept-26" — a figure nobody spent, under a
+ * name nobody was paid. A row being joined has to name something.
+ */
+function hasDescriptionUnderDate(line: string, currency: StatementCurrency): boolean {
+  const prefixed = ROW_DATE_PREFIX.exec(line);
+  if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) return false;
+  return prefixed[2].split(' ').some((word) => {
+    if (new RegExp(`^${DATE_TOKEN}$`, 'i').test(word)) return false;
+    if (/^(?:to|through|until|till|and|-|–|—)$/i.test(word)) return false;
+    if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word) || statementCurrency(word) !== null) return false;
+    if (classifyMoneyToken(word, currency)) return false;
+    return /[A-Za-z\p{Script=Arabic}]{2,}/u.test(word);
+  });
+}
+
 function joinWrappedRows(lines: string[], currency: StatementCurrency): string[] {
   const out: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     out.push(line);
     if (!line || !ROW_DATE_PREFIX.test(line) || LOOKS_LIKE_MONEY_LINE.test(line)) continue;
+    if (!hasDescriptionUnderDate(line, currency)) continue;
     let joined = line;
     for (
       let ahead = index + 1;
@@ -976,7 +1004,15 @@ function parseOriginalTotalTail(
   let figures = 0;
   // Walk back over the decomposition: the bare DR/CR this layout prints
   // between the two figures, and the original and VAT amounts themselves.
-  while (cut > 0 && figures < 2) {
+  //
+  // An EMPTY cell counts as one of them. VAT is zero on most rows and many
+  // statements print the cell as `-` rather than `0.00`, so treating a
+  // placeholder as the end of the tail made the branch bail on exactly those
+  // rows — and a bail used to fall through to `parseColumnTail`, which reads
+  // the LEFTMOST figure and filed `FOREIGN SHOP 10.00 - 47.50` as AED 10.00.
+  // That is the foreign amount: the wrong money, and the very thing the
+  // header-order guard exists to prevent, arriving through a different door.
+  while (cut > 0 && figures < 3) {
     const word = words[cut - 1];
     if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word)) {
       credit = credit || /^(?:CR|CREDIT)$/i.test(word);
@@ -985,15 +1021,25 @@ function parseOriginalTotalTail(
     }
     if (statementCurrency(word) === currency) { cut -= 1; continue; }
     const token = classifyMoneyToken(word, currency);
-    if (!token || token.kind === 'placeholder') break;
+    if (!token) break;
+    if (token.kind === 'placeholder') { figures += 1; cut -= 1; continue; }
     // A figure that disagrees about direction is not part of this charge.
     if (token.kind === 'signed' && (token.type === 'income') !== credit) return null;
     figures += 1;
     cut -= 1;
   }
-  // One figure alone is `parseColumnTail`'s lone-amount case, not this one, and
-  // leaving it there keeps a single rule for it.
-  if (figures === 0) return null;
+  // One figure alone is the lone-amount case, and it is answered HERE rather
+  // than left to fall through. A refusal in this layout is final — see the call
+  // site — so returning null would silently drop a row whose reading was never
+  // ambiguous: with a single figure there is no second column to pick wrongly.
+  // Same rule and same reason as `loneAmountIsCharge`, and both are reached
+  // only on a card statement.
+  if (figures === 0) {
+    const merchantOnly = words.slice(0, cut).join(' ').trim();
+    return merchantOnly.length < 2 || merchantOnly.length > 180
+      ? null
+      : { merchant: merchantOnly, amountFils: total.minor, type: credit ? 'income' : 'expense' };
+  }
   const merchant = words.slice(0, cut).join(' ').trim();
   return merchant.length < 2 || merchant.length > 180
     ? null
@@ -1514,11 +1560,16 @@ export function parseStatementLines(
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
+      // Once the header has named an original/total pair, THIS branch owns the
+      // row and a refusal is final. Falling through to `parseColumnTail` handed
+      // the same row to a reader that takes the leftmost figure — the foreign
+      // amount — so the header-order guard only ever protected the rows this
+      // branch happened to accept. A row it cannot read is now rejected and
+      // counted, which is the honest answer and keeps the guard whole.
       const column = prefixed && date
         ? (originalTotalColumns && cardStatement
             ? parseOriginalTotalTail(prefixed[2], currency)
-            : null) ??
-          parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+            : parseColumnTail(prefixed[2], currency, columnOrder, cardStatement))
         : null;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
