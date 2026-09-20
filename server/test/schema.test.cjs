@@ -171,7 +171,9 @@ ok('protected PDFs use a bounded one-request password without persistence',
     !/console\./.test(worker) && !/password[^\n]{0,80}(?:INSERT INTO|UPDATE |put\()/.test(worker));
 ok('direct PDF upload enforces media type, byte cap and PDF magic',
   /content-type[\s\S]{0,180}application\/pdf/.test(worker) &&
-    /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) && /!== '%PDF-'/.test(worker));
+    /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) &&
+    /pdfHeaderOffset\(incoming\.bytes\) < 0/.test(worker) &&
+    /MAX_PDF_HEADER_OFFSET = 1024/.test(worker));
 ok('direct CSV upload requires admin scope, an allowed media type, and a byte cap',
   /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
   /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
