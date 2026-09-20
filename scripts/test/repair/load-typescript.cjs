@@ -72,6 +72,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/recap-view-state') {
         return { loadViewedRecaps: async () => new Set() };
       }
+      // Statement import mints a session id with expo-crypto. Journey/repair
+      // harnesses that load the gate do not own entropy; a stable UUID keeps
+      // the authorized /statement-import handoff deterministic.
+      if (name === 'expo-crypto') {
+        return { randomUUID: () => 'test-statement-session' };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,

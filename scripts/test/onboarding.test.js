@@ -658,9 +658,11 @@ ok(
     !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
 );
 ok(
-  'Android capture exposes SMS, bank-app notifications, either, both, or manual',
+  'Android capture exposes SMS, bank-app notifications, statement import, either automatic source, both, or manual',
   /onPress=\{\(\) => void runSetupAction\(startScan\)\}/.test(gateSource) &&
     /onPress=\{\(\) => void runSetupAction\(connectAndroidNotifications\)\}/.test(gateSource) &&
+    /onPress=\{openStatementImport\}/.test(gateSource) &&
+    /onboardStatementChoice/.test(gateSource) &&
     /finishAndroidCapture/.test(gateSource) &&
     /onboardCaptureContinueBoth/.test(gateSource) &&
     /onboardCaptureContinueOne/.test(gateSource) &&
@@ -681,14 +683,20 @@ ok(
     /androidSmsReady/.test(gateSource),
 );
 ok(
-  'first-run gate exempts guided history routes only on iOS',
+  'first-run gate exempts iOS setup and only the in-memory-authorized statement route',
   /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
-    /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
+    /const statementImportSession = useRef<string \| null>\(null\)/.test(gateSource) &&
+    /const isOnboardingStatementRoute\s*=[\s\S]{0,160}pathname === '\/statement-import'[\s\S]{0,160}params\.statementSession === statementImportSession\.current/.test(gateSource) &&
+    /statementImportSession\.current = session[\s\S]{0,180}statementSession=\$\{session\}/.test(gateSource) &&
+    /const showOverlay\s*=[\s\S]{0,280}!isIosSetupRoute[\s\S]{0,80}!isOnboardingStatementRoute/.test(gateSource),
 );
 eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Choose how to add activity');
 eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Connect supported bank alerts, or start manually. You can change this later.');
 eq('iOS automatic choice explains the Shortcut and keeps history optional', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.');
 eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank alerts');
+eq('statement import is a first-run choice on either phone', i18n.t('onboardStatementChoice', 'en'), 'Import bank statements');
+eq('statement import discloses its secure relay before file selection', i18n.t('onboardStatementChoiceBody', 'en'), 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.');
+eq('capture trust distinguishes local alerts from cloud statement import', i18n.t('onboardCaptureLocalAutomaticBody', 'en'), 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.');
 eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'Add entries yourself. No Messages access. Connect later.');
 eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
 eq(
@@ -708,6 +716,10 @@ const iosVisibleCopyKeys = [
   'onboardCaptureBodyIos',
   'onboardAutomaticChoiceIos',
   'onboardAutomaticChoiceIosBody',
+  'onboardStatementChoice',
+  'onboardStatementChoiceBody',
+  'onboardCaptureLocalAutomaticTitle',
+  'onboardCaptureLocalAutomaticBody',
   'onboardManualChoiceIos',
   'onboardManualChoiceIosBody',
   'onboardCapturePrivacyIos',
@@ -722,12 +734,14 @@ ok(
   ['en', 'ar'].every((language) =>
     i18n.t('onboardCaptureTitleIos', language).length <= 42 &&
       i18n.t('onboardAutomaticChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardStatementChoiceBody', language).length <= 112 &&
       i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
 ok(
-  'iOS onboarding keeps one automatic CTA, one manual fallback, and full details behind Learn more',
+  'iOS onboarding keeps automatic, statement, and manual choices with full details behind Learn more',
   /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
+    /label=\{t\('onboardStatementChoice'\)\}/.test(gateSource) &&
     /onboardManualChoiceIos/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
     /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&

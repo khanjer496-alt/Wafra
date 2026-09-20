@@ -1110,6 +1110,9 @@ export async function scanInbox(
       };
       break;
     }
+    if (RNAppState?.currentState === 'active') {
+      await waitForForegroundHistoryIdle(FOREGROUND_PARSE_YIELD_MS);
+    }
     beforeDateMs = nextBeforeDateMs;
     beforeId = nextBeforeId;
   }

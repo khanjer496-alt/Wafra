@@ -1,4 +1,5 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { isSpending } from '@/lib/ledger';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 
@@ -625,6 +626,7 @@ export function detectSubscriptions(
 // roughly a quarter of that budget so rendering/input still have headroom on
 // large ledgers while the cooperative worker is active.
 const SUBSCRIPTION_DETECTION_SLICE_MS = 2;
+const SUBSCRIPTION_DETECTION_YIELD_MS = 16;
 
 /**
  * Same answer as detectSubscriptions(), but never intentionally monopolises a
@@ -682,7 +684,7 @@ export function detectSubscriptionsCooperatively(
         ));
         return;
       }
-      setTimeout(runSlice, 0);
+      void waitForForegroundHistoryIdle(SUBSCRIPTION_DETECTION_YIELD_MS).then(runSlice);
     };
     runSlice();
   }).finally(() => {

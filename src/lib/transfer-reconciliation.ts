@@ -150,6 +150,26 @@ export function transferFingerprint(tx: Transaction): string {
   ]))}`;
 }
 
+/**
+ * Store snapshots keep transaction rows immutable: an unchanged row is the
+ * exact same object in the next state. Reconciliation used to SHA-256 every
+ * transfer candidate again after a one-row edit, which is needlessly expensive
+ * on large Android ledgers. Cache only the reconciliation's read of the
+ * fingerprint by row identity; the exported `transferFingerprint` above stays
+ * uncached for callers that validate arbitrary/mutable input.
+ *
+ * WeakMap is important here: old ledger snapshots are never retained just to
+ * make this cache work.
+ */
+const reconciliationFingerprintCache = new WeakMap<Transaction, string>();
+function reconciliationFingerprint(tx: Transaction): string {
+  const cached = reconciliationFingerprintCache.get(tx);
+  if (cached !== undefined) return cached;
+  const fingerprint = transferFingerprint(tx);
+  reconciliationFingerprintCache.set(tx, fingerprint);
+  return fingerprint;
+}
+
 function normalizedReference(value: string | undefined): string | undefined {
   if (!value || !/^[A-Za-z0-9\s/-]+$/.test(value)) return undefined;
   const ref = value.replace(/[\s/-]/g, '').toUpperCase();
@@ -209,6 +229,16 @@ interface Context {
   instrumentKey: (value: unknown, allowStatementTail?: boolean) => string | undefined;
   corroboratingOf: Map<string, string>;
   knownCounterparties: Map<string, Account>;
+}
+
+function contextFingerprint(ctx: Context, transactionId: string): string | undefined {
+  const cached = ctx.fingerprints.get(transactionId);
+  if (cached !== undefined) return cached;
+  const transaction = ctx.rows.get(transactionId);
+  if (!transaction) return undefined;
+  const fingerprint = reconciliationFingerprint(transaction);
+  ctx.fingerprints.set(transactionId, fingerprint);
+  return fingerprint;
 }
 
 /** Ownership and pairing are different questions. A completed transfer naming
@@ -380,7 +410,6 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
       }
     }
     if (!isTransferCandidate(tx) || !id(tx.id)) continue;
-    fingerprints.set(tx.id, transferFingerprint(tx));
     const account = accountById.get(tx.accountId);
     if (duplicateIds.has(tx.id) || !evidence || evidence.attribution !== 'source' ||
       (tx.userEdited && !decisionOf(tx)) || !eligibleAccount(account)) continue;
@@ -507,8 +536,8 @@ function currentStoredPair(a: TransferRow, ctx: Context): boolean {
   const b = ctx.rows.get(link.counterpartId);
   const reverse = b?.transferMatch;
   if (!b || !isTransferMatch(reverse) || reverse.counterpartId !== a.id || reverse.basis !== link.basis ||
-    link.signature !== ctx.fingerprints.get(a.id) || link.counterpartSignature !== ctx.fingerprints.get(b.id) ||
-    reverse.signature !== ctx.fingerprints.get(b.id) || reverse.counterpartSignature !== ctx.fingerprints.get(a.id)) return false;
+    link.signature !== contextFingerprint(ctx, a.id) || link.counterpartSignature !== contextFingerprint(ctx, b.id) ||
+    reverse.signature !== contextFingerprint(ctx, b.id) || reverse.counterpartSignature !== contextFingerprint(ctx, a.id)) return false;
   if (link.basis === 'user') {
     const da = decisionOf(a); const db = decisionOf(b);
     return manualPair(a, b, ctx) && da?.ownership === 'own' && db?.ownership === 'own' &&
@@ -1081,7 +1110,7 @@ export function normalizeTransferLinks(transactions: Transaction[], accounts: Ac
     if (counterpart && assessment?.status === 'confirmed-own' &&
       (assessment.reason === 'user' || assessment.reason === 'reference' || assessment.reason === 'reciprocal-instruments' || assessment.reason === 'destination-and-receipt')) {
       match = { version: 1, counterpartId: counterpart.id, basis: assessment.reason,
-        signature: ctx.fingerprints.get(tx.id)!, counterpartSignature: ctx.fingerprints.get(counterpart.id)! };
+        signature: contextFingerprint(ctx, tx.id)!, counterpartSignature: contextFingerprint(ctx, counterpart.id)! };
     }
     const sameDecision = nextDecision === tx.transferDecision || (isTransferDecision(tx.transferDecision) && !!nextDecision &&
       nextDecision.ownership === tx.transferDecision.ownership && nextDecision.decidedAt === tx.transferDecision.decidedAt &&

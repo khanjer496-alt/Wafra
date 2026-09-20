@@ -137,21 +137,49 @@ export default function FlowScreen() {
         : w.belowAverage(Math.abs(categoryAverageDeltaPercent));
 
   // Detailed analysis and activity sorting run only in the view that needs them.
-  const sortedActivity = useMemo(() => view !== 'activity' ? [] : state.transactions
-    // Store order is already newest-first; filtering preserves that order.
-    .filter((tx) => isSpending(tx, live, internal) && inPeriod(tx.date, period)),
-    [view, state.transactions, live, internal, period]);
-  const activity = useMemo(() => {
+  // Store order is newest-first: stop after leaving this period rather than
+  // copying years of spending just to paint eight preview rows.
+  const sortedActivity = useMemo(() => {
+    if (view !== 'activity') return [];
     const needle = appliedQuery.trim().toLocaleLowerCase();
-    return !needle ? sortedActivity : sortedActivity.filter((tx) =>
-      `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase().includes(needle));
-  }, [sortedActivity, appliedQuery, accountById]);
+    const out: Transaction[] = [];
+    const unbounded = period.mode === 'all';
+    let previousDate: string | null = null;
+    let newestFirst = true;
+    let seenInPeriod = false;
+    for (const tx of state.transactions) {
+      if (newestFirst && previousDate !== null && tx.date > previousDate) newestFirst = false;
+      previousDate = tx.date;
+      const inside = inPeriod(tx.date, period);
+      if (!inside) {
+        if (seenInPeriod && newestFirst && !unbounded) break;
+        continue;
+      }
+      seenInPeriod = true;
+      if (!isSpending(tx, live, internal)) continue;
+      if (needle) {
+        const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
+        if (!haystack.includes(needle)) continue;
+      }
+      out.push(tx);
+      if (!needle && out.length >= ACTIVITY_PREVIEW_LIMIT) break;
+    }
+    return out;
+  }, [view, state.transactions, live, internal, period, appliedQuery, accountById]);
+  const activity = sortedActivity;
   const analysis = useMemo(() => {
     if (view !== 'trends') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
     const buckets = new Map(keys.map((key) => [key, { key, incomeFils: 0, expenseFils: 0 }]));
+    const oldestKey = keys[0]!;
+    let previousDate: string | null = null;
+    let newestFirst = true;
     for (const tx of state.transactions) {
-      const bucket = buckets.get(monthKey(tx.date)); if (!bucket) continue;
+      if (newestFirst && previousDate !== null && tx.date > previousDate) newestFirst = false;
+      previousDate = tx.date;
+      const txMonth = monthKey(tx.date);
+      if (newestFirst && txMonth < oldestKey) break;
+      const bucket = buckets.get(txMonth); if (!bucket) continue;
       if (isIncome(tx, live, internal)) bucket.incomeFils += tx.amountFils;
       else if (isSpending(tx, live, internal)) bucket.expenseFils += tx.amountFils;
     }

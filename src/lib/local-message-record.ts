@@ -17,6 +17,8 @@ import type { LaunchAlertSession } from '@/lib/launch-alert-parser';
 import {
   MARKETS,
   bankFromSender,
+  soleBankNamedInText,
+  withMarketPackForParsing,
   bankIdentityForName,
   detectLaunchMarketFromAlert,
 } from '@/lib/markets';
@@ -305,8 +307,12 @@ export function parseLocalMessageRecord(
       sender: _sender,
       ...structured
     } = parsedWithEphemeralSender;
+    // A Shortcut sender that names no bank (a number, a contact label) leaves
+    // the one bank the body names as the record's only bank identity.
     const bankHint = structured.bankHint ?? bankFromSender(envelope.sender)?.name ??
-      attribution?.bankHint;
+      attribution?.bankHint ??
+      withMarketPackForParsing(expectedMarket, () => soleBankNamedInText(envelope.text)?.name) ??
+      undefined;
     if (attribution && canonicalBankId(bankHint ?? '') !== attribution.bankId) {
       return { kind: 'invalid', milestone: 'none' };
     }

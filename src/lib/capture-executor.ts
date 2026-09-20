@@ -405,7 +405,18 @@ export const createCaptureExecutor = ({
 
   const executeSupplemental = async (): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
-    if (!activeLedger.getState().hydrated) return { kind: 'not-hydrated' };
+    const startingState = activeLedger.getState();
+    if (!startingState.hydrated) return { kind: 'not-hydrated' };
+    // Supplemental statement import is an explicit foreground action. A user
+    // who disabled automatic capture can still choose a statement file. If
+    // they opt out during an import that started enabled, honor that new choice
+    // before any later persistence/proof/ACK. Private Mode always blocks relay.
+    const startedOptedOut = startingState.captureOptOut === true;
+    const supplementalStopped = (): boolean => {
+      const current = activeLedger.getState();
+      return !current.hydrated || current.privateMode ||
+        (!startedOptedOut && current.captureOptOut === true);
+    };
     const stopped = (): CaptureExecutionOutcome => ({
       kind: 'up-to-date',
       source: 'none',
@@ -413,11 +424,11 @@ export const createCaptureExecutor = ({
     });
 
     const cfg = await dependencies.getRelay();
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     if (!cfg) return { kind: 'needs-setup' };
 
     const queued = await dependencies.sync(cfg);
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     // Network collection can overlap a foreground import or an edit. Plan
     // against the authoritative ledger after that wait, not the snapshot that
@@ -430,11 +441,11 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       state = activeLedger.getState();
     }
     const newestTs = queued.parsed.reduce(
@@ -442,7 +453,7 @@ export const createCaptureExecutor = ({
       state.lastScanTs,
     );
     if (queued.parsed.length > 0) await yieldForegroundTurn();
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     const supplementalTracing = captureTraceEnabled();
     const planStarted = supplementalTracing ? Date.now() : 0;
     captureTrace('plan:start', queued.parsed.length);
@@ -451,9 +462,9 @@ export const createCaptureExecutor = ({
       supplementalTracing ? Date.now() - planStarted : 0);
     let transactionIds: string[] = [];
     if (queued.parsed.length > 0 && hasChanges(plan)) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       await yieldForegroundTurn();
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       const saveStarted = supplementalTracing ? Date.now() : 0;
       captureTrace('save:start', plan.txCount + plan.healedCount);
       const receipt = activeLedger.importBatch(plan.batch);
@@ -461,22 +472,22 @@ export const createCaptureExecutor = ({
       await receipt.durable;
       captureTrace('save:done', receipt.ids.length,
         supplementalTracing ? Date.now() - saveStarted : 0);
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
     } else if (reviewCandidates.length === 0) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       const saveStarted = supplementalTracing ? Date.now() : 0;
       captureTrace('save:start');
       await activeLedger.ensureDurable();
       captureTrace('save:done', 0, supplementalTracing ? Date.now() - saveStarted : 0);
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
     }
 
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     await recordForegroundAutomationProof(queued.parsed, cfg);
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     const acknowledge = acknowledgementsFor(queued, true);
     if (acknowledge.length > 0) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       await dependencies.acknowledge(cfg, acknowledge);
     }
     const pageSummary = {

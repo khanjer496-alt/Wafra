@@ -64,10 +64,51 @@ const countBy = (values: readonly string[]): Record<string, number> => {
 
 function ledgerSourceDiagnostics(state: AppState) {
   const sourceIdentityCounts = new Map<string, number>();
+  const categoryCounts: Record<string, number> = {};
+  const transactionTypeCounts: Record<string, number> = {};
+  let withSmsSourceIdentity = 0;
+  let viaPush = 0;
+  let statementPdf = 0;
+  let statementCsv = 0;
+  let manual = 0;
+  let explicitOwnNotMarkedTransfer = 0;
+  let otherRows = 0;
+  let otherExpense = 0;
+  let otherIncome = 0;
+  let transferCandidates = 0;
+  let confirmedOwnTransfers = 0;
+  let unresolvedTransfers = 0;
+  let cardPaymentRows = 0;
+  let billPaymentRows = 0;
+
+  // One pass over a 10k–20k ledger. The previous shape walked the array more
+  // than a dozen times (filter/map per counter), which froze the support
+  // button on a real 14k-row inbox.
   for (const transaction of state.transactions) {
-    if (!transaction.smsKey) continue;
-    const key = canonicalCaptureSourceKey(transaction.smsKey, transaction.ts);
-    sourceIdentityCounts.set(key, (sourceIdentityCounts.get(key) ?? 0) + 1);
+    categoryCounts[transaction.category] = (categoryCounts[transaction.category] ?? 0) + 1;
+    transactionTypeCounts[transaction.type] = (transactionTypeCounts[transaction.type] ?? 0) + 1;
+    if (transaction.smsKey) {
+      withSmsSourceIdentity += 1;
+      const key = canonicalCaptureSourceKey(transaction.smsKey, transaction.ts);
+      sourceIdentityCounts.set(key, (sourceIdentityCounts.get(key) ?? 0) + 1);
+    }
+    if (transaction.viaPush === true) viaPush += 1;
+    if (transaction.captureSource === 'pdf') statementPdf += 1;
+    else if (transaction.captureSource === 'csv') statementCsv += 1;
+    if (transaction.source === 'manual' || transaction.source == null) manual += 1;
+    if (transaction.transferEvidence?.explicitOwn === true && transaction.isTransfer !== true) {
+      explicitOwnNotMarkedTransfer += 1;
+    }
+    if (transaction.category !== 'other') continue;
+    otherRows += 1;
+    if (transaction.type === 'expense') otherExpense += 1;
+    else if (transaction.type === 'income') otherIncome += 1;
+    if (isTransferCandidate(transaction)) transferCandidates += 1;
+    const ownership = transferOwnership(transaction);
+    if (ownership === 'own') confirmedOwnTransfers += 1;
+    else if (ownership === 'unknown') unresolvedTransfers += 1;
+    if (transaction.cardPaymentSide !== undefined) cardPaymentRows += 1;
+    if (transaction.paymentFlowSide !== undefined) billPaymentRows += 1;
   }
   let repeatedSourceIdentities = 0;
   let repeatedRows = 0;
@@ -76,37 +117,35 @@ function ledgerSourceDiagnostics(state: AppState) {
     repeatedSourceIdentities += 1;
     repeatedRows += count - 1;
   }
-  const otherRows = state.transactions.filter((row) => row.category === 'other');
 
   return {
     sourceIdentityCounts,
     summary: {
       rows: state.transactions.length,
-      withSmsSourceIdentity: state.transactions.filter((row) => Boolean(row.smsKey)).length,
-      viaPush: state.transactions.filter((row) => row.viaPush === true).length,
-      statementPdf: state.transactions.filter((row) => row.captureSource === 'pdf').length,
-      statementCsv: state.transactions.filter((row) => row.captureSource === 'csv').length,
-      manual: state.transactions.filter((row) => row.source === 'manual' || row.source == null).length,
+      withSmsSourceIdentity,
+      viaPush,
+      statementPdf,
+      statementCsv,
+      manual,
       repeatedSourceIdentities,
       repeatedRows,
-      explicitOwnNotMarkedTransfer: state.transactions.filter((row) =>
-        row.transferEvidence?.explicitOwn === true && row.isTransfer !== true).length,
-      categoryCounts: countBy(state.transactions.map((row) => row.category)),
-      transactionTypeCounts: countBy(state.transactions.map((row) => row.type)),
+      explicitOwnNotMarkedTransfer,
+      categoryCounts,
+      transactionTypeCounts,
       // "Other" is not synonymous with a parser miss. Transfer/remittance and
       // settlement rows deliberately live there, while parser coverage below
       // separately reports purchases whose category was actually unresolved.
       // Keep this source-free breakdown so a support file can tell those cases
       // apart without exposing any merchant, amount or account identity.
       otherBreakdown: {
-        rows: otherRows.length,
-        expense: otherRows.filter((row) => row.type === 'expense').length,
-        income: otherRows.filter((row) => row.type === 'income').length,
-        transferCandidates: otherRows.filter(isTransferCandidate).length,
-        confirmedOwnTransfers: otherRows.filter((row) => transferOwnership(row) === 'own').length,
-        unresolvedTransfers: otherRows.filter((row) => transferOwnership(row) === 'unknown').length,
-        cardPaymentRows: otherRows.filter((row) => row.cardPaymentSide !== undefined).length,
-        billPaymentRows: otherRows.filter((row) => row.paymentFlowSide !== undefined).length,
+        rows: otherRows,
+        expense: otherExpense,
+        income: otherIncome,
+        transferCandidates,
+        confirmedOwnTransfers,
+        unresolvedTransfers,
+        cardPaymentRows,
+        billPaymentRows,
       },
     },
   };
@@ -279,6 +318,7 @@ export async function buildAndroidTesterDiagnostic(
           overrides: state.merchantOverrides,
           shouldContinue: () => true,
           maxChecked: DIAGNOSTIC_SMS_CHECK_LIMIT,
+          maxPageSize: 50,
           onProgress,
         },
       );
