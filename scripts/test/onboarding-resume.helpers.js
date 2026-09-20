@@ -23,8 +23,15 @@ const actualEffect = ts.transpileModule(`({ effect: ${callback}, dependencies: (
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 class EffectHarness {
   constructor() {
+    // `isOnboardingStatementRoute` is one of the shipping effect's dependencies,
+    // so the VM context has to carry it or evaluating the dependency array
+    // throws before a single scenario runs. False is what all seven of them
+    // mean — none drives the statement route — and it stays overridable through
+    // `render({ isOnboardingStatementRoute: true })`, because `this.input` is
+    // spread into that context. The route's own behavior is asserted from the
+    // gate's source in onboarding.test.js, not from here.
     this.input = { state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: null }, pathname: '/',
-      params: {}, hydrationFailed: false, resumeAttempt: 0 };
+      params: {}, hydrationFailed: false, resumeAttempt: 0, isOnboardingStatementRoute: false };
     this.ui = { ready: false, failed: false, step: 'welcome', focus: null, tracking: null, intention: null, alerts: null, country: null,
       collectingName: false, nameDraft: '', nameSaving: false, nameSaveFailed: false,
       smsReady: false, notificationReady: false, awaitingNotification: false };

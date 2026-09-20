@@ -72,6 +72,19 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/recap-view-state') {
         return { loadViewedRecaps: async () => new Set() };
       }
+      // The onboarding gate mints a session id for a statement import. These
+      // harnesses drive navigation and timing, not identity, so a counter keeps
+      // them reproducible while still handing back a real UUID shape — a random
+      // one would make every assertion that carries the id unstable.
+      if (name === 'expo-crypto') {
+        let issued = 0;
+        return {
+          randomUUID: () => {
+            issued += 1;
+            return `00000000-0000-4000-8000-${String(issued).padStart(12, '0')}`;
+          },
+        };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,
