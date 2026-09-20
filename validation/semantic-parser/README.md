@@ -107,6 +107,12 @@ node export_wafra_fixtures.cjs > results/wafra-alert-fixtures.json
 Seed is `20260920` everywhere. `results/wafra-alert-fixtures.json` is generated,
 not committed — regenerate it with step 4.
 
+`results/proba-main-*.npz` are the cached probability matrices from step 2, one
+per model, about 4.8 MB each. They are committed deliberately: the gate-policy
+and model-agreement analyses read them, and regenerating them means refitting
+every model (~15 minutes of CPU). Step 2 reproduces them byte-for-byte from the
+fixed seed if they are ever dropped.
+
 ## What the two benchmarks do and do not measure
 
 `run_benchmark.py` measures **semantic robustness under dialect shift**.
