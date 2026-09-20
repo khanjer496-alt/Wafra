@@ -91,6 +91,7 @@ private func wafraPagedRequest(_ request: String) throws -> (sessionId: String, 
 private func wafraPagedBlocked(_ error: Error) throws -> String {
   let reason: String
   if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
+  else if let error = error as? WafraHistoryCursor.RangeViolation { reason = error.message }
   else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
   else if let error = error as? WafraPagedHistoryStore.FrameRefusal { reason = error.reason }
   else { reason = "storage-or-device-interruption" }
@@ -223,6 +224,7 @@ struct StageWafraPagedImportIntent: AppIntent {
     } catch {
       let reason: String
       if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
+      else if let error = error as? WafraHistoryCursor.RangeViolation { reason = error.message }
       else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
       else if let error = error as? WafraPagedHistoryStore.FrameRefusal { reason = error.reason }
       else { reason = "storage-or-device-interruption" }
@@ -263,6 +265,7 @@ struct StageWafraPagedColumnsIntent: AppIntent {
     } catch {
       let reason: String
       if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
+      else if let error = error as? WafraHistoryCursor.RangeViolation { reason = error.message }
       else if let error = error as? WafraPagedHistoryStore.Failure { reason = error.rawValue }
       else if let error = error as? WafraPagedHistoryStore.FrameRefusal { reason = error.reason }
       else { reason = "storage-or-device-interruption" }

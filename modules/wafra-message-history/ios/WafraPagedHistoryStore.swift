@@ -300,6 +300,7 @@ public final class WafraPagedHistoryStore {
       if let error = error as? Failure { reason = error.rawValue }
       else if let error = error as? FrameRefusal { reason = error.reason }
       else if let error = error as? WafraHistoryCursor.Failure { reason = error.rawValue }
+      else if let error = error as? WafraHistoryCursor.RangeViolation { reason = error.message }
       else { reason = "storage-or-device-interruption" }
       try? locked { directory in
         try write(Data(reason.utf8), to: directory.appendingPathComponent(Self.rowRefusalFile))

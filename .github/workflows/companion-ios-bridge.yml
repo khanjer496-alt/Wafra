@@ -1,0 +1,132 @@
+name: Temporary Companion iOS TestFlight bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Private Wafra release tag containing companion-source.tgz
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-ios-testflight-bridge
+  cancel-in-progress: false
+
+jobs:
+  build-submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+      EXPO_APPLE_TEAM_ID: UV7YN4GQ66
+      EXPO_APPLE_TEAM_TYPE: INDIVIDUAL
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Download exact private Companion source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/companion-source"
+          mkdir -p "$ROOT"
+          gh release download "${{ inputs.source_tag }}" \
+            --repo khanjer496-alt/Wafra \
+            --pattern 'companion-source-*.tgz' \
+            --dir "$ROOT"
+          ARCHIVE="$(find "$ROOT" -maxdepth 1 -type f -name 'companion-source-*.tgz' -print -quit)"
+          test -n "$ARCHIVE"
+          tar -xzf "$ARCHIVE" -C "$ROOT"
+          test -f "$ROOT/mobile/app.json"
+          echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
+
+      - name: Install Companion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          npm ci
+
+      - name: Prepare App Store Connect API key
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}"
+          test -n "${EXPO_ASC_API_KEY_P8:-}"
+          test -n "${EXPO_ASC_KEY_ID:-}"
+          test -n "${EXPO_ASC_ISSUER_ID:-}"
+          KEY="$RUNNER_TEMP/AuthKey_${EXPO_ASC_KEY_ID}.p8"
+          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY"
+          else
+            printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          grep -q 'BEGIN PRIVATE KEY' "$KEY"
+          echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
+
+      - name: Verify Companion EAS project and initialize temporary Git source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          PROJECT_ID="$(node -p "require('./app.json').expo.extra.eas.projectId")"
+          OWNER="$(node -p "require('./app.json').expo.owner")"
+          test "$PROJECT_ID" = "3cb8e0e0-3b5b-46de-a6e6-d006a3ad50a4"
+          test "$OWNER" = "nnnkk"
+          printf '{"status":"linked","projectId":"%s","owner":"%s","slug":"companion"}\n' "$PROJECT_ID" "$OWNER" > "$RUNNER_TEMP/eas-project.json"
+          git init -q
+          git config user.name 'Companion iOS bridge'
+          git config user.email 'companion-ios-bridge@users.noreply.github.com'
+          git add -A
+          git commit -qm 'Exact Companion source for EAS build'
+
+      - name: Attempt first store-signed iOS build
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          eas build --platform ios --profile preview --non-interactive --wait --json \
+            | tee "$RUNNER_TEMP/eas-build.json"
+
+      - name: Submit finished Companion build to TestFlight
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          eas submit --platform ios --profile preview --latest --non-interactive \
+            | tee "$RUNNER_TEMP/eas-submit.log"
+
+      - name: Preserve non-secret bridge evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-ios-bridge-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/eas-project.json
+            ${{ runner.temp }}/eas-build.json
+            ${{ runner.temp }}/eas-submit.log
+            ${{ env.APP_DIR }}/app.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove temporary App Store Connect key
+        if: always()
+        shell: bash
+        run: rm -f "${EXPO_ASC_API_KEY_PATH:-}"

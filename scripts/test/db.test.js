@@ -278,6 +278,16 @@ for (const method of ['async multiSet(entries)', 'async multiRemove(keys)']) {
       'the whole difference');
 }
 
+const multiSetBody = bodyOf(storage, 'async multiSet(entries)');
+ok('large encrypted ledger saves batch changed chunks across the native SQLite bridge',
+  !!multiSetBody &&
+    /MULTISET_ROWS_PER_STATEMENT/.test(multiSetBody) &&
+    /entries\.slice\(start, start \+ MULTISET_ROWS_PER_STATEMENT\)/.test(multiSetBody) &&
+    /batch\.map\(\(\) => '\(\?, \?, \?\)'\)\.join\(', '\)/.test(multiSetBody) &&
+    /await db\.runAsync\(/.test(multiSetBody) &&
+    !/for \(const \[key, value\] of entries\)/.test(multiSetBody),
+  'a 10k-20k row repair must not issue one awaited native execute per persisted 400-row chunk');
+
 // ---------------------------------------------------------------------------
 // 1b. A ROLLBACK that fails poisons the connection.
 //
@@ -510,11 +520,11 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // drift from the count the categorise screen prints beside the tap — the
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
-    // store.tsx gained this import in 6b9fbcf without the allowlist gaining the
-    // matching entry, so `npm test` fails on main itself with "unexpected store
-    // dependency @/lib/known-banks". The strictness is the point — this list is
-    // what stops the store's dependency graph drifting unnoticed — so the entry
-    // is added rather than the check loosened.
+    // Also the REAL module. sanitizeKnownBanks rewrites `parsed.knownBanks` on
+    // every hydrate and accountsLabelledWithBank relabels accounts from it, so
+    // both decide what a restored ledger actually contains. A stub here would
+    // let hydration drift from what the app does, which is the one thing this
+    // harness exists to pin.
     '@/lib/known-banks': require('./build/known-banks'),
     './balances': {},
     ...realModules,

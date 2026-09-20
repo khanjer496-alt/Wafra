@@ -78,6 +78,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === 'expo-crypto') {
         return { randomUUID: () => 'test-statement-session' };
       }
+      // The known-banks helpers decide which bank an account gets and which
+      // accounts a setup answer relabels. They are pure, so every harness gets
+      // the real compiled module rather than a stub that could drift from it.
+      if (name === '@/lib/known-banks') {
+        return require('../build/known-banks.js');
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,
