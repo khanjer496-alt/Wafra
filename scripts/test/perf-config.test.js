@@ -1189,6 +1189,20 @@ function bodyOf(source, header) {
       /return billsForMonthCache\.value\.slice\(\)/.test(billsLogic),
     'Home already computes card/bill upcoming data; opening Bills must reuse that result rather than retokenize the full ledger');
 
+  ok('manual bill reconciliation stops after the current money month on a newest-first ledger',
+    /function spendingInMonth\(/.test(billsLogic) &&
+      /if \(seenInMonth && newestFirst\) break/.test(billsLogic) &&
+      /const monthRows = spendingInMonth\(transactions, key, live, internal\)/.test(billsLogic) &&
+      /candidatePayments\(bill, monthRows, key, live, internal\)/.test(billsLogic),
+    'Home leaving-soon and Bills must not retokenize 14k historical rows to settle this month\'s three bills');
+
+  const dailySummaryLogic = stripComments(read('src/lib/daily-summary.ts'));
+  ok('daily spend summary stops after leaving today on a newest-first ledger',
+    /function forEachInDateWindow\(/.test(dailySummaryLogic) &&
+      /if \(seen && newestFirst\) break/.test(dailySummaryLogic) &&
+      /forEachInDateWindow\(state\.transactions, \(date\) => date === dayISO/.test(dailySummaryLogic),
+    'reminder setup must not walk 2019 to total today\'s coffees');
+
   ok('settled-card history is cached by immutable card inputs and day',
     /let recentlySettledDuesCache:/.test(cards) &&
       /recentlySettledDuesCache\.withinDays === withinDays/.test(cards) &&
@@ -1232,6 +1246,11 @@ function bodyOf(source, header) {
   ok('month summaries stop after leaving a newest-first bounded period',
     /if \(seenInPeriod && newestFirst && !unbounded\) break/.test(insightSource),
     'a 14k-row history must not walk 2019 just to total this month');
+
+  ok('month early-exit requires the whole ledger to be newest-first, not a sorted prefix',
+    /function datesAreNewestFirst/.test(insightSource) &&
+      /const newestFirst = datesAreNewestFirst\(transactions\)/.test(insightSource),
+    'a newest-first prefix with later in-period rows would undercount money if we stopped at the first inversion');
 
   ok('Wallet reissue suggestions are cached on the immutable ledger snapshot',
     /let reissueCache:/.test(cards) &&

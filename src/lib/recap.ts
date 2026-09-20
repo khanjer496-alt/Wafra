@@ -97,9 +97,25 @@ export function recapCandidates(now = new Date()): RecapDescriptor[] {
 
 /** Cheap Home eligibility check. Full analytics wait until the story opens. */
 export function hasRecapActivity(transactions: readonly Transaction[], descriptor: RecapDescriptor): boolean {
-  return transactions.some((transaction) =>
-    (transaction.type === 'expense' || transaction.type === 'income') &&
-    inPeriod(transaction.date, descriptor.period));
+  const unbounded = descriptor.period.mode === 'all';
+  let newestFirst = true;
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) {
+      newestFirst = false;
+      break;
+    }
+  }
+  let seenInPeriod = false;
+  for (const transaction of transactions) {
+    const inside = inPeriod(transaction.date, descriptor.period);
+    if (!inside) {
+      if (seenInPeriod && newestFirst && !unbounded) return false;
+      continue;
+    }
+    seenInPeriod = true;
+    if (transaction.type === 'expense' || transaction.type === 'income') return true;
+  }
+  return false;
 }
 
 function bounds(descriptor: RecapDescriptor): { from: string; to: string } {

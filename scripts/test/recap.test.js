@@ -30,7 +30,7 @@ Module._resolveFilename = function resolveWafraAlias(request, parent, isMain, op
   return originalResolveFilename.call(this, request, parent, isMain, options);
 };
 
-const { primaryRecapDescriptor, projectRecap, recapCandidates, recapDescriptor } = require('../../src/lib/recap.ts');
+const { primaryRecapDescriptor, projectRecap, recapCandidates, recapDescriptor, hasRecapActivity } = require('../../src/lib/recap.ts');
 const { setMonthStartDay } = require('../../src/lib/format.ts');
 
 Module._resolveFilename = originalResolveFilename;
@@ -88,6 +88,23 @@ eq('January surfaces the completed annual recap', primaryRecapDescriptor(new Dat
 eq('January keeps both the annual and December stories available',
   recapCandidates(new Date('2027-01-17T12:00:00')).map((row) => row.id),
   ['year:2026', 'month:2026-12']);
+ok('a newest-first prefix cannot hide a later in-month recap row',
+  hasRecapActivity([
+    tx('sep', { date: '2026-09-01' }),
+    tx('july', { date: '2026-07-01' }),
+    tx('aug', { date: '2026-08-15' }),
+  ], recapDescriptor('month', '2026-08')));
+ok('newest-first still finds August after skipping September',
+  hasRecapActivity([
+    tx('sep', { date: '2026-09-20' }),
+    tx('aug', { date: '2026-08-15' }),
+    tx('july', { date: '2026-07-01' }),
+  ], recapDescriptor('month', '2026-08')));
+ok('a ledger with no in-month activity is not recap-eligible',
+  !hasRecapActivity([
+    tx('sep', { date: '2026-09-20' }),
+    tx('july', { date: '2026-07-01' }),
+  ], recapDescriptor('month', '2026-08')));
 
 const recap = projectRecap(state, recapDescriptor('month', '2026-08'));
 eq('spending excludes transfers and investing', recap.totalSpendFils, 17_000);

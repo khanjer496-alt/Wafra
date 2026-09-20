@@ -171,6 +171,15 @@ eq(
   bills.billsForMonth([monthly], [charge('old')], august)[0].status,
   'paid',
 );
+eq(
+  'reconcile: an older out-of-month row cannot hide a later in-month payment',
+  bills.billsForMonth([monthly], [
+    { ...charge('live'), id: 'too-small', date: '2026-08-20', amountFils: 100 },
+    { ...charge('live'), id: 'july', date: '2026-07-01' },
+    { ...charge('live'), id: 'later', date: '2026-08-05' },
+  ], august, live, new Set())[0].status,
+  'paid',
+);
 
 /* ── 3. Per-category spend has exactly one answer ────────────────────── */
 

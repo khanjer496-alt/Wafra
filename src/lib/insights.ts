@@ -43,6 +43,14 @@ const summaryPeriodKey = (periodLike: PeriodLike): string => {
   return 'all';
 };
 
+/** Cheap date-only probe. A prefix can look sorted; the whole ledger must be. */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return false;
+  }
+  return true;
+}
+
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
 export const MAX_COMPOSITION_SLICES = 5;
 
@@ -108,17 +116,14 @@ export function summarizeMonth(
   let expenseFils = 0;
   const catTotals = new Map<CategoryId, number>();
   const unbounded = toPeriod(period).mode === 'all';
-  let previousDate: string | null = null;
-  let newestFirst = true;
+  const newestFirst = datesAreNewestFirst(transactions);
   let seenInPeriod = false;
 
   for (const t of transactions) {
-    if (newestFirst && previousDate !== null && t.date > previousDate) newestFirst = false;
-    previousDate = t.date;
     const inside = inPeriod(t.date, period);
     if (!inside) {
-      // Persisted order is newest-first. After the window we already entered
-      // it, older rows cannot rejoin a bounded period.
+      // Only a fully newest-first ledger can stop after leaving the window.
+      // A sorted prefix with later in-period rows would undercount money.
       if (seenInPeriod && newestFirst && !unbounded) break;
       continue;
     }
