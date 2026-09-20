@@ -804,6 +804,79 @@ function wideTextPdf(lines) {
     prosePitfall.reconciliation.verdict === 'proven',
     JSON.stringify(prosePitfall.reconciliation));
 
+  // ── Four ways reconciliation could accuse a correct parse ──
+  //
+  // Found by review, not by a statement. Every one of these reports
+  // `contradicted` against a reading that was right, which is worse than not
+  // checking: it is documented as only ever ADDING proof.
+  const owedLedger = (closingLines) => [
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Description', 'Transaction Amount', 'Billing Amount',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP DUBAI AE 100.00 100.00',
+    ...closingLines,
+  ].join('\n');
+  // `1,100.00 DR` ends in a direction, so the line read as no figure at all and
+  // the lookahead ran on to take the minimum payment underneath as the closing
+  // balance — off by the whole statement.
+  const trailingMarker = parseStatementLines(
+    owedLedger(['Total Outstanding 1,100.00 DR', 'Minimum Payment', '50.00']), 'AED');
+  ok('a balance with a trailing DR is read, not skipped for the figure below it',
+    trailingMarker.reconciliation.verdict === 'proven' &&
+      trailingMarker.reconciliation.closingMinor === 110000,
+    JSON.stringify(trailingMarker.reconciliation));
+  // An overpaid card is in CREDIT: it owes minus two hundred, not plus. Read as
+  // positive it missed by twice the balance.
+  const overpaid = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Description', 'Transaction Amount', 'Billing Amount',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 REFUND 1,200.00 CR 1,200.00CR',
+    'Total Outstanding', '200.00CR',
+  ].join('\n'), 'AED');
+  ok('an overpaid card reads its CR balance as money it does not owe',
+    overpaid.reconciliation.verdict === 'proven' &&
+      overpaid.reconciliation.closingMinor === -20000,
+    JSON.stringify(overpaid.reconciliation));
+  // A summary box stacks labels then values, so a lookahead that stopped only
+  // at its OWN label walked into the other balance and read opening as closing.
+  const stackedBox = parseStatementLines(
+    owedLedger(['Total Outstanding', '1,100.00']), 'AED');
+  ok('a stacked summary box does not read the opening balance as the closing one',
+    stackedBox.reconciliation.verdict === 'proven' &&
+      stackedBox.reconciliation.openingMinor === 100000 &&
+      stackedBox.reconciliation.closingMinor === 110000,
+    JSON.stringify(stackedBox.reconciliation));
+  // Both labels, THEN both values. A lookahead stopping only at its own label
+  // walked from "Total Outstanding" straight onto the opening figure, so
+  // closing equalled opening and the statement was contradicted by exactly its
+  // own traffic. Pairing labels to values across a block like this is guesswork
+  // either way, so the honest answer is to decline it.
+  const bothLabelsFirst = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Description', 'Transaction Amount', 'Billing Amount',
+    'Opening Balance', 'Total Outstanding', '1,000.00', '1,100.00',
+    '09-Aug-26 11-Aug-26 SHOP DUBAI AE 100.00 100.00',
+  ].join('\n'), 'AED');
+  ok('labels stacked above their values are declined, not contradicted',
+    bothLabelsFirst.reconciliation.verdict === 'unknown',
+    JSON.stringify(bothLabelsFirst.reconciliation));
+  // A row wrapped past the join limit is invisible — never read, never
+  // rejected. The sum is missing a transaction, so it cannot close, and saying
+  // `contradicted` would accuse a parse that did nothing wrong.
+  const wrappedTooFar = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Description', 'Transaction Amount', 'Billing Amount',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 VERY LONG MERCHANT NAME',
+    'CONTINUED LINE ONE', 'CONTINUED LINE TWO',
+    '100.00 100.00',
+    'Total Outstanding', '1,100.00',
+  ].join('\n'), 'AED');
+  ok('a row lost to wrapping makes the verdict unknown, never contradicted',
+    wrappedTooFar.reconciliation.verdict === 'unknown',
+    JSON.stringify([wrappedTooFar.rows.length, wrappedTooFar.rejectedRows, wrappedTooFar.reconciliation]));
+
   // ── A failing statement can be diagnosed without handling anyone's money ──
   //
   // A file that reads zero rows tells the user nothing actionable and tells
@@ -852,6 +925,23 @@ function wideTextPdf(lines) {
     print.otherHeaderLines >= 3 &&
       print.headers.every((header) => !/sample|cardholder|example|dubai|emirates/i.test(header)),
     JSON.stringify([print.headers, print.otherHeaderLines]));
+
+  // The probe above missed a whole class: a name that CONTAINS a column word.
+  // `GULF PAYMENTS SERVICES LLC` carries "payments", is four words, and went
+  // into the report verbatim. A column label ends in its noun; a trading name
+  // ends in what it is.
+  const tradingNames = statementLayoutFingerprint([
+    'Credit Card Statement',
+    'GULF PAYMENTS SERVICES LLC',
+    'NORTHBANK SETTLEMENTS PJSC',
+    'EXAMPLE BALANCE ADVISORS LTD',
+    'Transaction Date', 'Original Amount', 'Total Amount',
+  ].join('\n'), 'AED');
+  ok('a trading name containing a column word is still not a column label',
+    tradingNames.headers.every((header) => !/gulf|northbank|advisors|llc|pjsc|ltd/i.test(header)) &&
+      tradingNames.headers.includes('original amount') &&
+      tradingNames.headers.includes('total amount'),
+    JSON.stringify(tradingNames.headers));
 
   // What it DOES carry is enough to rebuild the table from.
   ok('a fingerprint names the column vocabulary the table used',
