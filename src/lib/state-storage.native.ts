@@ -37,6 +37,13 @@ export interface StateStorage {
 const DATABASE_NAME = 'wafra-private.db';
 const KEY_NAME = 'wafra.database.key.v1';
 const TABLE = 'wafra_state';
+// A large ledger can have dozens of 400-row chunks. Sending every changed
+// chunk through a separate `statement.executeAsync` call made a full repair or
+// layout conversion pay one JS/native round-trip per chunk. On the 14.8k-row
+// Android diagnostic that path lined up with 12-15 second foreground stalls.
+// Keep each SQLite statement comfortably below bind-variable limits while
+// collapsing the common 30-40 chunk save to two native calls.
+const MULTISET_ROWS_PER_STATEMENT = 32;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 /**
@@ -336,20 +343,20 @@ const encryptedStorage: StateStorage = {
         // or opens a fresh one, and never uses a dead one.
         const db = await openEncryptedDatabase();
         return writeTransaction(db, async () => {
-          const statement = await db.prepareAsync(
-            `INSERT INTO ${TABLE} (key, value, updated_at)
-             VALUES (?, ?, ?)
-             ON CONFLICT(key) DO UPDATE SET
-               value = excluded.value,
-               updated_at = excluded.updated_at`,
-          );
-          try {
-            const now = Date.now();
-            for (const [key, value] of entries) {
-              await statement.executeAsync(key, value, now);
-            }
-          } finally {
-            await statement.finalizeAsync();
+          const now = Date.now();
+          for (let start = 0; start < entries.length; start += MULTISET_ROWS_PER_STATEMENT) {
+            const batch = entries.slice(start, start + MULTISET_ROWS_PER_STATEMENT);
+            const values = batch.map(() => '(?, ?, ?)').join(', ');
+            const params: (string | number)[] = [];
+            for (const [key, value] of batch) params.push(key, value, now);
+            await db.runAsync(
+              `INSERT INTO ${TABLE} (key, value, updated_at)
+               VALUES ${values}
+               ON CONFLICT(key) DO UPDATE SET
+                 value = excluded.value,
+                 updated_at = excluded.updated_at`,
+              ...params,
+            );
           }
         });
       });
