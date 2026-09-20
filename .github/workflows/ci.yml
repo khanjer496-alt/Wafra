@@ -11,7 +11,21 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseding a PR run is what this is for: the newer push is the one worth a
+  # verdict, and the older one is wasted minutes.
+  #
+  # A push to `main` is the opposite case. A cancelled run reports NO verdict at
+  # all — not a failure, nothing — so cancelling one lets a breaking commit land
+  # with nobody told. That is not hypothetical: 98b1bb4 ("feat(onboarding): add
+  # bank statement import option") had its run cancelled by the very next push
+  # and broke onboarding.test.js plus 43 ios-journey regressions; main stayed red
+  # until someone ran the suites by hand, and every PR opened meanwhile inherited
+  # a red base. main has since gone red the same way more than once.
+  #
+  # So: cancel on every ref except main, where the run always finishes and says
+  # something. Two pushes to main in quick succession now cost two full runs,
+  # which is the right trade against a silent regression.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
