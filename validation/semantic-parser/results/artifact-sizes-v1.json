@@ -1,0 +1,58 @@
+{
+  "experiment": "shippable-artifact-size",
+  "created": "2026-09-20T19:44:10Z",
+  "torch": "2.14.0+cpu",
+  "note": "int8 is real torch dynamic quantization of Linear layers, serialized. int8_encoder_only_bytes is the floor a vocabulary-pruned build could reach, not a measured build.",
+  "candidates": [
+    {
+      "model_id": "intfloat/multilingual-e5-small",
+      "parameters": 117653760,
+      "vocab_size": 250002,
+      "embedding_parameters": 96014208,
+      "embedding_share": 0.8160742844087601,
+      "encoder_parameters": 21639552,
+      "fp32_bytes": 470690865,
+      "int8_bytes": 406603597,
+      "tokenizer_files": {
+        "tokenizer.json": 17082730,
+        "sentencepiece.bpe.model": 5069051,
+        "tokenizer_config.json": 443
+      },
+      "tokenizer_bytes": 22152224,
+      "int8_plus_tokenizer_bytes": 428755821,
+      "embedding_fp32_bytes": 384056832,
+      "int8_encoder_only_bytes": 22546765,
+      "estimated_pruned_int8_bytes": {
+        "vocab_10000": 26386765,
+        "vocab_20000": 30226765,
+        "vocab_32000": 34834765
+      },
+      "batch1_int8_cpu_ms": 9.254059219997544
+    },
+    {
+      "model_id": "Geotrend/distilbert-base-ar-cased",
+      "parameters": 48532224,
+      "vocab_size": 7305,
+      "embedding_parameters": 5610240,
+      "embedding_share": 0.11559824664124191,
+      "encoder_parameters": 42921984,
+      "fp32_bytes": 194165367,
+      "int8_bytes": 66791143,
+      "tokenizer_files": {
+        "tokenizer.json": 0,
+        "vocab.txt": 49054,
+        "tokenizer_config.json": 49
+      },
+      "tokenizer_bytes": 49103,
+      "int8_plus_tokenizer_bytes": 66840246,
+      "embedding_fp32_bytes": 22440960,
+      "int8_encoder_only_bytes": 44350183,
+      "estimated_pruned_int8_bytes": {
+        "vocab_10000": 52030183,
+        "vocab_20000": 59710183,
+        "vocab_32000": 68926183
+      },
+      "batch1_int8_cpu_ms": 8.883974999998827
+    }
+  ]
+}
