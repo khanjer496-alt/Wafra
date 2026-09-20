@@ -490,7 +490,8 @@ export function bankFromMessage(
  * a leading header ("ADCB: …", "RAKBANK" on its own first line), and those
  * two shapes are the only bank identity such a record has. A transfer's
  * destination ("to your FAB Account") is named by the sending bank, so a
- * claim preceded by "to" is not one. A bank named anywhere else is not the issuer:
+ * claim preceded by "to" counts only when the body has no transfer, payment
+ * or debit wording ("salary credited to your RAKBANK Account" does). A bank named anywhere else is not the issuer:
  * another bank's ATM, a remitter, or a merchant whose name contains a bank
  * token ("ADIBA FLOWERS") must not become the account's bank, because the
  * import planner would then mint a wrong-bank account and refuse to bind the
@@ -510,7 +511,7 @@ function bankClaimedPattern(re: RegExp): RegExp {
     // lastIndex before every scan.
     claimed = new RegExp(
       `(?:\\b(to|into|unto)\\s+)?\\byour\\s+${bank}[^\\n.]{0,24}?\\b(?:card|account|acc|a\\/c|acct|wallet)\\b` +
-      `|^\\s*${bank}\\s*(?:[:\\-\u2013|]|alert\\b|\\n)`,
+      `|^\\s*(?:from\\s+)?${bank}\\s*(?:[:\\-\u2013|]|alert\\b|\\n)`,
       'ig',
     );
     bankClaimedPatterns.set(re, claimed);
@@ -518,11 +519,20 @@ function bankClaimedPattern(re: RegExp): RegExp {
   return claimed;
 }
 
+/**
+ * Wording that makes "to your <bank> account" a destination rather than the
+ * sender's own account: a transfer (also "Trf"/"Tfr"), a payment, a debit,
+ * a wire or something "processed" or "moved". Without any of it,
+ * "salary credited to your RAKBANK Account" is the bank talking about itself.
+ */
+const MOVEMENT_WORDING = /\b(?:transfer\w*|trf\w*|tfr\w*|sent|remit\w*|payment|paid|instruction\w*|debit\w*|withdraw\w*|moved|wire\w*|processed)\b/i;
+
 function bankClaimed(re: RegExp, text: string): boolean {
   const pattern = bankClaimedPattern(re);
   pattern.lastIndex = 0;
+  const moved = MOVEMENT_WORDING.test(text);
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
-    if (!match[1]) return true;
+    if (!match[1] || !moved) return true;
   }
   return false;
 }

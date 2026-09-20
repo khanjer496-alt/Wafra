@@ -3018,6 +3018,9 @@ const S = {
   iosBanksNext: { en: 'Next', ar: 'التالي' },
   iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
   iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
+  accountSetBank: { en: 'Set bank', ar: 'تحديد البنك' },
+  accountNoBank: { en: 'No bank', ar: 'بدون بنك' },
+  accountBankQuestion: { en: 'Which bank is this account with?', ar: 'مع أي بنك هذا الحساب؟' },
 
   iosShortcutTitle: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
   iosShortcutBody: {

@@ -1327,6 +1327,18 @@ async function main() {
       markets.withMarketPackForParsing('SA', () => named('SAR 30.00 paid from your stc pay wallet at JARIR')) === 'stc pay' &&
       named('RAKBANK\nYour Card ending 1234 was used for AED 90.00 at LULU') === 'RAKBANK' &&
       named('ADCB Alert Your account XXX1234 has been debited with AED 50.00') === 'ADCB');
+    ok('markets: a "From HSBC:" header resolves',
+      named('From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending 1234') === 'HSBC');
+    ok('markets: an inward credit "to your <bank> account" with no transfer wording resolves',
+      named('Your salary of AED 18,500.00 has been credited to your RAKBANK Account XXXX1234. Available Balance AED 21,400.00') === 'RAKBANK' &&
+      named('Profit of AED 34.22 has been credited to your ADIB Savings Account XXXX1234. Available Balance AED 5,000.00') === 'ADIB' &&
+      named('AED 2,500.00 has been credited to your Wio Personal account from ACME TRADING LLC. Balance AED 5,000.00') === 'Wio');
+    ok('markets: "to your <bank>" next to transfer, payment or debit wording is still not a claim',
+      named('AED 500.00 debited from your account XXX1234 and credited to your FAB account 9876') === null &&
+      named('AED 900.00 sent to your FAB account 9876 from your account XXX1234') === null &&
+      named('Trf of AED 500.00 to your FAB account 9876 from a/c XXX1234. Bal AED 2,100.00') === null &&
+      named('AED 300.00 to your FAB Account 9876 has been processed. Ref TT12345.') === null &&
+      named('AED 1,200.00 moved to your ADCB account 4455 via wire') === null);
     ok('markets: two banks claimed as yours resolve none',
       named('Your ADIB Account XXX1234 and your FAB Account ending 9876 were both debited AED 100.00') === null);
     ok('markets: a body naming no bank resolves none',

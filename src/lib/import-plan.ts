@@ -8,6 +8,7 @@ import {
   getActiveMarket,
   withMarketPackForParsing,
 } from '@/lib/markets';
+import { singleKnownBank } from '@/lib/known-banks';
 import {
   bodyPrint,
   compatibleCaptureInstrument,
@@ -686,6 +687,9 @@ function buildImportPlanInMarket(
     /** False when multiple compatible accounts made attribution unsafe. */
     confident: boolean;
   }
+  // The user's sole known bank: names a card nothing else could, and yields
+  // to explicit evidence (see matchesCard and the backfill below).
+  const soleKnownBankName = singleKnownBank(state.knownBanks)?.name;
   const hintKey = (bankName: string | undefined, last4: string, kind: string) =>
     `${bankName ?? '?'}|${kind}|${last4}`;
   const unassignedCardRef = (
@@ -722,10 +726,15 @@ function buildImportPlanInMarket(
       }
     }
     // A missing bank can be learned from this sender. A different known bank
-    // cannot: last four digits are not globally unique.
+    // cannot: last four digits are not globally unique. The one exception is
+    // a label that came from the user's "Which banks text you?" answer when
+    // exactly one bank is known: that is a default, not evidence, so an alert
+    // that names another bank for the same card corrects it instead of
+    // minting a second account.
     return (
       !bankName ||
       !account.bankName ||
+      account.bankName === soleKnownBankName ||
       bankIdentityForName(account.bankName) === bankIdentityForName(bankName)
     );
   };
@@ -866,7 +875,9 @@ function buildImportPlanInMarket(
         const existingRef = !/^\d+$/.test(ref);
         // Learning a missing issuer is a real mutation. Re-stating the issuer
         // already persisted on this exact account is not.
-        if (!existingRef || !account?.bankName) bankNames[ref] ??= bank.name;
+        if (!existingRef || !account?.bankName || account.bankName === soleKnownBankName) {
+          bankNames[ref] ??= bank.name;
+        }
       }
       noteType(ref);
       return { accountId: ref, confident };
@@ -940,17 +951,20 @@ function buildImportPlanInMarket(
       return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
     }
     // Auto-create; reference by index until the store assigns real ids.
+    // When neither sender nor body named the bank, the user's own answer to
+    // "Which banks text you?" does, provided it is exactly one bank.
+    const label = bank ?? singleKnownBank(state.knownBanks);
     const idx = newAccounts.length;
     newAccounts.push({
-      name: bank
-        ? `${bank.name} ${cardAccountName(last4, kind)}`
+      name: label
+        ? `${label.name} ${cardAccountName(last4, kind)}`
         : cardAccountName(last4, kind),
       kind: kind === 'credit' || kind === 'debit' || kind === 'unknown' ? 'card' : 'bank',
       cardType: kind === 'credit' ? 'credit' : kind === 'debit' ? 'debit' : undefined,
       last4,
-      bankName: bank?.name,
+      bankName: label?.name,
       openingFils: 0,
-      color: bank?.color ?? colorForHint(last4),
+      color: label?.color ?? colorForHint(last4),
     });
     const ref = String(idx);
     accountCandidates.push({ ref, account: newAccounts[idx] });

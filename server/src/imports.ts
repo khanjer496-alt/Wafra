@@ -261,6 +261,21 @@ function statementInstrument(text: string): StatementInstrument | null {
     'credit',
     /\bcredit\s+card\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
   ) ?? labelled(
+    // Bilingual PDFs often interleave the translated label between the
+    // English label and the value: `Credit Card Number <Arabic> 4111…`.
+    // Permit only a short run containing no Latin letters/digits before the
+    // explicitly card-labelled number, so a later unrelated amount cannot be
+    // captured as card identity.
+    'credit',
+    /\bcredit\s+card\s+(?:number|no\.?)\b[^A-Za-z0-9\r\n]{0,96}([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/iu,
+  ) ?? labelled(
+    // Bilingual PDFs can expose the English label in visual/right-to-left
+    // extraction order as "Number Card Credit" even though the page renders
+    // "Credit Card Number". The following value is still explicitly labelled
+    // card metadata, so retaining only its terminal four digits is safe.
+    'credit',
+    /\bnumber\s+card\s+credit\b\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
+  ) ?? labelled(
     'unknown',
     /\bcard\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
   ) ?? labelled(
@@ -785,6 +800,285 @@ function isCardStatement(text: string): boolean {
   return markers.filter((marker) => marker.test(header)).length >= 2;
 }
 
+/**
+ * Credit-card transaction tables that expose both the original and posted
+ * total amount need different semantics from an account Debit/Credit table.
+ * The card itself is the direction authority: ordinary rows are charges and
+ * CR/credit marks the exceptions. Requiring all of these column labels keeps
+ * that convention scoped to an actual table, not prose that merely mentions a
+ * transaction or a total amount somewhere in the document.
+ */
+function hasCardTotalAmountTable(text: string, cardStatement: boolean): boolean {
+  if (!cardStatement) return false;
+  const normalized = text.replace(/\s+/g, ' ');
+  return (
+    /\btransaction\s*date\b/i.test(normalized) &&
+    /\b(?:posting|post)\s*date\b/i.test(normalized) &&
+    /\btransaction\s*(?:details?|description)\b/i.test(normalized) &&
+    /\boriginal\s+amount\b/i.test(normalized) &&
+    /\btotal\s+amount\b/i.test(normalized)
+  );
+}
+
+interface TrailingAmountCell {
+  before: string;
+  surface: string;
+  direction: 'expense' | 'income' | null;
+}
+
+// PDF text extraction may join a direction label directly to the figure
+// (`13.92CR`) or leave it as a separate text item (`13.92 CR`). The optional
+// ISO token covers original-amount cells in foreign currency; only the final
+// Total Amount cell is later required to match the ledger currency.
+const TRAILING_AMOUNT_CELL = /(?:^|\s)((?:(?:[A-Z]{3})\s*)?[\d,]+(?:\.\d{1,3})?(?:\s*[A-Z]{3})?)\s*(DR|CR|DEBIT|CREDIT)?\s*$/i;
+
+function trailingAmountCell(value: string): TrailingAmountCell | null {
+  const match = TRAILING_AMOUNT_CELL.exec(value);
+  if (!match) return null;
+  const label = match[2]?.toUpperCase();
+  const direction = label === 'CR' || label === 'CREDIT'
+    ? 'income'
+    : label === 'DR' || label === 'DEBIT'
+      ? 'expense'
+      : null;
+  return {
+    before: value.slice(0, match.index).trim(),
+    surface: match[1].trim(),
+    direction,
+  };
+}
+
+function ledgerCellMinor(cell: TrailingAmountCell, currency: StatementCurrency): number | null {
+  const positive = amountMinor(cell.surface, currency, false);
+  if (positive !== null) return positive;
+  // amountMinor deliberately refuses zero because zero is not a transaction.
+  // VAT can legitimately be an explicit 0.00 cell, and here it is used only to
+  // prove a column boundary, never emitted as a transaction amount.
+  const code = /\b([A-Z]{3})\b/i.exec(cell.surface)?.[1];
+  if (code && statementCurrency(code) !== currency) return null;
+  const numeric = cell.surface.replace(/[A-Za-z\s]/g, '').replace(/,/g, '');
+  return /^0(?:\.0{1,3})?$/.test(numeric) ? 0 : null;
+}
+
+function directionsAgree(values: Array<'expense' | 'income' | null>): 'expense' | 'income' | null | false {
+  const explicit = values.filter((value): value is 'expense' | 'income' => value !== null);
+  if (new Set(explicit).size > 1) return false;
+  return explicit[0] ?? null;
+}
+
+function cardTotalAmountRowComplete(line: string): boolean {
+  const first = ROW_DATE_PREFIX.exec(line);
+  if (!first) return false;
+  const posting = ROW_DATE_PREFIX.exec(first[2]);
+  if (!posting) return false;
+  const total = trailingAmountCell(posting[2]);
+  if (!total) return false;
+  return trailingAmountCell(total.before) !== null;
+}
+
+function reconcilesThirdAmountContinuation(
+  pending: string,
+  continuationLine: string,
+  currency: StatementCurrency,
+): boolean {
+  const continuation = trailingAmountCell(continuationLine);
+  if (!continuation || continuation.before) return false;
+  const totalMinor = ledgerCellMinor(continuation, currency);
+  if (totalMinor === null) return false;
+
+  const second = trailingAmountCell(pending);
+  if (!second) return false;
+  const secondMinor = ledgerCellMinor(second, currency);
+  const first = trailingAmountCell(second.before);
+  const firstMinor = first ? ledgerCellMinor(first, currency) : null;
+  return firstMinor !== null && secondMinor !== null && firstMinor + secondMinor === totalMinor;
+}
+
+function startsCardTotalAmountRow(line: string): boolean {
+  return CARD_ROW_PREFIX.test(line);
+}
+
+function cardTotalAmountRowPrefix(line: string, dateOrder: DateOrder): boolean {
+  const first = ROW_DATE_PREFIX.exec(line);
+  if (!first || !isoDate(first[1], dateOrder)) return false;
+  const posting = ROW_DATE_PREFIX.exec(first[2]);
+  return !!posting && isoDate(posting[1], dateOrder) !== null;
+}
+
+/**
+ * PDF extraction sometimes appends a visual subheader/footer after a complete
+ * row (`... 101.75 CR - 4111… cardholder`) instead of emitting an EOL. Trim
+ * such trailer text only when the prefix before a separator is already a fully
+ * formed two-date/two-amount card row. Hyphens inside merchant names therefore
+ * cannot truncate a transaction.
+ */
+function trimCompletedCardRowTrailer(line: string): string {
+  if (cardTotalAmountRowComplete(line)) return line;
+  const separators = [...line.matchAll(/\s[-–—]\s*/gu)].map((match) => match.index ?? -1).filter((index) => index > 0);
+  for (let index = separators.length - 1; index >= 0; index -= 1) {
+    const prefix = line.slice(0, separators[index]).trim();
+    if (cardTotalAmountRowComplete(prefix)) return prefix;
+  }
+  return line;
+}
+
+// The description may wrap immediately after Posting Date, so the second date
+// is allowed to end the extracted text line. The next line is then coalesced
+// into this pending row before amount parsing.
+const CARD_ROW_START = new RegExp(`(${DATE_TOKEN})\\s+(${DATE_TOKEN})(?=\\s|$)`, 'ig');
+const CARD_ROW_PREFIX = new RegExp(`^${DATE_TOKEN}\\s+${DATE_TOKEN}(?=\\s|$)`, 'i');
+const EMBEDDED_CARD_DATE_PAIR = new RegExp(`${DATE_TOKEN}\\s+${DATE_TOKEN}`, 'i');
+
+interface CardTextSegment {
+  text: string;
+  /** A visual row separator or a preceding money cell proved this boundary. */
+  explicitBoundary: boolean;
+}
+
+function packedCardRowBoundary(line: string, index: number): { valid: boolean; explicit: boolean } {
+  if (index === 0) return { valid: true, explicit: false };
+  const before = line.slice(0, index).trimEnd();
+  if (/[-–—]$/u.test(before)) return { valid: true, explicit: true };
+  // The first transaction on a flattened page can follow an Opening Balance
+  // directly, with no row separator. A money cell immediately before the date
+  // pair is a valid boundary; ordinary merchant prose is not.
+  const afterMoney = /(?:^|\s)(?:[A-Z]{3}\s*)?[\d,]+(?:\.\d{1,3})?\s*(?:DR|CR|DEBIT|CREDIT)?$/i.test(before);
+  return { valid: afterMoney, explicit: afterMoney };
+}
+
+/**
+ * Some PDF generators put an entire table page into one text line and separate
+ * visual rows only with a hyphen. Split only at the very strong "transaction
+ * date + posting date" signature. A lone date in a merchant or footer cannot
+ * create a row this way.
+ */
+function splitPackedCardRows(line: string): CardTextSegment[] {
+  const starts: { index: number; explicitBoundary: boolean }[] = [];
+  CARD_ROW_START.lastIndex = 0;
+  for (let match = CARD_ROW_START.exec(line); match; match = CARD_ROW_START.exec(line)) {
+    const boundary = packedCardRowBoundary(line, match.index);
+    if (boundary.valid) starts.push({ index: match.index, explicitBoundary: boundary.explicit });
+  }
+  CARD_ROW_START.lastIndex = 0;
+  if (starts.length === 0) return [{ text: line, explicitBoundary: false }];
+  const parts: CardTextSegment[] = [];
+  if (starts[0].index > 0) {
+    const prefix = line.slice(0, starts[0].index)
+      .replace(/\s*[-–—]\s*$/u, '')
+      .trim();
+    if (prefix) parts.push({ text: prefix, explicitBoundary: false });
+  }
+  for (let index = 0; index < starts.length; index += 1) {
+    const part = line.slice(starts[index].index, starts[index + 1]?.index ?? line.length)
+      .replace(/^[-–—]\s*/u, '')
+      .replace(/\s*[-–—]\s*$/u, '')
+      .trim();
+    if (part) parts.push({ text: part, explicitBoundary: starts[index].explicitBoundary });
+  }
+  return parts;
+}
+
+/**
+ * unpdf preserves PDF.js `hasEOL`, which means a visually single table row can
+ * arrive as several lines (description/location, then amount cells). Rebuild
+ * only rows in the strongly identified card Total Amount table, and stop as
+ * soon as the mandatory Original Amount + Total Amount tail is present.
+ */
+function coalesceCardTotalAmountRows(lines: string[], currency: StatementCurrency): string[] {
+  const result: string[] = [];
+  let pending: string | null = null;
+  const flush = () => {
+    if (pending) result.push(pending);
+    pending = null;
+  };
+  for (const segment of lines.flatMap(splitPackedCardRows)) {
+    const line = trimCompletedCardRowTrailer(
+      segment.text.replace(/^[-–—]\s*(?=\d{1,2}[\s/-])/u, '').trim(),
+    );
+    // A wrapped merchant/location line can itself begin with a date-looking
+    // token (for example a hotel stay period). In this table a REAL row starts
+    // with Transaction Date + Posting Date, so one leading date alone must stay
+    // attached to the pending description instead of flushing it as a new row.
+    if (startsCardTotalAmountRow(line)) {
+      if (pending && !cardTotalAmountRowComplete(pending) && !segment.explicitBoundary) {
+        // No visual/structural boundary proves this is a new transaction. Keep
+        // the two fragments together and let parseCardTotalAmountRow reject an
+        // embedded second date-pair as ambiguous rather than silently moving
+        // the money to the wrong transaction date.
+        pending = `${pending} ${line}`.replace(/\s+/g, ' ').trim();
+        continue;
+      }
+      flush();
+      pending = line;
+      continue;
+    }
+    if (pending) {
+      // Two trailing figures can be either Original + Total (complete row) OR
+      // Original + VAT with Total wrapped to the next text line. Extend only
+      // when the next line is a pure amount cell and all three reconcile.
+      if (cardTotalAmountRowComplete(pending) &&
+          !reconcilesThirdAmountContinuation(pending, line, currency)) {
+        flush();
+        if (line) result.push(line);
+        continue;
+      }
+      // A bare separator is a PDF table artefact, not part of the merchant.
+      if (!/^[-–—]$/u.test(line)) pending = `${pending} ${line}`.replace(/\s+/g, ' ').trim();
+      continue;
+    }
+    result.push(line);
+  }
+  flush();
+  return result;
+}
+
+function parseCardTotalAmountRow(
+  line: string,
+  currency: StatementCurrency,
+  dateOrder: DateOrder,
+): { date: string; merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  const first = ROW_DATE_PREFIX.exec(line);
+  if (!first) return null;
+  const date = isoDate(first[1], dateOrder);
+  const posting = ROW_DATE_PREFIX.exec(first[2]);
+  if (!date || !posting || !isoDate(posting[1], dateOrder)) return null;
+
+  const total = trailingAmountCell(posting[2]);
+  if (!total) return null;
+  const totalMinor = ledgerCellMinor(total, currency);
+  if (totalMinor === null || totalMinor <= 0) return null;
+
+  // One preceding amount is mandatory (Original Amount). If VAT is populated,
+  // there are three trailing cells and Original + VAT must reconcile exactly to
+  // Total before we strip the extra cell. This avoids eating a decimal number
+  // that legitimately belongs to the merchant description.
+  const nearest = trailingAmountCell(total.before);
+  if (!nearest) return null;
+  const nearestMinor = ledgerCellMinor(nearest, currency);
+  const prior = trailingAmountCell(nearest.before);
+  const priorMinor = prior ? ledgerCellMinor(prior, currency) : null;
+  const hasExplicitVat = prior !== null && nearestMinor !== null && priorMinor !== null &&
+    priorMinor + nearestMinor === totalMinor;
+  const merchant = (hasExplicitVat ? prior.before : nearest.before).trim();
+  if (merchant.length < 2 || merchant.length > 180) return null;
+  if (EMBEDDED_CARD_DATE_PAIR.test(merchant)) return null;
+
+  const direction = directionsAgree([
+    total.direction,
+    nearest.direction,
+    hasExplicitVat && prior ? prior.direction : null,
+  ]);
+  if (direction === false) return null;
+  return {
+    date,
+    merchant,
+    amountFils: totalMinor,
+    // In a proved credit-card Total Amount table, an unlabelled row is a card
+    // charge. Credits/refunds/payments are the rows explicitly marked CR.
+    type: direction ?? 'expense',
+  };
+}
+
 function parseColumnTail(
   rest: string,
   currency: StatementCurrency,
@@ -940,14 +1234,17 @@ export function parseStatementLines(
   if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
-  const sourceInstrument = identity.card ?? statementHeaderInstrument(text);
-  const lines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
+  const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
+  const bankHint = identity.bankHint ?? statementBankHint(text);
+  const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
+  const cardStatement = isCardStatement(text);
+  const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
+  const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
   const balanceTrailing = trailingBalanceRuns(lines, currency);
-  const cardStatement = isCardStatement(text);
   let previousBalance: number | null = null;
   const push = (
     date: string,
@@ -968,7 +1265,7 @@ export function parseStatementLines(
       merchant: transfer?.merchant ?? classification.merchant, date,
       dueDay: null, minDueFils: null, card: sourceInstrument, reference,
       transferHint: transfer?.transferHint ?? false,
-      ...(identity.bankHint ? { bankHint: identity.bankHint } : {}),
+      ...(bankHint ? { bankHint } : {}),
       snapshotFils: null, snapshotKind: null,
       categoryGuess: transfer ? 'other' : classification.categoryGuess,
       categoryDeliberate: transfer ? true : classification.categoryDeliberate,
@@ -990,6 +1287,19 @@ export function parseStatementLines(
     // a delta measured across a row that was skipped could carry the wrong
     // sign and file a credit as a debit.
     if (prefixed && !SUMMARY_DESCRIPTION.test(prefixed[2])) previousBalance = figures?.balanceMinor ?? null;
+    const cardTableCandidate = cardTotalAmountTable && prefixed
+      ? cardTotalAmountRowPrefix(line, dateOrder)
+      : false;
+    const cardTableRow = cardTableCandidate
+      ? parseCardTotalAmountRow(line, currency, dateOrder)
+      : null;
+    if (cardTableCandidate) {
+      if (cardTableRow) {
+        push(cardTableRow.date, cardTableRow.merchant, cardTableRow.amountFils, cardTableRow.type, line);
+      }
+      if (countable && rows.length === accepted) rejectedRows += 1;
+      continue;
+    }
     const match = ROW_END_DIRECTION.exec(line) ?? ROW_MIDDLE_DIRECTION.exec(line);
     if (match) {
       // Only treat the three-letter token before an amount as currency when

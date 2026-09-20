@@ -23,6 +23,7 @@ import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards
 import { formatAmount, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
+import { bankPickerOptions } from '@/lib/known-banks';
 import { t, tf } from '@/lib/i18n';
 
 /**
@@ -45,7 +46,7 @@ type Confirmation = {
 };
 
 /** What card management offers after opening a row or using its shortcut. */
-type CardAction = 'visibility' | 'delete';
+type CardAction = 'visibility' | 'bank' | 'delete';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -70,6 +71,7 @@ export default function CardsScreen() {
   // The card a long press is asking about, and the confirmation that the
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
+  const [bankFor, setBankFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
 
   // Opened from a due row: land straight on that card's history.
@@ -162,13 +164,26 @@ export default function CardsScreen() {
 
   const cardActions = (card: Account): Choice<CardAction>[] => [
     { value: 'visibility', label: card.archived ? t('unhide') : t('hideCard') },
+    { value: 'bank', label: t('accountSetBank'), detail: card.bankName },
     { value: 'delete', label: t('deleteCardAndEntries') },
   ];
+  // The bank behind a card: the user's known banks first, then the market's.
+  // "No bank" clears a wrong label; the badge and logo follow bankName.
+  const bankChoices = (): Choice<string>[] => [
+    ...bankPickerOptions(state.knownBanks, state.marketId).map((bank) => ({ value: bank.name, label: bank.name })),
+    { value: 'none', label: t('accountNoBank') },
+  ];
+  const setBank = (card: Account, value: string) => {
+    const bank = bankPickerOptions(state.knownBanks, state.marketId).find((candidate) => candidate.name === value);
+    editAccount(card.id, bank ? { bankName: bank.name, color: bank.color } : { bankName: undefined });
+    setBankFor(null);
+  };
 
   // Hiding happens on the spot; deleting the card and its entries asks first,
   // exactly as the two stacked alerts did.
   const onCardAction = (card: Account, action: CardAction) => {
     if (action === 'visibility') editAccount(card.id, { archived: !card.archived });
+    else if (action === 'bank') setBankFor(card);
     else
       setConfirmation({
         question: t('deleteCardTitle'),
@@ -356,6 +371,17 @@ export default function CardsScreen() {
           body={optionsFor.archived ? t('hiddenFromLists') : undefined}
           options={cardActions(optionsFor)}
           onSelect={(action) => onCardAction(optionsFor, action)}
+        />
+      )}
+      {bankFor && (
+        <ChoiceSheet
+          visible
+          onClose={() => setBankFor(null)}
+          title={t('accountSetBank')}
+          question={t('accountBankQuestion')}
+          options={bankChoices()}
+          value={bankFor.bankName ?? 'none'}
+          onSelect={(value) => setBank(bankFor, value)}
         />
       )}
       {/* Mounted only while there is something to confirm, so the entry
