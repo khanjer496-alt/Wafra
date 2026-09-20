@@ -25,6 +25,12 @@ export async function collectDiagnosticBankMessages(readPage: DiagnosticPageRead
   shouldContinue: () => boolean; onProgress?: (checked: number, included: number) => void;
   /** Optional recent-inbox ceiling for one-tap support reports. Omit for a full audit/export. */
   maxChecked?: number;
+  /**
+   * Native inbox pages occupy the JS thread until they return. Support reports
+   * keep this small so a 1,000-message audit cannot freeze the UI for tens of
+   * seconds on a large inbox.
+   */
+  maxPageSize?: number;
 }) {
   let beforeDate = Number.MAX_SAFE_INTEGER; let beforeId = Number.MAX_SAFE_INTEGER;
   let checked = 0; let excluded = 0; let totalChars = 0;
@@ -44,7 +50,10 @@ export async function collectDiagnosticBankMessages(readPage: DiagnosticPageRead
       personalAndUnknownSendersExcluded: true, securityMessagesExcluded: true,
       scope: 'Recent readable bank-money SMS only (bounded support audit). Deleted SMS and bank-app notification history are not included.',
     } };
-    const pageSize = Math.min(250, remaining);
+    const maxPage = Number.isSafeInteger(options.maxPageSize) && Number(options.maxPageSize) > 0
+      ? Math.min(250, Number(options.maxPageSize))
+      : 250;
+    const pageSize = Math.min(maxPage, remaining);
     const page = await readPage(beforeDate, beforeId, pageSize);
     assertDiagnosticContinues(options.shouldContinue);
     if (!Array.isArray(page) || page.length > pageSize) throw new Error('diagnostic_invalid_page');

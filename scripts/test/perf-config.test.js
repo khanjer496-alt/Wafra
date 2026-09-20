@@ -1064,6 +1064,15 @@ function bodyOf(source, header) {
       /syncPaymentReminders\(current\)/.test(autoImport),
     'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
 
+  const testerDiagnostics = stripComments(read('src/lib/android-tester-diagnostics.ts'));
+  const diagnosticMessages = stripComments(read('src/lib/diagnostic-messages.ts'));
+  ok('one-tap tester diagnostics page the native inbox instead of reading 1,000 SMS in one JS turn',
+    /maxPageSize: 50/.test(testerDiagnostics) &&
+      /maxPageSize\?: number/.test(read('src/lib/diagnostic-messages.ts')) &&
+      /Math\.min\(maxPage, remaining\)/.test(diagnosticMessages),
+    'a 14k-row ledger plus a 1,000-message inbox read froze the support button for 5-20s');
+
+
   ok('reminder planning accepts a precomputed recurrence projection',
     /detectedSubscriptions\?: readonly Subscription\[\]/.test(reminders) &&
       /detectedSubscriptions[\s\S]*?detectSubscriptions\(/.test(reminders),
