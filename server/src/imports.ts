@@ -828,20 +828,57 @@ function isCardStatement(text: string): boolean {
  */
 const COLUMN_LABEL_ONLY = /^[(\s]*([a-z][a-z ]*[a-z])[)\s]*(?:\([A-Z]{3}\))?$/i;
 
-function columnHeaderLabels(text: string): Set<string> {
-  const labels = new Set<string>();
+/**
+ * What the two columns are called, which is not one thing per bank.
+ *
+ * The same table is printed under several names — what the card was charged
+ * ("original amount", "transaction amount") beside what it settled to in the
+ * ledger's own currency ("total amount", "billing amount", "amount in AED").
+ * Keyed on the ledger's currency rather than a Gulf hard-code, so a SAR or USD
+ * statement naming its column that way is read on the same terms.
+ */
+const CHARGED_AMOUNT_LABELS = [
+  'original amount', 'transaction amount', 'foreign currency amount', 'original currency amount',
+];
+const settlementAmountLabels = (currency: StatementCurrency): string[] => {
+  const code = currency.toLowerCase();
+  return ['total amount', 'billing amount', 'settlement amount', `amount in ${code}`, `${code} amount`];
+};
+
+/** Every standalone column-header label in the file, in the order they appear. */
+function columnHeaderLabels(text: string): string[] {
+  const labels: string[] = [];
   for (const original of text.split(/\n+/)) {
     const line = original.replace(/[\p{Script=Arabic}\u200f\u200e]/gu, '').replace(/\s+/g, ' ').trim();
     if (!line || line.length > 40) continue;
     const label = COLUMN_LABEL_ONLY.exec(line)?.[1];
-    if (label) labels.add(label.toLowerCase());
+    if (label) labels.push(label.toLowerCase());
   }
   return labels;
 }
 
-function hasOriginalAndTotalColumns(text: string): boolean {
+/**
+ * ORDER matters, not just presence.
+ *
+ * `parseOriginalTotalTail` reads the LAST figure on the row, which is only the
+ * settlement amount while the settlement column is the rightmost of the two.
+ * A statement printing `Billing Amount | Transaction Amount` puts the foreign
+ * figure last, and reading that as the charge would file a USD number as AED —
+ * money wrong, silently. Whichever label the header states last is the column
+ * the last figure belongs to, so this returns true only when that is the
+ * settlement one. The other order is left to the branches that demand an
+ * explicit direction rather than read a position.
+ */
+function hasOriginalAndTotalColumns(text: string, currency: StatementCurrency): boolean {
   const labels = columnHeaderLabels(text);
-  return labels.has('original amount') && labels.has('total amount');
+  const settlement = settlementAmountLabels(currency);
+  let lastCharged = -1;
+  let lastSettlement = -1;
+  labels.forEach((label, index) => {
+    if (CHARGED_AMOUNT_LABELS.includes(label)) lastCharged = index;
+    if (settlement.includes(label)) lastSettlement = index;
+  });
+  return lastCharged >= 0 && lastSettlement > lastCharged;
 }
 
 /** Continuation lines a wrapped row may span before its figures arrive. */
@@ -1132,7 +1169,7 @@ export function parseStatementLines(
   );
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
   const columnOrder = statementColumnOrder(text);
-  const originalTotalColumns = hasOriginalAndTotalColumns(text);
+  const originalTotalColumns = hasOriginalAndTotalColumns(text, currency);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
   const balanceTrailing = trailingBalanceRuns(lines, currency);

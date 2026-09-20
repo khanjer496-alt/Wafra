@@ -679,6 +679,53 @@ function wideTextPdf(lines) {
   ok('those column names in prose are not a table header',
     proseOnly.rows.length === 0 && proseOnly.rejectedRows === 1,
     JSON.stringify([proseOnly.rows.length, proseOnly.rejectedRows]));
+  // ── The same table under other banks' column names ──
+  //
+  // "Original/Total" is HSBC's wording for a pairing several issuers print:
+  // what the card was charged beside what it settled to in the ledger's
+  // currency. Keyed to the header, so the names have to be the ones banks use.
+  const cardHead = [
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Description',
+  ];
+  const aliasRow = '09-Aug-26 11-Aug-26 COFFEE HOUSE DUBAI AE 41.25 41.25';
+  for (const [charged, settled] of [
+    ['Transaction Amount', 'Billing Amount'],
+    ['Original Amount', 'Amount in AED'],
+    ['Foreign Currency Amount', 'Settlement Amount'],
+  ]) {
+    const aliased = parseStatementLines([...cardHead, charged, settled, aliasRow].join('\n'), 'AED');
+    ok(`the same table reads under ${charged} / ${settled}`,
+      aliased.rows.length === 1 && aliased.rows[0].amountFils === 4125 &&
+        aliased.rows[0].type === 'expense' && aliased.rows[0].merchant === 'COFFEE HOUSE DUBAI AE',
+      JSON.stringify(aliased.rows.map((row) => [row.merchant, row.amountFils])));
+  }
+
+  // ── Which column is last decides whether the row can be read at all ──
+  //
+  // The charge is the LAST figure only while the settlement column is the
+  // rightmost of the two. Reversed, the last figure is the foreign one, and
+  // reading it would file GBP 10.00 as AED 10.00 — money wrong, and silently.
+  // So the reversed header is refused rather than read off a position.
+  const foreignRow = '09-Aug-26 11-Aug-26 FOREIGN SHOP LONDON GB 10.00 47.50';
+  const settlementLast = parseStatementLines(
+    [...cardHead, 'Transaction Amount', 'Billing Amount', foreignRow].join('\n'), 'AED');
+  ok('with the settlement column last, the AED figure is the charge',
+    settlementLast.rows.length === 1 && settlementLast.rows[0].amountFils === 4750,
+    JSON.stringify(settlementLast.rows.map((row) => row.amountFils)));
+  const settlementFirst = parseStatementLines(
+    [...cardHead, 'Billing Amount', 'Transaction Amount', foreignRow].join('\n'), 'AED');
+  ok('with the settlement column first, the row is refused rather than misread',
+    settlementFirst.rows.length === 0 && settlementFirst.rejectedRows === 1,
+    JSON.stringify([settlementFirst.rows.length, settlementFirst.rejectedRows]));
+  // The settlement name follows the ledger's own currency, not a Gulf default.
+  const sarStatement = parseStatementLines(
+    [...cardHead, 'Transaction Amount', 'Amount in SAR',
+      '09-Aug-26 11-Aug-26 RIYADH STORE SA 41.25 41.25'].join('\n'), 'SAR');
+  ok('the settlement column name follows the ledger currency',
+    sarStatement.rows.length === 1 && sarStatement.rows[0].amountFils === 4125,
+    JSON.stringify(sarStatement.rows.map((row) => row.amountFils)));
+
   // A run ends on a line of nothing but figures. A summary line carries money
   // too, and joining a date-led line onto one would put a figure nobody spent
   // on the ledger under a merchant assembled from two unrelated rows.
