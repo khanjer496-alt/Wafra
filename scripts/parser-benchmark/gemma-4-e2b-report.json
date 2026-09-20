@@ -1,0 +1,292 @@
+{
+  "model": "gemma-4-E2B-it-Q4_K_M.gguf",
+  "rows": 188,
+  "unparseableJson": 0,
+  "classification": {
+    "decision": {
+      "correct": 174,
+      "total": 188,
+      "accuracy": 0.925531914893617
+    },
+    "status": {
+      "correct": 161,
+      "total": 188,
+      "accuracy": 0.8563829787234043
+    },
+    "family": {
+      "correct": 160,
+      "total": 188,
+      "accuracy": 0.851063829787234
+    },
+    "direction": {
+      "correct": 148,
+      "total": 188,
+      "accuracy": 0.7872340425531915
+    },
+    "currency": {
+      "correct": 147,
+      "total": 188,
+      "accuracy": 0.7819148936170213
+    },
+    "minorUnits": {
+      "correct": 141,
+      "total": 188,
+      "accuracy": 0.75
+    }
+  },
+  "latencyMs": {
+    "mean": 9394.322323851047,
+    "median": 7601.439389999996,
+    "p95": 8373.931364000327
+  },
+  "wrongExamples": [
+    {
+      "id": "us-bofa-direct-deposit",
+      "field": "family",
+      "want": "transfer",
+      "got": "deposit",
+      "body": "Bank of America: USD 850.00 was credited to your account by direct deposit."
+    },
+    {
+      "id": "us-citi-autopay-future",
+      "field": "family",
+      "want": "unknown",
+      "got": "recurring-payment",
+      "body": "Citi Bank: Your recurring autopay of USD 75.00 will be debited tomorrow."
+    },
+    {
+      "id": "us-citi-autopay-future",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Citi Bank: Your recurring autopay of USD 75.00 will be debited tomorrow."
+    },
+    {
+      "id": "us-chase-statement-spend-summary",
+      "field": "minorUnits",
+      "want": "50000",
+      "got": null,
+      "body": "Chase Bank credit card statement: You spent USD 500.00 this statement period."
+    },
+    {
+      "id": "us-chase-statement-billing-cycle",
+      "field": "decision",
+      "want": "refuse",
+      "got": "review",
+      "body": "Chase Bank credit card statement: Spent USD 510.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-billing-cycle",
+      "field": "status",
+      "want": "informational",
+      "got": "posted",
+      "body": "Chase Bank credit card statement: Spent USD 510.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-billing-cycle",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Chase Bank credit card statement: Spent USD 510.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-card-charged",
+      "field": "decision",
+      "want": "refuse",
+      "got": "review",
+      "body": "Chase Bank credit card statement: Your card was charged USD 520.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-card-charged",
+      "field": "status",
+      "want": "informational",
+      "got": "posted",
+      "body": "Chase Bank credit card statement: Your card was charged USD 520.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-card-charged",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Chase Bank credit card statement: Your card was charged USD 520.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-paid",
+      "field": "decision",
+      "want": "refuse",
+      "got": "review",
+      "body": "Chase Bank credit card statement has been paid: USD 75.00."
+    },
+    {
+      "id": "us-chase-statement-paid",
+      "field": "status",
+      "want": "informational",
+      "got": "posted",
+      "body": "Chase Bank credit card statement has been paid: USD 75.00."
+    },
+    {
+      "id": "us-chase-statement-paid",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Chase Bank credit card statement has been paid: USD 75.00."
+    },
+    {
+      "id": "us-chase-card-bill-spend-summary",
+      "field": "decision",
+      "want": "refuse",
+      "got": "review",
+      "body": "Chase Bank credit card bill: You spent USD 530.00 this month."
+    },
+    {
+      "id": "us-chase-card-bill-spend-summary",
+      "field": "status",
+      "want": "informational",
+      "got": "posted",
+      "body": "Chase Bank credit card bill: You spent USD 530.00 this month."
+    },
+    {
+      "id": "us-chase-card-bill-spend-summary",
+      "field": "family",
+      "want": "statement",
+      "got": "purchase",
+      "body": "Chase Bank credit card bill: You spent USD 530.00 this month."
+    },
+    {
+      "id": "us-chase-card-bill-spend-summary",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Chase Bank credit card bill: You spent USD 530.00 this month."
+    },
+    {
+      "id": "gb-lloyds-card-declined",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Lloyds Bank card purchase GBP 47.90 at OAK HOME was declined."
+    },
+    {
+      "id": "gb-natwest-standing-order-future",
+      "field": "family",
+      "want": "unknown",
+      "got": "recurring-payment",
+      "body": "NatWest: Your standing order of GBP 625.00 is scheduled for tomorrow."
+    },
+    {
+      "id": "gb-natwest-standing-order-future",
+      "field": "minorUnits",
+      "want": "62500",
+      "got": null,
+      "body": "NatWest: Your standing order of GBP 625.00 is scheduled for tomorrow."
+    },
+    {
+      "id": "fr-ca-card-declined",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "Cr\u00e9dit Agricole : paiement par carte EUR 76,15 refus\u00e9 chez ATELIER BLEU."
+    },
+    {
+      "id": "fr-bnp-recurring-future",
+      "field": "family",
+      "want": "unknown",
+      "got": "recurring-payment",
+      "body": "BNP Paribas : abonnement r\u00e9current EUR 19,99 sera d\u00e9bit\u00e9 demain."
+    },
+    {
+      "id": "fr-bnp-recurring-future",
+      "field": "direction",
+      "want": "none",
+      "got": "debit",
+      "body": "BNP Paribas : abonnement r\u00e9current EUR 19,99 sera d\u00e9bit\u00e9 demain."
+    },
+    {
+      "id": "fr-bnp-card-not-paid",
+      "field": "decision",
+      "want": "refuse",
+      "got": "review",
+      "body": "BNP Paribas : paiement par carte EUR 22,40 non pay\u00e9 chez MAISON VERTE."
+    },
+    {
+      "id": "fr-bnp-card-not-paid",
+      "field": "status",
+      "want": "failed",
+      "got": "unknown",
+      "body": "BNP Paribas : paiement par carte EUR 22,40 non pay\u00e9 chez MAISON VERTE."
+    }
+  ],
+  "inventedMoney": {
+    "messagesRulesRefuse": 258,
+    "modelPostsMoney": 13,
+    "rate": 0.050387596899224806,
+    "examples": [
+      {
+        "body": "AED 100,181,428,624.00 was debited from your account XX9012.",
+        "currency": "AED",
+        "minorUnits": "10018142862400"
+      },
+      {
+        "body": "Dear Valued Customer, Payment of AED 351.35 on 15/04/2019 has been received and posted to your account no 5552906 Thank ",
+        "currency": "AED",
+        "minorUnits": "35135"
+      },
+      {
+        "body": "a named savings pot is a transfer, not AED 7,000 of spending",
+        "currency": "AED",
+        "minorUnits": "7000"
+      },
+      {
+        "body": "3D Secure: 458213. Purchase of AED 500.00 at NOON on Card 1234.",
+        "currency": "AED",
+        "minorUnits": "50000"
+      },
+      {
+        "body": "AED 500.00 debited provisionally at HERTZ on Card 1234. Pending settlement.",
+        "currency": "AED",
+        "minorUnits": "50000"
+      },
+      {
+        "body": ", amountFils: 766394, transfer: true, category: ",
+        "currency": null,
+        "minorUnits": "766394"
+      },
+      {
+        "body": "AED 1,234,567.89 has been transferred from your account 1234 to ABC PROPERTIES. Fee AED 25.00 applied.",
+        "currency": "AED",
+        "minorUnits": "123456789"
+      },
+      {
+        "body": "AED 2,500,000.00 has been debited from your account 1234 towards property purchase. Charges AED 100.00.",
+        "currency": "AED",
+        "minorUnits": "250000000"
+      },
+      {
+        "body": "Your USD account 1234 has been debited. Avl Bal is USD 5,000.00",
+        "currency": "USD",
+        "minorUnits": "500000"
+      },
+      {
+        "body": "Purchase at YAMM.COM with Credit Card 1234. Available limit is USD 1,200.00",
+        "currency": "USD",
+        "minorUnits": "120000"
+      },
+      {
+        "body": "Purchase amount of AED 1.00 at GOOGLE *TEMPORARY HOLD on your Debit Card has been refunded to your card account. Avl Bal",
+        "currency": "AED",
+        "minorUnits": "100"
+      },
+      {
+        "body": "Purchase of AED 1.00 at GOOGLE *TEMPORARY HOLD on Debit Card 8783.",
+        "currency": "AED",
+        "minorUnits": "100"
+      },
+      {
+        "body": "Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR, DUBAI. This transaction is pending processing.",
+        "currency": "AED",
+        "minorUnits": "5000"
+      }
+    ]
+  },
+  "note": "Gemma 4 E2B Q4_K_M via llama.cpp on 4 Xeon cores, no NPU. Latency here is a CPU figure and is not a phone measurement; accuracy is device-independent."
+}

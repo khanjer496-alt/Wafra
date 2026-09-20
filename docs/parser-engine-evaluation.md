@@ -187,6 +187,64 @@ the part of the parser that carries money.
 CPU latency was fine (median 2.5 ms, p95 2.8 ms). Latency was never the
 problem.
 
+### Measured: Gemma 4 E2B
+
+The only proposed runtime that can actually run on a phone, scored on the same
+188 labelled rows plus all 258 messages the rules refuse. Q4_K_M via llama.cpp
+on 4 Xeon cores; full report in `scripts/parser-benchmark/gemma-4-e2b-report.json`.
+
+| Field | Shipped rules | Gemma 4 E2B | CUA-S1 |
+| --- | --- | --- | --- |
+| decision | 100% | 92.6% | 48.4% |
+| status | 100% | 85.6% | 10.1% |
+| family | 100% | 85.1% | 8.5% |
+| direction | 100% | 78.7% | 28.7% |
+| currency | 100% | 78.2% | not scored |
+| minorUnits | 100% | **75.0%** | 0/0 — cannot extract |
+| money invented on refused messages | 0/258 | **13/258 (5.0%)** | not applicable |
+| per message | 0.21 ms | 7.6 s median (CPU) | 2.5 ms |
+
+Gemma is a serious model and an entirely different class of result from
+CUA-S1: it emitted valid JSON on all 188 rows, and it correctly refuses
+promotions and OTP messages, which is where the naive extractor failed. It is
+still not shippable as a money reader, for two reasons that are visible in the
+failures rather than in the headline numbers.
+
+**One amount in four is wrong.** 75% on `minorUnits` means a quarter of
+imported transactions would carry the wrong figure. There is no review
+workflow that makes that acceptable in a ledger.
+
+**The 5% invented money is not random.** All 13 cases are precisely the
+categories the rules encode:
+
+| Message | What Gemma posted | Why the rules refuse it |
+| --- | --- | --- |
+| `3D Secure: 458213. Purchase of AED 500.00 at NOON…` | AED 500.00 | security challenge — the real purchase alert follows, so this double-counts |
+| `AED 500.00 debited provisionally at HERTZ… Pending settlement.` | AED 500.00 | pre-authorisation — double-counts when it settles |
+| `Purchase of AED 50.00… This transaction is pending` | AED 50.00 | not posted yet |
+| `Purchase of AED 1.00 at GOOGLE *TEMPORARY HOLD…` | AED 1.00 | card verification hold, reversed |
+| `Your USD account 1234 has been debited. Avl Bal is USD 5,000.00` | USD 5,000.00 | that is the **balance**, not the amount |
+| `Purchase at YAMM.COM… Available limit is USD 1,200.00` | USD 1,200.00 | that is the **limit**; the message names no amount |
+| `AED 100,181,428,624.00 was debited…` | AED 100.18bn | above the sanity ceiling the invariants pin |
+| `a named savings pot is a transfer, not AED 7,000 of spending` | AED 7,000 | English prose, not a bank message |
+| `, amountFils: 766394, transfer: true, category:` | 766394 | JavaScript source, not a bank message |
+
+Reading a balance or a credit limit as a purchase, and reading arbitrary prose
+as money, are not prompt-engineering problems. They are the domain knowledge
+that 6,500 lines of rules and 76 suites encode. A model can be told about them
+one at a time, which is what writing rules already is.
+
+Two schema slips are worth noting for anyone wiring this up: Gemma emitted
+`family: "promotion"`, which is outside the enum it was given, and returned
+`minorUnits: "24.86"` where the instruction asked for `"2486"`. Anything
+touching a ledger needs constrained decoding, not a prompt.
+
+**Where this leaves a model.** Not on the money path. The defensible use is
+the category label on rows the rules have *already* parsed, where being wrong
+is a mislabel the user can fix rather than a number in their balance. That is
+the 117-message gap, and the cheaper fix for most of it is still a merchant
+table.
+
 ### Why `trycua/cua` was never a fit
 
 Independent of the scores: `trycua/cua` is a computer-use agent framework —
