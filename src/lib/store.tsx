@@ -265,6 +265,19 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
     : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+function applyTransactionEdit(transaction: Transaction, patch: Partial<Transaction>): Transaction {
+  // `titleEdited` is the narrow half of `userEdited`: the user replaced the
+  // parser's SHOP NAME, as opposed to correcting an amount, a date or an
+  // account. Parser-coverage measurement needs that distinction — a hand-typed
+  // name must never be scored as a parser naming success, and a row whose date
+  // was fixed must not be dropped from the measurement for it.
+  const renamed = patch.title !== undefined && patch.title !== transaction.title;
+  // userEdited pins the row: nothing re-parsed may overwrite it later.
+  return renamed || transaction.titleEdited
+    ? { ...transaction, ...patch, userEdited: true, titleEdited: true }
+    : { ...transaction, ...patch, userEdited: true };
+}
+
 /**
  * Automatic repairs may discard a poorer duplicate, but they must never
  * rewrite or discard the row the user chose to correct. Restore those rows
@@ -961,7 +974,7 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
       return action.transaction !== null;
     case 'editTransaction': {
       const before = state.transactions.find((transaction) => transaction.id === action.id);
-      const after = reduced.transactions.find((transaction) => transaction.id === action.id);
+      const after = before ? applyTransactionEdit(before, action.patch) : undefined;
       return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
     }
     case 'deleteTransaction':
@@ -1209,25 +1222,20 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     }
     case 'editTransaction': {
-      const transactions = sortTxs(
-        state.transactions.map((t) => {
-          if (t.id !== action.id) return t;
-          // `titleEdited` is the narrow half of `userEdited`: the user
-          // replaced the parser's SHOP NAME, as opposed to correcting an
-          // amount, a date or an account. Parser-coverage measurement needs
-          // that distinction — a hand-typed name must never be scored as a
-          // parser naming success, and a row whose date was fixed must not be
-          // dropped from the measurement for it. So it is set only when the
-          // patch carries a title that actually differs from the one on the
-          // row, and once set it survives every later edit.
-          const renamed = action.patch.title !== undefined && action.patch.title !== t.title;
-          // userEdited pins the row: nothing re-parsed may overwrite it later.
-          return renamed || t.titleEdited
-            ? { ...t, ...action.patch, userEdited: true, titleEdited: true }
-            : { ...t, ...action.patch, userEdited: true };
-        }),
-      );
-      return { ...state, transactions };
+      const index = state.transactions.findIndex((transaction) => transaction.id === action.id);
+      if (index < 0) return state;
+      const previous = state.transactions[index];
+      const edited = applyTransactionEdit(previous, action.patch);
+      const transactions = state.transactions.slice();
+      transactions[index] = edited;
+      // The ledger is already newest-first. Replacing one row cannot disturb
+      // that order unless its posting date actually changed, so do not walk the
+      // complete 10k-20k array merely to prove it is still sorted after a title,
+      // category, amount, account or transfer edit.
+      return {
+        ...state,
+        transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
+      };
     }
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
