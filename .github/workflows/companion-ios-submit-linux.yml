@@ -95,6 +95,7 @@ jobs:
             printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"
           fi
           chmod 600 "$KEY"; grep -q 'BEGIN PRIVATE KEY' "$KEY"
+          export EXPO_ASC_API_KEY_PATH="$KEY"
           echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
           cd "$APP_DIR"
           node - <<'NODE'
