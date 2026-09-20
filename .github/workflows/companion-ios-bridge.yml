@@ -80,23 +80,21 @@ jobs:
           grep -q 'BEGIN PRIVATE KEY' "$KEY"
           echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
 
-      - name: Create or link Companion EAS project
-        id: project
+      - name: Verify Companion EAS project and initialize temporary Git source
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          ACCOUNT="$(eas whoami 2>/dev/null | sed -n 's/^• \([^ ]*\).*/\1/p' | head -n 1)"
-          test -n "$ACCOUNT"
-          echo "Expo account: $ACCOUNT"
-          eas project:init --account "$ACCOUNT" --force --json --non-interactive | tee "$RUNNER_TEMP/eas-project.json"
-          node - <<'NODE'
-          const fs=require('fs');
-          const app=JSON.parse(fs.readFileSync(process.env.APP_DIR+'/app.json','utf8'));
-          const id=app?.expo?.extra?.eas?.projectId;
-          if(!id) throw new Error('Companion EAS projectId was not written');
-          console.log('Companion EAS projectId:',id);
-          NODE
+          PROJECT_ID="$(node -p "require('./app.json').expo.extra.eas.projectId")"
+          OWNER="$(node -p "require('./app.json').expo.owner")"
+          test "$PROJECT_ID" = "3cb8e0e0-3b5b-46de-a6e6-d006a3ad50a4"
+          test "$OWNER" = "nnnkk"
+          printf '{"status":"linked","projectId":"%s","owner":"%s","slug":"companion"}\n' "$PROJECT_ID" "$OWNER" > "$RUNNER_TEMP/eas-project.json"
+          git init -q
+          git config user.name 'Companion iOS bridge'
+          git config user.email 'companion-ios-bridge@users.noreply.github.com'
+          git add -A
+          git commit -qm 'Exact Companion source for EAS build'
 
       - name: Attempt first store-signed iOS build
         id: build
