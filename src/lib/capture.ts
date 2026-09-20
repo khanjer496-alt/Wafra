@@ -363,6 +363,10 @@ export async function collectNewMessages(
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
         maxInboxPages: fullHistoricalReread ? 1 : undefined,
+        // 1,000-row routine pages were 300-900ms of JS on a 14k-row phone.
+        // Incremental capture still drains every message newer than lastScanTs;
+        // it just yields between 128-row provider reads.
+        pageSize: 128,
         notificationOnly,
         learnedNotificationPackages: state.trustedNotificationPackages },
     );

@@ -2027,6 +2027,12 @@ const S = {
   onboardCaptureContinueOne: { en: 'Continue with this source', ar: 'متابعة بهذا المصدر' },
   onboardAutomaticChoiceIos: { en: 'Connect bank alerts', ar: 'ربط تنبيهات البنك' },
   onboardAutomaticChoiceIosBody: { en: 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.', ar: 'أضف اختصار وفرة مرة واحدة، ثم فعّل أتمتة الرسائل. استيراد الرسائل السابقة اختياري.' },
+  onboardStatementChoice: { en: 'Import bank statements', ar: 'استيراد كشوف البنك' },
+  onboardStatementChoiceBody: {
+    en: 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.',
+    ar: 'أرسل ملفات PDF أو CSV أو TSV عبر خدمة وفرة الآمنة. تُحلل الملفات الخام في الذاكرة ثم تُحذف.',
+  },
+  onboardStatementBack: { en: 'Back to setup', ar: 'العودة إلى الإعداد' },
   onboardManualChoice: { en: 'Start manually', ar: 'ابدأ يدوياً' },
   onboardManualChoiceIos: { en: 'Start manually', ar: 'ابدأ يدوياً' },
   onboardManualChoiceBody: { en: 'Add entries yourself. No SMS access. Set up capture later.', ar: 'أضف العمليات بنفسك. دون وصول للرسائل. يمكنك إعداد الالتقاط لاحقاً.' },
@@ -2046,6 +2052,14 @@ const S = {
   onboardCapturePrivacyIos: {
     en: 'Processed on this iPhone. Nothing uploaded.',
     ar: 'تتم المعالجة على هذا الآيفون. لا يُرفع شيء.',
+  },
+  onboardCaptureLocalAutomaticTitle: {
+    en: 'Automatic alerts stay on your phone',
+    ar: 'تبقى التنبيهات التلقائية على هاتفك',
+  },
+  onboardCaptureLocalAutomaticBody: {
+    en: 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.',
+    ar: 'يتم التقاط الرسائل محلياً. يستخدم استيراد الكشوف الخدمة الآمنة فقط عندما تختاره.',
   },
   onboardCaptureLearnMoreAction: { en: 'Learn more', ar: 'معرفة المزيد' },
   onboardCaptureLearnMoreTitle: { en: 'About bank alerts', ar: 'حول تنبيهات البنك' },

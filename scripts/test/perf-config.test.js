@@ -678,6 +678,40 @@ function fastest(fn, runs = 7) {
         'agreeing, budget warnings would quote a different number from the one Flow draws');
   }
   fmt.setMonthStartDay(1);
+
+  const july = [];
+  for (let d = 31; d >= 1; d--) {
+    july.push({
+      id: `jul-${d}`,
+      date: `2026-07-${String(d).padStart(2, '0')}`,
+      title: 'Shop',
+      amountFils: 1000,
+      type: 'expense',
+      category: 'dining',
+      accountId: 'acc-1',
+      source: 'sms',
+    });
+  }
+  const older = [];
+  for (let i = 0; i < 3000; i++) {
+    older.push({
+      id: `old-${i}`,
+      date: `2025-01-${String((i % 28) + 1).padStart(2, '0')}`,
+      title: 'Old',
+      amountFils: 500,
+      type: 'expense',
+      category: 'shopping',
+      accountId: 'acc-1',
+      source: 'sms',
+    });
+  }
+  const newestFirst = [...july, ...older];
+  const period = { mode: 'month', key: '2026-07' };
+  const windowed = insights.summarizeMonth(newestFirst, period);
+  const onlyJuly = insights.summarizeMonth(july, period);
+  ok('a newest-first 3,000-row tail does not change this month\'s summary',
+    windowed.expenseFils === onlyJuly.expenseFils && windowed.expenseFils === 31_000,
+    `newest-first ${windowed.expenseFils} vs July-only ${onlyJuly.expenseFils} — early-exit must not drop in-period rows or pick up older months`);
 }
 
 {
@@ -1046,10 +1080,11 @@ function bodyOf(source, header) {
 
   ok('Home defers optional historical insight work until after the first usable frame',
     /InteractionManager\.runAfterInteractions/.test(home) &&
-      /homeAnalysisReady && insightWidgetVisible/.test(home) &&
+      /!homeAnalysisReady \|\| !insightWidgetVisible/.test(home) &&
       /projectDashboardInsight\(state, period, now\)/.test(home) &&
+      !/const homeInsight = useMemo/.test(home) &&
       !/surface: 'dashboard', includeInsights: true/.test(home),
-    'a 10k+ row ledger must not run subscription/history analysis before Home can accept input');
+    'a 10k+ row ledger must not run subscription/history analysis before Home can accept input, and must not hitch the render that just painted a new SMS');
 
   const notifications = stripComments(read('src/lib/notifications.ts'));
   const reminders = stripComments(read('src/lib/reminders.ts'));
@@ -1063,6 +1098,37 @@ function bodyOf(source, header) {
       /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
       /syncPaymentReminders\(current\)/.test(autoImport),
     'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
+
+  const testerDiagnostics = stripComments(read('src/lib/android-tester-diagnostics.ts'));
+  const diagnosticMessages = stripComments(read('src/lib/diagnostic-messages.ts'));
+  ok('one-tap tester diagnostics page the native inbox instead of reading 1,000 SMS in one JS turn',
+    /maxPageSize: 50/.test(testerDiagnostics) &&
+      /maxPageSize\?: number/.test(read('src/lib/diagnostic-messages.ts')) &&
+      /Math\.min\(maxPage, remaining\)/.test(diagnosticMessages),
+    'a 14k-row ledger plus a 1,000-message inbox read froze the support button for 5-20s');
+
+  const smsReaderNative = stripComments(read(
+    'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt'));
+  ok('native SMS pages LIMIT the provider cursor instead of opening the whole inbox',
+    /DESC LIMIT \$limit/.test(smsReaderNative) &&
+      /remaining \+ 32/.test(smsReaderNative) &&
+      /fun collectInboxPage\(/.test(smsReaderNative) &&
+      /if \(rejectSensitive && SensitiveMessageFilter\.shouldReject\(body\)\) continue/.test(smsReaderNative),
+    'a native inbox read without LIMIT stalled Send diagnostics and routine capture on CPH2653');
+
+  ok('routine capture pages 128 inbox rows instead of 1,000',
+    /pageSize: 128/.test(captureSource) &&
+      /maxInboxPages: fullHistoricalReread \? 1 : undefined/.test(captureSource),
+    'incremental capture still drains every newer message; it must not parse a thousand bodies before yielding');
+
+  ok('SMS inbox pages yield to the UI between provider reads',
+    /waitForForegroundHistoryIdle\(FOREGROUND_PARSE_YIELD_MS\)/.test(autoImportSource),
+    'a multi-page catch-up after a week offline must not monopolise Hermes');
+
+  ok('Home FX repair stops after 16 fallback rows instead of filtering 14k',
+    /if \(pending\.length === 16\) break/.test(home),
+    'reference FX is a bounded repair, not a full-ledger scan');
+
 
   ok('reminder planning accepts a precomputed recurrence projection',
     /detectedSubscriptions\?: readonly Subscription\[\]/.test(reminders) &&
@@ -1086,7 +1152,7 @@ function bodyOf(source, header) {
     /function\* subscriptionDetectionWorker/.test(subscriptions) &&
       /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*2/.test(subscriptions) &&
       /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
-      /setTimeout\(runSlice, 0\)/.test(subscriptions),
+      /waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
 
   ok('recurrence detection drops impossible one-off/two-off merchant groups before yielding cadence work',
@@ -1122,6 +1188,20 @@ function bodyOf(source, header) {
       /billsForMonthCache\.bills === bills/.test(billsLogic) &&
       /return billsForMonthCache\.value\.slice\(\)/.test(billsLogic),
     'Home already computes card/bill upcoming data; opening Bills must reuse that result rather than retokenize the full ledger');
+
+  ok('manual bill reconciliation stops after the current money month on a newest-first ledger',
+    /function spendingInMonth\(/.test(billsLogic) &&
+      /if \(seenInMonth && newestFirst\) break/.test(billsLogic) &&
+      /const monthRows = spendingInMonth\(transactions, key, live, internal\)/.test(billsLogic) &&
+      /candidatePayments\(bill, monthRows, key, live, internal\)/.test(billsLogic),
+    'Home leaving-soon and Bills must not retokenize 14k historical rows to settle this month\'s three bills');
+
+  const dailySummaryLogic = stripComments(read('src/lib/daily-summary.ts'));
+  ok('daily spend summary stops after leaving today on a newest-first ledger',
+    /function forEachInDateWindow\(/.test(dailySummaryLogic) &&
+      /if \(seen && newestFirst\) break/.test(dailySummaryLogic) &&
+      /forEachInDateWindow\(state\.transactions, \(date\) => date === dayISO/.test(dailySummaryLogic),
+    'reminder setup must not walk 2019 to total today\'s coffees');
 
   ok('settled-card history is cached by immutable card inputs and day',
     /let recentlySettledDuesCache:/.test(cards) &&
@@ -1159,6 +1239,33 @@ function bodyOf(source, header) {
       /kept\.splice\(low, 0, item\)/.test(referencePresentation) &&
       /if \(kept\.length > boundedLimit\) kept\.pop\(\)/.test(referencePresentation),
     'pagination after fully sorting every recurring candidate still leaves the expensive synchronous work on the JS thread');
+
+  const insightSource = stripComments(read('src/lib/insights.ts'));
+  const flow = stripComments(read('src/app/(tabs)/flow.tsx'));
+  const wallet = stripComments(read('src/app/(tabs)/wallet.tsx'));
+  ok('month summaries stop after leaving a newest-first bounded period',
+    /if \(seenInPeriod && newestFirst && !unbounded\) break/.test(insightSource),
+    'a 14k-row history must not walk 2019 just to total this month');
+
+  ok('month early-exit requires the whole ledger to be newest-first, not a sorted prefix',
+    /function datesAreNewestFirst/.test(insightSource) &&
+      /const newestFirst = datesAreNewestFirst\(transactions\)/.test(insightSource),
+    'a newest-first prefix with later in-period rows would undercount money if we stopped at the first inversion');
+
+  ok('Wallet reissue suggestions are cached on the immutable ledger snapshot',
+    /let reissueCache:/.test(cards) &&
+      /reissueCache\?\.transactions === state\.transactions/.test(cards),
+    'opening Wallet three times on an unchanged 14k-row ledger was 122ms each');
+
+  ok('Wallet does not filter the whole ledger a second time just to count SMS rows',
+    !/state\.transactions\.filter\(\(tx\) => tx\.source === 'sms'\)/.test(wallet),
+    'smsCount belongs on the activity pass already walking accounts');
+
+  ok('Flow activity preview stops after eight newest matches',
+    /ACTIVITY_PREVIEW_LIMIT/.test(flow) &&
+      /out\.length >= ACTIVITY_PREVIEW_LIMIT/.test(flow) &&
+      !/\.filter\(\(tx\) => isSpending\(tx, live, internal\) && inPeriod\(tx\.date, period\)\)/.test(flow),
+    'the preview is eight rows; copying the whole period of spending is wasted JS');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

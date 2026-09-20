@@ -2709,6 +2709,33 @@ async function queueItem(id, row, publicKey) {
       }
 
       {
+        const events = [];
+        const current = {
+          ...hydrated, captureOptOut: true, privateMode: false, marketId: 'AE',
+        };
+        const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE' };
+        const queued = {
+          parsed: [row(20, 'STATEMENT ROW')],
+          ids: ['statement-row'], testIds: [], unreadable: 0, testReceived: 0,
+          shortcutRows: 0, shortcutRowsWithBank: 0,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: { ...ledger(Promise.resolve(), events), getState: () => current },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => queued,
+            planRows: () => changedPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+          },
+        });
+        const outcome = await executor.execute('supplemental');
+        ok('capture executor: explicit statement import still files while automatic capture is opted out',
+          outcome.kind === 'imported' &&
+            JSON.stringify(events) === JSON.stringify(['persist', 'ack:statement-row']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
         const network = controlledPromise();
         const events = [];
         let current = {

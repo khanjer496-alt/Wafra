@@ -212,7 +212,11 @@ export default function WalletScreen() {
       for (const account of state.accounts) {
         (isInactiveAccount(state, account, now) ? inactive : active).push(account);
       }
-      return { active, inactive };
+      let smsCount = 0;
+      for (const tx of state.transactions) {
+        if (tx.source === 'sms') smsCount += 1;
+      }
+      return { active, inactive, smsCount };
     }),
     // Activity depends on account snapshots and transaction dates only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,14 +224,11 @@ export default function WalletScreen() {
   );
   const activeSources = accountActivity.active;
   const inactiveAccounts = accountActivity.inactive;
+  const smsCount = accountActivity.smsCount;
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
   }`;
   // This month's spend per account, for the per-card line.
-  const smsCount = useMemo(
-    () => state.transactions.filter((tx) => tx.source === 'sms').length,
-    [state.transactions],
-  );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
     const due = dueByAccountId.get(account.id);

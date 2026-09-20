@@ -1828,20 +1828,25 @@ ok('the spoken label agrees with the sign on screen',
 {
   const types = read('src/lib/types.ts');
   const store = read('src/lib/store.tsx');
+  const editHelper = store.match(/function applyTransactionEdit\([\s\S]*?\n\}/)[0];
   // The reducer branch, not the earlier transfer-normalization switch that
   // shares the case label.
-  const branch = store.match(/case 'editTransaction': \{\s*const transactions = sortTxs\([\s\S]*?\n    \}/)[0];
+  const branch = store.match(/case 'editTransaction': \{\s*const index = state\.transactions\.findIndex[\s\S]*?\n    \}/)[0];
   const override = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
 
   ok('titleEdited is an optional, additive field on Transaction',
     /titleEdited\?: boolean;/.test(types),
     'existing rows must read as absent, which is correct for them');
   ok('an edit sets titleEdited only when the title actually changed',
-    /const renamed = action\.patch\.title !== undefined && action\.patch\.title !== t\.title;/
-      .test(branch),
+    /const renamed = patch\.title !== undefined && patch\.title !== transaction\.title;/
+      .test(editHelper),
     'editing an amount, a date or an account is not a renaming');
   ok('titleEdited stays true once set',
-    /renamed \|\| t\.titleEdited/.test(branch));
+    /renamed \|\| transaction\.titleEdited/.test(editHelper));
+  ok('a normal one-row edit does not rescan the full ledger just to prove sort order',
+    /state\.transactions\.slice\(\)/.test(branch) &&
+      /edited\.date !== previous\.date \? sortTxs\(transactions\) : transactions/.test(branch),
+    'only an actual posting-date change may require a whole-ledger sort check');
   ok('a bulk merchant rule never claims the title was retyped',
     !/titleEdited/.test(code(override)),
     'that path does not touch titles');

@@ -58,6 +58,10 @@ class EffectHarness {
       setResumeReady: value => { this.ui.ready = value; },
       setResumeFailed: value => { this.ui.failed = value; },
       loadIosMessageSetupProgress: () => { this.reads++; return this.loader(); },
+      // The shipping effect reads this from render scope. Statement import owns
+      // its handoff; existing resume cases are never on that authorized route.
+      isOnboardingStatementRoute: this.input.pathname === '/statement-import' &&
+        this.input.params?.statementSession != null,
     };
     const actual = vm.runInNewContext(actualEffect, context);
     const deps = actual.dependencies();
