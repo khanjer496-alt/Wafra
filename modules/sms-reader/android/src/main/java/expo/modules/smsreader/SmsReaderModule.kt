@@ -13,11 +13,19 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.exception.CodedException
+import kotlin.math.min
 
 private class SmsInboxAccessException(
   message: String,
   cause: Throwable? = null
 ) : CodedException("ERR_SMS_INBOX_ACCESS", message, cause)
+
+private data class NativeInboxRow(
+  val id: Long,
+  val address: String,
+  val body: String,
+  val date: Long,
+)
 
 /**
  * Reads SMS from the device inbox. The app must hold the READ_SMS runtime
@@ -27,6 +35,10 @@ private class SmsInboxAccessException(
  *
  * Paged by (date, _id), because Android may assign the same millisecond to
  * several messages. A date-only cursor can skip a row at a page boundary.
+ *
+ * Every provider query carries LIMIT. A 30k-row inbox on a OnePlus 13 opened
+ * an unbounded cursor for a 50- or 1,000-row page and stalled the JS thread
+ * for seconds while the bridge converted the result.
  */
 class SmsReaderModule : Module() {
   private var inboxObserver: ContentObserver? = null
@@ -38,6 +50,109 @@ class SmsReaderModule : Module() {
     }
     inboxObserver = null
     observedContext = null
+  }
+
+  private fun queryInboxSlice(
+    context: Context,
+    sinceMs: Long?,
+    beforeDateMs: Long,
+    beforeId: Long,
+    limit: Int,
+    missingCursor: () -> Nothing,
+  ): List<NativeInboxRow> {
+    val selection: String
+    val args: Array<String>
+    if (sinceMs == null) {
+      selection = "(${Telephony.Sms.DATE} < ?) OR " +
+        "(${Telephony.Sms.DATE} = ? AND ${Telephony.Sms._ID} < ?)"
+      args = arrayOf(
+        beforeDateMs.toString(),
+        beforeDateMs.toString(),
+        beforeId.toString(),
+      )
+    } else {
+      selection = "${Telephony.Sms.DATE} >= ? AND (" +
+        "${Telephony.Sms.DATE} < ? OR (" +
+        "${Telephony.Sms.DATE} = ? AND ${Telephony.Sms._ID} < ?))"
+      args = arrayOf(
+        sinceMs.toString(),
+        beforeDateMs.toString(),
+        beforeDateMs.toString(),
+        beforeId.toString(),
+      )
+    }
+    val cursor = context.contentResolver.query(
+      Telephony.Sms.Inbox.CONTENT_URI,
+      arrayOf(
+        Telephony.Sms._ID,
+        Telephony.Sms.ADDRESS,
+        Telephony.Sms.BODY,
+        Telephony.Sms.DATE
+      ),
+      selection,
+      args,
+      "${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC LIMIT $limit"
+    ) ?: missingCursor()
+    val rows = mutableListOf<NativeInboxRow>()
+    cursor.use {
+      val idIdx = it.getColumnIndex(Telephony.Sms._ID)
+      val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
+      val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
+      val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
+      while (it.moveToNext()) {
+        rows.add(
+          NativeInboxRow(
+            id = it.getLong(idIdx),
+            address = it.getString(addressIdx) ?: "",
+            body = it.getString(bodyIdx) ?: "",
+            date = it.getLong(dateIdx),
+          )
+        )
+      }
+    }
+    return rows
+  }
+
+  /**
+   * Fill one JS page from LIMIT-bounded provider slices. OTP/security bodies
+   * are dropped in-process; extra fetch rows keep that filter from looking like
+   * the end of the inbox.
+   */
+  private fun collectInboxPage(
+    context: Context,
+    sinceMs: Long?,
+    beforeDateMs: Long,
+    beforeId: Long,
+    pageSize: Int,
+    rejectSensitive: Boolean,
+    missingCursor: () -> Nothing,
+  ): List<Map<String, Any>> {
+    val messages = mutableListOf<Map<String, Any>>()
+    var cursorDate = beforeDateMs
+    var cursorId = beforeId
+    while (messages.size < pageSize) {
+      val remaining = pageSize - messages.size
+      val fetch = min(2_000, remaining + 32)
+      val rows = queryInboxSlice(context, sinceMs, cursorDate, cursorId, fetch, missingCursor)
+      if (rows.isEmpty()) break
+      for (row in rows) {
+        cursorDate = row.date
+        cursorId = row.id
+        val body = row.body
+        if (rejectSensitive && SensitiveMessageFilter.shouldReject(body)) continue
+        messages.add(
+          mapOf(
+            "id" to row.id.toDouble(),
+            "address" to row.address,
+            "body" to body,
+            "date" to row.date.toDouble()
+          )
+        )
+        if (messages.size >= pageSize) break
+      }
+      if (rows.size < fetch) break
+    }
+    return messages
   }
 
   override fun definition() = ModuleDefinition {
@@ -108,56 +223,25 @@ class SmsReaderModule : Module() {
       if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
         throw SmsInboxAccessException("SMS inbox permission is unavailable")
       }
-      val messages = mutableListOf<Map<String, Any>>()
       // Routine scans request 1,000. The resumable first-history importer may
       // request up to 2,000 so it can halve full-ledger durability checkpoints
       // while still retaining a durable cursor after every bounded page.
       val pageSize = max.coerceIn(1, 2_000)
       try {
-        val cursor = context.contentResolver.query(
-          Telephony.Sms.Inbox.CONTENT_URI,
-          arrayOf(
-            Telephony.Sms._ID,
-            Telephony.Sms.ADDRESS,
-            Telephony.Sms.BODY,
-            Telephony.Sms.DATE
-          ),
-          "${Telephony.Sms.DATE} >= ? AND (" +
-            "${Telephony.Sms.DATE} < ? OR (" +
-            "${Telephony.Sms.DATE} = ? AND ${Telephony.Sms._ID} < ?))",
-          arrayOf(
-            sinceMs.toLong().toString(),
-            beforeDateMs.toLong().toString(),
-            beforeDateMs.toLong().toString(),
-            beforeId.toLong().toString()
-          ),
-          "${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC"
-        ) ?: throw SmsInboxAccessException("SMS inbox query returned no cursor")
-        cursor.use {
-          val idIdx = it.getColumnIndex(Telephony.Sms._ID)
-          val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
-          val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
-          val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
-          while (it.moveToNext() && messages.size < pageSize) {
-            val body = it.getString(bodyIdx) ?: ""
-            if (SensitiveMessageFilter.shouldReject(body)) continue
-            messages.add(
-              mapOf(
-                "id" to it.getLong(idIdx).toDouble(),
-                "address" to (it.getString(addressIdx) ?: ""),
-                "body" to body,
-                "date" to it.getLong(dateIdx).toDouble()
-              )
-            )
-          }
-        }
+        collectInboxPage(
+          context,
+          sinceMs.toLong(),
+          beforeDateMs.toLong(),
+          beforeId.toLong(),
+          pageSize,
+          true,
+        ) { throw SmsInboxAccessException("SMS inbox query returned no cursor") }
       } catch (error: SecurityException) {
         // Some Android/OEM restricted-access layers can deny the provider
         // even after the runtime permission reports granted. Preserve that
         // distinction so the UI can send the user back to App settings.
         throw SmsInboxAccessException("SMS inbox access is restricted", error)
       }
-      messages
     }
 
     /**
@@ -183,42 +267,16 @@ class SmsReaderModule : Module() {
       }
       val context = appContext.reactContext
         ?: throw IllegalStateException("SMS reader context is unavailable")
-      val messages = mutableListOf<Map<String, Any>>()
       val pageSize = max.coerceIn(1, 1_000)
       try {
-        val cursor = context.contentResolver.query(
-          Telephony.Sms.Inbox.CONTENT_URI,
-          arrayOf(
-            Telephony.Sms._ID,
-            Telephony.Sms.ADDRESS,
-            Telephony.Sms.BODY,
-            Telephony.Sms.DATE
-          ),
-          "(${Telephony.Sms.DATE} < ?) OR " +
-            "(${Telephony.Sms.DATE} = ? AND ${Telephony.Sms._ID} < ?)",
-          arrayOf(
-            beforeDateMs.toLong().toString(),
-            beforeDateMs.toLong().toString(),
-            beforeId.toLong().toString()
-          ),
-          "${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC"
-        ) ?: throw IllegalStateException("SMS inbox query returned no cursor")
-        cursor.use {
-          val idIdx = it.getColumnIndex(Telephony.Sms._ID)
-          val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
-          val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
-          val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
-          while (it.moveToNext() && messages.size < pageSize) {
-            messages.add(
-              mapOf(
-                "id" to it.getLong(idIdx).toDouble(),
-                "address" to (it.getString(addressIdx) ?: ""),
-                "body" to (it.getString(bodyIdx) ?: ""),
-                "date" to it.getLong(dateIdx).toDouble()
-              )
-            )
-          }
-        }
+        collectInboxPage(
+          context,
+          null,
+          beforeDateMs.toLong(),
+          beforeId.toLong(),
+          pageSize,
+          false,
+        ) { throw IllegalStateException("SMS inbox query returned no cursor") }
       } catch (error: SecurityException) {
         // An empty page means "the export is complete" to JavaScript. If
         // permission disappears during pagination, propagate the failure so
@@ -226,7 +284,6 @@ class SmsReaderModule : Module() {
         // received messages.
         throw IllegalStateException("SMS permission became unavailable", error)
       }
-      messages
     }
 
     /** Compatibility seam for builds that carried the old delivery buffer. */

@@ -1072,6 +1072,15 @@ function bodyOf(source, header) {
       /Math\.min\(maxPage, remaining\)/.test(diagnosticMessages),
     'a 14k-row ledger plus a 1,000-message inbox read froze the support button for 5-20s');
 
+  const smsReaderNative = stripComments(read(
+    'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt'));
+  ok('native SMS pages LIMIT the provider cursor instead of opening the whole inbox',
+    /DESC LIMIT \$limit/.test(smsReaderNative) &&
+      /remaining \+ 32/.test(smsReaderNative) &&
+      /fun collectInboxPage\(/.test(smsReaderNative) &&
+      /if \(rejectSensitive && SensitiveMessageFilter\.shouldReject\(body\)\) continue/.test(smsReaderNative),
+    'a 30k-row inbox without LIMIT stalled Send diagnostics and routine capture on CPH2653');
+
 
   ok('reminder planning accepts a precomputed recurrence projection',
     /detectedSubscriptions\?: readonly Subscription\[\]/.test(reminders) &&
