@@ -1,0 +1,129 @@
+name: CUA-S1 Wafra Benchmark
+
+on:
+  push:
+    branches:
+      - research/cua-s1-wafra-benchmark
+    paths:
+      - "validation/cua-s1-*"
+      - ".github/workflows/cua-s1-wafra-benchmark.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Wafra research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Export Wafra evaluation corpus
+        run: |
+          node validation/export-cua-s1-fixtures.cjs > /tmp/wafra-cua-fixtures.json
+          node - <<'NODE'
+          const rows = require('/tmp/wafra-cua-fixtures.json');
+          const counts = {};
+          for (const row of rows) counts[row.market] = (counts[row.market] || 0) + 1;
+          console.log('Fixture count:', rows.length);
+          console.log('By market:', counts);
+          NODE
+
+      - name: Verify current Wafra parser baseline
+        run: |
+          npm ci --ignore-scripts
+          bash scripts/test/build.sh
+          node scripts/test/bank-corpus.test.js | tee /tmp/wafra-parser-baseline.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pinned CUA-S1 source
+        run: |
+          git clone --depth 1 https://github.com/trycua/cua.git /tmp/cua
+          python -m pip install --upgrade pip
+          python -m pip install -e /tmp/cua/libs/cua-s1/python huggingface_hub
+
+      - name: Download official safe CUA-S1 checkpoint
+        run: |
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+
+          repo = "cua-ai/cua-s1-forms"
+          root = Path("/tmp/cua-s1-checkpoint")
+          root.mkdir(parents=True, exist_ok=True)
+          weights = hf_hub_download(repo, "cua-s1-forms.safetensors", local_dir=root)
+          config = hf_hub_download(repo, "cua-s1-forms.json", local_dir=root)
+          print("weights:", weights)
+          print("config:", config)
+          PY
+
+      - name: Run zero-shot Wafra transfer benchmark
+        run: |
+          python validation/cua-s1-wafra-benchmark.py \
+            --fixtures /tmp/wafra-cua-fixtures.json \
+            --checkpoint /tmp/cua-s1-checkpoint/cua-s1-forms.safetensors \
+            --output /tmp/cua-s1-wafra-results.json \
+            --device cpu | tee /tmp/cua-s1-wafra-console.txt
+
+      - name: Summarize result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("/tmp/cua-s1-wafra-results.json")
+          if not path.exists():
+              print("CUA-S1 result file was not produced.")
+              raise SystemExit(0)
+          report = json.loads(path.read_text())
+          print("CUA-S1 Wafra zero-shot summary")
+          print("fixtures:", report["fixtureCount"])
+          print("checkpoint bytes:", report["checkpoint"]["bytes"])
+          print("parameters:", report["checkpoint"]["parameters"])
+          for name, result in report["classification"].items():
+              print(
+                  f'{name}: {result["correct"]}/{result["total"]} '
+                  f'({100 * result["accuracy"]:.2f}%), '
+                  f'high-confidence wrong={result["highConfidenceWrong"]}, '
+                  f'truncated={result["contextTruncated"]}'
+              )
+          amount = report["amountDisambiguation"]
+          if amount["total"]:
+              print(
+                  f'amount disambiguation: {amount["correct"]}/{amount["total"]} '
+                  f'({100 * amount["accuracy"]:.2f}%), '
+                  f'high-confidence wrong={amount["highConfidenceWrong"]}, '
+                  f'truncated={amount["contextTruncated"]}'
+              )
+          latency = report["latencyCpuBatch1"]
+          print(
+              f'CPU batch1 latency: median={latency["medianMs"]:.3f}ms '
+              f'p95={latency["p95Ms"]:.3f}ms mean={latency["meanMs"]:.3f}ms'
+          )
+          PY
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cua-s1-wafra-benchmark
+          if-no-files-found: warn
+          path: |
+            /tmp/wafra-cua-fixtures.json
+            /tmp/wafra-parser-baseline.txt
+            /tmp/cua-s1-wafra-results.json
+            /tmp/cua-s1-wafra-console.txt
