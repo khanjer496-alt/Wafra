@@ -26,8 +26,8 @@
     {
       "id": "divergence",
       "title": "Divergence from the shipped rules (961 unlabelled messages)",
-      "messages": 961,
-      "agreed": 961,
+      "messages": 966,
+      "agreed": 966,
       "diverged": 0,
       "agreement": 100,
       "buckets": {

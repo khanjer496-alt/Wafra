@@ -49,7 +49,7 @@ Four measurements, deliberately not collapsed into one percentage.
 2. **Labelled global alert rows** — 188 rows from `global-alert-formats.js`,
    compared on decision, status, family, direction, currency, minor units, and
    institution identification.
-3. **Divergence over the unlabelled corpus** — the 961 distinct in-repo
+3. **Divergence over the unlabelled corpus** — the 966 distinct in-repo
    messages (`scripts/test/corpus-messages.cjs`), which have no ground truth.
    This is *not* scored as accuracy. It is scored as disagreement with the
    shipped rules, split by what the disagreement costs a user:
@@ -74,7 +74,7 @@ Recorded in `scripts/parser-benchmark/baseline-rules.json`.
 | --- | --- |
 | Labelled AE/SA ledger | 121/121 pinned fields over 11 rows — 100% |
 | Labelled global alerts | 1128/1128 pinned fields over 188 rows — 100%, institution 100% |
-| Divergence | 961/961 agreement with itself, 0 in every bucket |
+| Divergence | 966/966 agreement with itself, 0 in every bucket |
 | Latency | p50 0.23 ms, p95 0.40 ms, max 1.0 ms; 5,000 messages in ~1.07 s |
 
 Latency is machine-dependent and is therefore not pinned in the committed
@@ -83,25 +83,26 @@ baseline.
 A naive engine — one that finds a currency amount and posts it, which is the
 shape of any extractor without refusal knowledge — scores 54.5% on the
 labelled ledger rows and, more importantly, **174 `posts-where-rules-refuse`
-rows out of 961**. Those 174 are promotional offers, OTP messages, declined
+rows out of 966**. Those 174 are promotional offers, OTP messages, declined
 transactions and bank-redacted figures such as `AED ····0710.00`. This is the
 failure mode a candidate has to be measured against, and it is invisible in an
 accuracy percentage.
 
 ## What the remaining failures are actually made of
 
-Over the same 961 messages the shipped rules produce:
+Over the same 966 messages the shipped rules produce, after the fix recorded below:
 
 ```
-  parsed                       703
+  parsed                       707
     category resolved          445
-    'other' on purpose         141   (brokerage, card settlement, own transfer)
-    'other' by fall-through    117   <-- categorisation gap
-  refused                      258
+    'other' on purpose         176   (statements, brokerage, card settlement,
+                                      own transfer, processor-only descriptors)
+    'other' by fall-through     86   <-- categorisation gap, was 117
+  refused                      259
     refused with a reason       85   (declined 30, security-challenge 29,
                                       preauthorisation 14, pending 8,
                                       card-lifecycle 3, returned-unpaid 1)
-    refused silently           173
+    refused silently           174
       ...of which money-shaped  96
 ```
 
@@ -112,23 +113,59 @@ credit offers, OTPs that name a purchase amount, future-dated notices
 of those is a **deliberate** refusal. A model that "fixed" them would be
 inventing money.
 
-The 117 fall-throughs are 75 distinct merchant names, and they split roughly:
+The 117 fall-throughs were 75 distinct merchant names, and reading them is
+what produced the fix below. They split roughly:
 
-- **Card-only descriptors** (`Card •4821`, nine of them) — the message names no
-  merchant. Nothing can categorise these.
+- **Card statements** (`Card •4821`) — 31 of the 117, and not spending at all.
+  A statement is the card's own bill; it names no shop because there is none.
+- **Card-only descriptors** (`Card purchase`) — a card was used and the parser
+  could not read where. A real gap, and one the accuracy report exists to show.
 - **Generic banking labels** — `Bank transfer`, `Outward remittance`,
-  `Bill payment`, `Card purchase`, `Refund`, `Insurance premium`. Already
-  correct as `other`, or fixable with a rule.
+  `Bill payment`, `Refund`. Money moving between places has no category.
 - **Person names** — `Ahmed Khalid`, `Mohammed Ali`, `Prasert On-puttha`. P2P
   transfers; `other` is the right answer.
+- **Processor-only descriptors** — a bare `PAYPAL` or `Ziina` with no payee
+  behind it. The bank named the rail and withheld the shop.
 - **Opaque POS descriptors** — `CXIANGHUI01L`, `Shathi Al Madeenah Tr`,
-  `Al Nujom Al Thabeiah S`, `Fo Sharjah Corni`. Truncated and transliterated;
-  the category is not recoverable from the string.
-- **Genuinely knowable brands** — `Ziina`, `Emaar Properties`, `Paypal`,
-  `Opensooq`, `Phuket Delight`, `Aromaya`, `Phoneinn`. Roughly 20–25 names.
+  `Al Nujom Al Thabeiah S`. Truncated and transliterated; the category is not
+  recoverable from the string, and these must stay unresolved so the user is
+  asked.
 
-Only the last group is a real gap, it is a *knowledge* gap rather than a
-parsing gap, and a merchant lookup table closes it without a model.
+The first and fifth groups were not a vocabulary gap at all. They were rows the
+parser had already understood being counted as rows it could not read.
+
+## The fix that followed
+
+`categoryDeliberate` separates two things `heal.ts` and the accuracy report
+both branch on: a row the parser understood that simply has no spending
+category, and a row nothing could read. Three of the four sites that build a
+`Card •NNNN` statement title said "understood"; the main one did not, so 31
+statements were being reported as uncategorised merchants and burying the real
+misses. `isDeliberateOtherTitle` was missing the same shape, so a hydrated row
+disagreed with its own parse. And the processor rule that already covered
+`2c2p` did not cover a bare `PAYPAL` or `Ziina`.
+
+| | before | after |
+| --- | --- | --- |
+| unresolved rows | 117 (17% of read) | **86 (12%)** |
+| distinct merchant names | 75 | **62** |
+| of which not spending at all | 32 | **0** |
+
+Ziina sits with the processors rather than the wallets on purpose: a UAE shop
+can accept it, so `Ziina *CLEANTIZER SER` still reaches Home services while a
+bare `Ziina` resolves to a deliberate Other. Naming it a wallet would be a
+guess about what the money bought.
+
+What did **not** change is as deliberate. `Card purchase` and `Bill payment`
+stay reportable: they mean the parser could not read the payee, which is a
+genuine gap the user should see, and the suite now pins that so the next
+person does not "fix" it. The opaque POS descriptors stay unresolved too —
+per `docs/categorization-policy.md`, an unknown seller behind a processor and
+an opaque platform both need the user's own category, not a guess.
+
+The remaining 86 are real transactions with real but unreadable merchant
+names. A merchant table closes some of them; nothing closes them all.
+
 
 ## What this means for a model proposal
 
@@ -136,7 +173,7 @@ The evidence says the extraction layer is not where the remaining loss is, and
 that the dangerous direction is a candidate that reads *more* messages rather
 than fewer. Any proposal should therefore be evaluated on:
 
-- `posts-where-rules-refuse` at or near zero on the 961-message corpus;
+- `posts-where-rules-refuse` at or near zero on the 966-message corpus;
 - no regression on the 1,249 pinned fields across the two labelled corpora;
 - p95 and max inside the 25 ms budget, measured on target hardware rather than
   a laptop, and 5,000 messages inside 1,500 ms;

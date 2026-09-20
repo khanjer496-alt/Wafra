@@ -3239,7 +3239,12 @@ function categoryOf(
   // spending category to invent. Marking this as a deliberate `other` keeps it
   // out of the "needs categorising" queue while a processor plus a real payee
   // (for example "2C2P BOLT") still reaches the payee's category normally.
-  if (merchant && /^(?:2c2p)$/i.test(merchant.trim())) {
+  //
+  // Ziina is here on the same evidence and not as a wallet: a UAE shop can
+  // accept it, so a bare "Ziina" descriptor proves the rail and hides the
+  // seller exactly as a bare "PAYPAL" does. Naming it a wallet would be a
+  // guess about what the money bought.
+  if (merchant && /^(?:2c2p|paypal|ziina)$/i.test(merchant.trim())) {
     return { id: 'other', deliberate: true };
   }
   // Market-local vocabulary wins over the global baseline.
@@ -3537,7 +3542,8 @@ export function isDeliberateOtherTitle(title: string): boolean {
     STRUCTURAL_TITLES.has(normalized) ||
     /^Transfer to [\p{L}\p{M}][\p{L}\p{M} .'-]{0,80}$/u.test(normalized) ||
     /^Payment to [•Xx*·]{1,8}\d{2,4}$/u.test(normalized) ||
-    /^2c2p$/i.test(normalized)
+    /^Card •\d{3,4}(?: payment)?$/u.test(normalized) ||
+    /^(?:2c2p|paypal|ziina)$/i.test(normalized)
   );
 }
 
@@ -5883,6 +5889,12 @@ function parseSmsInner(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      // A statement names no shop — it is the card's own bill — so `other` is
+      // the conclusion, not a shrug. The three other sites that build this
+      // same `Card •NNNN` title said so; this one did not, and 31 of the 32
+      // rows the accuracy report counted as "uncategorised merchants" were
+      // statements from here. They buried the real misses.
+      categoryDeliberate: true,
       currency,
       reference,
       raw: source,
