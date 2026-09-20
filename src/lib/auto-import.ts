@@ -43,11 +43,14 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
+import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
+import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { observeLocalSemanticParserShadow } from '@/lib/local-semantic-shadow';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -66,6 +69,16 @@ export interface AndroidNotificationImportDiagnostics {
   unresolvedFinancialCandidate: number;
   unresolvedParserMiss: number;
   unresolvedReviewRefusal: number;
+  /** Source-free template-certification outcomes from the last native drain. */
+  certificationAutomatic: number;
+  semanticGeneralized: number;
+  certificationReview: number;
+  certificationNeverPost: number;
+  certificationAdapterRequired: number;
+  /** Counts by code-owned certification id only; never message-derived text. */
+  certificationTemplates: Record<string, number>;
+  /** Market/family buckets only; never merchant, amount, account or source text. */
+  semanticGeneralizedFamilies: Record<string, number>;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
@@ -567,14 +580,16 @@ function parsedFinancialCandidateReview(
 }
 
 const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
-  'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment',
+  'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment', 'transfer',
 ]);
 
 /**
  * Convert one source-grounded worldwide event into the same structured row the
  * legacy launch parser emits. This is intentionally stricter than Review:
- * transfers, unknown direction/status, ambiguous money and statement/bill facts
- * remain review-only. Currency comes from ISO metadata, never a country default.
+ * unknown direction/status, ambiguous money and statement/bill facts remain
+ * review-only. Transfer rows are allowed only after template certification and
+ * retain transferHint so uncertain ownership is excluded from exact totals.
+ * Currency comes from ISO metadata, never a country default.
  */
 function parsedUniversalPosting(
   event: UniversalBankEvent,
@@ -588,7 +603,7 @@ function parsedUniversalPosting(
       event.amount.evidence !== 'explicit' || !event.amount.value) return null;
 
   if ((event.family === 'refund' && event.direction !== 'credit') ||
-      (event.family !== 'refund' && event.direction !== 'debit')) return null;
+      (event.family !== 'refund' && event.family !== 'transfer' && event.direction !== 'debit')) return null;
 
   const spec = ledgerMoneySpec(event.amount.value.currency);
   if (!spec || spec.exponent !== event.amount.value.exponent ||
@@ -598,11 +613,13 @@ function parsedUniversalPosting(
   if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER)) return null;
 
   const type = event.direction === 'credit' ? 'income' : 'expense';
-  const suggestion = suggestUniversalCategory(event, {
-    type,
-    overrides,
-    market: market ?? undefined,
-  });
+  const suggestion = event.family === 'transfer'
+    ? { category: 'other' as import('@/lib/types').CategoryId, merchant: '', needsReview: false }
+    : suggestUniversalCategory(event, {
+        type,
+        overrides,
+        market: market ?? undefined,
+      });
   const explicitMerchant = event.merchant.evidence === 'explicit'
     ? event.merchant.value?.trim() ?? ''
     : '';
@@ -611,8 +628,16 @@ function parsedUniversalPosting(
       : event.family === 'fee' ? 'Bank fee'
         : event.family === 'utility' ? 'Utility payment'
           : event.family === 'recurring-payment' ? 'Recurring payment'
+            : event.family === 'transfer'
+              ? event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
             : 'Card purchase';
-  const merchant = suggestion.merchant || explicitMerchant || fallbackTitle;
+  // Transfer ownership is a separate reconciliation question. Preserve a
+  // structural title so the ledger keeps this row in the unresolved-transfer
+  // bucket until it can prove own vs external; a recipient name must not turn a
+  // transfer into ordinary spending merely because merchant extraction found it.
+  const merchant = event.family === 'transfer'
+    ? fallbackTitle
+    : suggestion.merchant || explicitMerchant || fallbackTitle;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const card = instrument?.last4
     ? {
@@ -631,7 +656,7 @@ function parsedUniversalPosting(
     minDueFils: null,
     card,
     reference: null,
-    transferHint: false,
+    transferHint: event.family === 'transfer',
     snapshotFils: null,
     snapshotKind: null,
     categoryGuess: suggestion.category,
@@ -1143,6 +1168,13 @@ export async function scanInbox(
         unresolvedFinancialCandidate: 0,
         unresolvedParserMiss: 0,
         unresolvedReviewRefusal: 0,
+        certificationAutomatic: 0,
+        semanticGeneralized: 0,
+        certificationReview: 0,
+        certificationNeverPost: 0,
+        certificationAdapterRequired: 0,
+        certificationTemplates: {},
+        semanticGeneralizedFamilies: {},
         acknowledgementPlanned: 0,
         acknowledged: 0,
       };
@@ -1164,9 +1196,9 @@ export async function scanInbox(
         // money gates. Before forcing a first-transaction Review, also verify the
         // INSTALLED app's own Android label. A recognized bank alias or explicit
         // banking/finance identity is stronger than notification copy and can
-        // authorize a confident parser result immediately. Truly ambiguous apps
-        // remain review-first and may still be learned from an explicit user
-        // confirmation.
+        // establish issuer trust. It still cannot authorize money by itself:
+        // worldwide automatic import additionally requires a certified template.
+        // Truly ambiguous apps remain review-first.
         const verifiedSender = nativeSourceClass === 'financial-candidate'
           ? verifiedFinancialAppSender(n.appLabel ?? '')
           : null;
@@ -1175,6 +1207,11 @@ export async function scanInbox(
           : nativeSourceClass;
         const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
         const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        // Green semantic generalization needs independently verified installed-
+        // app identity. A user-learned package may still use an exact Gold
+        // certified template, but cannot generalize beyond what was confirmed.
+        const semanticGeneralizationAuthorized = sourceClass === 'trusted-bank' ||
+          (sourceClass === 'play-finance' && !!verifiedSender && hasUniversalInstitutionSender(verifiedSender));
         const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
           (learned ? `${n.pkg} ${n.title}` : '');
         if (isPromotionalBankPush(source)) {
@@ -1193,16 +1230,70 @@ export async function scanInbox(
         // their mature regional grammar as a fast path. A curated, locally
         // verified Play-finance, or previously confirmed package from any other
         // country may then use the universal structured parser in native ISO
-        // currency. Only genuinely ambiguous app identity remains Review-first.
+        // currency. Gold certified templates auto-import directly; a strongly
+        // verified installed app may also use the stricter Green semantic path.
+        // Anything incomplete/ambiguous remains Review-first.
         const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : parseLaunchAlert(source, sender, worldwide);
-        const universalEvent = !launchParsed && autoAuthorized
-          ? inspectGenericBankEventForReview(source, sender)
-          : null;
         const routedMarket = trustedMarket ??
           (worldwide?.route.decision === 'single' ? worldwide.route.market : null);
-        const universalParsed = universalEvent
+        const globalMarket = routedMarket && routedMarket !== 'AE' && routedMarket !== 'SA'
+          ? routedMarket
+          : null;
+        // Keep the full inspected fact for source-free certification metrics,
+        // even when it is deliberately non-reviewable (pending/failed/etc.).
+        // Review candidates still require event.decision === 'review'.
+        const universalInspection = !launchParsed && autoAuthorized
+          ? globalMarket
+            ? inspectUniversalBankEvent(source, { sender, market: globalMarket })
+            : inspectGenericBankEventForReview(source, sender)
+          : null;
+        // Local-AI shadow evaluation is deliberately outside import authority.
+        // For launch-parser successes, build the same source-grounded universal
+        // fact only for aggregate agreement metrics; its result can never
+        // replace `launchParsed`, certification, money, status or direction.
+        const semanticShadowInspection = universalInspection ?? (
+          launchParsed && autoAuthorized ? inspectGenericBankEventForReview(source, sender) : null
+        );
+        if (semanticShadowInspection) {
+          await observeLocalSemanticParserShadow(source, semanticShadowInspection);
+        }
+        const universalEvent = universalInspection?.decision === 'review'
+          ? universalInspection
+          : null;
+        const certification = universalInspection && globalMarket
+          ? certifyUniversalTemplate({
+              market: globalMarket,
+              institution: worldwide?.review?.institution.institution ?? null,
+              source,
+              event: universalInspection,
+              rail: worldwide?.review?.rail ?? null,
+              allowSemanticGeneralization: semanticGeneralizationAuthorized,
+            })
+          : null;
+        if (notificationImportStats && certification) {
+          if (certification.decision === 'automatic') {
+            notificationImportStats.certificationAutomatic += 1;
+            if (certification.templateId) {
+              notificationImportStats.certificationTemplates[certification.templateId] =
+                (notificationImportStats.certificationTemplates[certification.templateId] ?? 0) + 1;
+            }
+          }
+          else if (certification.decision === 'semantic-generalized') {
+            notificationImportStats.semanticGeneralized += 1;
+            if (globalMarket && universalInspection) {
+              const bucket = `${globalMarket}:${universalInspection.family}`;
+              notificationImportStats.semanticGeneralizedFamilies[bucket] =
+                (notificationImportStats.semanticGeneralizedFamilies[bucket] ?? 0) + 1;
+            }
+          }
+          else if (certification.decision === 'never-post') notificationImportStats.certificationNeverPost += 1;
+          else if (certification.decision === 'adapter-required') notificationImportStats.certificationAdapterRequired += 1;
+          else notificationImportStats.certificationReview += 1;
+        }
+        const universalParsed = universalEvent &&
+          (certification?.decision === 'automatic' || certification?.decision === 'semantic-generalized')
           ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
           : null;
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
