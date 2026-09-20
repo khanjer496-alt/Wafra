@@ -63,6 +63,7 @@ import {
   parseSms,
 } from '@/lib/sms-parser';
 import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
+import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -231,6 +232,7 @@ const EMPTY_STATE: AppState = {
   marketId: '',
   language: '',
   languagePreference: 'system',
+  knownBanks: [],
 };
 
 let idCounter = 0;
@@ -342,6 +344,7 @@ export function migratePersistedState(
     Date.now(),
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
+  parsed.knownBanks = sanitizeKnownBanks(parsed.knownBanks);
   parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
     ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
         typeof value === 'string' && value.length <= 255 &&
@@ -755,6 +758,7 @@ type Action =
   | { type: 'deleteBudget'; category: Budget['category'] }
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
+  | { type: 'setKnownBanks'; names: string[] }
   | { type: 'deleteAccount'; id: string }
   | { type: 'mergeRenewedCard'; oldId: string; newId: string }
   | { type: 'markCardsDistinct'; id: string }
@@ -1259,6 +1263,17 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'setKnownBanks': {
+      // The user's own answer to "Which banks text you?". One bank is an
+      // unambiguous label for every account nothing else could name; several
+      // are left for the per-account picker.
+      const knownBanks = sanitizeKnownBanks(action.names);
+      return {
+        ...state,
+        knownBanks,
+        accounts: accountsLabelledWithBank(state.accounts, singleKnownBank(knownBanks)),
+      };
+    }
     case 'mergeRenewedCard':
       // The bank reissued the card; the user confirmed the two rows are one.
       return mergeRenewedCard(state, action.oldId, action.newId);
@@ -1543,6 +1558,8 @@ interface StoreValue {
   deleteBudget: (category: Budget['category']) => void;
   addAccount: (a: Omit<Account, 'id'>) => void;
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
+  /** Store which banks text the user; one bank also labels every bank-less account. */
+  setKnownBanks: (names: string[]) => void;
   deleteAccount: (id: string) => void;
   /** Fold a reissued card's predecessor into it (user-confirmed). */
   mergeRenewedCard: (oldId: string, newId: string) => void;
@@ -2412,6 +2429,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteAccount', id });
   }, [dispatch]);
 
+  const setKnownBanks = useCallback((names: string[]) => {
+    dispatch({ type: 'setKnownBanks', names });
+  }, [dispatch]);
+
   const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
     dispatch({ type: 'mergeRenewedCard', oldId, newId });
   }, [dispatch]);
@@ -2853,6 +2874,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCard: mergeRenewedCardAction,
       markCardsDistinct: markCardsDistinctAction,
       addBill,
@@ -2919,6 +2941,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCardAction,
       markCardsDistinctAction,
       addBill,

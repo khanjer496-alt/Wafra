@@ -17,7 +17,7 @@ import { AutomationGuide } from '@/components/ios-message-setup/automation-guide
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button } from '@/components/ui/controls';
+import { Button, Chip } from '@/components/ui/controls';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Block } from '@/components/ui/layout';
 import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
@@ -25,6 +25,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { knownBankOptions } from '@/lib/known-banks';
 import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
@@ -110,7 +111,7 @@ export default function IosSetupScreen() {
     shortcutResult?: string;
     section?: string;
   }>();
-  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
+  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut, setKnownBanks } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
   const onboardingInsight = onboardingInsightKeys(state.onboardingProfile?.focus ?? null);
@@ -157,6 +158,16 @@ export default function IosSetupScreen() {
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
   const resetHistoryAttempt = useRef<number | null>(null);
   const [skipHistoryVisible, setSkipHistoryVisible] = useState(false);
+  // "Which banks text you?": asked once before either section can start, because
+  // iOS 26's Find Messages gives Wafra no sender and some banks never name
+  // themselves in an alert, so this answer is what labels those accounts.
+  // Skip hides it for this visit only; the answer itself persists in the ledger.
+  const [banksSkipped, setBanksSkipped] = useState(false);
+  const [bankPicks, setBankPicks] = useState<string[]>([]);
+  const banksStep = (state.knownBanks ?? []).length === 0 && !banksSkipped;
+  const toggleBankPick = (name: string) => setBankPicks((picks) =>
+    picks.includes(name) ? picks.filter((pick) => pick !== name) : [...picks, name]);
+  const saveKnownBanks = () => { setKnownBanks(bankPicks); };
   const skipHistoryAttempt = useRef<number | null | undefined>(undefined);
   const setupInitialized = useRef(false);
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
@@ -832,7 +843,7 @@ export default function IosSetupScreen() {
     };
   };
   const action = primaryAction();
-  const showFooterAction = !showAutomationGuide && (
+  const showFooterAction = !showAutomationGuide && !banksStep && (
     setupComplete ||
     (futureConfigured && !historyComplete && !historyDeferred && progress.activeSection === 'future')
   );
@@ -881,6 +892,26 @@ export default function IosSetupScreen() {
           />
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
+          ) : banksStep ? (
+            <View testID="ios-message-setup-banks" style={styles.checklist}>
+              <Block>
+                <ThemedText type="subtitle">{t('iosBanksTitle')}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">{t('iosBanksBody')}</ThemedText>
+                <View style={styles.bankChips} accessibilityRole="list">
+                  {knownBankOptions(state.marketId).map((bank) => (
+                    <Chip
+                      key={bank.name}
+                      label={bank.name}
+                      active={bankPicks.includes(bank.name)}
+                      onPress={() => toggleBankPick(bank.name)}
+                    />
+                  ))}
+                </View>
+                <ThemedText type="meta" themeColor="textSecondary">{tf('iosBanksSelected', { n: bankPicks.length })}</ThemedText>
+                <Button label={t('iosBanksNext')} onPress={saveKnownBanks} disabled={busy || bankPicks.length === 0} wrapLabel />
+                <Button label={t('iosBanksSkip')} variant="ghost" onPress={() => setBanksSkipped(true)} disabled={busy} wrapLabel />
+              </Block>
+            </View>
           ) : (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
               <ChecklistRow
@@ -1143,6 +1174,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
+  bankChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
   hints: { marginTop: Spacing.one },
   progress: { gap: Spacing.one },
   completionReveal: { gap: Spacing.one },

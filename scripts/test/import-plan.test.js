@@ -3166,5 +3166,39 @@ const DECLINE_SMS = [{
     applyHealPatch(titled, healPatch(titled, parsed)).title === 'My saved title');
 }
 
+{
+  // iOS 26 hands over no sender, and some banks never name themselves in the
+  // body. The user's own "Which banks text you?" answer then names the account,
+  // but only when exactly one bank is known; two known banks would be a guess.
+  setActiveMarket('AE');
+  const body = 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR, DUBAI.';
+  const ts = Date.UTC(2026, 6, 12, 10, 30);
+  const senderless = scan([{ body, ts, sender: '+971501234567' }]);
+  const bare = buildImportPlan(senderless.parsed, BASE, ts);
+  ok('a card no sender or body can name is minted without a bank',
+    bare.batch.newAccounts.length === 1 && bare.batch.newAccounts[0].bankName === undefined, bare.batch.newAccounts);
+  const one = buildImportPlan(senderless.parsed, { ...BASE, knownBanks: ['ADIB'] }, ts);
+  ok('with exactly one known bank, that bank names and colours the minted card',
+    one.batch.newAccounts.length === 1 && one.batch.newAccounts[0].bankName === 'ADIB' &&
+    one.batch.newAccounts[0].name === 'ADIB Debit Card •1234' && one.batch.newAccounts[0].color === '#0E5AA7', one.batch.newAccounts);
+  const two = buildImportPlan(senderless.parsed, { ...BASE, knownBanks: ['ADIB', 'FAB'] }, ts);
+  ok('with two known banks the minted card stays unnamed rather than guessed',
+    two.batch.newAccounts.length === 1 && two.batch.newAccounts[0].bankName === undefined, two.batch.newAccounts);
+  const withSender = scan([{ body, ts, sender: 'ENBD' }]);
+  const sender = buildImportPlan(withSender.parsed, { ...BASE, knownBanks: ['ADIB'] }, ts);
+  // The known-bank label is a default, not evidence: an alert that names a
+  // different bank for the same card corrects the label rather than minting a
+  // second account (before this, matchesCard treated the label as identity).
+  const labelled = apply({ ...BASE, knownBanks: ['ADIB'] }, one);
+  const fabRow = scan([{ body: 'AED 45.00 spent on your FAB Debit Card ending 1234 at LULU HYPERMARKET on 12/07/26.', ts: ts + 60000, sender: '+971501234567' }]);
+  const corrected = buildImportPlan(fabRow.parsed, labelled, ts);
+  const account = labelled.accounts.find((candidate) => candidate.last4 === '1234');
+  ok('an alert naming another bank corrects a known-bank label instead of splitting the card',
+    corrected.batch.newAccounts.length === 0 && account && corrected.batch.transactions[0]?.accountId === account.id &&
+    corrected.batch.bankNames?.[account.id] === 'FAB', { newAccounts: corrected.batch.newAccounts, bankNames: corrected.batch.bankNames });
+  ok('a resolving sender still outranks the known bank',
+    sender.batch.newAccounts.length === 1 && sender.batch.newAccounts[0].bankName === 'Emirates NBD', sender.batch.newAccounts);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

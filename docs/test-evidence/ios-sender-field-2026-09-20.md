@@ -83,3 +83,18 @@ with a bank hint ("existing accounts that predate this get theirs backfilled").
   "has any value", 999 "does not contain") and Text actions only.
 - A filter row on an unknown property is dropped silently; check the Find
   action's rendered filter before trusting a count.
+
+## Follow-up the same day: known banks (spec `docs/superpowers/specs/2026-09-20-ios-known-banks-design.md`)
+
+Measured over the parser corpus, the body rule names the bank for ADIB,
+RAKBANK, Wio, DIB and most Mashreq alerts but for none of the Emirates NBD,
+Liv, ADCB or FAB formats, which never name the bank. So the app now also asks
+the user once, in the iOS Shortcut setup, which banks text them
+(`knownBanks` on the ledger state). One known bank labels every account that
+neither sender nor body could name, both retroactively (`setKnownBanks`) and
+for future imports (`buildImportPlan`); several known banks leave the account
+for the new "Set bank" choice on the account sheets in Cards and Wallet,
+which any user can use to correct a label. Tests:
+`scripts/test/onboarding.test.js` (validation, helpers, screen source
+checks) and `scripts/test/import-plan.test.js` (one known bank names the
+minted card; two do not; a resolving sender still wins).
