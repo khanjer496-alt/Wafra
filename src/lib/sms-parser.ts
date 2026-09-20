@@ -804,7 +804,11 @@ const PORTAL_CHANNEL_RE = /(?:payment\s+channel|تم الدفع عن طريق)\s
  * table this size loose in the body is how a fish shop became a utility.
  * Nothing goes in here without a real message showing the biller naming itself.
  */
-const RECEIPT_BILLERS: [RegExp, string][] = [[/etisalat|اتصالات/i, 'Etisalat']];
+const RECEIPT_BILLERS: [RegExp, string][] = [
+  // e& is Etisalat's current consumer brand. Keep the canonical ledger name
+  // stable across old Etisalat receipts and newer "e& UAE" app receipts.
+  [/(?:etisalat|اتصالات|(?:^|\s)e\s*(?:&|and)\s*(?:uae)?(?:\s|$))/i, 'Etisalat'],
+];
 /** Payment INTO a card: settles dues rather than spending. */
 // CARD_PAYMENT_RE is market-compiled below.
 
@@ -3343,6 +3347,10 @@ export function classifyMerchantDescription(
  * name per service also makes subscription detection group them correctly.
  */
 const SERVICE_NAMES: [RegExp, string][] = [
+  // Strong UAE merchant identities must win before generic descriptor cleanup.
+  // "EMIRATES PETROLEUM COM" is a fuel descriptor, never Emirates airline.
+  [/\bemirates\s+petroleum(?:\s+(?:com|company|products?))?\b|\beppco\b|\benoc\b/i, 'ENOC'],
+  [/\betisalat\b|(?:^|\s)e\s*(?:&|and)\s*(?:uae)?(?:\s|$)/i, 'Etisalat'],
   [/openai|chat\s*gpt/i, 'ChatGPT'],
   [/anthropic|claude/i, 'Claude'],
   [/real-?debrid/i, 'Real-Debrid'],
@@ -3851,7 +3859,7 @@ function extractMerchant(raw: string, re: RegExp): string {
     // reporting-period phrase hides behind the same "to" a merchant uses, and
     // a row titled "Date" both invents a shop and defeats the spend-summary
     // gate, which only fires when the message names no merchant.
-    if (/^(?:the|this|that|your|our|an?|and|for|to|date|available|balance|limit)$/i.test(candidate)) {
+    if (/^(?:the|this|that|your|our|an?|and|for|to|date|available|balance|limit|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(candidate)) {
       continue;
     }
     if (/^\d+\s+(?:month|day|week|year|hr|hour|min)/i.test(candidate)) continue; // "up to 12 months"
@@ -5541,6 +5549,10 @@ function parseSmsInner(
         minDueFils: null,
         card,
         transferHint: false,
+        // This is biller-side evidence for a payment. It remains useful when
+        // captured alone, while payment-flow reconciliation can fold multiple
+        // line receipts into one independently observed bank debit.
+        paymentFlowSide: 'receipt',
         /**
          * EVERY FIGURE IN THIS RECEIPT BELONGS TO THE BILLER, NOT TO THE USER.
          *
@@ -6047,6 +6059,14 @@ function parseSmsInner(
       ownedDestinationMove);
   descriptor = merchant;
   merchant = cleanDescriptor(merchant);
+  // A billing period is not a merchant. Some provider confirmations say
+  // "...for August" before naming e& elsewhere in the body; the generic payee
+  // grammar used to promote that month to the shop name. Once the false
+  // descriptor is rejected, a closed service identity in the same message is
+  // stronger evidence and gives the receipt its actual provider.
+  if (/^(?:january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(merchant)) {
+    merchant = normalizeServiceName(raw) ?? '';
+  }
   // HSBC embeds the merchant BEFORE the verb:
   //   "From HSBC: 30AUG23 MINISTRY OF HUMAN RE Purchase from 041-..."
   if (!merchant) {

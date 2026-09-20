@@ -7,6 +7,8 @@ export interface VerifiedMerchantIdentity {
 // These domains are the brands' reviewed primary sites. Keep new aliases exact:
 // a substring such as "Nesto Plumbing" is not evidence of the retail chain.
 const MERCHANTS: readonly (VerifiedMerchantIdentity & { aliases: readonly string[] })[] = [
+  { canonicalName: 'ENOC', domain: 'enoc.com', aliases: ['enoc', 'enoc fuel', 'enoc pay', 'eppco', 'emirates petroleum', 'emirates petroleum com', 'emirates petroleum company', 'emirates petroleum products company'] },
+  { canonicalName: 'Etisalat', domain: 'eand.com', aliases: ['etisalat', 'e&', 'e& uae', 'e and', 'e and uae'] },
   { canonicalName: 'Choithrams', domain: 'choithrams.com', aliases: ['choithrams'] },
   { canonicalName: 'Nesto', domain: 'nestogroup.com', aliases: ['nesto', 'nesto hypermarket'] },
   { canonicalName: 'Sharaf DG', domain: 'sharafdg.com', aliases: ['sharaf dg'] },
