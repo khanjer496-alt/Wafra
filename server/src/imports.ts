@@ -1710,6 +1710,8 @@ export async function extractPdfStatementRows(
   totalRows: number;
   rejectedRows: number;
   completeRowAccounting: boolean;
+  /** Carried from the parse: a statement that proves itself says so here too. */
+  reconciliation: StatementReconciliation;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
@@ -1724,6 +1726,7 @@ export async function extractPdfStatementRows(
       totalRows: parsed.totalRows,
       rejectedRows: parsed.rejectedRows,
       completeRowAccounting: parsed.completeRowAccounting,
+      reconciliation: parsed.reconciliation,
     };
   } finally {
     const disposable = document as unknown as {
