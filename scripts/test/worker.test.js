@@ -217,7 +217,7 @@ function collector() {
  * real /v1/import/pdf route: unpdf extracts them and parseStatementText reads
  * them, so nothing about the import path is stubbed.
  */
-function tinyPdf(lines) {
+function tinyPdf(lines, prefix = '') {
   const escape = (line) => line.replace(/([()\\])/g, '\\$1');
   const stream = `BT /F1 12 Tf 50 750 Td ${
     lines.map((line, i) => `${i ? '0 -20 Td ' : ''}(${escape(line)}) Tj `).join('')
@@ -229,7 +229,7 @@ function tinyPdf(lines) {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
   ];
-  let pdf = '%PDF-1.4\n';
+  let pdf = `${prefix}%PDF-1.4\n`;
   const offsets = [0];
   for (let i = 0; i < objects.length; i++) {
     offsets.push(Buffer.byteLength(pdf));
@@ -1933,6 +1933,13 @@ const CARD_PAYMENT_DEBIT =
       (await call(env, 'POST', '/v1/import/pdf', {
         token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: 'not a pdf',
       })).status === 400);
+    const prefixedPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['2026-09-10 HSBC TEST PURCHASE 12.00 DR'], '\r\n '),
+    });
+    ok('pdf: a real PDF with a short publisher preamble is accepted',
+      prefixedPdf.status === 202 && (await prefixedPdf.json()).acceptedRows === 1);
     ok('pdf: the ingest token cannot upload a statement',
       (await call(env, 'POST', '/v1/import/pdf', {
         token: me.ingestToken, headers: { 'content-type': 'application/pdf' }, body: '%PDF-1.4',
@@ -2134,6 +2141,34 @@ const CARD_PAYMENT_DEBIT =
       }))));
     ok('statement: and the phone imports both of those as well',
       importOnPhone(differentRows).batch.transactions.length === 2);
+
+    // Real-world credit-card PDFs often have no Debit/Credit columns at all:
+    // ordinary purchases are unlabelled and only refunds/payments carry CR,
+    // while Original Amount and Total Amount are both printed. Exercise that
+    // shape through the REAL PDF route so a parser-only green test cannot hide
+    // an extraction/queue regression.
+    const cardTablePdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'HSBC Live+ Credit Card Statement',
+        'Statement Period: From 01 August 26 to 31 August 26',
+        'Minimum Payment Due AED 50.00',
+        'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+        '01-Aug-26 02-Aug-26 TEST SHOP DUBAI AE 10.00 10.00',
+        '03-Aug-26 04-Aug-26 TEST REFUND DUBAI AE 7.25 CR 7.25 CR',
+      ]),
+    });
+    const cardTableAccepted = await cardTablePdf.json();
+    ok('statement: card Total Amount layout is accepted through the real PDF endpoint',
+      cardTablePdf.status === 202 && cardTableAccepted.acceptedRows === 2,
+      JSON.stringify(cardTableAccepted));
+    const cardTableRows = await drainOpened(env, me);
+    ok('statement: unlabelled card charge and explicit CR refund keep opposite directions',
+      cardTableRows.length === 2 &&
+        cardTableRows.some((row) => row.type === 'expense' && row.amountFils === 1000) &&
+        cardTableRows.some((row) => row.type === 'income' && row.amountFils === 725),
+      JSON.stringify(cardTableRows.map((row) => [row.date, row.type, row.amountFils, row.merchant])));
 
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.

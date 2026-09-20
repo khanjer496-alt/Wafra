@@ -510,6 +510,12 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // drift from the count the categorise screen prints beside the tap — the
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
+    // Also the REAL module. sanitizeKnownBanks rewrites `parsed.knownBanks` on
+    // every hydrate and accountsLabelledWithBank relabels accounts from it, so
+    // both decide what a restored ledger actually contains. A stub here would
+    // let hydration drift from what the app does, which is the one thing this
+    // harness exists to pin.
+    '@/lib/known-banks': require('./build/known-banks'),
     './balances': {},
     ...realModules,
   };

@@ -37,9 +37,9 @@ ok('OTP and security-code bodies stop at the native Android bridge/buffer bounda
   JSON.stringify({ nativeFilter: nativeFilter.length, nativeInbox: nativeInbox.length }));
 ok('routine Android inbox paging and identity use the lossless date/id cursor',
   nativeInbox.includes('Telephony.Sms._ID') &&
-    nativeInbox.includes('${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC') &&
-    nativeInbox.includes('beforeId.toLong().toString()') &&
-    nativeInbox.includes('"id" to it.getLong(idIdx).toDouble()'),
+    nativeInbox.includes('${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC LIMIT $limit') &&
+    nativeInbox.includes('beforeId.toLong()') &&
+    nativeInbox.includes('"id" to row.id.toDouble()'),
   nativeInbox.length);
 const notificationRoot = path.resolve(
   __dirname,

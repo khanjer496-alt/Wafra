@@ -278,6 +278,41 @@ function nests(bill: Bill, t: Transaction): boolean {
   return x.includes(b) || b.includes(x);
 }
 
+/**
+ * Same-month spending for bill reconciliation. Home's leaving-soon and Bills
+ * both call `billsForMonth` on first paint; walking 14k rows per bill froze
+ * that path. A newest-first ledger can stop once the current money month is
+ * behind us. Unsorted callers still get a full scan — a sorted prefix is not
+ * enough, or a later in-month payment after an older row would be missed.
+ */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return false;
+  }
+  return true;
+}
+
+function spendingInMonth(
+  transactions: Transaction[],
+  key: string,
+  live?: Set<string>,
+  internal?: Set<string>,
+): Transaction[] {
+  const newestFirst = datesAreNewestFirst(transactions);
+  const out: Transaction[] = [];
+  let seenInMonth = false;
+  for (const t of transactions) {
+    if (monthKey(t.date) !== key) {
+      if (seenInMonth && newestFirst) break;
+      continue;
+    }
+    seenInMonth = true;
+    if (!isSpending(t, live, internal)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
 /** Status of each bill for the month containing `today`, sorted most urgent first. */
 export function billsForMonth(
   bills: Bill[],
@@ -330,7 +365,8 @@ export function billsForMonth(
    * Better an unreconciled bill the user marks by hand than a
    * bill that says paid while the money is still owed.
    */
-  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, transactions, key, live, internal));
+  const monthRows = spendingInMonth(transactions, key, live, internal);
+  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, monthRows, key, live, internal));
   const explicitlyClaimed = new Set<string>();
   candidates.forEach((rows, index) => {
     for (const transaction of rows) {

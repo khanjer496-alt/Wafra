@@ -141,6 +141,15 @@ const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_BYTES = 1024 * 1024;
 const MAX_PDF_PAGES = 100;
 const MAX_IMPORT_ROWS = 200;
+/**
+ * Real-world PDF readers tolerate a small transport/publisher preamble before
+ * the `%PDF-` header. Bank document generators occasionally emit one (for
+ * example a BOM or a few whitespace/metadata bytes), so requiring the magic at
+ * byte zero rejects a file that pdf.js can otherwise open. Keep the scan tight:
+ * this is only a cheap media-type gate before the bounded pdf.js parse below.
+ */
+const MAX_PDF_HEADER_OFFSET = 1024;
+const PDF_HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d] as const; // %PDF-
 const CSV_CONTENT_TYPES = new Set([
   'text/csv',
   'application/csv',
@@ -321,6 +330,21 @@ async function readBytes(
     reader.releaseLock();
   }
   return { bytes: buffer.slice(0, length), tooLarge: false };
+}
+
+function pdfHeaderOffset(bytes: Uint8Array): number {
+  const last = Math.min(MAX_PDF_HEADER_OFFSET, bytes.length - PDF_HEADER.length);
+  for (let offset = 0; offset <= last; offset += 1) {
+    let matches = true;
+    for (let index = 0; index < PDF_HEADER.length; index += 1) {
+      if (bytes[offset + index] !== PDF_HEADER[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return offset;
+  }
+  return -1;
 }
 
 interface Device {
@@ -1863,8 +1887,8 @@ export default {
           maxBytes: MAX_PDF_BYTES,
           maxRows: MAX_IMPORT_ROWS,
           maxPages: MAX_PDF_PAGES,
-          parser: 'text-explicit-direction-v1',
-          note: 'Scans and ambiguous visual debit/credit columns are rejected, not guessed.',
+          parser: 'text-structured-direction-v2',
+          note: 'Supports explicit debit/credit and strongly identified credit-card Total Amount tables; ambiguous rows are rejected, not guessed.',
         },
         csv: {
           enabled,
@@ -1978,10 +2002,7 @@ export default {
       }
       const incoming = await readBytes(req, MAX_PDF_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
-      if (
-        incoming.bytes.length < 5 ||
-        String.fromCharCode(...incoming.bytes.subarray(0, 5)) !== '%PDF-'
-      ) return json({ error: 'invalid_pdf' }, 400);
+      if (pdfHeaderOffset(incoming.bytes) < 0) return json({ error: 'invalid_pdf' }, 400);
 
       // BEFORE the extract, not after. extractPdfStatementRows hands the array
       // to pdf.js, which takes OWNERSHIP of the underlying buffer and detaches

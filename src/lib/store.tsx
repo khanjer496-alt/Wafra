@@ -63,6 +63,7 @@ import {
   parseSms,
 } from '@/lib/sms-parser';
 import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
+import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -231,6 +232,7 @@ const EMPTY_STATE: AppState = {
   marketId: '',
   language: '',
   languagePreference: 'system',
+  knownBanks: [],
 };
 
 let idCounter = 0;
@@ -263,6 +265,19 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
   return alreadySorted
     ? transactions
     : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function applyTransactionEdit(transaction: Transaction, patch: Partial<Transaction>): Transaction {
+  // `titleEdited` is the narrow half of `userEdited`: the user replaced the
+  // parser's SHOP NAME, as opposed to correcting an amount, a date or an
+  // account. Parser-coverage measurement needs that distinction — a hand-typed
+  // name must never be scored as a parser naming success, and a row whose date
+  // was fixed must not be dropped from the measurement for it.
+  const renamed = patch.title !== undefined && patch.title !== transaction.title;
+  // userEdited pins the row: nothing re-parsed may overwrite it later.
+  return renamed || transaction.titleEdited
+    ? { ...transaction, ...patch, userEdited: true, titleEdited: true }
+    : { ...transaction, ...patch, userEdited: true };
 }
 
 /**
@@ -342,6 +357,7 @@ export function migratePersistedState(
     Date.now(),
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
+  parsed.knownBanks = sanitizeKnownBanks(parsed.knownBanks);
   parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
     ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
         typeof value === 'string' && value.length <= 255 &&
@@ -755,6 +771,7 @@ type Action =
   | { type: 'deleteBudget'; category: Budget['category'] }
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
+  | { type: 'setKnownBanks'; names: string[] }
   | { type: 'deleteAccount'; id: string }
   | { type: 'mergeRenewedCard'; oldId: string; newId: string }
   | { type: 'markCardsDistinct'; id: string }
@@ -961,7 +978,7 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
       return action.transaction !== null;
     case 'editTransaction': {
       const before = state.transactions.find((transaction) => transaction.id === action.id);
-      const after = reduced.transactions.find((transaction) => transaction.id === action.id);
+      const after = before ? applyTransactionEdit(before, action.patch) : undefined;
       return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
     }
     case 'deleteTransaction':
@@ -1209,25 +1226,20 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     }
     case 'editTransaction': {
-      const transactions = sortTxs(
-        state.transactions.map((t) => {
-          if (t.id !== action.id) return t;
-          // `titleEdited` is the narrow half of `userEdited`: the user
-          // replaced the parser's SHOP NAME, as opposed to correcting an
-          // amount, a date or an account. Parser-coverage measurement needs
-          // that distinction — a hand-typed name must never be scored as a
-          // parser naming success, and a row whose date was fixed must not be
-          // dropped from the measurement for it. So it is set only when the
-          // patch carries a title that actually differs from the one on the
-          // row, and once set it survives every later edit.
-          const renamed = action.patch.title !== undefined && action.patch.title !== t.title;
-          // userEdited pins the row: nothing re-parsed may overwrite it later.
-          return renamed || t.titleEdited
-            ? { ...t, ...action.patch, userEdited: true, titleEdited: true }
-            : { ...t, ...action.patch, userEdited: true };
-        }),
-      );
-      return { ...state, transactions };
+      const index = state.transactions.findIndex((transaction) => transaction.id === action.id);
+      if (index < 0) return state;
+      const previous = state.transactions[index];
+      const edited = applyTransactionEdit(previous, action.patch);
+      const transactions = state.transactions.slice();
+      transactions[index] = edited;
+      // The ledger is already newest-first. Replacing one row cannot disturb
+      // that order unless its posting date actually changed, so do not walk the
+      // complete 10k-20k array merely to prove it is still sorted after a title,
+      // category, amount, account or transfer edit.
+      return {
+        ...state,
+        transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
+      };
     }
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
@@ -1259,6 +1271,17 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'setKnownBanks': {
+      // The user's own answer to "Which banks text you?". One bank is an
+      // unambiguous label for every account nothing else could name; several
+      // are left for the per-account picker.
+      const knownBanks = sanitizeKnownBanks(action.names);
+      return {
+        ...state,
+        knownBanks,
+        accounts: accountsLabelledWithBank(state.accounts, singleKnownBank(knownBanks)),
+      };
+    }
     case 'mergeRenewedCard':
       // The bank reissued the card; the user confirmed the two rows are one.
       return mergeRenewedCard(state, action.oldId, action.newId);
@@ -1543,6 +1566,8 @@ interface StoreValue {
   deleteBudget: (category: Budget['category']) => void;
   addAccount: (a: Omit<Account, 'id'>) => void;
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
+  /** Store which banks text the user; one bank also labels every bank-less account. */
+  setKnownBanks: (names: string[]) => void;
   deleteAccount: (id: string) => void;
   /** Fold a reissued card's predecessor into it (user-confirmed). */
   mergeRenewedCard: (oldId: string, newId: string) => void;
@@ -2412,6 +2437,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteAccount', id });
   }, [dispatch]);
 
+  const setKnownBanks = useCallback((names: string[]) => {
+    dispatch({ type: 'setKnownBanks', names });
+  }, [dispatch]);
+
   const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
     dispatch({ type: 'mergeRenewedCard', oldId, newId });
   }, [dispatch]);
@@ -2853,6 +2882,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCard: mergeRenewedCardAction,
       markCardsDistinct: markCardsDistinctAction,
       addBill,
@@ -2919,6 +2949,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCardAction,
       markCardsDistinctAction,
       addBill,

@@ -13,7 +13,7 @@ import {
   createLaunchAlertSession,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
-import { bankFromSender, detectLaunchMarketFromSender, withMarketPackForParsing } from '@/lib/markets';
+import { bankFromSender, detectLaunchMarketFromSender, soleBankNamedInText, withMarketPackForParsing } from '@/lib/markets';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import type { CategoryId } from '@/lib/types';
@@ -357,7 +357,10 @@ export function parseHistoricalMessageRecords(
     // which may differ from the user's initial device preference.
     const market = result.currency === 'AED' ? 'AE' : result.currency === 'SAR' ? 'SA' : undefined;
     const sourceFacts = () => {
-      const bankHint = structured.bankHint ?? bankFromSender(sender)?.name;
+      // iOS 26's Find Messages exposes no sender, so a record may carry none;
+      // the one bank the body names is then its only bank identity.
+      const bankHint = structured.bankHint ?? bankFromSender(sender)?.name ??
+        soleBankNamedInText(record.text)?.name;
       return {
         bankHint,
         transferEvidence: buildTransferEvidence({ ...result, bankHint, sender }, true),

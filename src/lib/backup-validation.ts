@@ -143,6 +143,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
     marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
+    knownBanks: arrayOf(text),
     themePreference: oneOf('system', 'light', 'dark'),
     onboardingCurrencyEvidence: (v) => v === null || ledgerCurrency(v),
     onboardingProfile: (v) => v === null || onboardingProfile(v),

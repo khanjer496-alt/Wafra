@@ -1,4 +1,5 @@
 import { useLanguage } from '@/hooks/use-language';
+import * as Crypto from 'expo-crypto';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -235,7 +236,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const language = useLanguage();
   const largeText = useLargeTextLayout();
   const pathname = usePathname();
-  const params = useGlobalSearchParams<{ onboarding?: string }>();
+  const params = useGlobalSearchParams<{ onboarding?: string; statementSession?: string }>();
   const router = useRouter();
   const motion = useMotionPreference();
   const reducedMotion = !motion.ready || motion.reducedMotion;
@@ -291,6 +292,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     outcomeOverride?: CompletionOutcome;
   } | null>(null);
   const startedEventSent = useRef(false);
+  const statementImportSession = useRef<string | null>(null);
+  const isOnboardingStatementRoute =
+    Platform.OS !== 'web' &&
+    pathname === '/statement-import' &&
+    statementImportSession.current !== null &&
+    params.statementSession === statementImportSession.current;
   const previewMode = state.onboarded && params.onboarding === 'preview';
   const previewStarted = useRef(false);
 
@@ -355,6 +362,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (stepTransitionTimer.current !== null) clearTimeout(stepTransitionTimer.current);
     stepTransitionTimer.current = null;
   }, []);
+
+  useEffect(() => {
+    if (pathname !== '/statement-import') statementImportSession.current = null;
+  }, [pathname]);
 
   const beginStepTransition = (): boolean => {
     if (stepTransitionTimer.current !== null || setupBusyRef.current || finishing) return false;
@@ -423,8 +434,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     previouslyOnboarded.current = state.onboarded;
     // These routes own their own handoff. Returning normally to the root must
     // re-read that progress, even when this gate stayed mounted underneath.
-    if (!state.onboarded && Platform.OS === 'ios' &&
-      (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/import-sms')) {
+    if (!state.onboarded && (
+      isOnboardingStatementRoute ||
+      (Platform.OS === 'ios' &&
+        (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/import-sms'))
+    )) {
       resumeHandled.current = false;
       setResumeReady(true);
       return;
@@ -490,7 +504,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     void restore();
     return () => { cancelled = true; };
   }, [state.captureOptOut, state.historyImport, state.hydrated, state.onboarded, state.onboardingPlan,
-    state.onboardingProfile, state.userName, hydrationFailed, pathname, params.onboarding, router, resumeAttempt]);
+    state.onboardingProfile, state.userName, hydrationFailed, isOnboardingStatementRoute, pathname,
+    params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = !previewMode && params.onboarding === 'complete' ? 'complete' : step;
   const capture = captureCopy();
@@ -510,8 +525,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    */
   const showRecovery = hydrationFailed;
 
-  // The guided iOS setup is itself onboarding. Keep these exemptions scoped
-  // to iPhone so an Android deep link cannot bypass the first-run gate.
+  // Guided iOS setup and the statement importer explicitly opened by this
+  // mounted gate are part of onboarding. The in-memory session keeps an
+  // external/cold deep link from forging that exemption.
   const isIosSetupRoute = Platform.OS === 'ios' && (
     pathname === '/ios-setup' ||
     pathname === '/ios-paging-beta' ||
@@ -521,7 +537,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     !showRecovery &&
     state.hydrated &&
     (!state.onboarded || finishing || previewMode) &&
-    !isIosSetupRoute;
+    !isIosSetupRoute &&
+    !isOnboardingStatementRoute;
   // Serialize permission, cleanup and durable completion actions. A second tap
   // must never start the other capture choice while the first is unresolved.
   const runSetupAction = async (action: () => Promise<void>) => {
@@ -856,6 +873,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setCompletionOutcome('failed');
     saveJourney('complete');
     setStep('complete');
+  };
+
+  const openStatementImport = () => {
+    if (Platform.OS === 'web' || !beginStepTransition()) return;
+    saveJourney('capture');
+    const session = Crypto.randomUUID();
+    statementImportSession.current = session;
+    router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
   };
 
   useEffect(() => {
@@ -1454,7 +1479,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       {Platform.OS !== 'web' && <CaptureMarketScene marketId={state.marketId} country={selectedCountry} />}
                       {Platform.OS !== 'web' && <View style={styles.contextTrustCard} testID="onboarding-context-trust">
                         {([
-                          ['lock', 'onboardPrivacyLocalTitle', Platform.OS === 'ios' ? 'onboardCapturePrivacyIos' : 'onboardCapturePrivacyAndroid'],
+                          ['lock', 'onboardCaptureLocalAutomaticTitle', 'onboardCaptureLocalAutomaticBody'],
                           ['bank', 'onboardPrivacyNoLoginTitle', 'onboardPrivacyNoLoginBody'],
                           ['repeat', 'onboardPrivacyChoiceTitle', 'onboardPrivacyChoiceBody'],
                         ] as const).map(([icon, titleKey, bodyKey]) => (
@@ -1505,6 +1530,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                               : <Icon name="chevron-right" size={18} color={night.textTertiary} />}
                           </Pressable>
 
+                          <Pressable accessibilityRole="button"
+                            disabled={setupBusy || transitioning}
+                            accessibilityState={{ disabled: setupBusy || transitioning }}
+                            accessibilityLabel={`${t('onboardStatementChoice')}. ${t('onboardStatementChoiceBody')}`}
+                            onPress={openStatementImport}
+                            style={({ pressed }) => [styles.captureSource, { opacity: pressed ? 0.76 : 1 }]}>
+                            <View style={styles.captureSourceIcon}>
+                              <Icon name="upload" size={21} color={night.primary} />
+                            </View>
+                            <View style={styles.grow}>
+                              <ThemedText style={styles.captureSourceTitle}>{t('onboardStatementChoice')}</ThemedText>
+                              <ThemedText style={styles.captureSourceBody}>{t('onboardStatementChoiceBody')}</ThemedText>
+                            </View>
+                            <Icon name="chevron-right" size={18} color={night.textTertiary} />
+                          </Pressable>
+
                           {(androidSmsReady || androidNotificationReady) && <Button wrapLabel
                             label={t(androidSmsReady && androidNotificationReady ? 'onboardCaptureContinueBoth' : 'onboardCaptureContinueOne')}
                             onPress={() => void runSetupAction(finishAndroidCapture)}
@@ -1528,6 +1569,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             disabled={setupBusy || transitioning}
                             labelColor={night.onPrimary}
                             style={styles.primaryButton}
+                          />
+                          <Button
+                            wrapLabel
+                            variant="outline"
+                            label={t('onboardStatementChoice')}
+                            onPress={openStatementImport}
+                            disabled={setupBusy || transitioning}
+                            labelColor={night.text}
+                            style={styles.ghost}
                           />
                           <Pressable
                             accessibilityRole="button"

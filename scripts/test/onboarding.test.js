@@ -658,9 +658,11 @@ ok(
     !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
 );
 ok(
-  'Android capture exposes SMS, bank-app notifications, either, both, or manual',
+  'Android capture exposes SMS, bank-app notifications, statement import, either automatic source, both, or manual',
   /onPress=\{\(\) => void runSetupAction\(startScan\)\}/.test(gateSource) &&
     /onPress=\{\(\) => void runSetupAction\(connectAndroidNotifications\)\}/.test(gateSource) &&
+    /onPress=\{openStatementImport\}/.test(gateSource) &&
+    /onboardStatementChoice/.test(gateSource) &&
     /finishAndroidCapture/.test(gateSource) &&
     /onboardCaptureContinueBoth/.test(gateSource) &&
     /onboardCaptureContinueOne/.test(gateSource) &&
@@ -681,14 +683,20 @@ ok(
     /androidSmsReady/.test(gateSource),
 );
 ok(
-  'first-run gate exempts guided history routes only on iOS',
+  'first-run gate exempts iOS setup and only the in-memory-authorized statement route',
   /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
-    /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
+    /const statementImportSession = useRef<string \| null>\(null\)/.test(gateSource) &&
+    /const isOnboardingStatementRoute\s*=[\s\S]{0,160}pathname === '\/statement-import'[\s\S]{0,160}params\.statementSession === statementImportSession\.current/.test(gateSource) &&
+    /statementImportSession\.current = session[\s\S]{0,180}statementSession=\$\{session\}/.test(gateSource) &&
+    /const showOverlay\s*=[\s\S]{0,280}!isIosSetupRoute[\s\S]{0,80}!isOnboardingStatementRoute/.test(gateSource),
 );
 eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Choose how to add activity');
 eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Connect supported bank alerts, or start manually. You can change this later.');
 eq('iOS automatic choice explains the Shortcut and keeps history optional', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.');
 eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank alerts');
+eq('statement import is a first-run choice on either phone', i18n.t('onboardStatementChoice', 'en'), 'Import bank statements');
+eq('statement import discloses its secure relay before file selection', i18n.t('onboardStatementChoiceBody', 'en'), 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.');
+eq('capture trust distinguishes local alerts from cloud statement import', i18n.t('onboardCaptureLocalAutomaticBody', 'en'), 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.');
 eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'Add entries yourself. No Messages access. Connect later.');
 eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
 eq(
@@ -708,6 +716,10 @@ const iosVisibleCopyKeys = [
   'onboardCaptureBodyIos',
   'onboardAutomaticChoiceIos',
   'onboardAutomaticChoiceIosBody',
+  'onboardStatementChoice',
+  'onboardStatementChoiceBody',
+  'onboardCaptureLocalAutomaticTitle',
+  'onboardCaptureLocalAutomaticBody',
   'onboardManualChoiceIos',
   'onboardManualChoiceIosBody',
   'onboardCapturePrivacyIos',
@@ -722,12 +734,14 @@ ok(
   ['en', 'ar'].every((language) =>
     i18n.t('onboardCaptureTitleIos', language).length <= 42 &&
       i18n.t('onboardAutomaticChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardStatementChoiceBody', language).length <= 112 &&
       i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
 ok(
-  'iOS onboarding keeps one automatic CTA, one manual fallback, and full details behind Learn more',
+  'iOS onboarding keeps automatic, statement, and manual choices with full details behind Learn more',
   /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
+    /label=\{t\('onboardStatementChoice'\)\}/.test(gateSource) &&
     /onboardManualChoiceIos/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
     /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&
@@ -1048,6 +1062,62 @@ try {
   ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', true);
 } catch {
   ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', false);
+}
+
+{
+  // Known banks: the user's own answer to "Which banks text you?", the only
+  // bank identity an iOS history import has when neither the sender (absent
+  // on iOS 26) nor the body names the bank.
+  eq('backup validation accepts a known-banks list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: ['ADIB', 'FAB'] }), true);
+  eq('backup validation accepts an empty known-banks list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: [] }), true);
+  eq('backup validation rejects a known-banks value that is not a list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: 'ADIB' }), false);
+  eq('backup validation rejects non-string known-bank entries',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: [7] }), false);
+  let known = null;
+  try { known = require('./build/known-banks'); } catch { known = null; }
+  ok('known-banks helpers exist', known !== null);
+  if (known) {
+    eq('sanitizeKnownBanks keeps only real bank names, once each',
+      JSON.stringify(known.sanitizeKnownBanks(['ADIB', 'Nope Bank', 'ADIB', 7, 'Al Rajhi'])), JSON.stringify(['ADIB', 'Al Rajhi']));
+    eq('sanitizeKnownBanks tolerates a missing value', JSON.stringify(known.sanitizeKnownBanks(undefined)), '[]');
+    eq('singleKnownBank resolves exactly one bank', known.singleKnownBank(['ADIB'])?.name, 'ADIB');
+    eq('singleKnownBank refuses to pick between two', known.singleKnownBank(['ADIB', 'FAB']), null);
+    eq('singleKnownBank is null when none is known', known.singleKnownBank([]), null);
+    const accounts = [
+      { id: 'a', name: 'Account •9957', kind: 'bank', openingFils: 0, color: '#FB923C', last4: '9957' },
+      { id: 'b', name: 'FAB Credit Card •1234', kind: 'card', cardType: 'credit', openingFils: 0, color: '#00A3E0', last4: '1234', bankName: 'FAB' },
+    ];
+    const labelled = known.accountsLabelledWithBank(accounts, known.singleKnownBank(['ADIB']));
+    ok('accountsLabelledWithBank labels only accounts that have no bank',
+      labelled[0].bankName === 'ADIB' && labelled[0].color === '#0E5AA7' && labelled[0].name === 'Account •9957' &&
+      labelled[1].bankName === 'FAB' && labelled[1].color === '#00A3E0', labelled);
+    const withCash = known.accountsLabelledWithBank([
+      { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#999' },
+      { id: 'c', name: 'Account •0315', kind: 'bank', openingFils: 0, color: '#FB923C', last4: '0315' },
+    ], known.singleKnownBank(['ADIB']));
+    ok('accountsLabelledWithBank leaves cash alone', withCash[0].bankName === undefined && withCash[1].bankName === 'ADIB', withCash);
+    const order = known.bankPickerOptions(['FAB', 'Nope'], 'AE').map((bank) => bank.name);
+    ok('bankPickerOptions lists known banks first, then the rest of the market once',
+      order[0] === 'FAB' && order.filter((name) => name === 'FAB').length === 1 && order.includes('ADIB') && !order.includes('Nope'), order);
+    ok('knownBankOptions lists the market pack banks',
+      known.knownBankOptions('AE').some((b) => b.name === 'ADIB') && !known.knownBankOptions('AE').some((b) => b.name === 'Al Rajhi') &&
+      known.knownBankOptions('SA').some((b) => b.name === 'Al Rajhi'));
+  }
+  const iosSetupSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
+  const cardsSource = fs.readFileSync(path.join(__dirname, '../../src/app/cards.tsx'), 'utf8');
+  const walletSource = fs.readFileSync(path.join(__dirname, '../../src/app/(tabs)/wallet.tsx'), 'utf8');
+  ok('the iOS setup screen asks which banks text the user and stores the answer',
+    iosSetupSource.includes("t('iosBanksTitle')") && iosSetupSource.includes("t('iosBanksSkip')") && iosSetupSource.includes('setKnownBanks('));
+  ok('the cards and wallet account sheets offer "Set bank"',
+    cardsSource.includes("t('accountSetBank')") && walletSource.includes("t('accountSetBank')") &&
+    cardsSource.includes("t('accountNoBank')") && walletSource.includes("t('accountNoBank')"));
+  for (const key of ['accountSetBank', 'accountNoBank', 'accountBankQuestion']) {
+    ok(`i18n has ${key} in both languages`,
+      typeof i18n.t(key, 'en') === 'string' && i18n.t(key, 'en') !== key && typeof i18n.t(key, 'ar') === 'string' && i18n.t(key, 'ar') !== key);
+  }
 }
 
 console.log(`\nonboarding: ${pass} passed, ${fail} failed`);

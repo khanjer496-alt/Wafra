@@ -43,6 +43,7 @@ import {
 } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
+import { bankPickerOptions } from '@/lib/known-banks';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
 
@@ -89,7 +90,7 @@ type Confirmation = {
 };
 
 /** The two things a long press on an account row offers. */
-type AccountAction = 'visibility' | 'delete';
+type AccountAction = 'visibility' | 'bank' | 'delete';
 
 export default function WalletScreen() {
   const theme = useTheme();
@@ -129,6 +130,7 @@ export default function WalletScreen() {
   // The account a long press is asking about, and the confirmation that a
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
+  const [bankFor, setBankFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const walletHeader: ScreenHeaderProps = {
     title: t('walletTitle'),
@@ -210,7 +212,11 @@ export default function WalletScreen() {
       for (const account of state.accounts) {
         (isInactiveAccount(state, account, now) ? inactive : active).push(account);
       }
-      return { active, inactive };
+      let smsCount = 0;
+      for (const tx of state.transactions) {
+        if (tx.source === 'sms') smsCount += 1;
+      }
+      return { active, inactive, smsCount };
     }),
     // Activity depends on account snapshots and transaction dates only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,14 +224,11 @@ export default function WalletScreen() {
   );
   const activeSources = accountActivity.active;
   const inactiveAccounts = accountActivity.inactive;
+  const smsCount = accountActivity.smsCount;
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
   }`;
   // This month's spend per account, for the per-card line.
-  const smsCount = useMemo(
-    () => state.transactions.filter((tx) => tx.source === 'sms').length,
-    [state.transactions],
-  );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
     const due = dueByAccountId.get(account.id);
@@ -313,7 +316,19 @@ export default function WalletScreen() {
   // stacked alerts did.
   const onAccountAction = (account: Account, action: AccountAction) => {
     if (action === 'visibility') editAccount(account.id, { archived: !account.archived });
+    else if (action === 'bank') setBankFor(account);
     else confirmDeleteAccount(account.id, account.name);
+  };
+  // The bank behind an account: known banks first, then the market's; "No
+  // bank" clears a wrong label. The badge and logo follow bankName.
+  const bankChoices = () => [
+    ...bankPickerOptions(state.knownBanks, state.marketId).map((bank) => ({ value: bank.name, label: bank.name })),
+    { value: 'none', label: t('accountNoBank') },
+  ];
+  const setBank = (account: Account, value: string) => {
+    const bank = bankPickerOptions(state.knownBanks, state.marketId).find((candidate) => candidate.name === value);
+    editAccount(account.id, bank ? { bankName: bank.name, color: bank.color } : { bankName: undefined });
+    setBankFor(null);
   };
 
   const openAccount = (account: Account) => {
@@ -748,9 +763,21 @@ export default function WalletScreen() {
               value: 'visibility' as AccountAction,
               label: optionsFor.archived ? t('unhide') : t('hideFromLists'),
             },
+            { value: 'bank' as AccountAction, label: t('accountSetBank'), detail: optionsFor.bankName },
             { value: 'delete' as AccountAction, label: t('delete') },
           ]}
           onSelect={(action) => onAccountAction(optionsFor, action)}
+        />
+      )}
+      {bankFor && (
+        <ChoiceSheet
+          visible
+          onClose={() => setBankFor(null)}
+          title={t('accountSetBank')}
+          question={t('accountBankQuestion')}
+          options={bankChoices()}
+          value={bankFor.bankName ?? 'none'}
+          onSelect={(value) => setBank(bankFor, value)}
         />
       )}
       {/* Mounted only while there is something to confirm, so the entry

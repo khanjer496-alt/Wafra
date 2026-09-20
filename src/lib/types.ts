@@ -759,6 +759,12 @@ export interface AppState {
   languagePreference?: 'system' | 'en' | 'ar';
   /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
   themePreference: string;
+  /**
+   * The banks the user said text them, by market-pack name. Optional for
+   * legacy ledgers; empty means not asked or skipped. With exactly one entry
+   * it names accounts that neither a sender nor an alert body could.
+   */
+  knownBanks?: string[];
 }
 
 /**

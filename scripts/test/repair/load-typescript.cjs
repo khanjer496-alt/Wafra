@@ -72,6 +72,18 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/recap-view-state') {
         return { loadViewedRecaps: async () => new Set() };
       }
+      // Statement import mints a session id with expo-crypto. Journey/repair
+      // harnesses that load the gate do not own entropy; a stable UUID keeps
+      // the authorized /statement-import handoff deterministic.
+      if (name === 'expo-crypto') {
+        return { randomUUID: () => 'test-statement-session' };
+      }
+      // The real known-banks module, compiled. import-plan asks it which bank
+      // labels an account no alert named, and Wallet and Cards build their
+      // "Set bank" picker from it, so a stub would answer the very questions
+      // these harnesses check differently from the app. It is market tables and
+      // pure functions — there is no native or UI boundary here to isolate.
+      if (name === '@/lib/known-banks') return require('../build/known-banks');
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,
