@@ -597,6 +597,103 @@ function wideTextPdf(lines) {
     JSON.stringify(columnRows.rows.map((row) => [row.merchant, row.type, row.amountFils])));
   ok('both columns populated, a lone amount, and two positives are skipped and counted',
     columnRows.rejectedRows === 3, String(columnRows.rejectedRows));
+
+  // ── The UAE card table: original / VAT / total, two dates, wrapped rows ──
+  //
+  // Reported against an HSBC UAE card statement that imported nothing at all.
+  // Its table is `Transaction Date | Posting Date | Transaction Details |
+  // Original Amount | (+) VAT | Total Amount (AED)`, and four things about it
+  // defeated the reader at once: a second date at the head of every
+  // description, two trailing figures that are one charge rather than a
+  // debit/credit pair, a CR printed hard against its own figure, and rows the
+  // PDF wrapped over three lines. 70 transactions, 0 read.
+  //
+  // Invented merchants and figures throughout; only the LAYOUT is the bank's.
+  const cardTable = [
+    'HSBC Credit Card Statement',
+    'Statement Date 10-Sept-26',
+    'Credit Limit 50,000.00',
+    'Minimum Amount Due 500.00',
+    'Transaction Date',
+    'Posting Date',
+    'Transaction Details',
+    'Original Amount',
+    '(+) VAT',
+    'Total Amount',
+    '(AED)',
+    'Opening Balance 1,500.00',
+    '10-Aug-26 11-Aug-26 CASHBACK 21.40 CR 21.40CR',
+    '-',
+    '26-Aug-26 26-Aug-26 PAYMENT RECEIVED THANK YOU 9,200.00 CR 9,200.00CR',
+    '-',
+    '09-Aug-26 11-Aug-26 COFFEE HOUSE DUBAI AE 41.25 41.25',
+    '-',
+    '09-Aug-26 11-Aug-26 NFC - (G-PAY)-GREEN VALLEY GROCERY',
+    'DUBAI AE',
+    '88.50 88.50',
+    '-',
+    '03-Sept-26 03-Sept-26 BOOKSHOP LLC DUBAI AE 1,776.00 1,776.00',
+    '-',
+  ].join('\n');
+  const cardRows = parseStatementLines(cardTable, 'AED');
+  ok('an original/VAT/total card table reads every row, and counts none rejected',
+    cardRows.rows.length === 5 && cardRows.rejectedRows === 0 && cardRows.totalRows === 5,
+    JSON.stringify([cardRows.rows.length, cardRows.rejectedRows, cardRows.totalRows]));
+  ok('the ledger figure is the TOTAL column, not the original amount beside it',
+    cardRows.rows.every((row) => row.amountFils > 0) &&
+      cardRows.rows.map((row) => row.amountFils).join(',') === '2140,920000,4125,8850,177600',
+    JSON.stringify(cardRows.rows.map((row) => row.amountFils)));
+  ok('a CR glued to its figure is a credit; an unmarked card row is a purchase',
+    cardRows.rows.map((row) => row.type).join(',') === 'income,income,expense,expense,expense',
+    JSON.stringify(cardRows.rows.map((row) => row.type)));
+  ok('the posting date is a column, so it never lands in the merchant',
+    cardRows.rows.every((row) => !/\d{2}-[A-Za-z]{3,4}-\d{2}/.test(row.merchant)) &&
+      cardRows.rows[0].merchant === 'CASHBACK' && cardRows.rows[2].merchant === 'COFFEE HOUSE DUBAI AE',
+    JSON.stringify(cardRows.rows.map((row) => row.merchant)));
+  ok('a row the PDF wrapped over three lines is one transaction, description intact',
+    cardRows.rows[3].merchant === 'NFC - (G-PAY)-GREEN VALLEY GROCERY DUBAI AE' &&
+      cardRows.rows[3].amountFils === 8850 && cardRows.rows[3].type === 'expense',
+    JSON.stringify([cardRows.rows[3].merchant, cardRows.rows[3].amountFils]));
+  ok('the dates are the transaction dates, and DD-MMMM-YY resolves',
+    cardRows.rows[0].date === '2026-08-10' && cardRows.rows[4].date === '2026-09-03',
+    JSON.stringify(cardRows.rows.map((row) => row.date)));
+
+  // The layout is proven by its HEADER, and nothing else. Without those column
+  // names the same rows are two ambiguous figures, which this parser refuses to
+  // read a direction into rather than guess between debit and credit.
+  const noHeader = parseStatementLines([
+    'Statement of Account',
+    '09-Aug-26 11-Aug-26 COFFEE HOUSE DUBAI AE 41.25 41.25',
+  ].join('\n'), 'AED');
+  ok('without the original/total header the ambiguous pair is still refused',
+    noHeader.rows.length === 0 && noHeader.rejectedRows === 1,
+    JSON.stringify([noHeader.rows.length, noHeader.rejectedRows]));
+  // The small print names the same words in prose. Reading those as a header
+  // would switch this layout on for every statement carrying the usual terms.
+  const proseOnly = parseStatementLines([
+    'Statement of Account',
+    'Total Amount Payable on this Statement date - Amount that needs to be paid',
+    'Interest is applied if the total amount of Minimum Payment Due is not settled',
+    '09-Aug-26 11-Aug-26 COFFEE HOUSE DUBAI AE 41.25 41.25',
+  ].join('\n'), 'AED');
+  ok('those column names in prose are not a table header',
+    proseOnly.rows.length === 0 && proseOnly.rejectedRows === 1,
+    JSON.stringify([proseOnly.rows.length, proseOnly.rejectedRows]));
+  // A run ends on a line of nothing but figures. A summary line carries money
+  // too, and joining a date-led line onto one would put a figure nobody spent
+  // on the ledger under a merchant assembled from two unrelated rows.
+  const notWrapped = parseStatementLines([
+    'Statement of Account',
+    'Date Description Debit Credit Balance',
+    '01/07/2026 CARREFOUR MARKET 40.00 - 9,960.00',
+    '10/07/2026 to 31/07/2026 closing period',
+    'Total 1,234.00',
+    'Balance c/f 9,960.00',
+  ].join('\n'), 'AED');
+  ok('a date-led line is never joined onto a summary line that merely has money',
+    notWrapped.rows.length === 1 && notWrapped.rows[0].merchant === 'CARREFOUR MARKET' &&
+      notWrapped.rows.every((row) => row.amountFils !== 123400),
+    JSON.stringify(notWrapped.rows.map((row) => [row.merchant, row.amountFils])));
   const signedRows = parseStatementLines([
     '01/07/2026 CARREFOUR MARKET -40.00',
     '02/07/2026 SALARY JULY +18,500.00 28,460.00',

@@ -29,6 +29,8 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   'i',
 );
 const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
+/** A row's own date followed by its posting/value date — two columns, not prose. */
+const DUAL_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+${DATE_TOKEN}\\s+(?=\\S)`, 'i');
 // The column branch (parseColumnTail) insists on a decimal point: a bare
 // integer at the end of a flattened PDF row is as likely a cheque or reference
 // number as money. One decimal place is still money — real statements print
@@ -736,6 +738,19 @@ function classifyMoneyToken(token: string, currency: StatementCurrency): MoneyTo
   if (MONEY_PLACEHOLDER.test(token)) return { kind: 'placeholder' };
   const spec = ledgerMoneySpec(currency);
   if (!spec) return null;
+  // `21.40CR` — the accounting suffix printed hard against its figure, with no
+  // space for the row lexer to split on. HSBC's card statement writes every
+  // credit this way, so ROW_END_DIRECTION (which needs DR/CR as its own final
+  // token) matched none of them. The suffix says the direction outright, which
+  // is the one thing this parser will not guess at, so it is read wherever it
+  // appears rather than behind a layout flag.
+  const suffixed = /^([\d,]+(?:\.\d{1,3})?)(DR|CR)$/i.exec(token);
+  if (suffixed) {
+    const minor = amountMinor(suffixed[1], currency, false);
+    if (minor !== null) {
+      return { kind: 'signed', minor, type: suffixed[2].toUpperCase() === 'CR' ? 'income' : 'expense' };
+    }
+  }
   // Flattened PDF rows lose column boundaries. For decimal currencies, a bare
   // integer at the tail is more likely a cheque/reference number than money;
   // preserve the old conservative requirement for a decimal point. Zero-decimal
@@ -783,6 +798,169 @@ function isCardStatement(text: string): boolean {
     /\bstatement\s+(?:period|date)\b/i,
   ];
   return markers.filter((marker) => marker.test(header)).length >= 2;
+}
+
+/**
+ * Whether this statement prices each row twice: what was charged, and what it
+ * came to in the ledger's own currency.
+ *
+ * `Transaction Details | Original Amount | (+) VAT | Total Amount (AED)` is the
+ * UAE card-statement table, and its last two or three figures are ONE charge
+ * decomposed — not the debit/credit pair `parseColumnTail` reads. Told apart
+ * only by the header naming both columns, because the rows themselves are
+ * indistinguishable from a debit-and-balance pair, and reading `41.25 41.25` as
+ * a debit of 41.25 and a credit of 41.25 would be a guess.
+ *
+ * Each label must stand as a column header ON ITS OWN LINE, and is looked for
+ * through the whole file rather than a leading slice. Both halves of that are
+ * load-bearing. A multi-page statement repeats its table head above each page's
+ * rows, which on the reported file first appears at line 234 of 701 — a header
+ * window would never have seen it. And the same words appear in the small print
+ * further down ("Total Amount Payable on this Statement date", "the total
+ * amount of Minimum Payment Due"), where they describe the bill rather than
+ * name a column; a substring test over the whole text matches those too and
+ * would switch this layout on for any statement carrying the usual terms.
+ *
+ * A bilingual head interleaves each English name with its Arabic twin, and the
+ * extractor sometimes glues the pair into one line, so Arabic is stripped
+ * before the line is compared. Anything else left on the line — a word of
+ * prose, another column's name — means this is not that header.
+ */
+const COLUMN_LABEL_ONLY = /^[(\s]*([a-z][a-z ]*[a-z])[)\s]*(?:\([A-Z]{3}\))?$/i;
+
+function columnHeaderLabels(text: string): Set<string> {
+  const labels = new Set<string>();
+  for (const original of text.split(/\n+/)) {
+    const line = original.replace(/[\p{Script=Arabic}\u200f\u200e]/gu, '').replace(/\s+/g, ' ').trim();
+    if (!line || line.length > 40) continue;
+    const label = COLUMN_LABEL_ONLY.exec(line)?.[1];
+    if (label) labels.add(label.toLowerCase());
+  }
+  return labels;
+}
+
+function hasOriginalAndTotalColumns(text: string): boolean {
+  const labels = columnHeaderLabels(text);
+  return labels.has('original amount') && labels.has('total amount');
+}
+
+/** Continuation lines a wrapped row may span before its figures arrive. */
+const MAX_WRAPPED_CONTINUATIONS = 2;
+
+/**
+ * Put a row that the PDF broke across lines back together.
+ *
+ * A table cell wider than its column wraps, and extraction emits each visual
+ * line separately — so one transaction arrives as a date-led line with NO
+ * money on it, the rest of its description, and then its figures:
+ *
+ *   09-Aug-26 11-Aug-26 NFC - (G-PAY)-GREEN VALLEY GROCERY
+ *   DUBAI AE
+ *   88.50 88.50
+ *
+ * These were not merely unread, they were invisible: the date line carries no
+ * money, so `LOOKS_LIKE_MONEY_LINE` was false and the row was never counted as
+ * rejected either. 42 of the 70 transactions on the reported statement were in
+ * this shape, and the result still called its accounting complete — which is
+ * the one thing `rejectedRows` exists to prevent.
+ *
+ * Deliberately narrow, because joining lines that are not one row would invent
+ * a transaction. It starts only from a date-led line with no money, stops at
+ * the next date-led line or an empty-cell placeholder, and spans at most two
+ * continuations. A run that finds no figures leaves every line exactly as it
+ * was.
+ *
+ * What ends a run is a line of nothing BUT figures — the wrapped row's own
+ * money cells, which is what a table emits once the description above them has
+ * run out. Merely containing money is not enough: a `Total 1,234.00` or
+ * `Balance c/f 9,960.00` under an unread date-led line carries money too, and
+ * joining onto one of those would turn a summary into a transaction and put a
+ * figure nobody spent on the ledger.
+ */
+function isMoneyOnlyLine(line: string, currency: StatementCurrency): boolean {
+  const words = line.split(' ');
+  let figures = 0;
+  for (const word of words) {
+    if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word) || statementCurrency(word) !== null) continue;
+    const token = classifyMoneyToken(word, currency);
+    if (!token) return false;
+    if (token.kind !== 'placeholder') figures += 1;
+  }
+  return figures > 0;
+}
+
+function joinWrappedRows(lines: string[], currency: StatementCurrency): string[] {
+  const out: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    out.push(line);
+    if (!line || !ROW_DATE_PREFIX.test(line) || LOOKS_LIKE_MONEY_LINE.test(line)) continue;
+    let joined = line;
+    for (
+      let ahead = index + 1;
+      ahead < lines.length && ahead - index <= MAX_WRAPPED_CONTINUATIONS;
+      ahead += 1
+    ) {
+      const next = lines[ahead];
+      if (!next || ROW_DATE_PREFIX.test(next) || MONEY_PLACEHOLDER.test(next)) break;
+      joined = `${joined} ${next}`;
+      if (isMoneyOnlyLine(next, currency)) {
+        out[out.length - 1] = joined;
+        index = ahead;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The charge on a row priced as `original [VAT] total`, and its direction.
+ *
+ * The ledger's figure is the LAST one — the total in its own currency — and the
+ * figures before it are that same charge before VAT and in the currency it was
+ * made in. Reachable only once the header has named those columns, and only on
+ * a card statement, where an unmarked row is a purchase: the same rule, and the
+ * same reason, as the lone-amount branch in `parseColumnTail`.
+ *
+ * Direction still has to be stated. A `CR` says so whether it is glued to the
+ * total or standing as its own word between the two figures, and that is the
+ * only way a row here becomes income.
+ */
+function parseOriginalTotalTail(
+  rest: string,
+  currency: StatementCurrency,
+): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  const words = rest.split(' ');
+  const total = classifyMoneyToken(words.at(-1) ?? '', currency);
+  if (!total || total.kind === 'placeholder') return null;
+  let cut = words.length - 1;
+  let credit = total.kind === 'signed' && total.type === 'income';
+  let figures = 0;
+  // Walk back over the decomposition: the bare DR/CR this layout prints
+  // between the two figures, and the original and VAT amounts themselves.
+  while (cut > 0 && figures < 2) {
+    const word = words[cut - 1];
+    if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word)) {
+      credit = credit || /^(?:CR|CREDIT)$/i.test(word);
+      cut -= 1;
+      continue;
+    }
+    if (statementCurrency(word) === currency) { cut -= 1; continue; }
+    const token = classifyMoneyToken(word, currency);
+    if (!token || token.kind === 'placeholder') break;
+    // A figure that disagrees about direction is not part of this charge.
+    if (token.kind === 'signed' && (token.type === 'income') !== credit) return null;
+    figures += 1;
+    cut -= 1;
+  }
+  // One figure alone is `parseColumnTail`'s lone-amount case, not this one, and
+  // leaving it there keeps a single rule for it.
+  if (figures === 0) return null;
+  const merchant = words.slice(0, cut).join(' ').trim();
+  return merchant.length < 2 || merchant.length > 180
+    ? null
+    : { merchant, amountFils: total.minor, type: credit ? 'income' : 'expense' };
 }
 
 function parseColumnTail(
@@ -941,9 +1119,20 @@ export function parseStatementLines(
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
   const sourceInstrument = identity.card ?? statementHeaderInstrument(text);
-  const lines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
+  const lines = joinWrappedRows(
+    text.split(/\n+/)
+      .map((original) => original.replace(/\s+/g, ' ').trim())
+      // A row headed by its transaction date AND its posting date puts a second
+      // date at the front of every description, where `parseColumnTail` reads
+      // it as the first word of the merchant. Only a date sitting immediately
+      // behind the row's own date is dropped: that position is a column, while
+      // a date later in the text is part of what the row says.
+      .map((line) => line.replace(DUAL_DATE_PREFIX, '$1 ')),
+    currency,
+  );
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
   const columnOrder = statementColumnOrder(text);
+  const originalTotalColumns = hasOriginalAndTotalColumns(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
   const balanceTrailing = trailingBalanceRuns(lines, currency);
@@ -1050,7 +1239,10 @@ export function parseStatementLines(
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
       const column = prefixed && date
-        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+        ? (originalTotalColumns && cardStatement
+            ? parseOriginalTotalTail(prefixed[2], currency)
+            : null) ??
+          parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
         : null;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
