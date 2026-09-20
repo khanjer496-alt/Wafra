@@ -48,11 +48,17 @@
     "benchmark:launch:fixtures": "bash scripts/generate-launch-benchmark-fixtures.sh",
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
     "bench:parser": "node scripts/parser-benchmark/run.mjs",
+    "eval:parser:typesafe": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs",
+    "eval:parser:typesafe:all": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all",
+    "eval:parser:typesafe:risk": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all --fail-on-risk",
+    "analyze:parser:jev": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs",
+    "analyze:parser:jev:all": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs --all",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
   },
   "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
@@ -93,6 +99,7 @@
     "expo-task-manager": "~55.0.20",
     "expo-updates": "~55.0.30",
     "expo-web-browser": "~55.0.20",
+    "onnxruntime-react-native": "1.24.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.10",
@@ -119,5 +126,6 @@
     "autolinking": {
       "nativeModulesDir": "./modules"
     }
-  }
+  },
+  "onnxruntimeExtensionsEnabled": "true"
 }
