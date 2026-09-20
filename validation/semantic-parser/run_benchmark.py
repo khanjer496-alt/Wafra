@@ -47,6 +47,13 @@ SEED = 20260920
 def build_model(name: str):
     if name == "linear":
         return CharNGramLinear(ngram_range=(2, 5), min_df=2, C=12.0, max_features=300_000, seed=SEED)
+    if name == "linear-robust":
+        # Representation chosen on the MSA<->PAL transfer proxy, not on any
+        # sealed dialect split: see results/dialect-shift-dev-v1.json.
+        return CharNGramLinear(
+            ngram_range=(2, 5), min_df=2, C=12.0, max_features=300_000,
+            fold_orthography=True, augment_copies=1, augment_rate=0.08, seed=SEED,
+        )
     if name == "centroid":
         return CharNGramCentroid(seed=SEED)
     if name == "charcnn":

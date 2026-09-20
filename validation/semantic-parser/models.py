@@ -29,6 +29,42 @@ import torch
 import torch.nn as nn
 
 
+# Spelling variants that dialects disagree on but that carry no meaning here.
+# Folding them was chosen on the MSA<->PAL transfer proxy in
+# dialect_shift_dev.py, never on a sealed dialect split.
+_ORTHOGRAPHIC_FOLD = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
+    "ى": "ي", "ئ": "ي",
+    "ة": "ه",
+    "ؤ": "و",
+    "گ": "ك", "چ": "ج", "پ": "ب", "ڤ": "ف",
+})
+
+
+def fold_orthography(text: str) -> str:
+    return text.translate(_ORTHOGRAPHIC_FOLD)
+
+
+def augment_spelling(text: str, rng: random.Random, rate: float) -> str:
+    """Character noise standing in for unseen dialectal spelling.
+
+    Drops, doubles or transposes characters.  It invents no vocabulary, so it
+    can only buy tolerance to spelling drift -- never to unseen synonyms.
+    """
+    out: list[str] = []
+    for ch in text:
+        roll = rng.random()
+        if roll < rate / 3:
+            continue
+        if roll < 2 * rate / 3:
+            out.append(ch)
+        out.append(ch)
+    if len(out) > 3 and rng.random() < rate:
+        i = rng.randrange(len(out) - 1)
+        out[i], out[i + 1] = out[i + 1], out[i]
+    return "".join(out)
+
+
 def set_all_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -58,6 +94,9 @@ class CharNGramLinear:
         max_features: int = 300_000,
         C: float = 4.0,
         sublinear_tf: bool = True,
+        fold_orthography: bool = False,
+        augment_copies: int = 0,
+        augment_rate: float = 0.08,
         seed: int = 20260920,
     ) -> None:
         self.cfg = {
@@ -67,6 +106,9 @@ class CharNGramLinear:
             "C": C,
             "sublinear_tf": sublinear_tf,
             "analyzer": "char_wb",
+            "fold_orthography": fold_orthography,
+            "augment_copies": augment_copies,
+            "augment_rate": augment_rate,
             "seed": seed,
         }
         self.seed = seed
@@ -79,9 +121,17 @@ class CharNGramLinear:
         from sklearn.linear_model import LogisticRegression
 
         set_all_seeds(self.seed)
-        texts = [r.text for r in train_rows]
+        texts = [self._prepare(r.text) for r in train_rows]
         y_names = [r.intent_en for r in train_rows]
-        self.labels = tuple(sorted(set(y_names)))
+        if self.cfg["augment_copies"]:
+            rng = random.Random(self.seed)
+            base = list(texts)
+            for _ in range(self.cfg["augment_copies"]):
+                texts.extend(
+                    augment_spelling(t, rng, self.cfg["augment_rate"]) for t in base
+                )
+                y_names = y_names + [r.intent_en for r in train_rows]
+        self.labels = tuple(sorted({r.intent_en for r in train_rows}))
         index = {name: i for i, name in enumerate(self.labels)}
         y = np.array([index[name] for name in y_names])
 
@@ -100,8 +150,11 @@ class CharNGramLinear:
         )
         self._clf.fit(X, y)
 
+    def _prepare(self, text: str) -> str:
+        return fold_orthography(text) if self.cfg["fold_orthography"] else text
+
     def predict_proba(self, texts: list[str]) -> np.ndarray:
-        X = self._vec.transform(texts)
+        X = self._vec.transform([self._prepare(t) for t in texts])
         return self._clf.predict_proba(X).astype(np.float32)
 
     def size_bytes(self) -> int:

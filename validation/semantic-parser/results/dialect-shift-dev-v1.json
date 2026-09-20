@@ -1,0 +1,386 @@
+{
+  "experiment": "dialect-shift-development",
+  "tag": "v1",
+  "created": "2026-09-20T15:45:58Z",
+  "seed": 20260920,
+  "mapping_version": "2026-09-20.1",
+  "sealed_splits_touched": [],
+  "note": "Fit and evaluation both come from the MSA+PAL fitting pool, split by the dialect column in Banking77_full_corpus.csv. The Saudi, Moroccan and Tunisian test sets are not loaded by this script.",
+  "setup_sizes": {
+    "msa->pal": {
+      "fit": 10729,
+      "eval": 12054
+    },
+    "pal->msa": {
+      "fit": 10820,
+      "eval": 11952
+    },
+    "msa->msa-val": {
+      "fit": 10729,
+      "eval": 1223
+    }
+  },
+  "variants": {
+    "baseline-char2-5": {
+      "config": {
+        "name": "baseline-char2-5",
+        "char_ngrams": [
+          2,
+          5
+        ]
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 10729,
+          "n_eval": 12054,
+          "features": 23233,
+          "fit_seconds": 27.0934898853302,
+          "intent_accuracy": 0.690559150489464,
+          "family_accuracy": 0.8366517338642774,
+          "state_accuracy": 0.8612078977932637,
+          "joint_accuracy": 0.7904430064708811,
+          "high_risk_joint_accuracy": 0.6473367697594502,
+          "mean_confidence": 0.4849866555092037
+        },
+        "pal->msa": {
+          "n_fit": 10820,
+          "n_eval": 11952,
+          "features": 25125,
+          "fit_seconds": 27.28627634048462,
+          "intent_accuracy": 0.7270749665327979,
+          "family_accuracy": 0.8710676037483266,
+          "state_accuracy": 0.8676372155287818,
+          "joint_accuracy": 0.8180220883534136,
+          "high_risk_joint_accuracy": 0.7218235542422963,
+          "mean_confidence": 0.5055985501219517
+        },
+        "msa->msa-val": {
+          "n_fit": 10729,
+          "n_eval": 1223,
+          "features": 23233,
+          "fit_seconds": 28.292649030685425,
+          "intent_accuracy": 0.8969746524938675,
+          "family_accuracy": 0.9566639411283728,
+          "state_accuracy": 0.9607522485690924,
+          "joint_accuracy": 0.9370400654129191,
+          "high_risk_joint_accuracy": 0.9033613445378151,
+          "mean_confidence": 0.7746432798262214
+        }
+      }
+    },
+    "fold-orthography": {
+      "config": {
+        "name": "fold-orthography",
+        "char_ngrams": [
+          2,
+          5
+        ],
+        "fold_orthography": true
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 10729,
+          "n_eval": 12054,
+          "features": 21354,
+          "fit_seconds": 28.056951999664307,
+          "intent_accuracy": 0.703086112493778,
+          "family_accuracy": 0.8458602953376473,
+          "state_accuracy": 0.8673469387755102,
+          "joint_accuracy": 0.79940268790443,
+          "high_risk_joint_accuracy": 0.6512027491408935,
+          "mean_confidence": 0.5003200548782739
+        },
+        "pal->msa": {
+          "n_fit": 10820,
+          "n_eval": 11952,
+          "features": 23289,
+          "fit_seconds": 28.065470218658447,
+          "intent_accuracy": 0.7365294511378849,
+          "family_accuracy": 0.8761713520749665,
+          "state_accuracy": 0.8719042838018741,
+          "joint_accuracy": 0.8247155287817939,
+          "high_risk_joint_accuracy": 0.7239341494301393,
+          "mean_confidence": 0.5253120457478692
+        },
+        "msa->msa-val": {
+          "n_fit": 10729,
+          "n_eval": 1223,
+          "features": 21354,
+          "fit_seconds": 29.00546097755432,
+          "intent_accuracy": 0.8937040065412919,
+          "family_accuracy": 0.9525756336876533,
+          "state_accuracy": 0.9591169255928046,
+          "joint_accuracy": 0.9329517579721995,
+          "high_risk_joint_accuracy": 0.9033613445378151,
+          "mean_confidence": 0.7765551247977724
+        }
+      }
+    },
+    "char+word": {
+      "config": {
+        "name": "char+word",
+        "char_ngrams": [
+          2,
+          5
+        ],
+        "word_ngrams": [
+          1,
+          2
+        ]
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 10729,
+          "n_eval": 12054,
+          "features": 37021,
+          "fit_seconds": 36.65063166618347,
+          "intent_accuracy": 0.672639787622366,
+          "family_accuracy": 0.8271113323378132,
+          "state_accuracy": 0.8461091753774681,
+          "joint_accuracy": 0.7763398042143687,
+          "high_risk_joint_accuracy": 0.6275773195876289,
+          "mean_confidence": 0.5110481661157579
+        },
+        "pal->msa": {
+          "n_fit": 10820,
+          "n_eval": 11952,
+          "features": 38349,
+          "fit_seconds": 25.93404507637024,
+          "intent_accuracy": 0.7049866131191432,
+          "family_accuracy": 0.8590194109772423,
+          "state_accuracy": 0.8573460508701473,
+          "joint_accuracy": 0.8053045515394913,
+          "high_risk_joint_accuracy": 0.6960742929506121,
+          "mean_confidence": 0.53122964837582
+        },
+        "msa->msa-val": {
+          "n_fit": 10729,
+          "n_eval": 1223,
+          "features": 37021,
+          "fit_seconds": 33.658106088638306,
+          "intent_accuracy": 0.9002452984464432,
+          "family_accuracy": 0.9550286181520851,
+          "state_accuracy": 0.9591169255928046,
+          "joint_accuracy": 0.9337694194603434,
+          "high_risk_joint_accuracy": 0.9117647058823529,
+          "mean_confidence": 0.7959029750410048
+        }
+      }
+    },
+    "fold+char+word": {
+      "config": {
+        "name": "fold+char+word",
+        "char_ngrams": [
+          2,
+          5
+        ],
+        "word_ngrams": [
+          1,
+          2
+        ],
+        "fold_orthography": true
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 10729,
+          "n_eval": 12054,
+          "features": 34962,
+          "fit_seconds": 32.5759015083313,
+          "intent_accuracy": 0.6854985896797744,
+          "family_accuracy": 0.8420441347270615,
+          "state_accuracy": 0.8539074166251867,
+          "joint_accuracy": 0.7888667662186826,
+          "high_risk_joint_accuracy": 0.6314432989690721,
+          "mean_confidence": 0.5279053494030584
+        },
+        "pal->msa": {
+          "n_fit": 10820,
+          "n_eval": 11952,
+          "features": 36148,
+          "fit_seconds": 23.884194135665894,
+          "intent_accuracy": 0.7150267737617135,
+          "family_accuracy": 0.8644578313253012,
+          "state_accuracy": 0.8594377510040161,
+          "joint_accuracy": 0.8105756358768407,
+          "high_risk_joint_accuracy": 0.698184888138455,
+          "mean_confidence": 0.5461375832614258
+        },
+        "msa->msa-val": {
+          "n_fit": 10729,
+          "n_eval": 1223,
+          "features": 34962,
+          "fit_seconds": 31.2840576171875,
+          "intent_accuracy": 0.9059689288634505,
+          "family_accuracy": 0.9566639411283728,
+          "state_accuracy": 0.9607522485690924,
+          "joint_accuracy": 0.937857726901063,
+          "high_risk_joint_accuracy": 0.9117647058823529,
+          "mean_confidence": 0.7983364523079176
+        }
+      }
+    },
+    "fold+augment": {
+      "config": {
+        "name": "fold+augment",
+        "char_ngrams": [
+          2,
+          5
+        ],
+        "fold_orthography": true,
+        "augment_copies": 1,
+        "augment_rate": 0.08
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 21458,
+          "n_eval": 12054,
+          "features": 44783,
+          "fit_seconds": 64.79201316833496,
+          "intent_accuracy": 0.7098888335822133,
+          "family_accuracy": 0.8472706155632985,
+          "state_accuracy": 0.8691720590675295,
+          "joint_accuracy": 0.8021403683424589,
+          "high_risk_joint_accuracy": 0.6499140893470791,
+          "mean_confidence": 0.5481733561228842
+        },
+        "pal->msa": {
+          "n_fit": 21640,
+          "n_eval": 11952,
+          "features": 47959,
+          "fit_seconds": 53.914337396621704,
+          "intent_accuracy": 0.7392904953145917,
+          "family_accuracy": 0.8781793842034806,
+          "state_accuracy": 0.874330655957162,
+          "joint_accuracy": 0.8275602409638554,
+          "high_risk_joint_accuracy": 0.7252005065428451,
+          "mean_confidence": 0.5785847519380843
+        },
+        "msa->msa-val": {
+          "n_fit": 21458,
+          "n_eval": 1223,
+          "features": 44783,
+          "fit_seconds": 66.3555417060852,
+          "intent_accuracy": 0.8994276369582993,
+          "family_accuracy": 0.9525756336876533,
+          "state_accuracy": 0.9648405560098119,
+          "joint_accuracy": 0.9394930498773508,
+          "high_risk_joint_accuracy": 0.9159663865546218,
+          "mean_confidence": 0.8264189508404967
+        }
+      }
+    },
+    "fold+char+word+augment": {
+      "config": {
+        "name": "fold+char+word+augment",
+        "char_ngrams": [
+          2,
+          5
+        ],
+        "word_ngrams": [
+          1,
+          2
+        ],
+        "fold_orthography": true,
+        "augment_copies": 1,
+        "augment_rate": 0.08
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 21458,
+          "n_eval": 12054,
+          "features": 76246,
+          "fit_seconds": 88.80629825592041,
+          "intent_accuracy": 0.7034179525468724,
+          "family_accuracy": 0.8494275759084121,
+          "state_accuracy": 0.8605442176870748,
+          "joint_accuracy": 0.7978264476522317,
+          "high_risk_joint_accuracy": 0.6391752577319587,
+          "mean_confidence": 0.5627459554803315
+        },
+        "pal->msa": {
+          "n_fit": 21640,
+          "n_eval": 11952,
+          "features": 79902,
+          "fit_seconds": 81.94375538825989,
+          "intent_accuracy": 0.7287483266398929,
+          "family_accuracy": 0.8694779116465864,
+          "state_accuracy": 0.8637884872824632,
+          "joint_accuracy": 0.8171854082998661,
+          "high_risk_joint_accuracy": 0.7121148163782186,
+          "mean_confidence": 0.5872040066560424
+        },
+        "msa->msa-val": {
+          "n_fit": 21458,
+          "n_eval": 1223,
+          "features": 76246,
+          "fit_seconds": 87.94035530090332,
+          "intent_accuracy": 0.8953393295175798,
+          "family_accuracy": 0.9533932951757972,
+          "state_accuracy": 0.9574816026165167,
+          "joint_accuracy": 0.9337694194603434,
+          "high_risk_joint_accuracy": 0.907563025210084,
+          "mean_confidence": 0.8420416879606187
+        }
+      }
+    },
+    "fold-char3-6": {
+      "config": {
+        "name": "fold-char3-6",
+        "char_ngrams": [
+          3,
+          6
+        ],
+        "fold_orthography": true,
+        "max_features": 400000
+      },
+      "setups": {
+        "msa->pal": {
+          "n_fit": 10729,
+          "n_eval": 12054,
+          "features": 27932,
+          "fit_seconds": 25.763696908950806,
+          "intent_accuracy": 0.6874066699850672,
+          "family_accuracy": 0.8397212543554007,
+          "state_accuracy": 0.8631989381118301,
+          "joint_accuracy": 0.7924340467894475,
+          "high_risk_joint_accuracy": 0.6387457044673539,
+          "mean_confidence": 0.49553267384208266
+        },
+        "pal->msa": {
+          "n_fit": 10820,
+          "n_eval": 11952,
+          "features": 30508,
+          "fit_seconds": 27.008602380752563,
+          "intent_accuracy": 0.7246485943775101,
+          "family_accuracy": 0.8694779116465864,
+          "state_accuracy": 0.865210843373494,
+          "joint_accuracy": 0.8172690763052208,
+          "high_risk_joint_accuracy": 0.7142254115660617,
+          "mean_confidence": 0.5199573596421851
+        },
+        "msa->msa-val": {
+          "n_fit": 10729,
+          "n_eval": 1223,
+          "features": 27932,
+          "fit_seconds": 28.05827784538269,
+          "intent_accuracy": 0.8961569910057237,
+          "family_accuracy": 0.9509403107113655,
+          "state_accuracy": 0.9599345870809485,
+          "joint_accuracy": 0.9337694194603434,
+          "high_risk_joint_accuracy": 0.9033613445378151,
+          "mean_confidence": 0.7689564541624612
+        }
+      }
+    }
+  },
+  "ranked_by_msa_to_pal_joint": [
+    "fold+augment",
+    "fold-orthography",
+    "fold+char+word+augment",
+    "fold-char3-6",
+    "baseline-char2-5",
+    "fold+char+word",
+    "char+word"
+  ],
+  "selected": "fold+augment"
+}
