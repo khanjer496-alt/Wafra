@@ -109,7 +109,7 @@ assert.match(cardDetailSheet, /CardDetailSheet\(\{ account, onClose, footer \}/)
 assert.match(cardDetailSheet, /<BottomSheet[^>]*footer=\{footer\}/);
 
 const interactionCards = code(read('src/app/cards.tsx'));
-assert.match(interactionCards, /type CardAction = 'visibility' \| 'delete'/);
+assert.match(interactionCards, /type CardAction = 'visibility' \| 'bank' \| 'delete'/);
 assert.doesNotMatch(interactionCards, /CardAction =[^\n]*'limit'|value: 'limit'|onPress=\{isCredit && limitLeft/);
 const cardsDetail = interactionCards.match(
   /<CardDetailSheet[\s\S]*?(?=\n\s*<BottomSheet visible=\{limitFor)/,

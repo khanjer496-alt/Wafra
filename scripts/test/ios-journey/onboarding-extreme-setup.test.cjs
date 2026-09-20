@@ -119,18 +119,23 @@ async function screen(t, options = {}) {
     setParams: patch => Object.assign(params, patch),
   };
   const store = {
-    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null },
+    // "Which banks text you?" gates both sections; these journeys exercise the
+    // checklist behind it, so the question is answered unless a case says
+    // otherwise (scripts/test/ios-setup-ux.test.js pins the question itself).
+    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null,
+      marketId: 'AE', knownBanks: options.knownBanks ?? ['Emirates NBD'] },
     async ensureDurable() { durableCalls++; await controls.beforeDurable?.(durableCalls); },
     setOnboarded() { onboarded = true; receipts.push(['onboarded']); },
     setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
     async setCaptureOptOut(value) { receipts.push(['optOut', value]); await controls.beforeOptOut?.(value); },
+    setKnownBanks(names) { store.state.knownBanks = [...names]; receipts.push(['knownBanks', [...names]]); },
   };
   const ui = {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': platform, '@/lib/i18n': copy,
     '@/components/themed-text': { ThemedText: 'Text' },
-    '@/components/ui/controls': { Button: 'Button' },
+    '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
   };
   const Details = source('src/components/ios-message-setup/details-sheet.tsx', {
