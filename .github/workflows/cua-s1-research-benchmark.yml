@@ -1,0 +1,83 @@
+name: CUA-S1 Wafra research benchmark
+
+on:
+  push:
+    branches:
+      - research/cua-s1-wafra-benchmark
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Export Wafra privacy-safe global fixture corpus
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const rows = require('./scripts/test/fixtures/global-alert-formats');
+          fs.writeFileSync('/tmp/wafra-cua-fixtures.json', JSON.stringify(rows, null, 2));
+          console.log(`exported ${rows.length} fixtures`);
+          NODE
+
+      - name: Install CUA-S1 research runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "huggingface_hub>=0.35" "git+https://github.com/trycua/cua.git#subdirectory=libs/cua-s1/python"
+
+      - name: Download official CUA-S1 Forms checkpoint
+        run: |
+          python <<'PY'
+          from huggingface_hub import snapshot_download
+          path = snapshot_download(repo_id="cua-ai/cua-s1-forms", local_dir="/tmp/cua-s1-forms")
+          print(path)
+          PY
+          find /tmp/cua-s1-forms -maxdepth 2 -type f -printf '%P %s bytes\n' | sort
+
+      - name: Run zero-shot Wafra transfer benchmark
+        run: |
+          python validation/cua-s1-wafra-benchmark.py \
+            --fixtures /tmp/wafra-cua-fixtures.json \
+            --checkpoint /tmp/cua-s1-forms \
+            --output /tmp/wafra-cua-s1-report.json \
+            --device cpu
+
+      - name: Print compact benchmark summary
+        if: always()
+        run: |
+          python <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('/tmp/wafra-cua-s1-report.json')
+          if not p.exists():
+              raise SystemExit('benchmark report was not produced')
+          r = json.loads(p.read_text())
+          print('fixtureCount=', r['fixtureCount'])
+          print('checkpoint=', r['checkpoint'])
+          for task, result in r['classification'].items():
+              print(task, result['correct'], '/', result['total'], 'accuracy=', result['accuracy'],
+                    'meanConfidence=', result['meanConfidence'], 'highConfidenceWrong=', result['highConfidenceWrong'])
+          print('amountDisambiguation=', r['amountDisambiguation'])
+          print('latencyCpuBatch1=', r['latencyCpuBatch1'])
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-s1-wafra-benchmark
+          path: /tmp/wafra-cua-s1-report.json
+          if-no-files-found: warn
+          retention-days: 14
