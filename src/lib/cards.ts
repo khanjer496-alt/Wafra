@@ -1047,22 +1047,38 @@ function statedIssueDate(due: CardDue): string | null {
  *
  * A card that states the date on ANY statement has told us its cycle, and an
  * issuer does not change it between months. So the gap is measured from the
- * statements that state it and used for the ones that do not; the constant is
- * the floor under a card that has never stated one at all. The widest observed
- * gap wins, because a window that is too narrow drops a payment while one that
- * is slightly wide is still bounded on the other side by the next statement.
+ * statements that state it and used for the ones that do not; the constant
+ * applies only to a card that has never stated one at all.
+ *
+ * NARROWEST observed wins, and the direction matters more than it looks. An
+ * earlier version floored this at the constant and took the widest, reasoning
+ * that a narrow window drops a payment while a wide one is still bounded by the
+ * next statement. That is wrong on the dangerous side, twice over:
+ *
+ *   - Flooring at 25 meant a cycle SHORTER than the guess was never learned. A
+ *     card closing 16 days before its deadline had its undated statements opened
+ *     at deadline-25, nine days early — straight back into the previous cycle.
+ *   - A window that opens too early credits the PREVIOUS cycle's payment to this
+ *     statement, which is exactly the false settlement this whole change exists
+ *     to stop. A window that opens too late leaves a real payment credited to
+ *     nothing, which is wrong but visible and never claims money is not owed.
+ *
+ * So when this card has told us its cycle, believe it, and when its statements
+ * disagree, take the tightest — under-crediting is the safe failure here.
  */
 function observedStatementGapDays(statements: Statement[]): number {
-  let widest = ASSUMED_STATEMENT_DAYS;
+  let narrowest: number | null = null;
   for (const statement of statements) {
     if (!statement.statementDate) continue;
     const gap = Math.round(
       (new Date(`${statement.dueDate}T12:00:00`).getTime() -
         new Date(`${statement.statementDate}T12:00:00`).getTime()) / 86400000,
     );
-    if (gap > widest && gap <= MAX_STATEMENT_GAP_DAYS) widest = gap;
+    // A non-positive gap is not a cycle, and one past the bound is not credible.
+    if (gap <= 0 || gap > MAX_STATEMENT_GAP_DAYS) continue;
+    if (narrowest === null || gap < narrowest) narrowest = gap;
   }
-  return widest;
+  return narrowest ?? ASSUMED_STATEMENT_DAYS;
 }
 
 /**

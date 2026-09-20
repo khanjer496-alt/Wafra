@@ -152,3 +152,32 @@ test('a statement stating no statement date falls back to the cycle approximatio
   assert.equal(statusOf([payment('p', '2026-08-20', 406196)], [legacy]).status, 'urgent');
   assert.equal(statusOf([payment('p', '2026-08-29', 246992)], [legacy]).status, 'settled');
 });
+
+test('a cycle SHORTER than the approximation is learned, not floored at it', () => {
+  // Found by review, not by a card. The gap inference floored itself at
+  // ASSUMED_STATEMENT_DAYS and only widened, so a card that closes sooner than
+  // the guess never taught it anything — and a window that opens too early is
+  // the false settlement this whole file exists to stop.
+  //
+  // This card closes 16 days before its deadline and says so on one statement.
+  // The next one omits the date, so its window is inferred: at deadline-16 it
+  // opens 2026-01-20, and at the old deadline-25 it opened 2026-01-11 — nine
+  // days back inside the December cycle.
+  const dec = { id: 'dec', accountId: 'enbd-card', statementDate: '2025-12-20',
+    dueDate: '2026-01-05', totalDueFils: 100000, minDueFils: 10000, paidFils: 0 };
+  const jan = { id: 'sep', accountId: 'enbd-card', statementDate: null,
+    dueDate: '2026-02-05', totalDueFils: 200000, minDueFils: 20000, paidFils: 0 };
+  // December is marked paid by hand so it cannot absorb the payment itself —
+  // the situation that hid the original bug. Asserted on what is still OWED
+  // rather than the status word, because this harness's "today" is September and
+  // a February deadline reads overdue either way.
+  const decPaid = [{ ...dec, paidFils: 100000 }, jan];
+  const januaryOwes = date => {
+    const state = { ...blank(decPaid), transactions: [payment('p', date, 200000)] };
+    return cardsStatus(state, jan).remainingFils;
+  };
+  assert.equal(januaryOwes('2026-01-12'), 200000, 'Jan 12 is December business');
+  assert.equal(januaryOwes('2026-01-19'), 200000, 'still inside the December cycle');
+  // Its own cycle starts the day after it closed.
+  assert.equal(januaryOwes('2026-01-21'), 0);
+});
