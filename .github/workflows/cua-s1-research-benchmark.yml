@@ -24,13 +24,63 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Export Wafra privacy-safe global fixture corpus
+      - name: Export Wafra privacy-safe fixture corpora
         run: |
           node <<'NODE'
           const fs = require('fs');
           const rows = require('./scripts/test/fixtures/global-alert-formats');
+          const { formattingMutations, postedFooterMutations } =
+            require('./scripts/test/fixtures/global-alert-adversarial');
+
           fs.writeFileSync('/tmp/wafra-cua-fixtures.json', JSON.stringify(rows, null, 2));
-          console.log(`exported ${rows.length} fixtures`);
+
+          const TRAIN = new Set(['US','GB','ES','IT','NL','KW','BH','JO']);
+          const VALIDATION = new Set(['DE','QA']);
+          const TEST = new Set(['FR','IN','OM','EG']);
+
+          const mutate = (row, includeBase) => {
+            const out = includeBase ? [row] : [];
+            for (const mutation of formattingMutations) {
+              out.push({
+                ...row,
+                id: `${row.id}--${mutation.id}`,
+                body: mutation.apply(row.body, row),
+              });
+            }
+            if (row.expected.status === 'posted') {
+              for (const mutation of postedFooterMutations) {
+                out.push({
+                  ...row,
+                  id: `${row.id}--${mutation.id}`,
+                  body: mutation.apply(row.body, row),
+                });
+              }
+            }
+            return out;
+          };
+
+          const trainBase = rows.filter(row => TRAIN.has(row.market));
+          const validationBase = rows.filter(row => VALIDATION.has(row.market));
+          const testBase = rows.filter(row => TEST.has(row.market));
+
+          const payload = {
+            splitPolicy: {
+              trainMarkets: [...TRAIN],
+              validationMarkets: [...VALIDATION],
+              testMarkets: [...TEST],
+            },
+            train: trainBase.flatMap(row => mutate(row, true)),
+            validation: validationBase.flatMap(row => mutate(row, true)),
+            testBase,
+            testStress: testBase.flatMap(row => mutate(row, false)),
+          };
+          fs.writeFileSync('/tmp/wafra-cua-domain.json', JSON.stringify(payload, null, 2));
+          console.log('zero-shot fixtures', rows.length);
+          console.log('domain rows', Object.fromEntries(
+            Object.entries(payload)
+              .filter(([, value]) => Array.isArray(value))
+              .map(([key, value]) => [key, value.length])
+          ));
           NODE
 
       - name: Install CUA-S1 research runtime
@@ -55,29 +105,50 @@ jobs:
             --output /tmp/wafra-cua-s1-report.json \
             --device cpu
 
-      - name: Print compact benchmark summary
+      - name: Run Wafra domain-adaptation experiment
+        run: |
+          python validation/cua-s1-wafra-finetune.py \
+            --data /tmp/wafra-cua-domain.json \
+            --checkpoint /tmp/cua-s1-forms \
+            --output /tmp/wafra-cua-s1-domain-report.json \
+            --epochs 20
+
+      - name: Print compact benchmark summaries
         if: always()
         run: |
           python <<'PY'
           import json
           from pathlib import Path
-          p = Path('/tmp/wafra-cua-s1-report.json')
-          if not p.exists():
-              raise SystemExit('benchmark report was not produced')
-          r = json.loads(p.read_text())
-          print('fixtureCount=', r['fixtureCount'])
-          print('checkpoint=', r['checkpoint'])
-          for task, result in r['classification'].items():
-              print(task, result['correct'], '/', result['total'], 'accuracy=', result['accuracy'],
-                    'meanConfidence=', result['meanConfidence'], 'highConfidenceWrong=', result['highConfidenceWrong'])
-          print('amountDisambiguation=', r['amountDisambiguation'])
-          print('latencyCpuBatch1=', r['latencyCpuBatch1'])
+
+          z = Path('/tmp/wafra-cua-s1-report.json')
+          if z.exists():
+              r = json.loads(z.read_text())
+              print('=== ZERO SHOT ===')
+              print('fixtureCount=', r['fixtureCount'])
+              print('checkpoint=', r['checkpoint'])
+              for task, result in r['classification'].items():
+                  print(task, result['correct'], '/', result['total'], 'accuracy=', result['accuracy'],
+                        'meanConfidence=', result['meanConfidence'], 'highConfidenceWrong=', result['highConfidenceWrong'])
+              print('latencyCpuBatch1=', r['latencyCpuBatch1'])
+
+          d = Path('/tmp/wafra-cua-s1-domain-report.json')
+          if d.exists():
+              r = json.loads(d.read_text())
+              print('=== DOMAIN ADAPTATION ===')
+              print('rows=', r['rows'])
+              print('examples=', r['examples'])
+              print('trainingSeconds=', r['trainingSeconds'])
+              print('initialTestBase=', r['initial']['testBase'])
+              print('finalTestBase=', r['final']['testBase'])
+              print('finalTestStress=', r['final']['testStress'])
           PY
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cua-s1-wafra-benchmark
-          path: /tmp/wafra-cua-s1-report.json
+          path: |
+            /tmp/wafra-cua-s1-report.json
+            /tmp/wafra-cua-s1-domain-report.json
           if-no-files-found: warn
           retention-days: 14
