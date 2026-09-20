@@ -1,0 +1,2213 @@
+{
+  "experiment": "arbanking77-dialect-holdout",
+  "tag": "finetune",
+  "created": "2026-09-20T20:22:52Z",
+  "seed": 20260920,
+  "mapping_version": "2026-09-20.1",
+  "train_split": "Banking77_Arabized_MSA_PAL_train.csv",
+  "tuning_split": "Banking77_Arabized_MSA_PAL_val.csv",
+  "sealed_dialect_splits": [
+    "saudi",
+    "moroccan",
+    "tunisian"
+  ],
+  "digests": {
+    "train": "61fc9807a6b2fee9016262afc901365df84c9be871fa1749cac0f578f4e2f952",
+    "val": "4fb06aa73615937d767fdd8b73b16fa3126fb847d4f26fd8012d17e9df7664f1",
+    "msa": "cde705d03fe58cd47dc5a2df11dee9e60ee278c0aa70615119ea9f3493c7f427",
+    "pal": "c9dea5a70e360eb24bf137aa3890958ab6b1eaa7022dc7baaa23d7ab0555a369",
+    "saudi": "6afd5cc8ac66350d38da874ef7b7c652dd12cec39f2afe87635d6f1c32752a21",
+    "moroccan": "87b29d68dd083983f397346d6334ec9736b82b5b1511781ec2baf38f59ab9c38",
+    "tunisian": "9109b0112c49f29a20a224da20e5fcfc6b2a36eedae69a8d32665e5451639462"
+  },
+  "dataset": {
+    "train": {
+      "file": "Banking77_Arabized_MSA_PAL_train.csv",
+      "sha256": "27e97bc55773c4077180adca298fd5d9bd9d15ab3974b39833d15b864691fa47",
+      "bytes": 2811933
+    },
+    "val": {
+      "file": "Banking77_Arabized_MSA_PAL_val.csv",
+      "sha256": "d178f075b41206cd93974b49747216f7ca6bd786536010ff61f22d4ea00cf373",
+      "bytes": 324359
+    },
+    "msa": {
+      "file": "Banking77_Arabized_MSA_test.csv",
+      "sha256": "2e72b0272a06c9d55afd8ceec562b6a11348602e28aceed1676dae2cdb16ec9b",
+      "bytes": 478714
+    },
+    "pal": {
+      "file": "Banking77_Arabized_PAL_test.csv",
+      "sha256": "6d80436bf89c8257894baa178a34f090c01975671d33dfd83da5eb2501341a43",
+      "bytes": 446345
+    },
+    "saudi": {
+      "file": "Banking77_Arabized_Saudi_test.csv",
+      "sha256": "9c01583810f37152a734197c3bf80b6cf9c6d129be25c9e1eac27bc0cd91af74",
+      "bytes": 426961
+    },
+    "moroccan": {
+      "file": "Banking77_Arabized_Moroccan_test.csv",
+      "sha256": "1c4063a2af8bc415a31d6ec53b18e23080fdd4814f10467f6b1819d827fa8de8",
+      "bytes": 464383
+    },
+    "tunisian": {
+      "file": "Banking77_Arabized_Tunisian_test.csv",
+      "sha256": "1c7c7aded5b5a90e20608a2dd2f3435683f6090d722e284e6e466eee402ef7a0",
+      "bytes": 121686
+    }
+  },
+  "environment": {
+    "python": "3.11.15",
+    "torch": "2.14.0+cpu",
+    "platform": "Linux-6.18.44-fc-v37-x86_64-with-glibc2.39"
+  },
+  "evidence_rules": {
+    "path": "results/evidence-rules.json",
+    "state_markers": 408,
+    "family_markers": 283
+  },
+  "models": {
+    "hf:Geotrend/distilbert-base-ar-cased:finetune": {
+      "config": {
+        "model": "pretrained-distilbert-base-ar-cased-finetune",
+        "model_id": "Geotrend/distilbert-base-ar-cased",
+        "mode": "finetune",
+        "max_len": 64,
+        "lr": 3e-05,
+        "head_lr": 0.001,
+        "epochs": 3,
+        "batch_size": 32,
+        "weight_decay": 0.01,
+        "label_smoothing": 0.05,
+        "seed": 20260920,
+        "n_labels": 77,
+        "parameters": 48591437,
+        "hidden_size": 768,
+        "tokenizer_vocab": 7305,
+        "best_val_intent_accuracy": 0.9094967532467533,
+        "history": [
+          {
+            "epoch": 0,
+            "train_loss": 1.9904508252655666,
+            "val_acc": 0.836038961038961,
+            "seconds": 911.5986716747284
+          },
+          {
+            "epoch": 1,
+            "train_loss": 0.8385864431702464,
+            "val_acc": 0.8993506493506493,
+            "seconds": 1144.17320394516
+          },
+          {
+            "epoch": 2,
+            "train_loss": 0.6509368811297757,
+            "val_acc": 0.9094967532467533,
+            "seconds": 870.466935634613
+          }
+        ]
+      },
+      "fit_seconds": 2930.52215218544,
+      "size": {
+        "serialized_bytes": 194402803,
+        "parameters": 48591437
+      },
+      "latency_batch1_cpu": {
+        "n": 200,
+        "mean_ms": 40.285433924991594,
+        "p50_ms": 38.87038999982906,
+        "p95_ms": 49.45411900007457,
+        "p99_ms": 57.66887699974177,
+        "max_ms": 58.374625999931595
+      },
+      "gate_tuning_on_val": {
+        "hybrid": {
+          "selected": {
+            "confidence_threshold": 0.95,
+            "margin_threshold": 0.5,
+            "require_agreement": false,
+            "require_family_corroboration": false,
+            "honour_state_veto": true,
+            "require_financial_evidence": false
+          },
+          "selected_val_metrics": {
+            "unsafe_auto_imports": 0,
+            "safe_auto_import_coverage": 0.32044198895027626,
+            "auto_import_rate": 0.07061688311688312
+          },
+          "zero_unsafe_configs_on_val": 36
+        },
+        "confidence_only": {
+          "selected": {
+            "confidence_threshold": 0.95,
+            "margin_threshold": 0.5,
+            "require_agreement": false,
+            "require_family_corroboration": false,
+            "honour_state_veto": false,
+            "require_financial_evidence": false
+          },
+          "selected_val_metrics": {
+            "unsafe_auto_imports": 0,
+            "safe_auto_import_coverage": 0.5543278084714549,
+            "auto_import_rate": 0.12215909090909091
+          },
+          "zero_unsafe_configs_on_val": 18
+        }
+      },
+      "splits": {
+        "msa": {
+          "n": 3574,
+          "hybrid_gate": {
+            "all": {
+              "n": 3574,
+              "family_accuracy": 0.9415221040850588,
+              "state_accuracy": 0.9476776720761052,
+              "joint_accuracy": 0.9219362059317292,
+              "direction_accuracy": 0.9583100167879127,
+              "intent_accuracy": 0.8757694459988808
+            },
+            "high_risk_subset": {
+              "n": 624,
+              "family_accuracy": 0.9102564102564102,
+              "state_accuracy": 0.8958333333333334,
+              "joint_accuracy": 0.8701923076923077,
+              "direction_accuracy": 0.9439102564102564,
+              "intent_accuracy": 0.8493589743589743
+            },
+            "calibration": {
+              "n": 3574,
+              "ece": 0.07780764860668596,
+              "mce": 0.34668188071564626,
+              "brier": 0.06888199896676465,
+              "overconfident_wrong_at_0.90": 19,
+              "overconfident_wrong_rate": 0.005316172355903749,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 5,
+                  "mean_confidence": 0.10058458149433136,
+                  "accuracy": 0.0
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 16,
+                  "mean_confidence": 0.16993437055498362,
+                  "accuracy": 0.25
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 38,
+                  "mean_confidence": 0.2322654877054064,
+                  "accuracy": 0.5789473684210527
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 70,
+                  "mean_confidence": 0.300199955701828,
+                  "accuracy": 0.5714285714285714
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 87,
+                  "mean_confidence": 0.3681793500637186,
+                  "accuracy": 0.632183908045977
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 97,
+                  "mean_confidence": 0.43050179039080116,
+                  "accuracy": 0.6907216494845361
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 100,
+                  "mean_confidence": 0.5019917437434196,
+                  "accuracy": 0.75
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 113,
+                  "mean_confidence": 0.569530749215489,
+                  "accuracy": 0.7345132743362832
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 97,
+                  "mean_confidence": 0.6318450029363337,
+                  "accuracy": 0.845360824742268
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 151,
+                  "mean_confidence": 0.6994370956294584,
+                  "accuracy": 0.8278145695364238
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 148,
+                  "mean_confidence": 0.7704455711551614,
+                  "accuracy": 0.8986486486486487
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 237,
+                  "mean_confidence": 0.8355478133833358,
+                  "accuracy": 0.9324894514767933
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 463,
+                  "mean_confidence": 0.9049714264292954,
+                  "accuracy": 0.9654427645788337
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1952,
+                  "mean_confidence": 0.9726211126038774,
+                  "accuracy": 0.9943647540983607
+                }
+              ]
+            },
+            "top_confusions": [
+              {
+                "true": "fee|informational",
+                "pred": "fee|posted",
+                "count": 9
+              },
+              {
+                "true": "service|informational",
+                "pred": "fee|informational",
+                "count": 8
+              },
+              {
+                "true": "transfer|failed",
+                "pred": "service|informational",
+                "count": 7
+              },
+              {
+                "true": "transfer|future",
+                "pred": "transfer|failed",
+                "count": 6
+              },
+              {
+                "true": "authentication|informational",
+                "pred": "authentication|failed",
+                "count": 6
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|informational",
+                "count": 6
+              },
+              {
+                "true": "transfer|future",
+                "pred": "balance|informational",
+                "count": 6
+              },
+              {
+                "true": "recurring-payment|informational",
+                "pred": "service|informational",
+                "count": 5
+              },
+              {
+                "true": "purchase|future",
+                "pred": "service|informational",
+                "count": 5
+              },
+              {
+                "true": "refund|posted",
+                "pred": "purchase|posted",
+                "count": 5
+              },
+              {
+                "true": "transfer|failed",
+                "pred": "transfer|informational",
+                "count": 5
+              },
+              {
+                "true": "cash-withdrawal|posted",
+                "pred": "fee|informational",
+                "count": 5
+              }
+            ],
+            "gate": {
+              "n": 3574,
+              "outcomes": {
+                "refuse": 2940,
+                "auto-import": 158,
+                "review": 476
+              },
+              "auto_import_rate": 0.04420817011751539,
+              "unsafe_auto_imports": 2,
+              "unsafe_auto_import_rate": 0.0005595970900951316,
+              "phantom_auto_imports": 1,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9873417721518988,
+              "ledger_eligible_n": 621,
+              "safe_auto_import_coverage": 0.25120772946859904,
+              "review_rate": 0.1331841074426413,
+              "refuse_rate": 0.8226077224398433,
+              "wrongly_refused": 38,
+              "wrongly_refused_rate": 0.061191626409017714,
+              "unsafe_examples": [
+                {
+                  "text": "لست متأكدا من الغرض من هذه الخصومات",
+                  "true": "fee|posted",
+                  "pred": "recurring-payment|posted",
+                  "confidence": 0.9534514546394348,
+                  "evidence": []
+                },
+                {
+                  "text": "اذا تم التحويل ما الرسوم التي سادفعها؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9785735011100769,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                }
+              ]
+            },
+            "gate_high_risk": {
+              "n": 624,
+              "outcomes": {
+                "refuse": 417,
+                "review": 180,
+                "auto-import": 27
+              },
+              "auto_import_rate": 0.04326923076923077,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 191,
+              "safe_auto_import_coverage": 0.14136125654450263,
+              "review_rate": 0.28846153846153844,
+              "refuse_rate": 0.6682692307692307,
+              "wrongly_refused": 9,
+              "wrongly_refused_rate": 0.04712041884816754,
+              "unsafe_examples": []
+            }
+          },
+          "confidence_only_gate": {
+            "gate": {
+              "n": 3574,
+              "outcomes": {
+                "refuse": 2940,
+                "auto-import": 303,
+                "review": 331
+              },
+              "auto_import_rate": 0.08477895914941243,
+              "unsafe_auto_imports": 2,
+              "unsafe_auto_import_rate": 0.0005595970900951316,
+              "phantom_auto_imports": 1,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9933993399339934,
+              "ledger_eligible_n": 621,
+              "safe_auto_import_coverage": 0.48470209339774556,
+              "review_rate": 0.09261331841074426,
+              "refuse_rate": 0.8226077224398433,
+              "wrongly_refused": 38,
+              "wrongly_refused_rate": 0.061191626409017714,
+              "unsafe_examples": [
+                {
+                  "text": "لست متأكدا من الغرض من هذه الخصومات",
+                  "true": "fee|posted",
+                  "pred": "recurring-payment|posted",
+                  "confidence": 0.9534514546394348,
+                  "evidence": []
+                },
+                {
+                  "text": "اذا تم التحويل ما الرسوم التي سادفعها؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9785735011100769,
+                  "evidence": []
+                }
+              ]
+            },
+            "calibration": {
+              "n": 3574,
+              "ece": 0.07780764860668596,
+              "mce": 0.34668188071564626,
+              "brier": 0.06888199896676465,
+              "overconfident_wrong_at_0.90": 19,
+              "overconfident_wrong_rate": 0.005316172355903749,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 5,
+                  "mean_confidence": 0.10058458149433136,
+                  "accuracy": 0.0
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 16,
+                  "mean_confidence": 0.16993437055498362,
+                  "accuracy": 0.25
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 38,
+                  "mean_confidence": 0.2322654877054064,
+                  "accuracy": 0.5789473684210527
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 70,
+                  "mean_confidence": 0.300199955701828,
+                  "accuracy": 0.5714285714285714
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 87,
+                  "mean_confidence": 0.3681793500637186,
+                  "accuracy": 0.632183908045977
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 97,
+                  "mean_confidence": 0.43050179039080116,
+                  "accuracy": 0.6907216494845361
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 100,
+                  "mean_confidence": 0.5019917437434196,
+                  "accuracy": 0.75
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 113,
+                  "mean_confidence": 0.569530749215489,
+                  "accuracy": 0.7345132743362832
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 97,
+                  "mean_confidence": 0.6318450029363337,
+                  "accuracy": 0.845360824742268
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 151,
+                  "mean_confidence": 0.6994370956294584,
+                  "accuracy": 0.8278145695364238
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 148,
+                  "mean_confidence": 0.7704455711551614,
+                  "accuracy": 0.8986486486486487
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 237,
+                  "mean_confidence": 0.8355478133833358,
+                  "accuracy": 0.9324894514767933
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 463,
+                  "mean_confidence": 0.9049714264292954,
+                  "accuracy": 0.9654427645788337
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1952,
+                  "mean_confidence": 0.9726211126038774,
+                  "accuracy": 0.9943647540983607
+                }
+              ]
+            }
+          }
+        },
+        "pal": {
+          "n": 3807,
+          "hybrid_gate": {
+            "all": {
+              "n": 3807,
+              "family_accuracy": 0.916206987128973,
+              "state_accuracy": 0.9343314946151826,
+              "joint_accuracy": 0.8967691095350669,
+              "direction_accuracy": 0.9443131074336748,
+              "intent_accuracy": 0.8463356973995272
+            },
+            "high_risk_subset": {
+              "n": 675,
+              "family_accuracy": 0.8681481481481481,
+              "state_accuracy": 0.8548148148148148,
+              "joint_accuracy": 0.8207407407407408,
+              "direction_accuracy": 0.9214814814814815,
+              "intent_accuracy": 0.794074074074074
+            },
+            "calibration": {
+              "n": 3807,
+              "ece": 0.0846377297167331,
+              "mce": 0.34700820256363263,
+              "brier": 0.08162111076986132,
+              "overconfident_wrong_at_0.90": 17,
+              "overconfident_wrong_rate": 0.004465458366167586,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 11,
+                  "mean_confidence": 0.10753725198182193,
+                  "accuracy": 0.45454545454545453
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 35,
+                  "mean_confidence": 0.17263470419815607,
+                  "accuracy": 0.4
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 88,
+                  "mean_confidence": 0.2328627102754333,
+                  "accuracy": 0.48863636363636365
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 92,
+                  "mean_confidence": 0.29937268923158233,
+                  "accuracy": 0.4891304347826087
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 101,
+                  "mean_confidence": 0.3682012661258773,
+                  "accuracy": 0.5841584158415841
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 111,
+                  "mean_confidence": 0.43423403759260437,
+                  "accuracy": 0.6666666666666666
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 134,
+                  "mean_confidence": 0.5019866530574969,
+                  "accuracy": 0.6268656716417911
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 166,
+                  "mean_confidence": 0.5690987907260298,
+                  "accuracy": 0.7409638554216867
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 123,
+                  "mean_confidence": 0.632616301862205,
+                  "accuracy": 0.8373983739837398
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 155,
+                  "mean_confidence": 0.7017573610428841,
+                  "accuracy": 0.8838709677419355
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 203,
+                  "mean_confidence": 0.7691839727862128,
+                  "accuracy": 0.896551724137931
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 278,
+                  "mean_confidence": 0.8372184640640835,
+                  "accuracy": 0.9424460431654677
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 476,
+                  "mean_confidence": 0.9047219412667411,
+                  "accuracy": 0.9705882352941176
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1834,
+                  "mean_confidence": 0.9723429641195835,
+                  "accuracy": 0.9929116684841875
+                }
+              ]
+            },
+            "top_confusions": [
+              {
+                "true": "service|informational",
+                "pred": "purchase|future",
+                "count": 15
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|failed",
+                "count": 15
+              },
+              {
+                "true": "purchase|posted",
+                "pred": "cash-withdrawal|posted",
+                "count": 12
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|informational",
+                "count": 11
+              },
+              {
+                "true": "service|informational",
+                "pred": "purchase|failed",
+                "count": 11
+              },
+              {
+                "true": "transfer|failed",
+                "pred": "purchase|posted",
+                "count": 9
+              },
+              {
+                "true": "service|informational",
+                "pred": "exchange|informational",
+                "count": 8
+              },
+              {
+                "true": "service|informational",
+                "pred": "authentication|informational",
+                "count": 7
+              },
+              {
+                "true": "fee|informational",
+                "pred": "fee|posted",
+                "count": 7
+              },
+              {
+                "true": "transfer|posted",
+                "pred": "service|informational",
+                "count": 7
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|posted",
+                "count": 6
+              },
+              {
+                "true": "recurring-payment|informational",
+                "pred": "service|informational",
+                "count": 6
+              }
+            ],
+            "gate": {
+              "n": 3807,
+              "outcomes": {
+                "refuse": 3190,
+                "review": 490,
+                "auto-import": 127
+              },
+              "auto_import_rate": 0.03335960073548726,
+              "unsafe_auto_imports": 1,
+              "unsafe_auto_import_rate": 0.0002626740215392698,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9921259842519685,
+              "ledger_eligible_n": 587,
+              "safe_auto_import_coverage": 0.21465076660988075,
+              "review_rate": 0.1287102705542422,
+              "refuse_rate": 0.8379301287102705,
+              "wrongly_refused": 45,
+              "wrongly_refused_rate": 0.07666098807495741,
+              "unsafe_examples": [
+                {
+                  "text": "على ما يبدو سعر الصرافة مش شغال في هاي المعاملة.",
+                  "true": "purchase|posted",
+                  "pred": "cash-withdrawal|posted",
+                  "confidence": 0.9604209065437317,
+                  "evidence": [
+                    "family:cash-withdrawal:core:صراف"
+                  ]
+                }
+              ]
+            },
+            "gate_high_risk": {
+              "n": 675,
+              "outcomes": {
+                "refuse": 447,
+                "review": 181,
+                "auto-import": 47
+              },
+              "auto_import_rate": 0.06962962962962962,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 213,
+              "safe_auto_import_coverage": 0.22065727699530516,
+              "review_rate": 0.26814814814814814,
+              "refuse_rate": 0.6622222222222223,
+              "wrongly_refused": 23,
+              "wrongly_refused_rate": 0.107981220657277,
+              "unsafe_examples": []
+            }
+          },
+          "confidence_only_gate": {
+            "gate": {
+              "n": 3807,
+              "outcomes": {
+                "refuse": 3190,
+                "review": 355,
+                "auto-import": 262
+              },
+              "auto_import_rate": 0.06882059364328869,
+              "unsafe_auto_imports": 2,
+              "unsafe_auto_import_rate": 0.0005253480430785396,
+              "phantom_auto_imports": 1,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9923664122137404,
+              "ledger_eligible_n": 587,
+              "safe_auto_import_coverage": 0.44293015332197616,
+              "review_rate": 0.09324927764644077,
+              "refuse_rate": 0.8379301287102705,
+              "wrongly_refused": 45,
+              "wrongly_refused_rate": 0.07666098807495741,
+              "unsafe_examples": [
+                {
+                  "text": "على ما يبدو سعر الصرافة مش شغال في هاي المعاملة.",
+                  "true": "purchase|posted",
+                  "pred": "cash-withdrawal|posted",
+                  "confidence": 0.9604209065437317,
+                  "evidence": []
+                },
+                {
+                  "text": "بدي اعمل تحويل شو الرسوم رح تكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9518769383430481,
+                  "evidence": []
+                }
+              ]
+            },
+            "calibration": {
+              "n": 3807,
+              "ece": 0.0846377297167331,
+              "mce": 0.34700820256363263,
+              "brier": 0.08162111076986132,
+              "overconfident_wrong_at_0.90": 17,
+              "overconfident_wrong_rate": 0.004465458366167586,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 11,
+                  "mean_confidence": 0.10753725198182193,
+                  "accuracy": 0.45454545454545453
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 35,
+                  "mean_confidence": 0.17263470419815607,
+                  "accuracy": 0.4
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 88,
+                  "mean_confidence": 0.2328627102754333,
+                  "accuracy": 0.48863636363636365
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 92,
+                  "mean_confidence": 0.29937268923158233,
+                  "accuracy": 0.4891304347826087
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 101,
+                  "mean_confidence": 0.3682012661258773,
+                  "accuracy": 0.5841584158415841
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 111,
+                  "mean_confidence": 0.43423403759260437,
+                  "accuracy": 0.6666666666666666
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 134,
+                  "mean_confidence": 0.5019866530574969,
+                  "accuracy": 0.6268656716417911
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 166,
+                  "mean_confidence": 0.5690987907260298,
+                  "accuracy": 0.7409638554216867
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 123,
+                  "mean_confidence": 0.632616301862205,
+                  "accuracy": 0.8373983739837398
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 155,
+                  "mean_confidence": 0.7017573610428841,
+                  "accuracy": 0.8838709677419355
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 203,
+                  "mean_confidence": 0.7691839727862128,
+                  "accuracy": 0.896551724137931
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 278,
+                  "mean_confidence": 0.8372184640640835,
+                  "accuracy": 0.9424460431654677
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 476,
+                  "mean_confidence": 0.9047219412667411,
+                  "accuracy": 0.9705882352941176
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1834,
+                  "mean_confidence": 0.9723429641195835,
+                  "accuracy": 0.9929116684841875
+                }
+              ]
+            }
+          }
+        },
+        "saudi": {
+          "n": 3580,
+          "hybrid_gate": {
+            "all": {
+              "n": 3580,
+              "family_accuracy": 0.8544692737430167,
+              "state_accuracy": 0.8871508379888268,
+              "joint_accuracy": 0.8201117318435754,
+              "direction_accuracy": 0.9008379888268156,
+              "intent_accuracy": 0.7298882681564246
+            },
+            "high_risk_subset": {
+              "n": 626,
+              "family_accuracy": 0.8242811501597445,
+              "state_accuracy": 0.8067092651757188,
+              "joint_accuracy": 0.768370607028754,
+              "direction_accuracy": 0.8706070287539937,
+              "intent_accuracy": 0.7332268370607029
+            },
+            "calibration": {
+              "n": 3580,
+              "ece": 0.0998351246971824,
+              "mce": 0.29001881613543157,
+              "brier": 0.13110096536718147,
+              "overconfident_wrong_at_0.90": 33,
+              "overconfident_wrong_rate": 0.009217877094972068,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 23,
+                  "mean_confidence": 0.12010966144178224,
+                  "accuracy": 0.30434782608695654
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 102,
+                  "mean_confidence": 0.16819624354441962,
+                  "accuracy": 0.3235294117647059
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 119,
+                  "mean_confidence": 0.23232326600231043,
+                  "accuracy": 0.47058823529411764
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 152,
+                  "mean_confidence": 0.3020864470224631,
+                  "accuracy": 0.5921052631578947
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 171,
+                  "mean_confidence": 0.3672926783213141,
+                  "accuracy": 0.5672514619883041
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 187,
+                  "mean_confidence": 0.43151045977113084,
+                  "accuracy": 0.6524064171122995
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 187,
+                  "mean_confidence": 0.49905453630309693,
+                  "accuracy": 0.6256684491978609
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 195,
+                  "mean_confidence": 0.5677621807807531,
+                  "accuracy": 0.7230769230769231
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 200,
+                  "mean_confidence": 0.6354007735848427,
+                  "accuracy": 0.815
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 206,
+                  "mean_confidence": 0.7012088284330461,
+                  "accuracy": 0.7912621359223301
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 222,
+                  "mean_confidence": 0.7663958453917289,
+                  "accuracy": 0.8783783783783784
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 265,
+                  "mean_confidence": 0.8371614651859931,
+                  "accuracy": 0.9207547169811321
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 444,
+                  "mean_confidence": 0.904358138506477,
+                  "accuracy": 0.9414414414414415
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1107,
+                  "mean_confidence": 0.9688526879804245,
+                  "accuracy": 0.9846431797651309
+                }
+              ]
+            },
+            "top_confusions": [
+              {
+                "true": "service|informational",
+                "pred": "authentication|informational",
+                "count": 52
+              },
+              {
+                "true": "authentication|informational",
+                "pred": "authentication|failed",
+                "count": 15
+              },
+              {
+                "true": "fee|informational",
+                "pred": "fee|posted",
+                "count": 14
+              },
+              {
+                "true": "recurring-payment|informational",
+                "pred": "service|informational",
+                "count": 13
+              },
+              {
+                "true": "service|informational",
+                "pred": "purchase|failed",
+                "count": 13
+              },
+              {
+                "true": "fee|informational",
+                "pred": "service|informational",
+                "count": 12
+              },
+              {
+                "true": "service|informational",
+                "pred": "purchase|posted",
+                "count": 11
+              },
+              {
+                "true": "transfer|failed",
+                "pred": "transfer|future",
+                "count": 11
+              },
+              {
+                "true": "authentication|informational",
+                "pred": "service|informational",
+                "count": 11
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|failed",
+                "count": 10
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|informational",
+                "count": 10
+              },
+              {
+                "true": "transfer|posted",
+                "pred": "service|informational",
+                "count": 9
+              }
+            ],
+            "gate": {
+              "n": 3580,
+              "outcomes": {
+                "refuse": 2976,
+                "review": 511,
+                "auto-import": 93
+              },
+              "auto_import_rate": 0.025977653631284917,
+              "unsafe_auto_imports": 1,
+              "unsafe_auto_import_rate": 0.00027932960893854746,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.989247311827957,
+              "ledger_eligible_n": 622,
+              "safe_auto_import_coverage": 0.14790996784565916,
+              "review_rate": 0.14273743016759777,
+              "refuse_rate": 0.8312849162011173,
+              "wrongly_refused": 118,
+              "wrongly_refused_rate": 0.18971061093247588,
+              "unsafe_examples": [
+                {
+                  "text": "أظن إن سعر صرف السحب ببطاقتي موب صحيح",
+                  "true": "purchase|posted",
+                  "pred": "cash-withdrawal|posted",
+                  "confidence": 0.9618797302246094,
+                  "evidence": [
+                    "family:cash-withdrawal:core:السحب"
+                  ]
+                }
+              ]
+            },
+            "gate_high_risk": {
+              "n": 626,
+              "outcomes": {
+                "refuse": 425,
+                "review": 161,
+                "auto-import": 40
+              },
+              "auto_import_rate": 0.06389776357827476,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 192,
+              "safe_auto_import_coverage": 0.20833333333333334,
+              "review_rate": 0.2571884984025559,
+              "refuse_rate": 0.6789137380191693,
+              "wrongly_refused": 25,
+              "wrongly_refused_rate": 0.13020833333333334,
+              "unsafe_examples": []
+            }
+          },
+          "confidence_only_gate": {
+            "gate": {
+              "n": 3580,
+              "outcomes": {
+                "refuse": 2976,
+                "review": 437,
+                "auto-import": 167
+              },
+              "auto_import_rate": 0.04664804469273743,
+              "unsafe_auto_imports": 5,
+              "unsafe_auto_import_rate": 0.0013966480446927375,
+              "phantom_auto_imports": 4,
+              "direction_flip_auto_imports": 1,
+              "auto_import_precision": 0.9700598802395209,
+              "ledger_eligible_n": 622,
+              "safe_auto_import_coverage": 0.2604501607717042,
+              "review_rate": 0.12206703910614525,
+              "refuse_rate": 0.8312849162011173,
+              "wrongly_refused": 118,
+              "wrongly_refused_rate": 0.18971061093247588,
+              "unsafe_examples": [
+                {
+                  "text": "أظن إن سعر صرف السحب ببطاقتي موب صحيح",
+                  "true": "purchase|posted",
+                  "pred": "cash-withdrawal|posted",
+                  "confidence": 0.9618797302246094,
+                  "evidence": []
+                },
+                {
+                  "text": "إذا تم التحويل وش الرسوم اللي بأدفعها؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9692608118057251,
+                  "evidence": []
+                },
+                {
+                  "text": "فيه رسوم على التحويل؟ إذا فيه, قد ايش بتكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9575749039649963,
+                  "evidence": []
+                },
+                {
+                  "text": "ليش دفعتي ملعقة؟",
+                  "true": "purchase|future",
+                  "pred": "refund|posted",
+                  "confidence": 0.9544568657875061,
+                  "evidence": []
+                },
+                {
+                  "text": "وش عمولة التحويل؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.981340229511261,
+                  "evidence": []
+                }
+              ]
+            },
+            "calibration": {
+              "n": 3580,
+              "ece": 0.0998351246971824,
+              "mce": 0.29001881613543157,
+              "brier": 0.13110096536718147,
+              "overconfident_wrong_at_0.90": 33,
+              "overconfident_wrong_rate": 0.009217877094972068,
+              "bins": [
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 23,
+                  "mean_confidence": 0.12010966144178224,
+                  "accuracy": 0.30434782608695654
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 102,
+                  "mean_confidence": 0.16819624354441962,
+                  "accuracy": 0.3235294117647059
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 119,
+                  "mean_confidence": 0.23232326600231043,
+                  "accuracy": 0.47058823529411764
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 152,
+                  "mean_confidence": 0.3020864470224631,
+                  "accuracy": 0.5921052631578947
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 171,
+                  "mean_confidence": 0.3672926783213141,
+                  "accuracy": 0.5672514619883041
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 187,
+                  "mean_confidence": 0.43151045977113084,
+                  "accuracy": 0.6524064171122995
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 187,
+                  "mean_confidence": 0.49905453630309693,
+                  "accuracy": 0.6256684491978609
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 195,
+                  "mean_confidence": 0.5677621807807531,
+                  "accuracy": 0.7230769230769231
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 200,
+                  "mean_confidence": 0.6354007735848427,
+                  "accuracy": 0.815
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 206,
+                  "mean_confidence": 0.7012088284330461,
+                  "accuracy": 0.7912621359223301
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 222,
+                  "mean_confidence": 0.7663958453917289,
+                  "accuracy": 0.8783783783783784
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 265,
+                  "mean_confidence": 0.8371614651859931,
+                  "accuracy": 0.9207547169811321
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 444,
+                  "mean_confidence": 0.904358138506477,
+                  "accuracy": 0.9414414414414415
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 1107,
+                  "mean_confidence": 0.9688526879804245,
+                  "accuracy": 0.9846431797651309
+                }
+              ]
+            }
+          }
+        },
+        "moroccan": {
+          "n": 3574,
+          "hybrid_gate": {
+            "all": {
+              "n": 3574,
+              "family_accuracy": 0.7767207610520426,
+              "state_accuracy": 0.8388360380526021,
+              "joint_accuracy": 0.7311135982092893,
+              "direction_accuracy": 0.8407946278679351,
+              "intent_accuracy": 0.5959709009513151
+            },
+            "high_risk_subset": {
+              "n": 624,
+              "family_accuracy": 0.6826923076923077,
+              "state_accuracy": 0.6282051282051282,
+              "joint_accuracy": 0.5785256410256411,
+              "direction_accuracy": 0.7596153846153846,
+              "intent_accuracy": 0.5352564102564102
+            },
+            "calibration": {
+              "n": 3574,
+              "ece": 0.12675961025922278,
+              "mce": 0.9383359923958778,
+              "brier": 0.17745416318414925,
+              "overconfident_wrong_at_0.90": 28,
+              "overconfident_wrong_rate": 0.00783435926133184,
+              "bins": [
+                {
+                  "lo": 0.0,
+                  "hi": 0.06666666666666667,
+                  "n": 2,
+                  "mean_confidence": 0.06166400760412216,
+                  "accuracy": 1.0
+                },
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 94,
+                  "mean_confidence": 0.11512160118907055,
+                  "accuracy": 0.2978723404255319
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 258,
+                  "mean_confidence": 0.16775517621936725,
+                  "accuracy": 0.3682170542635659
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 268,
+                  "mean_confidence": 0.23427324213865977,
+                  "accuracy": 0.47761194029850745
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 220,
+                  "mean_confidence": 0.29864889816804363,
+                  "accuracy": 0.5227272727272727
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 265,
+                  "mean_confidence": 0.36542256744402757,
+                  "accuracy": 0.5886792452830188
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 219,
+                  "mean_confidence": 0.43458539614938707,
+                  "accuracy": 0.6118721461187214
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 213,
+                  "mean_confidence": 0.4977393115350338,
+                  "accuracy": 0.676056338028169
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 195,
+                  "mean_confidence": 0.5638897342559619,
+                  "accuracy": 0.7128205128205128
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 198,
+                  "mean_confidence": 0.6326301305583029,
+                  "accuracy": 0.8080808080808081
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 184,
+                  "mean_confidence": 0.700633955390557,
+                  "accuracy": 0.7989130434782609
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 217,
+                  "mean_confidence": 0.7700221708842686,
+                  "accuracy": 0.8940092165898618
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 243,
+                  "mean_confidence": 0.8344496228567366,
+                  "accuracy": 0.8765432098765432
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 318,
+                  "mean_confidence": 0.9026946616622636,
+                  "accuracy": 0.9182389937106918
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 680,
+                  "mean_confidence": 0.9678809313213124,
+                  "accuracy": 0.9794117647058823
+                }
+              ]
+            },
+            "top_confusions": [
+              {
+                "true": "service|informational",
+                "pred": "authentication|informational",
+                "count": 49
+              },
+              {
+                "true": "service|informational",
+                "pred": "exchange|informational",
+                "count": 34
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|informational",
+                "count": 32
+              },
+              {
+                "true": "service|informational",
+                "pred": "balance|informational",
+                "count": 31
+              },
+              {
+                "true": "fee|informational",
+                "pred": "service|informational",
+                "count": 31
+              },
+              {
+                "true": "fee|informational",
+                "pred": "fee|posted",
+                "count": 25
+              },
+              {
+                "true": "transfer|posted",
+                "pred": "service|informational",
+                "count": 23
+              },
+              {
+                "true": "transfer|failed",
+                "pred": "service|informational",
+                "count": 23
+              },
+              {
+                "true": "service|informational",
+                "pred": "transfer|failed",
+                "count": 22
+              },
+              {
+                "true": "service|informational",
+                "pred": "refund|informational",
+                "count": 19
+              },
+              {
+                "true": "purchase|posted",
+                "pred": "service|informational",
+                "count": 19
+              },
+              {
+                "true": "transfer|future",
+                "pred": "transfer|failed",
+                "count": 16
+              }
+            ],
+            "gate": {
+              "n": 3574,
+              "outcomes": {
+                "refuse": 3019,
+                "review": 501,
+                "auto-import": 54
+              },
+              "auto_import_rate": 0.01510912143256855,
+              "unsafe_auto_imports": 5,
+              "unsafe_auto_import_rate": 0.0013989927252378287,
+              "phantom_auto_imports": 5,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9074074074074074,
+              "ledger_eligible_n": 621,
+              "safe_auto_import_coverage": 0.07890499194847021,
+              "review_rate": 0.14017907106883043,
+              "refuse_rate": 0.844711807498601,
+              "wrongly_refused": 203,
+              "wrongly_refused_rate": 0.32689210950080516,
+              "unsafe_examples": [
+                {
+                  "text": "واش التحويل كايكلف شي رسوم؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9653488993644714,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟ إيلا كان كاين، شحال غادي يكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9671575427055359,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟ إيلا كان كاين، شحال غادي يكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9671575427055359,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9568520188331604,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9568520188331604,
+                  "evidence": [
+                    "family:transfer:core:تحويل",
+                    "family:fee:core:رسوم"
+                  ]
+                }
+              ]
+            },
+            "gate_high_risk": {
+              "n": 624,
+              "outcomes": {
+                "refuse": 472,
+                "review": 147,
+                "auto-import": 5
+              },
+              "auto_import_rate": 0.008012820512820512,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 191,
+              "safe_auto_import_coverage": 0.02617801047120419,
+              "review_rate": 0.23557692307692307,
+              "refuse_rate": 0.7564102564102564,
+              "wrongly_refused": 95,
+              "wrongly_refused_rate": 0.4973821989528796,
+              "unsafe_examples": []
+            }
+          },
+          "confidence_only_gate": {
+            "gate": {
+              "n": 3574,
+              "outcomes": {
+                "refuse": 3019,
+                "review": 467,
+                "auto-import": 88
+              },
+              "auto_import_rate": 0.024622271964185788,
+              "unsafe_auto_imports": 7,
+              "unsafe_auto_import_rate": 0.00195858981533296,
+              "phantom_auto_imports": 7,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 0.9204545454545454,
+              "ledger_eligible_n": 621,
+              "safe_auto_import_coverage": 0.13043478260869565,
+              "review_rate": 0.1306659205372132,
+              "refuse_rate": 0.844711807498601,
+              "wrongly_refused": 203,
+              "wrongly_refused_rate": 0.32689210950080516,
+              "unsafe_examples": [
+                {
+                  "text": "واش التحويل كايكلف شي رسوم؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9653488993644714,
+                  "evidence": []
+                },
+                {
+                  "text": "شنو الرسوم لي غانخلص الى حولت؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.962632954120636,
+                  "evidence": []
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟ إيلا كان كاين، شحال غادي يكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9671575427055359,
+                  "evidence": []
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟ إيلا كان كاين، شحال غادي يكون؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9671575427055359,
+                  "evidence": []
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9568520188331604,
+                  "evidence": []
+                },
+                {
+                  "text": "واش كاين شي رسوم على التحويل؟",
+                  "true": "fee|informational",
+                  "pred": "fee|posted",
+                  "confidence": 0.9568520188331604,
+                  "evidence": []
+                },
+                {
+                  "text": "تم خصم مني مرتين، والخصم التاني كيبان 'في الانتظار'. قداش غادي نتسنى قبل ما نرجع فلوسي بعد ما يترد الخصم التاني؟",
+                  "true": "purchase|future",
+                  "pred": "purchase|posted",
+                  "confidence": 0.9536545872688293,
+                  "evidence": []
+                }
+              ]
+            },
+            "calibration": {
+              "n": 3574,
+              "ece": 0.12675961025922278,
+              "mce": 0.9383359923958778,
+              "brier": 0.17745416318414925,
+              "overconfident_wrong_at_0.90": 28,
+              "overconfident_wrong_rate": 0.00783435926133184,
+              "bins": [
+                {
+                  "lo": 0.0,
+                  "hi": 0.06666666666666667,
+                  "n": 2,
+                  "mean_confidence": 0.06166400760412216,
+                  "accuracy": 1.0
+                },
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 94,
+                  "mean_confidence": 0.11512160118907055,
+                  "accuracy": 0.2978723404255319
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 258,
+                  "mean_confidence": 0.16775517621936725,
+                  "accuracy": 0.3682170542635659
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 268,
+                  "mean_confidence": 0.23427324213865977,
+                  "accuracy": 0.47761194029850745
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 220,
+                  "mean_confidence": 0.29864889816804363,
+                  "accuracy": 0.5227272727272727
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 265,
+                  "mean_confidence": 0.36542256744402757,
+                  "accuracy": 0.5886792452830188
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 219,
+                  "mean_confidence": 0.43458539614938707,
+                  "accuracy": 0.6118721461187214
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 213,
+                  "mean_confidence": 0.4977393115350338,
+                  "accuracy": 0.676056338028169
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 195,
+                  "mean_confidence": 0.5638897342559619,
+                  "accuracy": 0.7128205128205128
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 198,
+                  "mean_confidence": 0.6326301305583029,
+                  "accuracy": 0.8080808080808081
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 184,
+                  "mean_confidence": 0.700633955390557,
+                  "accuracy": 0.7989130434782609
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 217,
+                  "mean_confidence": 0.7700221708842686,
+                  "accuracy": 0.8940092165898618
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 243,
+                  "mean_confidence": 0.8344496228567366,
+                  "accuracy": 0.8765432098765432
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 318,
+                  "mean_confidence": 0.9026946616622636,
+                  "accuracy": 0.9182389937106918
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 680,
+                  "mean_confidence": 0.9678809313213124,
+                  "accuracy": 0.9794117647058823
+                }
+              ]
+            }
+          }
+        },
+        "tunisian": {
+          "n": 999,
+          "hybrid_gate": {
+            "all": {
+              "n": 999,
+              "family_accuracy": 0.6026026026026026,
+              "state_accuracy": 0.6816816816816816,
+              "joint_accuracy": 0.5455455455455456,
+              "direction_accuracy": 0.7137137137137137,
+              "intent_accuracy": 0.41041041041041043
+            },
+            "high_risk_subset": {
+              "n": 64,
+              "family_accuracy": 0.3125,
+              "state_accuracy": 0.40625,
+              "joint_accuracy": 0.28125,
+              "direction_accuracy": 0.484375,
+              "intent_accuracy": 0.28125
+            },
+            "calibration": {
+              "n": 999,
+              "ece": 0.07609570567105504,
+              "mce": 0.9396810829639435,
+              "brier": 0.1955719847672901,
+              "overconfident_wrong_at_0.90": 0,
+              "overconfident_wrong_rate": 0.0,
+              "bins": [
+                {
+                  "lo": 0.0,
+                  "hi": 0.06666666666666667,
+                  "n": 1,
+                  "mean_confidence": 0.06031891703605652,
+                  "accuracy": 1.0
+                },
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 45,
+                  "mean_confidence": 0.10927850587500466,
+                  "accuracy": 0.2
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 111,
+                  "mean_confidence": 0.17062270520506678,
+                  "accuracy": 0.2972972972972973
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 118,
+                  "mean_confidence": 0.2355885148300963,
+                  "accuracy": 0.3135593220338983
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 104,
+                  "mean_confidence": 0.2971319934496513,
+                  "accuracy": 0.4326923076923077
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 99,
+                  "mean_confidence": 0.3706055021647251,
+                  "accuracy": 0.45454545454545453
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 101,
+                  "mean_confidence": 0.4307111416122701,
+                  "accuracy": 0.4752475247524752
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 55,
+                  "mean_confidence": 0.4995922755111348,
+                  "accuracy": 0.4909090909090909
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 56,
+                  "mean_confidence": 0.565767377614975,
+                  "accuracy": 0.5178571428571429
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 49,
+                  "mean_confidence": 0.6412069225797847,
+                  "accuracy": 0.7142857142857143
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 38,
+                  "mean_confidence": 0.7019989866959421,
+                  "accuracy": 0.7631578947368421
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 44,
+                  "mean_confidence": 0.7730996635827151,
+                  "accuracy": 0.7954545454545454
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 47,
+                  "mean_confidence": 0.8331255874735244,
+                  "accuracy": 0.8936170212765957
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 69,
+                  "mean_confidence": 0.9041580462801284,
+                  "accuracy": 0.9855072463768116
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 62,
+                  "mean_confidence": 0.9625117836459991,
+                  "accuracy": 1.0
+                }
+              ]
+            },
+            "top_confusions": [
+              {
+                "true": "service|informational",
+                "pred": "transfer|failed",
+                "count": 31
+              },
+              {
+                "true": "service|informational",
+                "pred": "balance|informational",
+                "count": 29
+              },
+              {
+                "true": "fee|posted",
+                "pred": "service|informational",
+                "count": 28
+              },
+              {
+                "true": "transfer|future",
+                "pred": "transfer|failed",
+                "count": 26
+              },
+              {
+                "true": "cash-withdrawal|failed",
+                "pred": "service|informational",
+                "count": 21
+              },
+              {
+                "true": "service|informational",
+                "pred": "cash-withdrawal|failed",
+                "count": 14
+              },
+              {
+                "true": "cash-withdrawal|posted",
+                "pred": "refund|informational",
+                "count": 14
+              },
+              {
+                "true": "service|informational",
+                "pred": "authentication|informational",
+                "count": 13
+              },
+              {
+                "true": "fee|posted",
+                "pred": "recurring-payment|posted",
+                "count": 11
+              },
+              {
+                "true": "fee|informational",
+                "pred": "transfer|failed",
+                "count": 9
+              },
+              {
+                "true": "service|informational",
+                "pred": "purchase|posted",
+                "count": 8
+              },
+              {
+                "true": "service|informational",
+                "pred": "refund|informational",
+                "count": 8
+              }
+            ],
+            "gate": {
+              "n": 999,
+              "outcomes": {
+                "refuse": 871,
+                "review": 126,
+                "auto-import": 2
+              },
+              "auto_import_rate": 0.002002002002002002,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 162,
+              "safe_auto_import_coverage": 0.012345679012345678,
+              "review_rate": 0.12612612612612611,
+              "refuse_rate": 0.8718718718718719,
+              "wrongly_refused": 93,
+              "wrongly_refused_rate": 0.5740740740740741,
+              "unsafe_examples": []
+            },
+            "gate_high_risk": {
+              "n": 64,
+              "outcomes": {
+                "refuse": 61,
+                "review": 3
+              },
+              "auto_import_rate": 0.0,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": NaN,
+              "ledger_eligible_n": 0,
+              "safe_auto_import_coverage": NaN,
+              "review_rate": 0.046875,
+              "refuse_rate": 0.953125,
+              "wrongly_refused": 0,
+              "wrongly_refused_rate": NaN,
+              "unsafe_examples": []
+            }
+          },
+          "confidence_only_gate": {
+            "gate": {
+              "n": 999,
+              "outcomes": {
+                "refuse": 871,
+                "review": 123,
+                "auto-import": 5
+              },
+              "auto_import_rate": 0.005005005005005005,
+              "unsafe_auto_imports": 0,
+              "unsafe_auto_import_rate": 0.0,
+              "phantom_auto_imports": 0,
+              "direction_flip_auto_imports": 0,
+              "auto_import_precision": 1.0,
+              "ledger_eligible_n": 162,
+              "safe_auto_import_coverage": 0.030864197530864196,
+              "review_rate": 0.12312312312312312,
+              "refuse_rate": 0.8718718718718719,
+              "wrongly_refused": 93,
+              "wrongly_refused_rate": 0.5740740740740741,
+              "unsafe_examples": []
+            },
+            "calibration": {
+              "n": 999,
+              "ece": 0.07609570567105504,
+              "mce": 0.9396810829639435,
+              "brier": 0.1955719847672901,
+              "overconfident_wrong_at_0.90": 0,
+              "overconfident_wrong_rate": 0.0,
+              "bins": [
+                {
+                  "lo": 0.0,
+                  "hi": 0.06666666666666667,
+                  "n": 1,
+                  "mean_confidence": 0.06031891703605652,
+                  "accuracy": 1.0
+                },
+                {
+                  "lo": 0.06666666666666667,
+                  "hi": 0.13333333333333333,
+                  "n": 45,
+                  "mean_confidence": 0.10927850587500466,
+                  "accuracy": 0.2
+                },
+                {
+                  "lo": 0.13333333333333333,
+                  "hi": 0.2,
+                  "n": 111,
+                  "mean_confidence": 0.17062270520506678,
+                  "accuracy": 0.2972972972972973
+                },
+                {
+                  "lo": 0.2,
+                  "hi": 0.26666666666666666,
+                  "n": 118,
+                  "mean_confidence": 0.2355885148300963,
+                  "accuracy": 0.3135593220338983
+                },
+                {
+                  "lo": 0.26666666666666666,
+                  "hi": 0.3333333333333333,
+                  "n": 104,
+                  "mean_confidence": 0.2971319934496513,
+                  "accuracy": 0.4326923076923077
+                },
+                {
+                  "lo": 0.3333333333333333,
+                  "hi": 0.4,
+                  "n": 99,
+                  "mean_confidence": 0.3706055021647251,
+                  "accuracy": 0.45454545454545453
+                },
+                {
+                  "lo": 0.4,
+                  "hi": 0.4666666666666667,
+                  "n": 101,
+                  "mean_confidence": 0.4307111416122701,
+                  "accuracy": 0.4752475247524752
+                },
+                {
+                  "lo": 0.4666666666666667,
+                  "hi": 0.5333333333333333,
+                  "n": 55,
+                  "mean_confidence": 0.4995922755111348,
+                  "accuracy": 0.4909090909090909
+                },
+                {
+                  "lo": 0.5333333333333333,
+                  "hi": 0.6,
+                  "n": 56,
+                  "mean_confidence": 0.565767377614975,
+                  "accuracy": 0.5178571428571429
+                },
+                {
+                  "lo": 0.6,
+                  "hi": 0.6666666666666666,
+                  "n": 49,
+                  "mean_confidence": 0.6412069225797847,
+                  "accuracy": 0.7142857142857143
+                },
+                {
+                  "lo": 0.6666666666666666,
+                  "hi": 0.7333333333333333,
+                  "n": 38,
+                  "mean_confidence": 0.7019989866959421,
+                  "accuracy": 0.7631578947368421
+                },
+                {
+                  "lo": 0.7333333333333333,
+                  "hi": 0.8,
+                  "n": 44,
+                  "mean_confidence": 0.7730996635827151,
+                  "accuracy": 0.7954545454545454
+                },
+                {
+                  "lo": 0.8,
+                  "hi": 0.8666666666666667,
+                  "n": 47,
+                  "mean_confidence": 0.8331255874735244,
+                  "accuracy": 0.8936170212765957
+                },
+                {
+                  "lo": 0.8666666666666667,
+                  "hi": 0.9333333333333333,
+                  "n": 69,
+                  "mean_confidence": 0.9041580462801284,
+                  "accuracy": 0.9855072463768116
+                },
+                {
+                  "lo": 0.9333333333333333,
+                  "hi": 1.0,
+                  "n": 62,
+                  "mean_confidence": 0.9625117836459991,
+                  "accuracy": 1.0
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

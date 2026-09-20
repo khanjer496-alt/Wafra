@@ -32,7 +32,11 @@ module.exports = defineConfig([
     // does not grant those — so a new tool file failed `eslint .` in CI while
     // passing `eslint src` locally. Say what these files are instead of
     // contorting them around a config gap.
-    files: ["scripts/**", "modules/**/plugin/**"],
+    //
+    // validation/ is the same kind of code for the same reason: research and
+    // recovery harnesses that run under Node or Python, never in the app.
+    // Its .cjs exporters were already failing `eslint .` on __dirname.
+    files: ["scripts/**", "validation/**", "modules/**/plugin/**"],
     languageOptions: { globals: { ...globals.node } },
   }
 ]);

@@ -1,6 +1,6 @@
 # Wafra Local Semantic Parser Research Handoff
 
-Updated: 2026-09-20
+Updated: 2026-09-20 (second round)
 
 ## Scope
 
@@ -85,6 +85,82 @@ auto-import / review / refuse
 ```
 
 A pretrained multilingual fallback is attractive because from-scratch tiny models cannot infer completely unseen synonyms. Research candidates included pruned/distilled multilingual MiniLM variants (~18–22M parameters before quantization). Actual checkpoint benchmarking was NOT completed because the prior sandbox could not download Hugging Face Xet-hosted weights. Do not claim those models were benchmarked.
+
+## Round 2 results — the ArBanking77 experiment is done
+
+The experiment this document called "highest priority" has been run. Code,
+exact splits, seeds, configs and result JSON are in
+`validation/semantic-parser/`; read `FINDINGS.md` there first, then `README.md`
+for how to reproduce.
+
+The blocker was real but not what it looked like. The Hugging Face mirror
+`SinaLab/ArBanking77` publishes only ~1k-row *sample* CSVs and carries **no
+Saudi / Moroccan / Tunisian test sets at all**. The full corpus is in the
+`SinaLab/ArBanking77` git checkout. Do not spend time on the HF path again.
+
+What changed in the conclusions:
+
+1. **A trained compact model beats the hand-written lexicon by roughly 2x** on
+   the same populations. Saudi high-risk exact family+state: 48.24% for the
+   lexicon, 76.68% for a char n-gram linear model. Moroccan: 32.53% to 66.35%.
+   Item 8 above stands, and now there is a measured replacement.
+2. **Independent semantic agreement does not work and should come out of the
+   safety design.** Pooled over all five splits, when the primary model is
+   wrong at confidence >= 0.90, a second model trained on the same corpus
+   disagrees 0-36% of the time; for the best primary it is 0-6%. Models
+   trained on one corpus share their blind spots. Keep "deterministic
+   financial evidence"; drop the "and/or".
+3. **Do not ensemble for safety.** Averaging probabilities produced *more*
+   unsafe auto-imports (7 on Moroccan) than any single model. Correlated
+   errors get more confident when pooled.
+4. **Thresholds do not transfer.** The confidence gate that is clean on
+   validation at 65.6% coverage produces 3 unsafe imports on Saudi at 27.0%.
+   A threshold is a property of the distribution it was fitted on.
+5. **Model size is not the constraint.** 64,429 parameters in 0.26 MB and
+   1.0 ms batch-1 CPU comes within 2 points of everything larger.
+6. **Deterministic extraction is where the safety is.** On 199 bank-alert
+   fixtures across 14 markets: 0 unsafe selections, 0 decoy picks, 97.0% exact
+   amount+currency coverage.
+7. **Pretrained encoders lose.** Two, fine-tuned on the same real data, at
+   90 to 260 times the artifact size of a 0.26 MB char-CNN that beats them.
+8. **The "no regression versus current deterministic parser" gate now has a
+   harness** (`production_parser_baseline.cjs`) and the research extractor
+   passes it: 11/11 in the shipping parser's own AE/SA scope, same as the
+   shipping parser. It started at 7/11 — the regression was real and is fixed.
+
+Still not met, and not close: **0 unsafe at >=90% safe coverage on unseen
+dialect wording.** The best zero-unsafe gate policy reaches 15.6% coverage on
+Saudi, and Palestinian still shows 1 unsafe under it.
+
+### Methodology worth keeping
+
+Tuning for dialect robustness has nowhere honest to look: MSA+PAL val is the
+same two dialects the model trained on, and touching the sealed sets ends
+their usefulness. `Banking77_full_corpus.csv` records which dialect each
+training row was rendered in, so the training pool splits into 10,729 MSA and
+10,820 Palestinian rows. `dialect_shift_dev.py` fits on one and measures
+transfer on the other, inside the fitting pool.
+
+It works. The proxy picked a representation predicting +1.17pt on MSA->PAL;
+the sealed dialects delivered +1.31 (Saudi), +1.09 (Moroccan), +0.70
+(Tunisian). Dialect robustness can be tuned without spending a holdout.
+
+### Revised architecture
+
+```
+raw SMS / notification
+  -> deterministic normalization + exact candidate extraction
+  -> deterministic amount-role selection            <- AUTHORIZES the import
+  -> local semantic model (family / direction / state)  <- NARROWS and routes
+  -> auditable marker veto
+  -> auto-import | review | refuse
+```
+
+The semantic model no longer authorizes an import. It chooses the family the
+amount-role rule is conditioned on, routes non-posting events to refuse, and
+supplies the review card's proposal. An auto-import requires an exactly
+extracted amount with an unambiguous role. Absent that evidence the answer is
+review, which is the right outcome for genuinely novel wording.
 
 ## Next experiment — highest priority
 
@@ -186,4 +262,8 @@ Polished behavior:
 - Prefer real external holdouts over increasingly elaborate synthetic fixtures.
 - Do not report a benchmark as completed unless it actually executed.
 - Save scripts, exact splits/seeds, model configs and result JSON so experiments are reproducible.
-- The immediate unfinished task is the ArBanking77 train-on-MSA/PAL -> test-on-Saudi/Moroccan/Tunisian experiment.
+- The ArBanking77 train-on-MSA/PAL -> test-on-Saudi/Moroccan/Tunisian
+  experiment is **done**; see `validation/semantic-parser/FINDINGS.md`.
+- The immediate unfinished task is a consented real-world holdout. Without
+  one, the acceptance gates cannot be met no matter how good the proxy
+  numbers look.
