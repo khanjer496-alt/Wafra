@@ -4,6 +4,7 @@ import { categorySupportsType } from '@/lib/categories';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
+import { getGrowthFunnelDiagnostics } from '@/lib/growth-funnel-diagnostics';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { getLaunchMetrics } from '@/lib/launch-performance';
 import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
@@ -136,6 +137,11 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   }
   assertDiagnosticContinues(active);
   options.onProgress?.(state.transactions.length, state.transactions.length);
+  const [growthFunnel, stability] = await Promise.all([
+    getGrowthFunnelDiagnostics(now).catch(() => null),
+    getStabilityDiagnostics(now).catch(() => null),
+  ]);
+  assertDiagnosticContinues(active);
   return {
     schema: 'wafra-diagnostics-v1', exportedAt: new Date(now).toISOString(),
     build: {
@@ -172,6 +178,17 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),
     issues,
+    operationalDiagnostics: {
+      // Both sources contain only closed event labels, timing/counter data and
+      // source-code crash frames. They are local until this user-owned export
+      // is explicitly shared by the user.
+      growthFunnel,
+      stability,
+      localSemantic: {
+        runtime: localSemanticRuntimeStatus(),
+        shadow: localSemanticShadowSnapshot(),
+      },
+    },
     // Only in an internal capture-trace build: launch phases and capture page
     // timings as phase names, counts and milliseconds. No message content,
     // identifier or date is recorded by either sink.
