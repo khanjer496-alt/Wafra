@@ -8,6 +8,7 @@ Run it before ``run_benchmark.py`` and copy the winning config across.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
@@ -50,6 +51,13 @@ def score(model, rows) -> dict:
 
 
 def main() -> int:
+    # Without this, an argument -- `--help` most obviously -- is silently
+    # ignored and the caller gets a seven-minute sweep instead of usage.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tag", default="char-ngram-linear",
+                        help="suffix for results/tune-<tag>.json")
+    args = parser.parse_args()
+
     train = load_split("train", purpose="train")
     val = load_split("val", purpose="train")
     print(f"train={len(train)} val={len(val)}", file=sys.stderr)
@@ -87,7 +95,7 @@ def main() -> int:
         "selected": runs[0]["config"],
     }
     RESULTS.mkdir(exist_ok=True)
-    out = RESULTS / "tune-char-ngram-linear.json"
+    out = RESULTS / f"tune-{args.tag}.json"
     out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"wrote {out}", file=sys.stderr)
     return 0
