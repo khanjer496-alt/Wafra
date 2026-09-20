@@ -118,10 +118,15 @@ async function screen(t, options = {}) {
     back: () => routes.push(['back']), canGoBack: () => options.canGoBack !== false,
     setParams: patch => Object.assign(params, patch),
   };
+  // "Which banks text you?" stands in front of both setup sections, so every
+  // case here answers it and goes on to drive the setup it is actually about.
+  // The step's own behaviour is covered in ios-setup-ux, not from here.
   const store = {
-    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null },
+    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null,
+      marketId: 'AE', knownBanks: options.knownBanks ?? ['Emirates NBD'] },
     async ensureDurable() { durableCalls++; await controls.beforeDurable?.(durableCalls); },
     setOnboarded() { onboarded = true; receipts.push(['onboarded']); },
+    setKnownBanks(names) { store.state.knownBanks = names; receipts.push(['knownBanks', ...names]); },
     setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
     async setCaptureOptOut(value) { receipts.push(['optOut', value]); await controls.beforeOptOut?.(value); },
   };
@@ -130,7 +135,7 @@ async function screen(t, options = {}) {
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': platform, '@/lib/i18n': copy,
     '@/components/themed-text': { ThemedText: 'Text' },
-    '@/components/ui/controls': { Button: 'Button' },
+    '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
   };
   const Details = source('src/components/ios-message-setup/details-sheet.tsx', {
