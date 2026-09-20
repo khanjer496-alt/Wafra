@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          ACCOUNT="$(eas whoami 2>/dev/null | tail -n 1 | tr -d '\r')"
+          ACCOUNT="$(eas whoami 2>/dev/null | sed -n 's/^• \([^ ]*\).*/\1/p' | head -n 1)"
           test -n "$ACCOUNT"
           echo "Expo account: $ACCOUNT"
           eas project:init --account "$ACCOUNT" --force --json --non-interactive | tee "$RUNNER_TEMP/eas-project.json"
