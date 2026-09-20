@@ -7,6 +7,7 @@ import type { Transaction } from '@/lib/types';
  * ordinary same-amount transfers later in the day into one event.
  */
 const PAYMENT_FLOW_WINDOW_MS = 5 * 60_000;
+const COMPOUND_BILL_WINDOW_MS = 3 * 24 * 60 * 60_000;
 
 interface MatchScore {
   count: number;
@@ -18,6 +19,13 @@ const eventTime = (row: Transaction): number | null => {
   if (Number.isFinite(row.ts)) return row.ts!;
   const match = row.smsKey?.match(/^s(\d+)-/);
   return match ? Number(match[1]) : null;
+};
+
+const providerKey = (title: string): string => {
+  const key = title.normalize('NFKC').toLowerCase().replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (/^(?:e and(?: uae)?|etisalat|e digital app)$/.test(key)) return 'etisalat';
+  return key;
 };
 
 /**
@@ -103,6 +111,50 @@ export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[
     for (const [fundingIndex] of preferredPairs(funding, receipts)) {
       removed.add(funding[fundingIndex].id);
     }
+  }
+
+  // A biller can confirm each service separately after one combined checkout.
+  // e& is a concrete example: two line receipts (e.g. mobile + home internet)
+  // can add exactly to one card debit. Those are allocations of one economic
+  // event, not three expenses. Only fold when we have 2+ explicit biller
+  // receipts, their exact integer-fils sum equals an independently captured
+  // ordinary expense, all rows share the same category, and every event is
+  // close in time. This deliberately refuses amount-only guessing.
+  const ordinary = transactions.filter(row =>
+    row.source === 'sms' && row.type === 'expense' &&
+    row.paymentFlowSide === undefined && row.isTransfer !== true &&
+    !row.userEdited && !row.transferDecision && eventTime(row) !== null);
+  const receiptRows = transactions.filter(row =>
+    row.source === 'sms' && row.type === 'expense' &&
+    row.paymentFlowSide === 'receipt' && row.isTransfer !== true &&
+    !row.userEdited && !row.transferDecision && eventTime(row) !== null);
+
+  for (const parent of ordinary) {
+    const parentTime = eventTime(parent)!;
+    const candidates = receiptRows.filter(row =>
+      !removed.has(row.id) &&
+      row.category === parent.category &&
+      providerKey(row.title) === providerKey(parent.title) &&
+      Math.abs(eventTime(row)! - parentTime) <= COMPOUND_BILL_WINDOW_MS &&
+      row.amountFils > 0 && row.amountFils < parent.amountFils);
+    // Bill bundles are intentionally bounded. Exhaustive subset search over a
+    // large history would be both slow and dangerously eager.
+    if (candidates.length < 2 || candidates.length > 8) continue;
+    let match: Transaction[] | null = null;
+    const limit = 1 << candidates.length;
+    for (let mask = 1; mask < limit && !match; mask++) {
+      if ((mask & (mask - 1)) === 0) continue; // require at least two receipts
+      let sum = 0;
+      const rows: Transaction[] = [];
+      for (let i = 0; i < candidates.length; i++) {
+        if ((mask & (1 << i)) === 0) continue;
+        sum += candidates[i].amountFils;
+        if (sum > parent.amountFils) break;
+        rows.push(candidates[i]);
+      }
+      if (rows.length >= 2 && sum === parent.amountFils) match = rows;
+    }
+    if (match) for (const child of match) removed.add(child.id);
   }
   return removed.size === 0 ? transactions : transactions.filter((row) => !removed.has(row.id));
 };

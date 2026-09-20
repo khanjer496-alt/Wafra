@@ -82,6 +82,7 @@ const response = rows => ({ ok: true, json: async () => rows });
   for (const [title, domain] of [
     ['Choithrams Dubai', 'choithrams.com'], ['Nesto Hypermarket Sharjah', 'nestogroup.com'],
     ['Sharaf DG Dubai', 'sharafdg.com'], ['Starbucks Riyadh', 'starbucks.com'],
+    ['ENOC', 'enoc.com'], ['Emirates Petroleum Com', 'enoc.com'], ['e& UAE', 'eand.com'],
   ]) {
     const value = await m.resolveRemoteMerchantLogo(title);
     assert.equal(value?.domain, domain, title);

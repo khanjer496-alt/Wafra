@@ -1041,6 +1041,10 @@ const globallyCorrectedFishbasket = parseSms(
   'Dear Customer, Your payment instructions of AED 125.00 to Fishbasket for consumer number 1234036 has been processed on 01/08/2026 18:27',
   { fishbasket: 'shopping' },
 );
+
+t('an e& confirmation never promotes its billing month to merchant',
+  'AED 240.23 has been debited from your account XXXX0002 for August. e& UAE confirms your bill payment.',
+  { merchant: 'Etisalat', amountFils: 24023, category: 'telecom', type: 'expense' });
 if (globallyCorrectedFishbasket?.categoryGuess === 'other' && globallyCorrectedFishbasket.categoryPinned !== true &&
     globallyCorrectedFishbasket.paymentFlowSide === 'receipt' && globallyCorrectedFishbasket.billIdentity === 'consumer:4036') {
   pass++; console.log('✓ a merchant-wide rule cannot classify a registered bill-payment nickname');
