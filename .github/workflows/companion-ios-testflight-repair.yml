@@ -1,0 +1,190 @@
+name: Temporary Companion TestFlight repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repair-public-beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+      COMPANION_APP_ID: '6814258840'
+      WAFRA_APP_ID: '6799171482'
+      VERSION: '1.1.0'
+      BUILD_NUMBER: '14'
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Repair Companion public TestFlight state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/companion-repair"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createPrivateKey, sign } from 'node:crypto';
+
+          const APP=process.env.COMPANION_APP_ID;
+          const SOURCE_APP=process.env.WAFRA_APP_ID;
+          const VERSION=process.env.VERSION;
+          const NUMBER=process.env.BUILD_NUMBER;
+          const out=`${process.env.RUNNER_TEMP}/companion-repair/result.json`;
+          const result={appId:APP,version:VERSION,buildNumber:NUMBER,startedAt:new Date().toISOString(),steps:[],errors:[]};
+          const save=()=>fs.writeFileSync(out,JSON.stringify(result,null,2)+'\n');
+          const note=(step,data={})=>{result.steps.push({at:new Date().toISOString(),step,...data});save();};
+          const err=(step,e)=>{result.errors.push({at:new Date().toISOString(),step,status:e?.status??null,message:String(e?.message||e)});save();};
+
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'';
+          const kid=process.env.EXPO_ASC_KEY_ID||'';
+          const iss=process.env.EXPO_ASC_ISSUER_ID||'';
+          if(!raw||!kid||!iss) throw new Error('App Store Connect API credentials missing');
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem);
+          const b64=v=>Buffer.from(JSON.stringify(v)).toString('base64url');
+          const jwt=()=>{const n=Math.floor(Date.now()/1000);const s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:n,exp:n+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path,{method='GET',body}={}){
+            const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{method,headers:{Authorization:`Bearer ${jwt()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});
+            const text=await r.text();
+            if(!r.ok){const e=new Error(`${method} ${path.split('?')[0]} returned ${r.status}`);e.status=r.status;throw e;}
+            return text?JSON.parse(text):null;
+          }
+          const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+          try {
+            const app=(await api(`apps/${APP}`)).data;
+            if(app.attributes.bundleId!=='app.companion.productivity') throw new Error('Companion App Store app ID points at wrong bundle');
+            result.appName=app.attributes.name;
+            note('app-verified',{appName:result.appName});
+
+            let found=null;
+            for(let i=0;i<121;i++){
+              const q=await api(`builds?filter[app]=${APP}&filter[version]=${encodeURIComponent(NUMBER)}&include=preReleaseVersion,buildBetaDetail&limit=100`);
+              const inc=new Map((q.included||[]).map(x=>[`${x.type}:${x.id}`,x]));
+              const matches=(q.data||[]).filter(b=>{const pr=b.relationships?.preReleaseVersion?.data;return pr&&inc.get(`${pr.type}:${pr.id}`)?.attributes?.version===VERSION});
+              if(matches.length>1) throw new Error('Multiple matching Companion builds');
+              if(matches.length){
+                const build=matches[0], bd=build.relationships?.buildBetaDetail?.data;
+                found={build,detail:bd?inc.get(`${bd.type}:${bd.id}`):null};
+                result.buildId=build.id;
+                result.processingState=build.attributes.processingState;
+                result.externalBuildState=found.detail?.attributes?.externalBuildState||null;
+                save();
+                if(build.attributes.processingState==='VALID') break;
+                if(['INVALID','FAILED'].includes(build.attributes.processingState)) throw new Error(`Apple build processing ${build.attributes.processingState}`);
+              }
+              await wait(15000);
+            }
+            if(!found||found.build.attributes.processingState!=='VALID') throw new Error('Build 14 did not become VALID in time');
+            note('build-valid',{buildId:found.build.id});
+            const buildId=found.build.id;
+
+            if(found.build.attributes.usesNonExemptEncryption===null){
+              await api(`builds/${buildId}`,{method:'PATCH',body:{data:{type:'builds',id:buildId,attributes:{usesNonExemptEncryption:false}}}});
+              note('encryption-compliance-set');
+            }
+
+            // Reuse Wafra's already accepted beta-review contact details without logging them.
+            try {
+              const source=(await api(`apps/${SOURCE_APP}/betaAppReviewDetail`)).data;
+              let target=null; try{target=(await api(`apps/${APP}/betaAppReviewDetail`)).data;}catch{}
+              if(source){
+                const src=source.attributes||{}, attrs={};
+                for(const k of ['contactFirstName','contactLastName','contactPhone','contactEmail','demoAccountName','demoAccountPassword','demoAccountRequired','notes']) if(src[k]!==undefined&&src[k]!==null) attrs[k]=src[k];
+                attrs.demoAccountRequired=false;
+                if(target) await api(`betaAppReviewDetails/${target.id}`,{method:'PATCH',body:{data:{type:'betaAppReviewDetails',id:target.id,attributes:attrs}}});
+                else await api('betaAppReviewDetails',{method:'POST',body:{data:{type:'betaAppReviewDetails',attributes:attrs,relationships:{app:{data:{type:'apps',id:APP}}}}}});
+                note('beta-review-contact-ready');
+              }
+            } catch(e){err('beta-review-contact',e);}
+
+            try {
+              const list=(await api(`apps/${APP}/betaAppLocalizations?limit=100`)).data||[];
+              const en=list.find(x=>x.attributes.locale==='en-US');
+              const attrs={description:'Companion is a productivity app with tasks, focus sessions, and an interactive pet companion.',feedbackEmail:'khanjer496@gmail.com'};
+              if(en) await api(`betaAppLocalizations/${en.id}`,{method:'PATCH',body:{data:{type:'betaAppLocalizations',id:en.id,attributes:attrs}}});
+              else await api('betaAppLocalizations',{method:'POST',body:{data:{type:'betaAppLocalizations',attributes:{locale:'en-US',...attrs},relationships:{app:{data:{type:'apps',id:APP}}}}}});
+              note('beta-app-localization-ready');
+            } catch(e){err('beta-app-localization',e);}
+
+            const notes='Please test onboarding, task creation/completion, focus sessions, Home interactions, pet reactions and audio, notifications, responsiveness, backup/restore, and report any crashes or visual regressions.';
+            try {
+              const list=(await api(`builds/${buildId}/betaBuildLocalizations?limit=100`)).data||[];
+              const en=list.find(x=>x.attributes.locale==='en-US');
+              if(en) await api(`betaBuildLocalizations/${en.id}`,{method:'PATCH',body:{data:{type:'betaBuildLocalizations',id:en.id,attributes:{whatsNew:notes}}}});
+              else await api('betaBuildLocalizations',{method:'POST',body:{data:{type:'betaBuildLocalizations',attributes:{locale:'en-US',whatsNew:notes},relationships:{build:{data:{type:'builds',id:buildId}}}}}});
+              note('build-localization-ready');
+            } catch(e){err('build-localization',e);}
+
+            let groups=(await api(`apps/${APP}/betaGroups?limit=100`)).data||[];
+            let group=groups.find(x=>!x.attributes.isInternalGroup&&x.attributes.publicLinkEnabled)||groups.find(x=>!x.attributes.isInternalGroup&&x.attributes.name==='Companion Public Beta')||groups.find(x=>!x.attributes.isInternalGroup);
+            if(!group){
+              group=(await api('betaGroups',{method:'POST',body:{data:{type:'betaGroups',attributes:{name:'Companion Public Beta',isInternalGroup:false},relationships:{app:{data:{type:'apps',id:APP}}}}}})).data;
+              note('external-group-created',{groupId:group.id});
+            }
+            if(!group.attributes.publicLinkEnabled){
+              group=(await api(`betaGroups/${group.id}`,{method:'PATCH',body:{data:{type:'betaGroups',id:group.id,attributes:{publicLinkEnabled:true}}}})).data;
+              note('public-link-enabled',{groupId:group.id});
+            }
+            result.groupId=group.id; result.groupName=group.attributes.name; result.publicLinkEnabled=group.attributes.publicLinkEnabled; result.publicLink=group.attributes.publicLink||null; save();
+
+            const members=(await api(`betaGroups/${group.id}/relationships/builds?limit=200`)).data||[];
+            if(!members.some(x=>x.id===buildId)){
+              await api(`betaGroups/${group.id}/relationships/builds`,{method:'POST',body:{data:[{type:'builds',id:buildId}]}});
+              note('build-associated-to-group');
+            }
+
+            let current=await api(`builds/${buildId}?include=buildBetaDetail`);
+            let detail=(current.included||[]).find(x=>x.type==='buildBetaDetails')||null;
+            if(detail&&!detail.attributes.autoNotifyEnabled){
+              await api(`buildBetaDetails/${detail.id}`,{method:'PATCH',body:{data:{type:'buildBetaDetails',id:detail.id,attributes:{autoNotifyEnabled:true}}}});
+              note('auto-notify-enabled');
+            }
+            let external=detail?.attributes?.externalBuildState||null;
+            result.externalBuildState=external; save();
+
+            if(external==='READY_FOR_BETA_SUBMISSION'){
+              try{
+                await api('betaAppReviewSubmissions',{method:'POST',body:{data:{type:'betaAppReviewSubmissions',relationships:{build:{data:{type:'builds',id:buildId}}}}}});
+                note('beta-review-submitted');
+              }catch(e){err('beta-review-submit',e);}
+            } else if(external==='READY_FOR_BETA_TESTING'){
+              try{await api('buildBetaNotifications',{method:'POST',body:{data:{type:'buildBetaNotifications',relationships:{build:{data:{type:'builds',id:buildId}}}}}});note('beta-testers-notified');}catch(e){err('notify-testers',e);}
+            }
+
+            // Refresh state and wait briefly for Apple's state machine to settle.
+            for(let i=0;i<21;i++){
+              group=(await api(`betaGroups/${group.id}`)).data;
+              current=await api(`builds/${buildId}?include=buildBetaDetail`);
+              detail=(current.included||[]).find(x=>x.type==='buildBetaDetails')||null;
+              external=detail?.attributes?.externalBuildState||null;
+              result.processingState=current.data.attributes.processingState;
+              result.externalBuildState=external;
+              result.publicLinkEnabled=group.attributes.publicLinkEnabled;
+              result.publicLink=group.attributes.publicLink||result.publicLink||null;
+              save();
+              if(['IN_BETA_TESTING','IN_BETA_REVIEW','BETA_REVIEW_SUBMITTED','WAITING_FOR_BETA_REVIEW'].includes(external)) break;
+              await wait(15000);
+            }
+            result.completedAt=new Date().toISOString(); save();
+            console.log(JSON.stringify({appId:result.appId,buildNumber:result.buildNumber,buildId:result.buildId,processingState:result.processingState,externalBuildState:result.externalBuildState,groupName:result.groupName,publicLinkEnabled:result.publicLinkEnabled,publicLink:result.publicLink,errorCount:result.errors.length},null,2));
+          } catch(e) {
+            err('fatal',e); result.completedAt=new Date().toISOString(); save(); console.error(String(e?.message||e)); process.exitCode=1;
+          }
+          NODE
+
+      - name: Preserve Companion TestFlight repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-testflight-repair-${{ github.run_id }}
+          path: ${{ runner.temp }}/companion-repair/result.json
+          retention-days: 14
+          if-no-files-found: error
