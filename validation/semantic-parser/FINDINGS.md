@@ -26,6 +26,9 @@ acceptance gate is claimed as met.
    parser exactly (11/11) on the markets the app actually ships.
 7. **A representation tuned on the in-pool transfer proxy generalized to the
    sealed dialects**, which is evidence the proxy is worth keeping.
+8. **Pretrained encoders lose.** Two of them, fine-tuned on the same real
+   data, at 90–260× the artifact size and 5–35× the latency of a 0.26 MB
+   char-CNN that beats them on almost every split.
 
 The architecture this supports is **deterministic-first**: exact extraction
 authorizes an import, and the semantic model narrows and routes. That is close
@@ -281,27 +284,71 @@ The proxy predicted +1.17pt on MSA→PAL. The sealed dialects delivered +1.31,
 +1.09 and +0.70. **The proxy's prediction transferred**, which is the point of
 having it: dialect robustness can be tuned without spending a holdout.
 
-A compact pretrained Arabic encoder used as a *frozen* feature extractor
-(`Geotrend/distilbert-base-ar-cased`, 48.5M parameters) is far worse than a
-64K-parameter char-CNN trained from scratch:
+### Pretrained encoders lose, twice
 
-| split | linear-robust joint | Geotrend frozen joint |
-|---|---|---|
-| MSA | 0.9281 | 0.8402 |
-| Saudi | 0.8318 | 0.6793 |
-| Moroccan | 0.7529 | 0.5476 |
-| Tunisian | 0.5676 | 0.3483 |
+Two compact pretrained encoders were fine-tuned on the same real training
+data and evaluated on the same sealed sets. Both lose to a 0.26 MB char-CNN.
 
-That is the expected result for mean-pooled features from a model never
-trained to produce sentence embeddings, and it is a lower bound rather than a
-verdict on pretraining. The fine-tuning run is what would answer the question
-properly; it is still in progress.
+Joint family+state accuracy, full test sets:
 
-Worth recording for whoever picks this up: `UBC-NLP/MARBERTv2` tokenizes
-Maghrebi dialect as whole words (`كيفاش`, `نلقى`, `ديالي`) where the Geotrend
-Arabic BERT fragments it into three pieces. If dialect-aware pretraining helps
-anywhere, that is where to look — at 163M parameters it is too large to ship,
-but it would establish the ceiling.
+| split | char-CNN 0.26 MB | linear-robust 3.4 MB | distilbert-ar ~67 MB | e5 int8 24.1 MB |
+|---|---|---|---|---|
+| MSA | **0.9337** | 0.9281 | 0.9219 | 0.9074 |
+| PAL | 0.9096 | **0.9133** | 0.8968 | 0.8639 |
+| Saudi | **0.8385** | 0.8318 | 0.8201 | 0.7983 |
+| Moroccan | 0.7378 | **0.7529** | 0.7311 | 0.7300 |
+| Tunisian | 0.5636 | 0.5676 | 0.5455 | **0.5866** |
+
+`Geotrend/distilbert-base-ar-cased` (48.5M parameters,
+`results/benchmark-finetune.json`) never caught up even in domain: 0.9095
+final validation intent accuracy against 0.9225 for TF-IDF character n-grams
+with logistic regression. Under the hybrid gate it produces **5 unsafe
+auto-imports on Moroccan**, against 0–1 for the char models. Its calibration
+is better by ECE (0.078–0.127 against 0.141–0.254) and that is misleading:
+it makes **33** wrong predictions at confidence ≥ 0.90 on Saudi against the
+linear model's **7**. Better calibrated and more dangerous at once — a good
+reason not to let ECE gate anything on its own.
+
+`intfloat/multilingual-e5-small` was built into a real shippable artifact
+rather than estimated (`build_e5_artifact.py`,
+`results/e5-int8-artifact-v1.json`): fine-tuned, vocabulary pruned, Linear
+layers *and* embedding quantized to int8, and then the quantized pruned model
+evaluated. The vocabulary collapses — Arabic retail banking is narrow enough
+that 24k training utterances touch only **3,955 of 250,002** sentencepiece
+tokens, 1.6% — which takes 117.7M parameters to 23.2M and the artifact to
+92.8 MB fp32, **24.1 MB int8**. For comparison the stock int8 ONNX plus its
+tokenizer is about 140 MB.
+
+Its one win is Tunisian, the furthest dialect, which is consistent with a
+tokenizer that segments `كيفاش` in two pieces where the Arabic DistilBERT
+needs three. Discount it: 999 rows over 27 of 77 intents, and on the 64-row
+high-risk subset e5 is the worst model measured at 0.1562 joint.
+
+The pruning cost is real and was measured rather than hidden. The vocabulary
+is built from the fitting splits only, so a Moroccan or Tunisian word the
+training data never contained falls back to UNK — which is what happens on a
+phone when a new market ships. Pruning against the holdouts would have
+produced a better number and a worthless one.
+
+Batch-1 CPU latency: 1.0–1.9 ms for the char models, 9.0 ms for e5 int8,
+38.9 ms for the fine-tuned DistilBERT.
+
+**So the pretrained-encoder question is answered: neither.** 90–260× the
+artifact size, 5–35× the latency, more unsafe auto-imports, and lower
+accuracy on almost every split. 21k in-domain examples appear to be plenty
+for a 77-way task with this much lexical signal, and generic pretraining adds
+nothing the character n-grams do not already capture.
+
+Frozen features are worse still, for the record — `Geotrend` frozen reaches
+only 0.6793 joint on Saudi against 0.8318 for `linear-robust` — which is the
+expected result for mean-pooled features from a model never trained to
+produce sentence embeddings.
+
+`UBC-NLP/MARBERTv2` remains unmeasured. At 163M parameters it is too large to
+ship, but it tokenizes Maghrebi as whole words and would establish the
+ceiling if anyone wants to know how much dialect-aware pretraining could
+theoretically buy. Given that two pretrained encoders both lost, the expected
+value of that run is low.
 
 ## What this means for the architecture
 
@@ -336,7 +383,7 @@ financial evidence"; drop the "and/or".
   regression versus current deterministic parser" is a stated gate and it has
   not been measured. It needs `scripts/test/build.sh` and a harness that runs
   `parseSms` over the same corpus.
-- **A fine-tuned compact encoder.** The frozen-feature run is done and is
-  much worse than the char models (§10); the fine-tune is still running.
+- **`UBC-NLP/MARBERTv2`.** Unmeasured, and low expected value now that two
+  pretrained encoders have both lost to a 0.26 MB char-CNN (§10).
 - **Tunisian remains unexplained.** 64 high-risk rows is too little evidence
   to act on, and the trained model is worse than the lexicon on family there.

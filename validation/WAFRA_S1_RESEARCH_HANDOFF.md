@@ -121,7 +121,9 @@ What changed in the conclusions:
 6. **Deterministic extraction is where the safety is.** On 199 bank-alert
    fixtures across 14 markets: 0 unsafe selections, 0 decoy picks, 97.0% exact
    amount+currency coverage.
-7. **The "no regression versus current deterministic parser" gate now has a
+7. **Pretrained encoders lose.** Two, fine-tuned on the same real data, at
+   90 to 260 times the artifact size of a 0.26 MB char-CNN that beats them.
+8. **The "no regression versus current deterministic parser" gate now has a
    harness** (`production_parser_baseline.cjs`) and the research extractor
    passes it: 11/11 in the shipping parser's own AE/SA scope, same as the
    shipping parser. It started at 7/11 — the regression was real and is fixed.
