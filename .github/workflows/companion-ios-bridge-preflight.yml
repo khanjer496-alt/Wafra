@@ -1,0 +1,138 @@
+name: Companion iOS bridge preflight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/companion-ios-bridge-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-ios-bridge-preflight
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Require the existing Wafra release credentials without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in EXPO_TOKEN EXPO_ASC_API_KEY_P8 EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing repository secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo 'The existing Wafra release credentials are available.'
+
+      - name: Inspect Companion resources through App Store Connect API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ios-release-evidence
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createPrivateKey, sign } from 'node:crypto';
+
+          const identifier = 'app.companion.productivity';
+          const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
+          const pem = raw.includes('BEGIN PRIVATE KEY')
+            ? raw
+            : Buffer.from(raw.replace(/\s/g, ''), 'base64').toString('utf8');
+          const key = createPrivateKey(pem);
+          const kid = process.env.EXPO_ASC_KEY_ID;
+          const iss = process.env.EXPO_ASC_ISSUER_ID;
+          const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+          const token = () => {
+            const now = Math.floor(Date.now() / 1000);
+            const unsigned = `${b64({ alg: 'ES256', kid, typ: 'JWT' })}.${b64({ iss, iat: now, exp: now + 600, aud: 'appstoreconnect-v1' })}`;
+            return `${unsigned}.${sign('sha256', Buffer.from(unsigned), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+          };
+          async function api(path) {
+            const response = await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`, {
+              headers: { Authorization: `Bearer ${token()}` },
+              signal: AbortSignal.timeout(30000),
+            });
+            const text = await response.text();
+            if (!response.ok) throw new Error(`GET ${path.split('?')[0]}: ${response.status} ${text}`);
+            return text ? JSON.parse(text) : null;
+          }
+
+          const bundleResult = await api(
+            `bundleIds?filter[identifier]=${encodeURIComponent(identifier)}` +
+              '&include=app&fields[bundleIds]=name,platform,identifier,app' +
+              '&fields[apps]=name,bundleId,sku,primaryLocale&limit=10',
+          );
+          if ((bundleResult.data || []).length > 1) throw new Error('Apple returned duplicate bundle IDs');
+          const bundle = bundleResult.data?.[0] || null;
+          const app = (bundleResult.included || []).find((entry) => entry.type === 'apps') || null;
+
+          const certificateResult = await api('certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200');
+          const certificates = (certificateResult.data || []).map((entry) => ({
+            id: entry.id,
+            name: entry.attributes?.name || null,
+            serialNumber: entry.attributes?.serialNumber || null,
+            expirationDate: entry.attributes?.expirationDate || null,
+            certificateType: entry.attributes?.certificateType || null,
+          }));
+
+          let profiles = [];
+          if (bundle) {
+            const profileResult = await api(
+              `profiles?filter[bundleId]=${encodeURIComponent(bundle.id)}` +
+                '&filter[profileType]=IOS_APP_STORE&limit=200',
+            );
+            profiles = (profileResult.data || []).map((entry) => ({
+              id: entry.id,
+              name: entry.attributes?.name || null,
+              profileState: entry.attributes?.profileState || null,
+              expirationDate: entry.attributes?.expirationDate || null,
+              profileType: entry.attributes?.profileType || null,
+            }));
+          }
+
+          const report = {
+            checkedAt: new Date().toISOString(),
+            identifier,
+            bundleIdExists: Boolean(bundle),
+            bundleIdResourceId: bundle?.id || null,
+            bundleName: bundle?.attributes?.name || null,
+            bundlePlatform: bundle?.attributes?.platform || null,
+            appRecordExists: Boolean(app),
+            appId: app?.id || null,
+            appName: app?.attributes?.name || null,
+            appSku: app?.attributes?.sku || null,
+            iosDistributionCertificates: certificates,
+            companionAppStoreProfiles: profiles,
+          };
+          fs.writeFileSync('ios-release-evidence/companion-preflight.json', JSON.stringify(report, null, 2) + '\n');
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+
+      - name: Preserve Companion preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-ios-bridge-preflight-${{ github.run_id }}
+          path: ios-release-evidence/companion-preflight.json
+          if-no-files-found: ignore
+          retention-days: 7
