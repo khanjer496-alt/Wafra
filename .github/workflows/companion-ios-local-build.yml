@@ -1,0 +1,411 @@
+name: Companion signed iOS local build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/companion-ios-local-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: companion-ios-local-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+      EXPO_APPLE_TEAM_ID: UV7YN4GQ66
+      EXPO_APPLE_TEAM_TYPE: INDIVIDUAL
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_TAG: companion-ios-bridge-12c6a8020172
+      SOURCE_ASSET: companion-source-21c4a667ca34.tgz
+      SOURCE_ARCHIVE_SHA256: 2e5c8c2d5a54ee329aa7537a4c8e6552c0db7a79ca84961f404810d847aa4a4e
+      SIGNING_ASSET: companion-signing-v1.tgz
+      SIGNING_ARCHIVE_SHA256: 51fe23c56baf19026524eb2221f84b3ba1d2c5fb85d8fbf54875cbe6729162f9
+      TARGET_SOURCE_SHA: 21c4a667ca34d2017bd2b9eee856b025f25f3a26
+      BUNDLE_IDENTIFIER: app.companion.productivity
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require existing release credentials without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in EXPO_TOKEN EXPO_ASC_API_KEY_P8 EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing repository secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Select stable Xcode 26.2 or newer
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEST="$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)"
+          test -n "$BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version | tee "$RUNNER_TEMP/xcode-version.txt"
+          VER="$(sed -n '1s/^Xcode //p' "$RUNNER_TEMP/xcode-version.txt")"
+          node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if (!(major>26 || (major===26 && minor>=2))) process.exit(1)' "$VER"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Download exact Companion source and encrypted signing handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/companion-source"
+          SIGN_DIR="$RUNNER_TEMP/companion-signing"
+          EVIDENCE="$RUNNER_TEMP/companion-ios-evidence"
+          mkdir -p "$ROOT" "$SIGN_DIR" "$EVIDENCE" artifacts/companion-ios
+          gh release download "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --pattern "$SOURCE_ASSET" \
+            --dir "$ROOT"
+          gh release download "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --pattern "$SIGNING_ASSET" \
+            --dir "$SIGN_DIR"
+          test "$(shasum -a 256 "$ROOT/$SOURCE_ASSET" | awk '{print $1}')" = "$SOURCE_ARCHIVE_SHA256"
+          test "$(shasum -a 256 "$SIGN_DIR/$SIGNING_ASSET" | awk '{print $1}')" = "$SIGNING_ARCHIVE_SHA256"
+          tar -xzf "$ROOT/$SOURCE_ASSET" -C "$ROOT"
+          tar -xzf "$SIGN_DIR/$SIGNING_ASSET" -C "$SIGN_DIR"
+          test -f "$ROOT/mobile/app.json"
+          test -s "$SIGN_DIR/companion-distribution.p12"
+          test -s "$SIGN_DIR/companion-app-store.mobileprovision"
+          test -s "$SIGN_DIR/companion-signing-metadata.json"
+          echo "APP_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
+          echo "SIGN_DIR=$SIGN_DIR" >> "$GITHUB_ENV"
+          echo "EVIDENCE=$EVIDENCE" >> "$GITHUB_ENV"
+
+      - name: Reverify the exact current Companion mobile tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          check_blob() {
+            local expected="$1"
+            local file="$2"
+            local actual
+            actual="$(git hash-object "$file")"
+            if [ "$actual" != "$expected" ]; then
+              echo "Blob mismatch for $file: expected $expected, got $actual" >&2
+              exit 1
+            fi
+          }
+          check_blob ee4dec90acea11ba6ab7babc8ff4b44c99ebe5e6 assets/audio/PROVENANCE.md
+          check_blob 448bae6c7498c111e202292b958c1933f8dcd3a6 assets/audio/SHA256SUMS
+          check_blob f0a0602576e31cc81d53704e7441ddfab1b045e8 scripts/bundle-pet-voices.cjs
+          check_blob 882c06eb65ee8b35821c2a7adaeafc199f81db4e src/audio/assets.ts
+          check_blob 1178f06e0a8dcb1ce33d87ead9becea7e28e0bc4 src/audio/pet-audio.test.ts
+          check_blob 44b2ba30b84163fb567423df2196138e4482a2f0 src/audio/pet-audio.ts
+          check_blob 6f290d52c8b07a59c52fefde78e055e204b571b5 app.json
+          check_blob 725c32b727f60ffd94945eafd85282ad14ea6854 eas.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+          const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          if (app.ios.bundleIdentifier !== process.env.BUNDLE_IDENTIFIER) throw new Error('bundle mismatch');
+          if (app.version !== '1.1.0') throw new Error('version mismatch');
+          if (app.extra?.eas?.projectId !== '3cb8e0e0-3b5b-46de-a6e6-d006a3ad50a4') throw new Error('EAS project mismatch');
+          if (eas.build?.preview?.distribution !== 'store') throw new Error('preview profile is not store distribution');
+          const report = {
+            verifiedAt: new Date().toISOString(),
+            sourceCommit: process.env.TARGET_SOURCE_SHA,
+            bundleIdentifier: app.ios.bundleIdentifier,
+            version: app.version,
+            easProjectId: app.extra.eas.projectId,
+            targetMobileTreeVerified: true,
+          };
+          fs.writeFileSync(`${process.env.EVIDENCE}/source-verification.json`, `${JSON.stringify(report, null, 2)}\n`);
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+          rm -rf .git
+          git init -q
+          git config user.name 'Companion iOS local build'
+          git config user.email 'companion-ios-local@users.noreply.github.com'
+          git add -A
+          git commit -qm "Exact Companion mobile source $TARGET_SOURCE_SHA"
+
+      - name: Install local iOS build toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          gem install fastlane -v 2.238.0 --no-document
+          gem install cocoapods -v 1.16.2 --no-document
+          cd "$APP_DIR"
+          npm ci
+          npx --yes eas-cli@24.7.0 --version
+          fastlane --version
+          pod --version
+
+      - name: Prepare and verify ephemeral local credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          P12_PASSWORD="$(node -e "const c=require('crypto');process.stdout.write(c.createHmac('sha256',process.env.EXPO_ASC_API_KEY_P8).update('app.companion.productivity:p12:v1').digest('hex').slice(0,48))")"
+          test -n "$P12_PASSWORD"
+          echo "::add-mask::$P12_PASSWORD"
+          echo "COMPANION_P12_PASSWORD=$P12_PASSWORD" >> "$GITHUB_ENV"
+
+          openssl pkcs12 \
+            -in "$SIGN_DIR/companion-distribution.p12" \
+            -passin "pass:$P12_PASSWORD" \
+            -clcerts -nokeys \
+            -out "$SIGN_DIR/certificate-from-p12.pem"
+          openssl x509 \
+            -in "$SIGN_DIR/certificate-from-p12.pem" \
+            -outform DER \
+            -out "$SIGN_DIR/certificate-from-p12.der"
+          security cms -D \
+            -i "$SIGN_DIR/companion-app-store.mobileprovision" \
+            -o "$SIGN_DIR/profile.plist"
+
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib
+          from pathlib import Path
+          sign_dir = Path(os.environ['SIGN_DIR'])
+          evidence = Path(os.environ['EVIDENCE'])
+          profile = plistlib.loads((sign_dir / 'profile.plist').read_bytes())
+          entitlements = profile.get('Entitlements', {})
+          app_identifier = entitlements.get('application-identifier')
+          if app_identifier != f"UV7YN4GQ66.{os.environ['BUNDLE_IDENTIFIER']}":
+              raise SystemExit(f'Provisioning profile mismatch: {app_identifier!r}')
+          if entitlements.get('get-task-allow') is not False:
+              raise SystemExit('Profile is not a store distribution profile')
+          if entitlements.get('aps-environment') != 'production':
+              raise SystemExit('Profile lacks production APNs entitlement')
+          if profile.get('ProvisionedDevices'):
+              raise SystemExit('Store profile unexpectedly contains device UDIDs')
+          certificates = profile.get('DeveloperCertificates') or []
+          p12_certificate = (sign_dir / 'certificate-from-p12.der').read_bytes()
+          if len(certificates) != 1 or hashlib.sha256(certificates[0]).digest() != hashlib.sha256(p12_certificate).digest():
+              raise SystemExit('P12 certificate does not match profile')
+          metadata = json.loads((sign_dir / 'companion-signing-metadata.json').read_text())
+          report = {
+              'verifiedAt': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+              'bundleIdentifier': os.environ['BUNDLE_IDENTIFIER'],
+              'certificateId': metadata.get('certificate', {}).get('id'),
+              'certificateSerialNumber': metadata.get('certificate', {}).get('serialNumber'),
+              'certificateExpirationDate': metadata.get('certificate', {}).get('expirationDate'),
+              'profileId': metadata.get('profile', {}).get('id'),
+              'profileName': profile.get('Name'),
+              'profileUuid': profile.get('UUID'),
+              'profileExpirationDate': metadata.get('profile', {}).get('expirationDate'),
+              'applicationIdentifier': app_identifier,
+              'apsEnvironment': entitlements.get('aps-environment'),
+              'getTaskAllow': entitlements.get('get-task-allow'),
+              'provisionedDeviceCount': len(profile.get('ProvisionedDevices') or []),
+              'certificateSha256': hashlib.sha256(p12_certificate).hexdigest(),
+          }
+          (evidence / 'signing-verification.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+
+          cd "$APP_DIR"
+          mkdir -p .companion-signing
+          cp "$SIGN_DIR/companion-distribution.p12" .companion-signing/companion-distribution.p12
+          cp "$SIGN_DIR/companion-app-store.mobileprovision" .companion-signing/companion-app-store.mobileprovision
+          {
+            echo '/credentials.json'
+            echo '/.companion-signing/'
+          } >> .git/info/exclude
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          fs.writeFileSync('credentials.json', `${JSON.stringify({
+            ios: {
+              provisioningProfilePath: '.companion-signing/companion-app-store.mobileprovision',
+              distributionCertificate: {
+                path: '.companion-signing/companion-distribution.p12',
+                password: process.env.COMPANION_P12_PASSWORD,
+              },
+            },
+          }, null, 2)}\n`, { mode: 0o600 });
+          const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          eas.build.preview.credentialsSource = 'local';
+          fs.writeFileSync('eas.json', `${JSON.stringify(eas, null, 2)}\n`);
+          NODE
+
+      - name: Build signed Companion IPA locally on macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          npx --yes eas-cli@24.7.0 build \
+            --platform ios \
+            --profile preview \
+            --local \
+            --non-interactive \
+            --freeze-credentials \
+            --output "$RUNNER_TEMP/Companion-local.ipa"
+          test -s "$RUNNER_TEMP/Companion-local.ipa"
+
+      - name: Verify the signed IPA
+        id: ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -tq "$RUNNER_TEMP/Companion-local.ipa"
+          CHECK_DIR="$RUNNER_TEMP/companion-ipa-check"
+          mkdir -p "$CHECK_DIR"
+          ditto -x -k "$RUNNER_TEMP/Companion-local.ipa" "$CHECK_DIR"
+          APP_BUNDLE="$(find "$CHECK_DIR/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_BUNDLE" && test -d "$APP_BUNDLE"
+          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+          codesign -d --entitlements :- "$APP_BUNDLE" > "$RUNNER_TEMP/companion-entitlements.plist"
+          security cms -D -i "$APP_BUNDLE/embedded.mobileprovision" -o "$RUNNER_TEMP/companion-profile.plist"
+          export APP_BUNDLE
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib, shutil
+          from pathlib import Path
+          runner = Path(os.environ['RUNNER_TEMP'])
+          evidence = Path(os.environ['EVIDENCE'])
+          app = Path(os.environ['APP_BUNDLE'])
+          info = plistlib.loads((app / 'Info.plist').read_bytes())
+          entitlements = plistlib.loads((runner / 'companion-entitlements.plist').read_bytes())
+          profile = plistlib.loads((runner / 'companion-profile.plist').read_bytes())
+          bundle_id = info.get('CFBundleIdentifier')
+          version = info.get('CFBundleShortVersionString')
+          build_number = str(info.get('CFBundleVersion'))
+          expected_application_id = f"UV7YN4GQ66.{os.environ['BUNDLE_IDENTIFIER']}"
+          if bundle_id != os.environ['BUNDLE_IDENTIFIER']:
+              raise SystemExit(f'IPA bundle mismatch: {bundle_id!r}')
+          if version != '1.1.0':
+              raise SystemExit(f'IPA version mismatch: {version!r}')
+          if entitlements.get('application-identifier') != expected_application_id:
+              raise SystemExit('IPA application identifier mismatch')
+          if entitlements.get('get-task-allow') is not False:
+              raise SystemExit('IPA is not store signed')
+          if entitlements.get('aps-environment') != 'production':
+              raise SystemExit('IPA lacks production APNs entitlement')
+          if 'UV7YN4GQ66' not in (profile.get('TeamIdentifier') or []):
+              raise SystemExit('IPA profile team mismatch')
+          if profile.get('ProvisionedDevices') or profile.get('ProvisionsAllDevices', False):
+              raise SystemExit('IPA profile is not an App Store profile')
+          source = runner / 'Companion-local.ipa'
+          output_dir = Path('artifacts/companion-ios')
+          output = output_dir / f'Companion-{version}-{build_number}.ipa'
+          shutil.copyfile(source, output)
+          signing = json.loads((evidence / 'signing-verification.json').read_text())
+          report = {
+              'verifiedAt': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+              'sourceCommit': os.environ['TARGET_SOURCE_SHA'],
+              'githubRunId': os.environ['GITHUB_RUN_ID'],
+              'buildHost': 'github-macos',
+              'profile': 'preview',
+              'bundleIdentifier': bundle_id,
+              'version': version,
+              'buildNumber': build_number,
+              'applicationIdentifier': entitlements.get('application-identifier'),
+              'apsEnvironment': entitlements.get('aps-environment'),
+              'getTaskAllow': entitlements.get('get-task-allow'),
+              'profileUuid': profile.get('UUID'),
+              'certificateId': signing.get('certificateId'),
+              'profileId': signing.get('profileId'),
+              'sha256': hashlib.file_digest(output.open('rb'), 'sha256').hexdigest(),
+              'bytes': output.stat().st_size,
+              'storeSigningVerified': True,
+          }
+          (output_dir / 'verification.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'ipa_path={output}\n')
+              out.write(f'build_number={build_number}\n')
+          PY
+
+      - name: Recheck App Store Connect app record
+        id: app_record
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/companion-ios-bootstrap.mjs \
+            --output-dir artifacts/companion-ios/apple-state
+          EXISTS="$(node -p "require('./artifacts/companion-ios/apple-state/companion-apple-resources.json').appRecordExists")"
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [ "$EXISTS" != 'true' ]; then
+            node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            const verification = JSON.parse(fs.readFileSync('artifacts/companion-ios/verification.json', 'utf8'));
+            const outcome = {
+              status: 'SIGNED_IPA_READY_APP_RECORD_REQUIRED',
+              sourceCommit: process.env.TARGET_SOURCE_SHA,
+              bundleIdentifier: process.env.BUNDLE_IDENTIFIER,
+              version: verification.version,
+              buildNumber: verification.buildNumber,
+              remainingAction: 'Create one new iOS app record in App Store Connect for bundle ID app.companion.productivity.',
+            };
+            fs.writeFileSync('artifacts/companion-ios/release-outcome.json', `${JSON.stringify(outcome, null, 2)}\n`);
+            console.log(JSON.stringify(outcome, null, 2));
+            NODE
+          fi
+
+      - name: Upload directly if the app record appeared
+        if: steps.app_record.outputs.exists == 'true'
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.ipa_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          chmod 700 "$KEY_DIR"
+          KEY_FILE="$KEY_DIR/AuthKey_${EXPO_ASC_KEY_ID}.p8"
+          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY_FILE"
+          else
+            printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY_FILE"
+          fi
+          chmod 600 "$KEY_FILE"
+          xcrun altool --upload-app --type ios --file "$IPA_PATH" \
+            --apiKey "$EXPO_ASC_KEY_ID" --apiIssuer "$EXPO_ASC_ISSUER_ID" \
+            | tee artifacts/companion-ios/apple-upload.log
+
+      - name: Preserve verified Companion installer and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-ios-local-${{ github.run_id }}
+          path: artifacts/companion-ios/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Delete temporary public source and signing handoff after verified IPA
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --cleanup-tag \
+            --yes
+
+      - name: Remove all temporary private material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf \
+            "${SIGN_DIR:-}" \
+            "${APP_DIR:-}/.companion-signing" \
+            "${APP_DIR:-}/credentials.json" \
+            "$HOME/.appstoreconnect/private_keys"

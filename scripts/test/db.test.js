@@ -278,6 +278,16 @@ for (const method of ['async multiSet(entries)', 'async multiRemove(keys)']) {
       'the whole difference');
 }
 
+const multiSetBody = bodyOf(storage, 'async multiSet(entries)');
+ok('large encrypted ledger saves batch changed chunks across the native SQLite bridge',
+  !!multiSetBody &&
+    /MULTISET_ROWS_PER_STATEMENT/.test(multiSetBody) &&
+    /entries\.slice\(start, start \+ MULTISET_ROWS_PER_STATEMENT\)/.test(multiSetBody) &&
+    /batch\.map\(\(\) => '\(\?, \?, \?\)'\)\.join\(', '\)/.test(multiSetBody) &&
+    /await db\.runAsync\(/.test(multiSetBody) &&
+    !/for \(const \[key, value\] of entries\)/.test(multiSetBody),
+  'a 10k-20k row repair must not issue one awaited native execute per persisted 400-row chunk');
+
 // ---------------------------------------------------------------------------
 // 1b. A ROLLBACK that fails poisons the connection.
 //

@@ -39,7 +39,7 @@ const ENTRIES: readonly [string, number, readonly string[]][] = [
   ['telegram', require('../../../assets/merchants/telegram.png'), ['Telegram', 'Telegram Premium', 'تلغرام', 'تيليجرام']],
   ['dropbox', require('../../../assets/merchants/dropbox.png'), ['Dropbox', 'Dropbox Plus']],
   ['rta', require('../../../assets/merchants/rta.png'), ['RTA', 'RTA Dubai', 'RTA Nol', 'RTA Nol Top-up', 'Nol Top-up', 'هيئة الطرق والمواصلات']],
-  ['enoc', require('../../../assets/merchants/enoc.png'), ['ENOC', 'ENOC Fuel', 'ENOC Pay', 'EPPCO', 'اينوك', 'إينوك', 'ايبكو']],
+  ['enoc', require('../../../assets/merchants/enoc.png'), ['ENOC', 'ENOC Fuel', 'ENOC Pay', 'EPPCO', 'Emirates Petroleum', 'Emirates Petroleum Com', 'Emirates Petroleum Company', 'Emirates Petroleum Products Company', 'اينوك', 'إينوك', 'ايبكو']],
   ['adnoc', require('../../../assets/merchants/adnoc.png'), ['ADNOC', 'ADNOC Distribution', 'ADNOC Dist', 'ADNOC Fuel', 'ADNOC Oasis', 'ادنوك', 'أدنوك']],
   ['du', require('../../../assets/merchants/du.png'), ['du', 'du Telecom', 'du Postpaid', 'du Home Internet', 'du Bill', 'دو']],
   ['etisalat', require('../../../assets/merchants/etisalat.png'), ['Etisalat', 'Etisalat Postpaid', 'Etisalat Bill', 'Etisalat eLife', 'e&', 'e& UAE', 'e and UAE', 'اتصالات']],

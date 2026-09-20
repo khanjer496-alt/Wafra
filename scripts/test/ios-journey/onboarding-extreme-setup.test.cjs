@@ -118,17 +118,17 @@ async function screen(t, options = {}) {
     back: () => routes.push(['back']), canGoBack: () => options.canGoBack !== false,
     setParams: patch => Object.assign(params, patch),
   };
-  // "Which banks text you?" stands in front of both setup sections, so every
-  // case here answers it and goes on to drive the setup it is actually about.
-  // The step's own behaviour is covered in ios-setup-ux, not from here.
   const store = {
+    // "Which banks text you?" gates both sections; these journeys exercise the
+    // checklist behind it, so the question is answered unless a case says
+    // otherwise (scripts/test/ios-setup-ux.test.js pins the question itself).
     state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null,
       marketId: 'AE', knownBanks: options.knownBanks ?? ['Emirates NBD'] },
     async ensureDurable() { durableCalls++; await controls.beforeDurable?.(durableCalls); },
     setOnboarded() { onboarded = true; receipts.push(['onboarded']); },
-    setKnownBanks(names) { store.state.knownBanks = names; receipts.push(['knownBanks', ...names]); },
     setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
     async setCaptureOptOut(value) { receipts.push(['optOut', value]); await controls.beforeOptOut?.(value); },
+    setKnownBanks(names) { store.state.knownBanks = [...names]; receipts.push(['knownBanks', [...names]]); },
   };
   const ui = {
     react,

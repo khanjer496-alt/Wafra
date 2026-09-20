@@ -1,0 +1,826 @@
+name: Signed Companion iOS release candidate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/companion-ios-signed-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: companion-ios-signed-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+      EXPO_APPLE_TEAM_ID: UV7YN4GQ66
+      EXPO_APPLE_TEAM_TYPE: INDIVIDUAL
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_TAG: companion-ios-bridge-12c6a8020172
+      SOURCE_ASSET: companion-source-12c6a8020172.tgz
+      SOURCE_ARCHIVE_SHA256: c542f2fc43a0bdcdc5c2197458afd10220990941aa16f97cd849a1bc9cc3e6bf
+      SOURCE_BASE_SHA: 12c6a8020172490619d6214f22e3cd3631871500
+      TARGET_SOURCE_SHA: 21c4a667ca34d2017bd2b9eee856b025f25f3a26
+      BUNDLE_IDENTIFIER: app.companion.productivity
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Require release credentials without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in EXPO_TOKEN EXPO_ASC_API_KEY_P8 EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing repository secret: %s\n' "${missing[@]}"
+            exit 1
+          fi
+          eas whoami
+
+      - name: Download the verified Companion source handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/companion-source"
+          EVIDENCE="$RUNNER_TEMP/companion-ios-evidence"
+          SIGN_DIR="$RUNNER_TEMP/companion-signing"
+          mkdir -p "$ROOT" "$EVIDENCE" "$SIGN_DIR"
+          gh release download "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --pattern "$SOURCE_ASSET" \
+            --dir "$ROOT"
+          ARCHIVE="$ROOT/$SOURCE_ASSET"
+          test -f "$ARCHIVE"
+          ACTUAL_SHA="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$SOURCE_ARCHIVE_SHA256"
+          tar -xzf "$ARCHIVE" -C "$ROOT"
+          test -f "$ROOT/mobile/app.json"
+          echo "APP_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
+          echo "EVIDENCE=$EVIDENCE" >> "$GITHUB_ENV"
+          echo "SIGN_DIR=$SIGN_DIR" >> "$GITHUB_ENV"
+          touch "$RUNNER_TEMP/eas-submit.log"
+
+      - name: Apply and verify the complete current-main delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+
+          cat > assets/audio/PROVENANCE.md <<'COMPANION_EOF'
+          # Companion animal audio
+
+          Verified against the creators' original OpenGameArt submission pages on 2026-09-20. Playback makes no remote request. Cat taps use Kerzoven's recorded meows at a higher playback gain and a 3 second hold so the phrase is not cut off.
+
+          | Played file | Creator / original | Source and license | Notes |
+          | --- | --- | --- | --- |
+          | source/cat_softmew.wav | Kerzoven / cat_softmew.wav | [Cat Purr & Meow](https://opengameart.org/content/cat-purr-meow), CC0 1.0 | Real recorded meow (~2.5 s). Used for `cat-mew` at 0.82 gain with a 3 s hold. |
+          | cat-meow.wav | Kerzoven pack | [Cat Purr & Meow](https://opengameart.org/content/cat-purr-meow), CC0 1.0 | Natural meow used for happy `cat-chirp` at 0.82 gain with a 1.5 s hold. |
+          | cat-purr.wav | Kerzoven / cat_purrsleepy_loop.wav | [Cat Purr & Meow](https://opengameart.org/content/cat-purr-meow), CC0 1.0 | First 3 seconds, mono 22050 Hz PCM, edge fades; never looped |
+          | dog-yip-soft.wav | Technopeasant / Bark.ogg | [Baby Animals - Sounds Pack](https://opengameart.org/content/baby-animals-sounds-pack), CC0 1.0 | Pitched into a puppy range, high-cut, -10 dB, ~190 ms |
+          | dog-yip-happy.wav | rubberduck / cute_07.ogg | [80 CC0 creature SFX](https://opengameart.org/content/80-cc0-creature-sfx), CC0 1.0 | Soft cute chirp pitched up, high-cut, ~250 ms |
+          | success.wav | Created for Companion | Original generated two-note sine-wave UI effect | 660/880 Hz notes with soft attack |
+
+          [CC0 1.0 dedication](https://creativecommons.org/publicdomain/zero/1.0/). Attribution is voluntary under CC0; creator credits are also exported from src/audio/assets.ts for display in Settings. No human speech or microphone access.
+
+          The short `cat-mew-cute.wav` / `cat-chirp-happy.wav` edits and the outdoor bark stay in the tree but are no longer played.
+          COMPANION_EOF
+
+          cat > assets/audio/SHA256SUMS <<'COMPANION_EOF'
+          2b93f98454892f5a19b916981a88fcc0975660cb6d03144cab4b7b1697c531e3  cat-meow.wav
+          1856a4bfae81e254bdea234b33e95cd8a8cddfdcc0f0adb352f210ab09869587  cat-purr.wav
+          cb2b7e024a294e3472eb66676d14c08e2f86e3cb40e1816aa06919b33a475ecd  dog-bark.wav
+          7f06368e25e6a7aec9b106c3e2915f236b3fa10b41781733ecc8a1866fc749b9  source/cat_purrsleepy_loop.wav
+          7de9fed4401b677ccbf072781182857d875093a8e9b5727fc21b38028cfd5a90  source/cat_softmew.wav
+          bbd0f908b3514dd3bd7d2bc04dcf64f8d360a161e7f43cac5d6761e7add79451  source/dog_barking_mono.wav
+          ca748cd62e669bcde3808f28f475571fd8e45d7560147fb409785ffc1908c28f  success.wav
+          ee467b9c4ce836407bad3da9bd01e8b13ca8d2244bfd76b077fbe956d644b325  cat-mew-cute.wav
+          6ccfd6fe6706051753ff1bc1be1e45726041b09f051cbbc7d1f26e23790766a6  cat-chirp-happy.wav
+          5c962381e328a00dc7d75b3e5d6d63f433f1ab90235fa46b6c00e3fd0dc72531  dog-yip-soft.wav
+          f70549dc48ef6b8c6ce104bf02e42946fb3e81c7050facb72f21b25b4eecb243  dog-yip-happy.wav
+          COMPANION_EOF
+
+          cat > scripts/bundle-pet-voices.cjs <<'COMPANION_EOF'
+          #!/usr/bin/node
+          /* Unpack bundled CC0 pet voices into assets/audio.
+           * Accepts either scripts/pet-voices/<stem>.json (JSON string of base64)
+           * or ordered scripts/pet-voices/<stem>.NN.b64 chunks. Missing payloads are skipped.
+           */
+          const fs = require("fs");
+          const path = require("path");
+
+          const payloadDir = path.join(__dirname, "pet-voices");
+          const dest = path.join(__dirname, "..", "assets", "audio");
+          const files = [
+            "cat-mew-natural.wav",
+            "cat-chirp-natural.wav",
+            "cat-mew-cute.wav",
+            "cat-chirp-happy.wav",
+            "dog-yip-soft.wav",
+            "dog-yip-happy.wav",
+          ];
+
+          function readPayload(stem) {
+            const jsonPath = path.join(payloadDir, `${stem}.json`);
+            if (fs.existsSync(jsonPath)) {
+              const raw = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+              const b64 = typeof raw === "string" ? raw : raw.b64 || raw.data || "";
+              return Buffer.from(String(b64).replace(/\s+/g, ""), "base64");
+            }
+            if (!fs.existsSync(payloadDir)) return null;
+            const chunks = fs
+              .readdirSync(payloadDir)
+              .filter((name) => name.startsWith(`${stem}.`) && name.endsWith(".b64"))
+              .sort();
+            if (!chunks.length) return null;
+            const b64 = chunks
+              .map((name) => fs.readFileSync(path.join(payloadDir, name), "utf8").trim())
+              .join("")
+              .replace(/\s+/g, "");
+            return Buffer.from(b64, "base64");
+          }
+
+          fs.mkdirSync(dest, { recursive: true });
+          if (!fs.existsSync(payloadDir)) {
+            process.stdout.write("skip pet voices (no scripts/pet-voices payloads)\n");
+            process.exit(0);
+          }
+          for (const name of files) {
+            const stem = path.basename(name, ".wav");
+            const bytes = readPayload(stem);
+            if (!bytes || !bytes.length) {
+              process.stdout.write(`skip ${name} (no payload)\n`);
+              continue;
+            }
+            fs.writeFileSync(path.join(dest, name), bytes);
+            process.stdout.write(`wrote ${name} (${bytes.length} bytes)\n`);
+          }
+          COMPANION_EOF
+          chmod +x scripts/bundle-pet-voices.cjs
+
+          cat > src/audio/assets.ts <<'COMPANION_EOF'
+          export const PET_AUDIO = {
+            "cat-mew": require("../../assets/audio/source/cat_softmew.wav"),
+            "cat-chirp": require("../../assets/audio/cat-meow.wav"),
+            "cat-purr": require("../../assets/audio/cat-purr.wav"),
+            "dog-yip": require("../../assets/audio/dog-yip-soft.wav"),
+            "dog-happy": require("../../assets/audio/dog-yip-happy.wav"),
+            success: require("../../assets/audio/success.wav"),
+          };
+          export const AUDIO_CREDITS = [
+            {
+              title: "Cat Purr & Meow",
+              author: "Kerzoven",
+              license: "CC0 1.0",
+              url: "https://opengameart.org/content/cat-purr-meow",
+            },
+            {
+              title: "Baby Animals - Sounds Pack",
+              author: "Technopeasant",
+              license: "CC0 1.0",
+              url: "https://opengameart.org/content/baby-animals-sounds-pack",
+            },
+            {
+              title: "80 CC0 creature SFX",
+              author: "rubberduck",
+              license: "CC0 1.0",
+              url: "https://opengameart.org/content/80-cc0-creature-sfx",
+            },
+          ];
+          COMPANION_EOF
+
+          cat > src/audio/pet-audio.ts <<'COMPANION_EOF'
+          import { createAudioPlayer, type AudioPlayer } from "expo-audio";
+          import { PET_AUDIO } from "./assets";
+          import type { PetSound } from "../pet/behavior";
+
+          export function voiceGain(sound: Exclude<PetSound, null>, volume: number) {
+            const softness =
+              sound === "success"
+                ? 0.26
+                : sound.startsWith("dog-")
+                  ? 0.2
+                  : sound === "cat-purr"
+                    ? 0.42
+                    : sound === "cat-mew" || sound === "cat-chirp"
+                      ? 0.82
+                      : 0.26;
+            return Math.max(0, Math.min(1, volume)) * softness;
+          }
+
+          export function voiceMs(sound: Exclude<PetSound, null>) {
+            if (sound === "cat-purr") return 1_600;
+            if (sound === "cat-mew") return 3_000;
+            if (sound === "cat-chirp") return 1_500;
+            if (sound === "success") return 640;
+            if (sound.startsWith("dog-")) return 280;
+            return 720;
+          }
+
+          function attackRatio(sound: Exclude<PetSound, null>) {
+            return sound.startsWith("cat-") ? 0.72 : 0.35;
+          }
+
+          /** One bounded player, no loop, no recording, no lingering load callbacks. */
+          export class PetAudio {
+            private player: AudioPlayer | null = null;
+            private timeout: ReturnType<typeof setTimeout> | null = null;
+            private fade: ReturnType<typeof setTimeout> | null = null;
+            private subscription: { remove(): void } | null = null;
+            stop() {
+              if (this.timeout) clearTimeout(this.timeout);
+              if (this.fade) clearTimeout(this.fade);
+              this.timeout = null;
+              this.fade = null;
+              this.subscription?.remove();
+              this.subscription = null;
+              const player = this.player;
+              this.player = null;
+              if (player) {
+                try {
+                  player.volume = 0;
+                } catch {
+                  /* already released by the platform */
+                }
+                try {
+                  player.pause();
+                } catch {
+                  /* already released by the platform */
+                }
+                try {
+                  player.remove();
+                } catch {
+                  /* cleanup must stay safe on interruptions */
+                }
+              }
+            }
+            play(sound: Exclude<PetSound, null>, volume: number) {
+              this.stop();
+              try {
+                const player = createAudioPlayer(PET_AUDIO[sound], {
+                  updateInterval: 100,
+                });
+                this.player = player;
+                player.loop = false;
+                const peak = voiceGain(sound, volume);
+                player.volume = peak * attackRatio(sound);
+                this.subscription = player.addListener(
+                  "playbackStatusUpdate",
+                  (status) => {
+                    if (this.player !== player) return;
+                    if (status.didJustFinish || status.error) this.stop();
+                  },
+                );
+                player.play();
+                this.fade = setTimeout(() => {
+                  if (this.player !== player) return;
+                  try {
+                    player.volume = peak;
+                  } catch {
+                    /* player may already be gone */
+                  }
+                }, 40);
+                const hold = voiceMs(sound);
+                this.timeout = setTimeout(() => {
+                  if (this.player !== player) return;
+                  try {
+                    player.volume = 0;
+                  } catch {
+                    /* fade-out is best-effort */
+                  }
+                  this.stop();
+                }, hold);
+              } catch {
+                this.stop();
+              }
+            }
+          }
+          COMPANION_EOF
+
+          cat > src/audio/pet-audio.test.ts <<'COMPANION_EOF'
+          import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+          const mock = vi.hoisted(() => ({ players: [] as any[] }));
+          vi.mock("./assets", () => ({
+            PET_AUDIO: {
+              "cat-mew": 1,
+              "cat-chirp": 2,
+              "cat-purr": 3,
+              "dog-yip": 4,
+              "dog-happy": 5,
+              success: 6,
+            },
+          }));
+          vi.mock("expo-audio", () => ({
+            createAudioPlayer: () => {
+              const player = {
+                isLoaded: false,
+                play: vi.fn(),
+                pause: vi.fn(),
+                remove: vi.fn(),
+                callback: null as any,
+                unsubscribe: vi.fn(),
+                loop: true,
+                volume: 1,
+                addListener: (_name: string, cb: any) => {
+                  player.callback = cb;
+                  return { remove: player.unsubscribe };
+                },
+              };
+              mock.players.push(player);
+              return player;
+            },
+          }));
+          import { PetAudio, voiceGain } from "./pet-audio";
+          describe("one-shot animal audio lifecycle", () => {
+            beforeEach(() => {
+              vi.useFakeTimers();
+              mock.players.length = 0;
+            });
+            afterEach(() => {
+              vi.clearAllTimers();
+              vi.useRealTimers();
+            });
+            it("stops a released hold even if its file finishes loading afterwards", () => {
+              const audio = new PetAudio();
+              audio.play("cat-purr", 0.55);
+              const player = mock.players[0];
+              expect(player.play).toHaveBeenCalledOnce();
+              audio.stop();
+              player.callback({ isLoaded: true });
+              expect(player.play).toHaveBeenCalledOnce();
+              expect(player.pause).toHaveBeenCalledOnce();
+              expect(player.remove).toHaveBeenCalledOnce();
+              expect(player.unsubscribe).toHaveBeenCalledOnce();
+            });
+            it("never loops, replaces prior playback and bounds cleanup even without completion events", () => {
+              const audio = new PetAudio();
+              audio.play("cat-mew", 0.4);
+              const first = mock.players[0];
+              expect(first.play).toHaveBeenCalledOnce();
+              expect(first.loop).toBe(false);
+              expect(first.volume).toBeCloseTo(voiceGain("cat-mew", 0.4) * 0.72);
+              vi.advanceTimersByTime(40);
+              expect(first.volume).toBeCloseTo(voiceGain("cat-mew", 0.4));
+              audio.play("dog-yip", 0.6);
+              expect(first.remove).toHaveBeenCalledOnce();
+              const second = mock.players[1];
+              expect(second.volume).toBeCloseTo(voiceGain("dog-yip", 0.6) * 0.35);
+              expect(second.volume).toBeLessThan(0.12);
+              vi.advanceTimersByTime(801);
+              expect(second.remove).toHaveBeenCalledOnce();
+              second.callback({ isLoaded: true });
+              expect(second.play).toHaveBeenCalledOnce();
+            });
+            it("lets a natural cat mew play through instead of clipping", () => {
+              const audio = new PetAudio();
+              audio.play("cat-mew", 0.7);
+              const player = mock.players[0];
+              vi.advanceTimersByTime(2_400);
+              expect(player.remove).not.toHaveBeenCalled();
+              vi.advanceTimersByTime(700);
+              expect(player.remove).toHaveBeenCalledOnce();
+            });
+            it("releases naturally completed audio immediately", () => {
+              const audio = new PetAudio();
+              audio.play("success", 0.55);
+              const player = mock.players[0];
+              expect(player.play).toHaveBeenCalledOnce();
+              player.callback({ isLoaded: true, didJustFinish: true });
+              expect(player.remove).toHaveBeenCalledOnce();
+              audio.stop();
+              expect(player.remove).toHaveBeenCalledOnce();
+            });
+            it("keeps recorded yips quiet so they read as cute not harsh", () => {
+              expect(voiceGain("dog-yip", 1)).toBeLessThan(0.25);
+              expect(voiceGain("dog-happy", 0.55)).toBeLessThan(0.15);
+              expect(voiceGain("cat-mew", 0.55)).toBeGreaterThan(0.4);
+              expect(voiceGain("cat-mew", 0.55)).toBeLessThan(0.5);
+              expect(voiceGain("cat-chirp", 1)).toBeCloseTo(0.82);
+            });
+          });
+          COMPANION_EOF
+
+          check_blob() {
+            local expected="$1"
+            local file="$2"
+            local actual
+            actual="$(git hash-object "$file")"
+            if [ "$actual" != "$expected" ]; then
+              echo "Blob mismatch for $file: expected $expected, got $actual" >&2
+              exit 1
+            fi
+          }
+          check_blob ee4dec90acea11ba6ab7babc8ff4b44c99ebe5e6 assets/audio/PROVENANCE.md
+          check_blob 448bae6c7498c111e202292b958c1933f8dcd3a6 assets/audio/SHA256SUMS
+          check_blob f0a0602576e31cc81d53704e7441ddfab1b045e8 scripts/bundle-pet-voices.cjs
+          check_blob 882c06eb65ee8b35821c2a7adaeafc199f81db4e src/audio/assets.ts
+          check_blob 1178f06e0a8dcb1ce33d87ead9becea7e28e0bc4 src/audio/pet-audio.test.ts
+          check_blob 44b2ba30b84163fb567423df2196138e4482a2f0 src/audio/pet-audio.ts
+          check_blob 6f290d52c8b07a59c52fefde78e055e204b571b5 app.json
+          check_blob 725c32b727f60ffd94945eafd85282ad14ea6854 eas.json
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const report = {
+            verifiedAt: new Date().toISOString(),
+            baseArchiveCommit: process.env.SOURCE_BASE_SHA,
+            targetSourceCommit: process.env.TARGET_SOURCE_SHA,
+            targetMobileTreeVerified: true,
+            bundleIdentifier: process.env.BUNDLE_IDENTIFIER,
+            version: '1.1.0',
+            files: {
+              'assets/audio/PROVENANCE.md': 'ee4dec90acea11ba6ab7babc8ff4b44c99ebe5e6',
+              'assets/audio/SHA256SUMS': '448bae6c7498c111e202292b958c1933f8dcd3a6',
+              'scripts/bundle-pet-voices.cjs': 'f0a0602576e31cc81d53704e7441ddfab1b045e8',
+              'src/audio/assets.ts': '882c06eb65ee8b35821c2a7adaeafc199f81db4e',
+              'src/audio/pet-audio.test.ts': '1178f06e0a8dcb1ce33d87ead9becea7e28e0bc4',
+              'src/audio/pet-audio.ts': '44b2ba30b84163fb567423df2196138e4482a2f0',
+              'app.json': '6f290d52c8b07a59c52fefde78e055e204b571b5',
+              'eas.json': '725c32b727f60ffd94945eafd85282ad14ea6854',
+            },
+          };
+          fs.writeFileSync(
+            `${process.env.EVIDENCE}/source-verification.json`,
+            `${JSON.stringify(report, null, 2)}\n`,
+          );
+          NODE
+
+          rm -rf .git
+          git init -q
+          git config user.name 'Companion iOS release bridge'
+          git config user.email 'companion-ios-bridge@users.noreply.github.com'
+          git add -A
+          git commit -qm "Exact Companion mobile source $TARGET_SOURCE_SHA"
+
+      - name: Preserve the reconstructed exact source until the build finishes
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXACT_ARCHIVE="$RUNNER_TEMP/companion-source-${TARGET_SOURCE_SHA:0:12}.tgz"
+          tar --exclude='.git' -czf "$EXACT_ARCHIVE" -C "$APP_ROOT" mobile
+          sha256sum "$EXACT_ARCHIVE" > "$EVIDENCE/exact-source-archive.sha256"
+          gh release upload "$SOURCE_TAG" "$EXACT_ARCHIVE" \
+            --repo khanjer496-alt/Wafra \
+            --clobber
+
+      - name: Install exact Companion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          npm ci
+
+      - name: Prepare App Store Connect key and encrypted P12 password
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/AuthKey_${EXPO_ASC_KEY_ID}.p8"
+          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY"
+          else
+            printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          grep -q 'BEGIN PRIVATE KEY' "$KEY"
+          echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
+
+          P12_PASSWORD="$(node -e "const c=require('crypto');process.stdout.write(c.createHmac('sha256',process.env.EXPO_ASC_API_KEY_P8).update('app.companion.productivity:p12:v1').digest('hex').slice(0,48))")"
+          test -n "$P12_PASSWORD"
+          echo "::add-mask::$P12_PASSWORD"
+          echo "COMPANION_P12_PASSWORD=$P12_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Register Companion bundle ID and enable push notifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/companion-ios-bootstrap.mjs \
+            --output-dir "$EVIDENCE/apple-state"
+
+      - name: Restore or create Companion-only App Store signing assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="$SIGN_DIR/companion-signing-v1.tgz"
+          if gh release download "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --pattern 'companion-signing-v1.tgz' \
+            --dir "$SIGN_DIR" 2>/dev/null; then
+            tar -xzf "$PACKAGE" -C "$SIGN_DIR"
+            echo 'Restored the encrypted Companion signing package.'
+          else
+            openssl req -new -newkey rsa:2048 -nodes \
+              -keyout "$SIGN_DIR/companion-distribution.key" \
+              -out "$SIGN_DIR/companion-distribution.csr" \
+              -subj '/CN=Companion Distribution/O=Naser Khanjar/C=AE'
+
+            node scripts/release/companion-ios-bootstrap.mjs \
+              --create-signing \
+              --csr "$SIGN_DIR/companion-distribution.csr" \
+              --profile-name "Companion App Store ${GITHUB_RUN_ID}" \
+              --output-dir "$SIGN_DIR"
+
+            openssl x509 -inform DER \
+              -in "$SIGN_DIR/companion-distribution.cer" \
+              -out "$SIGN_DIR/companion-distribution.pem"
+            openssl pkcs12 -export \
+              -out "$SIGN_DIR/companion-distribution.p12" \
+              -inkey "$SIGN_DIR/companion-distribution.key" \
+              -in "$SIGN_DIR/companion-distribution.pem" \
+              -name 'Companion Distribution' \
+              -passout env:COMPANION_P12_PASSWORD
+            cp "$SIGN_DIR/companion-apple-resources.json" \
+              "$SIGN_DIR/companion-signing-metadata.json"
+            tar -czf "$PACKAGE" -C "$SIGN_DIR" \
+              companion-distribution.p12 \
+              companion-app-store.mobileprovision \
+              companion-signing-metadata.json
+            gh release upload "$SOURCE_TAG" "$PACKAGE" \
+              --repo khanjer496-alt/Wafra \
+              --clobber
+            rm -f \
+              "$SIGN_DIR/companion-distribution.key" \
+              "$SIGN_DIR/companion-distribution.csr" \
+              "$SIGN_DIR/companion-distribution.cer" \
+              "$SIGN_DIR/companion-distribution.pem"
+          fi
+          test -s "$SIGN_DIR/companion-distribution.p12"
+          test -s "$SIGN_DIR/companion-app-store.mobileprovision"
+          test -s "$SIGN_DIR/companion-signing-metadata.json"
+          cp "$SIGN_DIR/companion-signing-metadata.json" \
+            "$EVIDENCE/companion-signing-metadata.json"
+
+      - name: Verify the P12 and App Store profile match Companion
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkcs12 \
+            -in "$SIGN_DIR/companion-distribution.p12" \
+            -passin env:COMPANION_P12_PASSWORD \
+            -clcerts -nokeys \
+            -out "$SIGN_DIR/certificate-from-p12.pem"
+          openssl x509 \
+            -in "$SIGN_DIR/certificate-from-p12.pem" \
+            -outform DER \
+            -out "$SIGN_DIR/certificate-from-p12.der"
+          openssl smime -inform DER -verify -noverify \
+            -in "$SIGN_DIR/companion-app-store.mobileprovision" \
+            -out "$SIGN_DIR/profile.plist"
+
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib
+          from pathlib import Path
+
+          sign_dir = Path(os.environ['SIGN_DIR'])
+          evidence = Path(os.environ['EVIDENCE'])
+          profile = plistlib.loads((sign_dir / 'profile.plist').read_bytes())
+          entitlements = profile.get('Entitlements', {})
+          app_identifier = entitlements.get('application-identifier')
+          expected_suffix = f".{os.environ['BUNDLE_IDENTIFIER']}"
+          if not isinstance(app_identifier, str) or not app_identifier.endswith(expected_suffix):
+              raise SystemExit(f'Provisioning profile app identifier mismatch: {app_identifier!r}')
+          if entitlements.get('get-task-allow') is not False:
+              raise SystemExit('Provisioning profile is not a distribution profile')
+          if entitlements.get('aps-environment') != 'production':
+              raise SystemExit('Provisioning profile lacks production APNs entitlement')
+          if profile.get('ProvisionedDevices'):
+              raise SystemExit('Provisioning profile unexpectedly contains device UDIDs')
+          certificates = profile.get('DeveloperCertificates') or []
+          if len(certificates) != 1:
+              raise SystemExit(f'Expected one certificate in profile, got {len(certificates)}')
+          p12_certificate = (sign_dir / 'certificate-from-p12.der').read_bytes()
+          if hashlib.sha256(certificates[0]).digest() != hashlib.sha256(p12_certificate).digest():
+              raise SystemExit('P12 certificate does not match the provisioning profile')
+          report = {
+              'verifiedAt': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+              'bundleIdentifier': os.environ['BUNDLE_IDENTIFIER'],
+              'profileName': profile.get('Name'),
+              'profileUuid': profile.get('UUID'),
+              'teamIdentifiers': profile.get('TeamIdentifier'),
+              'applicationIdentifier': app_identifier,
+              'apsEnvironment': entitlements.get('aps-environment'),
+              'getTaskAllow': entitlements.get('get-task-allow'),
+              'provisionedDeviceCount': len(profile.get('ProvisionedDevices') or []),
+              'certificateSha256': hashlib.sha256(p12_certificate).hexdigest(),
+          }
+          (evidence / 'local-signing-verification.json').write_text(
+              json.dumps(report, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Configure ephemeral EAS local credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          mkdir -p .companion-signing
+          cp "$SIGN_DIR/companion-distribution.p12" \
+            .companion-signing/companion-distribution.p12
+          cp "$SIGN_DIR/companion-app-store.mobileprovision" \
+            .companion-signing/companion-app-store.mobileprovision
+          {
+            echo '/credentials.json'
+            echo '/.companion-signing/'
+          } >> .git/info/exclude
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const credentials = {
+            ios: {
+              provisioningProfilePath: '.companion-signing/companion-app-store.mobileprovision',
+              distributionCertificate: {
+                path: '.companion-signing/companion-distribution.p12',
+                password: process.env.COMPANION_P12_PASSWORD,
+              },
+            },
+          };
+          fs.writeFileSync('credentials.json', `${JSON.stringify(credentials, null, 2)}\n`, {
+            mode: 0o600,
+          });
+          const eas = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          eas.build.preview.credentialsSource = 'local';
+          fs.writeFileSync('eas.json', `${JSON.stringify(eas, null, 2)}\n`);
+          NODE
+
+      - name: Build the signed Companion IPA on EAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          eas build --platform ios --profile preview --non-interactive --wait --json \
+            | tee "$RUNNER_TEMP/eas-build.json"
+
+      - name: Download and inspect the signed IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA_URL="$(node - <<'NODE'
+          const fs = require('fs');
+          const parsed = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/eas-build.json', 'utf8'));
+          const build = Array.isArray(parsed) ? parsed[0] : parsed;
+          const url = build?.artifacts?.applicationArchiveUrl || build?.artifacts?.buildUrl;
+          if (!build?.id || !url || build.status !== 'FINISHED') {
+            throw new Error(`EAS build did not finish with an IPA: ${JSON.stringify(build)}`);
+          }
+          process.stdout.write(url);
+          NODE
+          )"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/Companion.ipa" "$IPA_URL"
+          test -s "$RUNNER_TEMP/Companion.ipa"
+          mkdir -p "$RUNNER_TEMP/companion-ipa"
+          unzip -q "$RUNNER_TEMP/Companion.ipa" -d "$RUNNER_TEMP/companion-ipa"
+          APP_BUNDLE="$(find "$RUNNER_TEMP/companion-ipa/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP_BUNDLE"
+          openssl smime -inform DER -verify -noverify \
+            -in "$APP_BUNDLE/embedded.mobileprovision" \
+            -out "$RUNNER_TEMP/ipa-profile.plist"
+
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib
+          from pathlib import Path
+
+          runner = Path(os.environ['RUNNER_TEMP'])
+          app_dirs = list((runner / 'companion-ipa' / 'Payload').glob('*.app'))
+          if len(app_dirs) != 1:
+              raise SystemExit(f'Expected one app bundle, found {len(app_dirs)}')
+          app = app_dirs[0]
+          info = plistlib.loads((app / 'Info.plist').read_bytes())
+          profile = plistlib.loads((runner / 'ipa-profile.plist').read_bytes())
+          entitlements = profile.get('Entitlements', {})
+          bundle_id = info.get('CFBundleIdentifier')
+          version = info.get('CFBundleShortVersionString')
+          build_number = info.get('CFBundleVersion')
+          if bundle_id != os.environ['BUNDLE_IDENTIFIER']:
+              raise SystemExit(f'IPA bundle mismatch: {bundle_id!r}')
+          if version != '1.1.0':
+              raise SystemExit(f'IPA version mismatch: {version!r}')
+          if entitlements.get('get-task-allow') is not False:
+              raise SystemExit('IPA embeds a non-distribution profile')
+          if entitlements.get('aps-environment') != 'production':
+              raise SystemExit('IPA does not contain production APNs entitlement')
+          ipa = runner / 'Companion.ipa'
+          eas_raw = json.loads((runner / 'eas-build.json').read_text(encoding='utf-8'))
+          eas_build = eas_raw[0] if isinstance(eas_raw, list) else eas_raw
+          report = {
+              'verifiedAt': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+              'sourceCommit': os.environ['TARGET_SOURCE_SHA'],
+              'easBuildId': eas_build.get('id'),
+              'easBuildStatus': eas_build.get('status'),
+              'bundleIdentifier': bundle_id,
+              'version': version,
+              'buildNumber': str(build_number),
+              'profileName': profile.get('Name'),
+              'profileUuid': profile.get('UUID'),
+              'applicationIdentifier': entitlements.get('application-identifier'),
+              'apsEnvironment': entitlements.get('aps-environment'),
+              'getTaskAllow': entitlements.get('get-task-allow'),
+              'provisionedDeviceCount': len(profile.get('ProvisionedDevices') or []),
+              'ipaSha256': hashlib.sha256(ipa.read_bytes()).hexdigest(),
+              'storeSigningVerified': True,
+          }
+          evidence = Path(os.environ['EVIDENCE'])
+          (evidence / 'ipa-verification.json').write_text(
+              json.dumps(report, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Recheck the App Store Connect app record
+        id: app_record
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/companion-ios-bootstrap.mjs \
+            --output-dir "$EVIDENCE/post-build-apple-state"
+          EXISTS="$(node -p "require('$EVIDENCE/post-build-apple-state/companion-apple-resources.json').appRecordExists")"
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [ "$EXISTS" != 'true' ]; then
+            node --input-type=module <<'NODE'
+            import fs from 'node:fs';
+            const verification = JSON.parse(
+              fs.readFileSync(`${process.env.EVIDENCE}/ipa-verification.json`, 'utf8'),
+            );
+            const outcome = {
+              status: 'SIGNED_IPA_READY_APP_RECORD_REQUIRED',
+              sourceCommit: process.env.TARGET_SOURCE_SHA,
+              bundleIdentifier: process.env.BUNDLE_IDENTIFIER,
+              easBuildId: verification.easBuildId,
+              version: verification.version,
+              buildNumber: verification.buildNumber,
+              remainingAction: 'Create one new iOS app record in App Store Connect for bundle ID app.companion.productivity.',
+            };
+            fs.writeFileSync(
+              `${process.env.EVIDENCE}/release-outcome.json`,
+              `${JSON.stringify(outcome, null, 2)}\n`,
+            );
+            console.log(JSON.stringify(outcome, null, 2));
+            NODE
+          fi
+
+      - name: Submit immediately if the app record appeared
+        if: steps.app_record.outputs.exists == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          eas submit --platform ios --profile preview \
+            --path "$RUNNER_TEMP/Companion.ipa" \
+            --non-interactive \
+            | tee "$RUNNER_TEMP/eas-submit.log"
+
+      - name: Preserve the signed IPA and release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-ios-signed-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/Companion.ipa
+            ${{ runner.temp }}/eas-build.json
+            ${{ runner.temp }}/eas-submit.log
+            ${{ runner.temp }}/companion-ios-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Delete the temporary public source handoff after a verified build
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete "$SOURCE_TAG" \
+            --repo khanjer496-alt/Wafra \
+            --cleanup-tag \
+            --yes
+
+      - name: Remove all local signing and API-key material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf \
+            "${SIGN_DIR:-}" \
+            "${APP_DIR:-}/.companion-signing" \
+            "${APP_DIR:-}/credentials.json" \
+            "${EXPO_ASC_API_KEY_PATH:-}"
