@@ -655,7 +655,7 @@ const afterFirst = apply(BASE, first);
   const smsTs = T0 + 4_400_000;
   const reminder = {
     kind: 'billDue', type: 'expense', amountFils: 77581, currency: 'AED',
-    merchant: 'E&', date: '2026-08-15', dueDay: 15, minDueFils: null,
+    merchant: 'Etisalat', date: '2026-08-15', dueDay: 15, minDueFils: null,
     card: null, reference: null, transferHint: false,
     snapshotFils: null, snapshotKind: null, categoryGuess: 'telecom', raw: '',
     smsTs, sender: 'e&', channel: 'inbox',
@@ -673,7 +673,7 @@ const afterFirst = apply(BASE, first);
     plan.batch.updates.some((u) => u.id === 'phantom-e&' && u.remove),
     plan.batch.updates);
   ok('and the reminder itself lands as a bill due',
-    plan.billDues.length === 1 && plan.billDues[0].merchant === 'E&', plan.billDues);
+    plan.billDues.length === 1 && plan.billDues[0].merchant === 'Etisalat', plan.billDues);
   ok('...and never as a transaction', plan.txCount === 0, plan.batch.transactions);
 
   const newerReminder = {
@@ -2577,7 +2577,7 @@ const DECLINE_SMS = [{
   );
   ok('a current utility reminder is part of the same durable import batch',
     currentPlan.batch.newBills?.length === 1 &&
-      currentPlan.batch.newBills[0].title === 'E&' &&
+      currentPlan.batch.newBills[0].title === 'Etisalat' &&
       currentPlan.batch.newBills[0].category === 'telecom' &&
       currentPlan.batch.newBills[0].dueDay === 15,
     currentPlan.batch.newBills);

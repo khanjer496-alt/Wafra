@@ -1019,9 +1019,15 @@ t('SEWA bill notice is a due reminder, not an expense',
 // hasDebit true and isBillDue requires !hasDebit.
 t('e& due-date notice is a reminder, not a charge',
   'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due for FISH BASKET REST. with the Party-ID 3014835 on 15-08-2026 . To pay your bill, please visit businessonline.etisalat.ae/quickpay. Kindly disregard this message if you have already paid. Thank you.',
-  { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15,
+  { kind: 'billDue', merchant: 'Etisalat', amountFils: 77581, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'party:4835' });
 
+// NOTE: the Arabic bill paths title this biller `E&` while every descriptor
+// path now titles it `Etisalat` (1096fba). `subscriptions.ts` and
+// `bank-alert-semantic-output.ts` say `E&` too, so the canonical ledger name is
+// genuinely split across subsystems and one biller can reach a ledger twice.
+// These five pin the behaviour as it ships; which name wins is a product
+// decision, not something to settle by editing a green test.
 t('Arabic e& monthly statement creates one telecom reminder',
   'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
   'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
@@ -1087,7 +1093,7 @@ t('a postpaid bill reminder is not a payment',
 // still has to post. Suppression must never beat evidence.
 t('an e& bill actually debited still posts',
   'AED 775.81 has been debited from your account XXXX0002 for your e& bill payment on 15/08/2026.',
-  { kind: 'transaction', type: 'expense', merchant: 'E&', amountFils: 77581 });
+  { kind: 'transaction', type: 'expense', merchant: 'Etisalat', amountFils: 77581 });
 
 // Grubtech sells a POS/order-management system TO restaurants. Nobody has
 // ever eaten at one — it is a monthly software bill for the operator, and 55
@@ -1114,13 +1120,17 @@ t('qlub is still a restaurant bill',
 // one ("Authorisation code:", "Amount:" are all in this corpus), so the match
 // failed outright and both charges arrived titled "Card purchase" — a title no
 // bill reminder can ever reconcile against.
+// ...and the two channel codes resolve to ONE biller, which is what makes the
+// reminder reconcilable: `ETISALAT TELEP` and `ETISALAT GSM` are the same payee
+// billing through two rails, and titling them apart left a bill reminder with
+// two merchants to match and neither of them the one it names.
 t('a bank channel code in front of the payee is not the payee',
   'Your ADCB Credit Card XXX2518 has been used for AED 450.45 at MB BILL DR:ETISALAT TELEP DUBAI on 04/08/2026.',
-  { merchant: 'Etisalat Telep', amountFils: 45045, category: 'telecom', type: 'expense' });
+  { merchant: 'Etisalat', amountFils: 45045, category: 'telecom', type: 'expense' });
 
 t('...and the same shape on the other Etisalat line',
   'Your ADCB Credit Card XXX2518 has been used for AED 313.95 at MB BILL DR:ETISALAT GSM DUBAI on 04/08/2026.',
-  { merchant: 'Etisalat Gsm', amountFils: 31395, category: 'telecom' });
+  { merchant: 'Etisalat', amountFils: 31395, category: 'telecom' });
 
 // The emirate is peeled by cleanDescriptor like any other descriptor tail, so
 // a one-word payee survives the whole path.
@@ -1836,9 +1846,19 @@ t('payment-for survives the newline banks put before the card number',
   'Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with\n 4110. Available limit AED 63,155.07.',
   { merchant: 'Caribou Coffee', amountFils: 2600, category: 'dining' });
 
+// Punctuation in the middle of a descriptor must survive the payee grammar,
+// which is what this shape used to be read for. It needs a descriptor that is
+// nobody's known identity to show it: a fuel site IS one, and now resolves.
 t('payment-for keeps a descriptor with punctuation in it',
+  'Payment for BRIGHT STAR TR. - 49/6915 of AED 108.01 has been made using Credit Card ending with 4110. Available limit AED 65,810.74.',
+  { merchant: 'Bright Star Tr. - 49/6915', amountFils: 10801, type: 'expense' });
+
+// The same shape once a known biller is behind the punctuation. A fuel site
+// number is not part of who was paid, and keeping it split the same station
+// across as many merchants as it has pumps.
+t('a known biller behind a site number is still that biller',
   'Payment for ENOC SITE - 49/6915 of AED 108.01 has been made using Credit Card ending with 4110. Available limit AED 65,810.74.',
-  { merchant: 'ENOC Site - 49/6915', amountFils: 10801, category: 'transport' });
+  { merchant: 'ENOC', amountFils: 10801, category: 'transport' });
 
 // The acquirer descriptor is a fixed-width field, so the city is glued onto a
 // truncated name with no separator at all.
@@ -1892,7 +1912,7 @@ t('a refund says so',
 
 t("Etisalat's own app is telecom, not Other",
   'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
-  { merchant: 'E& Digital App', category: 'telecom' });
+  { merchant: 'Etisalat', category: 'telecom' });
 
 t('a truncated government descriptor still reads as government',
   'Your Credit Card ending *** 6383 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Your available limit is AED 1659.58',
@@ -4915,9 +4935,12 @@ t('Western Union is not a shop',
   same('FEWA: the truncated federal descriptor', 'Federal Electricity An', 'FEWA');
   same('DEWA keeps its name', 'DEWA', 'DEWA');
   same('district cooling is its own biller', 'Empower', 'Empower');
-  // Must NOT over-reach: these are pinned by other tests.
+  // Must NOT over-reach: this is pinned by other tests.
   same('a shop is not a utility', 'Carrefour', null);
-  same('telecom descriptors are left alone', 'Etisalat Gsm', null);
+  // ...but a telecom descriptor IS owned here, so both rails of the same biller
+  // reach one ledger name. Left alone they titled one payee two ways.
+  same('a telecom rail descriptor resolves to its biller', 'Etisalat Gsm', 'Etisalat');
+  same('and so does the current brand', 'e& UAE', 'Etisalat');
 }
 
 
