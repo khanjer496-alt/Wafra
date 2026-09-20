@@ -3,7 +3,7 @@
 // not source spelling or callback mock counts.
 module.exports = async ({ execute, ok, eq, translated }) => {
   const disposers = [];
-  const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, params = { fromOnboarding: '1' } } = {}) => {
+  const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, knownBanks = ['Emirates NBD'], params = { fromOnboarding: '1' } } = {}) => {
     const slots = [];
     const effects = [];
     let cursor = 0;
@@ -54,6 +54,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       async removeItem(key) { values.delete(key); },
     };
     const urls = [];
+    const bankSaves = [];
     const preferenceEvents = [];
     let optedOut = captureOptOut;
     const routes = [];
@@ -95,10 +96,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     // dismissAll pops to the existing root and is not a destination; the
     // navigate that follows it is the route the user lands on.
     const router = { replace: (route) => routes.push(route), push: (route) => routes.push(route), navigate: (route) => routes.push(route), dismissAll() {}, back() {}, canGoBack: () => true, setParams() {} };
+    // "Which banks text you?" gates both sections, so these cases answer it by
+    // default and the checklist is what they exercise; knownBanks: [] leaves it
+    // unanswered and puts the bank step on screen instead.
     const store = {
-      state: { accounts: [], transactions: [], language: 'en', onboardingProfile: null },
+      state: { accounts: [], transactions: [], language: 'en', onboardingProfile: null, marketId: 'AE', knownBanks },
       ensureDurable: async () => {},
       setOnboarded() { onboarded = true; },
+      setKnownBanks(names) { store.state.knownBanks = names; bankSaves.push([...names]); },
       setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
       async setCaptureOptOut(value) {
         preferenceEvents.push(`opt-out:${value}`);
@@ -129,7 +134,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
       '@/components/themed-text': { ThemedText: 'ThemedText' },
       '@/components/themed-view': { ThemedView: 'ThemedView' },
-      '@/components/ui/controls': { Button: 'Button' },
+      '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
       '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' },
       '@/components/ui/layout': { Block: 'Block' },
       '@/components/ui/screen-header': { ScreenHeader: 'ScreenHeader' },
@@ -164,6 +169,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
           body: 'onboardInsightOverviewBody',
         }),
       },
+      // The real module. The setup screen renders one option per bank this
+      // market is known to text from, so a stub would either invent that list
+      // or, as an empty object did, crash on knownBankOptions being undefined.
+      '@/lib/known-banks': require('./build/known-banks'),
       '@/lib/store': { useStore: () => store },
       '../../modules/wafra-message-history': historyAvailable ? native : {},
     }).default;
@@ -201,10 +210,20 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       return action ? { type: 'Button', props: action } : undefined;
     };
     const press = async (key) => { const action = button(key); if (!action || action.props.disabled) return false; await action.props.onPress(); await settle(); return true; };
+    // Chips carry a bank name, not a translation key, and a pick has to be
+    // re-rendered before the next lookup: button() reads the settled tree, so
+    // pressing a chip without settling leaves Next still disabled.
+    const pressChip = async (label) => {
+      const chip = all().find((node) => node.type === 'Chip' && node.props.label === label);
+      if (!chip || chip.props.disabled) return false;
+      await chip.props.onPress();
+      await settle();
+      return true;
+    };
     const foreground = async () => { foregroundListeners.forEach((listener) => listener('active')); await settle(); };
     await settle();
     disposers.push(() => slots.forEach((memo) => memo.cleanup?.()));
-    return { all, button, press, urls, routes, nativeStatus, foreground, native, values, preferenceEvents,
+    return { all, button, press, pressChip, urls, routes, nativeStatus, foreground, native, values, preferenceEvents, bankSaves,
       optedOut: () => optedOut,
       historyChunkReads: () => historyChunkReads,
       help: async (key) => { await press('iosMessageLearnMore'); return press(key); },
@@ -640,6 +659,34 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   await privacyHelp.press('iosMessagePrivacyDetails');
   eq('iOS setup: privacy disclosure collapses without changing capture consent',
     [hasPrivacy(), privacyHelp.preferenceEvents], [false, []]);
+
+  // The bank question itself, which gates both sections. Untested when it
+  // landed: the harness answered nothing and the screen only crashed on an
+  // undefined knownBankOptions, so none of these behaviours were pinned.
+  const banks = await makeScreen({ fresh: true, knownBanks: [] });
+  const chips = () => banks.all().filter((node) => node.type === 'Chip');
+  eq('iOS setup: an unanswered bank question replaces the checklist, not sits beside it',
+    [banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks'),
+      banks.all().some((node) => node.type === 'ChecklistRow'),
+      chips().length > 0],
+    [true, false, true]);
+  eq('iOS setup: no bank is pre-picked and Next stays unavailable until one is',
+    [chips().some((chip) => chip.props.active), banks.button('iosBanksNext').props.disabled], [false, true]);
+  const first = chips()[0].props.label;
+  await banks.pressChip(first);
+  await banks.press('iosBanksNext');
+  eq('iOS setup: answering the bank question saves exactly the picks and reveals the checklist',
+    [banks.bankSaves, banks.all().some((node) => node.type === 'ChecklistRow'),
+      banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks')],
+    [[[first]], true, false]);
+  eq('iOS setup: answering banks starts no import and opens nothing',
+    [banks.urls, banks.routes, banks.historyChunkReads()], [[], [], 0]);
+
+  const skippedBanks = await makeScreen({ fresh: true, knownBanks: [] });
+  await skippedBanks.press('iosBanksSkip');
+  eq('iOS setup: skipping the bank question saves no bank and still reveals the checklist',
+    [skippedBanks.bankSaves, skippedBanks.all().some((node) => node.type === 'ChecklistRow')], [[], true]);
+
   disposers.forEach((dispose) => dispose());
 
 };
