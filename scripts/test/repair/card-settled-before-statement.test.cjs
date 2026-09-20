@@ -123,9 +123,13 @@ test('a payment made after the statement closed still settles it', () => {
   assert.equal(settled.remainingFils, 0);
   assert.deepEqual(settled.payments, ['p']);
 
-  // The closing day itself belongs to the cycle it closes.
+  // The closing day itself belongs to the cycle that CLOSED: this statement's
+  // total is the balance as of that day, so a payment made on it is already
+  // inside the figure and crediting it again would count it twice.
   const onTheDay = statusOf([payment('p', '2026-08-28', 246992)], [sep]);
-  assert.equal(onTheDay.status, 'settled');
+  assert.equal(onTheDay.status, 'urgent');
+  const dayAfter = statusOf([payment('p', '2026-08-29', 246992)], [sep]);
+  assert.equal(dayAfter.status, 'settled');
 
   // The day before it does not.
   const dayBefore = statusOf([payment('p', '2026-08-27', 246992)], [sep]);
@@ -146,5 +150,5 @@ test('a statement stating no statement date falls back to the cycle approximatio
   // before the parser read the statement date is repaired by the fallback
   // alone — no re-import and no backfill needed.
   assert.equal(statusOf([payment('p', '2026-08-20', 406196)], [legacy]).status, 'urgent');
-  assert.equal(statusOf([payment('p', '2026-08-28', 246992)], [legacy]).status, 'settled');
+  assert.equal(statusOf([payment('p', '2026-08-29', 246992)], [legacy]).status, 'settled');
 });

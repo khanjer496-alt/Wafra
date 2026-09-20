@@ -1722,6 +1722,15 @@ export function isParsedRelayRow(
   if (dueKind && row.date !== null && row.dueDay !== Number(row.date.slice(8))) return false;
   if (!validNullableSafeFils(row.minDueFils)) return false;
   if (row.kind !== 'cardStatement' && row.minDueFils !== null) return false;
+  // The statement date is the one cardStatement field that reached stored state
+  // unchecked. `not-a-date` and `2026-8-5` both passed: the first is inert, but
+  // the second is worse than useless — allocation compares these as strings, so
+  // an unpadded month silently refuses every early-August payment, and the row
+  // then fails backup-validation's strict ISO check on restore.
+  if (row.statementDate !== undefined) {
+    if (row.kind !== 'cardStatement') return false;
+    if (!validIsoDate(row.statementDate) || row.statementDate === null) return false;
+  }
 
   if (!validNullableSafeFils(row.snapshotFils)) return false;
   if (

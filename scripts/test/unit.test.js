@@ -1362,8 +1362,16 @@ const floorPaid = (date, statementDate) =>
   allocLib.duePaidFils(floorState(date, statementDate), floorState(date, statementDate).cardDues[0]);
 // No stated statement date: the issue day is approximated 25 days before the
 // deadline, the same approximation used to close the previous cycle's window.
-ok('dues: a payment on the approximated issue day settles the statement',
-  floorPaid('2026-07-21') === 100000, String(floorPaid('2026-07-21')));
+//
+// The closing day itself belongs to the cycle that CLOSES, not the one opening:
+// this statement's total is the balance as of that day, so a payment made on it
+// is already inside the figure and crediting it again would count it twice.
+// Each day belongs to exactly one cycle, which is also what stops a surplus
+// spilling across the boundary.
+ok('dues: a payment the day after the approximated issue day settles the statement',
+  floorPaid('2026-07-22') === 100000, String(floorPaid('2026-07-22')));
+ok('dues: a payment on the issue day itself belongs to the cycle that closed',
+  floorPaid('2026-07-21') === 0, String(floorPaid('2026-07-21')));
 ok('dues: a payment the day before it is the previous cycle, and is not credited',
   floorPaid('2026-07-20') === 0, String(floorPaid('2026-07-20')));
 ok('dues: a payment 40 days early no longer settles the statement',
@@ -1371,14 +1379,35 @@ ok('dues: a payment 40 days early no longer settles the statement',
 // A STATED statement date replaces the approximation in both directions: it
 // admits a payment the approximation would have refused...
 ok('dues: a stated statement date admits a payment the approximation refused',
-  floorPaid('2026-07-18', '2026-07-18') === 100000, String(floorPaid('2026-07-18', '2026-07-18')));
+  floorPaid('2026-07-19', '2026-07-18') === 100000, String(floorPaid('2026-07-19', '2026-07-18')));
 // ...and refuses one the approximation would have taken.
 ok('dues: a stated statement date refuses a payment made before it',
   floorPaid('2026-07-22', '2026-07-25') === 0, String(floorPaid('2026-07-22', '2026-07-25')));
 // A statement date is never a deadline. One on or after the due date cannot be
 // this statement's issue day whatever the row says, so the approximation stands.
 ok('dues: a statement date on or after the deadline is ignored',
-  floorPaid('2026-07-21', '2026-08-15') === 100000, String(floorPaid('2026-07-21', '2026-08-15')));
+  floorPaid('2026-07-22', '2026-08-15') === 100000, String(floorPaid('2026-07-22', '2026-08-15')));
+// A card that states its cycle ANYWHERE has told us what it is, and an issuer
+// does not change it between months. Without this a long-cycle issuer that
+// states nothing on one statement lost payments made inside its own cycle.
+{
+  const longCycle = {
+    accounts: [legCard],
+    cardDues: [
+      { id: 'jul', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000,
+        dueDate: '2026-07-31', statementDate: '2026-06-26', paidFils: 0 },
+      { id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000,
+        dueDate: '2026-08-31', paidFils: 0 },
+    ],
+    transactions: [{
+      id: 'p', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+      date: '2026-08-01', category: 'other', title: 'card payment', source: 'sms',
+    }],
+  };
+  ok('dues: a 35-day cycle observed on one statement is used for the next',
+    allocLib.duePaidFils(longCycle, longCycle.cardDues[1]) === 100000,
+    String(allocLib.duePaidFils(longCycle, longCycle.cardDues[1])));
+}
 // Nor may a corrupt one reach back into the cycle before last. Asked with the
 // payment ON that date, so trusting it would credit the statement and the
 // assertion cannot pass just because the payment is old.

@@ -180,7 +180,14 @@ export function mergeImportedCardDues(
     // `existing` is walked before `incoming`, so a fresher reading supersedes an
     // older one, and a reminder that omits it never erases what a statement
     // already stated.
-    const statementDate = due.statementDate ?? prior.statementDate;
+    //
+    // Fresher is not the same as usable. A reading that lands on or after the
+    // deadline, or a cycle further back than any real one, is refused by
+    // `statedIssueDate` — and taking it here anyway replaced a correct date
+    // with one allocation would then ignore, dropping the card silently back to
+    // the approximation. Only a date that would survive that test may win.
+    const incomingDate = statedIssueDate(due) ? due.statementDate : undefined;
+    const statementDate = incomingDate ?? (statedIssueDate(prior) ? prior.statementDate : undefined);
 
     merged[at] = {
       ...prior,
@@ -1023,6 +1030,35 @@ function statedIssueDate(due: CardDue): string | null {
 }
 
 /**
+ * How many days before its deadline THIS CARD closes a statement.
+ *
+ * `ASSUMED_STATEMENT_DAYS` is a guess, and a guess that is too short loses real
+ * payments: an issuer whose cycle runs 35 days states nothing, so a payment
+ * made 30 days ahead of the deadline fell outside its own statement's window
+ * and was credited to nothing at all. Narrowing is the safe direction for a
+ * wrong reading, but not for one this can simply know.
+ *
+ * A card that states the date on ANY statement has told us its cycle, and an
+ * issuer does not change it between months. So the gap is measured from the
+ * statements that state it and used for the ones that do not; the constant is
+ * the floor under a card that has never stated one at all. The widest observed
+ * gap wins, because a window that is too narrow drops a payment while one that
+ * is slightly wide is still bounded on the other side by the next statement.
+ */
+function observedStatementGapDays(statements: Statement[]): number {
+  let widest = ASSUMED_STATEMENT_DAYS;
+  for (const statement of statements) {
+    if (!statement.statementDate) continue;
+    const gap = Math.round(
+      (new Date(`${statement.dueDate}T12:00:00`).getTime() -
+        new Date(`${statement.statementDate}T12:00:00`).getTime()) / 86400000,
+    );
+    if (gap > widest && gap <= MAX_STATEMENT_GAP_DAYS) widest = gap;
+  }
+  return widest;
+}
+
+/**
  * When this statement came into existence — stated, or approximated.
  *
  * One function for both edges of a statement's allocation window: the day it
@@ -1031,8 +1067,8 @@ function statedIssueDate(due: CardDue): string | null {
  * could be credited to a cycle it had nothing to do with. Deriving both from
  * here means one statement's window ends exactly where the next one's begins.
  */
-function issueDateOf(s: Statement): string {
-  return s.statementDate ?? shiftISO(s.dueDate, -ASSUMED_STATEMENT_DAYS);
+function issueDateOf(s: Statement, gapDays: number): string {
+  return s.statementDate ?? shiftISO(s.dueDate, -gapDays);
 }
 
 /**
@@ -1109,6 +1145,7 @@ function computePaymentAllocations(
     s.dueIds.push(d.id);
   }
   const statements = [...byDate.values()].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const gapDays = observedStatementGapDays(statements);
 
   for (const payment of cardPaymentsOf(state, ids)) {
     let left = payment.amountFils;
@@ -1129,13 +1166,13 @@ function computePaymentAllocations(
       // whenever the August statement could not absorb it first, which is every
       // time it was marked paid by hand, never reached the app, or recorded a
       // total lower than the payment.
-      if (payment.date < issueDateOf(s)) continue;
+      if (payment.date <= issueDateOf(s, gapDays)) continue;
       const next = statements[i + 1];
       // A newer statement closes this one's allocation window when it was
       // issued. The newest known statement has no arbitrary +20-day cutoff:
       // people pay late, and until a replacement exists that payment still
       // settles the only balance Wafra knows about.
-      let until = next ? issueDateOf(next) : null;
+      let until = next ? issueDateOf(next, gapDays) : null;
       if (s.settledOn && (!until || s.settledOn > until)) until = s.settledOn;
       if (until && payment.date > until) continue;
       const take = Math.min(outstanding, left);

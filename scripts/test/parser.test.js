@@ -5536,6 +5536,16 @@ t('a generated-on date is the statement date, and still not the deadline',
 t('a due date is never read as the statement date',
   'Credit Card ending 8575: Due Date 22/09/26. Total Amt Due AED 2469.92. Min Amt Due AED 513.62',
   { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
+// A label followed by a RANGE states a period, not a closing day. Taking its
+// start opened the payment window a full cycle early and re-admitted the
+// previous cycle's payment — through a date the row appears to state, which
+// beats the approximation and so is worse than reading nothing.
+t('a statement date range states a period, not a closing day',
+  'Credit Card ending 8575. Statement Date: 01/08/26 - 31/08/26. Total Amt Due AED 100.00, Due Date 22/09/26',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
+t('...and the same in words',
+  'Credit Card ending 8575. Statement dated 01 Aug 2026 to 31 Aug 2026. Total Amt Due AED 100.00, Due Date 22/09/26',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
 t('a card statement announcing only its deadline states no statement date',
   'Your Credit Card statement for card ending 1234 is ready. Total amount due AED 714.74, minimum due AED 100.00. Due date 15/10/2026.',
   { kind: 'cardStatement', date: '2026-10-15', statementDate: null });

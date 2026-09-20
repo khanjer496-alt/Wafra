@@ -4513,12 +4513,18 @@ function namedDate(monthWord: string, day: string, year: string): string | null 
 const STATEMENT_DATE_LABEL = String.raw`(?:\b(?:statement|stmt)\.?\s*dat(?:e|ed)\b` +
   String.raw`|\b(?:statement|stmt)\b(?:(?!\bdue\b)[^.\n]){0,48}?\bdated\b` +
   String.raw`|\b(?:statement|stmt)\b(?:(?!\bdue\b)[^.\n]){0,24}?\bgenerated\s+on\b)`;
+// A label followed by a RANGE states a period, not a closing day. "Statement
+// Date: 01/08/26 - 31/08/26" would otherwise yield 01/08 and open the payment
+// window a full cycle early — re-admitting the previous cycle's payment through
+// a date the row appears to state, which beats the approximation and is
+// therefore worse than reading nothing.
+const NOT_A_RANGE = String.raw`(?!\s*(?:-|–|—|to|through|till|until)\s*\d)`;
 const STATEMENT_DATE_NUMERIC_RE = new RegExp(
-  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?!\\d)`, 'i');
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2,4})(?!\\d)${NOT_A_RANGE}`, 'i');
 const STATEMENT_DATE_ISO_RE = new RegExp(
-  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{4})-(\\d{1,2})-(\\d{1,2})(?!\\d)`, 'i');
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{4})-(\\d{1,2})-(\\d{1,2})(?!\\d)${NOT_A_RANGE}`, 'i');
 const STATEMENT_DATE_NAMED_RE = new RegExp(
-  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[-\\s]*([A-Za-z]{3,9})\\.?[-\\s]*(\\d{2,4})(?!\\d)`, 'i');
+  `${STATEMENT_DATE_LABEL}\\s*(?:is|:)?\\s*(\\d{1,2})[-\\s]*([A-Za-z]{3,9})\\.?[-\\s]*(\\d{2,4})(?!\\d)${NOT_A_RANGE}`, 'i');
 
 /**
  * THE DAY THE BANK CLOSED THIS STATEMENT, or null when it names none.
