@@ -57,6 +57,13 @@ jobs:
           test -f "$ROOT/mobile/app.json" && test -f "$ROOT/mobile/eas.json"
           echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
 
+      - name: Install Companion runtime dependencies for Expo config resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR"
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
       - name: Verify exact IPA and source identity
         id: ipa
         shell: bash
