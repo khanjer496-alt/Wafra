@@ -1,0 +1,292 @@
+{
+  "experiment": "tune-char-ngram-linear",
+  "selection_split": "MSA_PAL_val",
+  "sealed_splits_touched": [],
+  "mapping_version": "2026-09-20.1",
+  "train_digest": "61fc9807a6b2fee9016262afc901365df84c9be871fa1749cac0f578f4e2f952",
+  "val_digest": "4fb06aa73615937d767fdd8b73b16fa3126fb847d4f26fd8012d17e9df7664f1",
+  "dataset": {
+    "train": {
+      "file": "Banking77_Arabized_MSA_PAL_train.csv",
+      "sha256": "27e97bc55773c4077180adca298fd5d9bd9d15ab3974b39833d15b864691fa47",
+      "bytes": 2811933
+    },
+    "val": {
+      "file": "Banking77_Arabized_MSA_PAL_val.csv",
+      "sha256": "d178f075b41206cd93974b49747216f7ca6bd786536010ff61f22d4ea00cf373",
+      "bytes": 324359
+    },
+    "msa": {
+      "file": "Banking77_Arabized_MSA_test.csv",
+      "sha256": "2e72b0272a06c9d55afd8ceec562b6a11348602e28aceed1676dae2cdb16ec9b",
+      "bytes": 478714
+    },
+    "pal": {
+      "file": "Banking77_Arabized_PAL_test.csv",
+      "sha256": "6d80436bf89c8257894baa178a34f090c01975671d33dfd83da5eb2501341a43",
+      "bytes": 446345
+    },
+    "saudi": {
+      "file": "Banking77_Arabized_Saudi_test.csv",
+      "sha256": "9c01583810f37152a734197c3bf80b6cf9c6d129be25c9e1eac27bc0cd91af74",
+      "bytes": 426961
+    },
+    "moroccan": {
+      "file": "Banking77_Arabized_Moroccan_test.csv",
+      "sha256": "1c4063a2af8bc415a31d6ec53b18e23080fdd4814f10467f6b1819d827fa8de8",
+      "bytes": 464383
+    },
+    "tunisian": {
+      "file": "Banking77_Arabized_Tunisian_test.csv",
+      "sha256": "1c7c7aded5b5a90e20608a2dd2f3435683f6090d722e284e6e466eee402ef7a0",
+      "bytes": 121686
+    }
+  },
+  "runs": [
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          5
+        ],
+        "min_df": 2,
+        "max_features": 300000,
+        "C": 12.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9224837662337663,
+        "family_accuracy": 0.9675324675324676,
+        "state_accuracy": 0.9691558441558441,
+        "joint_accuracy": 0.952922077922078,
+        "mean_confidence": 0.8221869468688965
+      },
+      "fit_seconds": 56.81188607215881,
+      "size": {
+        "pickle_bytes": 24119420,
+        "vocab_terms": 36885,
+        "vocab_bytes": 436526,
+        "coef_float32_bytes": 11360580,
+        "coef_int8_bytes": 2840453,
+        "estimated_float32_total": 11944646,
+        "estimated_int8_total": 3424211
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          4
+        ],
+        "min_df": 2,
+        "max_features": 300000,
+        "C": 4.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9159902597402597,
+        "family_accuracy": 0.9642857142857143,
+        "state_accuracy": 0.9642857142857143,
+        "joint_accuracy": 0.948051948051948,
+        "mean_confidence": 0.7455025315284729
+      },
+      "fit_seconds": 41.10248398780823,
+      "size": {
+        "pickle_bytes": 13839026,
+        "vocab_terms": 21197,
+        "vocab_bytes": 227921,
+        "coef_float32_bytes": 6528676,
+        "coef_int8_bytes": 1632477,
+        "estimated_float32_total": 6841385,
+        "estimated_int8_total": 1944878
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          5
+        ],
+        "min_df": 2,
+        "max_features": 300000,
+        "C": 4.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9159902597402597,
+        "family_accuracy": 0.9638798701298701,
+        "state_accuracy": 0.9642857142857143,
+        "joint_accuracy": 0.948051948051948,
+        "mean_confidence": 0.7398804426193237
+      },
+      "fit_seconds": 55.58173871040344,
+      "size": {
+        "pickle_bytes": 24119420,
+        "vocab_terms": 36885,
+        "vocab_bytes": 436526,
+        "coef_float32_bytes": 11360580,
+        "coef_int8_bytes": 2840453,
+        "estimated_float32_total": 11944646,
+        "estimated_int8_total": 3424211
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          1,
+          5
+        ],
+        "min_df": 1,
+        "max_features": 400000,
+        "C": 4.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9151785714285714,
+        "family_accuracy": 0.9646915584415584,
+        "state_accuracy": 0.963474025974026,
+        "joint_accuracy": 0.948051948051948,
+        "mean_confidence": 0.737561047077179
+      },
+      "fit_seconds": 82.91143488883972,
+      "size": {
+        "pickle_bytes": 37171341,
+        "vocab_terms": 56832,
+        "vocab_bytes": 682343,
+        "coef_float32_bytes": 17504256,
+        "coef_int8_bytes": 4376372,
+        "estimated_float32_total": 18413927,
+        "estimated_int8_total": 5285735
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          5
+        ],
+        "min_df": 3,
+        "max_features": 150000,
+        "C": 4.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9135551948051948,
+        "family_accuracy": 0.9638798701298701,
+        "state_accuracy": 0.9642857142857143,
+        "joint_accuracy": 0.948051948051948,
+        "mean_confidence": 0.7411767244338989
+      },
+      "fit_seconds": 42.0463228225708,
+      "size": {
+        "pickle_bytes": 19230000,
+        "vocab_terms": 29411,
+        "vocab_bytes": 345455,
+        "coef_float32_bytes": 9058588,
+        "coef_int8_bytes": 2264955,
+        "estimated_float32_total": 9521687,
+        "estimated_int8_total": 2727746
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          6
+        ],
+        "min_df": 2,
+        "max_features": 400000,
+        "C": 4.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.9103084415584416,
+        "family_accuracy": 0.9606331168831169,
+        "state_accuracy": 0.9618506493506493,
+        "joint_accuracy": 0.9439935064935064,
+        "mean_confidence": 0.7361311316490173
+      },
+      "fit_seconds": 61.20730495452881,
+      "size": {
+        "pickle_bytes": 33038719,
+        "vocab_terms": 50459,
+        "vocab_bytes": 641226,
+        "coef_float32_bytes": 15541372,
+        "coef_int8_bytes": 3885651,
+        "estimated_float32_total": 16384434,
+        "estimated_int8_total": 4728405
+      }
+    },
+    {
+      "config": {
+        "model": "char-ngram-linear",
+        "ngram_range": [
+          2,
+          5
+        ],
+        "min_df": 2,
+        "max_features": 300000,
+        "C": 1.0,
+        "sublinear_tf": true,
+        "analyzer": "char_wb",
+        "seed": 20260920,
+        "n_labels": 77
+      },
+      "val": {
+        "intent_accuracy": 0.8928571428571429,
+        "family_accuracy": 0.9500811688311688,
+        "state_accuracy": 0.953327922077922,
+        "joint_accuracy": 0.9314123376623377,
+        "mean_confidence": 0.5625907182693481
+      },
+      "fit_seconds": 43.36551213264465,
+      "size": {
+        "pickle_bytes": 24119420,
+        "vocab_terms": 36885,
+        "vocab_bytes": 436526,
+        "coef_float32_bytes": 11360580,
+        "coef_int8_bytes": 2840453,
+        "estimated_float32_total": 11944646,
+        "estimated_int8_total": 3424211
+      }
+    }
+  ],
+  "selected": {
+    "model": "char-ngram-linear",
+    "ngram_range": [
+      2,
+      5
+    ],
+    "min_df": 2,
+    "max_features": 300000,
+    "C": 12.0,
+    "sublinear_tf": true,
+    "analyzer": "char_wb",
+    "seed": 20260920,
+    "n_labels": 77
+  }
+}

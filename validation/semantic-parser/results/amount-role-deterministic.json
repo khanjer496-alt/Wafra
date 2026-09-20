@@ -1,0 +1,5392 @@
+{
+  "experiment": "amount-role-safety",
+  "tag": "v8",
+  "created": "2026-09-20T15:15:52Z",
+  "corpus_note": "Wafra repository fixtures: privacy-safe near-real templates and standard-derived reconstructions, not consented customer evidence.",
+  "fixture_count": 199,
+  "overall_family_blind": {
+    "n": 199,
+    "selected": 167,
+    "selection_rate": 0.8391959798994975,
+    "abstained": 32,
+    "unsafe_selections": 0,
+    "unsafe_amount_selections": 0,
+    "picked_decoy": 0,
+    "amount_precision": 1.0,
+    "exact_amount_and_currency_coverage": 0.8391959798994975,
+    "decoy_subset": {
+      "n": 34,
+      "selected": 3,
+      "unsafe": 0,
+      "picked_decoy": 0
+    },
+    "abstain_reasons": {
+      "only-decoy-roles": 30,
+      "multi-currency-ambiguous": 2
+    },
+    "latency_ms": {
+      "mean": 0.0807936532656462,
+      "p95": 0.13439500003187277,
+      "max": 0.4323050000039075
+    },
+    "failures": []
+  },
+  "overall_family_conditioned": {
+    "n": 199,
+    "selected": 189,
+    "selection_rate": 0.949748743718593,
+    "abstained": 10,
+    "unsafe_selections": 0,
+    "unsafe_amount_selections": 0,
+    "picked_decoy": 0,
+    "amount_precision": 1.0,
+    "exact_amount_and_currency_coverage": 0.949748743718593,
+    "decoy_subset": {
+      "n": 34,
+      "selected": 25,
+      "unsafe": 0,
+      "picked_decoy": 0
+    },
+    "abstain_reasons": {
+      "only-decoy-roles": 8,
+      "multi-currency-ambiguous": 2
+    },
+    "latency_ms": {
+      "mean": 0.07869615578029747,
+      "p95": 0.13451800009534054,
+      "max": 0.1931829999648471
+    },
+    "failures": []
+  },
+  "by_corpus": {
+    "global-alert-formats": {
+      "n": 188,
+      "selected": 182,
+      "selection_rate": 0.9680851063829787,
+      "abstained": 6,
+      "unsafe_selections": 0,
+      "unsafe_amount_selections": 0,
+      "picked_decoy": 0,
+      "amount_precision": 1.0,
+      "exact_amount_and_currency_coverage": 0.9680851063829787,
+      "decoy_subset": {
+        "n": 28,
+        "selected": 22,
+        "unsafe": 0,
+        "picked_decoy": 0
+      },
+      "abstain_reasons": {
+        "only-decoy-roles": 6
+      },
+      "latency_ms": {
+        "mean": 0.07504527127608487,
+        "p95": 0.10966499985443079,
+        "max": 0.15382399988084217
+      }
+    },
+    "saudi-bank-formats": {
+      "n": 2,
+      "selected": 2,
+      "selection_rate": 1.0,
+      "abstained": 0,
+      "unsafe_selections": 0,
+      "unsafe_amount_selections": 0,
+      "picked_decoy": 0,
+      "amount_precision": 1.0,
+      "exact_amount_and_currency_coverage": 1.0,
+      "decoy_subset": {
+        "n": 1,
+        "selected": 1,
+        "unsafe": 0,
+        "picked_decoy": 0
+      },
+      "abstain_reasons": {},
+      "latency_ms": {
+        "mean": 0.18052250004529924,
+        "p95": 0.1751980000790354,
+        "max": 0.18584700001156307
+      }
+    },
+    "uae-bank-formats": {
+      "n": 9,
+      "selected": 5,
+      "selection_rate": 0.5555555555555556,
+      "abstained": 4,
+      "unsafe_selections": 0,
+      "unsafe_amount_selections": 0,
+      "picked_decoy": 0,
+      "amount_precision": 1.0,
+      "exact_amount_and_currency_coverage": 0.5555555555555556,
+      "decoy_subset": {
+        "n": 5,
+        "selected": 2,
+        "unsafe": 0,
+        "picked_decoy": 0
+      },
+      "abstain_reasons": {
+        "only-decoy-roles": 2,
+        "multi-currency-ambiguous": 2
+      },
+      "latency_ms": {
+        "mean": 0.13144166662944676,
+        "p95": 0.1633279998713988,
+        "max": 0.18316000000595523
+      }
+    }
+  },
+  "per_row": [
+    {
+      "id": "us-chase-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2486",
+      "got_minor": "2486",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 24.86",
+          "minor_units": 2486,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank alert: Your card ending 4421 was charged USD 24.86 at NORTH STAR MARKET."
+    },
+    {
+      "id": "us-bofa-direct-deposit",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "85000",
+      "got_minor": "85000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 850.00",
+          "minor_units": 85000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Bank of America: USD 850.00 was credited to your account by direct deposit."
+    },
+    {
+      "id": "us-wells-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6120",
+      "got_minor": "6120",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 61.20",
+          "minor_units": 6120,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Wells Fargo card purchase for USD 61.20 at RIVER BOOKS was declined."
+    },
+    {
+      "id": "us-citi-autopay-future",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7500",
+      "got_minor": "7500",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 75.00",
+          "minor_units": 7500,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Citi Bank: Your recurring autopay of USD 75.00 will be debited tomorrow."
+    },
+    {
+      "id": "us-discover-balance",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "143218",
+      "got_minor": "143218",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 1,432.18",
+          "minor_units": 143218,
+          "currency": "USD",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "Discover Card account alert: Available balance USD 1,432.18."
+    },
+    {
+      "id": "us-chase-statement-spend-summary",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "50000",
+      "got_minor": "50000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 500.00",
+          "minor_units": 50000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card statement: You spent USD 500.00 this statement period."
+    },
+    {
+      "id": "us-chase-statement-billing-cycle",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "51000",
+      "got_minor": "51000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 510.00",
+          "minor_units": 51000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card statement: Spent USD 510.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-card-charged",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "52000",
+      "got_minor": "52000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 520.00",
+          "minor_units": 52000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card statement: Your card was charged USD 520.00 this billing cycle."
+    },
+    {
+      "id": "us-chase-statement-paid",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7500",
+      "got_minor": "7500",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 75.00",
+          "minor_units": 7500,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card statement has been paid: USD 75.00."
+    },
+    {
+      "id": "us-chase-card-bill-spend-summary",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "53000",
+      "got_minor": "53000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 530.00",
+          "minor_units": 53000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card bill: You spent USD 530.00 this month."
+    },
+    {
+      "id": "gb-barclays-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1845",
+      "got_minor": "1845",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 18.45",
+          "minor_units": 1845,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays: Card payment GBP 18.45 paid at GREEN LANE CAFE with card ending 7712."
+    },
+    {
+      "id": "gb-hsbc-faster-payment",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "32000",
+      "got_minor": "32000",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 320.00",
+          "minor_units": 32000,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "HSBC UK: GBP 320.00 was credited to your account by Faster Payments."
+    },
+    {
+      "id": "gb-lloyds-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4790",
+      "got_minor": "4790",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 47.90",
+          "minor_units": 4790,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Lloyds Bank card purchase GBP 47.90 at OAK HOME was declined."
+    },
+    {
+      "id": "gb-natwest-standing-order-future",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "62500",
+      "got_minor": "62500",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 625.00",
+          "minor_units": 62500,
+          "currency": "GBP",
+          "roles": []
+        }
+      ],
+      "body": "NatWest: Your standing order of GBP 625.00 is scheduled for tomorrow."
+    },
+    {
+      "id": "gb-barclays-balance",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "210517",
+      "got_minor": "210517",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 2,105.17",
+          "minor_units": 210517,
+          "currency": "GBP",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "Barclays account alert: Available balance GBP 2,105.17."
+    },
+    {
+      "id": "fr-bnp-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3270",
+      "got_minor": "3270",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 32,70",
+          "minor_units": 3270,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : paiement par carte EUR 32,70 débité chez MAISON VERTE."
+    },
+    {
+      "id": "fr-sg-virement-credit",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "48000",
+      "got_minor": "48000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 480,00",
+          "minor_units": 48000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Société Générale : virement SEPA EUR 480,00 crédité sur votre compte."
+    },
+    {
+      "id": "fr-ca-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7615",
+      "got_minor": "7615",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 76,15",
+          "minor_units": 7615,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Crédit Agricole : paiement par carte EUR 76,15 refusé chez ATELIER BLEU."
+    },
+    {
+      "id": "fr-bnp-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1999",
+      "got_minor": "1999",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 19,99",
+          "minor_units": 1999,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : abonnement récurrent EUR 19,99 sera débité demain."
+    },
+    {
+      "id": "fr-sg-balance",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "124060",
+      "got_minor": "124060",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 1 240,60",
+          "minor_units": 124060,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Société Générale : solde disponible EUR 1 240,60."
+    },
+    {
+      "id": "fr-bnp-card-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2240",
+      "got_minor": "2240",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 22,40",
+          "minor_units": 2240,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : paiement par carte EUR 22,40 non payé chez MAISON VERTE."
+    },
+    {
+      "id": "fr-bnp-card-will-not-pay",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2340",
+      "got_minor": "2340",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 23,40",
+          "minor_units": 2340,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : paiement par carte EUR 23,40 ne sera pas payé."
+    },
+    {
+      "id": "fr-bnp-card-is-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2440",
+      "got_minor": "2440",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 24,40",
+          "minor_units": 2440,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : paiement par carte EUR 24,40 n’est pas payé."
+    },
+    {
+      "id": "fr-bnp-card-not-debited",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2540",
+      "got_minor": "2540",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 25,40",
+          "minor_units": 2540,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : paiement par carte EUR 25,40 n’a pas été débité."
+    },
+    {
+      "id": "de-db-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2840",
+      "got_minor": "2840",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 28,40",
+          "minor_units": 2840,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Kartenzahlung EUR 28,40 wurde belastet bei NORD MARKT."
+    },
+    {
+      "id": "de-commerz-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "95000",
+      "got_minor": "95000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 950,00",
+          "minor_units": 95000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Commerzbank: SEPA Überweisung EUR 950,00 wurde Ihrem Konto gutgeschrieben."
+    },
+    {
+      "id": "de-sparkasse-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4325",
+      "got_minor": "4325",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 43,25",
+          "minor_units": 4325,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Sparkasse: Kartenzahlung EUR 43,25 bei BERG LADEN abgelehnt."
+    },
+    {
+      "id": "de-n26-debit-future",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "51000",
+      "got_minor": "51000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 510,00",
+          "minor_units": 51000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "N26: Dauerauftrag EUR 510,00 wird morgen abgebucht."
+    },
+    {
+      "id": "de-db-balance",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "322109",
+      "got_minor": "322109",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 3.221,09",
+          "minor_units": 322109,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Kontostand EUR 3.221,09."
+    },
+    {
+      "id": "de-db-card-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2460",
+      "got_minor": "2460",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 24,60",
+          "minor_units": 2460,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Kartenzahlung EUR 24,60 bei NORD MARKT nicht bezahlt."
+    },
+    {
+      "id": "de-db-card-not-charged",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2560",
+      "got_minor": "2560",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 25,60",
+          "minor_units": 2560,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Kartenzahlung EUR 25,60 wurde nicht belastet."
+    },
+    {
+      "id": "es-santander-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1780",
+      "got_minor": "1780",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 17,80",
+          "minor_units": 1780,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: compra con tarjeta EUR 17,80 cargado en MERCADO SOL."
+    },
+    {
+      "id": "es-bbva-bizum-credit",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6500",
+      "got_minor": "6500",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 65,00",
+          "minor_units": 6500,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BBVA: transferencia Bizum EUR 65,00 abonado en tu cuenta."
+    },
+    {
+      "id": "es-caixa-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "9210",
+      "got_minor": "9210",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 92,10",
+          "minor_units": 9210,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "CaixaBank: compra con tarjeta EUR 92,10 rechazado en CASA NORTE."
+    },
+    {
+      "id": "es-santander-subscription-future",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1299",
+      "got_minor": "1299",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 12,99",
+          "minor_units": 1299,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: suscripción recurrente EUR 12,99 se cargará mañana."
+    },
+    {
+      "id": "es-bbva-balance",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "200644",
+      "got_minor": "200644",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 2.006,44",
+          "minor_units": 200644,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BBVA: saldo disponible EUR 2.006,44."
+    },
+    {
+      "id": "es-santander-card-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2680",
+      "got_minor": "2680",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 26,80",
+          "minor_units": 2680,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: compra con tarjeta EUR 26,80 no pagado en MERCADO SOL."
+    },
+    {
+      "id": "es-santander-card-has-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2780",
+      "got_minor": "2780",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 27,80",
+          "minor_units": 2780,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: compra con tarjeta EUR 27,80 no ha sido pagado."
+    },
+    {
+      "id": "es-santander-card-not-paid-reflexive",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2880",
+      "got_minor": "2880",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 28,80",
+          "minor_units": 2880,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: compra con tarjeta EUR 28,80 no se ha pagado."
+    },
+    {
+      "id": "es-santander-card-not-charged",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2980",
+      "got_minor": "2980",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 29,80",
+          "minor_units": 2980,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: compra con tarjeta EUR 29,80 no se ha cargado."
+    },
+    {
+      "id": "it-intesa-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2635",
+      "got_minor": "2635",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 26,35",
+          "minor_units": 2635,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: pagamento con carta EUR 26,35 addebitato presso BOTTEGA UNO."
+    },
+    {
+      "id": "it-unicredit-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "74000",
+      "got_minor": "74000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 740,00",
+          "minor_units": 74000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "UniCredit: bonifico SEPA EUR 740,00 accreditato sul tuo conto."
+    },
+    {
+      "id": "it-bpm-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "5890",
+      "got_minor": "5890",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 58,90",
+          "minor_units": 5890,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco BPM: pagamento con carta EUR 58,90 rifiutato presso CASA BLU."
+    },
+    {
+      "id": "it-intesa-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "849",
+      "got_minor": "849",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 8,49",
+          "minor_units": 849,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: abbonamento ricorrente EUR 8,49 sarà addebitato domani."
+    },
+    {
+      "id": "it-unicredit-balance",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "190872",
+      "got_minor": "190872",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 1.908,72",
+          "minor_units": 190872,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "UniCredit: saldo disponibile EUR 1.908,72."
+    },
+    {
+      "id": "it-intesa-card-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2370",
+      "got_minor": "2370",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 23,70",
+          "minor_units": 2370,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: pagamento con carta EUR 23,70 non pagato presso BOTTEGA UNO."
+    },
+    {
+      "id": "it-intesa-card-has-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2470",
+      "got_minor": "2470",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 24,70",
+          "minor_units": 2470,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: pagamento con carta EUR 24,70 non è stato pagato."
+    },
+    {
+      "id": "it-intesa-card-not-debited",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2570",
+      "got_minor": "2570",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 25,70",
+          "minor_units": 2570,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: pagamento con carta EUR 25,70 non è stato addebitato."
+    },
+    {
+      "id": "nl-ing-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2160",
+      "got_minor": "2160",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 21,60",
+          "minor_units": 2160,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: EUR 21,60 afgeschreven voor een pasbetaling bij NOORD WINKEL."
+    },
+    {
+      "id": "nl-rabo-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "38500",
+      "got_minor": "38500",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 385,00",
+          "minor_units": 38500,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Rabobank: SEPA overboeking EUR 385,00 bijgeschreven op uw rekening."
+    },
+    {
+      "id": "nl-abn-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3995",
+      "got_minor": "3995",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 39,95",
+          "minor_units": 3995,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ABN AMRO: pasbetaling EUR 39,95 bij STAD BOEKEN geweigerd."
+    },
+    {
+      "id": "nl-ing-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "future",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1400",
+      "got_minor": "1400",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 14,00",
+          "minor_units": 1400,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Bank: periodiek abonnement EUR 14,00 wordt morgen afgeschreven."
+    },
+    {
+      "id": "nl-rabo-balance",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "248011",
+      "got_minor": "248011",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 2.480,11",
+          "minor_units": 248011,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Rabobank: beschikbaar saldo EUR 2.480,11."
+    },
+    {
+      "id": "nl-ing-card-not-paid",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2050",
+      "got_minor": "2050",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 20,50",
+          "minor_units": 2050,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: pasbetaling EUR 20,50 bij NOORD WINKEL niet betaald."
+    },
+    {
+      "id": "nl-ing-refund-not-credited",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "failed",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2150",
+      "got_minor": "2150",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 21,50",
+          "minor_units": 2150,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: terugbetaling EUR 21,50 niet bijgeschreven."
+    },
+    {
+      "id": "in-hdfc-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "124950",
+      "got_minor": "124950",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 1,249.50",
+          "minor_units": 124950,
+          "currency": "INR",
+          "roles": []
+        }
+      ],
+      "body": "HDFC Bank: INR 1,249.50 debited on card ending 7312 for purchase at NORTH MART."
+    },
+    {
+      "id": "in-icici-upi-credit",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "250000",
+      "got_minor": "250000",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 2,500.00",
+          "minor_units": 250000,
+          "currency": "INR",
+          "roles": []
+        }
+      ],
+      "body": "ICICI Bank: INR 2,500.00 credited to your account through UPI transfer."
+    },
+    {
+      "id": "in-axis-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "309900",
+      "got_minor": "309900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 3,099.00",
+          "minor_units": 309900,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Axis Bank card purchase INR 3,099.00 at CITY ELECTRONICS was declined."
+    },
+    {
+      "id": "in-sbi-mandate-future",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "79900",
+      "got_minor": "79900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 799.00",
+          "minor_units": 79900,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "SBI: Your e-mandate payment of INR 799.00 is due tomorrow and will be processed through card ending 5521."
+    },
+    {
+      "id": "in-kotak-balance",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "4521075",
+      "got_minor": "4521075",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 45,210.75",
+          "minor_units": 4521075,
+          "currency": "INR",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "Kotak Bank account alert: Available balance INR 45,210.75."
+    },
+    {
+      "id": "qa-qnb-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "12450",
+      "got_minor": "12450",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 124.50 لشراء",
+          "minor_units": 12450,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: تم الخصم ر.ق ١٢٤٫٥٠ لشراء بالبطاقة لدى متجر النور."
+    },
+    {
+      "id": "qa-qib-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "80000",
+      "got_minor": "80000",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 800.00 عبر",
+          "minor_units": 80000,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "مصرف قطر الإسلامي: تم الإيداع ر.ق ٨٠٠٫٠٠ عبر تحويل فوري Fawran."
+    },
+    {
+      "id": "qa-cbq-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7525",
+      "got_minor": "7525",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 75.25 مرفوضة",
+          "minor_units": 7525,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك التجاري القطري: شراء بالبطاقة ر.ق ٧٥٫٢٥ مرفوضة."
+    },
+    {
+      "id": "qa-qnb-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "9900",
+      "got_minor": "9900",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 99.00 غدا",
+          "minor_units": 9900,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: سيتم خصم دفعة متكررة ر.ق ٩٩٫٠٠ غداً."
+    },
+    {
+      "id": "qa-qib-balance",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "342010",
+      "got_minor": "342010",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 3,420.10",
+          "minor_units": 342010,
+          "currency": "QAR",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "مصرف قطر الإسلامي: الرصيد المتاح ر.ق ٣٬٤٢٠٫١٠."
+    },
+    {
+      "id": "kw-nbk-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "12345",
+      "got_minor": "12345",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 12.345 لشراء",
+          "minor_units": 12345,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم الخصم د.ك ١٢٫٣٤٥ لشراء بالبطاقة لدى سوق المدينة."
+    },
+    {
+      "id": "kw-kfh-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "250000",
+      "got_minor": "250000",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 250.000 عبر",
+          "minor_units": 250000,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بيت التمويل الكويتي: تم الإيداع د.ك ٢٥٠٫٠٠٠ عبر تحويل Wamd."
+    },
+    {
+      "id": "kw-boubyan-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8750",
+      "got_minor": "8750",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 8.750 مرفوضة",
+          "minor_units": 8750,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك بوبيان: شراء بالبطاقة د.ك ٨٫٧٥٠ مرفوضة."
+    },
+    {
+      "id": "kw-nbk-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "15000",
+      "got_minor": "15000",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 15.000 غدا",
+          "minor_units": 15000,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: سيتم خصم دفعة متكررة د.ك ١٥٫٠٠٠ غداً."
+    },
+    {
+      "id": "kw-kfh-balance",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1100500",
+      "got_minor": "1100500",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 1,100.500",
+          "minor_units": 1100500,
+          "currency": "KWD",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "بيت التمويل الكويتي: الرصيد المتاح د.ك ١٬١٠٠٫٥٠٠."
+    },
+    {
+      "id": "bh-nbb-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "21300",
+      "got_minor": "21300",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 21.300 لشراء",
+          "minor_units": 21300,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم الخصم د.ب ٢١٫٣٠٠ لشراء بالبطاقة لدى متجر الواحة."
+    },
+    {
+      "id": "bh-bbk-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "400000",
+      "got_minor": "400000",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 400.000 عبر",
+          "minor_units": 400000,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين والكويت: تم الإيداع د.ب ٤٠٠٫٠٠٠ عبر تحويل Fawri."
+    },
+    {
+      "id": "bh-abc-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "33750",
+      "got_minor": "33750",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 33.750 مرفوضة",
+          "minor_units": 33750,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك ABC: شراء بالبطاقة د.ب ٣٣٫٧٥٠ مرفوضة."
+    },
+    {
+      "id": "bh-nbb-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "12000",
+      "got_minor": "12000",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 12.000 غدا",
+          "minor_units": 12000,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: سيتم خصم دفعة متكررة د.ب ١٢٫٠٠٠ غداً."
+    },
+    {
+      "id": "bh-bbk-balance",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "980250",
+      "got_minor": "980250",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 980.250",
+          "minor_units": 980250,
+          "currency": "BHD",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "بنك البحرين والكويت: الرصيد المتاح د.ب ٩٨٠٫٢٥٠."
+    },
+    {
+      "id": "om-muscat-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "18450",
+      "got_minor": "18450",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 18.450 لشراء",
+          "minor_units": 18450,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: تم الخصم ر.ع ١٨٫٤٥٠ لشراء بالبطاقة لدى سوق الشاطئ."
+    },
+    {
+      "id": "om-dhofar-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "320000",
+      "got_minor": "320000",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 320.000 عبر",
+          "minor_units": 320000,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك ظفار: تم الإيداع ر.ع ٣٢٠٫٠٠٠ عبر تحويل MPCSS."
+    },
+    {
+      "id": "om-sohar-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "42750",
+      "got_minor": "42750",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 42.750 مرفوضة",
+          "minor_units": 42750,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "صحار الدولي: شراء بالبطاقة ر.ع ٤٢٫٧٥٠ مرفوضة."
+    },
+    {
+      "id": "om-muscat-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 10.000 غدا",
+          "minor_units": 10000,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: سيتم خصم دفعة متكررة ر.ع ١٠٫٠٠٠ غداً."
+    },
+    {
+      "id": "om-dhofar-balance",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1750125",
+      "got_minor": "1750125",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 1,750.125",
+          "minor_units": 1750125,
+          "currency": "OMR",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "بنك ظفار: الرصيد المتاح ر.ع ١٬٧٥٠٫١٢٥."
+    },
+    {
+      "id": "eg-nbe-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "14575",
+      "got_minor": "14575",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 145.75 لشراء",
+          "minor_units": 14575,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم الخصم ج.م ١٤٥٫٧٥ لشراء بالبطاقة لدى متجر النيل."
+    },
+    {
+      "id": "eg-bm-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "200000",
+      "got_minor": "200000",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 2,000.00 عبر",
+          "minor_units": 200000,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مصر: تم الإيداع ج.م ٢٬٠٠٠٫٠٠ عبر تحويل InstaPay."
+    },
+    {
+      "id": "eg-cib-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "31050",
+      "got_minor": "31050",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 310.50 مرفوضة",
+          "minor_units": 31050,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك التجاري الدولي: شراء بالبطاقة ج.م ٣١٠٫٥٠ مرفوضة."
+    },
+    {
+      "id": "eg-nbe-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8500",
+      "got_minor": "8500",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 85.00 غدا",
+          "minor_units": 8500,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: سيتم خصم دفعة متكررة ج.م ٨٥٫٠٠ غداً."
+    },
+    {
+      "id": "eg-bm-balance",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1242030",
+      "got_minor": "1242030",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 12,420.30",
+          "minor_units": 1242030,
+          "currency": "EGP",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "بنك مصر: الرصيد المتاح ج.م ١٢٬٤٢٠٫٣٠."
+    },
+    {
+      "id": "jo-arab-card-posted",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "24500",
+      "got_minor": "24500",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 24.500 لشراء",
+          "minor_units": 24500,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: تم الخصم د.أ ٢٤٫٥٠٠ لشراء بالبطاقة لدى متجر الساحة."
+    },
+    {
+      "id": "jo-etihad-transfer-credit",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "150000",
+      "got_minor": "150000",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 150.000 عبر",
+          "minor_units": 150000,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الاتحاد: تم الإيداع د.أ ١٥٠٫٠٠٠ عبر تحويل CliQ."
+    },
+    {
+      "id": "jo-housing-card-declined",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "failed",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "19750",
+      "got_minor": "19750",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 19.750 مرفوضة",
+          "minor_units": 19750,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الإسكان: شراء بالبطاقة د.أ ١٩٫٧٥٠ مرفوضة."
+    },
+    {
+      "id": "jo-arab-recurring-future",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "future",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7000",
+      "got_minor": "7000",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 7.000 غدا",
+          "minor_units": 7000,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: سيتم خصم دفعة متكررة د.أ ٧٫٠٠٠ غداً."
+    },
+    {
+      "id": "jo-etihad-balance",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "2100250",
+      "got_minor": "2100250",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 2,100.250",
+          "minor_units": 2100250,
+          "currency": "JOD",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "بنك الاتحاد: الرصيد المتاح د.أ ٢٬١٠٠٫٢٥٠."
+    },
+    {
+      "id": "us-jpmorgan-chase-cash",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 100.00",
+          "minor_units": 10000,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank: ATM withdrawal USD 100.00 was debited from your account."
+    },
+    {
+      "id": "us-jpmorgan-chase-refund",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1825",
+      "got_minor": "1825",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 18.25",
+          "minor_units": 1825,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank: Refund USD 18.25 was credited to your card ending 4421."
+    },
+    {
+      "id": "us-jpmorgan-chase-fee",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1200",
+      "got_minor": "1200",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 12.00",
+          "minor_units": 1200,
+          "currency": "USD",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "Chase Bank: Monthly account maintenance fee USD 12.00 was debited."
+    },
+    {
+      "id": "us-jpmorgan-chase-utility",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8640",
+      "got_minor": "8640",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 86.40",
+          "minor_units": 8640,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank: Electric bill USD 86.40 was paid from your account."
+    },
+    {
+      "id": "us-jpmorgan-chase-recurring",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1499",
+      "got_minor": "1499",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 14.99",
+          "minor_units": 1499,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank: Recurring autopay USD 14.99 was debited for STREAM HOUSE."
+    },
+    {
+      "id": "us-jpmorgan-chase-statement",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "7500",
+      "got_minor": "7500",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 75.00",
+          "minor_units": 7500,
+          "currency": "USD",
+          "roles": [
+            "statement-total"
+          ]
+        }
+      ],
+      "body": "Chase Bank credit card statement: Minimum amount due USD 75.00."
+    },
+    {
+      "id": "us-jpmorgan-chase-authentication",
+      "corpus": "global-alert-formats",
+      "market": "US",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4210",
+      "got_minor": "4210",
+      "expected_currency": "USD",
+      "got_currency": "USD",
+      "candidates": [
+        {
+          "raw": "USD 42.10",
+          "minor_units": 4210,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Chase Bank verification code for a card purchase of USD 42.10."
+    },
+    {
+      "id": "gb-barclays-uk-cash",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8000",
+      "got_minor": "8000",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 80.00",
+          "minor_units": 8000,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays: Cash withdrawal GBP 80.00 was debited at an ATM."
+    },
+    {
+      "id": "gb-barclays-uk-refund",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1150",
+      "got_minor": "1150",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 11.50",
+          "minor_units": 1150,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays: Refund GBP 11.50 was credited to your card ending 7712."
+    },
+    {
+      "id": "gb-barclays-uk-fee",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "700",
+      "got_minor": "700",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 7.00",
+          "minor_units": 700,
+          "currency": "GBP",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "Barclays: Monthly account maintenance fee GBP 7.00 was debited."
+    },
+    {
+      "id": "gb-barclays-uk-utility",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6425",
+      "got_minor": "6425",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 64.25",
+          "minor_units": 6425,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays: Energy bill GBP 64.25 was paid from your account."
+    },
+    {
+      "id": "gb-barclays-uk-recurring",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "999",
+      "got_minor": "999",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 9.99",
+          "minor_units": 999,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays: Recurring payment GBP 9.99 was debited for VIEW BOX."
+    },
+    {
+      "id": "gb-barclays-uk-statement",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "5500",
+      "got_minor": "5500",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 55.00",
+          "minor_units": 5500,
+          "currency": "GBP",
+          "roles": [
+            "statement-total"
+          ]
+        }
+      ],
+      "body": "Barclays card statement: Minimum amount due GBP 55.00."
+    },
+    {
+      "id": "gb-barclays-uk-authentication",
+      "corpus": "global-alert-formats",
+      "market": "GB",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3120",
+      "got_minor": "3120",
+      "expected_currency": "GBP",
+      "got_currency": "GBP",
+      "candidates": [
+        {
+          "raw": "GBP 31.20",
+          "minor_units": 3120,
+          "currency": "GBP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Barclays security code for a card payment of GBP 31.20."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-cash",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 100,00",
+          "minor_units": 10000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : retrait d’espèces EUR 100,00 débité au distributeur."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-refund",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1640",
+      "got_minor": "1640",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 16,40",
+          "minor_units": 1640,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : remboursement EUR 16,40 crédité sur votre carte."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-fee",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "800",
+      "got_minor": "800",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 8,00",
+          "minor_units": 800,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : frais EUR 8,00 débité sur votre compte."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-utility",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7230",
+      "got_minor": "7230",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 72,30",
+          "minor_units": 7230,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : facture électricité EUR 72,30 payée depuis votre compte."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-recurring",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1399",
+      "got_minor": "1399",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 13,99",
+          "minor_units": 1399,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : abonnement récurrent EUR 13,99 débité pour VIDEO PLUS."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-statement",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6000",
+      "got_minor": "6000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 60,00",
+          "minor_units": 6000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : relevé de carte, montant minimum dû EUR 60,00."
+    },
+    {
+      "id": "fr-bnp-paribas-fr-authentication",
+      "corpus": "global-alert-formats",
+      "market": "FR",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2750",
+      "got_minor": "2750",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 27,50",
+          "minor_units": 2750,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "BNP Paribas : code de sécurité pour paiement par carte EUR 27,50."
+    },
+    {
+      "id": "de-deutsche-bank-de-cash",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 100,00",
+          "minor_units": 10000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Bargeldabhebung EUR 100,00 wurde am Geldautomat belastet."
+    },
+    {
+      "id": "de-deutsche-bank-de-refund",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1420",
+      "got_minor": "1420",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 14,20",
+          "minor_units": 1420,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Erstattung EUR 14,20 wurde Ihrem Konto gutgeschrieben."
+    },
+    {
+      "id": "de-deutsche-bank-de-fee",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "600",
+      "got_minor": "600",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 6,00",
+          "minor_units": 600,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Monatliche Gebühr EUR 6,00 wurde abgebucht."
+    },
+    {
+      "id": "de-deutsche-bank-de-utility",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7910",
+      "got_minor": "7910",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 79,10",
+          "minor_units": 7910,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Strom EUR 79,10 wurde von Ihrem Konto bezahlt."
+    },
+    {
+      "id": "de-deutsche-bank-de-recurring",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1099",
+      "got_minor": "1099",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 10,99",
+          "minor_units": 1099,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank: Abonnement EUR 10,99 wurde wiederkehrend abgebucht."
+    },
+    {
+      "id": "de-deutsche-bank-de-statement",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4800",
+      "got_minor": "4800",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 48,00",
+          "minor_units": 4800,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank Kontoauszug: fälliger Mindestbetrag EUR 48,00."
+    },
+    {
+      "id": "de-deutsche-bank-de-authentication",
+      "corpus": "global-alert-formats",
+      "market": "DE",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3580",
+      "got_minor": "3580",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 35,80",
+          "minor_units": 3580,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Deutsche Bank Sicherheitscode für Kartenzahlung EUR 35,80."
+    },
+    {
+      "id": "es-santander-es-cash",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 100,00",
+          "minor_units": 10000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: retirada de efectivo EUR 100,00 cargado en cajero."
+    },
+    {
+      "id": "es-santander-es-refund",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2130",
+      "got_minor": "2130",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 21,30",
+          "minor_units": 2130,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: reembolso EUR 21,30 abonado en tu tarjeta."
+    },
+    {
+      "id": "es-santander-es-fee",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "900",
+      "got_minor": "900",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 9,00",
+          "minor_units": 900,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: comisión EUR 9,00 cargado en tu cuenta."
+    },
+    {
+      "id": "es-santander-es-utility",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6875",
+      "got_minor": "6875",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 68,75",
+          "minor_units": 6875,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: factura de electricidad EUR 68,75 pagado desde tu cuenta."
+    },
+    {
+      "id": "es-santander-es-recurring",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1249",
+      "got_minor": "1249",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 12,49",
+          "minor_units": 1249,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: suscripción recurrente EUR 12,49 cargado para CINE CASA."
+    },
+    {
+      "id": "es-santander-es-statement",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "5200",
+      "got_minor": "5200",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 52,00",
+          "minor_units": 5200,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander extracto: importe mínimo pendiente EUR 52,00."
+    },
+    {
+      "id": "es-santander-es-authentication",
+      "corpus": "global-alert-formats",
+      "market": "ES",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2990",
+      "got_minor": "2990",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 29,90",
+          "minor_units": 2990,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Banco Santander: código de seguridad para compra con tarjeta EUR 29,90."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-cash",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 100,00",
+          "minor_units": 10000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: prelievo contanti EUR 100,00 addebitato allo sportello ATM."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-refund",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1760",
+      "got_minor": "1760",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 17,60",
+          "minor_units": 1760,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: rimborso EUR 17,60 accreditato sulla carta."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-fee",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "750",
+      "got_minor": "750",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 7,50",
+          "minor_units": 750,
+          "currency": "EUR",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "Intesa Sanpaolo: commissione EUR 7,50 addebitato sul conto."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-utility",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7420",
+      "got_minor": "7420",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 74,20",
+          "minor_units": 7420,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: utenza elettricità EUR 74,20 pagato dal conto."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-recurring",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1199",
+      "got_minor": "1199",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 11,99",
+          "minor_units": 1199,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: abbonamento ricorrente EUR 11,99 addebitato per TV CASA."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-statement",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "5700",
+      "got_minor": "5700",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 57,00",
+          "minor_units": 5700,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo estratto conto: importo minimo dovuto EUR 57,00."
+    },
+    {
+      "id": "it-intesa-sanpaolo-it-authentication",
+      "corpus": "global-alert-formats",
+      "market": "IT",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3340",
+      "got_minor": "3340",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 33,40",
+          "minor_units": 3340,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "Intesa Sanpaolo: codice di sicurezza per pagamento con carta EUR 33,40."
+    },
+    {
+      "id": "nl-ing-nl-cash",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "10000",
+      "got_minor": "10000",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 100,00",
+          "minor_units": 10000,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: geldopname EUR 100,00 afgeschreven bij geldautomaat."
+    },
+    {
+      "id": "nl-ing-nl-refund",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1980",
+      "got_minor": "1980",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 19,80",
+          "minor_units": 1980,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: terugbetaling EUR 19,80 bijgeschreven op uw rekening."
+    },
+    {
+      "id": "nl-ing-nl-fee",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "550",
+      "got_minor": "550",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 5,50",
+          "minor_units": 550,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: maandelijkse kosten EUR 5,50 afgeschreven."
+    },
+    {
+      "id": "nl-ing-nl-utility",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7040",
+      "got_minor": "7040",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 70,40",
+          "minor_units": 7040,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: energie EUR 70,40 betaald vanaf uw rekening."
+    },
+    {
+      "id": "nl-ing-nl-recurring",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "899",
+      "got_minor": "899",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 8,99",
+          "minor_units": 899,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Nederland: periodiek abonnement EUR 8,99 afgeschreven voor KIJK TV."
+    },
+    {
+      "id": "nl-ing-nl-statement",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4600",
+      "got_minor": "4600",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 46,00",
+          "minor_units": 4600,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Bank rekeningoverzicht: minimumbedrag EUR 46,00."
+    },
+    {
+      "id": "nl-ing-nl-authentication",
+      "corpus": "global-alert-formats",
+      "market": "NL",
+      "status": "informational",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "2570",
+      "got_minor": "2570",
+      "expected_currency": "EUR",
+      "got_currency": "EUR",
+      "candidates": [
+        {
+          "raw": "EUR 25,70",
+          "minor_units": 2570,
+          "currency": "EUR",
+          "roles": []
+        }
+      ],
+      "body": "ING Bank beveiligingscode voor pasbetaling EUR 25,70."
+    },
+    {
+      "id": "in-hdfc-bank-cash",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "500000",
+      "got_minor": "500000",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 5,000.00",
+          "minor_units": 500000,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "HDFC Bank: ATM cash withdrawal INR 5,000.00 was debited from your account."
+    },
+    {
+      "id": "in-hdfc-bank-refund",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "74900",
+      "got_minor": "74900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 749.00",
+          "minor_units": 74900,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "HDFC Bank: Refund INR 749.00 was credited to card ending 7312."
+    },
+    {
+      "id": "in-hdfc-bank-fee",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "49900",
+      "got_minor": "49900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 499.00",
+          "minor_units": 49900,
+          "currency": "INR",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "HDFC Bank: Annual card fee INR 499.00 was debited from your account."
+    },
+    {
+      "id": "in-hdfc-bank-utility",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "186000",
+      "got_minor": "186000",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 1,860.00",
+          "minor_units": 186000,
+          "currency": "INR",
+          "roles": []
+        }
+      ],
+      "body": "HDFC Bank: Electricity bill INR 1,860.00 was paid through BBPS."
+    },
+    {
+      "id": "in-hdfc-bank-recurring",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "29900",
+      "got_minor": "29900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 299.00",
+          "minor_units": 29900,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "HDFC Bank: UPI AutoPay INR 299.00 was debited for MUSIC HOUSE."
+    },
+    {
+      "id": "in-hdfc-bank-statement",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "240000",
+      "got_minor": "240000",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 2,400.00",
+          "minor_units": 240000,
+          "currency": "INR",
+          "roles": [
+            "statement-total"
+          ]
+        }
+      ],
+      "body": "HDFC Bank credit card statement: Minimum amount due INR 2,400.00."
+    },
+    {
+      "id": "in-hdfc-bank-authentication",
+      "corpus": "global-alert-formats",
+      "market": "IN",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "129900",
+      "got_minor": "129900",
+      "expected_currency": "INR",
+      "got_currency": "INR",
+      "candidates": [
+        {
+          "raw": "INR 1,299.00",
+          "minor_units": 129900,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "HDFC Bank verification code for card purchase INR 1,299.00."
+    },
+    {
+      "id": "qa-qnb-qatar-cash",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "50000",
+      "got_minor": "50000",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 500.00 لعملية",
+          "minor_units": 50000,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: تم الخصم ر.ق ٥٠٠٫٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "qa-qnb-qatar-refund",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4550",
+      "got_minor": "4550",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 45.50 إلى",
+          "minor_units": 4550,
+          "currency": "QAR",
+          "roles": []
+        }
+      ],
+      "body": "بنك قطر الوطني: تم رد ر.ق ٤٥٫٥٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "qa-qnb-qatar-fee",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1000",
+      "got_minor": "1000",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 10.00 رسوم",
+          "minor_units": 1000,
+          "currency": "QAR",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: تم الخصم ر.ق ١٠٫٠٠ رسوم شهرية."
+    },
+    {
+      "id": "qa-qnb-qatar-utility",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "22075",
+      "got_minor": "22075",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 220.75 فاتورة",
+          "minor_units": 22075,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: تم الدفع ر.ق ٢٢٠٫٧٥ فاتورة كهرباء."
+    },
+    {
+      "id": "qa-qnb-qatar-recurring",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3900",
+      "got_minor": "3900",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 39.00 لدفعة",
+          "minor_units": 3900,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: تم الخصم ر.ق ٣٩٫٠٠ لدفعة متكررة."
+    },
+    {
+      "id": "qa-qnb-qatar-statement",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "15000",
+      "got_minor": null,
+      "expected_currency": "QAR",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "ر.ق 150.00",
+          "minor_units": 15000,
+          "currency": "QAR",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: كشف حساب البطاقة، الحد الأدنى المستحق ر.ق ١٥٠٫٠٠."
+    },
+    {
+      "id": "qa-qnb-qatar-authentication",
+      "corpus": "global-alert-formats",
+      "market": "QA",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8825",
+      "got_minor": "8825",
+      "expected_currency": "QAR",
+      "got_currency": "QAR",
+      "candidates": [
+        {
+          "raw": "ر.ق 88.25",
+          "minor_units": 8825,
+          "currency": "QAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك قطر الوطني: رمز التحقق لشراء بالبطاقة ر.ق ٨٨٫٢٥."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-cash",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "100000",
+      "got_minor": "100000",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 100.000 لعملية",
+          "minor_units": 100000,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم الخصم د.ك ١٠٠٫٠٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-refund",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "12500",
+      "got_minor": "12500",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 12.500 إلى",
+          "minor_units": 12500,
+          "currency": "KWD",
+          "roles": []
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم رد د.ك ١٢٫٥٠٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-fee",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "5000",
+      "got_minor": "5000",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 5.000 رسوم",
+          "minor_units": 5000,
+          "currency": "KWD",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم الخصم د.ك ٥٫٠٠٠ رسوم شهرية."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-utility",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "30750",
+      "got_minor": "30750",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 30.750 فاتورة",
+          "minor_units": 30750,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم الدفع د.ك ٣٠٫٧٥٠ فاتورة كهرباء."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-recurring",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "9990",
+      "got_minor": "9990",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 9.990 لدفعة",
+          "minor_units": 9990,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: تم الخصم د.ك ٩٫٩٩٠ لدفعة متكررة."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-statement",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "40000",
+      "got_minor": null,
+      "expected_currency": "KWD",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "د.ك 40.000",
+          "minor_units": 40000,
+          "currency": "KWD",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: كشف حساب البطاقة، الحد الأدنى المستحق د.ك ٤٠٫٠٠٠."
+    },
+    {
+      "id": "kw-national-bank-of-kuwait-authentication",
+      "corpus": "global-alert-formats",
+      "market": "KW",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "16250",
+      "got_minor": "16250",
+      "expected_currency": "KWD",
+      "got_currency": "KWD",
+      "candidates": [
+        {
+          "raw": "د.ك 16.250",
+          "minor_units": 16250,
+          "currency": "KWD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك الكويت الوطني: رمز التحقق لشراء بالبطاقة د.ك ١٦٫٢٥٠."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-cash",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "100000",
+      "got_minor": "100000",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 100.000 لعملية",
+          "minor_units": 100000,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم الخصم د.ب ١٠٠٫٠٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-refund",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "14500",
+      "got_minor": "14500",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 14.500 إلى",
+          "minor_units": 14500,
+          "currency": "BHD",
+          "roles": []
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم رد د.ب ١٤٫٥٠٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-fee",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "4000",
+      "got_minor": "4000",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 4.000 رسوم",
+          "minor_units": 4000,
+          "currency": "BHD",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم الخصم د.ب ٤٫٠٠٠ رسوم شهرية."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-utility",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "28750",
+      "got_minor": "28750",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 28.750 فاتورة",
+          "minor_units": 28750,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم الدفع د.ب ٢٨٫٧٥٠ فاتورة كهرباء."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-recurring",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "8990",
+      "got_minor": "8990",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 8.990 لدفعة",
+          "minor_units": 8990,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: تم الخصم د.ب ٨٫٩٩٠ لدفعة متكررة."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-statement",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "35000",
+      "got_minor": null,
+      "expected_currency": "BHD",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "د.ب 35.000",
+          "minor_units": 35000,
+          "currency": "BHD",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: كشف حساب البطاقة، الحد الأدنى المستحق د.ب ٣٥٫٠٠٠."
+    },
+    {
+      "id": "bh-national-bank-of-bahrain-authentication",
+      "corpus": "global-alert-formats",
+      "market": "BH",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "17250",
+      "got_minor": "17250",
+      "expected_currency": "BHD",
+      "got_currency": "BHD",
+      "candidates": [
+        {
+          "raw": "د.ب 17.250",
+          "minor_units": 17250,
+          "currency": "BHD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك البحرين الوطني: رمز التحقق لشراء بالبطاقة د.ب ١٧٫٢٥٠."
+    },
+    {
+      "id": "om-bank-muscat-cash",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "100000",
+      "got_minor": "100000",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 100.000 لعملية",
+          "minor_units": 100000,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: تم الخصم ر.ع ١٠٠٫٠٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "om-bank-muscat-refund",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "13500",
+      "got_minor": "13500",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 13.500 إلى",
+          "minor_units": 13500,
+          "currency": "OMR",
+          "roles": []
+        }
+      ],
+      "body": "بنك مسقط: تم رد ر.ع ١٣٫٥٠٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "om-bank-muscat-fee",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "3000",
+      "got_minor": "3000",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 3.000 رسوم",
+          "minor_units": 3000,
+          "currency": "OMR",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: تم الخصم ر.ع ٣٫٠٠٠ رسوم شهرية."
+    },
+    {
+      "id": "om-bank-muscat-utility",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "26750",
+      "got_minor": "26750",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 26.750 فاتورة",
+          "minor_units": 26750,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: تم الدفع ر.ع ٢٦٫٧٥٠ فاتورة كهرباء."
+    },
+    {
+      "id": "om-bank-muscat-recurring",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "7990",
+      "got_minor": "7990",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 7.990 لدفعة",
+          "minor_units": 7990,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: تم الخصم ر.ع ٧٫٩٩٠ لدفعة متكررة."
+    },
+    {
+      "id": "om-bank-muscat-statement",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "30000",
+      "got_minor": null,
+      "expected_currency": "OMR",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "ر.ع 30.000",
+          "minor_units": 30000,
+          "currency": "OMR",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: كشف حساب البطاقة، الحد الأدنى المستحق ر.ع ٣٠٫٠٠٠."
+    },
+    {
+      "id": "om-bank-muscat-authentication",
+      "corpus": "global-alert-formats",
+      "market": "OM",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "18250",
+      "got_minor": "18250",
+      "expected_currency": "OMR",
+      "got_currency": "OMR",
+      "candidates": [
+        {
+          "raw": "ر.ع 18.250",
+          "minor_units": 18250,
+          "currency": "OMR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "بنك مسقط: رمز التحقق لشراء بالبطاقة ر.ع ١٨٫٢٥٠."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-cash",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "100000",
+      "got_minor": "100000",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 1,000.00 لعملية",
+          "minor_units": 100000,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم الخصم ج.م ١٬٠٠٠٫٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-refund",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "12050",
+      "got_minor": "12050",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 120.50 إلى",
+          "minor_units": 12050,
+          "currency": "EGP",
+          "roles": []
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم رد ج.م ١٢٠٫٥٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-fee",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "3000",
+      "got_minor": "3000",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 30.00 رسوم",
+          "minor_units": 3000,
+          "currency": "EGP",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم الخصم ج.م ٣٠٫٠٠ رسوم شهرية."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-utility",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "45075",
+      "got_minor": "45075",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 450.75 فاتورة",
+          "minor_units": 45075,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم الدفع ج.م ٤٥٠٫٧٥ فاتورة كهرباء."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-recurring",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "9900",
+      "got_minor": "9900",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 99.00 لدفعة",
+          "minor_units": 9900,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: تم الخصم ج.م ٩٩٫٠٠ لدفعة متكررة."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-statement",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "60000",
+      "got_minor": null,
+      "expected_currency": "EGP",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "ج.م 600.00",
+          "minor_units": 60000,
+          "currency": "EGP",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: كشف حساب البطاقة، الحد الأدنى المستحق ج.م ٦٠٠٫٠٠."
+    },
+    {
+      "id": "eg-national-bank-of-egypt-authentication",
+      "corpus": "global-alert-formats",
+      "market": "EG",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "24025",
+      "got_minor": "24025",
+      "expected_currency": "EGP",
+      "got_currency": "EGP",
+      "candidates": [
+        {
+          "raw": "ج.م 240.25",
+          "minor_units": 24025,
+          "currency": "EGP",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك الأهلي المصري: رمز التحقق لشراء بالبطاقة ج.م ٢٤٠٫٢٥."
+    },
+    {
+      "id": "jo-arab-bank-jordan-cash",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "100000",
+      "got_minor": "100000",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 100.000 لعملية",
+          "minor_units": 100000,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: تم الخصم د.أ ١٠٠٫٠٠٠ لعملية سحب نقدي من صراف آلي."
+    },
+    {
+      "id": "jo-arab-bank-jordan-refund",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "11500",
+      "got_minor": "11500",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 11.500 إلى",
+          "minor_units": 11500,
+          "currency": "JOD",
+          "roles": []
+        }
+      ],
+      "body": "البنك العربي: تم رد د.أ ١١٫٥٠٠ إلى بطاقتك كاسترداد."
+    },
+    {
+      "id": "jo-arab-bank-jordan-fee",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "2000",
+      "got_minor": "2000",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 2.000 رسوم",
+          "minor_units": 2000,
+          "currency": "JOD",
+          "roles": [
+            "fee"
+          ]
+        }
+      ],
+      "body": "البنك العربي: تم الخصم د.أ ٢٫٠٠٠ رسوم شهرية."
+    },
+    {
+      "id": "jo-arab-bank-jordan-utility",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "24750",
+      "got_minor": "24750",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 24.750 فاتورة",
+          "minor_units": 24750,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: تم الدفع د.أ ٢٤٫٧٥٠ فاتورة كهرباء."
+    },
+    {
+      "id": "jo-arab-bank-jordan-recurring",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "6990",
+      "got_minor": "6990",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 6.990 لدفعة",
+          "minor_units": 6990,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: تم الخصم د.أ ٦٫٩٩٠ لدفعة متكررة."
+    },
+    {
+      "id": "jo-arab-bank-jordan-statement",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "informational",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "25000",
+      "got_minor": null,
+      "expected_currency": "JOD",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "د.أ 25.000",
+          "minor_units": 25000,
+          "currency": "JOD",
+          "roles": [
+            "minimum-due"
+          ]
+        }
+      ],
+      "body": "البنك العربي: كشف حساب البطاقة، الحد الأدنى المستحق د.أ ٢٥٫٠٠٠."
+    },
+    {
+      "id": "jo-arab-bank-jordan-authentication",
+      "corpus": "global-alert-formats",
+      "market": "JO",
+      "status": "informational",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "19250",
+      "got_minor": "19250",
+      "expected_currency": "JOD",
+      "got_currency": "JOD",
+      "candidates": [
+        {
+          "raw": "د.أ 19.250",
+          "minor_units": 19250,
+          "currency": "JOD",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "البنك العربي: رمز التحقق لشراء بالبطاقة د.أ ١٩٫٢٥٠."
+    },
+    {
+      "id": "enbd-credit-card-purchase",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "8950",
+      "got_minor": "8950",
+      "expected_currency": "AED",
+      "got_currency": "AED",
+      "candidates": [
+        {
+          "raw": "AED 89.50",
+          "minor_units": 8950,
+          "currency": "AED",
+          "roles": [
+            "transaction"
+          ]
+        },
+        {
+          "raw": "AED 14,671.30",
+          "minor_units": 1467130,
+          "currency": "AED",
+          "roles": [
+            "limit"
+          ]
+        }
+      ],
+      "body": "Purchase of AED 89.50 with Credit Card ending 4844 at CARREFOUR, DUBAI. Avl Cr. Limit AED 14,671.30"
+    },
+    {
+      "id": "adcb-salik-card-credit",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "30000",
+      "got_minor": "30000",
+      "expected_currency": "AED",
+      "got_currency": "AED",
+      "candidates": [
+        {
+          "raw": "AED300.00",
+          "minor_units": 30000,
+          "currency": "AED",
+          "roles": [
+            "transaction"
+          ]
+        },
+        {
+          "raw": "AED 2508.31",
+          "minor_units": 250831,
+          "currency": "AED",
+          "roles": [
+            "limit"
+          ]
+        }
+      ],
+      "body": "AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.Avl.Limit is AED 2508.31"
+    },
+    {
+      "id": "fab-multiline-card-purchase",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "7650",
+      "got_minor": null,
+      "expected_currency": "AED",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "AED 76.50\nTAP",
+          "minor_units": 7650,
+          "currency": "AED",
+          "roles": []
+        },
+        {
+          "raw": "AED 7875.65",
+          "minor_units": 787565,
+          "currency": "AED",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "Credit Card Purchase\nCard No XXXX4711\nAED 76.50\nTAP*Keeta Dubai ARE\n15/12/25 22:34\nAvailable Balance AED 7875.65\nYour December statement payment due date is 26/12/2025"
+    },
+    {
+      "id": "fab-account-credit-with-reference",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1500000",
+      "got_minor": "1500000",
+      "expected_currency": "AED",
+      "got_currency": "AED",
+      "candidates": [
+        {
+          "raw": "AED 15,000.00",
+          "minor_units": 1500000,
+          "currency": "AED",
+          "roles": []
+        }
+      ],
+      "body": "AED 15,000.00 has been credited to your account no. 095-XXX11XXX-0001 IPI TT REF: XXOTTXXXX075 RENT PAYMENTS on 25/07/2026"
+    },
+    {
+      "id": "mashreq-foreign-compact-date",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "multi-currency-ambiguous",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "8814",
+      "got_minor": null,
+      "expected_currency": "AED",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "USD 24.00",
+          "minor_units": 2400,
+          "currency": "USD",
+          "roles": [
+            "transaction"
+          ]
+        },
+        {
+          "raw": "AED 2207.33",
+          "minor_units": 220733,
+          "currency": "AED",
+          "roles": [
+            "limit"
+          ]
+        }
+      ],
+      "body": "Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at GOOGLE *Domains g.co/helppay# US on 22Jan18 09:"
+    },
+    {
+      "id": "adib-compact-masked-card",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "sole-candidate-no-decoys",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4250",
+      "got_minor": "4250",
+      "expected_currency": "AED",
+      "got_currency": "AED",
+      "candidates": [
+        {
+          "raw": "AED 42.50",
+          "minor_units": 4250,
+          "currency": "AED",
+          "roles": []
+        }
+      ],
+      "body": "XXX456789 was used for AED 42.50 on Jan 17 2023 1:04PM at CARREFOUR,AE."
+    },
+    {
+      "id": "rakbank-retail-grammar-probe",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "only-decoy-roles",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "12000",
+      "got_minor": null,
+      "expected_currency": "AED",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "AED 120.00",
+          "minor_units": 12000,
+          "currency": "AED",
+          "roles": []
+        },
+        {
+          "raw": "AED 8,700.00",
+          "minor_units": 870000,
+          "currency": "AED",
+          "roles": [
+            "limit"
+          ]
+        }
+      ],
+      "body": "Your RAKBANK Credit Card ending 0000 was used for AED 120.00 at CARREFOUR on 31/07/2026. Available credit limit AED 8,700.00"
+    },
+    {
+      "id": "liv-debit-card-spend",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "4500",
+      "got_minor": "4500",
+      "expected_currency": "AED",
+      "got_currency": "AED",
+      "candidates": [
+        {
+          "raw": "AED 45.00",
+          "minor_units": 4500,
+          "currency": "AED",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "You spent AED 45.00 on your Liv debit card 1354 at STARBUCKS DIFC on 20/07/2026"
+    },
+    {
+      "id": "wio-foreign-with-local-equivalent",
+      "corpus": "uae-bank-formats",
+      "market": "AE",
+      "status": "posted",
+      "reason": "multi-currency-ambiguous",
+      "selected": false,
+      "amount_correct": false,
+      "currency_correct": false,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "1096",
+      "got_minor": null,
+      "expected_currency": "AED",
+      "got_currency": null,
+      "candidates": [
+        {
+          "raw": "INR 270",
+          "minor_units": 27000,
+          "currency": "INR",
+          "roles": [
+            "transaction"
+          ]
+        },
+        {
+          "raw": "AED 10.96",
+          "minor_units": 1096,
+          "currency": "AED",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "Payment of INR 270 (AED 10.96) was done at Craft docs using your Wio Personal card 68XX with Own AED funds"
+    },
+    {
+      "id": "bank-albilad-arabic-pos-credit-card",
+      "corpus": "saudi-bank-formats",
+      "market": "SA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": true,
+      "expected_minor": "1200",
+      "got_minor": "1200",
+      "expected_currency": "SAR",
+      "got_currency": "SAR",
+      "candidates": [
+        {
+          "raw": "12.00 SAR",
+          "minor_units": 1200,
+          "currency": "SAR",
+          "roles": [
+            "transaction"
+          ]
+        },
+        {
+          "raw": "1234.56 SAR",
+          "minor_units": 123456,
+          "currency": "SAR",
+          "roles": [
+            "balance"
+          ]
+        }
+      ],
+      "body": "شراء عبر نقاط البيع\nبطاقة: **1234;الإئتمانية\nلدى: Some merchant\nدولة: السعودية\nمبلغ: 12.00 SAR\nرصيد: 1234.56 SAR\nفي: 2019-05-07 23:44"
+    },
+    {
+      "id": "bank-albilad-arabic-mada-pos",
+      "corpus": "saudi-bank-formats",
+      "market": "SA",
+      "status": "posted",
+      "reason": "unique-transaction-role",
+      "selected": true,
+      "amount_correct": true,
+      "currency_correct": true,
+      "picked_decoy": false,
+      "decoy_present": false,
+      "expected_minor": "3400",
+      "got_minor": "3400",
+      "expected_currency": "SAR",
+      "got_currency": "SAR",
+      "candidates": [
+        {
+          "raw": "34.00 SAR",
+          "minor_units": 3400,
+          "currency": "SAR",
+          "roles": [
+            "transaction"
+          ]
+        }
+      ],
+      "body": "مشتريات نقاط البيع\nبطاقة: **4567;مدى\nمن: xx005\nمبلغ: 34.00 SAR\nلدى: Some restaurant\nدولة: السعودية\nفي: 2019/05/07 01:29"
+    }
+  ]
+}
