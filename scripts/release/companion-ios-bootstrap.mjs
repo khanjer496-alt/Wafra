@@ -110,7 +110,7 @@ async function ensureBundleId() {
 
 async function ensurePushNotifications(bundleId) {
   const listed = await request(
-    `bundleIds/${encodeURIComponent(bundleId)}/bundleIdCapabilities?limit=200`,
+    `bundleIds/${encodeURIComponent(bundleId)}/bundleIdCapabilities`,
   );
   const existing = (listed.data || []).find(
     (entry) => entry.attributes?.capabilityType === 'PUSH_NOTIFICATIONS',
