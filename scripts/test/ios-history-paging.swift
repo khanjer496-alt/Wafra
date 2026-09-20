@@ -462,6 +462,47 @@ struct PagedHistoryTests {
       try windowStore.readChunk(sessionId: windowState["sessionId"] as! String, chunkIndex: $0)
     }
     try check("windowed run commits every row exactly once", Set(windowRecords.map { try! json($0)["id"] as! String }).count == windowSource.count && windowRecords.count == windowSource.count)
+    // A date-range refusal must name which bound broke and the instants involved
+    // (dates only, never text), so one screenshot of the Shortcut's alert settles
+    // a device report; the bare code "wrong-date-range" did not (tester iPhone,
+    // 20 Sep 2026, 1,285 messages in).
+    func rangeDetail(_ name: String, _ operation: () throws -> Void) throws -> String {
+      do { try operation() } catch let violation as WafraHistoryCursor.RangeViolation {
+        try check("\(name): reason code is unchanged", violation.reason == .wrongDateRange)
+        return violation.message
+      }
+      try check("\(name): a detailed range violation was thrown", false); return ""
+    }
+    let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    do {
+      let fresh = make("windows-edge")
+      let s = try json(fresh.begin(oldestGUID: windowSource.last!.guid, oldestInstant: windowSource.last!.date,
+        newestGUID: windowSource.first!.guid, newestInstant: windowSource.first!.date))
+      let edge = iso.date(from: s["after"] as! String)!
+      let message = try rangeDetail("row at the window start") {
+        _ = try fresh.stageRow(sessionId: s["sessionId"] as! String, authorizationSecret: s["authorizationSecret"] as! String,
+          revision: s["revision"] as! Int, guid: windowSource.first!.guid, body: "x", sender: "TEST", instant: windowSource.first!.date)
+        _ = try fresh.stageRow(sessionId: s["sessionId"] as! String, authorizationSecret: s["authorizationSecret"] as! String,
+          revision: s["revision"] as! Int, guid: "edge", body: "x", sender: "TEST", instant: edge)
+        _ = try commitTyped(fresh, s, found: 2)
+      }
+      try check("a row at the window start names the window start and the row's instant",
+        message.hasPrefix("wrong-date-range; ") && message.contains("window start") && message.contains("row 2/2") &&
+        message.contains(stamp(edge)) && message.contains("after=" + stamp(edge)) && message.contains("before="))
+    }
+    do {
+      let fresh = make("windows-cursor")
+      let s = try json(fresh.begin(oldestGUID: windowSource.last!.guid, oldestInstant: windowSource.last!.date,
+        newestGUID: windowSource.first!.guid, newestInstant: windowSource.first!.date))
+      let late = iso.date(from: s["before"] as! String)!
+      let message = try rangeDetail("row at the cursor") {
+        _ = try fresh.stageRow(sessionId: s["sessionId"] as! String, authorizationSecret: s["authorizationSecret"] as! String,
+          revision: s["revision"] as! Int, guid: "late", body: "x", sender: "TEST", instant: late)
+        _ = try commitTyped(fresh, s, found: 1)
+      }
+      try check("a row not before the cursor names the cursor and the row's instant",
+        message.contains("not before the cursor") && message.contains("row 1/1") && message.contains(stamp(late)))
+    }
     try rejected("a row outside the issued window is refused") {
       let fresh = make("windows-outside")
       let s = try json(fresh.begin(oldestGUID: windowSource.last!.guid, oldestInstant: windowSource.last!.date,

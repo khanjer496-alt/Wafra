@@ -46,6 +46,25 @@ public enum WafraHistoryCursor {
     case alreadyComplete = "already-complete"
   }
 
+  /// `wrongDateRange` with the bound that broke and the instants involved
+  /// (dates only, never text), so the Shortcut's "History paused safely" alert
+  /// says exactly which page and row Apple returned outside the issued query.
+  public struct RangeViolation: Error {
+    public let reason: Failure = .wrongDateRange
+    public let detail: String
+    public var message: String { "\(reason.rawValue); \(detail)" }
+  }
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+  private static func iso(_ milliseconds: Int64) -> String {
+    isoFormatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1_000))
+  }
+  private static func bounds(_ state: Checkpoint) -> String {
+    "before=\(iso(state.before)) after=\(state.windowStart.map(iso) ?? "none") oldest=\(iso(state.oldest.milliseconds)) revision=\(state.revision)"
+  }
   public static let initialLimit = 51
   public static let maximumLimit = 408
   public static let windowMilliseconds: Int64 = 90 * 24 * 60 * 60 * 1_000
@@ -114,11 +133,20 @@ public enum WafraHistoryCursor {
           Set(records.map(\.id)).count == records.count,
           records.allSatisfy(valid) else { throw Failure.invalidPage }
     var previous = state.before
-    for row in records {
-      guard row.milliseconds < state.before,
-            row.milliseconds >= state.oldest.milliseconds,
-            state.windowStart.map({ row.milliseconds > $0 }) ?? true,
-            row.milliseconds <= previous else { throw Failure.wrongDateRange }
+    for (index, row) in records.enumerated() {
+      let position = "row \(index + 1)/\(records.count) at \(iso(row.milliseconds))"
+      if row.milliseconds >= state.before {
+        throw RangeViolation(detail: "\(position) is not before the cursor; \(bounds(state))")
+      }
+      if row.milliseconds < state.oldest.milliseconds {
+        throw RangeViolation(detail: "\(position) is older than the oldest anchor; \(bounds(state))")
+      }
+      if let windowStart = state.windowStart, row.milliseconds <= windowStart {
+        throw RangeViolation(detail: "\(position) is not after the window start; \(bounds(state))")
+      }
+      if row.milliseconds > previous {
+        throw RangeViolation(detail: "\(position) is out of order after \(iso(previous)); \(bounds(state))")
+      }
       previous = row.milliseconds
     }
     let observed = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0.milliseconds) })
@@ -162,7 +190,9 @@ public enum WafraHistoryCursor {
       next.before = boundary
       next.overlap = records
     } else {
-      guard boundary < state.before else { throw Failure.wrongDateRange }
+      guard boundary < state.before else {
+        throw RangeViolation(detail: "page boundary \(iso(boundary)) is not before the cursor; \(bounds(state))")
+      }
       next.before = boundary
       next.limit = initialLimit
       next.checked += committed
