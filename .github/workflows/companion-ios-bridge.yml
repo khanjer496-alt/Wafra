@@ -47,9 +47,11 @@ jobs:
           mkdir -p "$ROOT"
           gh release download "${{ inputs.source_tag }}" \
             --repo khanjer496-alt/Wafra \
-            --pattern companion-source.tgz \
+            --pattern 'companion-source-*.tgz' \
             --dir "$ROOT"
-          tar -xzf "$ROOT/companion-source.tgz" -C "$ROOT"
+          ARCHIVE="$(find "$ROOT" -maxdepth 1 -type f -name 'companion-source-*.tgz' -print -quit)"
+          test -n "$ARCHIVE"
+          tar -xzf "$ARCHIVE" -C "$ROOT"
           test -f "$ROOT/mobile/app.json"
           echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
 
