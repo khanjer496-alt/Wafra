@@ -10,21 +10,32 @@ on:
       - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Superseding a PR run is what this is for: the newer push is the one worth a
-  # verdict, and the older one is wasted minutes.
+  # Every push to `main` gets its OWN group, keyed on the commit, so no main run
+  # ever shares a group with another. Pull requests keep sharing one group per
+  # ref, so a newer push still supersedes an older one there.
   #
-  # A push to `main` is the opposite case. A cancelled run reports NO verdict at
-  # all — not a failure, nothing — so cancelling one lets a breaking commit land
-  # with nobody told. That is not hypothetical: 98b1bb4 ("feat(onboarding): add
-  # bank statement import option") had its run cancelled by the very next push
-  # and broke onboarding.test.js plus 43 ios-journey regressions; main stayed red
-  # until someone ran the suites by hand, and every PR opened meanwhile inherited
-  # a red base. main has since gone red the same way more than once.
+  # Both halves are needed, and cancel-in-progress alone is not enough.
+  # `cancel-in-progress: false` only spares a RUNNING run. A group holds one
+  # running plus one pending member, and GitHub cancels the pending one whenever
+  # a newer run is queued into the group — documented as "any existing pending
+  # job or workflow in the same concurrency group will be canceled and the new
+  # queued job or workflow will take its place", regardless of
+  # cancel-in-progress. So with three pushes in quick succession the middle
+  # commit was still cancelled while queued, which is the exact hole this exists
+  # to close. A per-commit group removes the sharing, and the flag below then
+  # documents the intent and covers a re-run of the same SHA.
   #
-  # So: cancel on every ref except main, where the run always finishes and says
-  # something. Two pushes to main in quick succession now cost two full runs,
-  # which is the right trade against a silent regression.
+  # Why it matters: a cancelled run reports NO verdict at all — not a failure,
+  # nothing — so a breaking commit lands with nobody told. 98b1bb4
+  # ("feat(onboarding): add bank statement import option") had its run cancelled
+  # by the very next push and broke onboarding.test.js plus 43 ios-journey
+  # regressions; main stayed red until someone ran the suites by hand, and every
+  # PR opened meanwhile inherited a red base. main has since gone red the same
+  # way more than once in a single day.
+  #
+  # The cost is that rapid pushes to main each pay for a full run. That is the
+  # right trade against a silent regression.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
