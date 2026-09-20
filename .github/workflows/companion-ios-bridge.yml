@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       source_tag:
-        description: Private Wafra release tag containing companion-source.tgz
+        description: Private Wafra release tag containing companion-source-<sha>.tgz
+        required: true
+        type: string
+      source_sha:
+        description: Exact 40-character Companion main commit archived in the source asset
         required: true
         type: string
 
@@ -16,26 +20,106 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-submit:
+  preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    timeout-minutes: 10
+    outputs:
+      app_id: ${{ steps.apple.outputs.app_id }}
+      app_record_exists: ${{ steps.apple.outputs.app_record_exists }}
+      bundle_id_exists: ${{ steps.apple.outputs.bundle_id_exists }}
     env:
-      EXPO_NO_TELEMETRY: '1'
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Inspect Companion records in App Store Connect
+        id: apple
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/companion-preflight"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createPrivateKey, sign } from 'node:crypto';
+          const identifier='app.companion.productivity';
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'', kid=process.env.EXPO_ASC_KEY_ID||'', iss=process.env.EXPO_ASC_ISSUER_ID||'';
+          if(!raw||!kid||!iss) throw new Error('App Store Connect credentials are missing');
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem), b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const jwt=()=>{const now=Math.floor(Date.now()/1000);const s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{headers:{Authorization:`Bearer ${jwt()}`},signal:AbortSignal.timeout(30000)});const t=await r.text();if(!r.ok)throw new Error(`GET ${path.split('?')[0]}: ${r.status} ${t}`);return t?JSON.parse(t):null;}
+          const result=await api(`bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&fields[bundleIds]=name,platform,identifier&limit=10`);
+          if((result.data||[]).length>1) throw new Error('duplicate bundle IDs');
+          const bundle=result.data?.[0]||null;
+          const apps=await api(`apps?filter[bundleId]=${encodeURIComponent(identifier)}&fields[apps]=name,bundleId,sku,primaryLocale&limit=10`);
+          if((apps.data||[]).length>1) throw new Error('duplicate App Store records');
+          const app=apps.data?.[0]||null;
+          const certs=await api('certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200');
+          let groups=[]; let reviewDetail=null;
+          if(app){
+            const g=await api(`apps/${app.id}/betaGroups?limit=100`); groups=(g.data||[]).map(x=>({id:x.id,name:x.attributes.name,internal:x.attributes.isInternalGroup,publicLinkEnabled:x.attributes.publicLinkEnabled,publicLink:x.attributes.publicLink??null}));
+            try { const d=await api(`apps/${app.id}/betaAppReviewDetail`); reviewDetail=d?.data?.attributes??null; } catch {}
+          }
+          const report={sourceCommit:process.env.SOURCE_SHA,identifier,bundleIdExists:Boolean(bundle),bundleIdResourceId:bundle?.id||null,appRecordExists:Boolean(app),appId:app?.id||null,appName:app?.attributes?.name||null,activeIosDistributionCertificates:(certs.data||[]).length,betaGroups:groups,betaAppReviewDetail:reviewDetail};
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/companion-preflight/apple.json`,JSON.stringify(report,null,2)+'\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`app_id=${app?.id||''}\napp_record_exists=${app?'true':'false'}\nbundle_id_exists=${bundle?'true':'false'}\n`);
+          console.log(JSON.stringify(report,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-apple-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/companion-preflight/apple.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  build-submit:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
       EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
       EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
       EXPO_APPLE_TEAM_ID: UV7YN4GQ66
       EXPO_APPLE_TEAM_TYPE: INDIVIDUAL
+      EXPO_NO_TELEMETRY: '1'
       GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      ASC_APP_ID: ${{ needs.preflight.outputs.app_id }}
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.3
+
+      - name: Select newest stable Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
+          test -n "$BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | tail -40
+          xcrun simctl list runtimes | head -40 || true
+          df -h /
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
 
       - uses: expo/expo-github-action@v8
         with:
-          eas-version: latest
+          eas-version: 22.4.0
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
 
@@ -43,90 +127,150 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          printf '%s' "$SOURCE_SHA" | grep -qE '^[0-9a-f]{40}$'
+          SHORT=${SOURCE_SHA:0:12}
+          test "$SOURCE_TAG" = "companion-ios-bridge-$SHORT"
           ROOT="$RUNNER_TEMP/companion-source"
           mkdir -p "$ROOT"
-          gh release download "${{ inputs.source_tag }}" \
-            --repo khanjer496-alt/Wafra \
-            --pattern 'companion-source-*.tgz' \
-            --dir "$ROOT"
-          ARCHIVE="$(find "$ROOT" -maxdepth 1 -type f -name 'companion-source-*.tgz' -print -quit)"
+          gh release download "$SOURCE_TAG" --repo khanjer496-alt/Wafra --pattern 'companion-source-*.tgz' --dir "$ROOT"
+          ARCHIVE=$(find "$ROOT" -maxdepth 1 -type f -name 'companion-source-*.tgz' -print -quit)
           test -n "$ARCHIVE"
           tar -xzf "$ARCHIVE" -C "$ROOT"
           test -f "$ROOT/mobile/app.json"
           echo "APP_DIR=$ROOT/mobile" >> "$GITHUB_ENV"
 
-      - name: Install Companion dependencies
+      - name: Install local iOS build toolchain
         shell: bash
         run: |
           set -euo pipefail
+          gem install fastlane -v 2.238.0 --no-document
+          gem install cocoapods -v 1.16.2 --no-document
           cd "$APP_DIR"
           npm ci
+          eas --version
+          fastlane --version
+          pod --version
 
       - name: Prepare App Store Connect API key
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${EXPO_TOKEN:-}"
-          test -n "${EXPO_ASC_API_KEY_P8:-}"
-          test -n "${EXPO_ASC_KEY_ID:-}"
-          test -n "${EXPO_ASC_ISSUER_ID:-}"
+          test -n "$EXPO_TOKEN" && test -n "$EXPO_ASC_API_KEY_P8" && test -n "$EXPO_ASC_KEY_ID" && test -n "$EXPO_ASC_ISSUER_ID"
           KEY="$RUNNER_TEMP/AuthKey_${EXPO_ASC_KEY_ID}.p8"
-          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
-            printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY"
-          else
-            printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"
-          fi
-          chmod 600 "$KEY"
-          grep -q 'BEGIN PRIVATE KEY' "$KEY"
+          if printf '%s' "$EXPO_ASC_API_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$KEY"; else printf '%s' "$EXPO_ASC_API_KEY_P8" | tr -d '[:space:]' | base64 -d > "$KEY"; fi
+          chmod 600 "$KEY"; grep -q 'BEGIN PRIVATE KEY' "$KEY"
           echo "EXPO_ASC_API_KEY_PATH=$KEY" >> "$GITHUB_ENV"
 
-      - name: Verify Companion EAS project and initialize temporary Git source
+      - name: Verify Companion identity and initialize exact temporary Git source
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          PROJECT_ID="$(node -p "require('./app.json').expo.extra.eas.projectId")"
-          OWNER="$(node -p "require('./app.json').expo.owner")"
-          test "$PROJECT_ID" = "3cb8e0e0-3b5b-46de-a6e6-d006a3ad50a4"
-          test "$OWNER" = "nnnkk"
-          printf '{"status":"linked","projectId":"%s","owner":"%s","slug":"companion"}\n' "$PROJECT_ID" "$OWNER" > "$RUNNER_TEMP/eas-project.json"
+          test "$(node -p "require('./app.json').expo.extra.eas.projectId")" = '3cb8e0e0-3b5b-46de-a6e6-d006a3ad50a4'
+          test "$(node -p "require('./app.json').expo.owner")" = 'nnnkk'
+          test "$(node -p "require('./app.json').expo.ios.bundleIdentifier")" = 'app.companion.productivity'
           git init -q
-          git config user.name 'Companion iOS bridge'
+          git config user.name 'Companion iOS release bridge'
           git config user.email 'companion-ios-bridge@users.noreply.github.com'
-          git add -A
-          git commit -qm 'Exact Companion source for EAS build'
+          git add -A && git commit -qm "Exact Companion source $SOURCE_SHA"
 
-      - name: Attempt first store-signed iOS build
-        id: build
+      - name: Build signed Companion IPA locally on GitHub macOS
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          eas build --platform ios --profile preview --non-interactive --wait --json \
-            | tee "$RUNNER_TEMP/eas-build.json"
+          eas build --platform ios --profile preview --local --non-interactive --freeze-credentials --output "$RUNNER_TEMP/Companion-local.ipa"
 
-      - name: Submit finished Companion build to TestFlight
+      - name: Verify exact signed IPA
+        id: ipa
         shell: bash
         run: |
           set -euo pipefail
-          cd "$APP_DIR"
-          eas submit --platform ios --profile preview --latest --non-interactive \
-            | tee "$RUNNER_TEMP/eas-submit.log"
+          unzip -tq "$RUNNER_TEMP/Companion-local.ipa"
+          CHECK="$RUNNER_TEMP/companion-ipa-check"; mkdir -p "$CHECK" "$RUNNER_TEMP/companion-evidence"
+          ditto -x -k "$RUNNER_TEMP/Companion-local.ipa" "$CHECK"
+          APP=$(find "$CHECK/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$APP" && test -d "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          security cms -D -i "$APP/embedded.mobileprovision" > "$RUNNER_TEMP/companion-profile.plist"
+          export APP
+          python3 <<'PY'
+          import hashlib,json,os,pathlib,plistlib,shutil
+          app=pathlib.Path(os.environ['APP']); temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          info=plistlib.loads((app/'Info.plist').read_bytes()); profile=plistlib.loads((temp/'companion-profile.plist').read_bytes())
+          assert info['CFBundleIdentifier']=='app.companion.productivity'
+          assert 'UV7YN4GQ66' in profile['TeamIdentifier']
+          assert 'ProvisionedDevices' not in profile and not profile.get('ProvisionsAllDevices',False)
+          version=info['CFBundleShortVersionString']; number=str(info['CFBundleVersion'])
+          target=temp/'companion-evidence'/f'Companion-{version}-{number}.ipa'; shutil.copyfile(temp/'Companion-local.ipa',target)
+          report={'sourceCommit':os.environ['SOURCE_SHA'],'version':version,'buildNumber':number,'bundleIdentifier':info['CFBundleIdentifier'],'sha256':hashlib.file_digest(target.open('rb'),'sha256').hexdigest(),'bytes':target.stat().st_size,'storeSigningVerified':True}
+          (temp/'companion-evidence'/'verification.json').write_text(json.dumps(report,indent=2)+'\n')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write(f'build_number={number}\nversion={version}\nipa_path={target}\n')
+          print(json.dumps(report,indent=2))
+          PY
 
-      - name: Preserve non-secret bridge evidence
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: companion-ios-bridge-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/eas-project.json
-            ${{ runner.temp }}/eas-build.json
-            ${{ runner.temp }}/eas-submit.log
-            ${{ env.APP_DIR }}/app.json
+          name: companion-ios-signed-${{ steps.ipa.outputs.build_number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/companion-evidence/
+          retention-days: 14
+
+      - name: Upload verified IPA directly to App Store Connect
+        if: needs.preflight.outputs.app_record_exists == 'true'
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.ipa_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"; mkdir -p "$KEY_DIR"; chmod 700 "$KEY_DIR"
+          cp "$EXPO_ASC_API_KEY_PATH" "$KEY_DIR/AuthKey_${EXPO_ASC_KEY_ID}.p8"; chmod 600 "$KEY_DIR/AuthKey_${EXPO_ASC_KEY_ID}.p8"
+          xcrun altool --upload-app --type ios --file "$IPA_PATH" --apiKey "$EXPO_ASC_KEY_ID" --apiIssuer "$EXPO_ASC_ISSUER_ID"
+
+      - name: Wait for Apple processing and publish external TestFlight
+        if: needs.preflight.outputs.app_record_exists == 'true'
+        env:
+          VERSION: ${{ steps.ipa.outputs.version }}
+          BUILD_NUMBER: ${{ steps.ipa.outputs.build_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/companion-public"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'; import {createPrivateKey,sign} from 'node:crypto';
+          const APP=process.env.ASC_APP_ID, VERSION=process.env.VERSION, NUMBER=process.env.BUILD_NUMBER;
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'',kid=process.env.EXPO_ASC_KEY_ID,iss=process.env.EXPO_ASC_ISSUER_ID;
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8'); const key=createPrivateKey(pem); const b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const jwt=()=>{const n=Math.floor(Date.now()/1000),s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:n,exp:n+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path,{method='GET',body}={}){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{method,headers:{Authorization:`Bearer ${jwt()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});const t=await r.text();if(!r.ok){const e=new Error(`${method} ${path.split('?')[0]}: ${r.status}`);e.body=t;throw e;}return t?JSON.parse(t):null;}
+          const wait=ms=>new Promise(r=>setTimeout(r,ms)); let found=null;
+          for(let i=0;i<91;i++){const r=await api(`builds?filter[app]=${APP}&filter[version]=${encodeURIComponent(NUMBER)}&include=preReleaseVersion,buildBetaDetail&limit=100`);const inc=new Map((r.included||[]).map(x=>[`${x.type}:${x.id}`,x]));const matches=r.data.filter(x=>{const ref=x.relationships?.preReleaseVersion?.data;return ref&&inc.get(`${ref.type}:${ref.id}`)?.attributes.version===VERSION});if(matches.length>1)throw new Error('ambiguous build');if(matches.length){const b=matches[0],ref=b.relationships?.buildBetaDetail?.data;found={build:b,detail:ref?inc.get(`${ref.type}:${ref.id}`):null};console.log(JSON.stringify({attempt:i,processing:b.attributes.processingState,external:found.detail?.attributes?.externalBuildState||null}));if(b.attributes.processingState==='VALID')break;if(['INVALID','FAILED'].includes(b.attributes.processingState))throw new Error('Apple processing failed');}await wait(20000)}
+          if(!found||found.build.attributes.processingState!=='VALID')throw new Error('build did not become VALID'); const id=found.build.id;
+          if(found.build.attributes.usesNonExemptEncryption===null) await api(`builds/${id}`,{method:'PATCH',body:{data:{type:'builds',id,attributes:{usesNonExemptEncryption:false}}}});
+          const notes='Companion beta. Please test onboarding, tasks, focus sessions, Home interactions, pet reactions/audio, responsiveness, notifications, backup/restore, and report any crashes or visual regressions.';
+          const loc=await api(`builds/${id}/betaBuildLocalizations?limit=100`); const en=loc.data.find(x=>x.attributes.locale==='en-US');
+          if(en) await api(`betaBuildLocalizations/${en.id}`,{method:'PATCH',body:{data:{type:'betaBuildLocalizations',id:en.id,attributes:{whatsNew:notes}}}}); else await api('betaBuildLocalizations',{method:'POST',body:{data:{type:'betaBuildLocalizations',attributes:{locale:'en-US',whatsNew:notes},relationships:{build:{data:{type:'builds',id}}}}}});
+          let groups=(await api(`apps/${APP}/betaGroups?limit=100`)).data.filter(x=>!x.attributes.isInternalGroup); let group=groups.find(x=>x.attributes.publicLinkEnabled)||groups.find(x=>x.attributes.name==='Companion Public Beta')||groups[0];
+          if(!group){group=(await api('betaGroups',{method:'POST',body:{data:{type:'betaGroups',attributes:{name:'Companion Public Beta',isInternalGroup:false},relationships:{app:{data:{type:'apps',id:APP}}}}}})).data;}
+          if(!group.attributes.publicLinkEnabled){group=(await api(`betaGroups/${group.id}`,{method:'PATCH',body:{data:{type:'betaGroups',id:group.id,attributes:{publicLinkEnabled:true}}}})).data;}
+          const members=await api(`betaGroups/${group.id}/relationships/builds?limit=200`); if(!members.data.some(x=>x.id===id)) await api(`betaGroups/${group.id}/relationships/builds`,{method:'POST',body:{data:[{type:'builds',id}]}});
+          let current=await api(`builds/${id}?include=buildBetaDetail`); let detail=(current.included||[]).find(x=>x.type==='buildBetaDetails')||null; const external=detail?.attributes?.externalBuildState||null;
+          if(detail&&!detail.attributes.autoNotifyEnabled) await api(`buildBetaDetails/${detail.id}`,{method:'PATCH',body:{data:{type:'buildBetaDetails',id:detail.id,attributes:{autoNotifyEnabled:true}}}});
+          let reviewAction='none'; if(external==='READY_FOR_BETA_SUBMISSION'){try{await api('betaAppReviewSubmissions',{method:'POST',body:{data:{type:'betaAppReviewSubmissions',relationships:{build:{data:{type:'builds',id}}}}}});reviewAction='submitted-for-beta-review';}catch(e){reviewAction=`beta-review-blocked:${e.message}`;}}
+          else if(external==='READY_FOR_BETA_TESTING'){try{await api('buildBetaNotifications',{method:'POST',body:{data:{type:'buildBetaNotifications',relationships:{build:{data:{type:'builds',id}}}}}});reviewAction='notified-testers';}catch{}}
+          group=(await api(`betaGroups/${group.id}`)).data; current=await api(`builds/${id}?include=buildBetaDetail`); detail=(current.included||[]).find(x=>x.type==='buildBetaDetails')||null;
+          const report={appId:APP,version:VERSION,buildNumber:NUMBER,buildId:id,processingState:current.data.attributes.processingState,externalBuildState:detail?.attributes?.externalBuildState||null,groupId:group.id,groupName:group.attributes.name,publicLinkEnabled:group.attributes.publicLinkEnabled,publicLink:group.attributes.publicLink||null,reviewAction};
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/companion-public/result.json`,JSON.stringify(report,null,2)+'\n'); console.log(JSON.stringify(report,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-ios-public-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/companion-public/result.json
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14
 
       - name: Remove temporary App Store Connect key
         if: always()
         shell: bash
-        run: rm -f "${EXPO_ASC_API_KEY_PATH:-}"
+        run: rm -rf "$HOME/.appstoreconnect/private_keys" "$RUNNER_TEMP/AuthKey_"*.p8
