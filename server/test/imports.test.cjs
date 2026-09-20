@@ -7,6 +7,7 @@ const {
   parseStatementCsv,
   parseStatementLines,
   parseStatementText,
+  statementLayoutFingerprint,
 } = require('../.test-build/imports.cjs');
 
 let passed = 0;
@@ -725,6 +726,150 @@ function wideTextPdf(lines) {
   ok('the settlement column name follows the ledger currency',
     sarStatement.rows.length === 1 && sarStatement.rows[0].amountFils === 4125,
     JSON.stringify(sarStatement.rows.map((row) => row.amountFils)));
+
+  // ── The rows have to ADD UP to what the statement says about itself ──
+  //
+  // Recognising a layout and reading it correctly are not the same thing, and
+  // nothing here could previously tell them apart: a reading that took the
+  // wrong figure, or every direction the wrong way round, produced a full set
+  // of plausible transactions and no complaint. The statement states its own
+  // opening and closing balance, so the arithmetic between them is a proof.
+  const cardLedger = (closing) => [
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    '10-Aug-26 11-Aug-26 SHOP TWO DUBAI AE 50.00 50.00',
+    '11-Aug-26 12-Aug-26 REFUND 30.00 CR 30.00CR',
+    'Total Outstanding', closing,
+  ].join('\n');
+  // 1,000.00 + 100.00 + 50.00 − 30.00 = 1,120.00 owed.
+  const proven = parseStatementLines(cardLedger('AED 1,120.00'), 'AED');
+  ok('a card statement whose rows reach its stated closing balance is proven',
+    proven.rows.length === 3 && proven.reconciliation.verdict === 'proven' &&
+      proven.reconciliation.openingMinor === 100000 && proven.reconciliation.closingMinor === 112000,
+    JSON.stringify(proven.reconciliation));
+  const contradicted = parseStatementLines(cardLedger('AED 9,999.00'), 'AED');
+  ok('one that does not is contradicted, with the gap stated',
+    contradicted.reconciliation.verdict === 'contradicted' &&
+      contradicted.reconciliation.differenceMinor === -887900,
+    JSON.stringify(contradicted.reconciliation));
+  // An account balance runs the other way: a purchase LOWERS it. Getting that
+  // backwards misses by twice the traffic rather than closing, so the sign
+  // convention is itself under test here.
+  const account = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    '02/07/2026 REFUND - 250.00 5,150.00',
+    'Closing Balance 5,150.00',
+  ].join('\n'), 'AED');
+  ok('an account statement reconciles on the opposite sign convention',
+    account.rows.length === 2 && account.reconciliation.verdict === 'proven',
+    JSON.stringify(account.reconciliation));
+  // Proof is only ever added, never used to cast doubt on what it cannot check.
+  const noAnchors = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a statement stating no balances is unknown, not contradicted',
+    noAnchors.rows.length === 1 && noAnchors.reconciliation.verdict === 'unknown',
+    JSON.stringify(noAnchors.reconciliation));
+  // A partial read is missing transactions by definition, so it cannot close.
+  // Calling that a contradiction would report every partial import as wrong.
+  const partial = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    '02/07/2026 BOTH POPULATED 10.00 20.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a read with rejected rows is unknown rather than contradicted',
+    partial.rejectedRows === 1 && partial.reconciliation.verdict === 'unknown',
+    JSON.stringify([partial.rejectedRows, partial.reconciliation]));
+  // The label has to be a label. "Total Outstanding" heads the summary box of a
+  // real statement AND appears five times in its small print; anchoring to a
+  // sentence would contradict a parse that was right.
+  const prosePitfall = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    'Total Outstanding', 'AED 1,100.00',
+    '11. Overlimit Amount is the amount by which the Total Outstanding on Statement Date exceeds 50,000.00',
+  ].join('\n'), 'AED');
+  ok('a balance label inside a sentence is not an anchor',
+    prosePitfall.reconciliation.verdict === 'proven',
+    JSON.stringify(prosePitfall.reconciliation));
+
+  // ── A failing statement can be diagnosed without handling anyone's money ──
+  //
+  // A file that reads zero rows tells the user nothing actionable and tells
+  // nobody upstream which layout defeated it. The fingerprint carries the SHAPE
+  // so a fixture can be written from it — and carries nothing else. This case
+  // is built to break that promise: a name, an employer, a city, an account
+  // number, merchant names and real-looking amounts, all in the places a
+  // statement really puts them.
+  const privacyProbe = [
+    'Northbank Gulf Limited',
+    'Credit Card Statement',
+    'MS SAMPLE CARDHOLDER',
+    'EXAMPLE TRADING FZ LLC',
+    'DUBAI',
+    'UNITED ARAB EMIRATES',
+    'Credit Card Number',
+    '4000 0000 0000 0002',
+    'Credit Limit 50,000.00',
+    'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,500.00',
+    '09-Aug-26 11-Aug-26 NFC - (X-PAY)-EXAMPLE PHARMACY 123 BR',
+    'DUBAI AE',
+    '88.50 88.50',
+    '10-Aug-26 11-Aug-26 REBATE 21.40 CR 21.40CR',
+    'Total Outstanding AED 1,567.10',
+  ].join('\n');
+  const print = statementLayoutFingerprint(privacyProbe, 'AED');
+  const serialized = JSON.stringify(print);
+  const mustNotLeak = [
+    'SAMPLE', 'CARDHOLDER', 'EXAMPLE', 'TRADING', 'PHARMACY', 'REBATE', 'X-PAY',
+    '4000', '0000', '0002', '1,500.00', '1500.00', '1,567.10',
+    '88.50', '21.40', '50,000', '500.00',
+  ];
+  const leaked = mustNotLeak.filter((needle) => serialized.toUpperCase().includes(needle.toUpperCase()));
+  ok('a fingerprint carries no name, employer, account number, merchant or amount',
+    leaked.length === 0, `leaked ${JSON.stringify(leaked)} in ${serialized}`);
+  // Nothing that could be a value survives as digits either.
+  ok('a fingerprint carries no digits at all outside its counts',
+    print.headers.every((header) => !/\d/.test(header)) &&
+      print.shapes.every((entry) => !/\d/.test(entry.shape)),
+    JSON.stringify([print.headers, print.shapes]));
+  // ...and the address block is counted rather than named.
+  ok('header-shaped lines that do not name a column are counted, not reported',
+    print.otherHeaderLines >= 3 &&
+      print.headers.every((header) => !/sample|cardholder|example|dubai|emirates/i.test(header)),
+    JSON.stringify([print.headers, print.otherHeaderLines]));
+
+  // What it DOES carry is enough to rebuild the table from.
+  ok('a fingerprint names the column vocabulary the table used',
+    print.headers.includes('original amount') && print.headers.includes('total amount'),
+    JSON.stringify(print.headers));
+  // Two shapes, for two rows: the three-line wrapped one rejoined into a single
+  // row ending in its pair of figures, and the credit with its glued marker.
+  // The posting date is already gone from both — that is the shape saying the
+  // dual-date column was understood, not that the statement lacked one.
+  ok('a fingerprint reports the row shapes, wrapped rows already rejoined',
+    print.shapes.length === 2 &&
+      print.shapes.some((entry) => /^DATE .*MONEY MONEY$/.test(entry.shape)) &&
+      print.shapes.some((entry) => entry.shape === 'DATE WORD MONEY DIR MONEY'),
+    JSON.stringify(print.shapes));
+  ok('a fingerprint reports what the parser proved about the layout',
+    print.cardStatement === true && print.originalTotalColumns === true &&
+      print.dateLedLines === 2 && print.moneyLines === 2,
+    JSON.stringify(print));
 
   // A run ends on a line of nothing but figures. A summary line carries money
   // too, and joining a date-led line onto one would put a figure nobody spent

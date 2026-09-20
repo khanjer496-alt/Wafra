@@ -1129,6 +1129,243 @@ function trailingBalanceRuns(lines: string[], currency: StatementCurrency): bool
   return checked >= 4 && agreed >= Math.ceil(checked * 0.9);
 }
 
+/**
+ * The two figures a statement states about itself: what it opened at and what
+ * it closed at.
+ *
+ * Both are matched from a SHORT label line, never a sentence. "Total
+ * Outstanding" heads the summary box of the reported statement and also appears
+ * five times in its small print ("Amount by which the Total Outstanding on
+ * Statement Date amount exceeds your current credit limit"), and anchoring a
+ * reconciliation to a sentence would contradict a parse that was right.
+ *
+ * The figure is taken from the label's own line when it is there, and otherwise
+ * from the first line of nothing but money within a short window after it: a
+ * bilingual summary box lays its labels and values out as separate lines, so
+ * the reported statement states "Total Outstanding" and its figure five
+ * lines apart with its Arabic twin and a stray bracket in between.
+ */
+const OPENING_BALANCE_LABEL =
+  /\b(?:opening|previous|prev)\s+balance\b|\bbalance\s+b\/?f\b|\bbrought\s+forward\b|الرصيد الافتتاحي/iu;
+const CLOSING_BALANCE_LABEL =
+  /\b(?:closing|new|current)\s+balance\b|\btotal\s+outstanding\b|\bbalance\s+c\/?f\b|\bcarried\s+forward\b|\bstatement\s+balance\b|الرصيد الختامي/iu;
+/** A label line is a label, not prose. */
+const MAX_BALANCE_LABEL_CHARS = 48;
+/** How far past a label its own figure may sit in a stacked bilingual box. */
+const MAX_BALANCE_VALUE_LOOKAHEAD = 8;
+
+function statedBalance(
+  lines: string[],
+  label: RegExp,
+  currency: StatementCurrency,
+): number | null {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || line.length > MAX_BALANCE_LABEL_CHARS || !label.test(line)) continue;
+    // On the label's own line, the last figure on it is the balance.
+    const own = classifyMoneyToken(line.split(' ').at(-1) ?? '', currency);
+    if (own && own.kind !== 'placeholder') {
+      return own.kind === 'signed' && own.type === 'expense' ? -own.minor : own.minor;
+    }
+    for (let ahead = index + 1; ahead <= index + MAX_BALANCE_VALUE_LOOKAHEAD && ahead < lines.length; ahead += 1) {
+      const next = lines[ahead];
+      if (!next) continue;
+      if (label.test(next) || ROW_DATE_PREFIX.test(next)) break;
+      if (!isMoneyOnlyLine(next, currency)) continue;
+      const figure = classifyMoneyToken(next.split(' ').at(-1) ?? '', currency);
+      if (!figure || figure.kind === 'placeholder') break;
+      return figure.kind === 'signed' && figure.type === 'expense' ? -figure.minor : figure.minor;
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the rows that were read actually ADD UP to what the statement says.
+ *
+ * Recognising a layout and reading it correctly are not the same thing, and
+ * nothing in this file could previously tell them apart: a reading that put the
+ * wrong figure in every row, or every direction the wrong way round, produced a
+ * full set of plausible transactions and no complaint. The statement states its
+ * own opening and closing balance, so the arithmetic between them is a proof
+ * that costs nothing to run — it is how the HSBC layout in this parser was
+ * shown to be right rather than merely accepted.
+ *
+ * A card statement's balance is what is OWED, so a purchase raises it and a
+ * payment lowers it; an account statement runs the other way. `isCardStatement`
+ * already decides which, and getting it backwards is itself caught, because the
+ * sum then misses by twice the traffic rather than closing.
+ *
+ * Attempted only on a complete read. A file with rejected rows is missing
+ * transactions by definition, so it cannot close, and calling that a
+ * contradiction would report every partial import as wrong. The verdict is
+ * `unknown` wherever the statement does not state both anchors — this exists to
+ * ADD proof, never to cast doubt on a parse it cannot check.
+ */
+export type StatementReconciliation =
+  | { verdict: 'unknown' }
+  | { verdict: 'proven'; openingMinor: number; closingMinor: number }
+  | { verdict: 'contradicted'; openingMinor: number; closingMinor: number; differenceMinor: number };
+
+function reconcileStatement(
+  rows: StatementParsedRow[],
+  lines: string[],
+  text: string,
+  currency: StatementCurrency,
+  rejectedRows: number,
+): StatementReconciliation {
+  if (rejectedRows > 0) return { verdict: 'unknown' };
+  const openingMinor = statedBalance(lines, OPENING_BALANCE_LABEL, currency);
+  const closingMinor = statedBalance(lines, CLOSING_BALANCE_LABEL, currency);
+  if (openingMinor === null || closingMinor === null) return { verdict: 'unknown' };
+  let expenses = 0;
+  let income = 0;
+  for (const row of rows) {
+    if (row.type === 'expense') expenses += row.amountFils;
+    else income += row.amountFils;
+  }
+  const owed = isCardStatement(text);
+  const expected = owed
+    ? openingMinor + expenses - income
+    : openingMinor - expenses + income;
+  const differenceMinor = expected - closingMinor;
+  return differenceMinor === 0
+    ? { verdict: 'proven', openingMinor, closingMinor }
+    : { verdict: 'contradicted', openingMinor, closingMinor, differenceMinor };
+}
+
+/** How many distinct row shapes a fingerprint reports, commonest first. *//** How many distinct row shapes a fingerprint reports, commonest first. */
+const MAX_FINGERPRINT_SHAPES = 8;
+/** How many column-header labels it reports. */
+const MAX_FINGERPRINT_HEADERS = 16;
+
+/**
+ * A statement's LAYOUT with its contents removed.
+ *
+ * When a file reads zero rows the parser knows exactly why and the user is told
+ * nothing that can be acted on — and nobody upstream learns which bank, which
+ * table, which shape defeated it. Every such failure has so far had to arrive
+ * as a person reporting it, and the HSBC case took a real statement to diagnose.
+ *
+ * What makes that fixable without handling anyone's money is that the answer is
+ * never in the values. It is in the SHAPE: how many date columns a row leads
+ * with, whether its figures carry a direction, where the amounts sit. So every
+ * token that could carry content becomes its class and nothing else —
+ *
+ *   `09-Aug-26 11-Aug-26 COFFEE HOUSE DUBAI AE 41.25 41.25`
+ *     becomes  `DATE DATE WORD WORD WORD WORD MONEY MONEY`
+ *
+ * — which is enough to write a fixture from and carries no merchant, no amount,
+ * no balance, no account number, no name. Digits never survive: a token that is
+ * money becomes MONEY whatever its value, and one that is anything else becomes
+ * WORD whatever it spells. Column headers are the one exception, and they are
+ * taken only from `columnHeaderLabels`, which already requires a label to stand
+ * alone on its line as a header rather than appear in prose.
+ */
+export interface StatementLayoutFingerprint {
+  /** Column labels the file states, in order. Named only when they name a
+   *  column — see `reportableColumnLabels`, which is what keeps a cardholder's
+   *  name and address out of this. */
+  headers: string[];
+  /** Standalone header-shaped lines that were NOT reported, counted only. */
+  otherHeaderLines: number;
+  /** Distinct date-led row shapes with their counts, commonest first. */
+  shapes: { shape: string; count: number }[];
+  /** Date-led lines seen, and how many of those carried money. */
+  dateLedLines: number;
+  moneyLines: number;
+  /** Whether the file read as a card statement, and which layouts it proved. */
+  cardStatement: boolean;
+  originalTotalColumns: boolean;
+  trailingBalance: boolean;
+}
+
+/**
+ * The nouns a money table names its columns with.
+ *
+ * `columnHeaderLabels` answers "does this line stand alone like a header", which
+ * is all `hasOriginalAndTotalColumns` needs, because that one only ever asks
+ * whether a label it already knows is present. A fingerprint REPORTS its labels,
+ * so the same rule is nowhere near enough: an address block is short standalone
+ * alphabetic lines too, and fingerprinting the reported statement emitted the
+ * cardholder's name, their employer and their city alongside the real headers.
+ *
+ * So a label is reported only when it names a column — it carries one of these
+ * nouns and is no longer than a header gets. That keeps the discovery this
+ * exists for (the next bank's word for an amount column is still learned) while
+ * a name, an employer or a street cannot satisfy it. Anything else is counted
+ * and not named, so the count still says how much was passed over.
+ */
+const COLUMN_NOUN =
+  /\b(?:amounts?|dates?|balances?|descriptions?|details?|debits?|credits?|references?|totals?|charges?|values?|postings?|narration|particulars|withdrawals?|deposits?|transactions?|billing|settlements?|currency|rate|vat|tax|fees?|limits?|payments?|outstanding)\b/i;
+const MAX_FINGERPRINT_LABEL_WORDS = 4;
+
+function reportableColumnLabels(text: string): { headers: string[]; otherHeaderLines: number } {
+  const headers: string[] = [];
+  let otherHeaderLines = 0;
+  for (const label of columnHeaderLabels(text)) {
+    if (COLUMN_NOUN.test(label) && label.split(' ').length <= MAX_FINGERPRINT_LABEL_WORDS) {
+      if (!headers.includes(label)) headers.push(label);
+    } else {
+      otherHeaderLines += 1;
+    }
+  }
+  return { headers, otherHeaderLines };
+}
+
+/** One token's CLASS. Never its value — see StatementLayoutFingerprint. */
+function tokenClass(word: string, currency: StatementCurrency): string {
+  if (new RegExp(`^${DATE_TOKEN}$`, 'i').test(word)) return 'DATE';
+  if (/^(?:DR|CR|DEBIT|CREDIT)$/i.test(word)) return 'DIR';
+  if (statementCurrency(word) !== null) return 'CUR';
+  const token = classifyMoneyToken(word, currency);
+  if (token) return token.kind === 'placeholder' ? 'EMPTY' : 'MONEY';
+  // A bare integer is not money to this parser, but a row full of them is a
+  // reference or a card number and the difference matters when reading a shape.
+  if (/^[\d,]+$/.test(word)) return 'DIGITS';
+  return 'WORD';
+}
+
+export function statementLayoutFingerprint(
+  text: string,
+  currency: StatementCurrency = 'AED',
+): StatementLayoutFingerprint {
+  const lines = joinWrappedRows(
+    text.split(/\n+/)
+      .map((original) => original.replace(/\s+/g, ' ').trim())
+      .map((line) => line.replace(DUAL_DATE_PREFIX, '$1 ')),
+    currency,
+  );
+  const counts = new Map<string, number>();
+  let dateLedLines = 0;
+  let moneyLines = 0;
+  for (const line of lines) {
+    if (!line || line.length > 400 || !ROW_DATE_PREFIX.test(line)) continue;
+    dateLedLines += 1;
+    if (LOOKS_LIKE_MONEY_LINE.test(line)) moneyLines += 1;
+    // Collapsed, so one shape is not reported once per merchant-name length:
+    // `WORD WORD WORD` and `WORD WORD` are the same table, differently wide.
+    const shape = line.split(' ').map((word) => tokenClass(word, currency))
+      .join(' ').replace(/(?:WORD )+WORD/g, 'WORD+').replace(/\bWORD\b(?! \+)/g, 'WORD');
+    counts.set(shape, (counts.get(shape) ?? 0) + 1);
+  }
+  const shapes = [...counts.entries()]
+    .map(([shape, count]) => ({ shape, count }))
+    .sort((a, b) => b.count - a.count || a.shape.localeCompare(b.shape))
+    .slice(0, MAX_FINGERPRINT_SHAPES);
+  const { headers, otherHeaderLines } = reportableColumnLabels(text);
+  return {
+    headers: headers.slice(0, MAX_FINGERPRINT_HEADERS),
+    otherHeaderLines,
+    shapes,
+    dateLedLines,
+    moneyLines,
+    cardStatement: isCardStatement(text),
+    originalTotalColumns: hasOriginalAndTotalColumns(text, currency),
+    trailingBalance: trailingBalanceRuns(lines, currency),
+  };
+}
+
 export interface StatementTextResult {
   rows: StatementParsedRow[];
   /** Every date-led money row this parser accounted for, accepted or rejected. */
@@ -1137,6 +1374,8 @@ export interface StatementTextResult {
   rejectedRows: number;
   /** True when every row in totalRows is represented by rows or rejectedRows. */
   completeRowAccounting: boolean;
+  /** Whether the rows add up to the balances the statement states for itself. */
+  reconciliation: StatementReconciliation;
 }
 
 /**
@@ -1299,6 +1538,7 @@ export function parseStatementLines(
     totalRows: rows.length + rejectedRows,
     rejectedRows,
     completeRowAccounting: true,
+    reconciliation: reconcileStatement(rows, lines, text, currency, rejectedRows),
   };
 }
 
