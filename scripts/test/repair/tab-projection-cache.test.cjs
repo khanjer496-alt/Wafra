@@ -21,6 +21,9 @@ test('tab projections reuse immutable ledger work instead of rescanning on every
   assert.match(subscriptions, /entry\.liveAccounts === liveAccounts/);
   assert.match(balances, /netWorthBreakdownCache\?\.accounts === state\.accounts/);
   assert.match(balances, /netWorthBreakdownCache\.transactions === state\.transactions/);
+  const cards = read('src/lib/cards.ts');
+  assert.match(cards, /reissueCache\?\.transactions === state\.transactions/);
+  assert.match(cards, /reissueCache\.cardDues === state\.cardDues/);
 });
 
 test('Wallet balance projection does not reconcile the full transfer graph on first paint', () => {

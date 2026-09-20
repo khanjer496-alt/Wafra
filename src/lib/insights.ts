@@ -107,9 +107,22 @@ export function summarizeMonth(
   let incomeFils = 0;
   let expenseFils = 0;
   const catTotals = new Map<CategoryId, number>();
+  const unbounded = toPeriod(period).mode === 'all';
+  let previousDate: string | null = null;
+  let newestFirst = true;
+  let seenInPeriod = false;
 
   for (const t of transactions) {
-    if (!inPeriod(t.date, period)) continue;
+    if (newestFirst && previousDate !== null && t.date > previousDate) newestFirst = false;
+    previousDate = t.date;
+    const inside = inPeriod(t.date, period);
+    if (!inside) {
+      // Persisted order is newest-first. After the window we already entered
+      // it, older rows cannot rejoin a bounded period.
+      if (seenInPeriod && newestFirst && !unbounded) break;
+      continue;
+    }
+    seenInPeriod = true;
     // One definition of spending and income, shared with every other screen
     // that adds money up. See ledger.ts for what these exclude and why.
     if (isIncome(t, live, internal)) {
@@ -388,11 +401,23 @@ export function buildInsights(
   // headline read "Biggest purchase — AED 19,000, Outgoing Transfer" over a
   // month whose Out was 3,000.
   let largest: Transaction | null = null;
+  let largestPreviousDate: string | null = null;
+  let largestNewestFirst = true;
+  let largestSeenInPeriod = false;
+  const largestUnbounded = period.mode === 'all';
   for (const t of transactions) {
-    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
-    if (inPeriod(t.date, period) && !isFixedCommitment(t.category)) {
-      if (!largest || t.amountFils > largest.amountFils) largest = t;
+    if (largestNewestFirst && largestPreviousDate !== null && t.date > largestPreviousDate) {
+      largestNewestFirst = false;
     }
+    largestPreviousDate = t.date;
+    const inside = inPeriod(t.date, period);
+    if (!inside) {
+      if (largestSeenInPeriod && largestNewestFirst && !largestUnbounded) break;
+      continue;
+    }
+    largestSeenInPeriod = true;
+    if (!isSpending(t, liveAccounts, internalTransfers) || isFixedCommitment(t.category)) continue;
+    if (!largest || t.amountFils > largest.amountFils) largest = t;
   }
   if (largest && largest.amountFils >= 20_000) {
     insights.push({

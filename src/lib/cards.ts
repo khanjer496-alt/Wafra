@@ -107,6 +107,13 @@ let paymentsCache: {
 } | null = null;
 let allocationCache: (CardInputs & { byAccount: Map<string, Map<string, Allocation>> }) | null = null;
 let activityCache: { transactions: Transaction[]; byAccount: Map<string, string> } | null = null;
+let reissueCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  cardDues: CardDue[];
+  todayISO: string;
+  value: ReissueSuggestion[];
+} | null = null;
 
 export function estimatedMinimumFils(totalFils: number): number {
   return Math.round(totalFils * ESTIMATED_MINIMUM_RATE);
@@ -1537,6 +1544,15 @@ export interface ReissueSuggestion {
 }
 
 export function reissueSuggestions(state: AppState, today: Date): ReissueSuggestion[] {
+  const todayISO = toISODate(today);
+  if (
+    reissueCache?.transactions === state.transactions &&
+    reissueCache.accounts === state.accounts &&
+    reissueCache.cardDues === state.cardDues &&
+    reissueCache.todayISO === todayISO
+  ) {
+    return reissueCache.value;
+  }
   const spendingCount = new Map<string, number>();
   for (const t of state.transactions) {
     if (isSpending(t)) {
@@ -1583,6 +1599,13 @@ export function reissueSuggestions(state: AppState, today: Date): ReissueSuggest
 
     if (candidates.length > 0) out.push({ newAccountId: a.id, candidateIds: candidates });
   }
+  reissueCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    cardDues: state.cardDues,
+    todayISO,
+    value: out,
+  };
   return out;
 }
 
