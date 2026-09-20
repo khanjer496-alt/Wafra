@@ -17,7 +17,7 @@ const { performance } = require('node:perf_hooks');
 const { test } = require('node:test');
 const ts = require('typescript');
 
-const root = path.resolve(__dirname, '../../..');
+const root = path.resolve(__dirname, '../..');
 const originalResolveFilename = Module._resolveFilename;
 const originalTsLoader = require.extensions['.ts'];
 
@@ -41,19 +41,19 @@ Module._resolveFilename = function resolveWafraAlias(request, parent, isMain, op
   return originalResolveFilename.call(this, request, parent, isMain, options);
 };
 
-const { projectDashboard, projectDashboardInsight } = require('../../../src/lib/dashboard-projection.ts');
-const { summarizeMonth, buildInsights } = require('../../../src/lib/insights.ts');
-const { netWorthBreakdown } = require('../../../src/lib/balances.ts');
-const { openDues, reissueSuggestions, isInactiveAccount } = require('../../../src/lib/cards.ts');
-const { detectSubscriptions } = require('../../../src/lib/subscriptions.ts');
-const { leavingSoon } = require('../../../src/lib/leaving-soon.ts');
-const { hasRecapActivity, recapCandidates } = require('../../../src/lib/recap.ts');
-const { liveAccountIds, internalTransferIdsForState, isSpending } = require('../../../src/lib/ledger.ts');
-const { inPeriod } = require('../../../src/lib/period.ts');
-const { setMonthStartDay } = require('../../../src/lib/format.ts');
-const { setActiveMarket, setLedgerCurrency } = require('../../../src/lib/markets.ts');
-const { TRANSFER_NORMALIZATION_VERSION } = require('../../../src/lib/transfer-reconciliation.ts');
-const { parseSms } = require('../../../src/lib/sms-parser.ts');
+const { projectDashboard, projectDashboardInsight } = require('../../src/lib/dashboard-projection.ts');
+const { summarizeMonth, buildInsights } = require('../../src/lib/insights.ts');
+const { netWorthBreakdown } = require('../../src/lib/balances.ts');
+const { openDues, reissueSuggestions, isInactiveAccount } = require('../../src/lib/cards.ts');
+const { detectSubscriptions } = require('../../src/lib/subscriptions.ts');
+const { leavingSoon } = require('../../src/lib/leaving-soon.ts');
+const { hasRecapActivity, recapCandidates } = require('../../src/lib/recap.ts');
+const { liveAccountIds, internalTransferIdsForState, isSpending } = require('../../src/lib/ledger.ts');
+const { inPeriod } = require('../../src/lib/period.ts');
+const { setMonthStartDay } = require('../../src/lib/format.ts');
+const { setActiveMarket, setLedgerCurrency } = require('../../src/lib/markets.ts');
+const { TRANSFER_NORMALIZATION_VERSION } = require('../../src/lib/transfer-reconciliation.ts');
+const { parseSms } = require('../../src/lib/sms-parser.ts');
 
 Module._resolveFilename = originalResolveFilename;
 if (originalTsLoader) require.extensions['.ts'] = originalTsLoader;
