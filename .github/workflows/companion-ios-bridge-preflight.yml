@@ -79,12 +79,17 @@ jobs:
 
           const bundleResult = await api(
             `bundleIds?filter[identifier]=${encodeURIComponent(identifier)}` +
-              '&include=app&fields[bundleIds]=name,platform,identifier,app' +
-              '&fields[apps]=name,bundleId,sku,primaryLocale&limit=10',
+              '&fields[bundleIds]=name,platform,identifier&limit=10',
           );
           if ((bundleResult.data || []).length > 1) throw new Error('Apple returned duplicate bundle IDs');
           const bundle = bundleResult.data?.[0] || null;
-          const app = (bundleResult.included || []).find((entry) => entry.type === 'apps') || null;
+
+          const appResult = await api('apps?limit=200&fields[apps]=name,bundleId,sku,primaryLocale');
+          const matchingApps = (appResult.data || []).filter(
+            (entry) => entry.attributes?.bundleId === identifier,
+          );
+          if (matchingApps.length > 1) throw new Error('Apple returned duplicate App Store Connect app records');
+          const app = matchingApps[0] || null;
 
           const certificateResult = await api('certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200');
           const certificates = (certificateResult.data || []).map((entry) => ({
@@ -98,16 +103,18 @@ jobs:
           let profiles = [];
           if (bundle) {
             const profileResult = await api(
-              `profiles?filter[bundleId]=${encodeURIComponent(bundle.id)}` +
-                '&filter[profileType]=IOS_APP_STORE&limit=200',
+              `bundleIds/${encodeURIComponent(bundle.id)}/profiles?limit=200` +
+                '&fields[profiles]=name,platform,profileType,profileState,uuid,createdDate,expirationDate',
             );
-            profiles = (profileResult.data || []).map((entry) => ({
-              id: entry.id,
-              name: entry.attributes?.name || null,
-              profileState: entry.attributes?.profileState || null,
-              expirationDate: entry.attributes?.expirationDate || null,
-              profileType: entry.attributes?.profileType || null,
-            }));
+            profiles = (profileResult.data || [])
+              .filter((entry) => entry.attributes?.profileType === 'IOS_APP_STORE')
+              .map((entry) => ({
+                id: entry.id,
+                name: entry.attributes?.name || null,
+                profileState: entry.attributes?.profileState || null,
+                expirationDate: entry.attributes?.expirationDate || null,
+                profileType: entry.attributes?.profileType || null,
+              }));
           }
 
           const report = {
