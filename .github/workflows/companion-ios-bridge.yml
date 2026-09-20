@@ -54,9 +54,12 @@ jobs:
           const key=createPrivateKey(pem), b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
           const jwt=()=>{const now=Math.floor(Date.now()/1000);const s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
           async function api(path){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{headers:{Authorization:`Bearer ${jwt()}`},signal:AbortSignal.timeout(30000)});const t=await r.text();if(!r.ok)throw new Error(`GET ${path.split('?')[0]}: ${r.status} ${t}`);return t?JSON.parse(t):null;}
-          const result=await api(`bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&include=app&fields[bundleIds]=name,platform,identifier,app&fields[apps]=name,bundleId,sku,primaryLocale&limit=10`);
+          const result=await api(`bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&fields[bundleIds]=name,platform,identifier&limit=10`);
           if((result.data||[]).length>1) throw new Error('duplicate bundle IDs');
-          const bundle=result.data?.[0]||null, app=(result.included||[]).find(x=>x.type==='apps')||null;
+          const bundle=result.data?.[0]||null;
+          const apps=await api(`apps?filter[bundleId]=${encodeURIComponent(identifier)}&fields[apps]=name,bundleId,sku,primaryLocale&limit=10`);
+          if((apps.data||[]).length>1) throw new Error('duplicate App Store records');
+          const app=apps.data?.[0]||null;
           const certs=await api('certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200');
           let groups=[]; let reviewDetail=null;
           if(app){
