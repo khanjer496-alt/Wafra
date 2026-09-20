@@ -109,7 +109,10 @@ assert.match(cardDetailSheet, /CardDetailSheet\(\{ account, onClose, footer \}/)
 assert.match(cardDetailSheet, /<BottomSheet[^>]*footer=\{footer\}/);
 
 const interactionCards = code(read('src/app/cards.tsx'));
-assert.match(interactionCards, /type CardAction = 'visibility' \| 'delete'/);
+// 'bank' joined the union in 6b9fbcf, which let any account's bank be set.
+// The contract pins the union so an action cannot be added without a decision
+// being recorded here; this records that one.
+assert.match(interactionCards, /type CardAction = 'visibility' \| 'bank' \| 'delete'/);
 assert.doesNotMatch(interactionCards, /CardAction =[^\n]*'limit'|value: 'limit'|onPress=\{isCredit && limitLeft/);
 const cardsDetail = interactionCards.match(
   /<CardDetailSheet[\s\S]*?(?=\n\s*<BottomSheet visible=\{limitFor)/,

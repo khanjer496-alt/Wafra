@@ -510,6 +510,12 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // drift from the count the categorise screen prints beside the tap — the
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
+    // store.tsx gained this import in 6b9fbcf without the allowlist gaining the
+    // matching entry, so `npm test` fails on main itself with "unexpected store
+    // dependency @/lib/known-banks". The strictness is the point — this list is
+    // what stops the store's dependency graph drifting unnoticed — so the entry
+    // is added rather than the check loosened.
+    '@/lib/known-banks': require('./build/known-banks'),
     './balances': {},
     ...realModules,
   };
