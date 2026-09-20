@@ -13,7 +13,7 @@ const load = require(path.join(root, 'scripts/test/repair/load-typescript.cjs'))
 const sourcePath = process.env.WAFRA_ONBOARDING_SOURCE || path.join(root, 'src/components/onboarding-gate.tsx');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const ast = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const actionNames = ['startScan', 'connectAndroidNotifications', 'finishAndroidCapture', 'beginCapture', 'continueManually', 'runSetupAction', 'openWafra'];
+const actionNames = ['startScan', 'connectAndroidNotifications', 'finishAndroidCapture', 'beginCapture', 'openStatementImport', 'continueManually', 'runSetupAction', 'openWafra'];
 const declarations = new Map();
 let overlayExpression;
 let backDisabledExpression;
@@ -69,17 +69,20 @@ function actions(options = {}) {
   };
   const context = {
     Platform: { OS: options.platform ?? 'android' },
+    Crypto: { randomUUID: () => 'test-statement-session' },
     focus: options.focus ?? null,
     tracking: options.tracking ?? null,
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
-    saveJourney() {},
+    saveJourney(stage) { record('journey', stage); },
+    beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
     stepTransitionTimer: { current: null },
     transitioning: false,
     requestedFirstEntry: { current: false },
     requestedDestination: { current: undefined },
+    statementImportSession: { current: null },
     setFinishing(value) { ui.finishing = value; record('finishing', value); },
     setFinishSaveFailed(value) { ui.finishSaveFailed = value; record('finish-save-failed', value); },
     get finishing() { return ui.finishing; },
@@ -89,6 +92,7 @@ function actions(options = {}) {
     trackOnboardingEvent() {},
     showRecovery: false,
     isIosSetupRoute: false,
+    isOnboardingStatementRoute: options.statementRouteAuthorized ?? false,
     setSetupBusy(value) { ui.busy = value; record('busy', value); },
     setSmsDenied(value) { ui.denied = value; record('denied', value); },
     setAndroidSmsReady(value) { ui.androidSmsReady = value; record('sms-ready', value); },
@@ -372,6 +376,34 @@ test('iOS automatic choice waits for its opt-in write before entering local setu
   assert.equal(calls(h, 'requestSmsPermission').length, 0);
   assert.equal(calls(h, 'beginHistoryImport').length, 0);
   assert.equal(calls(h, 'dispatchIosMessageSetup').length, 0, 'Do not manufacture Shortcut/history evidence');
+});
+
+for (const platform of ['ios', 'android']) {
+  test(platform + ' statement import opens from onboarding without changing capture consent', () => {
+    const h = actions({ platform, optOut: true });
+    h.openStatementImport();
+    assert.deepEqual(calls(h, 'route'), [[
+      'route',
+      '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
+    ]]);
+    assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
+    assert.equal(h.ledger.captureOptOut, true);
+    assert.equal(calls(h, 'capture-write-start').length, 0);
+    assert.equal(calls(h, 'requestSmsPermission').length, 0);
+    assert.equal(calls(h, 'beginHistoryImport').length, 0);
+  });
+}
+
+test('web never opens statement import from onboarding', () => {
+  const h = actions({ platform: 'web' });
+  h.openStatementImport();
+  assert.equal(calls(h, 'route').length, 0);
+  assert.equal(calls(h, 'journey').length, 0);
+});
+
+test('statement child route exemption is available only after the gate authorizes that route', () => {
+  assert.equal(actions({ statementRouteAuthorized: false }).isOverlayVisible(), true);
+  assert.equal(actions({ statementRouteAuthorized: true }).isOverlayVisible(), false);
 });
 
 test('failed iOS opt-in stays in onboarding and never opens setup', async () => {
