@@ -84,6 +84,22 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/known-banks') {
         return require('../build/known-banks.js');
       }
+      // The on-device semantic model is native-only and advisory. Screen and
+      // journey harnesses get the same fail-closed behaviour the web build has:
+      // the deterministic plan is returned unchanged and the runtime is never
+      // ready. Harnesses that exercise the model supply their own module.
+      if (name === '@/lib/local-semantic-assistant') {
+        return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
+      }
+      if (name === '@/lib/local-semantic-runtime') {
+        return {
+          localSemanticRuntimeStatus: () => ({ state: 'not-downloaded', modelVersion: 'test', error: null, retryAfter: null,
+            metrics: { downloadMs: 0, prepareMs: 0, sessionMs: 0, encodeCount: 0, encodeTotalMs: 0, encodeMaxMs: 0, failures: 0 } }),
+          getLocalSemanticEncoder: async () => { throw new Error('local-semantic-runtime:native-only'); },
+          createDownloadedSemanticRetriever: async () => { throw new Error('local-semantic-runtime:native-only'); },
+          clearLocalSemanticArtifacts() {},
+        };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,

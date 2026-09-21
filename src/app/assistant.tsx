@@ -20,6 +20,7 @@ import { toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { improveAssistantRequestLocally } from '@/lib/local-semantic-assistant';
+import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { currentMonthPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -272,7 +273,10 @@ export default function AssistantScreen() {
           )
         : runWafraAssistant(snapshot, clean, now, previous, period);
       if (result === null) return;
-      if (result.request.tool === 'help' && !previous) {
+      // The on-device intent fallback is consulted only when the encoder is
+      // already loaded; otherwise the deterministic path stays synchronous and
+      // the root layout's warm-up decides when the model becomes available.
+      if (result.request.tool === 'help' && !previous && localSemanticRuntimeStatus().state === 'ready') {
         const improved = await improveAssistantRequestLocally({
           question: clean,
           deterministicRequest: result.request,
