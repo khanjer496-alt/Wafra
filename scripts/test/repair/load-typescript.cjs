@@ -101,6 +101,8 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/local-semantic-shadow') {
         return {
           async observeLocalSemanticParserShadow() {},
+          async hydrateLocalSemanticShadow() {},
+          flushLocalSemanticShadowPersistence: async () => {},
           queueLocalSemanticParserShadow() {},
           async flushLocalSemanticParserShadow() {},
           buildLocalParserSemanticWindow: () => null,
@@ -114,6 +116,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/local-semantic-inbox-shadow') {
         return {
           runLocalSemanticInboxShadow: async () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
+          hydrateLocalSemanticInboxShadow: async () => {},
           localSemanticInboxShadowStatus: () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
         };
       }

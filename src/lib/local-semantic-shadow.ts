@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import {
   redactLocalSemanticText,
   type LocalParserFamily,
@@ -62,6 +64,70 @@ const state: LocalSemanticShadowSnapshot = {
 const increment = (bucket: Record<string, number>, key: string): void => {
   bucket[key] = (bucket[key] ?? 0) + 1;
 };
+
+/**
+ * The counters are aggregate, source-free numbers, but they only mean
+ * something across a whole inbox pass, and a pass can outlive the process
+ * that started it (the owner's first pass was lost to an app restart before
+ * the export). They are therefore persisted, and hydrated once at startup;
+ * the queue itself is not (its windows are rebuilt by the next pass).
+ */
+const STORAGE_KEY = 'wafra:local-semantic-shadow:v1';
+const COUNTER_KEYS = [
+  'observed', 'modelUnavailable', 'eligible', 'canonicalAccepted', 'learnedAccepted', 'hybridAccepted',
+  'bothAccepted', 'modelAgreement', 'deterministicComparable', 'canonicalDeterministicAgreement',
+  'learnedDeterministicAgreement', 'hybridDeterministicAgreement', 'queueDropped',
+] as const;
+const BUCKET_KEYS = ['byDeterministicFamily', 'byCanonicalFamily', 'byLearnedFamily', 'byHybridFamily'] as const;
+let persistChain = Promise.resolve();
+let dirtySince = 0;
+
+const persistSnapshot = (): void => {
+  persistChain = persistChain
+    .then(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(localSemanticShadowSnapshot())))
+    .catch(() => undefined);
+};
+
+const persistIfDue = (force = false): void => {
+  dirtySince += 1;
+  if (force || dirtySince >= 50) {
+    dirtySince = 0;
+    persistSnapshot();
+  }
+};
+
+let hydrated: Promise<void> | null = null;
+/** Restore persisted counters once; later writes always win over the stored copy. */
+export function hydrateLocalSemanticShadow(): Promise<void> {
+  hydrated ??= (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const stored: unknown = JSON.parse(raw);
+      if (!stored || typeof stored !== 'object') return;
+      const record = stored as Record<string, unknown>;
+      for (const key of COUNTER_KEYS) {
+        const value = record[key];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0) state[key] += Math.floor(value);
+      }
+      for (const key of BUCKET_KEYS) {
+        const bucket = record[key];
+        if (!bucket || typeof bucket !== 'object') continue;
+        for (const [family, value] of Object.entries(bucket as Record<string, unknown>)) {
+          if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+            state[key][family] = (state[key][family] ?? 0) + Math.floor(value);
+          }
+        }
+      }
+    } catch {
+      // A corrupt or missing record only means counting starts from zero.
+    }
+  })();
+  return hydrated;
+}
+
+/** Test/diagnostic hook: resolves once the latest snapshot write has settled. */
+export const flushLocalSemanticShadowPersistence = (): Promise<void> => persistChain;
 
 export const localSemanticShadowSnapshot = (): LocalSemanticShadowSnapshot => ({
   ...state,
@@ -225,6 +291,7 @@ export async function observeLocalSemanticParserShadow(
     return;
   }
   await scoreShadowWindow(semanticText, parserFamily(event.family));
+  persistIfDue(true);
 }
 
 /**
@@ -242,6 +309,7 @@ export function queueLocalSemanticParserShadow(source: string, event: UniversalB
   if (!semanticText) return;
   if (queue.length >= SHADOW_QUEUE_LIMIT) {
     state.queueDropped += 1;
+    persistIfDue();
     return;
   }
   queue.push({ window: semanticText, family: parserFamily(event.family) });
@@ -278,11 +346,13 @@ async function drainShadowQueue(): Promise<void> {
       if (!next) break;
       await scoreShadowWindow(next.window, next.family);
       state.queued = queue.length;
+      persistIfDue();
       await yieldTurn();
     }
   } finally {
     state.queued = queue.length;
     draining = false;
+    persistIfDue(true);
   }
 }
 

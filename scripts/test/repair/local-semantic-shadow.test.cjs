@@ -37,12 +37,17 @@ function harness({ state = 'ready', fail = false } = {}) {
       return encoder;
     },
   };
+  const store = new Map();
   const shadow = load(path.join(root, 'src/lib/local-semantic-shadow.ts'), {
     '@/lib/local-semantic-model': semantic,
     '@/lib/local-semantic-bundle': bundle,
     '@/lib/local-semantic-runtime': runtime,
+    '@react-native-async-storage/async-storage': { __esModule: true, default: {
+      getItem: async (key) => store.get(key) ?? null,
+      setItem: async (key, value) => { store.set(key, value); },
+    } },
   });
-  return { shadow, calls };
+  return { shadow, calls, store };
 }
 
 const field = (value, span) => ({ evidence: span ? 'explicit' : 'missing', value: value ?? null, alternatives: [], spans: span ? [span] : [], issues: [] });
@@ -108,4 +113,25 @@ test('ineligible events (non-review, missing money) are observed but never queue
   assert.equal(snap.observed, 2);
   assert.equal(snap.eligible, 0);
   assert.equal(calls.encode.length, 0);
+});
+
+
+test('counters are persisted after a drain and hydrated by the next process', async () => {
+  const first = harness();
+  first.shadow.queueLocalSemanticParserShadow(source, event);
+  await first.shadow.flushLocalSemanticParserShadow();
+  await first.shadow.flushLocalSemanticShadowPersistence();
+  const stored = JSON.parse(first.store.get('wafra:local-semantic-shadow:v1'));
+  assert.equal(stored.observed, 1);
+  assert.equal(stored.canonicalAccepted, 1);
+  assert.equal(stored.byCanonicalFamily.purchase, 1);
+  for (const key of Object.keys(stored)) assert.ok(!/text|window|body|source/i.test(key), key);
+
+  const second = harness();
+  second.store.set('wafra:local-semantic-shadow:v1', JSON.stringify(stored));
+  await second.shadow.hydrateLocalSemanticShadow();
+  const snap = second.shadow.localSemanticShadowSnapshot();
+  assert.equal(snap.observed, 1);
+  assert.equal(snap.canonicalDeterministicAgreement, 1);
+  assert.equal(snap.queued, 0);
 });

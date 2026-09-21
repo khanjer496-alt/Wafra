@@ -28,7 +28,9 @@ import '@/lib/background-relay';
 import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
 import { getLocalSemanticEncoder } from '@/lib/local-semantic-runtime';
+import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
@@ -115,7 +117,10 @@ export default function RootLayout() {
   // artifact once; web resolves to a fail-closed stub. Nothing in launch waits
   // for this and parser authority remains deterministic while it is unavailable.
   useEffect(() => {
-    if (Platform.OS !== 'web') void getLocalSemanticEncoder().catch(() => undefined);
+    if (Platform.OS === 'web') return;
+    void hydrateLocalSemanticShadow().catch(() => undefined);
+    void hydrateLocalSemanticInboxShadow().catch(() => undefined);
+    void getLocalSemanticEncoder().catch(() => undefined);
   }, []);
 
   // Ask the OS about Reduce Motion and the screen reader once, here, while

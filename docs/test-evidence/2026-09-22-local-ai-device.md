@@ -61,8 +61,12 @@ that follow this build (tester-triggered inbox pass; `unrecognized` Help).
   the app as laggy during that window, which is what the 40 ms drain gap in
   the following commit addresses. An Ask question typed during the drain was
   answered, but slowly.
-- Counters and encode timings from this pass are read from the next
-  diagnostics export (pending at the time of writing).
+- The next export (01:22 device time) came from a fresh process: the app had
+  been restarted between the pass and the export, and the counters lived only
+  in memory, so the pass results were lost. Persistence of the counters and
+  the pass status follows in the next commit. The same export did confirm the
+  verified-marker path: `downloadMs 0`, `prepareMs 247` (was 4,309 on first
+  run), `sessionMs 304`, `failures 0`, state `ready`.
 
 ## Not yet measured
 

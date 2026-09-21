@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { hasBankAlertMoneyHint, inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { queueLocalSemanticParserShadow } from '@/lib/local-semantic-shadow';
 import { nonPostingReason } from '@/lib/sms-parser';
@@ -32,6 +34,32 @@ let status: LocalSemanticInboxShadowStatus = {
   state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null,
 };
 let inFlight: Promise<LocalSemanticInboxShadowStatus> | null = null;
+
+const STORAGE_KEY = 'wafra:local-semantic-inbox-shadow:v1';
+const persist = (): Promise<void> =>
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(status)).catch(() => undefined);
+let hydrated: Promise<void> | null = null;
+/** Restore the last finished pass once, so an export after a restart still reports it. */
+export function hydrateLocalSemanticInboxShadow(): Promise<void> {
+  hydrated ??= (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const stored = raw ? JSON.parse(raw) as Partial<LocalSemanticInboxShadowStatus> : null;
+      if (stored && status.state === 'idle' && typeof stored.state === 'string' &&
+          ['complete', 'stopped', 'failed'].includes(stored.state)) {
+        status = {
+          state: stored.state as LocalSemanticInboxShadowStatus['state'],
+          checked: Number.isFinite(stored.checked) ? Number(stored.checked) : 0,
+          eligible: Number.isFinite(stored.eligible) ? Number(stored.eligible) : 0,
+          queued: Number.isFinite(stored.queued) ? Number(stored.queued) : 0,
+          startedAt: typeof stored.startedAt === 'number' ? stored.startedAt : null,
+          finishedAt: typeof stored.finishedAt === 'number' ? stored.finishedAt : null,
+        };
+      }
+    } catch { /* counting starts from idle */ }
+  })();
+  return hydrated;
+}
 
 export const localSemanticInboxShadowStatus = (): LocalSemanticInboxShadowStatus => ({ ...status });
 
@@ -79,6 +107,7 @@ export function runLocalSemanticInboxShadow(
     } finally {
       status.finishedAt = Date.now();
       inFlight = null;
+      await persist();
     }
     return { ...status };
   })();

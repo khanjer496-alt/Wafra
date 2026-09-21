@@ -7,7 +7,7 @@ const load = require('./load-typescript.cjs');
 
 const root = path.resolve(__dirname, '../../..');
 
-function harness({ eventFor = () => ({ decision: 'review' }), dropped = () => 0 } = {}) {
+function harness({ eventFor = () => ({ decision: 'review' }), dropped = () => 0, store = new Map() } = {}) {
   const queued = [];
   const module = load(path.join(root, 'src/lib/local-semantic-inbox-shadow.ts'), {
     '@/lib/launch-alert-parser': {
@@ -17,8 +17,12 @@ function harness({ eventFor = () => ({ decision: 'review' }), dropped = () => 0 
     '@/lib/local-semantic-shadow': { queueLocalSemanticParserShadow: (body, event) => queued.push({ body, event }) },
     '@/lib/sms-parser': { nonPostingReason: (body) => (/OTP/.test(body) ? 'security-challenge' : null) },
     '../../modules/sms-reader': {},
+    '@react-native-async-storage/async-storage': { __esModule: true, default: {
+      getItem: async (key) => store.get(key) ?? null,
+      setItem: async (key, value) => { store.set(key, value); },
+    } },
   });
-  return { module, queued };
+  return { module, queued, store };
 }
 
 const inbox = (count) => Array.from({ length: count }, (_, i) => ({
@@ -72,4 +76,17 @@ test('a reader failure ends the pass as failed without throwing', async () => {
   const { module } = harness();
   const result = await module.runLocalSemanticInboxShadow(async () => { throw new Error('provider'); });
   assert.equal(result.state, 'failed');
+});
+
+
+test('a finished pass is persisted and reported again after a restart', async () => {
+  const store = new Map();
+  const first = harness({ store });
+  await first.module.runLocalSemanticInboxShadow(readerFor(inbox(30), []));
+  const second = harness({ store });
+  await second.module.hydrateLocalSemanticInboxShadow();
+  const status = second.module.localSemanticInboxShadowStatus();
+  assert.equal(status.state, 'complete');
+  assert.equal(status.checked, 30);
+  assert.equal(status.eligible, 10);
 });
