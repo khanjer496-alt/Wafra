@@ -544,8 +544,21 @@ const compileAssistantDefinition = (
   }
 };
 
-const isExactPlainHelp = (request: AssistantToolRequest): boolean =>
-  request.tool === 'help' && Object.keys(request).length === 1;
+const UNRECOGNIZED_HELP_KEYS = new Set(['tool', 'clarification', 'suggestions', 'unrecognized']);
+
+/**
+ * Only Help that recognised nothing may reach the model: exact plain Help, or
+ * the planner's "didn't understand" clarification, which it marks
+ * `unrecognized`. Every other Help (a named merchant that was not found, an
+ * unsupported condition, a safety refusal) stays deterministic.
+ */
+const isExactPlainHelp = (request: AssistantToolRequest): boolean => {
+  if (request.tool !== 'help') return false;
+  const keys = Object.keys(request);
+  if (keys.length === 1) return true;
+  return (request as { unrecognized?: unknown }).unrecognized === true &&
+    keys.every((key) => UNRECOGNIZED_HELP_KEYS.has(key));
+};
 
 const freezeCompiledAssistantRequest = (request: AssistantToolRequest): AssistantToolRequest => {
   const period = (request as unknown as Record<string, unknown>).period;

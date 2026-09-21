@@ -8,11 +8,19 @@ used for two narrow jobs:
    deterministic parser's redacted semantic window is embedded and compared
    with the parser's own family. Bank-app notifications are scored inline;
    SMS history windows are queued (bounded at 10,000) and scored one at a time
-   off the scan path, so an import never waits on the encoder. Only aggregate
-   counters are kept (`localSemanticShadowSnapshot`). The model never changes
-   an amount, currency, status, direction, dedupe key, or import decision.
-2. **Ask Wafra intent fallback.** When the deterministic planner produces plain
-   Help for a fresh question (no conversation context), the encoder ranks the
+   off the scan path, so an import never waits on the encoder. An existing
+   inbox never reaches the encoder on its own (live capture sees only new
+   messages and the startup parser-repair pass is excluded), so Settings →
+   "Send test diagnostics" also starts a bounded background pass over the
+   readable inbox (`local-semantic-inbox-shadow.ts`, up to 40,000 messages,
+   stops when the queue drops). Only aggregate counters are kept
+   (`localSemanticShadowSnapshot`, `localSemanticInboxShadowStatus`). The
+   model never changes an amount, currency, status, direction, dedupe key, or
+   import decision.
+2. **Ask Wafra intent fallback.** When the deterministic planner recognised
+   nothing in a fresh question (plain Help, or its "didn't understand"
+   clarification marked `unrecognized`) and no conversation context is active,
+   the encoder ranks the
    question against app-owned intent prototypes and may pick one closed tool
    (`spending-total`, `subscriptions`, `upcoming-payments`, ...). The compiled
    request must pass the production request validator, and every number in the

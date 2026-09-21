@@ -85,7 +85,17 @@ export interface AssistantFilters {
 }
 
 export type AssistantToolRequest =
-  | { tool: 'help'; clarification?: string; suggestions?: string[] }
+  | {
+      tool: 'help';
+      clarification?: string;
+      suggestions?: string[];
+      /**
+       * Set only when the deterministic planner recognised nothing in the
+       * question. It is the one Help shape the optional on-device intent
+       * fallback may act on; safety clarifications never carry it.
+       */
+      unrecognized?: true;
+    }
   | (AssistantFilters & (
   | { tool: 'spending-total'; period: Period }
   | { tool: 'income-total'; period: Period }
@@ -317,8 +327,12 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\
 const containsPhrase = (text: string, phrase: string) =>
   (` ${normalizeMerchantText(text)} `).includes(` ${normalizeMerchantText(phrase)} `);
 
-function clarification(body: string, suggestions?: string[]): AssistantToolRequest {
-  return { tool: 'help', clarification: body, ...(suggestions?.length ? { suggestions } : {}) };
+function clarification(body: string, suggestions?: string[], unrecognized = false): AssistantToolRequest {
+  return {
+    tool: 'help', clarification: body,
+    ...(suggestions?.length ? { suggestions } : {}),
+    ...(unrecognized ? { unrecognized: true as const } : {}),
+  };
 }
 
 function validISODate(value: string): boolean {
@@ -2645,7 +2659,7 @@ export function planAssistantQuestion(
   }
   const scopeError = invalidFilters(state, filters);
   if (scopeError) return clarification(scopeError);
-  if (hasUnsupportedRemainder(q)) return clarification('I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.');
+  if (hasUnsupportedRemainder(q)) return clarification('I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.', undefined, true);
   const scoped = { period, ...filters };
   const multipleDimensions = includedCategories(filters).length > 1 || includedMerchants(filters).length > 1 || (filters.accountIds?.length ?? 0) > 1;
   if (comparison && multipleDimensions && !comparisonPeriod && parsed.periods.length < 2 && !/\b(?:why|change|changed|previous period|same dates)\b/.test(q)) return clarification('I can compare the combined spending for these filters over time. Name two periods or ask why their combined spending changed.');
