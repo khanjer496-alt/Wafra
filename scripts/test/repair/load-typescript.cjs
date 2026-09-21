@@ -111,6 +111,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
             byHybridFamily: {}, queued: 0, queueDropped: 0 }),
         };
       }
+      if (name === '@/lib/local-semantic-inbox-shadow') {
+        return {
+          runLocalSemanticInboxShadow: async () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
+          localSemanticInboxShadowStatus: () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
+        };
+      }
       if (name === '@/lib/local-semantic-assistant') {
         return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
       }

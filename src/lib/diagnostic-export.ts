@@ -10,6 +10,7 @@ import { getLaunchMetrics } from '@/lib/launch-performance';
 import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
 import { getStabilityDiagnostics } from '@/lib/stability-diagnostics';
+import { localSemanticInboxShadowStatus } from '@/lib/local-semantic-inbox-shadow';
 import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
 import { localSemanticShadowSnapshot } from '@/lib/local-semantic-shadow';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
@@ -190,6 +191,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       localSemantic: {
         runtime: localSemanticRuntimeStatus(),
         shadow: localSemanticShadowSnapshot(),
+        inboxPass: localSemanticInboxShadowStatus(),
       },
     },
     // Only in an internal capture-trace build: launch phases and capture page
