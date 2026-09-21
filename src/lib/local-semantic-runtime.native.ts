@@ -60,47 +60,99 @@ const sha256Bytes = async (file: File): Promise<string> => {
   return [...digest].map((value) => value.toString(16).padStart(2, '0')).join('');
 };
 
-const verified = async (file: File, spec: ArtifactSpec): Promise<boolean> => {
+/**
+ * A full SHA-256 of the 34.8 MiB encoder means reading it into JS on every
+ * cold launch. After one successful verification a marker next to the file
+ * records the hash that was verified; later launches trust exact size plus
+ * that marker. The marker is only ever written after a full hash match, and
+ * a missing/mismatched marker or size falls back to hashing (then re-download).
+ */
+const markerFile = (directory: Directory, spec: ArtifactSpec): File =>
+  new File(directory, `${spec.name}.verified`);
+
+const verified = async (file: File, spec: ArtifactSpec, marker?: File): Promise<boolean> => {
   if (!file.exists) return false;
   if (spec.exactBytes !== undefined && file.size !== spec.exactBytes) return false;
-  if (spec.sha256 !== undefined) return (await sha256Bytes(file)).toLowerCase() === spec.sha256;
-  return file.size > 0;
+  if (spec.sha256 === undefined) return file.size > 0;
+  if (marker?.exists) {
+    try {
+      if ((await marker.text()).trim().toLowerCase() === spec.sha256) return true;
+    } catch { /* unreadable marker: hash below */ }
+  }
+  const matches = (await sha256Bytes(file)).toLowerCase() === spec.sha256;
+  if (matches && marker) {
+    try { marker.write(spec.sha256); } catch { /* marker is an optimization only */ }
+  }
+  return matches;
 };
 
 async function ensureArtifact(spec: ArtifactSpec): Promise<File> {
   const directory = runtimeDirectory();
   const target = new File(directory, spec.name);
+  const marker = markerFile(directory, spec);
   try {
-    if (await verified(target, spec)) return target;
+    if (await verified(target, spec, marker)) return target;
   } catch { /* replace corrupt/unverifiable files below */ }
+  if (marker.exists) marker.delete();
   if (target.exists) target.delete();
+  const startedAt = Date.now();
   const downloaded = await File.downloadFileAsync(spec.url, target, { idempotent: true });
-  if (!(await verified(downloaded, spec))) {
+  metrics.downloadMs += Date.now() - startedAt;
+  if (!(await verified(downloaded, spec, marker))) {
     if (downloaded.exists) downloaded.delete();
     throw new Error(`local-semantic-runtime:artifact-verification-failed:${spec.name}`);
   }
   return downloaded;
 }
 
+/** Source-free timings: no text, embeddings, amounts or identifiers. */
+export interface LocalSemanticRuntimeMetrics {
+  downloadMs: number;
+  prepareMs: number;
+  sessionMs: number;
+  encodeCount: number;
+  encodeTotalMs: number;
+  encodeMaxMs: number;
+  failures: number;
+}
+
 export interface LocalSemanticRuntimeStatus {
   state: 'not-downloaded' | 'downloading' | 'ready' | 'failed';
   modelVersion: string;
   error: string | null;
+  metrics: LocalSemanticRuntimeMetrics;
+  /** Epoch ms before which a failed runtime is not retried; null when retryable. */
+  retryAfter: number | null;
 }
 
-let status: LocalSemanticRuntimeStatus = {
-  state: 'not-downloaded', modelVersion: MODEL_VERSION, error: null,
+const freshMetrics = (): LocalSemanticRuntimeMetrics => ({
+  downloadMs: 0, prepareMs: 0, sessionMs: 0, encodeCount: 0, encodeTotalMs: 0, encodeMaxMs: 0, failures: 0,
+});
+
+let metrics = freshMetrics();
+let status: Omit<LocalSemanticRuntimeStatus, 'metrics'> = {
+  state: 'not-downloaded', modelVersion: MODEL_VERSION, error: null, retryAfter: null,
 };
 let encoderPromise: Promise<LocalOnnxInt8TextEncoder> | null = null;
+let session: InferenceSession | null = null;
 
-export const localSemanticRuntimeStatus = (): LocalSemanticRuntimeStatus => ({ ...status });
+/**
+ * A failed download/verification/session must not be retried by every scanned
+ * notification or Ask question. Retries back off 1 min → 5 min → 30 min → 2 h.
+ */
+const RETRY_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000] as const;
+const retryDelay = (failures: number): number =>
+  RETRY_BACKOFF_MS[Math.min(failures, RETRY_BACKOFF_MS.length) - 1];
+
+export const localSemanticRuntimeStatus = (): LocalSemanticRuntimeStatus => ({ ...status, metrics: { ...metrics } });
 
 const int64Tensor = (values: readonly number[], sequenceLength: number): Tensor =>
   new Tensor('int64', values.map((value) => BigInt(value)), [1, sequenceLength]);
 
 async function createEncoder(): Promise<LocalOnnxInt8TextEncoder> {
-  status = { state: 'downloading', modelVersion: MODEL_VERSION, error: null };
+  status = { state: 'downloading', modelVersion: MODEL_VERSION, error: null, retryAfter: null };
   try {
+    const prepareStartedAt = Date.now();
     const [modelFile, tokenizerFile, tokenizerConfigFile] = await Promise.all(
       ARTIFACTS.map((artifact) => ensureArtifact(artifact)),
     );
@@ -108,20 +160,25 @@ async function createEncoder(): Promise<LocalOnnxInt8TextEncoder> {
       tokenizerFile.text().then(JSON.parse), tokenizerConfigFile.text().then(JSON.parse),
     ]);
     const tokenizer = new Tokenizer(tokenizerJson, tokenizerConfig);
-    const session = await InferenceSession.create(modelFile.uri, {
+    metrics.prepareMs = Date.now() - prepareStartedAt;
+    const sessionStartedAt = Date.now();
+    const created = await InferenceSession.create(modelFile.uri, {
       graphOptimizationLevel: 'all', executionMode: 'sequential',
     });
+    session = created;
+    metrics.sessionMs = Date.now() - sessionStartedAt;
     const encoder: LocalOnnxInt8TextEncoder = Object.freeze({
       manifest: LOCAL_SEMANTIC_RUNTIME_MANIFEST,
       async encode(text: string) {
         const clean = text.trim().slice(0, LOCAL_SEMANTIC_RUNTIME_MANIFEST.maximumCharacters);
         if (!clean) throw new Error('local-semantic-runtime:empty-input');
+        const encodeStartedAt = Date.now();
         const encoded = tokenizer.encode(clean, { return_token_type_ids: true });
         const ids = encoded.ids.slice(0, MAX_TOKENS);
         if (ids.length === 0) throw new Error('local-semantic-runtime:empty-tokens');
         const attention = encoded.attention_mask.slice(0, ids.length);
         const types = (encoded.token_type_ids ?? new Array(ids.length).fill(0)).slice(0, ids.length);
-        const outputs = await session.run({
+        const outputs = await created.run({
           input_ids: int64Tensor(ids, ids.length),
           attention_mask: int64Tensor(attention, ids.length),
           token_type_ids: int64Tensor(types, ids.length),
@@ -149,21 +206,30 @@ async function createEncoder(): Promise<LocalOnnxInt8TextEncoder> {
         norm = Math.sqrt(norm);
         if (!Number.isFinite(norm) || norm <= 1e-12) throw new Error('local-semantic-runtime:invalid-embedding');
         for (let dim = 0; dim < 384; dim += 1) pooled[dim] /= norm;
+        const elapsed = Date.now() - encodeStartedAt;
+        metrics.encodeCount += 1;
+        metrics.encodeTotalMs += elapsed;
+        if (elapsed > metrics.encodeMaxMs) metrics.encodeMaxMs = elapsed;
         return pooled;
       },
     });
-    status = { state: 'ready', modelVersion: MODEL_VERSION, error: null };
+    status = { state: 'ready', modelVersion: MODEL_VERSION, error: null, retryAfter: null };
     return encoder;
   } catch (error) {
+    metrics.failures += 1;
     status = {
       state: 'failed', modelVersion: MODEL_VERSION,
       error: error instanceof Error ? error.message.slice(0, 160) : 'unknown',
+      retryAfter: Date.now() + retryDelay(metrics.failures),
     };
     throw error;
   }
 }
 
 export function getLocalSemanticEncoder(): Promise<LocalOnnxInt8TextEncoder> {
+  if (!encoderPromise && status.state === 'failed' && status.retryAfter !== null && Date.now() < status.retryAfter) {
+    return Promise.reject(new Error('local-semantic-runtime:retry-backoff'));
+  }
   encoderPromise ??= createEncoder().catch((error) => {
     encoderPromise = null;
     throw error;
@@ -181,6 +247,10 @@ export async function createDownloadedSemanticRetriever(
 export function clearLocalSemanticArtifacts(): void {
   const directory = runtimeDirectory();
   if (directory.exists) directory.delete();
+  const released = session;
+  session = null;
   encoderPromise = null;
-  status = { state: 'not-downloaded', modelVersion: MODEL_VERSION, error: null };
+  metrics = freshMetrics();
+  status = { state: 'not-downloaded', modelVersion: MODEL_VERSION, error: null, retryAfter: null };
+  void released?.release().catch(() => undefined);
 }
