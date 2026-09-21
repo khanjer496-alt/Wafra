@@ -24,28 +24,51 @@ test.describe('home', () => {
     expect(clipped ?? [], 'money figures were truncated').toHaveLength(0);
   });
 
-  test('the headline total equals the rows printed beneath it', async ({ aiQuery }) => {
-    // The bug class this exists for: a total computed over the whole month and
-    // a list showing a filtered subset, printed one above the other with
-    // nothing saying they measure different things.
-    const summary = await aiQuery<{ total: string; label: string; rows: { label: string; amount: string }[] }>(
-      '{ total: string, label: string, rows: { label: string, amount: string }[] }, ' +
-      'the headline total on this screen with the label that describes it, and the ' +
-      'breakdown rows printed directly beneath that total with their amounts. ' +
-      'Only include rows that belong to that breakdown.',
+  test('net equals income minus spending', async ({ aiQuery }) => {
+    // Home prints Spending, Income and Net within one card, so the screen
+    // carries its own proof. This is the check that catches a transfer counted
+    // on one side only, a refund signed the wrong way, or a period that moved
+    // under one figure and not the others — none of which throws.
+    const hero = await aiQuery<{ spending: string; income: string; net: string }>(
+      '{ spending: string, income: string, net: string }, the spending total, the ' +
+      'income total and the net figure from the summary at the top of this screen, ' +
+      'each exactly as printed including its sign.',
     );
 
-    const total = money(summary?.total);
-    test.skip(!Number.isFinite(total) || !summary?.rows?.length, 'no headline breakdown on this screen');
+    const spending = money(hero?.spending);
+    const income = money(hero?.income);
+    const net = money(hero?.net);
+    test.skip(![spending, income, net].every(Number.isFinite), 'no income/net summary on this screen');
 
-    const rows = sumMoney(summary.rows.map((r) => r.amount));
-    // Rounding: each row is displayed to the nearest unit, so a breakdown of N
-    // rows can differ from the stored total by up to N/2 units. Anything wider
-    // than that is a real disagreement, not display rounding.
-    const tolerance = Math.max(1, summary.rows.length / 2);
+    // Spending is printed unsigned; net carries the sign. Compare magnitudes
+    // against the subtraction rather than assuming either convention.
     expect(
-      Math.abs(Math.abs(total) - Math.abs(rows)),
-      `"${summary.label}" shows ${summary.total} over rows summing to ${rows}`,
+      Math.abs(net - (income - Math.abs(spending))),
+      `net ${hero.net} does not equal income ${hero.income} minus spending ${hero.spending}`,
+    ).toBeLessThanOrEqual(0.02);
+  });
+
+  test('the spending breakdown adds up to the figure that links to it', async ({ aiQuery, aiTap }) => {
+    const headline = await aiQuery<{ total: string; period: string }>(
+      '{ total: string, period: string }, the spending total at the top of this ' +
+      'screen and the period label beside it.',
+    );
+    const total = money(headline?.total);
+    test.skip(!Number.isFinite(total), 'no spending total on this screen');
+
+    await aiTap('the control that opens the spending breakdown from the summary');
+
+    const rows = await aiQuery<{ category: string; amount: string }[]>(
+      '{ category: string, amount: string }[], every category row in the breakdown ' +
+      'that just opened, with its amount.',
+    );
+    test.skip(!rows?.length, 'the breakdown rendered no rows');
+
+    const sum = sumMoney(rows.map((r) => r.amount));
+    const tolerance = Math.max(1, rows.length / 2);
+    expect(
+      Math.abs(Math.abs(total) - Math.abs(sum)),
+      `${headline.period}: ${headline.total} over ${rows.length} rows summing to ${sum}`,
     ).toBeLessThanOrEqual(tolerance);
   });
 
