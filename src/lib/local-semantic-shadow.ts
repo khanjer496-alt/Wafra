@@ -249,7 +249,14 @@ export function queueLocalSemanticParserShadow(source: string, event: UniversalB
   void drainShadowQueue();
 }
 
-const yieldTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Gap between scored windows. On the device an unthrottled drain held the JS
+ * thread near 100% CPU for minutes while Ask Wafra was answering; this keeps
+ * the pass in the background where it belongs. Ten thousand windows still
+ * finish within roughly ten minutes.
+ */
+const DRAIN_GAP_MS = 40;
+const yieldTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, DRAIN_GAP_MS));
 
 async function drainShadowQueue(): Promise<void> {
   if (draining) return;
