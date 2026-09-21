@@ -119,6 +119,41 @@ const encode = async (text) => {
 };
 
 const anchors = require(path.join(ROOT, 'scripts/local-ai/assistant-anchors.js'));
+
+/**
+ * `LOCAL_SEMANTIC_REGISTRY` in `src/lib/local-semantic-model.ts` is the code-owned
+ * authority for which prototype ids mean anything, and it maps each one to a tool
+ * AND an argument policy. A vector whose id is not in it is dead weight: the
+ * runtime looks the id up, finds nothing, and refuses — correctly, because an
+ * index is data and data does not get to invent an intent.
+ *
+ * So refuse to write it. Emitting 246 prototypes of which 58 are reachable
+ * would look like a working index and behave like the old one, which is the
+ * worst of both. Expanding the intent set means adding registry entries first,
+ * with a deliberate policy for each, and that is a source change for review —
+ * not something an asset regeneration can smuggle in.
+ */
+const registryPath = path.join(ROOT, 'scripts/test/build/local-semantic-model.js');
+if (!fs.existsSync(registryPath)) {
+  process.stderr.write(
+    'build-assistant-index: scripts/test/build is missing; run bash scripts/test/build.sh first\n' +
+    'so the prototype registry can be read.\n');
+  process.exit(2);
+}
+const { LOCAL_SEMANTIC_REGISTRY } = require(registryPath);
+const unknown = anchors
+  .map((group) => group.id)
+  .filter((id) => !Object.hasOwn(LOCAL_SEMANTIC_REGISTRY, id));
+if (unknown.length) {
+  process.stderr.write(
+    `build-assistant-index: ${unknown.length} anchor id(s) are absent from ` +
+    'LOCAL_SEMANTIC_REGISTRY, so the runtime would refuse every vector built from ' +
+    'them:\n' + unknown.map((id) => `  ${id}\n`).join('') +
+    '\nAdd a registry entry (tool + argument policy) in src/lib/local-semantic-model.ts\n' +
+    'for each, or remove the anchor group. Refusing to write a partly-dead index.\n');
+  process.exit(1);
+}
+
 const prototypes = [];
 for (const group of anchors) {
   for (const phrasing of group.phrasings) {

@@ -128,9 +128,7 @@ SUITES+=(alert-market-detection)
 SUITES+=(alert-review-tray)
 SUITES+=(unparsed-launch-alert)
 SUITES+=(review-promotion)
-SUITES+=(local-semantic-model)
 SUITES+=(verification-challenge)
-SUITES+=(local-assistant-router)
 SUITES+=(review-source-bindings)
 SUITES+=(provider-source-identity)
 SUITES+=(home-presentation)
@@ -169,6 +167,8 @@ SUITES+=(wafra-assistant)
 SUITES+=(home-widget-preferences)
 SUITES+=(recap)
 SUITES+=(ledger-stress)
+SUITES+=(universal-confidence)
+SUITES+=(universal-template-certification)
 
 missing=""
 for t in "${SUITES[@]}"; do

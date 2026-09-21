@@ -1,46 +1,56 @@
 /**
- * Anchor questions for the local Ask Wafra intent router, one group per tool.
+ * Anchor questions for on-device Ask Wafra intent routing, one group per tool.
  *
- * The shipped `assistant-prototype-index.e5.int8.json` carries 58 vectors over
- * ten intents. `ASSISTANT_TOOL_CATALOG` has twenty-five tools, so fifteen of
- * them were unreachable locally: ask "how much did I blow on food last month"
- * and the nearest prototype is `ask.income.total.current-scope`, because
- * `category-breakdown` has no prototype to be near. This file is the input
- * that fixes that — `build-assistant-index.mjs` encodes every phrasing below
- * with the same model the app downloads and writes the expanded index.
+ * NOT WIRED UP YET, AND THE BUILDER WILL TELL YOU WHY.
+ *
+ * `LOCAL_SEMANTIC_REGISTRY` in `src/lib/local-semantic-model.ts` is the
+ * code-owned authority for which prototype ids mean anything. It maps each id
+ * to a tool AND an argument policy, and `chooseLocalSemanticAssistantPlan`
+ * refuses an id it does not know — correctly, because an index is data and data
+ * does not get to invent an intent.
+ *
+ * The registry currently holds ELEVEN assistant intents. `ASSISTANT_TOOL_CATALOG`
+ * holds twenty-five tools. Fifteen are therefore unreachable locally, and that
+ * shows up as a wrong answer rather than a missing one: ask "how much did I blow
+ * on food last month" and the nearest prototype is
+ * `ask.income.total.current-scope`, because `category-breakdown` has no
+ * prototype to be near. Measured at a margin of 0.004 against the shipped index.
+ *
+ * This file covers all twenty-five, so the fifteen gaps are written down and
+ * ready. `build-assistant-index.mjs` reads the registry and REFUSES to emit an
+ * index containing an id the registry lacks — it names the fifteen. Expanding
+ * the intent set means adding registry entries first, each with a deliberate
+ * argument policy, which is a source change for review rather than something an
+ * asset regeneration can smuggle in.
  *
  * WHAT AN ANCHOR IS FOR
  *
  * Not training data. These are reference points in the embedding space, and a
- * question is routed to whichever it lands nearest. So they should cover the
- * ways a question is actually ASKED, not the ways a tool could be described.
- * "How much did I blow on food" and "what's my grocery spend" are the same
- * intent in different registers, and both need to be here or neither is near.
+ * question routes to whichever it lands nearest. So they cover the ways a
+ * question is actually ASKED, not the ways a tool could be described. "How much
+ * did I blow on food" and "what's my grocery spend" are one intent in two
+ * registers, and both need to be here or neither is near.
  *
  * LANGUAGES
  *
- * Every tool carries English, Arabic, and where it reads naturally, Arabizi —
- * Arabic written in Latin script with digits for letters (3 for ع, 7 for ح),
- * which is how a great many people in the UAE and Saudi actually type. The
- * encoder handles all three in one space, which is the whole reason it is
- * worth 35 MB; a keyword router would need three separate rule sets.
+ * Every group carries English, Arabic, and where it reads naturally, Arabizi —
+ * Arabic in Latin script with digits for letters (3 for ع, 7 for ح), which is
+ * how a great many people in the UAE and Saudi actually type. One embedding
+ * space handles all three, which is the point of the encoder; a keyword router
+ * would need three rule sets kept in step.
  *
- * WHAT THE ROUTER DOES WITH THEM
+ * MEASURED
  *
- * Picks a tool. Nothing else. Every figure the user sees is computed by the
- * deterministic ledger tool the router names, never by the model — which is
- * why an anchor being slightly off costs a clarifying question rather than a
- * wrong number.
+ * Built against the pinned encoder and scored on thirty questions worded
+ * differently from every anchor here: 27/30 top-1. With gates at score 0.80 and
+ * margin 0.02, twenty routed and ten asked for clarification — and all twenty
+ * routed were correct, with all three misses inside the margin gate. ~5 ms per
+ * question on x86 CPU. Note the registry's own thresholds for this domain are
+ * 0.72/0.08, so re-measure against those if these are ever wired in.
  *
- * There is deliberately no anchor for `compare-accounts`. It exists in the
- * `AssistantTool` union but NOT in `ASSISTANT_TOOL_CATALOG`, and the catalog is
- * what `isAssistantToolRequest` validates against — so an anchor for it could
- * only ever route to `unrecognised`. `local-assistant-router.test.js` asserts
- * that every anchor names a catalog tool, in both directions.
- *
- * `id` follows the shipped convention `ask.<subject>.<variant>`, and `tool` is
- * the `AssistantTool` it resolves to. Several ids may share a tool when the
- * default arguments differ.
+ * There is deliberately no group for `compare-accounts`: it is in the
+ * `AssistantTool` union but not in `ASSISTANT_TOOL_CATALOG`, which is what
+ * `isAssistantToolRequest` validates against, so it could only ever be refused.
  */
 
 const anchors = Object.freeze([

@@ -84,6 +84,54 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/known-banks') {
         return require('../build/known-banks.js');
       }
+      // The on-device semantic model is native-only and advisory. Screen and
+      // journey harnesses get the same fail-closed behaviour the web build has:
+      // the deterministic plan is returned unchanged and the runtime is never
+      // ready. Harnesses that exercise the model supply their own module.
+      // The universal extractor is pure and deterministic; harnesses that load
+      // the capture path get the real compiled module, never a stub that could
+      // drift from what ships. Shadow evaluation is observational only and
+      // native-only, so it is inert here unless a harness supplies its own.
+      if (name === '@/lib/universal-parser') {
+        return require('../build/universal-parser.js');
+      }
+      // The semantic wording predicates are pure regexes over the message text
+      // and nothing else. `alert-semantics.ts` asks this module whether a bank
+      // is CHALLENGING a transaction rather than reporting one, and stubbing
+      // that would make a harness disagree with the shipping parser about
+      // whether a fraud-verification prompt posts — so every harness gets the
+      // real compiled module, as with `universal-parser` above.
+      if (name === '@/lib/bank-alert-semantic-rules') {
+        return require('../build/bank-alert-semantic-rules.js');
+      }
+      if (name === '@/lib/universal-template-certification') {
+        return require('../build/universal-template-certification.js');
+      }
+      if (name === '@/lib/local-semantic-shadow') {
+        return {
+          async observeLocalSemanticParserShadow() {},
+          queueLocalSemanticParserShadow() {},
+          async flushLocalSemanticParserShadow() {},
+          buildLocalParserSemanticWindow: () => null,
+          localSemanticShadowSnapshot: () => ({ schemaVersion: 1, observed: 0, modelUnavailable: 0, eligible: 0,
+            canonicalAccepted: 0, learnedAccepted: 0, hybridAccepted: 0, bothAccepted: 0, modelAgreement: 0,
+            deterministicComparable: 0, canonicalDeterministicAgreement: 0, learnedDeterministicAgreement: 0,
+            hybridDeterministicAgreement: 0, byDeterministicFamily: {}, byCanonicalFamily: {}, byLearnedFamily: {},
+            byHybridFamily: {}, queued: 0, queueDropped: 0 }),
+        };
+      }
+      if (name === '@/lib/local-semantic-assistant') {
+        return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
+      }
+      if (name === '@/lib/local-semantic-runtime') {
+        return {
+          localSemanticRuntimeStatus: () => ({ state: 'not-downloaded', modelVersion: 'test', error: null, retryAfter: null,
+            metrics: { downloadMs: 0, prepareMs: 0, sessionMs: 0, encodeCount: 0, encodeTotalMs: 0, encodeMaxMs: 0, failures: 0 } }),
+          getLocalSemanticEncoder: async () => { throw new Error('local-semantic-runtime:native-only'); },
+          createDownloadedSemanticRetriever: async () => { throw new Error('local-semantic-runtime:native-only'); },
+          clearLocalSemanticArtifacts() {},
+        };
+      }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);
     },
     console, setTimeout, clearTimeout,

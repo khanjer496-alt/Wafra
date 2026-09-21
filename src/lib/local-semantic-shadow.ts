@@ -31,6 +31,10 @@ export interface LocalSemanticShadowSnapshot {
   byCanonicalFamily: Record<string, number>;
   byLearnedFamily: Record<string, number>;
   byHybridFamily: Record<string, number>;
+  /** Windows queued off the SMS scan path, still waiting for the encoder. */
+  queued: number;
+  /** Windows dropped because the bounded queue was full. */
+  queueDropped: number;
 }
 
 const state: LocalSemanticShadowSnapshot = {
@@ -51,6 +55,8 @@ const state: LocalSemanticShadowSnapshot = {
   byCanonicalFamily: {},
   byLearnedFamily: {},
   byHybridFamily: {},
+  queued: 0,
+  queueDropped: 0,
 };
 
 const increment = (bucket: Record<string, number>, key: string): void => {
@@ -197,21 +203,91 @@ const hybridPrediction = (embedding: ArrayLike<number>) => {
  * stores only aggregate family counters and agreement counts, never source
  * text, embeddings, amounts, identifiers or timestamps.
  */
+const shadowWindow = (source: string, event: UniversalBankEvent): string | null => {
+  state.observed += 1;
+  if (event.decision !== 'review' || (event.status !== 'posted' && event.status !== 'unknown') ||
+      event.amount.evidence === 'missing') return null;
+  const semanticText = buildLocalParserSemanticWindow(source, event);
+  if (!semanticText) return null;
+  state.eligible += 1;
+  return semanticText;
+};
+
 export async function observeLocalSemanticParserShadow(
   source: string,
   event: UniversalBankEvent,
 ): Promise<void> {
-  state.observed += 1;
-  if (event.decision !== 'review' || (event.status !== 'posted' && event.status !== 'unknown') ||
-      event.amount.evidence === 'missing') return;
-  const semanticText = buildLocalParserSemanticWindow(source, event);
+  const semanticText = shadowWindow(source, event);
   if (!semanticText) return;
-  state.eligible += 1;
   if (localSemanticRuntimeStatus().state !== 'ready') {
     state.modelUnavailable += 1;
     void getLocalSemanticEncoder().catch(() => undefined);
     return;
   }
+  await scoreShadowWindow(semanticText, parserFamily(event.family));
+}
+
+/**
+ * SMS history is scanned in the thousands. The redacted window is built on
+ * the scan path (cheap, deterministic) and scored later, one at a time, so a
+ * history import never waits on the encoder. Only the redacted window and the
+ * deterministic family are held; the bound keeps memory flat on huge inboxes.
+ */
+const SHADOW_QUEUE_LIMIT = 10_000;
+const queue: { window: string; family: LocalParserFamily | null }[] = [];
+let draining = false;
+
+export function queueLocalSemanticParserShadow(source: string, event: UniversalBankEvent): void {
+  const semanticText = shadowWindow(source, event);
+  if (!semanticText) return;
+  if (queue.length >= SHADOW_QUEUE_LIMIT) {
+    state.queueDropped += 1;
+    return;
+  }
+  queue.push({ window: semanticText, family: parserFamily(event.family) });
+  state.queued = queue.length;
+  void drainShadowQueue();
+}
+
+const yieldTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function drainShadowQueue(): Promise<void> {
+  if (draining) return;
+  draining = true;
+  try {
+    while (queue.length > 0) {
+      if (localSemanticRuntimeStatus().state !== 'ready') {
+        try {
+          await getLocalSemanticEncoder();
+        } catch {
+          // Download/verification failed or is backing off: this batch cannot
+          // be scored. Count it and release the memory rather than retrying.
+          state.modelUnavailable += queue.length;
+          queue.length = 0;
+          break;
+        }
+      }
+      const next = queue.shift();
+      if (!next) break;
+      await scoreShadowWindow(next.window, next.family);
+      state.queued = queue.length;
+      await yieldTurn();
+    }
+  } finally {
+    state.queued = queue.length;
+    draining = false;
+  }
+}
+
+/** Test/diagnostic hook: resolves once nothing queued is left to score. */
+export async function flushLocalSemanticParserShadow(): Promise<void> {
+  while (draining || queue.length > 0) await yieldTurn();
+}
+
+async function scoreShadowWindow(
+  semanticText: string,
+  deterministic: LocalParserFamily | null,
+): Promise<void> {
   try {
     const encoder = await getLocalSemanticEncoder();
     const prediction = hybridPrediction(await encoder.encode(semanticText));
@@ -243,7 +319,6 @@ export async function observeLocalSemanticParserShadow(
       state.bothAccepted += 1;
       if (canonicalAccepted === learnedAccepted) state.modelAgreement += 1;
     }
-    const deterministic = parserFamily(event.family);
     if (deterministic) {
       state.deterministicComparable += 1;
       increment(state.byDeterministicFamily, deterministic);
