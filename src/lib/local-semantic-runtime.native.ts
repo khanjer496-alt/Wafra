@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
-import { InferenceSession, Tensor } from 'onnxruntime-react-native';
+import type { InferenceSession as InferenceSessionType, Tensor as TensorType } from 'onnxruntime-react-native';
 import { Tokenizer } from '@huggingface/tokenizers';
 
 import {
@@ -134,7 +134,7 @@ let status: Omit<LocalSemanticRuntimeStatus, 'metrics'> = {
   state: 'not-downloaded', modelVersion: MODEL_VERSION, error: null, retryAfter: null,
 };
 let encoderPromise: Promise<LocalOnnxInt8TextEncoder> | null = null;
-let session: InferenceSession | null = null;
+let session: InferenceSessionType | null = null;
 
 /**
  * A failed download/verification/session must not be retried by every scanned
@@ -146,12 +146,30 @@ const retryDelay = (failures: number): number =>
 
 export const localSemanticRuntimeStatus = (): LocalSemanticRuntimeStatus => ({ ...status, metrics: { ...metrics } });
 
-const int64Tensor = (values: readonly number[], sequenceLength: number): Tensor =>
-  new Tensor('int64', values.map((value) => BigInt(value)), [1, sequenceLength]);
+/**
+ * `onnxruntime-react-native` calls `install()` on its native module the moment
+ * its JavaScript is evaluated. Importing it at the top of this file would make
+ * a missing or mis-linked native runtime a launch crash for every user. It is
+ * loaded here instead, inside the encoder's failure boundary, so a broken
+ * runtime becomes `state: 'failed'` in diagnostics and nothing else.
+ */
+type OnnxModule = typeof import('onnxruntime-react-native');
+let onnxModule: OnnxModule | null = null;
+const loadOnnx = async (): Promise<OnnxModule> => {
+  onnxModule ??= await import('onnxruntime-react-native');
+  return onnxModule;
+};
+
+const int64Tensor = (
+  Tensor: OnnxModule['Tensor'],
+  values: readonly number[],
+  sequenceLength: number,
+): TensorType => new Tensor('int64', values.map((value) => BigInt(value)), [1, sequenceLength]);
 
 async function createEncoder(): Promise<LocalOnnxInt8TextEncoder> {
   status = { state: 'downloading', modelVersion: MODEL_VERSION, error: null, retryAfter: null };
   try {
+    const { InferenceSession, Tensor } = await loadOnnx();
     const prepareStartedAt = Date.now();
     const [modelFile, tokenizerFile, tokenizerConfigFile] = await Promise.all(
       ARTIFACTS.map((artifact) => ensureArtifact(artifact)),
@@ -179,9 +197,9 @@ async function createEncoder(): Promise<LocalOnnxInt8TextEncoder> {
         const attention = encoded.attention_mask.slice(0, ids.length);
         const types = (encoded.token_type_ids ?? new Array(ids.length).fill(0)).slice(0, ids.length);
         const outputs = await created.run({
-          input_ids: int64Tensor(ids, ids.length),
-          attention_mask: int64Tensor(attention, ids.length),
-          token_type_ids: int64Tensor(types, ids.length),
+          input_ids: int64Tensor(Tensor, ids, ids.length),
+          attention_mask: int64Tensor(Tensor, attention, ids.length),
+          token_type_ids: int64Tensor(Tensor, types, ids.length),
         });
         const hidden = outputs.last_hidden_state;
         if (!hidden || hidden.type !== 'float32' || hidden.dims.length !== 3 ||
