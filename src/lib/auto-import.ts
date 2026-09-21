@@ -1302,9 +1302,6 @@ export async function scanInbox(
         const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket, n.ts)
           : parseLaunchAlert(source, sender, worldwide, undefined, n.ts);
-        const universalEvent = !launchParsed && autoAuthorized
-          ? inspectGenericBankEventForReview(source, sender)
-          : null;
         const routedMarket = trustedMarket ??
           (worldwide?.route.decision === 'single' ? worldwide.route.market : null);
         const globalMarket = routedMarket && routedMarket !== 'AE' && routedMarket !== 'SA'
