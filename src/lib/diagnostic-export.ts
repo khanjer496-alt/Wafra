@@ -7,8 +7,12 @@ import { getMonthStartDay, monthKey } from '@/lib/format';
 import { getGrowthFunnelDiagnostics } from '@/lib/growth-funnel-diagnostics';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { getLaunchMetrics } from '@/lib/launch-performance';
+import { LOCAL_SEMANTIC_MODEL_PROVENANCE } from '@/lib/local-semantic-model';
+import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
+import { localSemanticShadowSnapshot } from '@/lib/local-semantic-shadow';
 import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
+import { getStabilityDiagnostics } from '@/lib/stability-diagnostics';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
 
@@ -185,6 +189,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       growthFunnel,
       stability,
       localSemantic: {
+        modelProvenance: LOCAL_SEMANTIC_MODEL_PROVENANCE,
         runtime: localSemanticRuntimeStatus(),
         shadow: localSemanticShadowSnapshot(),
       },

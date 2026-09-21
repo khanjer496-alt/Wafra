@@ -79,7 +79,9 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture \
-         wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences; do
+         wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
+         local-semantic-model local-semantic-runtime local-semantic-shadow \
+         universal-template-certification growth-funnel-diagnostics stability-diagnostics; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -96,8 +98,12 @@ done
 # so the rename costs nothing here and the guard below stops the next collision
 # from being discovered the same way.
 [ -f ../../src/lib/feedback.ts ] && rewrite ../../src/lib/feedback.ts build/app-feedback.ts
+# Copied through rewrite() rather than cp: a stub that stands in for an app
+# module may need the app's own types, and it must spell that import the way
+# the app does (`@/lib/...`) so the repository typecheck can resolve it too.
+# rewrite() is a no-op on every stub that imports nothing.
 for f in stubs/*.ts; do
-  cp "$f" "build/$(basename "$f")"
+  rewrite "$f" "build/$(basename "$f")"
 done
 # The app's own native module wrappers, compiled for real against a
 # requireOptionalNativeModule that returns null — which is what they do on iOS
