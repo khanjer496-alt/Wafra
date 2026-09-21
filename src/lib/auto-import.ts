@@ -50,7 +50,7 @@ import { certifyUniversalTemplate } from '@/lib/universal-template-certification
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
-import { observeLocalSemanticParserShadow } from '@/lib/local-semantic-shadow';
+import { observeLocalSemanticParserShadow, queueLocalSemanticParserShadow } from '@/lib/local-semantic-shadow';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -1068,6 +1068,15 @@ export async function scanInbox(
       const p = launchSenderMarket
         ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
         : null;
+      // Local-AI shadow evaluation over SMS history: the deterministic
+      // universal fact is built only for money-bearing bodies and its redacted
+      // window is queued for later scoring, so the scan never waits on the
+      // encoder. It can never replace `p`, review, money, status or direction.
+      // The parser-version repair pass at startup is excluded on purpose.
+      if (!options.historyRepair && (p || hasBankAlertMoneyHint(sms.body))) {
+        const shadowInspection = inspectGenericBankEventForReview(sms.body, sms.address);
+        if (shadowInspection) queueLocalSemanticParserShadow(sms.body, shadowInspection);
+      }
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
