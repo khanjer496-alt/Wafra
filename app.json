@@ -192,7 +192,8 @@
             ]
           }
         }
-      ]
+      ],
+      "./plugins/onnxruntime-gradle9-compat"
     ],
     "experiments": {
       "typedRoutes": true,
