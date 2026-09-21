@@ -1,0 +1,33 @@
+name: Temporary Companion bridge release cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/companion-ios-cleanup-releases.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  delete-temporary-bridge-releases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete temporary Companion bridge releases and tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='khanjer496-alt/Wafra'
+          mapfile -t tags < <(gh release list --repo "$repo" --limit 100 --json tagName --jq '.[] | select(.tagName | startswith("companion-ios-bridge-")) | .tagName')
+          printf 'Found %s temporary bridge release(s)\n' "${#tags[@]}"
+          for tag in "${tags[@]}"; do
+            echo "Deleting $tag"
+            gh release delete "$tag" --repo "$repo" --cleanup-tag --yes
+          done
+          remaining_releases=$(gh release list --repo "$repo" --limit 100 --json tagName --jq '[.[] | select(.tagName | startswith("companion-ios-bridge-"))] | length')
+          remaining_tags=$(gh api "repos/$repo/git/matching-refs/tags/companion-ios-bridge-" --jq 'length')
+          test "$remaining_releases" = '0'
+          test "$remaining_tags" = '0'
+          echo 'Temporary Companion bridge releases and tags removed.'
