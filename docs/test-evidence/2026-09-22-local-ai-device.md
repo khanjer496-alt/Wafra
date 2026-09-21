@@ -51,6 +51,19 @@ that follow this build (tester-triggered inbox pass; `unrecognized` Help).
 - Arabic and mixed-language questions: not yet exercised on device (adb cannot
   type non-ASCII; to be done by the owner on the next build).
 
+## Build 333 (commit d327ee7a, run 35654399147) — inbox shadow pass
+
+- Installed in place; launched cleanly. "Send test diagnostics" started the
+  bounded inbox pass (owner's inbox: about 30,000 SMS).
+- The unthrottled drain held the JS thread at 106–117% CPU for roughly nine
+  minutes with the process stable (pid unchanged, PSS 345–415 MB) and finished
+  on its own; CPU returned to 0% and PSS to about 275 MB. The owner reported
+  the app as laggy during that window, which is what the 40 ms drain gap in
+  the following commit addresses. An Ask question typed during the drain was
+  answered, but slowly.
+- Counters and encode timings from this pass are read from the next
+  diagnostics export (pending at the time of writing).
+
 ## Not yet measured
 
 - Encode latency and shadow agreement over the inbox (needs the next build).
