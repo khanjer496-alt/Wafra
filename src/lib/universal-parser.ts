@@ -3,7 +3,11 @@ import { inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isApplicationPurchaseOffer, isExpectedFutureMoneyNotice } from '@/lib/bank-alert-semantic-rules';
+import {
+  isApplicationPurchaseOffer,
+  isExpectedFutureMoneyNotice,
+  isTransactionVerificationChallenge,
+} from '@/lib/bank-alert-semantic-rules';
 
 const emptyEvent = (issue: string): UniversalBankEvent => ({
     version: 1, decision: 'ignore', family: 'unknown', status: 'unknown', direction: 'unknown',
@@ -145,7 +149,7 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
   if (/^\s*(?:(?:tu|su)\s+)?estado\s+de\s+cuenta\b/iu.test(text)) {
     return { status: 'informational', family: 'statement' };
   }
-  const declined = [
+const declined = [
     /(?:^|[.!?;])\s*(?:your\s+)?(?:card\s+)?(?:payment|transaction|purchase)\s+(?:(?:was|is|has\s+been)\s+)?(?:declined|failed|rejected|not\s+approved)(?=\s*(?:[.!?;]|$))/iu,
     /\b(?:kartenzahlung|zahlung)\b[^!?]{0,180}\babgelehnt(?=\s*(?:[.!?]|$))/iu,
     /\b(?:betaling|kaartbetaling)\b[^!?]{0,180}\bgeweigerd(?=\s*(?:op\b|[.!?]|$))/iu,
@@ -259,6 +263,22 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   ));
   if (challenge || pending) status = 'informational';
   if (explicitlyUnsuccessful) status = 'failed';
+  // A bank ASKING whether you made a payment has not told you that you did.
+  //
+  // "Did you attempt a USD 1,299.00 purchase at TECH OUTLET? Reply YES or NO."
+  // read as a posted purchase, because `controlText` is the clause around the
+  // amount and the disclaimer that follows it ("We have not processed it")
+  // lives in a later sentence. Widening that scope would let a disclaimer
+  // about one transaction suppress a genuine second one in the same message,
+  // so the question itself is the evidence instead.
+  //
+  // Status becomes `unknown` rather than `informational` on purpose. Some
+  // banks do challenge a charge that HAS posted, and `informational` would
+  // route the row to `ignore` and hide it. `unknown` keeps it reviewable while
+  // making it unpostable, which is the safe half of both readings.
+  if (!challenge && isTransactionVerificationChallenge(wholeContext) && status === 'posted') {
+    status = 'unknown';
+  }
   if (sourceControl) {
     status = sourceControl.status;
     if (sourceControl.family) family = sourceControl.family;

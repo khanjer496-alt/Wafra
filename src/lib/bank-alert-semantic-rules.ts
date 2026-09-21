@@ -125,3 +125,26 @@ export const automaticMeaning = (
   if (debit && CARD_PURCHASE_LANGUAGE.test(semanticText)) return 'card-purchase';
   return null;
 };
+
+/**
+ * A bank asking the customer to confirm a transaction, rather than telling
+ * them one happened.
+ *
+ * Deliberately NOT included: "if this was not you, call us". Genuine posted
+ * debit alerts carry that line constantly, so matching it would suppress real
+ * spending. What distinguishes a challenge is that the bank is asking a
+ * question it expects an answer to — an interrogative about whether the
+ * customer made the payment, or an explicit instruction to reply yes/no.
+ */
+const VERIFICATION_CHALLENGE =
+  /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b|\bwas\s+(?:this|that)\s+(?:transaction\s+)?you\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
+
+  /**
+ * True when the bank is ASKING whether the customer made a transaction.
+ *
+ * Both the market-pack path (`alert-semantics.ts`) and the market-agnostic one
+ * (`universal-parser.ts`) need this and neither may import the other, so it
+ * lives here.
+ */
+export const isTransactionVerificationChallenge = (source: string): boolean =>
+  VERIFICATION_CHALLENGE.test(source);

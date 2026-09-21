@@ -17,6 +17,7 @@ const build = path.resolve(
 const { parseSms } = require(path.join(build, 'sms-parser'));
 const { withMarketPackForParsing } = require(path.join(build, 'markets'));
 const { inspectMarketAlert } = require(path.join(build, 'alert-semantics'));
+const { inspectGenericBankEventForReview } = require(path.join(build, 'launch-alert-parser'));
 
 export const name = 'rules';
 export const description = 'src/lib/sms-parser.ts + alert-semantics.ts as shipped';
@@ -42,5 +43,30 @@ export const reviewAlert = (message, market, { sender } = {}) => {
     currency: candidate?.currency ?? null,
     minorUnits: candidate?.minorUnits ?? null,
     institution: review.institution?.institution ?? null,
+  };
+};
+
+/**
+ * The seam for a market Wafra has no pack for.
+ *
+ * `inspectMarketAlert` needs a market pack and throws without one, so it is
+ * the wrong thing to ask about Brazil. `auto-import.ts` reaches for
+ * `inspectGenericBankEventForReview` in exactly that case, and a `null` from
+ * it is a deliberate refusal — the message never established bank context —
+ * not a failure to parse. The qualification harness has to see that
+ * difference, because refusing is the safe answer and crashing is not.
+ */
+export const reviewUnknownMarket = (message, { sender } = {}) => {
+  const event = inspectGenericBankEventForReview(message, sender ?? '');
+  if (!event) return null;
+  const money = event.amount?.value ?? null;
+  return {
+    decision: event.decision,
+    status: event.status,
+    family: event.family,
+    direction: event.direction,
+    currency: money?.currency ?? null,
+    minorUnits: money?.minorUnits ?? null,
+    institution: null,
   };
 };
