@@ -19,8 +19,9 @@ import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
+import { improveAssistantRequestLocally } from '@/lib/local-semantic-assistant';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { periodLabel, periodRange } from '@/lib/period';
+import { currentMonthPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
@@ -260,7 +261,7 @@ export default function AssistantScreen() {
         return;
       }
       const previous = usePrevious && renderIsCurrent ? contextRequest ?? conversationContext : null;
-      const result = Platform.OS === 'android'
+      let result = Platform.OS === 'android'
         ? await runWafraAssistantCooperatively(
             snapshot,
             clean,
@@ -271,6 +272,19 @@ export default function AssistantScreen() {
           )
         : runWafraAssistant(snapshot, clean, now, previous, period);
       if (result === null) return;
+      if (result.request.tool === 'help' && !previous) {
+        const improved = await improveAssistantRequestLocally({
+          question: clean,
+          deterministicRequest: result.request,
+          previousRequest: previous,
+          defaultPeriod: period,
+          currentPeriod: currentMonthPeriod(now),
+          cancelled: () => startGeneration !== getStateGeneration(),
+        });
+        if (improved !== result.request && improved.tool !== 'help') {
+          result = { request: improved, answer: executeAssistantTool(snapshot, improved, now) };
+        }
+      }
       appendAnswer(clean, result, snapshot, now);
     } catch {
       // Restore the draft when submission fails; financial records never enter logs.

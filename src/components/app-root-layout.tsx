@@ -28,6 +28,7 @@ import '@/lib/background-relay';
 import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { getLocalSemanticEncoder } from '@/lib/local-semantic-runtime';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
@@ -108,6 +109,14 @@ export default function RootLayout() {
   const ready = Platform.OS === 'web' || fontsLoaded || !!fontError;
 
   useEffect(() => startRuntimePerformanceMonitor(), []);
+
+  // Warm the optional on-device semantic model in parallel with normal app
+  // startup. The native runtime downloads/hash-verifies the pinned ~35.5 MiB
+  // artifact once; web resolves to a fail-closed stub. Nothing in launch waits
+  // for this and parser authority remains deterministic while it is unavailable.
+  useEffect(() => {
+    if (Platform.OS !== 'web') void getLocalSemanticEncoder().catch(() => undefined);
+  }, []);
 
   // Ask the OS about Reduce Motion and the screen reader once, here, while
   // the fonts are still loading. Both answers are app-wide and asynchronous,
