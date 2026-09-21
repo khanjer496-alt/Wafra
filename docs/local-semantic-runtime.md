@@ -6,9 +6,11 @@ used for two narrow jobs:
 
 1. **Parser shadow mode.** For every universally inspected bank alert, the
    deterministic parser's redacted semantic window is embedded and compared
-   with the parser's own family. Only aggregate counters are kept
-   (`localSemanticShadowSnapshot`). The model never changes an amount,
-   currency, status, direction, dedupe key, or import decision.
+   with the parser's own family. Bank-app notifications are scored inline;
+   SMS history windows are queued (bounded at 10,000) and scored one at a time
+   off the scan path, so an import never waits on the encoder. Only aggregate
+   counters are kept (`localSemanticShadowSnapshot`). The model never changes
+   an amount, currency, status, direction, dedupe key, or import decision.
 2. **Ask Wafra intent fallback.** When the deterministic planner produces plain
    Help for a fresh question (no conversation context), the encoder ranks the
    question against app-owned intent prototypes and may pick one closed tool
@@ -44,8 +46,13 @@ directory (`local-ai/<model-version>/`):
 | `tokenizer_config.json` | 1,206 | `606031684b9a…957b2` |
 
 A size or hash mismatch deletes the file and fails closed
-(`artifact-verification-failed`). `EXPO_PUBLIC_WAFRA_LOCAL_AI_BASE_URL` may
-point dev builds at a mirror; hashes never change.
+(`artifact-verification-failed`). After one full hash match a `<name>.verified`
+marker lets later launches trust exact size plus marker instead of re-reading
+the encoder. Failures back off 1 min → 5 min → 30 min → 2 h; the status
+carries `retryAfter` and source-free `metrics` (download, prepare, session
+create, encode count/total/max, failures) that the diagnostics export reports.
+`EXPO_PUBLIC_WAFRA_LOCAL_AI_BASE_URL` may point dev builds at a mirror; hashes
+never change.
 
 ## Authority boundaries
 
