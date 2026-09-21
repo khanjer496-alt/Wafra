@@ -21,6 +21,13 @@ module.exports = defineConfig([
       "android/*",
       "ios/*",
       "server/*",
+      // scripts/midscene/ is the same case as server/: its own package.json
+      // and its own node_modules, which `npm ci` at the root does not install.
+      // `eslint .` walks the filesystem, so it lints those files anyway and
+      // import/no-unresolved cannot find @playwright/test or @midscene/web —
+      // three errors in CI and none locally, where the sub-install exists.
+      // The suite is typechecked by its own tsconfig; see scripts/midscene/.
+      "scripts/midscene/**",
       ".claude/worktrees/**",
       ".superpowers/**",
     ],
