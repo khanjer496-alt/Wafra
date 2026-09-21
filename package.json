@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json",
     "test": "bash scripts/test/run.sh",
     "test:e2e": "bash scripts/e2e/run.sh",
+    "test:ai": "bash scripts/midscene/run.sh",
     "check:store": "node scripts/check-store-metadata.mjs",
     "check:store-assets": "node scripts/check-store-assets.mjs",
     "check:store-pricing": "node scripts/check-store-pricing.mjs",
