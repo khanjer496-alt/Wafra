@@ -209,7 +209,7 @@ test('the scanner reads only with native availability and granted notification a
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
   const run = async () => { const result = await scanner.scanInbox(0, {}, undefined, null); await result.commit(); };
@@ -243,7 +243,7 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
   const result = await scanner.scanInbox(0, {}, undefined, null, { notificationOnly: true });
@@ -318,7 +318,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
     }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},

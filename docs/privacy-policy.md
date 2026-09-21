@@ -185,6 +185,17 @@ store biometric templates.
   both name searches and image requests. Logo caches are removed by Erase all
   data; image bitmap caching remains managed by the platform image library.
 
+- **On-device language model:** Wafra can download a small multilingual text
+  encoder (about 35 MB, plus its tokenizer) once from Wafra's own GitHub release
+  so that bank-alert families and Ask Wafra questions can be understood on the
+  device. The request carries no bank message, transaction, account/card
+  identifier or question; GitHub receives only the ordinary download request
+  and the device's network address. Every file is checked against a fixed
+  size and SHA-256 hash and is discarded on mismatch. All inference then runs
+  locally: message text, amounts and questions never leave the phone for this
+  feature, and the model never decides an amount, currency or whether a
+  transaction is imported.
+
 - **Purchases and paywalls:** when store billing is configured, Apple or Google
   processes payment and Superwall provides paywall/onboarding presentation,
   subscription entitlement state and related product-flow analytics. Wafra may

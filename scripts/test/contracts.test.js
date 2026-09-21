@@ -2324,6 +2324,10 @@ ok('the spoken label agrees with the sign on screen',
   const reviewDraftModules = new Set([
     'unparsed-launch-alert.ts', 'parser-research.ts', 'universal-dates.ts',
     'universal-fields.ts', 'universal-money.ts', 'universal-types.ts',
+    // The on-device semantic layer sees deterministic spans only to replace
+    // them with typed placeholders before anything is embedded; it is a
+    // redactor, and its own contract below keeps it away from ledger writers.
+    'local-semantic-model.ts',
   ]);
   ok('drafts reach only the reviewed extraction modules and isolated research redactor',
     alertConsumers.length === reviewDraftModules.size &&
@@ -2350,10 +2354,15 @@ ok('the spoken label agrees with the sign on screen',
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
-  const globalExtractor = read('src/lib/universal-parser.ts');
+  // The universal extractor reads market packs to inspect alerts; template
+  // certification reads them only to refuse a market-inconsistent currency.
+  // Neither may write the ledger or reach the network.
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts']);
+  const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
-    marketReviewConsumers.length === 1 && marketReviewConsumers[0].endsWith(`${path.sep}universal-parser.ts`) &&
-    !/(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(globalExtractor) &&
+    marketReviewConsumers.length === marketReviewModules.size &&
+    marketReviewConsumers.every((file) => marketReviewModules.has(path.basename(file)) &&
+      !directWriterOrTransport.test(fs.readFileSync(file, 'utf8'))) &&
     /decision: 'review' \| 'ignore'/.test(read('src/lib/universal-types.ts')),
     marketReviewConsumers.join(' | '));
 }

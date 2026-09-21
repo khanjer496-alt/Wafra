@@ -32,7 +32,7 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
     '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => null,
       parse: body => {
         parsed++;
