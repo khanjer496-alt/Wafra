@@ -21,6 +21,8 @@ import {
   type TesterDiagnosticWirePayload,
 } from '@/lib/feedback-transport';
 import { getLaunchMetrics } from '@/lib/launch-performance';
+import { runLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
+import { localSemanticShadowSnapshot } from '@/lib/local-semantic-shadow';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { getBankLogoCacheDiagnostics } from '@/lib/bank-logo-resolver';
 import { getMerchantLogoCacheDiagnostics } from '@/lib/merchant-logo-resolver';
@@ -309,6 +311,13 @@ export async function buildAndroidTesterDiagnostic(
 
   if (!state.privateMode && !state.captureOptOut && readSmsGranted &&
     state.historyImport?.status !== 'running' && smsReader?.getInboxSms) {
+    // Tester-triggered parser shadow pass over the readable inbox. It runs in
+    // the background after this report, queues only redacted windows, and can
+    // never reach the ledger; its counters surface in the diagnostics export.
+    void runLocalSemanticInboxShadow(
+      (beforeDate, beforeId, max) => smsReader.getInboxSms(0, beforeDate, beforeId, max),
+      { queueDropped: () => localSemanticShadowSnapshot().queueDropped },
+    ).catch(() => undefined);
     try {
       const collected = await collectDiagnosticBankMessages(
         (beforeDate, beforeId, max) => smsReader.getInboxSms(0, beforeDate, beforeId, max),

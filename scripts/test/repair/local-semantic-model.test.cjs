@@ -244,6 +244,17 @@ test('Ask Wafra uses semantic fallback only for exact plain help on a fresh turn
   assert.equal(contextual.source, 'deterministic');
   assert.equal(contextual.fallbackReason, 'conversation-context-present');
   assert.deepEqual(calls, [arabic], 'contextual questions stay with the deterministic resolver');
+
+  const before = calls.length;
+  const unrecognized = await semantic.chooseLocalSemanticAssistantPlan({
+    question: arabic,
+    deterministicRequest: { tool: 'help', clarification: 'I didn’t quite understand that.', unrecognized: true },
+    defaultPeriod: { mode: 'month', key: '2026-08' },
+    currentPeriod: { mode: 'month', key: '2026-09' },
+    retriever,
+  });
+  assert.equal(unrecognized.source, 'local-semantic', 'a nothing-recognised Help is the fallback\'s whole purpose');
+  assert.equal(calls.length, before + 1);
 });
 
 test('candidate gates reject hidden fields and ambiguous similarity margins', async () => {

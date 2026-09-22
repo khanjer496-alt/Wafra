@@ -81,7 +81,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
-         local-semantic-model local-semantic-runtime local-semantic-shadow growth-funnel-diagnostics stability-diagnostics; do
+         local-semantic-model local-semantic-runtime local-semantic-shadow local-semantic-inbox-shadow growth-funnel-diagnostics stability-diagnostics; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
