@@ -1,0 +1,12 @@
+# Accepts the "Add Shortcut" sheet that Shortcuts shows for a signed file,
+# whichever route delivered the file (import URL or Safari download).
+appId: com.apple.shortcuts
+---
+- takeScreenshot: ${OUT}/shortcut-install-0
+- tapOn:
+    text: "Add Shortcut"
+    optional: true
+- tapOn:
+    text: "Add Untrusted Shortcut"
+    optional: true
+- takeScreenshot: ${OUT}/shortcut-install-1

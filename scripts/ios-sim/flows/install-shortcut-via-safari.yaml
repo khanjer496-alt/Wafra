@@ -1,0 +1,25 @@
+# Fallback: the same route a person uses on a phone. Safari downloads the
+# signed file, the download is opened, and Shortcuts offers "Add Shortcut".
+appId: com.apple.mobilesafari
+---
+- openLink: ${SHORTCUT_HTTP_URL}
+- takeScreenshot: ${OUT}/safari-download-0
+- tapOn:
+    text: "Download"
+    optional: true
+- takeScreenshot: ${OUT}/safari-download-1
+- tapOn:
+    text: "View"
+    optional: true
+- tapOn:
+    id: "Downloads"
+    optional: true
+- takeScreenshot: ${OUT}/safari-download-2
+- tapOn:
+    text: ".*\\.shortcut"
+    optional: true
+- takeScreenshot: ${OUT}/safari-download-3
+- tapOn:
+    text: "Add Shortcut"
+    optional: true
+- takeScreenshot: ${OUT}/safari-download-4

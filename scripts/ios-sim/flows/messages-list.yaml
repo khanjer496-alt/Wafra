@@ -1,0 +1,17 @@
+# Opens the simulator's Messages app and records what the seeded store shows.
+appId: com.apple.MobileSMS
+---
+- launchApp:
+    appId: com.apple.MobileSMS
+    stopApp: true
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    text: "OK"
+    optional: true
+- takeScreenshot: ${OUT}/messages-list
+- tapOn:
+    text: "ADCB"
+    optional: true
+- takeScreenshot: ${OUT}/messages-adcb

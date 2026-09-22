@@ -1,0 +1,55 @@
+# Drives the History shortcut's own prompts and Apple's permission sheets.
+# The first alert carries a Cancel button; only affirmative buttons are ever
+# tapped, and each is tapped only when it is on screen (a `when` check does
+# not wait for the element, so an idle round costs seconds, not a lookup
+# timeout per button). Repeats until the round budget is spent, taking a
+# screenshot each round so a stalled run shows exactly where it stopped.
+appId: com.apple.shortcuts
+---
+- openLink: shortcuts://run-shortcut?name=${SHORTCUT_NAME}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- repeat:
+    times: ${ROUNDS}
+    commands:
+      - runFlow:
+          when:
+            visible: "Always Allow"
+          commands:
+            - tapOn: "Always Allow"
+      - runFlow:
+          when:
+            visible: "Allow Once"
+          commands:
+            - tapOn: "Allow Once"
+      - runFlow:
+          when:
+            visible:
+              text: "Allow"
+          commands:
+            - tapOn:
+                text: "Allow"
+      - runFlow:
+          when:
+            visible:
+              text: "OK"
+          commands:
+            - tapOn:
+                text: "OK"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "Done"
+          commands:
+            - tapOn: "Done"
+      - evalScript: ${output.round = (output.round || 0) + 1}
+      - takeScreenshot: ${OUT}/run-${output.round}
+      # Maestro has no sleep; a bounded busy-wait keeps the round cadence.
+      - evalScript: ${(function () { var t = Date.now(); while (Date.now() - t < 5000) {} })()}

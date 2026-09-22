@@ -1,0 +1,33 @@
+# Fallback seeding through the Messages UI. The simulator runtime ships two
+# stub conversations; a message sent in one arrives in the other as an
+# incoming message, which is the only way the simulator's Messages has ever
+# been seen to hold a received message when direct store writes are ignored.
+# One flow run sends one body; the workflow loops over the seed rows.
+appId: com.apple.MobileSMS
+---
+- launchApp:
+    appId: com.apple.MobileSMS
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- tapOn:
+    text: ${THREAD}
+    optional: true
+- tapOn:
+    id: "Message"
+    optional: true
+- tapOn:
+    text: "Message"
+    optional: true
+- inputText: ${BODY}
+- tapOn:
+    id: "Send"
+    optional: true
+- tapOn:
+    text: "Send"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- back
