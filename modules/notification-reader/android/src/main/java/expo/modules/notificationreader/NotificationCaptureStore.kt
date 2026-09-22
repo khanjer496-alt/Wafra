@@ -43,6 +43,31 @@ object NotificationCaptureStore {
   private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
   private const val VERSION = 1
 
+  /**
+   * A BANK APP RE-POSTING ONE ALERT IS NOT A SECOND CHARGE.
+   *
+   * Identity here used to be (package, post time) alone, and every other layer
+   * trusted it: the JS capture key for a notification is `s{postTime}-{amount}`
+   * and the ledger's cross-channel test only pairs a push with an SMS, never a
+   * push with a push. So when an issuer re-posted the same notification with a
+   * fresh postTime — FCM redelivering after a doze window, a background sync,
+   * or the app updating its own shade entry — nothing downstream could see the
+   * two copies as one event, and the charge was counted twice. ADCB is
+   * notification-only for some users, which makes this every alert they get.
+   *
+   * The content is therefore the identity. Two notifications from one package
+   * carrying byte-identical title and text within this window are one posting.
+   *
+   * THE WINDOW IS THE WHOLE SAFETY ARGUMENT and must stay short. Two genuinely
+   * identical charges — the same amount at the same merchant, worded the same
+   * way down to the balance — are a real thing, and beyond this window they
+   * must both survive. Thirty minutes covers redelivery and sync retries while
+   * leaving a repeat purchase later in the day untouched.
+   */
+  private const val REPOST_WINDOW_MS = 30L * 60 * 1000
+  private const val RECENT_CONTENT = "recent_content"
+  private const val MAX_RECENT_CONTENT = 200
+
   @Synchronized
   fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
     // Recheck while holding the queue lock: an opt-out racing a callback must
@@ -64,7 +89,17 @@ object NotificationCaptureStore {
       val repaired = current.toMutableList()
       repaired[samePostedNotification] = prior.copy(title = title, text = text)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
+      recordRecentContent(prefs, contentFingerprint(pkg, title, text), ts)
       return "repaired"
+    }
+    // The re-post guard, which has to outlive the queue row itself: by the time
+    // an issuer redelivers, the first copy is normally drained and acknowledged
+    // and `current` is empty, so comparing against the queue alone would see
+    // nothing. Recent content receipts are the only record left of it.
+    val fingerprint = contentFingerprint(pkg, title, text)
+    val recent = recentContent(prefs)
+    if (recent.any { it.first == fingerprint && kotlin.math.abs(it.second - ts) <= REPOST_WINDOW_MS }) {
+      return "repost"
     }
     val next = (current + CapturedBankNotification(
       id = UUID.randomUUID().toString(),
@@ -74,6 +109,7 @@ object NotificationCaptureStore {
       ts = ts,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
+    recordRecentContent(prefs, fingerprint, ts)
     return "appended"
   }
 
@@ -161,6 +197,7 @@ object NotificationCaptureStore {
     val ok = prefs.edit()
       .remove(QUEUE)
       .remove(ACKED)
+      .remove(RECENT_CONTENT)
       .putLong(CLEARED_THROUGH, clearedThrough)
       .commit()
     if (!ok) throw IllegalStateException("Notification queue could not be cleared")
@@ -238,6 +275,116 @@ object NotificationCaptureStore {
     val digest = MessageDigest.getInstance("SHA-256")
       .digest("$pkg\u0000$ts".toByteArray(Charsets.UTF_8))
     return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
+  }
+
+  /**
+   * The identity of what the issuer actually SHOWED, independent of when.
+   *
+   * Only the digest is ever retained, and it is retained encrypted like every
+   * other value in this store — the class invariant is that SharedPreferences
+   * holds opaque ids, IVs and ciphertext, and a bare hash of a bank alert
+   * would weaken it, since an attacker holding the file could confirm a
+   * guessed body by hashing it.
+   */
+  private fun contentFingerprint(pkg: String, title: String, text: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+      .digest("$pkg\u0000$title\u0000$text".toByteArray(Charsets.UTF_8))
+    return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
+  }
+
+  /**
+   * Recent content receipts as (fingerprint, post time), already windowed.
+   *
+   * Every failure here returns an EMPTY list, which degrades to the old
+   * behaviour of letting the posting through. A KeyStore that will not open,
+   * ciphertext that will not authenticate and malformed JSON all mean the
+   * guard is missing — none of them is evidence that a charge is a duplicate,
+   * and refusing money on a storage error is the one outcome worse than a
+   * duplicate row.
+   */
+  private fun recentContent(prefs: android.content.SharedPreferences): List<Pair<String, Long>> {
+    val stored = prefs.getString(RECENT_CONTENT, null) ?: return emptyList()
+    val cutoff = System.currentTimeMillis() - REPOST_WINDOW_MS
+    return try {
+      val plaintext = decryptPayload(stored)
+      if (plaintext == null) {
+        // Unreadable receipts occupy the slot forever otherwise; the next
+        // append rewrites them from scratch.
+        prefs.edit().remove(RECENT_CONTENT).commit()
+        return emptyList()
+      }
+      val array = JSONArray(plaintext)
+      buildList {
+        for (index in 0 until array.length()) {
+          val value = array.optJSONObject(index) ?: continue
+          val fingerprint = value.optString("f")
+          val ts = value.optLong("t", 0L)
+          if (fingerprint.isNotBlank() && ts >= cutoff) add(fingerprint to ts)
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  /**
+   * Remember that this content was accepted, so a later redelivery can be
+   * recognised once the queue row itself is drained.
+   *
+   * The caller has ALREADY committed the queue row, so this must never throw:
+   * a receipt that fails to persist costs the next re-post guard, while an
+   * exception escaping here would abort the listener's wake-up and strand a
+   * charge that is already stored.
+   */
+  private fun recordRecentContent(
+    prefs: android.content.SharedPreferences,
+    fingerprint: String,
+    ts: Long,
+  ) {
+    try {
+      val retained = (recentContent(prefs) + (fingerprint to ts))
+        .distinct().takeLast(MAX_RECENT_CONTENT)
+      val array = JSONArray()
+      retained.forEach { array.put(JSONObject().put("f", it.first).put("t", it.second)) }
+      prefs.edit().putString(RECENT_CONTENT, encryptPayload(array.toString())).commit()
+    } catch (_: Exception) {
+      // Guard lost, charge kept.
+    }
+  }
+
+  private fun encryptPayload(plaintext: String): String {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, key())
+    return JSONObject()
+      .put("v", VERSION)
+      .put("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+      .put("ct", Base64.encodeToString(
+        cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP,
+      ))
+      .toString()
+  }
+
+  private fun decryptPayload(stored: String): String? {
+    val envelope = try { JSONObject(stored) } catch (_: JSONException) { return null }
+    if (envelope.optInt("v") != VERSION) return null
+    val iv: ByteArray
+    val bytes: ByteArray
+    try {
+      iv = Base64.decode(envelope.getString("iv"), Base64.NO_WRAP)
+      bytes = Base64.decode(envelope.getString("ct"), Base64.NO_WRAP)
+    } catch (_: JSONException) {
+      return null
+    } catch (_: IllegalArgumentException) {
+      return null
+    }
+    if (iv.size != 12 || bytes.size < 16) return null
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+    return try {
+      String(cipher.doFinal(bytes), Charsets.UTF_8)
+    } catch (_: AEADBadTagException) {
+      null
+    }
   }
 
   private fun encrypt(row: CapturedBankNotification, secretKey: SecretKey): JSONObject {

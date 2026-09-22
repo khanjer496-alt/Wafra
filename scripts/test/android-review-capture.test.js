@@ -54,6 +54,33 @@ const notificationListener = fs.readFileSync(
 const notificationStore = fs.readFileSync(
   path.join(notificationRoot, 'NotificationCaptureStore.kt'), 'utf8',
 );
+ok('a re-posted bank notification is one posting, not a second charge',
+  // Identity was (package, postTime) alone, and everything downstream trusted
+  // it: a notification's capture key is `s{postTime}-{amount}` and dedupe.ts
+  // only pairs a push with an SMS, never a push with a push. An issuer
+  // redelivering one alert with a fresh postTime therefore double-counted the
+  // charge, with no window anywhere able to see the two copies as one event.
+  notificationStore.includes('REPOST_WINDOW_MS = 30L * 60 * 1000') &&
+    notificationStore.includes('contentFingerprint(pkg: String, title: String, text: String)') &&
+    /digest\("\$pkg\\u0000\$title\\u0000\$text"/.test(notificationStore) &&
+    notificationStore.includes('return "repost"') &&
+    // The guard must be consulted before the row is queued, and must outlive
+    // the queue row itself — by redelivery time the first copy is normally
+    // drained, so comparing against the queue alone would see nothing.
+    notificationStore.indexOf('return "repost"') <
+      notificationStore.indexOf('writeAll(context, next)') &&
+    notificationStore.includes('recordRecentContent(prefs, fingerprint, ts)') &&
+    notificationStore.includes('recordRecentContent(prefs, contentFingerprint(pkg, title, text), ts)'),
+  JSON.stringify({ notificationStore: notificationStore.length }));
+ok('retained re-post receipts stay ciphertext and are erased with the queue',
+  // The class invariant is that SharedPreferences holds only opaque ids, IVs
+  // and AES-GCM ciphertext. A bare content hash would weaken it: anyone with
+  // the file could confirm a guessed alert body by hashing it.
+  notificationStore.includes('putString(RECENT_CONTENT, encryptPayload(') &&
+    notificationStore.includes('decryptPayload(stored)') &&
+    notificationStore.includes('.remove(RECENT_CONTENT)') &&
+    !/putString\(RECENT_CONTENT, (?!encryptPayload)/.test(notificationStore),
+  JSON.stringify({ notificationStore: notificationStore.length }));
 ok('bank-app OTP notifications are refused before queueing and purged on upgrade',
   /verification code|security code/.test(notificationFilter) &&
     notificationListener.includes('SensitiveNotificationFilter.shouldReject(body)') &&
