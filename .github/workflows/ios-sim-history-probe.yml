@@ -12,10 +12,20 @@ name: iOS simulator history probe
 # The seeded rows are fixtures, not a person's messages, and the store they
 # go into is a throwaway simulator device on a throwaway runner.
 #
-# Not triggered by push: a macOS runner is billed at 10x Linux and the build
-# takes 20-40 minutes when the native fingerprint cache misses.
+# Runs on request, plus on pushes to the probe branch that touch its own
+# files (see `on`): a macOS runner is billed at 10x Linux and the build takes
+# 20-40 minutes when the native fingerprint cache misses.
 
 on:
+  # workflow_dispatch is only listed by GitHub once the file exists on the
+  # default branch. Until this merges, a push to the probe branch that touches
+  # the probe's own files runs it with the defaults below (same precedent as
+  # ios-shortcuts-release-review.yml). The branch filter never matches main.
+  push:
+    branches: [claude/ios-testing-shortcuts-ch57wi]
+    paths:
+      - '.github/workflows/ios-sim-history-probe.yml'
+      - 'scripts/ios-sim/**'
   workflow_dispatch:
     inputs:
       device:
@@ -57,23 +67,34 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Every input resolved once, with the push-trigger defaults.
+  IN_DEVICE: ${{ inputs.device || 'iPhone 17 Pro' }}
+  IN_SHORTCUT_URL: ${{ inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
+  IN_SHORTCUT_NAME: ${{ inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+  IN_SEED_DAYS: ${{ inputs.seed_days || '80' }}
+  IN_ROUNDS: ${{ inputs.rounds || '60' }}
+  IN_CACHE: ${{ inputs.cache || 'true' }}
+  IN_XCODE: ${{ inputs.xcode || '26.3' }}
+  IN_RUNTIME: ${{ inputs.runtime || '26-2' }}
+  IN_UI_FALLBACK_ROWS: ${{ inputs.ui_fallback_rows || '40' }}
+  IN_RUNNER: ${{ inputs.runner || 'macos-26' }}
   # Same JS-time configuration as the eas.json profiles that install the v6
   # record: without EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL the app treats the
   # paged history surfaces as unverified and hides them.
   EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
   EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "1"
   EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "1"
-  EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: ${{ inputs.shortcut_url }}
+  EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: ${{ inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
   EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
   WAFRA_SMS_CORPUS_EXPORT: "0"
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
   EVIDENCE: ${{ github.workspace }}/ios-sim-evidence
-  SHORTCUT_NAME: ${{ inputs.shortcut_name }}
+  SHORTCUT_NAME: ${{ inputs.shortcut_name || 'Wafra-History-v6.signed' }}
   SHORTCUT_PORT: "8787"
 
 jobs:
   probe:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +107,7 @@ jobs:
           # FB23342158 / developer.apple.com/forums/thread/836585), and the
           # macos-26 image pairs Xcode 26.5 and 26.6 with that runtime. Xcode
           # 26.3 and 26.2 both ship the iOS 26.2 simulator, which still works.
-          PREFERRED='${{ inputs.xcode }}'
+          PREFERRED="$IN_XCODE"
           BEST=""
           for candidate in "/Applications/Xcode_${PREFERRED}.app" /Applications/Xcode_26.3.app /Applications/Xcode_26.2.app; do
             [ -d "$candidate" ] && { BEST=$candidate; break; }
@@ -124,12 +145,12 @@ jobs:
       - name: Build the seed rows from the public corpus
         run: |
           set -euo pipefail
-          node scripts/ios-sim/build-seed-messages.mjs "$RUNNER_TEMP/seed.json" --days '${{ inputs.seed_days }}'
+          node scripts/ios-sim/build-seed-messages.mjs "$RUNNER_TEMP/seed.json" --days "$IN_SEED_DAYS"
           node -e 'const j=require(process.argv[1]);const by={};for(const r of j.rows)by[r.sender]=(by[r.sender]||0)+1;console.log(j.rows.length,"rows;",Object.keys(by).length,"senders")' "$RUNNER_TEMP/seed.json"
 
       - name: Fingerprint native build inputs
         id: fp
-        if: inputs.cache == 'true'
+        if: env.IN_CACHE == 'true'
         run: |
           set -euo pipefail
           HASH=$(npx --yes @expo/fingerprint@0.20.13 fingerprint:generate --platform ios \
@@ -139,7 +160,7 @@ jobs:
 
       - name: Restore cached app build
         id: appcache
-        if: inputs.cache == 'true'
+        if: env.IN_CACHE == 'true'
         uses: actions/cache/restore@v4
         with:
           path: build/native-sim-app
@@ -150,15 +171,15 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          DEVICE='${{ inputs.device }}'
+          DEVICE="$IN_DEVICE"
           RUNTIME=$(xcrun simctl list runtimes -j | node -e '
             const want = process.argv[1];
             const all = JSON.parse(require("fs").readFileSync(0, "utf8")).runtimes.filter(r => r.platform === "iOS" && r.isAvailable);
             const hit = all.find(r => r.identifier.endsWith("iOS-" + want));
             process.stdout.write((hit || all.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true })).at(-1) || {}).identifier || "");
-          ' '${{ inputs.runtime }}')
+          ' "$IN_RUNTIME")
           [ -n "$RUNTIME" ] || { echo "::error::no available iOS simulator runtime"; xcrun simctl list runtimes; exit 1; }
-          case "$RUNTIME" in *iOS-${{ inputs.runtime }}) ;; *) echo "::warning::runtime iOS ${{ inputs.runtime }} is not installed; using $RUNTIME";; esac
+          case "$RUNTIME" in *iOS-"$IN_RUNTIME") ;; *) echo "::warning::runtime iOS $IN_RUNTIME is not installed; using $RUNTIME";; esac
           DEVICE_TYPE=$(xcrun simctl list devicetypes -j | node -e '
             const want = process.argv[1];
             const all = JSON.parse(require("fs").readFileSync(0, "utf8")).devicetypes.filter(d => /^iPhone/.test(d.name));
@@ -247,12 +268,12 @@ jobs:
       # a bounded number of rows go this way.
       - name: "Stage 2b: send seed rows through the Messages UI"
         id: seedui
-        if: steps.seed.outcome == 'failure' && inputs.ui_fallback_rows != '0'
+        if: steps.seed.outcome == 'failure' && env.IN_UI_FALLBACK_ROWS != '0'
         continue-on-error: true
         timeout-minutes: 30
         env:
           UDID: ${{ steps.sim.outputs.udid }}
-          LIMIT: ${{ inputs.ui_fallback_rows }}
+          LIMIT: ${{ env.IN_UI_FALLBACK_ROWS }}
         run: |
           set -euo pipefail
           export OUT="$EVIDENCE/02b-messages-ui"; mkdir -p "$OUT"
@@ -302,7 +323,7 @@ jobs:
           rm -rf build/native-sim-app && mkdir -p build/native-sim-app && cp -R "$APP" build/native-sim-app/
 
       - name: Save app build to cache
-        if: inputs.cache == 'true' && steps.appcache.outputs.cache-hit != 'true'
+        if: env.IN_CACHE == 'true' && steps.appcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: build/native-sim-app
@@ -336,7 +357,7 @@ jobs:
         continue-on-error: true
         env:
           UDID: ${{ steps.sim.outputs.udid }}
-          SHORTCUT_URL: ${{ inputs.shortcut_url }}
+          SHORTCUT_URL: ${{ env.IN_SHORTCUT_URL }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/shortcuts"
@@ -389,7 +410,7 @@ jobs:
           export OUT="$EVIDENCE/05-run"; mkdir -p "$OUT"
           START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "$START" > "$OUT/started-at.txt"
-          maestro --device "$UDID" test -e OUT="$OUT" -e SHORTCUT_NAME="$SHORTCUT_NAME" -e ROUNDS='${{ inputs.rounds }}' scripts/ios-sim/flows/run-history.yaml || true
+          maestro --device "$UDID" test -e OUT="$OUT" -e SHORTCUT_NAME="$SHORTCUT_NAME" -e ROUNDS="$IN_ROUNDS" scripts/ios-sim/flows/run-history.yaml || true
           xcrun simctl io "$UDID" screenshot "$OUT/final.png"
           # What Shortcuts and the app's intents logged while it ran.
           xcrun simctl spawn "$UDID" log show --start "$START" \
