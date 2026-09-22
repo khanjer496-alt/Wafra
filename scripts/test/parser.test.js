@@ -5779,5 +5779,50 @@ t('ADIB chequebook request is not a transaction',
   'Dear Customer, thank you for requesting a new chequebook for your A/C NO: ****1234. Your request will be fulfilled at the earliest. Sincerely, ADIB',
   null, { sender: 'ADIB' });
 
+// ── A structural conclusion is not a shrug ────────────────────────────────
+//
+// `categoryDeliberate` splits two things the accuracy report and heal.ts both
+// branch on: a row the parser UNDERSTOOD and that simply has no spending
+// category, versus one it could not read. Getting a statement into the second
+// bucket cost nothing at parse time and buried the real misses — 31 of the 32
+// rows the corpus counted as "uncategorised merchants" were card statements.
+t('a card statement is a deliberate Other, not an uncategorised merchant',
+  'Your Credit Card ending 4821 statement is generated. Total due AED 3,240.00, minimum due AED 162.00 by 05/08/2026',
+  { kind: 'cardStatement', merchant: 'Card •4821', category: 'other', deliberate: true });
+t('the overdue-reminder statement path agrees with it',
+  'Dear Customer, we have not received the overdue payment of AED 205.84 on your Credit Card ending 7720 that you promised to deposit. Please pay immediately.',
+  { kind: 'cardStatement', category: 'other', deliberate: true });
+
+{
+  const { isDeliberateOtherTitle } = require('./build/sms-parser');
+  ok('a stored statement title survives hydration as a deliberate Other',
+    isDeliberateOtherTitle('Card •4821') && isDeliberateOtherTitle('Card •4821 payment'));
+
+  // The guard on the fix above. "Card purchase" means a card was used and the
+  // parser could NOT read where — a real gap the accuracy report exists to
+  // show. It looks like the titles above and must never join them.
+  ok('"Card purchase" stays reportable — it is a gap, not a conclusion',
+    !isDeliberateOtherTitle('Card purchase') && !isDeliberateOtherTitle('Bill payment'));
+}
+
+// ── A processor descriptor with no shop behind it ─────────────────────────
+t('a bare PayPal descriptor is understood, not waiting to be categorised',
+  'Your Cr.Card XXX7720 was used for USD1.00 on 15/06/2024 17:49:15 at PAYPAL,\u00b7\u00b7\u00b7\u00b77733-LU. Avl. Cr.limit is AED4417.96',
+  { merchant: 'Paypal', category: 'other', deliberate: true });
+t('a bare Ziina descriptor is the same case',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 756.00\nZiina                 Dubai           AE \n29/12/25 17:47 \nBalance AED \u00b7\u00b7\u00b7\u00b75193.16',
+  { merchant: 'Ziina', category: 'other', deliberate: true });
+// Ziina is also a rail a real shop sits behind, which is the whole reason it
+// belongs with the processors rather than among the wallets.
+t('a Ziina payment that names the shop reaches that shop\u2019s category',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 378.00\nZiina  *CLEANTIZER SERDubai           AE \n01/05/26 22:19 \nBalance AED 8202.35',
+  { merchant: 'Cleantizer', category: 'home-services', deliberate: true });
+// The negative that keeps the rule honest: a processor PLUS a payee is not a
+// processor-only descriptor, and the unknown seller stays unresolved so the
+// user is still asked.
+t('a processor with a payee behind it still names that payee',
+  'From HSBC: 08SEP25 PAYPAL *CXIANGHUI01L Purchase from 041-340***-001 AED 259.40- by Card Ending with 6737. Your available balance is AED 100.00',
+  { merchant: 'CXIANGHUI01L', category: 'other', deliberate: false });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -47,6 +47,7 @@
     "check:launch": "bash scripts/check-launch.sh",
     "benchmark:launch:fixtures": "bash scripts/generate-launch-benchmark-fixtures.sh",
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
+    "bench:parser": "node scripts/parser-benchmark/run.mjs",
     "eval:parser:typesafe": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs",
     "eval:parser:typesafe:all": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all",
     "eval:parser:typesafe:risk": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all --fail-on-risk",
@@ -54,7 +55,9 @@
     "analyze:parser:jev:all": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs --all",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
-    "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
+    "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server",
+    "qualify:parser": "node scripts/parser-benchmark/qualification.mjs",
+    "eval:assistant-routing": "node scripts/local-ai/assistant-routing-eval.mjs"
   },
   "dependencies": {
     "@huggingface/tokenizers": "^0.2.0",

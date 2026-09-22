@@ -8,6 +8,7 @@ import {
   type AlertInstitutionGrammarReview,
 } from '@/lib/alert-institution-grammars';
 import { alertMarketPack } from '@/lib/alert-market-packs';
+import { isTransactionVerificationChallenge } from '@/lib/bank-alert-semantic-rules';
 import type {
   AlertFamily,
   MoneyDirection,
@@ -209,7 +210,15 @@ export const inspectMarketAlert = (
   // Lifecycle verbs describe the instruction, not movement of money. Words
   // such as "setup successful" must not let a created mandate masquerade as a
   // successfully posted debit.
-  const status = lifecycleOnly || ungroundedExecution ? 'informational' : initialStatus;
+  // A bank asking "did you attempt this?" has not said that you did. The
+  // market path reached `posted` here for a fraud-verification prompt because
+  // the wording that withdraws it sits outside the clause holding the amount.
+  // `unknown` rather than `informational`: some banks challenge a charge that
+  // HAS posted, and `informational` would drop the row instead of reviewing it.
+  const challenged = initialStatus === 'posted' && isTransactionVerificationChallenge(text);
+  const status = lifecycleOnly || ungroundedExecution
+    ? 'informational'
+    : challenged ? 'unknown' : initialStatus;
   const institution = inspectAlertInstitutionGrammar(
     draft.normalizedText,
     market,

@@ -1,0 +1,47 @@
+{
+  "engine": "rules",
+  "description": "src/lib/sms-parser.ts + alert-semantics.ts as shipped",
+  "node": "v22.22.2",
+  "ranAt": "2026-09-20",
+  "sections": [
+    {
+      "id": "ledger",
+      "title": "Labelled AE/SA ledger rows",
+      "rows": 11,
+      "checked": 121,
+      "matched": 121,
+      "accuracy": 100,
+      "failures": []
+    },
+    {
+      "id": "global",
+      "title": "Labelled global alert rows",
+      "rows": 188,
+      "checked": 1128,
+      "matched": 1128,
+      "accuracy": 100,
+      "institutionAccuracy": 100,
+      "failures": []
+    },
+    {
+      "id": "divergence",
+      "title": "Divergence from the shipped rules (961 unlabelled messages)",
+      "messages": 966,
+      "agreed": 966,
+      "diverged": 0,
+      "agreement": 100,
+      "buckets": {
+        "posts-where-rules-refuse": 0,
+        "refuses-where-rules-post": 0,
+        "different-money": 0,
+        "different-merchant-or-date": 0
+      },
+      "failures": []
+    },
+    {
+      "id": "latency",
+      "title": "Latency",
+      "note": "machine-dependent; not pinned in the committed baseline"
+    }
+  ]
+}

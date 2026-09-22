@@ -95,6 +95,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/universal-parser') {
         return require('../build/universal-parser.js');
       }
+      // The semantic wording predicates are pure regexes over the message text
+      // and nothing else. `alert-semantics.ts` asks this module whether a bank
+      // is CHALLENGING a transaction rather than reporting one, and stubbing
+      // that would make a harness disagree with the shipping parser about
+      // whether a fraud-verification prompt posts — so every harness gets the
+      // real compiled module, as with `universal-parser` above.
+      if (name === '@/lib/bank-alert-semantic-rules') {
+        return require('../build/bank-alert-semantic-rules.js');
+      }
       if (name === '@/lib/universal-template-certification') {
         return require('../build/universal-template-certification.js');
       }

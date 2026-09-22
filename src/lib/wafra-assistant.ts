@@ -2651,11 +2651,34 @@ export function planAssistantQuestion(
     return clarification(`I can’t reliably isolate “${narrow.phrase}” from the recorded data without guessing. I can show the broader ${parent} category, or you can name a merchant.`,
       [`How much did I spend on ${parent.toLowerCase()}?`, 'What are my top merchants?']);
   }
-  if (/\d/.test(q.replace(/\btop\s+\d+\b/g, '')) ||
+  const withoutRankLimit = q.replace(/\btop\s+\d+\b/g, '');
+  const carriesNumber = /\d/.test(withoutRankLimit);
+  const otherPartialSignal =
     /\b(?:in|during|before|after|since|between|with|using)\s+(?!(?:the )?previous period\b)\S|\b(?:usd|eur|gbp|aed|sar|jpy|kwd)\b|[$€£]/.test(q) ||
     (!hasCategoryFilter(filters) && /\bon\s+(?!track\b)\S/.test(q)) ||
-    (includedMerchants(filters).length > 1 && /\b(?:vs|versus)\b/.test(q))) {
-    return clarification('I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date.');
+    (includedMerchants(filters).length > 1 && /\b(?:vs|versus)\b/.test(q));
+  if (carriesNumber || otherPartialSignal) {
+    // Arabizi spells Arabic letters as digits — 2 for hamza, 3 for ain, 5 for
+    // kha, 6 for taa, 7 for haa. (Spelled out because this file deliberately
+    // embeds no non-Latin vocabulary, which wafra-assistant.test.js asserts.)
+    // So "dafa3t", "in5asam" and "3ala" carry no number at all. This
+    // guard exists to refuse a question holding an amount or a date the planner
+    // will not guess about, and it was firing on the spelling of ordinary words:
+    // every Arabizi question landed here, and because this clarification is not
+    // marked `unrecognized` it was also held back from the on-device model,
+    // which reads all three registers. One character decided it — "hal dafat el
+    // faatura" reached the model and "hal dafa3t el faatura" did not.
+    //
+    // The refusal itself does not move. Only the eligibility flag does, and only
+    // when the digits were the sole reason to refuse and every one of them was a
+    // letter. A token is read as Arabizi when it is built solely from ASCII
+    // letters and those five digits, holds at least one of them and at least two
+    // letters: "aed500" and "card4110" and "2026" are all left alone, so an
+    // amount or a year still refuses exactly as before.
+    const arabiziOnly = carriesNumber && !otherPartialSignal &&
+      !/\d/.test(withoutRankLimit.replace(/\b(?=[a-z23567]*[a-z][a-z23567]*[a-z])[a-z23567]*[23567][a-z23567]*\b/gi, ''));
+    return clarification('I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date.',
+      undefined, arabiziOnly);
   }
   const scopeError = invalidFilters(state, filters);
   if (scopeError) return clarification(scopeError);

@@ -56,6 +56,66 @@
       "tool": "data-coverage",
       "policy": "default-period"
     },
+    "ask.compare.periods": {
+      "kind": "assistant-intent",
+      "tool": "compare-periods",
+      "policy": "default-period"
+    },
+    "ask.largest-purchases": {
+      "kind": "assistant-intent",
+      "tool": "largest-purchases",
+      "policy": "default-period-default-limit"
+    },
+    "ask.daily-average": {
+      "kind": "assistant-intent",
+      "tool": "daily-average",
+      "policy": "default-period"
+    },
+    "ask.net-income-spending": {
+      "kind": "assistant-intent",
+      "tool": "net-income-spending",
+      "policy": "default-period"
+    },
+    "ask.cash-withdrawal.category": {
+      "kind": "assistant-intent",
+      "tool": "category-breakdown",
+      "policy": "cash-withdrawal-category"
+    },
+    "ask.month-forecast": {
+      "kind": "assistant-intent",
+      "tool": "month-forecast",
+      "policy": "current-calendar-month"
+    },
+    "ask.historical-baseline": {
+      "kind": "assistant-intent",
+      "tool": "historical-baseline",
+      "policy": "default-period-typical-baseline"
+    },
+    "ask.account-inventory": {
+      "kind": "assistant-intent",
+      "tool": "account-inventory",
+      "policy": "no-arguments"
+    },
+    "ask.top-accounts": {
+      "kind": "assistant-intent",
+      "tool": "top-accounts",
+      "policy": "default-period-default-limit"
+    },
+    "ask.credit-card-settlement-summary": {
+      "kind": "assistant-intent",
+      "tool": "credit-card-settlement-summary",
+      "policy": "no-arguments"
+    },
+    "ask.recurring-changes": {
+      "kind": "assistant-intent",
+      "tool": "recurring-changes",
+      "policy": "default-period"
+    },
+    "ask.unusual-charges": {
+      "kind": "assistant-intent",
+      "tool": "unusual-charges",
+      "policy": "default-period"
+    },
     "parser.family.purchase": {
       "kind": "parser-family",
       "family": "purchase"
