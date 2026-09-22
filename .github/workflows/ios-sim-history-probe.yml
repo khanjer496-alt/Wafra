@@ -64,37 +64,39 @@ permissions:
 
 concurrency:
   group: ios-sim-history-probe-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue rather than cancel: an in-flight run is 20-40 minutes of native
+  # build whose fingerprint cache the next run wants.
+  cancel-in-progress: false
 
 env:
   # Every input resolved once, with the push-trigger defaults.
-  IN_DEVICE: ${{ inputs.device || 'iPhone 17 Pro' }}
-  IN_SHORTCUT_URL: ${{ inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
-  IN_SHORTCUT_NAME: ${{ inputs.shortcut_name || 'Wafra-History-v6.signed' }}
-  IN_SEED_DAYS: ${{ inputs.seed_days || '80' }}
-  IN_ROUNDS: ${{ inputs.rounds || '60' }}
-  IN_CACHE: ${{ inputs.cache || 'true' }}
-  IN_XCODE: ${{ inputs.xcode || '26.3' }}
-  IN_RUNTIME: ${{ inputs.runtime || '26-2' }}
-  IN_UI_FALLBACK_ROWS: ${{ inputs.ui_fallback_rows || '40' }}
-  IN_RUNNER: ${{ inputs.runner || 'macos-26' }}
+  IN_DEVICE: ${{ github.event.inputs.device || 'iPhone 17 Pro' }}
+  IN_SHORTCUT_URL: ${{ github.event.inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
+  IN_SHORTCUT_NAME: ${{ github.event.inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+  IN_SEED_DAYS: ${{ github.event.inputs.seed_days || '80' }}
+  IN_ROUNDS: ${{ github.event.inputs.rounds || '60' }}
+  IN_CACHE: ${{ github.event.inputs.cache || 'true' }}
+  IN_XCODE: ${{ github.event.inputs.xcode || '26.3' }}
+  IN_RUNTIME: ${{ github.event.inputs.runtime || '26-2' }}
+  IN_UI_FALLBACK_ROWS: ${{ github.event.inputs.ui_fallback_rows || '40' }}
+  IN_RUNNER: ${{ github.event.inputs.runner || 'macos-26' }}
   # Same JS-time configuration as the eas.json profiles that install the v6
   # record: without EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL the app treats the
   # paged history surfaces as unverified and hides them.
   EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
   EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "1"
   EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "1"
-  EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: ${{ inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
+  EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: ${{ github.event.inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
   EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
   WAFRA_SMS_CORPUS_EXPORT: "0"
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
   EVIDENCE: ${{ github.workspace }}/ios-sim-evidence
-  SHORTCUT_NAME: ${{ inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+  SHORTCUT_NAME: ${{ github.event.inputs.shortcut_name || 'Wafra-History-v6.signed' }}
   SHORTCUT_PORT: "8787"
 
 jobs:
   probe:
-    runs-on: ${{ inputs.runner || 'macos-26' }}
+    runs-on: ${{ github.event.inputs.runner || 'macos-26' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
