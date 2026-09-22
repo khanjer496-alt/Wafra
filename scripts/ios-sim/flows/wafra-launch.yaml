@@ -1,0 +1,14 @@
+# Records Wafra's first screen after install. Run 1 landed on the storage
+# recovery screen ("Your ledger could not be opened"); if it is there, one
+# retry is recorded as well so the log around it can be read.
+appId: app.wafra.ios
+---
+- takeScreenshot: ${OUT}/launch-0
+- runFlow:
+    when:
+      visible: "Try again"
+    commands:
+      - tapOn: "Try again"
+      - waitForAnimationToEnd:
+          timeout: 5000
+      - takeScreenshot: ${OUT}/launch-after-retry

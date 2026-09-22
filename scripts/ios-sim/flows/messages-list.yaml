@@ -1,15 +1,23 @@
-# Opens the simulator's Messages app and records what the seeded store shows.
+# Opens the simulator's Messages app, dismisses its first-run "Shared with
+# You" splash (three pages, one OK each on iOS 26.2), and records the list.
 appId: com.apple.MobileSMS
 ---
 - launchApp:
     appId: com.apple.MobileSMS
     stopApp: true
-- tapOn:
-    text: "Continue"
-    optional: true
-- tapOn:
-    text: "OK"
-    optional: true
+- repeat:
+    times: 4
+    commands:
+      - runFlow:
+          when:
+            visible: "OK"
+          commands:
+            - tapOn: "OK"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
 - takeScreenshot: ${OUT}/messages-list
 - tapOn:
     text: "ADCB"

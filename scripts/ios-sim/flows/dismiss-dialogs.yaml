@@ -1,0 +1,9 @@
+# Clears any leftover alert so the next check does not read a stale sheet.
+appId: com.apple.shortcuts
+---
+- tapOn:
+    text: "OK"
+    optional: true
+- tapOn:
+    text: "Done"
+    optional: true

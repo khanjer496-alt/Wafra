@@ -3,6 +3,11 @@
 appId: com.apple.shortcuts
 ---
 - takeScreenshot: ${OUT}/shortcut-install-0
+- runFlow:
+    when:
+      visible: "Import Failed"
+    commands:
+      - tapOn: "OK"
 - tapOn:
     text: "Add Shortcut"
     optional: true
