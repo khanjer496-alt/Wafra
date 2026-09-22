@@ -18,8 +18,8 @@ appId: com.apple.MobileSMS
             visible: "Continue"
           commands:
             - tapOn: "Continue"
-- takeScreenshot: ${OUT}/messages-list
+- takeScreenshot: messages-list
 - tapOn:
     text: "ADCB"
     optional: true
-- takeScreenshot: ${OUT}/messages-adcb
+- takeScreenshot: messages-adcb

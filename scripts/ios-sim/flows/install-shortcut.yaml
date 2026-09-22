@@ -2,7 +2,7 @@
 # whichever route delivered the file (import URL or Safari download).
 appId: com.apple.shortcuts
 ---
-- takeScreenshot: ${OUT}/shortcut-install-0
+- takeScreenshot: shortcut-install-0
 - runFlow:
     when:
       visible: "Import Failed"
@@ -14,4 +14,4 @@ appId: com.apple.shortcuts
 - tapOn:
     text: "Add Untrusted Shortcut"
     optional: true
-- takeScreenshot: ${OUT}/shortcut-install-1
+- takeScreenshot: shortcut-install-1

@@ -8,14 +8,14 @@ appId: app.wafra.ios
       visible: "Open"
     commands:
       - tapOn: "Open"
-- takeScreenshot: ${OUT}/wafra-history-0
+- takeScreenshot: wafra-history-0
 - tapOn:
     text: "Refresh progress"
     optional: true
-- takeScreenshot: ${OUT}/wafra-history-1
+- takeScreenshot: wafra-history-1
 - tapOn:
     text: "Review transactions"
     optional: true
-- takeScreenshot: ${OUT}/wafra-history-2
+- takeScreenshot: wafra-history-2
 - openLink: wafra://ios-paging-beta
-- takeScreenshot: ${OUT}/wafra-paging-beta
+- takeScreenshot: wafra-paging-beta

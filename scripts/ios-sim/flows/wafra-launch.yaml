@@ -3,7 +3,7 @@
 # retry is recorded as well so the log around it can be read.
 appId: app.wafra.ios
 ---
-- takeScreenshot: ${OUT}/launch-0
+- takeScreenshot: launch-0
 - runFlow:
     when:
       visible: "Try again"
@@ -11,4 +11,4 @@ appId: app.wafra.ios
       - tapOn: "Try again"
       - waitForAnimationToEnd:
           timeout: 5000
-      - takeScreenshot: ${OUT}/launch-after-retry
+      - takeScreenshot: launch-after-retry

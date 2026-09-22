@@ -3,23 +3,23 @@
 appId: com.apple.mobilesafari
 ---
 - openLink: ${SHORTCUT_HTTP_URL}
-- takeScreenshot: ${OUT}/safari-download-0
+- takeScreenshot: safari-download-0
 - tapOn:
     text: "Download"
     optional: true
-- takeScreenshot: ${OUT}/safari-download-1
+- takeScreenshot: safari-download-1
 - tapOn:
     text: "View"
     optional: true
 - tapOn:
     id: "Downloads"
     optional: true
-- takeScreenshot: ${OUT}/safari-download-2
+- takeScreenshot: safari-download-2
 - tapOn:
     text: ".*\\.shortcut"
     optional: true
-- takeScreenshot: ${OUT}/safari-download-3
+- takeScreenshot: safari-download-3
 - tapOn:
     text: "Add Shortcut"
     optional: true
-- takeScreenshot: ${OUT}/safari-download-4
+- takeScreenshot: safari-download-4

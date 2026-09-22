@@ -50,6 +50,6 @@ appId: com.apple.shortcuts
           commands:
             - tapOn: "Done"
       - evalScript: ${output.round = (output.round || 0) + 1}
-      - takeScreenshot: ${OUT}/run-${output.round}
+      - takeScreenshot: run-${output.round}
       # Maestro has no sleep; a bounded busy-wait keeps the round cadence.
       - evalScript: ${(function () { var t = Date.now(); while (Date.now() - t < 5000) {} })()}

@@ -30,7 +30,7 @@ they go into belongs to a throwaway simulator device on a throwaway runner.
 | --- | --- | --- |
 | 1 | Lists the runtime's apps; requires Shortcuts and Messages. | A runtime without Shortcuts ends the route. |
 | 2 | Writes the corpus into `Library/SMS/sms.db` with `scripts/ios-sim/seed-sms-db.py` while the device is shut down, boots, opens Messages. | Run 1 (iOS 26.2): a fresh device has no `sms.db` at all, even after Messages ran, so there is nothing to write into; the stage records a search of the runtime for a template store and fails. The simulator's Messages keeps conversations in memory. |
-| 2b | Fallback: sends a bounded number of bodies through the Messages UI. The runtime ships two stub conversations; a message sent in one arrives in the other as an incoming message. | Slow (one Maestro flow per message); capped by `ui_fallback_rows`. |
+| 2b | Fallback: composes a new conversation in the Messages UI and sends a bounded number of seed bodies into it. Sent rows are still rows for Find Messages, and on iOS 26 the sender is empty for received ones too. | Run 3: the iOS 26.2 list starts empty, so there are no stub conversations to reuse. Slow (one Maestro flow per message); capped by `ui_fallback_rows`. |
 | 3 | Builds the simulator app (fingerprint-cached under the probe's own key), installs and launches it with the v6 history record configured, and records the first screen plus the app's log lines. | Run 1: a build made with `CODE_SIGNING_ALLOWED=NO` has no entitlements, SecureStore cannot reach the keychain, and Wafra opens on "Your ledger could not be opened". The probe builds with ad-hoc signing instead; `native-sim.yml` still disables signing. |
 | 4 | Tries `shortcuts://import-shortcut` with the public https release-asset URL, then the Safari-download route the app's own help text describes; "installed" means `open-shortcut` by name opens the editor rather than a "Could not find the shortcut" sheet. | Run 1: the import URL scheme refused a loopback http URL ("The shortcut URL provided was invalid"), and the first version of the installed check false-matched that sheet. |
 | 5 | Opens `shortcuts://run-shortcut?name=…` and answers only affirmative prompts (Allow, OK, Continue) for a bounded number of rounds; captures the unified log for Shortcuts and Wafra. | The shortcut's own "History paused" alerts, a missing Find Messages result, or an intent refusal. |
@@ -54,6 +54,11 @@ rows with a stable GUID each, a sender label inferred from the bank the body
 names, and distinct second-resolution dates spread over `seed_days` before the
 run. Distinct seconds matter: the paged graph withholds the last whole second
 of a page as overlap and requires the next page to return exactly those rows.
+
+Maestro flows are run through `scripts/ios-sim/maestro-test.sh`, which points
+Maestro's own output folder at the evidence directory: `takeScreenshot` paths
+resolve inside that folder and an absolute path is refused (run 3), which
+silently ended every flow at its first screenshot.
 
 `scripts/ios-sim/seed-sms-db.py` introspects every table with `PRAGMA
 table_info` and writes only columns that exist, stubs the SQL functions the

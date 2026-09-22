@@ -256,7 +256,7 @@ jobs:
           sleep 8
           xcrun simctl io "$UDID" screenshot "$EVIDENCE/02-messages-seeded.png"
           export OUT="$EVIDENCE/02-messages"; mkdir -p "$OUT"
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/messages-list.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/messages-list.yaml || true
           maestro --device "$UDID" hierarchy > "$OUT/messages-hierarchy.json" 2>/dev/null || true
           xcrun simctl terminate "$UDID" com.apple.MobileSMS || true
           if grep -q -E '"(ADCB|EmiratesNBD|BankAlerts|FAB)"' "$OUT/messages-hierarchy.json"; then
@@ -268,11 +268,10 @@ jobs:
             exit 1
           fi
 
-      # Stage 2b: the simulator's Messages has been observed to keep its
-      # conversations in memory and ignore store writes. Its runtime ships two
-      # stub conversations, and a message sent in one arrives in the other as
-      # an incoming message. That is slow (one message per flow run), so only
-      # a bounded number of rows go this way.
+      # Stage 2b: the iOS 26.2 simulator's Messages keeps its store in memory
+      # and (run 3) starts with an empty list, so the fallback composes a new
+      # conversation and sends the seed bodies into it. Slow (one flow per
+      # message), so only a bounded number of rows go this way.
       - name: "Stage 2b: send seed rows through the Messages UI"
         id: seedui
         if: steps.seed.outcome == 'failure' && env.IN_UI_FALLBACK_ROWS != '0'
@@ -281,44 +280,37 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           LIMIT: ${{ env.IN_UI_FALLBACK_ROWS }}
+          RECIPIENT: "888"
         run: |
           set -euo pipefail
           export OUT="$EVIDENCE/02b-messages-ui"; mkdir -p "$OUT"
-          # Messages opens on a "Shared with You" first-run splash (run 1); the
-          # flow dismisses it before the list is read.
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/messages-list.yaml || true
-          maestro --device "$UDID" hierarchy > "$OUT/list-hierarchy.json" 2>/dev/null || true
-          xcrun simctl io "$UDID" screenshot "$OUT/list.png"
+          SENT=0; FAILED=0
+          while IFS= read -r body; do
+            [ "$SENT" -lt "$LIMIT" ] || break
+            SENT=$((SENT + 1))
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/send-via-messages.yaml \
+              -e RECIPIENT="$RECIPIENT" -e BODY="$body" -e SEQ="$SENT" > "$OUT/send-$SENT.log" 2>&1 \
+              || { FAILED=$((FAILED + 1)); echo "send $SENT failed (see send-$SENT.log)"; }
+          done < <(node -e '
+            const j = require(process.argv[1]);
+            for (const r of j.rows) console.log(r.body.replace(/\s+/g, " ").trim());
+          ' "$RUNNER_TEMP/seed.json")
+          echo "sent $SENT bodies to $RECIPIENT, $FAILED flows failed"
+          printf '{"sent":%d,"failed":%d,"recipient":"%s"}\n' "$SENT" "$FAILED" "$RECIPIENT" > "$OUT/sent.json"
+          # What the list shows afterwards; the conversation must exist.
+          xcrun simctl launch "$UDID" com.apple.MobileSMS; sleep 4
+          xcrun simctl io "$UDID" screenshot "$OUT/after.png"
+          maestro --device "$UDID" hierarchy > "$OUT/after-hierarchy.json" 2>/dev/null || true
           node -e '
             const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
             const out = [];
             (function walk(n, d) { const t = n?.attributes?.text || ""; if (t.trim()) out.push(" ".repeat(d) + t.trim()); (n.children || []).forEach(c => walk(c, d + 1)); })(h, 0);
             require("fs").writeFileSync(process.argv[2], out.join("\n") + "\n");
-          ' "$OUT/list-hierarchy.json" "$OUT/list-texts.txt"
-          cat "$OUT/list-texts.txt"
-          # The stub conversations are named by number; take the first two cells.
-          THREADS=$(node -e '
-            const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-            const out = new Set();
-            (function walk(n) { const t = n?.attributes?.text || ""; if (/^\+?[\d\s()-]{3,}$/.test(t.trim())) out.add(t.trim()); (n.children || []).forEach(walk); })(h);
-            process.stdout.write([...out].slice(0, 2).join("\n"));
-          ' "$OUT/list-hierarchy.json")
-          echo "stub conversations:"; printf '%s\n' "$THREADS"
-          SEND_TO=$(printf '%s\n' "$THREADS" | head -1)
-          [ -n "$SEND_TO" ] || { echo "::error::no stub conversation found in the Messages list"; exit 1; }
-          SENT=0
-          while IFS= read -r body; do
-            [ "$SENT" -lt "$LIMIT" ] || break
-            maestro --device "$UDID" test -e THREAD="$SEND_TO" -e BODY="$body" scripts/ios-sim/flows/send-via-messages.yaml >/dev/null 2>&1 || echo "send $SENT failed"
-            SENT=$((SENT + 1))
-          done < <(node -e '
-            const j = require(process.argv[1]);
-            for (const r of j.rows) console.log(r.body.replace(/\s+/g, " ").trim());
-          ' "$RUNNER_TEMP/seed.json")
-          echo "sent $SENT bodies to $SEND_TO"
-          echo "$SENT" > "$OUT/sent-count.txt"
-          xcrun simctl io "$UDID" screenshot "$OUT/after.png"
+          ' "$OUT/after-hierarchy.json" "$OUT/after-texts.txt"
+          cat "$OUT/after-texts.txt"
           xcrun simctl terminate "$UDID" com.apple.MobileSMS || true
+          grep -q "$RECIPIENT" "$OUT/after-texts.txt" || { echo "::error::no conversation with $RECIPIENT after sending"; exit 1; }
+          [ "$FAILED" -lt "$SENT" ] || { echo "::error::every send flow failed"; exit 1; }
 
       - name: Build app
         timeout-minutes: 60
@@ -374,7 +366,7 @@ jobs:
           sleep 10
           xcrun simctl io "$UDID" screenshot "$EVIDENCE/03-wafra-launch.png"
           export OUT="$EVIDENCE/03-wafra"; mkdir -p "$OUT"
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/wafra-launch.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/wafra-launch.yaml || true
           xcrun simctl spawn "$UDID" log show --start "$LAUNCHED_AT" \
             --predicate 'process == "Wafra" OR (subsystem == "com.apple.securityd" AND eventMessage CONTAINS "Wafra") OR eventMessage CONTAINS "app.wafra.ios"' \
             --style compact > "$OUT/launch-log.txt" 2>&1 || true
@@ -409,7 +401,7 @@ jobs:
             sleep 4
             xcrun simctl io "$UDID" screenshot "$OUT/open-check-$1.png"
             maestro --device "$UDID" hierarchy > "$OUT/open-check-$1.json" 2>/dev/null || true
-            maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/dismiss-dialogs.yaml >/dev/null 2>&1 || true
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/dismiss-dialogs.yaml >/dev/null 2>&1 || true
             grep -q "$SHORTCUT_NAME" "$OUT/open-check-$1.json" && ! grep -q "Could not find the shortcut" "$OUT/open-check-$1.json"
           }
 
@@ -417,12 +409,12 @@ jobs:
           xcrun simctl openurl "$UDID" "shortcuts://import-shortcut?url=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SHORTCUT_URL")&name=$SHORTCUT_NAME" || true
           sleep 8
           xcrun simctl io "$UDID" screenshot "$OUT/route-a.png"
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/install-shortcut.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
           if installed a; then echo "installed via import URL"; echo "route=import-url" >> "$GITHUB_OUTPUT"; exit 0; fi
 
           # Route B: Safari download, the path the app's own help text describes.
-          maestro --device "$UDID" test -e OUT="$OUT" -e SHORTCUT_HTTP_URL="$SHORTCUT_URL" scripts/ios-sim/flows/install-shortcut-via-safari.yaml || true
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/install-shortcut.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut-via-safari.yaml -e SHORTCUT_HTTP_URL="$SHORTCUT_URL" || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
           if installed b; then echo "installed via Safari download"; echo "route=safari" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "::error::the shortcut is not installed after both routes"
           exit 1
@@ -438,7 +430,7 @@ jobs:
           export OUT="$EVIDENCE/05-run"; mkdir -p "$OUT"
           START=$(date '+%Y-%m-%d %H:%M:%S')
           echo "$START (runner local time)" > "$OUT/started-at.txt"
-          maestro --device "$UDID" test -e OUT="$OUT" -e SHORTCUT_NAME="$SHORTCUT_NAME" -e ROUNDS="$IN_ROUNDS" scripts/ios-sim/flows/run-history.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/run-history.yaml -e SHORTCUT_NAME="$SHORTCUT_NAME" -e ROUNDS="$IN_ROUNDS" || true
           xcrun simctl io "$UDID" screenshot "$OUT/final.png"
           # What Shortcuts and the app's intents logged while it ran.
           xcrun simctl spawn "$UDID" log show --start "$START" \
@@ -455,7 +447,7 @@ jobs:
         run: |
           set -euo pipefail
           export OUT="$EVIDENCE/06-wafra"; mkdir -p "$OUT"
-          maestro --device "$UDID" test -e OUT="$OUT" scripts/ios-sim/flows/wafra-history.yaml || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/wafra-history.yaml || true
           xcrun simctl io "$UDID" screenshot "$OUT/final.png"
           CONTAINER=$(xcrun simctl get_app_container "$UDID" "${BUNDLE_ID:-app.wafra.ios}" data)
           echo "app container: $CONTAINER"
