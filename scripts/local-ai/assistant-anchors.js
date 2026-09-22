@@ -1,27 +1,18 @@
 /**
  * Anchor questions for on-device Ask Wafra intent routing, one group per tool.
  *
- * NOT WIRED UP YET, AND THE BUILDER WILL TELL YOU WHY.
+ * These are encoded into `assets/local-ai/assistant-prototype-index.e5.int8.json`
+ * by `build-assistant-index.mjs` and are live: twenty-two intents, measured in
+ * `docs/test-evidence/2026-09-22-ask-wafra-local-routing.md`.
  *
- * `LOCAL_SEMANTIC_REGISTRY` in `src/lib/local-semantic-model.ts` is the
- * code-owned authority for which prototype ids mean anything. It maps each id
- * to a tool AND an argument policy, and `chooseLocalSemanticAssistantPlan`
- * refuses an id it does not know — correctly, because an index is data and data
- * does not get to invent an intent.
- *
- * The registry currently holds ELEVEN assistant intents. `ASSISTANT_TOOL_CATALOG`
- * holds twenty-five tools. Fifteen are therefore unreachable locally, and that
- * shows up as a wrong answer rather than a missing one: ask "how much did I blow
- * on food last month" and the nearest prototype is
- * `ask.income.total.current-scope`, because `category-breakdown` has no
- * prototype to be near. Measured at a margin of 0.004 against the shipped index.
- *
- * This file covers all twenty-five, so the fifteen gaps are written down and
- * ready. `build-assistant-index.mjs` reads the registry and REFUSES to emit an
- * index containing an id the registry lacks — it names the fifteen. Expanding
- * the intent set means adding registry entries first, each with a deliberate
- * argument policy, which is a source change for review rather than something an
- * asset regeneration can smuggle in.
+ * `LOCAL_SEMANTIC_REGISTRY` in `src/lib/local-semantic-model.ts` remains the
+ * code-owned authority for which prototype ids mean anything. It maps each id to
+ * a tool AND an argument policy, and `chooseLocalSemanticAssistantPlan` refuses
+ * an id it does not know — correctly, because an index is data and data does not
+ * get to invent an intent. The builder reads the registry and REFUSES to emit an
+ * id the registry lacks, so adding an intent means adding a registry entry with
+ * a deliberate argument policy first: a source change for review, not something
+ * an asset regeneration can smuggle in.
  *
  * WHAT AN ANCHOR IS FOR
  *
@@ -34,26 +25,29 @@
  * LANGUAGES
  *
  * Every group carries English, Arabic, and where it reads naturally, Arabizi —
- * Arabic in Latin script with digits for letters (3 for ع, 7 for ح), which is
+ * Arabic in Latin script with digits for letters (3 for ain, 7 for haa), which is
  * how a great many people in the UAE and Saudi actually type. One embedding
  * space handles all three, which is the point of the encoder; a keyword router
- * would need three rule sets kept in step.
+ * would need three rule sets kept in step. It is also where the fallback earns
+ * its place rather than competing: measured over these phrasings, the
+ * deterministic planner already answers about half the English and NONE of the
+ * Arabic.
  *
- * MEASURED
+ * ADDING ONE
  *
- * Built against the pinned encoder and scored on thirty questions worded
- * differently from every anchor here: 27/30 top-1. With gates at score 0.80 and
- * margin 0.02, twenty routed and ten asked for clarification — and all twenty
- * routed were correct, with all three misses inside the margin gate. ~5 ms per
- * question on x86 CPU. Note the registry's own thresholds for this domain are
- * 0.72/0.08, so re-measure against those if these are ever wired in.
+ * `createLocalSemanticRetriever` throws above 256 prototypes, and it throws at
+ * construction — Ask Wafra would lose the model entirely rather than degrade.
+ * 211 today, so there is room for roughly four more intents at current size.
+ * `scripts/test/local-semantic-routing.test.js` pins the ceiling, and
+ * `npm run eval:assistant-routing` must be re-run: a new intent crowds the
+ * space and the margin gate is what keeps a crowded space safe.
  *
  * There is deliberately no group for `compare-accounts`: it is in the
  * `AssistantTool` union but not in `ASSISTANT_TOOL_CATALOG`, which is what
  * `isAssistantToolRequest` validates against, so it could only ever be refused.
  */
 
-const anchors = Object.freeze([
+const anchors = [
   {
     id: 'ask.help', tool: 'help',
     phrasings: [
@@ -81,29 +75,6 @@ const anchors = Object.freeze([
       'how much money came in', 'what did I receive this month',
       'كم دخلي هذا الشهر', 'ما مجموع الدخل', 'كم استلمت هذا الشهر', 'الراتب الذي استلمته',
       'kam da5li hatha el shahar',
-    ],
-  },
-  {
-    id: 'ask.merchant.breakdown', tool: 'merchant-breakdown',
-    phrasings: [
-      'how much did I spend at Carrefour', 'what did I spend at Starbucks',
-      'my total at Amazon', 'how much have I paid this shop',
-      'spending at one store', 'how much goes to that merchant',
-      'how much has this shop taken', 'what have I paid that company',
-      'كم صرفت في كارفور', 'كم دفعت لهذا المتجر', 'مجموع مشترياتي من أمازون',
-      'kam sarafat fi carrefour',
-    ],
-  },
-  {
-    id: 'ask.category.breakdown', tool: 'category-breakdown',
-    phrasings: [
-      'how much did I blow on food last month', 'what do I spend on groceries',
-      'how much goes to transport', 'my spending on dining out',
-      'how much did I spend on bills', 'total for that category',
-      'what am I spending on utilities', 'how much on entertainment',
-      'كم صرفت على الطعام', 'كم أنفق على المواصلات', 'مصروف البقالة',
-      'كم صرفت على الفواتير',
-      'kam sarafat 3ala akl', 'kam 3ala grocery',
     ],
   },
   {
@@ -190,7 +161,16 @@ const anchors = Object.freeze([
     ],
   },
   {
-    id: 'ask.cash-outflow', tool: 'cash-outflow',
+    // Every phrasing here asks about money taken out of an ATM. That is the
+    // `cash-withdrawal` CATEGORY, not the `cash-outflow` tool, which totals
+    // everything that left the accounts — repayments and transfers included.
+    // Pointing these at `cash-outflow` returned a larger, unrelated number
+    // with full confidence, which is the exact failure the gate cannot catch:
+    // the routing was certain and the arithmetic was right for a question
+    // nobody asked. `cash-outflow`'s own phrasings ("money out", "left my
+    // account", "actual outflow") are matched by the deterministic planner and
+    // never reach here, so that tool needs no prototype.
+    id: 'ask.cash-withdrawal.category', tool: 'category-breakdown',
     phrasings: [
       'how much cash did I withdraw', 'my ATM withdrawals',
       'how much cash have I taken out', 'total cash out',
@@ -235,16 +215,6 @@ const anchors = Object.freeze([
       'my most used card', 'rank my cards by spending',
       'أي بطاقة أستخدم أكثر', 'من أي حساب أصرف أكثر', 'البطاقة الأكثر استخداماً',
       'ay card astakhdem akthar',
-    ],
-  },
-  {
-    id: 'ask.obligation-status', tool: 'obligation-status',
-    phrasings: [
-      'did I pay my card bill', 'is my statement settled',
-      'have I paid that bill yet', 'what is the status of my card payment',
-      'do I still owe on the statement',
-      'هل دفعت فاتورة البطاقة', 'هل تمت تسوية كشف الحساب', 'هل سددت الفاتورة',
-      'hal dafa3t el faatura',
     ],
   },
   {
@@ -303,6 +273,65 @@ const anchors = Object.freeze([
       'shu el data elli 3indak',
     ],
   },
+];
+
+/**
+ * Written down, deliberately NOT encoded.
+ *
+ * Each of these tools refuses without an argument that identifies a specific
+ * thing: a merchant name, an arbitrary category, a card or bill. A prototype id
+ * cannot carry one. Nearest-neighbour search over these phrasings would land on
+ * the right INTENT and then have nothing to answer about, and the only ways out
+ * are both wrong — invent the argument, or drop it and answer a broader
+ * question the user did not ask. `category-breakdown` appears above exactly
+ * once, for `cash-withdrawal`, because that is the single category a question
+ * names without any lookup.
+ *
+ * Resolving these belongs in the deterministic planner, which already reads
+ * recorded merchant and account names and matches category aliases — in English.
+ * The fall-through measurement in `docs/test-evidence/` shows what that costs
+ * outside English: the Arabic phrasings here name real recorded merchants
+ * (كارفور, أمازون) and real categories (الطعام, المواصلات) and the planner reads
+ * none of them. That is a vocabulary gap in `wafra-assistant.ts`, and an
+ * embedding cannot close it, because the missing piece is the span of text to
+ * look up, not the intent.
+ */
+const argumentDependent = Object.freeze([
+  {
+    id: 'ask.merchant.breakdown', tool: 'merchant-breakdown',
+    phrasings: [
+      'how much did I spend at Carrefour', 'what did I spend at Starbucks',
+      'my total at Amazon', 'how much have I paid this shop',
+      'spending at one store', 'how much goes to that merchant',
+      'how much has this shop taken', 'what have I paid that company',
+      'كم صرفت في كارفور', 'كم دفعت لهذا المتجر', 'مجموع مشترياتي من أمازون',
+      'kam sarafat fi carrefour',
+    ],
+  },
+  {
+    id: 'ask.category.breakdown', tool: 'category-breakdown',
+    phrasings: [
+      'how much did I blow on food last month', 'what do I spend on groceries',
+      'how much goes to transport', 'my spending on dining out',
+      'how much did I spend on bills', 'total for that category',
+      'what am I spending on utilities', 'how much on entertainment',
+      'كم صرفت على الطعام', 'كم أنفق على المواصلات', 'مصروف البقالة',
+      'كم صرفت على الفواتير',
+      'kam sarafat 3ala akl', 'kam 3ala grocery',
+    ],
+  },
+  {
+    id: 'ask.obligation-status', tool: 'obligation-status',
+    phrasings: [
+      'did I pay my card bill', 'is my statement settled',
+      'have I paid that bill yet', 'what is the status of my card payment',
+      'do I still owe on the statement',
+      'هل دفعت فاتورة البطاقة', 'هل تمت تسوية كشف الحساب', 'هل سددت الفاتورة',
+      'hal dafa3t el faatura',
+    ],
+  },
 ]);
 
-module.exports = anchors;
+anchors.argumentDependent = argumentDependent;
+
+module.exports = Object.freeze(anchors);

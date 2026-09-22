@@ -118,18 +118,75 @@ export interface LocalSemanticThresholds {
   minimumMargin: number;
 }
 
+/**
+ * Measured, not chosen. `npm run eval:assistant-routing` scores the shipping
+ * path over 127 held-out questions — 75 in scope, 52 out of it, none of them an
+ * anchor — and the two gates behave nothing alike.
+ *
+ * `minimumScore` is inert for `assistant-intent` and cannot be made useful. In
+ * scope the cosine runs 0.817 to 0.987; out of scope it runs 0.816 to 0.938. The
+ * distributions overlap almost entirely, because E5 places any short question
+ * near any short prototype: "what is the weather in dubai tomorrow" scores 0.87
+ * against a financial intent. Any value above 0.817 starts discarding correct
+ * routes without blocking a single wrong one, so this stays low deliberately.
+ * It is kept as a floor against a degenerate vector, not as a relevance test.
+ *
+ * `minimumMargin` does all the work. It is not a confidence score — it asks
+ * whether the nearest two intents are distinguishable at all, and on this corpus
+ * that tracks correctness almost exactly. Ungated top-1 is only 32/57; the
+ * margin discards very nearly the set it gets wrong:
+ *
+ *     margin   routed   correct   wrong   out-of-scope leaks
+ *      0.08         2         2       0       0
+ *      0.05         4         4       0       0
+ *      0.04         9         9       0       0
+ *      0.03        11        11       0       0
+ *      0.02        15        15       0       2
+ *      0.01        28        22       6       5
+ *      0.00        57        32      25      35
+ *
+ * 0.08 was calibrated when ten intents were registered. With twenty-two the
+ * space is denser and 0.08 routes almost nothing: the index expansion is worth
+ * nothing without this change, and this change is unjustified without the index.
+ *
+ * 0.04 rather than 0.03 buys headroom over the worst out-of-scope margin
+ * observed, 0.027 — "احذف كل معاملاتي" ("delete all my transactions") landing on
+ * `money-review`, which is the vaguest intent and therefore the sink for any
+ * imperative. Thirty-two adversarial rows in a financial register ("can i afford
+ * a car", "set me a budget for dining", "why is my balance wrong") did not push
+ * that tail any higher, so 0.04 sits about half again above a tail measured by
+ * trying to break it, where 0.03 sat 0.003 above it. Coverage 9 vs 11 is the
+ * price, and a refusal costs a rephrase while a wrong route spends the user's
+ * attention on a correct answer to a question they did not ask.
+ *
+ * Nothing routed can move money or records: the registry maps every prototype to
+ * a read-only tool in `ASSISTANT_TOOL_CATALOG` and the compiled request must pass
+ * `isAssistantToolRequest`. A leak here is a wrong answer, never a wrong action.
+ *
+ * Re-run the evaluation before touching either number.
+ */
 export const LOCAL_SEMANTIC_THRESHOLDS: Readonly<Record<LocalSemanticDomain, LocalSemanticThresholds>> =
   Object.freeze({
-    'assistant-intent': Object.freeze({ minimumScore: 0.72, minimumMargin: 0.08 }),
+    'assistant-intent': Object.freeze({ minimumScore: 0.72, minimumMargin: 0.04 }),
     'parser-family': Object.freeze({ minimumScore: 0.78, minimumMargin: 0.1 }),
   });
 
+/**
+ * Every policy must be fully determined by code. A prototype id says only which
+ * question was asked; it never carries an argument, because the index is data
+ * and a merchant name, category or account id chosen by a nearest-neighbour
+ * search is a value the user never supplied. An intent whose tool NEEDS such an
+ * argument therefore gets no prototype at all — see the argument-dependent
+ * groups in `scripts/local-ai/assistant-anchors.js`.
+ */
 type AssistantPolicy =
   | 'no-arguments'
   | 'default-period'
   | 'current-calendar-month'
   | 'default-30-days'
-  | 'default-period-default-limit';
+  | 'default-period-default-limit'
+  | 'default-period-typical-baseline'
+  | 'cash-withdrawal-category';
 
 interface AssistantPrototypeDefinition {
   kind: 'assistant-intent';
@@ -188,6 +245,42 @@ export const LOCAL_SEMANTIC_REGISTRY: Readonly<Record<string, LocalSemanticProto
   }),
   'ask.data-coverage.current-scope': Object.freeze({
     kind: 'assistant-intent', tool: 'data-coverage', policy: 'default-period',
+  }),
+  'ask.compare.periods': Object.freeze({
+    kind: 'assistant-intent', tool: 'compare-periods', policy: 'default-period',
+  }),
+  'ask.largest-purchases': Object.freeze({
+    kind: 'assistant-intent', tool: 'largest-purchases', policy: 'default-period-default-limit',
+  }),
+  'ask.daily-average': Object.freeze({
+    kind: 'assistant-intent', tool: 'daily-average', policy: 'default-period',
+  }),
+  'ask.net-income-spending': Object.freeze({
+    kind: 'assistant-intent', tool: 'net-income-spending', policy: 'default-period',
+  }),
+  'ask.cash-withdrawal.category': Object.freeze({
+    kind: 'assistant-intent', tool: 'category-breakdown', policy: 'cash-withdrawal-category',
+  }),
+  'ask.month-forecast': Object.freeze({
+    kind: 'assistant-intent', tool: 'month-forecast', policy: 'current-calendar-month',
+  }),
+  'ask.historical-baseline': Object.freeze({
+    kind: 'assistant-intent', tool: 'historical-baseline', policy: 'default-period-typical-baseline',
+  }),
+  'ask.account-inventory': Object.freeze({
+    kind: 'assistant-intent', tool: 'account-inventory', policy: 'no-arguments',
+  }),
+  'ask.top-accounts': Object.freeze({
+    kind: 'assistant-intent', tool: 'top-accounts', policy: 'default-period-default-limit',
+  }),
+  'ask.credit-card-settlement-summary': Object.freeze({
+    kind: 'assistant-intent', tool: 'credit-card-settlement-summary', policy: 'no-arguments',
+  }),
+  'ask.recurring-changes': Object.freeze({
+    kind: 'assistant-intent', tool: 'recurring-changes', policy: 'default-period',
+  }),
+  'ask.unusual-charges': Object.freeze({
+    kind: 'assistant-intent', tool: 'unusual-charges', policy: 'default-period',
   }),
   'parser.family.purchase': Object.freeze({ kind: 'parser-family', family: 'purchase' }),
   'parser.family.transfer': Object.freeze({ kind: 'parser-family', family: 'transfer' }),
@@ -541,6 +634,18 @@ const compileAssistantDefinition = (
       return { tool: definition.tool, withinDays: 30 };
     case 'default-period-default-limit':
       return { tool: definition.tool, period: copyPeriod(defaultPeriod), limit: 5 };
+    // `historical-baseline` refuses without a baseline, and the four choices
+    // answer different questions. The anchored phrasings all ask the same one
+    // ("is this normal for me", "what do I usually spend"), so the typical
+    // month is the policy — a code decision recorded here, not a model's.
+    case 'default-period-typical-baseline':
+      return { tool: definition.tool, period: copyPeriod(defaultPeriod), baseline: 'typical-month' };
+    // The one category a question can name unambiguously without any lookup:
+    // asking about cash withdrawn is asking about `cash-withdrawal`, which is a
+    // Wafra category id. Every other category has to be resolved from the words
+    // the user typed, which is the deterministic planner's job.
+    case 'cash-withdrawal-category':
+      return { tool: definition.tool, period: copyPeriod(defaultPeriod), category: 'cash-withdrawal' };
   }
 };
 

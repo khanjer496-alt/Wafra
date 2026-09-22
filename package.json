@@ -56,7 +56,8 @@
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server",
-    "qualify:parser": "node scripts/parser-benchmark/qualification.mjs"
+    "qualify:parser": "node scripts/parser-benchmark/qualification.mjs",
+    "eval:assistant-routing": "node scripts/local-ai/assistant-routing-eval.mjs"
   },
   "dependencies": {
     "@huggingface/tokenizers": "^0.2.0",
