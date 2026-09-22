@@ -1,0 +1,27 @@
+# Apple's own install route: an iCloud share link opens in Safari with a
+# "Get Shortcut" button, which hands the record to Shortcuts, which offers
+# "Add Shortcut". No URL import is involved, so it sidesteps the "shortcut
+# URL provided was invalid" refusal that import-shortcut gives on the
+# simulator for any non-iCloud URL (runs 1 and 3).
+appId: com.apple.mobilesafari
+---
+- openLink: ${ICLOUD_URL}
+- takeScreenshot: icloud-0
+- runFlow:
+    when:
+      visible: "Get Shortcut"
+    commands:
+      - tapOn: "Get Shortcut"
+- takeScreenshot: icloud-1
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- takeScreenshot: icloud-2
+- runFlow:
+    when:
+      visible: "Add Shortcut"
+    commands:
+      - tapOn: "Add Shortcut"
+- takeScreenshot: icloud-3

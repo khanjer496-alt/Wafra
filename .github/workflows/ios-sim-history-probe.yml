@@ -37,6 +37,12 @@ on:
       shortcut_name:
         description: Name Shortcuts installs the file under (its basename without .shortcut)
         default: Wafra-History-v6.signed
+      icloud_fallback_url:
+        description: iCloud share link of a verified History record to install when neither file route works (empty disables). Its graph is older than the release asset; it only shows whether Shortcuts on the simulator can import and run a Wafra history graph at all.
+        default: https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d
+      icloud_fallback_name:
+        description: Name Shortcuts installs that iCloud record under
+        default: Wafra-History-v2-typed-date.signed
       seed_days:
         description: Spread the seeded messages over this many days before now
         default: "80"
@@ -73,6 +79,8 @@ env:
   IN_DEVICE: ${{ github.event.inputs.device || 'iPhone 17 Pro' }}
   IN_SHORTCUT_URL: ${{ github.event.inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
   IN_SHORTCUT_NAME: ${{ github.event.inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+  IN_ICLOUD_FALLBACK_URL: ${{ github.event.inputs.icloud_fallback_url || 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d' }}
+  IN_ICLOUD_FALLBACK_NAME: ${{ github.event.inputs.icloud_fallback_name || 'Wafra-History-v2-typed-date.signed' }}
   IN_SEED_DAYS: ${{ github.event.inputs.seed_days || '80' }}
   IN_ROUNDS: ${{ github.event.inputs.rounds || '60' }}
   IN_CACHE: ${{ github.event.inputs.cache || 'true' }}
@@ -394,29 +402,41 @@ jobs:
           mkdir -p "$OUT"
 
           installed() {
-            # open-shortcut resolves by installed name; a missing name leaves
-            # Shortcuts on its library with a "Could not find the shortcut"
-            # sheet, which itself contains the name (run 1 false-matched it).
-            xcrun simctl openurl "$UDID" "shortcuts://open-shortcut?name=$SHORTCUT_NAME" || return 1
+            # $1 = evidence tag, $2 = installed name. open-shortcut resolves by
+            # installed name; a missing name leaves Shortcuts on its library
+            # with a "Could not find the shortcut" sheet, which itself contains
+            # the name (run 1 false-matched it).
+            xcrun simctl openurl "$UDID" "shortcuts://open-shortcut?name=$2" || return 1
             sleep 4
             xcrun simctl io "$UDID" screenshot "$OUT/open-check-$1.png"
             maestro --device "$UDID" hierarchy > "$OUT/open-check-$1.json" 2>/dev/null || true
             bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/dismiss-dialogs.yaml >/dev/null 2>&1 || true
-            grep -q "$SHORTCUT_NAME" "$OUT/open-check-$1.json" && ! grep -q "Could not find the shortcut" "$OUT/open-check-$1.json"
+            grep -q "$2" "$OUT/open-check-$1.json" && ! grep -q "Could not find the shortcut" "$OUT/open-check-$1.json"
           }
+          record() { echo "route=$1" >> "$GITHUB_OUTPUT"; echo "installed_name=$2" >> "$GITHUB_OUTPUT"; printf '{"route":"%s","name":"%s"}\n' "$1" "$2" > "$OUT/installed.json"; }
 
           # Route A: the import URL scheme with the public https URL.
           xcrun simctl openurl "$UDID" "shortcuts://import-shortcut?url=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SHORTCUT_URL")&name=$SHORTCUT_NAME" || true
           sleep 8
           xcrun simctl io "$UDID" screenshot "$OUT/route-a.png"
           bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
-          if installed a; then echo "installed via import URL"; echo "route=import-url" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if installed a "$SHORTCUT_NAME"; then echo "installed via import URL"; record import-url "$SHORTCUT_NAME"; exit 0; fi
 
           # Route B: Safari download, the path the app's own help text describes.
           bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut-via-safari.yaml -e SHORTCUT_HTTP_URL="$SHORTCUT_URL" || true
           bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
-          if installed b; then echo "installed via Safari download"; echo "route=safari" >> "$GITHUB_OUTPUT"; exit 0; fi
-          echo "::error::the shortcut is not installed after both routes"
+          if installed b "$SHORTCUT_NAME"; then echo "installed via Safari download"; record safari "$SHORTCUT_NAME"; exit 0; fi
+
+          # Route C: an iCloud share link of an older verified record. Apple's
+          # own install path; it shows whether Shortcuts on this simulator can
+          # take a Wafra history graph at all, not whether the release asset
+          # can be installed.
+          if [ -n "$IN_ICLOUD_FALLBACK_URL" ]; then
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut-via-icloud.yaml -e ICLOUD_URL="$IN_ICLOUD_FALLBACK_URL" || true
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
+            if installed c "$IN_ICLOUD_FALLBACK_NAME"; then echo "::warning::installed the iCloud fallback record $IN_ICLOUD_FALLBACK_NAME, not the release asset"; record icloud-fallback "$IN_ICLOUD_FALLBACK_NAME"; exit 0; fi
+          fi
+          echo "::error::the shortcut is not installed after every route"
           exit 1
 
       - name: "Stage 5: run the History shortcut against the seeded store"
@@ -425,12 +445,15 @@ jobs:
         timeout-minutes: 25
         env:
           UDID: ${{ steps.sim.outputs.udid }}
+          INSTALLED_NAME: ${{ steps.install.outputs.installed_name }}
         run: |
           set -euo pipefail
           export OUT="$EVIDENCE/05-run"; mkdir -p "$OUT"
+          RUN_NAME="${INSTALLED_NAME:-$SHORTCUT_NAME}"
+          echo "running $RUN_NAME"
           START=$(date '+%Y-%m-%d %H:%M:%S')
           echo "$START (runner local time)" > "$OUT/started-at.txt"
-          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/run-history.yaml -e SHORTCUT_NAME="$SHORTCUT_NAME" -e ROUNDS="$IN_ROUNDS" || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/run-history.yaml -e SHORTCUT_NAME="$RUN_NAME" -e ROUNDS="$IN_ROUNDS" || true
           xcrun simctl io "$UDID" screenshot "$OUT/final.png"
           # What Shortcuts and the app's intents logged while it ran.
           xcrun simctl spawn "$UDID" log show --start "$START" \
@@ -470,6 +493,7 @@ jobs:
           S3: ${{ steps.app.outcome }}
           S4: ${{ steps.install.outcome }}
           S4R: ${{ steps.install.outputs.route }}
+          S4N: ${{ steps.install.outputs.installed_name }}
           S5: ${{ steps.run.outcome }}
           S6: ${{ steps.result.outcome }}
         run: |
@@ -482,7 +506,7 @@ jobs:
             echo "| 2 Messages store seeded from the public corpus and visible in Messages | $S2 |"
             echo "| 2b Seed rows sent through the Messages UI instead | ${S2B:-not needed} |"
             echo "| 3 Wafra built, installed and launched | $S3 |"
-            echo "| 4 Signed History shortcut installed | $S4 ${S4R:+(via $S4R)} |"
+            echo "| 4 History shortcut installed | $S4 ${S4R:+(via $S4R: $S4N)} |"
             echo "| 5 Shortcut ran against the seeded store | $S5 |"
             echo "| 6 Wafra progress and staged store captured | $S6 |"
             echo
