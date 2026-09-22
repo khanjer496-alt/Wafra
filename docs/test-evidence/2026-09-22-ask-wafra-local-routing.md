@@ -200,7 +200,13 @@ supplies the single category a question names without any lookup.
   `createLocalSemanticRetriever` throws at construction and Ask Wafra loses the
   model entirely rather than degrading. Room for roughly four more intents at
   current size. Pinned by test.
-- The index asset grew from 252 KiB to 685 KiB, bundled.
+- The index asset grew from 252 KiB to 685 KiB. It is imported statically by
+  `local-semantic-bundle.ts`, so it is parsed at module load on every cold
+  launch, not lazily when Ask Wafra opens. Build 332 measured a 1,269 ms cold
+  launch against the 252 KiB version; the added parse cost has NOT been measured
+  on a device. If it shows up, the fix is to load this index on demand rather
+  than to shrink the intent set, since the routing is what the size buys. The
+  other two bundled artifacts are unchanged at 26 KiB and 45 KiB.
 - No device measurement of routing yet. Build 332 established that the encoder
   loads and runs on a real phone; these routes have not been exercised there.
 - The out-of-scope tail rests on 37 rows that reach the retriever. It did not
