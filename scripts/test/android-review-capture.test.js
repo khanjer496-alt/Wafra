@@ -69,8 +69,8 @@ ok('a re-posted bank notification is one posting, not a second charge',
     // drained, so comparing against the queue alone would see nothing.
     notificationStore.indexOf('return "repost"') <
       notificationStore.indexOf('writeAll(context, next)') &&
-    notificationStore.includes('recordRecentContent(prefs, fingerprint, ts)') &&
-    notificationStore.includes('recordRecentContent(prefs, contentFingerprint(pkg, title, text), ts)'),
+    notificationStore.includes('recordRecentContent(prefs, eventIdentity, ts)') &&
+    notificationStore.includes('contentFingerprint(pkg, title, text)?.let { recordRecentContent(prefs, it, ts) }'),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('retained re-post receipts stay ciphertext and are erased with the queue',
   // The class invariant is that SharedPreferences holds only opaque ids, IVs
@@ -80,6 +80,12 @@ ok('retained re-post receipts stay ciphertext and are erased with the queue',
     notificationStore.includes('decryptPayload(stored)') &&
     notificationStore.includes('.remove(RECENT_CONTENT)') &&
     !/putString\(RECENT_CONTENT, (?!encryptPayload)/.test(notificationStore),
+  JSON.stringify({ notificationStore: notificationStore.length }));
+ok('re-post suppression requires an explicit transaction clock',
+  notificationStore.includes('TRANSACTION_DATETIME_RE') &&
+    notificationStore.includes('val eventIdentity = contentFingerprint(pkg, title, text)') &&
+    notificationStore.includes('if (eventIdentity != null && recent.any') &&
+    notificationStore.includes('if (!TRANSACTION_DATETIME_RE.containsMatchIn(text)) return null'),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('bank-app OTP notifications are refused before queueing and purged on upgrade',
   /verification code|security code/.test(notificationFilter) &&

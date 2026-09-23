@@ -55,8 +55,9 @@ object NotificationCaptureStore {
    * two copies as one event, and the charge was counted twice. ADCB is
    * notification-only for some users, which makes this every alert they get.
    *
-   * The content is therefore the identity. Two notifications from one package
-   * carrying byte-identical title and text within this window are one posting.
+   * The content is an identity only when the bank includes an explicit
+   * transaction date and time. Without that clock, two equal purchases can
+   * legitimately produce identical text within minutes of each other.
    *
    * THE WINDOW IS THE WHOLE SAFETY ARGUMENT and must stay short. Two genuinely
    * identical charges — the same amount at the same merchant, worded the same
@@ -67,6 +68,7 @@ object NotificationCaptureStore {
   private const val REPOST_WINDOW_MS = 30L * 60 * 1000
   private const val RECENT_CONTENT = "recent_content"
   private const val MAX_RECENT_CONTENT = 200
+  private val TRANSACTION_DATETIME_RE = Regex("""\b\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}\b""")
 
   @Synchronized
   fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
@@ -89,16 +91,16 @@ object NotificationCaptureStore {
       val repaired = current.toMutableList()
       repaired[samePostedNotification] = prior.copy(title = title, text = text)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
-      recordRecentContent(prefs, contentFingerprint(pkg, title, text), ts)
+      contentFingerprint(pkg, title, text)?.let { recordRecentContent(prefs, it, ts) }
       return "repaired"
     }
     // The re-post guard, which has to outlive the queue row itself: by the time
     // an issuer redelivers, the first copy is normally drained and acknowledged
     // and `current` is empty, so comparing against the queue alone would see
     // nothing. Recent content receipts are the only record left of it.
-    val fingerprint = contentFingerprint(pkg, title, text)
-    val recent = recentContent(prefs)
-    if (recent.any { it.first == fingerprint && kotlin.math.abs(it.second - ts) <= REPOST_WINDOW_MS }) {
+    val eventIdentity = contentFingerprint(pkg, title, text)
+    val recent = if (eventIdentity != null) recentContent(prefs) else emptyList()
+    if (eventIdentity != null && recent.any { it.first == eventIdentity && kotlin.math.abs(it.second - ts) <= REPOST_WINDOW_MS }) {
       return "repost"
     }
     val next = (current + CapturedBankNotification(
@@ -109,7 +111,7 @@ object NotificationCaptureStore {
       ts = ts,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
-    recordRecentContent(prefs, fingerprint, ts)
+    if (eventIdentity != null) recordRecentContent(prefs, eventIdentity, ts)
     return "appended"
   }
 
@@ -286,7 +288,8 @@ object NotificationCaptureStore {
    * would weaken it, since an attacker holding the file could confirm a
    * guessed body by hashing it.
    */
-  private fun contentFingerprint(pkg: String, title: String, text: String): String {
+  private fun contentFingerprint(pkg: String, title: String, text: String): String? {
+    if (!TRANSACTION_DATETIME_RE.containsMatchIn(text)) return null
     val digest = MessageDigest.getInstance("SHA-256")
       .digest("$pkg\u0000$title\u0000$text".toByteArray(Charsets.UTF_8))
     return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
