@@ -80,6 +80,7 @@ async function screen(t, options = {}) {
     pending: 0, dropped: 0, corrupt: false, ...options.nativeStatus,
   };
   const native = {
+    notificationCaptureSupported: options.notificationCaptureSupported === true,
     async getCaptureStatus() { await controls.beforeStatus?.(); return { ...nativeStatus }; },
     async setCaptureEnabled(value) { await controls.beforeEnable?.(value); nativeStatus.enabled = value; receipts.push(['enabled', value]); },
     async getCompletedSession() { return null; },
@@ -314,16 +315,60 @@ test('native capture unavailable on entry recovers through Retry without claimin
   assert.equal(s.nativeStatus.enabled, false);
 });
 
+test('iOS 27 can choose notifications before answering the bank-name question', async t => {
+  const s = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true });
+  await s.press('iosNotificationSetupAction');
+  assert.equal(s.saved().futureCaptureSource, 'notification');
+  assert.equal(s.saved().futureAutomationConfirmed, false);
+  assert.equal(s.routes.at(-1)[1].pathname, '/ios-notification-setup');
+  assert.deepEqual(s.store.state.knownBanks, []);
+  assert.equal(s.nativeStatus.enabled, false);
+});
+
+test('notification-only onboarding finishes with its own proof and never requires SMS setup or a bank-name choice', async t => {
+  const s = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true,
+    nativeStatus: { enabled: true, notificationSetupProofAt: Date.now(), setupProofVersion: null },
+    progress: { futureCaptureSource: 'notification', futureAutomationConfirmed: true, historyStatus: 'complete' } });
+  assert.equal(s.all().some(node => node.props?.testID === 'ios-message-setup-banks'), false);
+  await s.press('iosMessageContinue');
+  assert.equal(s.onboarded, true);
+  assert.deepEqual(s.store.state.knownBanks, []);
+});
+
+test('SMS proof cannot finish a selected notification automation', async t => {
+  const s = await screen(t, { version: '27.0', notificationCaptureSupported: true,
+    nativeStatus: { enabled: true, setupProofVersion: 1 },
+    progress: { futureCaptureSource: 'notification', futureAutomationConfirmed: true, historyStatus: 'complete' } });
+  assert.equal(s.button('iosMessageContinue'), undefined);
+  assert.equal(s.onboarded, false);
+  await s.press('iosNotificationChooseSms');
+  assert.equal(s.saved().futureCaptureSource, 'message');
+  assert.equal(s.saved().futureAutomationConfirmed, false);
+  assert.equal(s.saved().historyStatus, 'complete');
+});
+
+test('notification help cannot open an invisible SMS guide or run its permission check', async t => {
+  const s = await screen(t, { version: '27.0', notificationCaptureSupported: true,
+    nativeStatus: { enabled: true, notificationSetupProofAt: Date.now() },
+    progress: { futureCaptureSource: 'notification', futureAutomationConfirmed: true, historyStatus: 'complete' } });
+  await s.press('iosMessageLearnMore');
+  assert.equal(s.button('iosMessageReviewAutomation'), undefined);
+  assert.equal(s.button('iosMessageAddAgain'), undefined);
+  assert.equal(s.button('iosMessageRunPermissionCheck'), undefined);
+  assert.ok(!s.text().includes(s.copy.t('iosMessageGuideSender')));
+  assert.ok(s.button('iosMessageContinue'));
+});
+
 test('failed Shortcuts scheme probe on future proof offers App Store and never enables capture', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true },
     controls: { beforeCanOpen: async () => { throw Error('scheme unavailable'); } } });
-  await s.press('iosLocalAutomationAdded');
+  await s.press('iosMessageRunPermissionCheck');
   assert.ok(s.text().includes(s.copy.t('iosShortcutsMissing')));
   assert.equal(s.nativeStatus.enabled, false);
   assert.deepEqual(s.urls, []);
   assert.ok(s.button('iosInstallShortcuts'));
   s.controls.beforeCanOpen = undefined;
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   assert.equal(s.nativeStatus.enabled, true);
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.equal(s.onboarded, false);
@@ -392,11 +437,11 @@ test('history double start and returning from Shortcuts never start a second ext
 
 test('proof callback success cannot fabricate first SMS and error callback gets actionable feedback', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true } });
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   await s.callback('success');
   assert.equal(s.saved().futureStatus, 'in-progress');
   assert.equal(s.nativeStatus.firstCapturedAt, null);
-  assert.ok(s.button('iosMessageRetryCheck'));
+  assert.ok(s.button('iosMessageRunPermissionCheck'));
   await s.callback('error');
   assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
@@ -407,13 +452,13 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
 
 test('canceled proof and unknown callbacks preserve retry without inventing capture or completing onboarding', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true } });
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   for (const callback of ['cancel', 'unknown', '', 'success']) {
     await s.callback(callback); await s.foreground(2);
     assert.equal(s.saved().futureStatus, 'in-progress');
     assert.equal(s.nativeStatus.firstCapturedAt, null);
     assert.equal(s.onboarded, false);
-    assert.ok(s.button('iosMessageRetryCheck'));
+    assert.ok(s.button('iosMessageRunPermissionCheck'));
   }
 });
 

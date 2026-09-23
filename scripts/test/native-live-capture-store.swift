@@ -191,6 +191,86 @@ struct NativeLiveCaptureStoreTests {
     }
   }
 
+  private static func testNotifications() throws {
+    let notificationRoot = root("notifications")
+    defer { remove([notificationRoot]) }
+    var now = fixedClock
+    let queue = store(root: notificationRoot, now: { now })
+    check("disabled notification does not enter the queue", try queue.stageNotification(
+      text: messageBody, eventId: eventId(90_000), observedAt: fixedClock) == .disabled)
+    expectsEntitlementRequired("disabled notification cannot prove setup") {
+      try queue.recordNotificationSetupProof(at: fixedClock)
+    }
+    try grantLifetimeAndEnable(queue)
+    try queue.recordNotificationSetupProof(at: fixedClock)
+    check("notification setup proof records only the manual action timestamp", try queue.status().notificationSetupProofAt == fixedClock.timeIntervalSince1970
+      && queue.status().pending == 0 && queue.status().setupProofAt == nil
+      && queue.status().firstNotificationReceivedAt == nil && queue.status().lastReceivedAt == nil)
+    expectsThrow("notification setup rejects invalid date") {
+      try queue.recordNotificationSetupProof(at: Date(timeIntervalSince1970: .nan))
+    }
+    check("notification cannot use a message GUID digest", try queue.stageNotification(
+      text: messageBody, eventId: String(repeating: "a", count: 64), observedAt: fixedClock) == .invalid)
+    check("notification cannot claim a bank sender", try queue.stage(sender: knownSender,
+      body: messageBody, eventId: eventId(90_000), observedAt: fixedClock, source: .notification) == .invalid)
+    for text in ["", "  \n\t", String(repeating: "a", count: WafraLiveCaptureStore.maxBodyBytes + 1)] {
+      check("notification rejects empty or oversized text", try queue.stageNotification(
+        text: text, eventId: eventId(90_000), observedAt: fixedClock) == .invalid)
+    }
+    check("rejected notifications never establish receipts", try queue.status().firstNotificationReceivedAt == nil
+      && queue.status().lastNotificationReceivedAt == nil && queue.status().pending == 0)
+    let oldManifestURL = notificationRoot.appendingPathComponent("manifest.plist")
+    var oldManifest = try PropertyListSerialization.propertyList(from: Data(contentsOf: oldManifestURL), format: nil) as! [String: Any]
+    oldManifest.removeValue(forKey: "notificationSetupProofAt")
+    oldManifest.removeValue(forKey: "firstNotificationReceivedAt")
+    oldManifest.removeValue(forKey: "lastNotificationReceivedAt")
+    try PropertyListSerialization.data(fromPropertyList: oldManifest, format: .binary, options: 0).write(to: oldManifestURL, options: .atomic)
+    check("old manifests migrate notification diagnostics to unknown", try queue.status().notificationSetupProofAt == nil
+      && queue.status().firstNotificationReceivedAt == nil && queue.status().lastNotificationReceivedAt == nil
+      && !queue.status().corrupt)
+    _ = try queue.stage(sender: knownSender, body: messageBody, eventId: eventId(89_999), observedAt: fixedClock)
+    check("SMS retains message source and does not establish notification receipt",
+      try decoded(queue.listPendingRecords(limit: 1)[0])?["source"] as? String == "message"
+      && queue.status().firstNotificationReceivedAt == nil)
+    check("notification stages successfully", try queue.stageNotification(
+      text: messageBody, eventId: eventId(90_000), observedAt: fixedClock) == .accepted)
+    let rows = try queue.listPendingRecords(limit: 5).compactMap(decoded)
+    let notification = rows.first { $0["source"] as? String == "notification" }
+    check("notification roundtrips with generic sender and exact text",
+      notification?["sender"] as? String == "Wafra Notification" && notification?["text"] as? String == messageBody)
+    check("notification admission records receipt without setup or ledger proof", try queue.status().firstNotificationReceivedAt == fixedClock.timeIntervalSince1970
+      && queue.status().lastNotificationReceivedAt == fixedClock.timeIntervalSince1970
+      && queue.status().setupProofAt == nil && queue.status().firstCapturedAt == nil)
+    now = fixedClock.addingTimeInterval(30)
+    _ = try queue.stageNotification(text: messageBody, eventId: eventId(90_000), observedAt: fixedClock)
+    check("pending replay does not advance notification receipt", try queue.status().lastNotificationReceivedAt == fixedClock.timeIntervalSince1970)
+    try queue.acknowledgeRecords(ids: [eventId(90_000)])
+    let reopened = store(root: notificationRoot, now: { now })
+    check("acknowledged notification replay remains durable and does not requeue", try reopened.stageNotification(
+      text: messageBody, eventId: eventId(90_000), observedAt: fixedClock) == .accepted
+      && reopened.status().pending == 1 && reopened.status().lastNotificationReceivedAt == fixedClock.timeIntervalSince1970)
+    _ = try reopened.stageNotification(text: "second notification", eventId: eventId(90_001), observedAt: now)
+    check("later notification advances last receipt while preserving first", try reopened.status().firstNotificationReceivedAt == fixedClock.timeIntervalSince1970
+      && reopened.status().lastNotificationReceivedAt == now.timeIntervalSince1970)
+    try reopened.acknowledgeRecords(ids: [eventId(89_999)])
+    for index in 0..<3 {
+      _ = try reopened.stageNotification(text: "notification \(index)", eventId: eventId(90_010 + index), observedAt: now)
+    }
+    _ = try reopened.stage(sender: knownSender, body: "later SMS", eventId: eventId(90_020), observedAt: now.addingTimeInterval(1))
+    let oldReaderRows = try reopened.listPendingRecords(limit: 2, includeNotifications: false)
+    check("legacy reader filters notifications before page limit so later SMS is not starved",
+      oldReaderRows.count == 1 && oldReaderRows.compactMap(rowId) == [eventId(90_020)])
+    try reopened.acknowledgeRecords(ids: oldReaderRows.compactMap(rowId))
+    check("legacy reader acknowledgement preserves all notification records", try reopened.status().pending == 4
+      && reopened.listPendingRecords(limit: 2, includeNotifications: false).isEmpty)
+    let allReaderRows = try reopened.listPendingRecords(limit: 50, includeNotifications: true).compactMap(decoded)
+    check("notification-aware reader sees the preserved notification queue",
+      allReaderRows.count == 4 && allReaderRows.allSatisfy { $0["source"] as? String == "notification" })
+    try reopened.eraseAll()
+    check("erase clears notification setup proof and receipts", try reopened.status().notificationSetupProofAt == nil && reopened.status().firstNotificationReceivedAt == nil
+      && reopened.status().lastNotificationReceivedAt == nil)
+  }
+
   static func main() throws {
     if try runChildIfRequested() { return }
 
@@ -1120,6 +1200,10 @@ struct NativeLiveCaptureStoreTests {
         && countCapacity.status().enabled
     )
 
+    check("capacity-refused notification does not establish receipts", try countCapacity.stageNotification(
+      text: "notification", eventId: eventId(90_100), observedAt: fixedClock) == .capacityReached
+      && countCapacity.status().firstNotificationReceivedAt == nil && countCapacity.status().lastNotificationReceivedAt == nil)
+
     let byteCapacity = store(root: byteRoot)
     try grantLifetimeAndEnable(byteCapacity)
     let largeBody = String(repeating: "x", count: 16 * 1024)
@@ -1494,6 +1578,8 @@ struct NativeLiveCaptureStoreTests {
       "records use complete-until-first-authentication protection",
       recordProtection == .completeUntilFirstUserAuthentication
     )
+
+    try testNotifications()
 
     print("\nNative live capture store: \(passed) passed, \(failed) failed")
     if failed > 0 { Foundation.exit(1) }

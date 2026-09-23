@@ -1,11 +1,76 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import {
+  BOUNDARY_SAFE_SHORTCUT_NAME, buildBoundarySafeHistoryShortcut, verifyBoundarySafeHistoryShortcut,
   COLUMN_SEPARATOR, FAST_SHORTCUT_NAME, ROW_SHORTCUT_NAME, WINDOWED_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildFastHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut, buildWindowedHistoryShortcut,
   verifyColumnarHistoryShortcut, verifyFastHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut, verifyWindowedHistoryShortcut,
 } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 import { buildColumnFrameProbe } from '../build-ios-column-frame-check.mjs';
+
+// Evaluate the generator's actual date actions and strict query predicates.
+// This checks our query contract, not Apple's on-device Messages implementation.
+function selectOldestFromProbeGraph(graph, messages, now) {
+  const dates = new Map();
+  const reference = value => value.Value.attachmentsByRange['{0, 1}'];
+  for (const action of graph.WFWorkflowActions) {
+    const p = action.WFWorkflowActionParameters;
+    if (action.WFWorkflowActionIdentifier === 'is.workflow.actions.date') dates.set(p.UUID, now);
+    if (action.WFWorkflowActionIdentifier === 'is.workflow.actions.adjustdate') {
+      const duration = p.WFDuration.Value;
+      assert.ok(['days', 'sec'].includes(duration.Unit));
+      assert.equal(p.WFAdjustOperation, 'Subtract');
+      const delta = duration.Magnitude * (duration.Unit === 'days' ? 86_400_000 : 1_000);
+      const source = dates.get(reference(p.WFDate).OutputUUID);
+      assert.ok(Number.isFinite(source), 'date adjustment has a resolved input');
+      dates.set(p.UUID, source - delta);
+    }
+    if (action.WFWorkflowActionIdentifier !== 'com.apple.MobileSMS.MessageEntity') continue;
+    if (p.WFContentItemSortOrder !== 'Oldest First' || p.WFContentItemLimitNumber !== 1) continue;
+    const candidates = messages.filter(message => p.WFContentItemFilter.Value.WFActionParameterFilterTemplates.every(predicate => {
+      const boundary = dates.get(reference(predicate.Values.Date).OutputUUID);
+      assert.ok(Number.isFinite(boundary), 'query has a resolved date boundary');
+      assert.ok([0, 2].includes(predicate.Operator));
+      return predicate.Operator === 0 ? message < boundary : message > boundary;
+    }));
+    // The generated ladder stops probing after its first non-empty band.
+    if (candidates.length) return Math.min(...candidates);
+  }
+  return null;
+}
+
+test('oldest anchor includes messages on either side of every strict age-band boundary', () => {
+  const graph = buildBoundarySafeHistoryShortcut();
+  const now = Date.UTC(2026, 8, 23, 12);
+  for (const ageDays of [365, 1_095, 3_650]) {
+    const boundary = now - ageDays * 86_400_000;
+    for (const offset of [-1, 0, 1]) {
+      const oldest = boundary + offset;
+      assert.equal(selectOldestFromProbeGraph(graph, [oldest, boundary + 2_000], now), oldest,
+        `oldest at ${ageDays} days plus ${offset} ms must not disappear between bands`);
+      assert.equal(selectOldestFromProbeGraph(graph, [oldest], now), oldest,
+        `a single message at ${ageDays} days plus ${offset} ms must not appear empty`);
+    }
+  }
+});
+
+test('v7 is a separate candidate; existing v2-v6 artifact graphs remain byte-identical', () => {
+  const candidate = buildBoundarySafeHistoryShortcut();
+  assert.equal(candidate.WFWorkflowName, BOUNDARY_SAFE_SHORTCUT_NAME);
+  assert.equal(verifyBoundarySafeHistoryShortcut(candidate), true);
+  assert.throws(() => verifyWindowedHistoryShortcut(candidate));
+  assert.throws(() => verifyBoundarySafeHistoryShortcut(buildWindowedHistoryShortcut()));
+  for (const [build, digest] of [
+    [buildPagedHistoryShortcut, '7f210db00b72757636273b5bccd8a3e070ba02385ab918383d4e42f6475ae41d'],
+    [buildColumnarHistoryShortcut, '71c2370ffaad57b9ddbdbabcac86def42e1f6032a62ed3f535ac04dd463bde07'],
+    [buildRowHistoryShortcut, 'e606e26b88d7bf570994e1c7fee836bbe2a047c316b55816a4b16e68d0154223'],
+    [buildFastHistoryShortcut, 'afad094ade5c1df80020e26a4082439a6e2b36bc2a474ced9924676f5db784d1'],
+    [buildWindowedHistoryShortcut, '647abdf525f00938ad49eb226dcad53b08d37e0164b10558f893509c6d14f67c'],
+  ]) {
+    assert.equal(createHash('sha256').update(JSON.stringify(build())).digest('hex'), digest, build.name);
+  }
+});
 
 test('typed-date graph never formats or parses a date inside Shortcuts', () => {
   // iOS 26 materialized the Message `date` property as the phone's display
@@ -302,7 +367,7 @@ test('a published plist may reorder dictionary keys without changing its action 
   assert.equal(verifyPagedHistoryShortcut(reorder(buildPagedHistoryShortcut())), true);
 });
 test('every generated action reference resolves and all action IDs are unique', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     const ids = graph.WFWorkflowActions.map(a => a.WFWorkflowActionParameters.UUID);
     assert.equal(new Set(ids).size, ids.length);
     walk(graph, value => {
@@ -311,7 +376,7 @@ test('every generated action reference resolves and all action IDs are unique', 
   }
 });
 test('all scalar text variable ranges actually cover the placeholder', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
     if (value.WFSerializationType !== 'WFTextTokenString') return;
     for (const range of Object.keys(value.Value.attachmentsByRange || {})) {
       const match = /^\{(\d+), (\d+)\}$/.exec(range);
@@ -321,7 +386,7 @@ test('all scalar text variable ranges actually cover the placeholder', () => {
   });
 });
 test('conditional subjects are explicitly typed for Shortcuts on-device comparisons', () => {
-  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions, ...buildWindowedHistoryShortcut().WFWorkflowActions]
+  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions, ...buildWindowedHistoryShortcut().WFWorkflowActions, ...buildBoundarySafeHistoryShortcut().WFWorkflowActions]
     .filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
       action.WFWorkflowActionParameters.WFControlFlowMode === 0);
   assert.ok(actions.length > 0);
@@ -339,7 +404,7 @@ test('conditional subjects are explicitly typed for Shortcuts on-device comparis
 });
 
 test('repeat and conditional blocks are nested and closed correctly', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut()]) {
   const stack = [];
   for (const action of graph.WFWorkflowActions) {
     const p = action.WFWorkflowActionParameters;
@@ -402,7 +467,7 @@ test('empty pages and the safety work budget cannot be advertised as completion'
   assert.equal(graph.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url' && JSON.stringify(a).includes('import-sms')).length, 1);
 });
 test('no raw source leaves through files, network, clipboard, mail, or messages', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     assert.doesNotMatch(JSON.stringify(graph), /https?:/);
     // Inspect executable identifiers, not explanatory comments such as
     // "no clipboard". The exact-graph validator independently pins parameters.

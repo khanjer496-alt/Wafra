@@ -31,6 +31,10 @@ const FILES = {
     MODULES,
     'notification-reader/android/src/main/java/expo/modules/notificationreader/SensitiveNotificationFilter.kt',
   ),
+  NotificationCaptureStore: path.join(
+    MODULES,
+    'notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt',
+  ),
 };
 
 function read(file) {
@@ -97,4 +101,21 @@ function patternSource(file, name, vars = {}) {
   return interpolate(literals(decl).replace(/\\\\/g, '\\'), vars);
 }
 
-module.exports = { FILES, read, literals, interpolate, constant, patternSource };
+/**
+ * The pattern of a `Regex("""...""")` declaration — a Kotlin RAW string.
+ *
+ * `literals` cannot read these: it scans for `"..."` and a raw string opens
+ * with an empty one. Raw strings also apply no escaping of their own, so the
+ * bytes between the delimiters are already exactly what Kotlin hands the
+ * regex engine, and nothing must be unescaped on the way out.
+ */
+function rawPatternSource(file, name) {
+  const src = read(file);
+  const decl = src.match(
+    new RegExp(`val ${name} =\\s*Regex\\("""([\\s\\S]*?)"""`),
+  )?.[1];
+  if (!decl) throw new Error(`${name} raw Regex not found in ${file}.kt`);
+  return decl;
+}
+
+module.exports = { FILES, read, literals, interpolate, constant, patternSource, rawPatternSource };

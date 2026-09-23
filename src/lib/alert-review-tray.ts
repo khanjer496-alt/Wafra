@@ -28,6 +28,7 @@ type ReviewableFamily = Extract<AlertFamily,
   'purchase' | 'transfer' | 'cash-withdrawal' | 'refund' | 'fee' | 'utility' | 'recurring-payment'>;
 
 export interface ReviewAlert {
+  attentionReason?: 'possible-notification-replay';
   kind?: 'registered';
   id: string;
   sourceKey: string;
@@ -51,6 +52,7 @@ export interface ReviewAlert {
 }
 
 export interface UniversalReviewAlert {
+  attentionReason?: 'possible-notification-replay';
   kind: 'universal';
   id: string;
   sourceKey: string;
@@ -65,6 +67,9 @@ export interface UniversalReviewAlert {
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
+/** New local notification records have an independent, non-evicting quota. */
+export const isIosNotificationReview = (item: Pick<ReviewEntry, 'channel' | 'sourceKey'>): boolean =>
+  item.channel === 'push' && /^local_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
 export const isUniversalReviewAlert = (item: ReviewEntry): item is UniversalReviewAlert =>
   item.kind === 'universal';
 
@@ -182,17 +187,23 @@ const reviewableFamily = (family: AlertFamily): family is ReviewableFamily => [
 export const pruneAlertReviewTray = (
   state: AlertReviewTrayState,
   now: number,
-): AlertReviewTrayState => ({
+): AlertReviewTrayState => {
+  const fresh = state.pending.filter(item => item.expiresAt > now).sort((a, b) => a.observedAt - b.observedAt);
+  // Keep up to fifty protected notification reviews alongside the legacy
+  // newest-fifty lane. SMS/relay/history admission must not evict an already
+  // acknowledged notification, nor start refusing their own records without
+  // a retry path. Canonical writes never exceed fifty notification entries.
+  const notifications = fresh.filter(isIosNotificationReview).slice(0, REVIEW_ALERT_CAP);
+  const legacy = fresh.filter(item => !isIosNotificationReview(item)).slice(-REVIEW_ALERT_CAP);
+  return {
   schemaVersion: 1,
-  pending: state.pending
-    .filter((item) => item.expiresAt > now)
-    .sort((a, b) => a.observedAt - b.observedAt)
-    .slice(-REVIEW_ALERT_CAP),
+  pending: [...notifications, ...legacy].sort((a, b) => a.observedAt - b.observedAt),
   tombstones: state.tombstones.filter((item) => item.expiresAt > now).slice(-REVIEW_TOMBSTONE_CAP),
   templateRules: [...state.templateRules]
     .sort((a, b) => a.updatedAt - b.updatedAt)
     .slice(-REVIEW_TEMPLATE_RULE_CAP),
-});
+  };
+};
 
 export const prepareReviewAlert = (input: ReviewAdmissionInput): ReviewAlert | null => {
   const { route, review } = input.inspection;
@@ -318,6 +329,12 @@ export const admitPreparedReviewAlert = (
     state.pending.some((entry) => canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt) === sourceKey)) {
     return { state, outcome: 'duplicate' };
   }
+  // This local notification caller withholds ACK on refusal. Other capture
+  // callers still use the legacy newest-fifty policy and cannot yet apply
+  // backpressure, so do not silently change their admission contract here.
+  if (isIosNotificationReview(item) && state.pending.filter(isIosNotificationReview).length >= REVIEW_ALERT_CAP) {
+    return { state, outcome: 'refused', reason: 'review-capacity' };
+  }
   return {
     outcome: 'admitted',
     state: pruneAlertReviewTray({ ...state, pending: [...state.pending, item] }, now),
@@ -358,6 +375,8 @@ const families: readonly ReviewableFamily[] = [
 const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const common = value as ReviewEntry;
+  const attention = common.channel === 'push' && common.attentionReason === 'possible-notification-replay'
+    ? { attentionReason: 'possible-notification-replay' as const } : {};
   if (!opaqueKey(common.id) || !reviewSourceKey(common.sourceKey) ||
   !validTimestamp(common.observedAt) || !captureSourceTimeMatches(common.sourceKey, common.observedAt) || !validTimestamp(common.expiresAt) ||
   common.expiresAt <= common.observedAt || common.expiresAt > now + REVIEW_ALERT_TTL_MS) return null;
@@ -368,7 +387,7 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
     notificationSourceClass(common.sourceClass)
     ? { sourcePackage: common.sourcePackage, sourceClass: common.sourceClass }
     : {};
-  return { ...item, ...sourceMeta, expiresAt: common.expiresAt };
+  return { ...item, ...sourceMeta, ...attention, expiresAt: common.expiresAt };
   }
   const item = value as ReviewAlert;
   const instrument = item?.instrument;
@@ -416,6 +435,7 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
     direction: item.direction, family: item.family, rail: item.rail,
     instrument: instrument ? { kind: instrument.kind, last4: instrument.last4 } : null,
     ...sourceMeta,
+    ...attention,
   };
 };
 

@@ -58,6 +58,7 @@ const transaction: Check = (value) => {
     originalAmountMinor: positive, originalCurrency: (v) => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
     fxRate: finitePositive, fxRateDate: isoDate, fxSource: oneOf('bank', 'reference', 'fallback'),
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
+    notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     viaPush: boolean, captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,

@@ -1,6 +1,8 @@
 import Foundation
 
 private let englishValues = [
+  "live.notification.title": "Capture bank notification",
+  "live.notification.text.parameter": "Notification text",
   "live.setup_proof.title": "Record Wafra capture setup proof",
   "live.setup_proof.error": "Wafra could not record the setup proof.",
   "live.automation_input_probe.title": "Probe Wafra automation input",
@@ -15,6 +17,8 @@ private let englishValues = [
 ]
 
 private let arabicValues = [
+  "live.notification.title": "التقاط إشعار بنكي",
+  "live.notification.text.parameter": "نص الإشعار",
   "live.setup_proof.title": "تسجيل إثبات إعداد الالتقاط في وفرة",
   "live.setup_proof.error": "تعذّر على وفرة تسجيل إثبات الإعداد.",
   "live.automation_input_probe.title": "اختبار إدخال أتمتة رسائل وفرة",
@@ -87,6 +91,14 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
     check("resource helper finds the exact CocoaPods bundle",
       WafraLiveCaptureResources.bundle().bundleURL.lastPathComponent ==
         "WafraLiveCaptureResources.bundle")
+
+    let shortcutURL = WafraLiveCaptureResources.bundle().url(
+      forResource: "Wafra Notifications v1", withExtension: "shortcut")
+    check("resource bundle includes the installable notification Shortcut",
+      shortcutURL?.isFileURL == true && shortcutURL?.lastPathComponent == "Wafra Notifications v1.shortcut")
+    let shortcutBytes = shortcutURL.flatMap { try? Data(contentsOf: $0) }
+    check("bundled notification Shortcut is the signed AEA asset",
+      shortcutBytes?.count == 22747 && shortcutBytes?.prefix(4) == Data("AEA1".utf8))
 
     for key in englishValues.keys.sorted() {
       let english = resolve(key, localization: "en")

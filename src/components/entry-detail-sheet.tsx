@@ -214,7 +214,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     onClose();
   };
 
-  const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
+  // A notification capture is stored with `source: 'sms'` and `viaPush`, so
+  // reading `source` alone called every bank-app alert an SMS. That is not
+  // cosmetic: which channel a row came from is the first thing anyone asks
+  // when a charge looks wrong, and the wrong answer sends them looking for a
+  // message their bank never sent.
+  const sourceLabel =
+    transaction.source === 'sms'
+      ? transaction.viaPush ? t('bankNotificationSource') : t('bankSmsSource')
+      : t('addedByHand');
   const fxSourceLabel =
     transaction.fxSource === 'bank'
       ? tf('bankQuotedRate', { currency: ledgerCurrencyCode() })

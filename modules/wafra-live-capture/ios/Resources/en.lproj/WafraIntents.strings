@@ -14,3 +14,7 @@
 "live.stage.capacity" = "Wafra's local capture queue is full. Open Wafra to process waiting messages, then try again.";
 "live.stage_text.title" = "Capture Wafra message text";
 "live.stage_text.message.parameter" = "Message";
+"live.notification.title" = "Capture bank notification";
+"live.notification.text.parameter" = "Notification text";
+"live.notification.invalid" = "No usable notification text reached Wafra. In Shortcuts, pass the notification message as text to Notification text, then try again.";
+"live.notification.error" = "Wafra could not save this notification. Open Wafra to check Capture status, then try again.";

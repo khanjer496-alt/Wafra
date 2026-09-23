@@ -6,6 +6,7 @@ import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { isUniversalReviewAlert } from '@/lib/alert-review-tray';
+import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
   parseLocalMessageRecord,
   preflightLocalMessageRecord,
@@ -32,6 +33,8 @@ export interface IosLocalCaptureOutcome {
   invalid: number;
   firstCapturedAt: number | null;
   retirement: 'not-needed' | 'complete' | 'retry-needed';
+  /** Refused reviews remain in the native queue; retry after Review has room. */
+  deferredReviews?: number;
 }
 
 export interface IosLocalCaptureCoordinator {
@@ -306,7 +309,12 @@ export function createIosLocalCaptureCoordinator(
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
 
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-      const serializedPage = await input.native.listPendingRecords(PAGE_SIZE);
+      // Older JS must never see a new source it would reject and acknowledge.
+      // New binaries expose notification rows only through this opt-in API.
+      const serializedPage = input.native.notificationCaptureSupported === true &&
+        input.native.listPendingRecordsIncludingNotifications
+        ? await input.native.listPendingRecordsIncludingNotifications(PAGE_SIZE)
+        : await input.native.listPendingRecords(PAGE_SIZE);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       if (serializedPage.length === 0) break;
       if (serializedPage.length > PAGE_SIZE) {
@@ -357,6 +365,12 @@ export function createIosLocalCaptureCoordinator(
               pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',
             } : {}),
           });
+      const replayState = input.ledger.getState();
+      const reviewPossibleReplay = createIosNotificationReplayGuard(replayState.transactions ?? [], [
+        ...(replayState.reviewTray?.pending ?? []).map(item => item.sourceKey),
+        ...(replayState.reviewTray?.tombstones ?? []).filter(item => item.expiresAt > now.getTime())
+          .map(item => item.sourceKey),
+      ]);
       for (let recordIndex = 0; recordIndex < page.length; recordIndex += 1) {
         const record = page[recordIndex];
         let serialized = record.serialized;
@@ -373,6 +387,21 @@ export function createIosLocalCaptureCoordinator(
           serializedPage[record.sourceIndex] = '';
         }
         outcomes.push(outcome);
+      }
+
+      // Seed every authoritative SMS before comparing notifications, regardless
+      // of native queue order. Source text has already been cleared above.
+      for (let index = 0; index < outcomes.length; index += 1) {
+        const outcome = outcomes[index];
+        if (outcome.kind === 'parsed' && outcome.row.channel !== 'push') {
+          reviewPossibleReplay(outcome, page[index].preflight.id);
+        }
+      }
+      for (let index = 0; index < outcomes.length; index += 1) {
+        const outcome = outcomes[index];
+        if (outcome.kind !== 'parsed' || outcome.row.channel === 'push') {
+          outcomes[index] = reviewPossibleReplay(outcome, page[index].preflight.id);
+        }
       }
 
       totals.scanned += outcomes.length;
@@ -556,10 +585,17 @@ export function createIosLocalCaptureCoordinator(
 
       const qualifyingReviewIds = new Set([...priorReviewIds, ...admittedReviewIds]);
       const qualifyingDeclineIds = new Set([...priorDeclineIds, ...importedDeclineIds]);
+      // Notification delivery cannot prove the Message automation or retire
+      // its older relay. Keep the existing milestone exclusively for SMS.
+      const messageOutcomes = outcomes.filter(outcome =>
+        outcome.kind === 'parsed' || outcome.kind === 'declined' ? outcome.row.channel !== 'push'
+          : outcome.kind === 'review' ? outcome.item.channel !== 'push' : false);
+      const messageIds = new Set(outcomes.flatMap((outcome, index) =>
+        messageOutcomes.includes(outcome) ? [page[index].preflight.id] : []));
       const qualifying = [
-        earliestObservedAt(outcomes, 'parsed'),
-        earliestQualification(allReviewQualifications, qualifyingReviewIds),
-        earliestQualification(allDeclineQualifications, qualifyingDeclineIds),
+        earliestObservedAt(messageOutcomes, 'parsed'),
+        earliestQualification(allReviewQualifications.filter(value => messageIds.has(value.id)), qualifyingReviewIds),
+        earliestQualification(allDeclineQualifications.filter(value => messageIds.has(value.id)), qualifyingDeclineIds),
       ].filter((value): value is number => value !== null);
       if (qualifying.length > 0) {
         const observedAt = Math.min(...qualifying);
@@ -576,8 +612,21 @@ export function createIosLocalCaptureCoordinator(
       // append that raced this page cannot be removed by its acknowledgement.
       requireLedgerGeneration(input.ledger, pageGeneration);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-      await input.native.acknowledgeRecords(page.map((record) => record.preflight.id));
+      const reviewTray = input.ledger.getState().reviewTray;
+      const deferredReviewIds = new Set(outcomes.flatMap((outcome, index) => {
+        if (outcome.kind !== 'review' || outcome.item.channel !== 'push') return [];
+        const item = outcome.item;
+        const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
+          reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
+        return retained ? [] : [page[index].preflight.id];
+      }));
+      const acknowledgedIds = page.map(record => record.preflight.id).filter(id => !deferredReviewIds.has(id));
+      if (acknowledgedIds.length > 0) await input.native.acknowledgeRecords(acknowledgedIds);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+      if (deferredReviewIds.size > 0) {
+        totals.ignored = Math.max(0, totals.ignored - deferredReviewIds.size);
+        return { ...stopped(firstCapturedAt), deferredReviews: deferredReviewIds.size };
+      }
       if (pageIndex + 1 < MAX_PAGES) await yieldBetweenPages();
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
     }

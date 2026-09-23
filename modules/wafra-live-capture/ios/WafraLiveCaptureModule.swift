@@ -5,6 +5,7 @@ private enum WafraLiveCaptureBridgeError: Error {
   case invalidLimit
   case invalidTimestamp
   case invalidEntitlementLease
+  case notificationShortcutUnavailable
 }
 
 private struct WafraLiveCaptureStatusRecord: Record {
@@ -19,6 +20,9 @@ private struct WafraLiveCaptureStatusRecord: Record {
   @Field var firstCapturedAt: Double?
   @Field var lastReceivedAt: Double?
   @Field var lastHandledAt: Double?
+  @Field var notificationSetupProofAt: Double?
+  @Field var firstNotificationReceivedAt: Double?
+  @Field var lastNotificationReceivedAt: Double?
 }
 
 private func bridgeLimit(_ limit: Double) throws -> Int {
@@ -107,6 +111,7 @@ public class WafraLiveCaptureModule: Module {
   public func definition() -> ModuleDefinition {
     Name("WafraLiveCapture")
     Constant("queueChangeEventsSupported") { true }
+    Constant("notificationCaptureSupported") { true }
     Events("onQueueChanged")
     OnStartObserving { self.startQueueObservation() }
     OnStopObserving { self.stopQueueObservation() }
@@ -149,7 +154,12 @@ public class WafraLiveCaptureModule: Module {
 
     AsyncFunction("listPendingRecords") { (limit: Double) -> [String] in
       let nativeLimit = try bridgeLimit(limit)
-      return try WafraLiveCaptureStore.shared.listPendingRecords(limit: nativeLimit)
+      return try WafraLiveCaptureStore.shared.listPendingRecords(limit: nativeLimit, includeNotifications: false)
+    }
+
+    AsyncFunction("listPendingRecordsIncludingNotifications") { (limit: Double) -> [String] in
+      let nativeLimit = try bridgeLimit(limit)
+      return try WafraLiveCaptureStore.shared.listPendingRecords(limit: nativeLimit, includeNotifications: true)
     }
 
     AsyncFunction("acknowledgeRecords") { (ids: [String]) in
@@ -158,6 +168,18 @@ public class WafraLiveCaptureModule: Module {
 
     AsyncFunction("purgeExpired") { () -> Int in
       try WafraLiveCaptureStore.shared.purgeExpired()
+    }
+
+    AsyncFunction("getNotificationShortcutURL") { () -> String in
+      guard #available(iOS 16.0, *) else {
+        throw WafraLiveCaptureBridgeError.notificationShortcutUnavailable
+      }
+      guard let url = WafraLiveCaptureResources.bundle().url(
+        forResource: "Wafra Notifications v1", withExtension: "shortcut"
+      ), url.isFileURL else {
+        throw WafraLiveCaptureBridgeError.notificationShortcutUnavailable
+      }
+      return url.absoluteString
     }
 
     AsyncFunction("getCaptureStatus") { () -> WafraLiveCaptureStatusRecord in
@@ -174,6 +196,9 @@ public class WafraLiveCaptureModule: Module {
       record.firstCapturedAt = try epochMilliseconds(status.firstCapturedAt)
       record.lastReceivedAt = try epochMilliseconds(status.lastReceivedAt)
       record.lastHandledAt = try epochMilliseconds(status.lastHandledAt)
+      record.notificationSetupProofAt = try epochMilliseconds(status.notificationSetupProofAt)
+      record.firstNotificationReceivedAt = try epochMilliseconds(status.firstNotificationReceivedAt)
+      record.lastNotificationReceivedAt = try epochMilliseconds(status.lastNotificationReceivedAt)
       return record
     }
 

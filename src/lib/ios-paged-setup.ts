@@ -31,7 +31,7 @@ export const PAGED_HISTORY_INSTALL_URL: string | null =
 export const pagedHistoryEnabled = (): boolean =>
   process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
 export const pagedHistoryRunUrl = (): string =>
-  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta')}`;
+  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta?blocked=1')}`;
 
 export interface PagedHistoryProgress {
   sessionId: string;
@@ -61,6 +61,9 @@ export function parsePagedHistoryProgress(raw: string | null, now = Date.now()):
 
 export const pagedHistoryCopy = {
   en: {
+    statement: 'Import a bank statement',
+    statementHelp: 'For a large inbox, use a bank statement PDF or CSV to bring in past transactions without waiting for Messages. You will review the import options before selecting a file.',
+    notStarted: 'Apple Shortcuts stopped before any history was saved. If Find Messages reports an error, try importing a bank statement below. You can retry Messages later.',
     title: 'Import past messages', intro: 'Bring your past bank messages into Wafra. Review the results before saving.',
     install: 'Add the history Shortcut', installed: 'I added it — start import', start: 'Start history import', resume: 'Resume saved import', review: 'Review transactions',
     installHelp: 'Safari downloads the signed shortcut file. Open it from Downloads (the share icon, then Shortcuts) and tap Add Shortcut, then return here to start.',
@@ -77,6 +80,9 @@ export const pagedHistoryCopy = {
     back: 'Back to setup', again: 'Add Shortcut again', unavailable: 'Update Wafra to import past messages.',
   },
   ar: {
+    statement: 'استيراد كشف حساب بنكي',
+    statementHelp: 'إذا كان صندوق الرسائل كبيراً، استخدم كشف حساب PDF أو CSV لإضافة العمليات السابقة دون انتظار الرسائل. ستراجع خيارات الاستيراد قبل اختيار الملف.',
+    notStarted: 'توقفت اختصارات Apple قبل حفظ أي سجل. إذا ظهر خطأ في «البحث عن الرسائل»، جرّب استيراد كشف حساب أدناه. يمكنك إعادة محاولة الرسائل لاحقاً.',
     title: 'استيراد الرسائل السابقة', intro: 'أضف رسائلك المصرفية السابقة إلى وفرة، وراجع النتائج قبل حفظها.',
     install: 'إضافة اختصار السجل', installed: 'أضفته — بدء الاستيراد', start: 'بدء استيراد السجل', resume: 'متابعة الاستيراد المحفوظ', review: 'مراجعة العمليات',
     installHelp: 'سيحمّل Safari ملف الاختصار الموقّع. افتحه من التنزيلات (أيقونة المشاركة ثم الاختصارات) واضغط إضافة الاختصار، ثم عد إلى هنا للبدء.',

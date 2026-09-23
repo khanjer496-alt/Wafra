@@ -289,12 +289,15 @@ struct PagedHistoryTests {
         found: 2, guids: "a\(sep)b", bodies: "x\(sep)y\(sep)z", senders: "s\(sep)s", dates: "\(stamp(fixedNow))\(sep)\(stamp(fixedNow))")
     }
     try check("column refusal leaves the cursor untouched", try json(columnar.status()!)["checked"] as! Int == col["checked"] as! Int)
-    try rejected("a sender column that does not line up is refused, never silently blanked for the page") {
+    let beforePartialSender = try columnar.status()
+    try rejected("a partially missing sender column is refused, never padded or blanked for the page") {
       let next = page(rows(100), col); let (g2, b2, _, d2) = columns(next)
       _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
         authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
-        found: next.count, guids: g2, bodies: b2, senders: "", dates: d2)
+        found: next.count, guids: g2, bodies: b2, senders: "TEST", dates: d2)
     }
+    try check("a partial sender column leaves the entire saved checkpoint unchanged",
+      try columnar.status() == beforePartialSender)
     try rejected("a column larger than its records could carry is refused before splitting") {
       _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
         authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
@@ -311,6 +314,67 @@ struct PagedHistoryTests {
     let colRecord = try json(columnar.readChunk(sessionId: colSession, chunkIndex: 0)[0])
     try check("column-framed body survives the round trip unchanged", colRecord["text"] as! String == rows(100)[0].body)
     try check("column-framed sender survives the round trip unchanged", colRecord["sender"] as? String == "TEST")
+
+    // MessageEntity may expose no Sender property at all. Its list-wide
+    // extraction is then one empty string, while the typed-row fallback
+    // stages the same messages with an empty sender for every row.
+    let absentSource = rows(100)
+    let absentColumns = make("absent-sender-columns")
+    let absentTyped = make("absent-sender-typed")
+    var absentCol = try begin(absentColumns, absentSource)
+    var absentRow = try begin(absentTyped, absentSource)
+    while absentCol["status"] as! String != "complete" {
+      let next = page(absentSource, absentCol)
+      let (guids, bodies, _, dates) = columns(next)
+      absentCol = try json(absentColumns.stageColumns(sessionId: absentCol["sessionId"] as! String,
+        authorizationSecret: absentCol["authorizationSecret"] as! String,
+        revision: absentCol["revision"] as! Int, found: next.count,
+        guids: guids, bodies: bodies, senders: "", dates: dates))
+      for row in next {
+        _ = try absentTyped.stageRow(sessionId: absentRow["sessionId"] as! String,
+          authorizationSecret: absentRow["authorizationSecret"] as! String,
+          revision: absentRow["revision"] as! Int,
+          guid: row.guid, body: row.body, sender: "", instant: row.date)
+      }
+      absentRow = try json(absentTyped.commitRows(sessionId: absentRow["sessionId"] as! String,
+        authorizationSecret: absentRow["authorizationSecret"] as! String,
+        revision: absentRow["revision"] as! Int, found: next.count))
+      for key in ["revision", "before", "after", "limit", "status", "checked", "accepted", "skipped"] {
+        try check("all-absent sender columns preserve typed-row checkpoint \(key)",
+          (absentCol[key] as? NSObject) == (absentRow[key] as? NSObject))
+      }
+    }
+    try check("all-absent sender columns accept every source message without skipping",
+      absentCol["accepted"] as! Int == 100 && absentCol["skipped"] as! Int == 0)
+    let absentColId = absentCol["sessionId"] as! String
+    let absentRowId = absentRow["sessionId"] as! String
+    let absentSession = try absentColumns.completedSession(sessionId: absentColId)!
+    var absentRecords: [String] = []
+    for index in absentSession.chunkIndices {
+      let columnRecords = try absentColumns.readChunk(sessionId: absentColId, chunkIndex: index)
+      let typedRecords = try absentTyped.readChunk(sessionId: absentRowId, chunkIndex: index)
+      try check("all-absent sender columns preserve exact typed-row GUID identities, bodies and dates", columnRecords == typedRecords)
+      absentRecords += columnRecords
+    }
+    try check("all-absent sender round trip preserves the complete source count", absentRecords.count == 100)
+    for (index, value) in absentRecords.enumerated() {
+      let record = try json(value)
+      try check("all-absent sender records preserve source text and date without inventing sender identity",
+        record["text"] as? String == absentSource[index].body &&
+        record["receivedAt"] as? String == stamp(absentSource[index].date) && record["sender"] == nil)
+    }
+    let absentRefusal = make("absent-sender-refusal")
+    let absentRefusalState = try begin(absentRefusal, rows(2))
+    let beforeAbsentRefusal = try absentRefusal.status()
+    try rejected("all-absent senders do not permit a body sentinel to misalign records") {
+      let next = page(rows(2), absentRefusalState); let (guids, bodies, _, dates) = columns(next)
+      _ = try absentRefusal.stageColumns(sessionId: absentRefusalState["sessionId"] as! String,
+        authorizationSecret: absentRefusalState["authorizationSecret"] as! String,
+        revision: absentRefusalState["revision"] as! Int, found: next.count,
+        guids: guids, bodies: bodies + sep + "extra", senders: "", dates: dates)
+    }
+    try check("all-absent sender sentinel refusal leaves the entire checkpoint unchanged",
+      try absentRefusal.status() == beforeAbsentRefusal)
 
     // Typed-row path (v4): Begin with exact instants, one staged row per
     // Message, one commit per page. No Shortcuts-formatted date text exists.

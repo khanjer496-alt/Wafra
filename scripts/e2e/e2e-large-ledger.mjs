@@ -9,8 +9,11 @@ import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 const { performanceLedger, now } = require('../test/fixtures/performance-ledger.cjs');
 const { createWebSeed, STATE_KEY } = require('./universal-review-fixtures.cjs');
-const { PARSER_VERSION } = require('../test/build/sms-parser.js');
-const { TRANSFER_NORMALIZATION_VERSION } = require('../test/build/transfer-reconciliation.js');
+// E2E runs in its own clean CI job; load the shipping constants directly,
+// using the same in-memory source loader as the review fixtures above.
+const loadSource = require('../universal-test/load-ts.cjs').createLoader();
+const { PARSER_VERSION } = loadSource('@/lib/sms-parser');
+const { TRANSFER_NORMALIZATION_VERSION } = loadSource('@/lib/transfer-reconciliation');
 const base = process.env.BASE ?? 'http://localhost:8128';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(base).hostname));
 const out = path.resolve(process.env.PERFORMANCE_EVIDENCE ?? 'artifacts/performance-ui');

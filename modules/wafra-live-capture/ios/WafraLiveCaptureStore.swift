@@ -15,6 +15,11 @@ public enum WafraLiveStageResult: String, Codable {
   case disabled
 }
 
+public enum WafraLiveCaptureSource: String, Codable {
+  case message
+  case notification
+}
+
 public struct WafraLiveCaptureStatus: Codable {
   public let enabled: Bool
   public let entitled: Bool
@@ -28,12 +33,19 @@ public struct WafraLiveCaptureStatus: Codable {
   /// Wall-clock receipts, not transaction timestamps or proof of complete coverage.
   public let lastReceivedAt: TimeInterval?
   public let lastHandledAt: TimeInterval?
+  /// Manual action execution only, not proof that a Notification trigger fired.
+  public let notificationSetupProofAt: TimeInterval?
+  /// Notification queue admission only, not permission, bank identity or ledger proof.
+  public let firstNotificationReceivedAt: TimeInterval?
+  public let lastNotificationReceivedAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
   /// A wake-up hint only. No SMS content, identifiers, or counts cross this channel.
   public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
+
+  public static let notificationSetupProbeText = "Wafra notification setup check"
 
   public static let maxBodyBytes = 16 * 1024
   public static let maxSenderCharacters = 80
@@ -68,7 +80,7 @@ public final class WafraLiveCaptureStore {
     let text: String
     let sender: String
     let observedAt: String
-    let source: String
+    let source: WafraLiveCaptureSource
   }
 
   private struct RecordSummary: Codable {
@@ -100,6 +112,9 @@ public final class WafraLiveCaptureStore {
     var firstCapturedAt: TimeInterval?
     var lastReceivedAt: TimeInterval?
     var lastHandledAt: TimeInterval?
+    var notificationSetupProofAt: TimeInterval?
+    var firstNotificationReceivedAt: TimeInterval?
+    var lastNotificationReceivedAt: TimeInterval?
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
@@ -107,6 +122,7 @@ public final class WafraLiveCaptureStore {
       case storeEntitlementLifetime, storeEntitlementExpiresAt, storeEntitlementVerifiedAt
       case setupProofVersion, setupProofAt, automationInputProbeAt, firstCapturedAt
       case lastReceivedAt, lastHandledAt
+      case notificationSetupProofAt, firstNotificationReceivedAt, lastNotificationReceivedAt
     }
 
     init() {}
@@ -159,6 +175,12 @@ public final class WafraLiveCaptureStore {
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
       lastHandledAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastHandledAt))
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      notificationSetupProofAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .notificationSetupProofAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      firstNotificationReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .firstNotificationReceivedAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      lastNotificationReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastNotificationReceivedAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     }
 
     var recordBytes: Int {
@@ -210,7 +232,8 @@ public final class WafraLiveCaptureStore {
     sender: String,
     body: String,
     eventId: String,
-    observedAt: Date
+    observedAt: Date,
+    source: WafraLiveCaptureSource = .message
   ) throws -> WafraLiveStageResult {
     var newlyQueued = false
     let result: WafraLiveStageResult = try withExclusiveLock { root in
@@ -228,7 +251,8 @@ public final class WafraLiveCaptureStore {
         let id = canonicalEventId(eventId),
         validAdmissionDate(observedAt, now: receiptTime),
         validSender(sender),
-        validBody(body)
+        validBody(body),
+        source != .notification || (UUID(uuidString: id) != nil && sender == "Wafra Notification" && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       else { return .invalid }
 
       let observedAtString = Self.iso8601(observedAt)
@@ -239,7 +263,7 @@ public final class WafraLiveCaptureStore {
         text: body,
         sender: sender,
         observedAt: observedAtString,
-        source: "message"
+        source: source
       )
       let data = try Self.encodeRecord(record)
 
@@ -283,6 +307,11 @@ public final class WafraLiveCaptureStore {
       // Publish receipt and queued event in the same durable manifest write.
       // Duplicate/replayed, invalid, disabled and capacity-refused calls never advance it.
       manifest.lastReceivedAt = max(manifest.lastReceivedAt ?? 0, receiptTime.timeIntervalSince1970)
+      if source == .notification {
+        let receivedAt = receiptTime.timeIntervalSince1970
+        manifest.firstNotificationReceivedAt = manifest.firstNotificationReceivedAt ?? receivedAt
+        manifest.lastNotificationReceivedAt = max(manifest.lastNotificationReceivedAt ?? 0, receivedAt)
+      }
       do {
         try writeManifest(manifest, in: root)
       } catch {
@@ -297,6 +326,16 @@ public final class WafraLiveCaptureStore {
     // A missed/coalesced notification is harmless: launch/resume rereads disk.
     if newlyQueued { queueDidChange() }
     return result
+  }
+
+  /// Shortcuts supplies notification text explicitly. No notification access is requested here.
+  public func stageNotification(
+    text: String,
+    eventId: String,
+    observedAt: Date
+  ) throws -> WafraLiveStageResult {
+    try stage(sender: "Wafra Notification", body: text, eventId: eventId,
+      observedAt: observedAt, source: .notification)
   }
 
   public func setCaptureEnabled(_ enabled: Bool) throws {
@@ -386,7 +425,7 @@ public final class WafraLiveCaptureStore {
     }
   }
 
-  public func listPendingRecords(limit: Int) throws -> [String] {
+  public func listPendingRecords(limit: Int, includeNotifications: Bool = true) throws -> [String] {
     try withExclusiveLock { root in
       var manifest = try loadManifest(in: root)
       _ = try purgeExpiredUnlocked(manifest: &manifest, in: root, now: clock())
@@ -416,6 +455,9 @@ public final class WafraLiveCaptureStore {
           try tombstoneRecord(id: id, manifest: &manifest, in: root)
           continue
         }
+        // Legacy JS decoders discard unknown sources. Filter before applying the
+        // page limit so retained notifications cannot starve later SMS records.
+        if !includeNotifications && record.source == .notification { continue }
         rows.append(String(decoding: data, as: UTF8.self))
       }
       return rows
@@ -516,8 +558,25 @@ public final class WafraLiveCaptureStore {
         setupProofAt: manifest.setupProofAt,
         firstCapturedAt: manifest.firstCapturedAt,
         lastReceivedAt: manifest.lastReceivedAt,
-        lastHandledAt: manifest.lastHandledAt
+        lastHandledAt: manifest.lastHandledAt,
+        notificationSetupProofAt: manifest.notificationSetupProofAt,
+        firstNotificationReceivedAt: manifest.firstNotificationReceivedAt,
+        lastNotificationReceivedAt: manifest.lastNotificationReceivedAt
       )
+    }
+  }
+
+  /// Confirms only that the manually run action reached native storage.
+  /// It never adds a financial event or proves a Notification trigger fired.
+  public func recordNotificationSetupProof(at: Date) throws {
+    try withExclusiveLock { root in
+      guard validEntitlementTimestamp(at.timeIntervalSince1970) else { throw StoreError.invalidSetupProof }
+      var manifest = try loadManifest(in: root)
+      guard manifest.enabled, isEntitled(manifest, at: clock()) else {
+        throw StoreError.entitlementRequired
+      }
+      manifest.notificationSetupProofAt = at.timeIntervalSince1970
+      try writeManifest(manifest, in: root)
     }
   }
 
@@ -816,7 +875,7 @@ public final class WafraLiveCaptureStore {
     guard
       record.v == 1,
       record.id == id,
-      record.source == "message",
+      record.source != .notification || (UUID(uuidString: id) != nil && record.sender == "Wafra Notification" && !record.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
       validSender(record.sender),
       validBody(record.text),
       let date = Self.parseISO8601(record.observedAt),

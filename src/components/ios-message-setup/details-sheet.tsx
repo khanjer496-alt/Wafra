@@ -11,6 +11,7 @@ interface DetailsSheetProps {
   visible: boolean;
   onClose(): void;
   section: 'future' | 'history';
+  source?: 'message' | 'notification';
   fromOnboarding?: boolean;
   actions?: { label: string; onPress(): void }[];
   privacyExpanded: boolean;
@@ -18,10 +19,12 @@ interface DetailsSheetProps {
 }
 
 export const DetailsSheet = ({
-  visible, onClose, section, fromOnboarding, actions = [], privacyExpanded, onTogglePrivacy,
+  visible, onClose, section, source = 'message', fromOnboarding, actions = [], privacyExpanded, onTogglePrivacy,
 }: DetailsSheetProps) => {
   const lines: StringKey[] = section === 'future'
-    ? ['iosMessageHelpLocal', 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
+    ? source === 'notification' ? ['iosNotificationSetupSummary', 'iosNotificationHelpInput', 'iosNotificationHelpStatus']
+    : ['iosMessageHelpLocal', 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
+      'iosMessagePermissionBody', 'iosMessagePermissionLocked',
       'iosMessageHelpProof', 'iosMessageSenderUnavailable']
     : ['iosMessageHelpReadable', 'iosMessageHelpCoverage', 'historyReadyCompact',
       'iosMessagePastTiming', 'iosMessageHistoryKeepOpen',
@@ -49,9 +52,9 @@ export const DetailsSheet = ({
         {privacyExpanded && (
           <View style={styles.section}>
             <ThemedText type="small" themeColor="textSecondary">
-              {t(section === 'future' ? 'iosLocalPrivacyBody' : 'historyImportPrivacy')}
+              {t(section === 'future' ? source === 'notification' ? 'iosNotificationPrivacyBody' : 'iosLocalPrivacyBody' : 'historyImportPrivacy')}
             </ThemedText>
-            {section === 'future' && (
+            {section === 'future' && source !== 'notification' && (
               <ThemedText type="small" themeColor="textSecondary">{t('iosLocalMigrationBody')}</ThemedText>
             )}
           </View>
