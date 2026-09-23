@@ -30,6 +30,8 @@ export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
 export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
 export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
+/** Shortcut input cannot attest which app actually delivered a notification. */
+export const LOCAL_NOTIFICATION_SENDER = 'Wafra Notification';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
@@ -46,7 +48,7 @@ interface LocalMessageEnvelope {
   text: string;
   sender: string;
   observedAt: string;
-  source: 'message';
+  source: 'message' | 'notification';
 }
 
 export interface LocalMessageRecordPreflight {
@@ -124,7 +126,9 @@ function decodeLocalMessageEnvelope(
     !validLocalMessageId(value.id) ||
     typeof value.text !== 'string' ||
     typeof value.sender !== 'string' ||
-    value.source !== 'message') {
+    (value.source !== 'message' && value.source !== 'notification') ||
+    (value.source === 'notification' &&
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER))) {
     return null;
   }
   const textBytes = localMessageUtf8Bytes(value.text);
@@ -183,7 +187,7 @@ export function preflightLocalMessageRecord(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const object = value as Record<string, unknown>;
   if (!validLocalMessageId(object.id)) return null;
-  const attribution = typeof object.sender === 'string'
+  const attribution = object.source === 'message' && typeof object.sender === 'string'
     ? attributeIosBankSender(object.sender)
     : null;
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
@@ -217,12 +221,14 @@ function sanitizedRefusal(
   market: 'AE' | 'SA' | null,
   session: LaunchAlertSession,
   inspection: ReturnType<LaunchAlertSession['inspect']>,
+  existingDecision?: ReturnType<typeof inspectSourceFreeRefusedAlert>,
 ): Exclude<LocalMessageParseOutcome, { kind: 'parsed' } | { kind: 'invalid' }> {
-  const decision = inspectSourceFreeRefusedAlert({
+  const channel = envelope.source === 'notification' ? 'push' : 'inbox';
+  const decision = existingDecision ?? inspectSourceFreeRefusedAlert({
     source: envelope.text,
     sender: envelope.sender,
     observedAt,
-    channel: 'inbox',
+    channel,
     session,
     existingInspection: inspection,
   });
@@ -233,10 +239,13 @@ function sanitizedRefusal(
       market,
       row: {
         smsTs: observedAt,
-        channel: 'inbox',
+        channel,
         // Message timestamps can collide at whole-second precision. Preserve
         // exact Apple identity so a decline cannot sweep an unrelated posting.
-        ...(SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+        // A notification's arrival time is not the identity of any Message.
+        // Its UUID confines decline reconciliation to this exact queue record.
+        ...(envelope.source === 'notification' || SHA256_EVENT_ID_RE.test(envelope.id)
+          ? { sourceEventId: envelope.id } : {}),
         reason: decision.reason,
       },
       milestone: 'decline-candidate',
@@ -268,7 +277,8 @@ export function parseLocalMessageRecord(
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
   if (!decoded) return { kind: 'invalid', milestone: 'none' };
   const { envelope, observedAt } = decoded;
-  const attribution = attributeIosBankSender(envelope.sender);
+  const isNotification = envelope.source === 'notification';
+  const attribution = isNotification ? null : attributeIosBankSender(envelope.sender);
   const routedMarket = attribution?.market ??
     detectLaunchMarketFromAlert(envelope.text, envelope.sender);
   if (routedMarket !== expectedMarket) {
@@ -277,8 +287,26 @@ export function parseLocalMessageRecord(
 
   try {
     const inspection = session.inspect(envelope.text, envelope.sender);
+    // Apply the same push promotion/non-posting policy as Android before a
+    // permissive transaction grammar can mistake an offer for actual money.
+    // Reuse this source-free decision on refusal; source text is never retained.
+    const notificationDecision = isNotification ? inspectSourceFreeRefusedAlert({
+      source: envelope.text,
+      sender: envelope.sender,
+      observedAt,
+      channel: 'push',
+      session,
+      existingInspection: inspection,
+    }) : undefined;
+    if (notificationDecision?.kind === 'declined' && notificationDecision.reason === 'security-challenge') {
+      return { kind: 'ignored', market: expectedMarket, milestone: 'none' };
+    }
+    if (notificationDecision?.kind === 'declined' ||
+      (notificationDecision?.kind === 'ignored' && notificationDecision.reason !== 'unrecognized')) {
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
     if (expectedMarket === null) {
-      return sanitizedRefusal(envelope, observedAt, null, session, inspection);
+      return sanitizedRefusal(envelope, observedAt, null, session, inspection, notificationDecision);
     }
     const parsed = session.parse(
       envelope.text,
@@ -288,15 +316,24 @@ export function parseLocalMessageRecord(
       observedAt,
     );
     if (!parsed) {
-      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection);
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
     }
-    if (shouldReviewParsedIncome(parsed)) {
+    // Statements and card payments have separate accounting mutations without
+    // a transaction observation receipt. Keep notification delivery on the
+    // durable source-free Review path until those kinds have end-to-end replay
+    // identity; authoritative Message capture retains its existing behavior.
+    if (isNotification && parsed.kind !== 'transaction') {
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
+    if (shouldReviewParsedIncome(parsed) || (isNotification && parsed.type === 'income' &&
+      parsed.categoryGuess === 'other' && !parsed.transferHint)) {
       const refusal = sanitizedRefusal(
         envelope,
         observedAt,
         expectedMarket,
         session,
         inspection,
+        notificationDecision,
       );
       if (refusal.kind === 'review') return refusal;
     }
@@ -316,18 +353,29 @@ export function parseLocalMessageRecord(
     if (attribution && canonicalBankId(bankHint ?? '') !== attribution.bankId) {
       return { kind: 'invalid', milestone: 'none' };
     }
+    // Notification setup does not establish an issuer. Never let the planner
+    // fill an absent bank from a user's unrelated single known-bank answer.
+    // The existing review policy keeps grounded facts for account selection;
+    // if it cannot describe the alert safely, leave it unposted.
+    if (isNotification && canonicalBankId(bankHint ?? '') === null) {
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
     const row: ScannedSms = {
       ...structured,
       // Capture only masked endpoints/reference before the body is discarded.
       // Import planning downgrades this if local source routing is ambiguous.
-      transferEvidence: buildTransferEvidence({ ...parsed, bankHint, sender: envelope.sender }, true),
+      transferEvidence: buildTransferEvidence({ ...parsed, bankHint, sender: envelope.sender }, !isNotification),
       ...(bankHint ? { bankHint } : {}),
       // Receipt time dates a transaction, never an unstated card deadline.
       date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(observedAt)),
       smsTs: observedAt,
-      channel: 'inbox',
+      channel: isNotification ? 'push' : 'inbox',
       market: expectedMarket,
-      sourceEventId: envelope.id,
+      // Notification UUIDs identify queue observations, not bank events. Keep
+      // them as ACK/review/decline receipts only; financial rows use existing push
+      // time/merchant/instrument dedupe, including repeated OS notifications.
+      ...(!isNotification ? { sourceEventId: envelope.id } : {}),
+      ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {
       kind: 'parsed',

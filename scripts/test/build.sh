@@ -79,7 +79,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
-         ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture \
+         ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
          local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics; do

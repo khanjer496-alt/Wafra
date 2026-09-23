@@ -22,7 +22,7 @@ test('run link contains only the matching Shortcut name and local return routes'
   const url = new URL(api.pagedHistoryRunUrl());
   assert.equal(url.protocol, 'shortcuts:');
   assert.equal(url.searchParams.get('name'), 'Wafra-History-v2-typed-date.signed');
-  assert.equal(url.searchParams.get('x-error'), 'wafra://ios-paging-beta');
+  assert.equal(url.searchParams.get('x-error'), 'wafra://ios-paging-beta?blocked=1');
   assert.equal(url.searchParams.get('x-cancel'), 'wafra://ios-paging-beta');
   assert.equal([...url.searchParams].length, 3);
   assert.equal(api.pagedHistoryEnabled(), false);

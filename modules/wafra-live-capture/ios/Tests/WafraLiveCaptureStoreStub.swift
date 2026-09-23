@@ -12,6 +12,9 @@ public struct WafraLiveCaptureStatus {
   public let firstCapturedAt: TimeInterval?
   public let lastReceivedAt: TimeInterval?
   public let lastHandledAt: TimeInterval?
+  public let notificationSetupProofAt: TimeInterval?
+  public let firstNotificationReceivedAt: TimeInterval?
+  public let lastNotificationReceivedAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
@@ -21,6 +24,7 @@ public final class WafraLiveCaptureStore {
 
   public private(set) var calls: [String] = []
   public private(set) var listLimits: [Int] = []
+  public private(set) var listIncludesNotifications: [Bool] = []
   public private(set) var firstCapturedDates: [Date] = []
   public private(set) var localLeaseCalls: [(Date?, Bool)] = []
   public private(set) var storeLeaseCalls: [(Date?, Bool, Date)] = []
@@ -37,12 +41,16 @@ public final class WafraLiveCaptureStore {
     setupProofAt: 123.25,
     firstCapturedAt: 987.5,
     lastReceivedAt: 1234.5,
-    lastHandledAt: 1244.75
+    lastHandledAt: 1244.75,
+    notificationSetupProofAt: 1245.125,
+    firstNotificationReceivedAt: 1250.25,
+    lastNotificationReceivedAt: 1300.5
   )
 
   public func reset() {
     calls = []
     listLimits = []
+    listIncludesNotifications = []
     firstCapturedDates = []
     localLeaseCalls = []
     storeLeaseCalls = []
@@ -68,9 +76,10 @@ public final class WafraLiveCaptureStore {
     calls.append("setCaptureEnabled:\(enabled)")
   }
 
-  public func listPendingRecords(limit: Int) throws -> [String] {
+  public func listPendingRecords(limit: Int, includeNotifications: Bool = true) throws -> [String] {
     calls.append("listPendingRecords")
     listLimits.append(limit)
+    listIncludesNotifications.append(includeNotifications)
     return ["pending:\(limit)"]
   }
 
@@ -106,4 +115,22 @@ public final class WafraLiveCaptureStore {
   public func eraseAll() throws {
     calls.append("eraseAll")
   }
+}
+
+/// Resource-only adapter for the native bridge host harness. No financial files.
+public enum WafraLiveCaptureResources {
+  public static var shortcutAvailable = true
+  public static var requestedName: String?
+  public static var requestedExtension: String?
+  public static let shortcutURL = URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Notifications v1.shortcut")
+
+  public struct ResourceBundle {
+    public func url(forResource name: String?, withExtension ext: String?) -> URL? {
+      WafraLiveCaptureResources.requestedName = name
+      WafraLiveCaptureResources.requestedExtension = ext
+      return WafraLiveCaptureResources.shortcutAvailable ? WafraLiveCaptureResources.shortcutURL : nil
+    }
+  }
+
+  public static func bundle() -> ResourceBundle { ResourceBundle() }
 }

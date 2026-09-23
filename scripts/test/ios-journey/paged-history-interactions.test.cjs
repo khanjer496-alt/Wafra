@@ -8,7 +8,7 @@ const historyInstallUrl = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
-async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl } = {}) {
+async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false } = {}) {
   const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [];
   const listeners = []; let cursor = 0, generation = 1, nativeReads = 0;
   const values = new Map(); if (legacyInstalled) values.set('wafra/ios-paged-shortcut-confirmed/v1', 'true');
@@ -34,7 +34,7 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
       AppState: { addEventListener: (_kind, fn) => { listeners.push(fn); return { remove() {} }; } },
       Linking: { canOpenURL: async () => available, openURL: async value => urls.push(value) } },
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ push: v => routes.push(v), replace: v => routes.push(v), dismissTo: v => routes.push(v), canGoBack: () => true }),
-      useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings' }) },
+      useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings', blocked: blocked ? '1' : undefined }) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '@react-native-async-storage/async-storage': { getItem: async k => values.get(k) ?? null, setItem: async (k, v) => values.set(k, v) },
     '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'Header' },
@@ -43,6 +43,9 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
     '@/constants/theme': { MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12, four: 16 } },
     '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({ background: '#14120F' }) },
     '@/lib/store': { useStore: () => store }, '@/lib/ios-paged-setup': api,
+    '@/lib/ios-statement-handoff': load(path.join(root, 'src/lib/ios-statement-handoff.ts'), {
+      'expo-crypto': { randomUUID: () => 'test-ios-statement-session' },
+    }),
     '@/lib/ios-history-setup': { beginIosHistoryHandoffForOrigin: async (...args) => handoffs.push(args),
       iosHistoryReturnOriginFromParam: value => value, iosSupportsMessageHistory: () => true,
       iosHistorySetupStorageCoordinator: { run: fn => fn() } },
@@ -74,6 +77,23 @@ test('fresh setup does not import on render or install; explicit confirmation st
   assert.match(s.urls[1], /^shortcuts:\/\/x-callback-url\/run-shortcut\?/);
   assert.equal(s.handoffs[0][0], 'onboarding');
   assert.equal(s.changes[0].type, 'history-status-changed'); assert.equal(s.changes[0].status, 'in-progress');
+});
+test('a Shortcut query failure before the first page offers statements without claiming saved progress', async () => {
+  const s = await screen({ installed: true, blocked: true });
+  assert.match(s.text(), /before any history was saved/);
+  s.button('Import a bank statement').onPress(); await s.flush();
+  assert.equal(s.routes[0].pathname, '/statement-import');
+  assert.equal(s.routes[0].params.fromOnboarding, '1');
+  assert.equal(s.routes[0].params.statementSession, 'test-ios-statement-session');
+  assert.deepEqual(s.discards, []);
+  assert.deepEqual(s.handoffs, []);
+  assert.deepEqual(s.changes, [], 'choosing a statement must not mark SMS history complete');
+});
+test('statement alternative preserves a resumable SMS journal and its original progress', async () => {
+  const s = await screen({ installed: true, progress: session() });
+  s.button('Import a bank statement').onPress(); await s.flush();
+  assert.deepEqual(s.discards, []);
+  assert.ok(s.button('Resume saved import'));
 });
 test('missing or unapproved install configuration never opens a different shortcut or starts a handoff', async () => {
   for (const installUrl of ['', 'https://example.invalid/unverified.shortcut']) {

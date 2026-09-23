@@ -271,8 +271,12 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       firstCapturedAt: number | null;
       lastReceivedAt?: number | null;
       lastHandledAt?: number | null;
+      notificationSetupProofAt?: number | null;
+      firstNotificationReceivedAt?: number | null;
+      lastNotificationReceivedAt?: number | null;
     }`.replace(/\s+/g, ' ').trim();
     const exactNativeModule = `export interface WafraLiveCaptureNativeModule {
+      readonly notificationCaptureSupported?: boolean;
       readonly queueChangeEventsSupported?: boolean;
       addListener?(
         eventName: 'onQueueChanged',
@@ -286,9 +290,11 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       ): Promise<boolean>;
       setCaptureEnabled(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
+      listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
       getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
+      getNotificationShortcutURL?(): Promise<string>;
       getAutomationInputProbeAt(): Promise<number | null>;
       acknowledgeCaptureWarning(warningId: string): Promise<boolean>;
       recordFirstCapturedAt(observedAt: number): Promise<void>;
@@ -335,9 +341,11 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'setStoreCaptureEntitlementLease',
       'setCaptureEnabled',
       'listPendingRecords',
+      'listPendingRecordsIncludingNotifications',
       'acknowledgeRecords',
       'purgeExpired',
       'getCaptureStatus',
+      'getNotificationShortcutURL',
       'getAutomationInputProbeAt',
       'acknowledgeCaptureWarning',
       'recordFirstCapturedAt',
@@ -358,9 +366,10 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /milliseconds\s*\/\s*1_000(?:\.0)?/.test(swiftModule) &&
         /seconds\s*\*\s*1_000(?:\.0)?/.test(swiftModule), swiftModule);
     ok('Swift bridge maps every operation directly to the singleton store',
-      nativeMethods.every((method) => {
+      nativeMethods.filter((method) => method !== 'getNotificationShortcutURL').every((method) => {
         const storeMethod = {
           getCaptureStatus: 'status',
+          listPendingRecordsIncludingNotifications: 'listPendingRecords',
           getAutomationInputProbeAt: 'automationInputProbeAt',
           setLocalCaptureEntitlementLease: 'setLocalEntitlementLease',
           setStoreCaptureEntitlementLease: 'setStoreEntitlementLease',
@@ -368,6 +377,12 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         return new RegExp(`WafraLiveCaptureStore\\.shared\\.${storeMethod}\\(`).test(swiftModule);
       }),
       swiftModule);
+
+    ok('notification Shortcut asset bridge exposes only the fixed bundled local file',
+      /AsyncFunction\("getNotificationShortcutURL"\)\s*\{\s*\(\) -> String in/.test(swiftModule) &&
+        /WafraLiveCaptureResources\.bundle\(\)\.url\(\s*forResource: "Wafra Notifications v1",\s*withExtension: "shortcut"/.test(swiftModule) &&
+        /url\.isFileURL/.test(swiftModule) &&
+        /throw WafraLiveCaptureBridgeError\.notificationShortcutUnavailable/.test(swiftModule), swiftModule);
 
     ok('local module is autolinkable on Apple and web', (() => {
       try {
@@ -413,6 +428,10 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.stage.capacity',
       'live.stage_text.title',
       'live.stage_text.message.parameter',
+      'live.notification.title',
+      'live.notification.text.parameter',
+      'live.notification.invalid',
+      'live.notification.error',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -436,16 +455,17 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       appPlugins.indexOf(livePlugin) > appPlugins.indexOf('./modules/wafra-message-history/plugin'),
       JSON.stringify(appPlugins));
 
-    eq('generated source declares all four app-discoverable intents once', [
+    eq('generated source declares all five app-discoverable intents once', [
       generatedIntent.match(/struct RecordWafraCaptureSetupProofIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct ProbeWafraAutomationInputIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveMessageIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveTextIntent:\s*AppIntent/g)?.length || 0,
-    ], [1, 1, 1, 1]);
+      generatedIntent.match(/struct CaptureWafraNotificationIntent:\s*AppIntent/g)?.length || 0,
+    ], [1, 1, 1, 1, 1]);
     eq('all intents are always allowed and do not launch Wafra', [
       generatedIntent.match(/authenticationPolicy:\s*IntentAuthenticationPolicy\s*=\s*\.alwaysAllowed/g)?.length || 0,
       generatedIntent.match(/openAppWhenRun\s*=\s*false/g)?.length || 0,
-    ], [4, 4]);
+    ], [5, 5]);
     ok('setup-proof intent has no parameters and records proof version 1', (() => {
       const match = generatedIntent.match(
         /struct RecordWafraCaptureSetupProofIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}/,
@@ -495,31 +515,46 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.disabled:[\s\S]*captureDisabled/.test(match[1]);
     })(), generatedIntent);
-    eq('probe plus live paths expose the exact six parameters',
-      generatedIntent.match(/@Parameter\(/g)?.length || 0, 6);
+    ok('notification action accepts one required auto-connected String through the protected queue', (() => {
+      const match = generatedIntent.match(
+        /struct CaptureWafraNotificationIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension CaptureWafraNotificationIntent/,
+      );
+      return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 1 &&
+        /var text:\s*String\s*\n/.test(match[1]) &&
+        /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
+        /stageNotification\(\s*text:\s*text,\s*eventId:\s*UUID\(\)\.uuidString,\s*observedAt:\s*Date\(\)/.test(match[1]) &&
+        /case \.invalid:[\s\S]*invalidNotification/.test(match[1]) &&
+        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
+    })(), generatedIntent);
+    ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
+      /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
+        /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
+    eq('probe plus live paths expose the exact seven parameters',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 7);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(/@Parameter\(\s*title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [4, 6, 0]);
+    ], [5, 7, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [10, 0]);
+    ], [12, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
-        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
+        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent|CaptureWafraNotificationIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
       ) || [];
-      return modes.length === 4 && extensions.length === 4;
+      return modes.length === 5 && extensions.length === 5;
     })(), generatedIntent);
-    ok('generated intents contain no network, file, clipboard, log, notification, or dialog capability',
-      !/(?:https?:|URLSession|FileManager|NSFile|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|UNUserNotificationCenter|notification|ProvidesDialog|dialog:)/i
+    ok('generated intents contain no direct network, file, clipboard, log, notification-center or dialog APIs',
+      !/(?:https?:|URLSession|URLRequest|NWConnection|FileManager|FileHandle|NSFile|(?:Data|NSData)\(contentsOf:|\.write\(to:|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|import\s+UserNotifications|UNUserNotificationCenter|UNNotificationRequest|NotificationCenter\s*\.|ProvidesDialog|dialog:)/i
         .test(generatedIntent), generatedIntent);
     const pluginIntentSource = plugin.match(/const intentSource = `([\s\S]*?)`;\s*\n/)?.[1] || '';
     eq('generated intent source exactly matches the deterministic plugin template',
@@ -4116,12 +4151,12 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: false,
       futureStatus: 'skipped',
     }, 'not-added'), 'add-shortcut');
-  eq('setup restoration: confirmed Shortcut progress resumes at Apple automation',
+  eq('setup restoration: confirmed Shortcut checks permissions before Apple automation',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,
       futureAutomationConfirmed: false,
       futureStatus: 'in-progress',
-    }, 'not-added'), 'create-automation');
+    }, 'not-added'), 'prove-shortcut');
   eq('setup restoration: self-confirmed automation without native proof stays retryable',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,
@@ -4218,6 +4253,8 @@ struct WafraBankSenderRegistryTests {
       opening: false,
       failure: null,
       captureHealth: null,
+      notificationReadiness: 'not-added',
+      notificationSupported: false,
     });
     ok('setup controller: unsupported platforms never resolve a native module',
       harness.statusReads() === 0);

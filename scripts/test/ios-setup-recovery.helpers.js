@@ -631,14 +631,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     ['in-progress', 'not-started', false]);
   const manualToAutomatic = await makeScreen({ captureOptOut: true, progress: { futureShortcutConfirmed: true } });
   eq('iOS setup: opening setup never opts manual users into capture', manualToAutomatic.preferenceEvents, []);
-  await manualToAutomatic.press('iosLocalAutomationAdded');
-  eq('iOS setup: explicit automation confirmation saves opt-in before enabling native capture',
+  ok('iOS setup: permission preflight is offered before automation setup', await manualToAutomatic.press('iosMessageRunPermissionCheck'));
+  eq('iOS setup: explicit permission preflight saves opt-in before enabling native capture',
     manualToAutomatic.preferenceEvents, ['opt-out:false', 'preference-saved', 'native:true']);
   eq('iOS setup: a manual user can explicitly enable automatic capture',
     [manualToAutomatic.optedOut(), manualToAutomatic.nativeStatus.enabled], [false, true]);
 
   const failedOptIn = await makeScreen({ captureOptOut: true, optInFails: true, progress: { futureShortcutConfirmed: true } });
-  await failedOptIn.press('iosLocalAutomationAdded');
+  ok('iOS setup: failed opt-in exercises the actual permission-check action', await failedOptIn.press('iosMessageRunPermissionCheck'));
   eq('iOS setup: failed preference save cannot enable capture or run its check',
     [failedOptIn.nativeStatus.enabled, failedOptIn.urls, failedOptIn.saved().futureAutomationConfirmed],
     [false, [], false]);

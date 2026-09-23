@@ -155,6 +155,8 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /** Local notification queue receipt, never a bank-event/deduplication identity. */
+  notificationObservationId?: string;
   /**
    * Structured ingest provenance. PDF/CSV identify statement rows whose event
    * time and merchant wording are intentionally coarser than a live capture.

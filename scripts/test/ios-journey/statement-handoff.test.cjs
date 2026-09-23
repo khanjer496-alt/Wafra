@@ -1,0 +1,21 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const load = require('../repair/load-typescript.cjs');
+const file = path.resolve(__dirname, '../../../src/lib/ios-statement-handoff.ts');
+test('only a live, explicit setup handoff permits the statement route; cold links and stale tokens do not', () => {
+  let count = 0;
+  const fresh = () => load(file, { 'expo-crypto': { randomUUID: () => `test-session-${++count}` } });
+  const handoff = fresh();
+  assert.equal(handoff.matchesIosStatementHandoff('test-session-1'), false);
+  const first = handoff.beginIosStatementHandoff();
+  assert.equal(handoff.matchesIosStatementHandoff(first), true);
+  assert.equal(handoff.matchesIosStatementHandoff([first]), false);
+  assert.equal(fresh().matchesIosStatementHandoff(first), false, 'a cold launch cannot trust the previous URL');
+  const second = handoff.beginIosStatementHandoff();
+  assert.equal(handoff.matchesIosStatementHandoff(first), false);
+  assert.equal(handoff.matchesIosStatementHandoff(second), true);
+  handoff.clearIosStatementHandoff();
+  assert.equal(handoff.matchesIosStatementHandoff(second), false);
+});

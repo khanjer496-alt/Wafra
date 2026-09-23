@@ -611,6 +611,7 @@ if [ -z "$metadata_file" ]; then
   exit 1
 fi
 verify_app_intents_metadata "$metadata_file"
+node scripts/check-ios-notification-metadata.mjs "$metadata_file"
 verify_history_resources "$app_bundle" "$resource_bundle"
 
 echo "✓ generated App Intents are in Sources and both built bundles resolve Arabic resources"

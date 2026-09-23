@@ -66,6 +66,9 @@ export interface IosSetupModel {
   opening: boolean;
   failure: IosSetupFailure;
   captureHealth: IosCaptureHealth | null;
+  /** Separate proof: an SMS Shortcut check cannot prove notification input. */
+  notificationReadiness?: IosSetupReadiness;
+  notificationSupported?: boolean;
 }
 
 export type IosSetupIntent =
@@ -73,6 +76,7 @@ export type IosSetupIntent =
   | { type: 'refresh-status' }
   | { type: 'install-shortcut' }
   | { type: 'shortcut-added' }
+  | { type: 'check-shortcut' }
   | { type: 'open-automation' }
   | { type: 'automation-added' }
   | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
@@ -92,7 +96,7 @@ export interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
-    'getCaptureStatus' | 'setCaptureEnabled'
+    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported'
   > | null;
   shortcutUrl: string | null;
   canOpenUrl(url: string): Promise<boolean>;
@@ -115,6 +119,8 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   opening: false,
   failure: null,
   captureHealth: null,
+  notificationReadiness: 'not-added',
+  notificationSupported: false,
 };
 
 const iosVersionMajor = (): number => {
@@ -123,6 +129,24 @@ const iosVersionMajor = (): number => {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+export function iosSupportsNotificationAutomation(version: unknown): boolean {
+  const value = String(version);
+  return /^\d+(?:\.\d+)*$/.test(value) && Number(value.split('.')[0]) >= 27;
+}
+
+export function resolveIosNotificationReadiness(status: Pick<WafraLiveCaptureStatus,
+  'enabled' | 'entitled' | 'notificationSetupProofAt' | 'firstNotificationReceivedAt'>): IosSetupReadiness {
+  if (!status.enabled || !status.entitled) return 'not-added';
+  // A receipt proves delivery to the protected queue, not a posted transaction.
+  return isCaptureTimestamp(status.notificationSetupProofAt) || isCaptureTimestamp(status.firstNotificationReceivedAt)
+    ? 'shortcut-proven' : 'not-added';
+}
+
+export function resolveIosSelectedReadiness(source: unknown, model: Pick<IosSetupModel,
+  'readiness' | 'notificationReadiness'> | null | undefined): IosSetupReadiness {
+  return source === 'notification' ? model?.notificationReadiness ?? 'not-added' : model?.readiness ?? 'not-added';
+}
 
 // The guided automation. Apple's Sender picker lists Contacts only and bank
 // SMS IDs are not Contacts. iOS 26 refuses a Message automation with neither
@@ -192,7 +216,8 @@ export const resolveIosFutureSetupStep = (
       ? 'add-shortcut'
       : 'confirm-shortcut';
   }
-  if (!progress.futureAutomationConfirmed) return 'create-automation';
+  // Resolve first-run app permissions while Shortcuts is in the foreground.
+  // Otherwise the first background trigger may fail before it can ask.
   return 'prove-shortcut';
 };
 
@@ -246,6 +271,8 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
         stage: 'shortcut',
         opening: false,
         failure: null,
@@ -264,6 +291,8 @@ export function createIosCaptureSetup({
         stage: 'shortcut',
         opening: false,
         failure: 'load',
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
       });
       return;
     }
@@ -272,12 +301,16 @@ export function createIosCaptureSetup({
       const status = await native.getCaptureStatus();
       if (disposed) return;
       const readiness = resolveIosSetupReadiness(status);
+      const notificationSupported = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version) &&
+        native.notificationCaptureSupported === true;
       publish({
         loading: false,
         supported: true,
         shortcutAvailable: shortcutUrl !== null,
         readiness,
         captureHealth: readIosCaptureHealth(status),
+        notificationSupported,
+        notificationReadiness: notificationSupported ? resolveIosNotificationReadiness(status) : 'not-added',
         stage:
           readiness !== 'not-added' || (!initial && model.stage === 'automation')
             ? 'automation'
@@ -292,6 +325,8 @@ export function createIosCaptureSetup({
         readiness: 'not-added',
         captureHealth: null,
         failure: 'load',
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
       });
     }
   };
@@ -387,7 +422,13 @@ export function createIosCaptureSetup({
     }
   });
 
-  const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
+  const checkShortcut = (skipProven = false): Promise<void> => joinOpening(async (generation) => {
+    if (skipProven) {
+      await refreshStatus();
+      if (disposed || generation !== operationGeneration) return;
+      if (model.failure === 'load') return;
+      if (model.readiness !== 'not-added') return;
+    }
     if (!isSupportedIosMessageAutomationTrigger(UNFILTERED_MESSAGE_TRIGGER)) {
       publish({ failure: 'shortcut-run' });
       return;
@@ -486,11 +527,14 @@ export function createIosCaptureSetup({
         case 'shortcut-added':
           publish({ stage: 'automation', failure: null });
           return;
+        case 'check-shortcut':
+          await checkShortcut();
+          return;
         case 'open-automation':
           await openAutomation();
           return;
         case 'automation-added':
-          await confirmAutomation();
+          await checkShortcut(true);
           return;
         case 'shortcut-callback':
           await refreshStatus(false);
