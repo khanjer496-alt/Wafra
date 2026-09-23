@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { accountDisplayName, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -287,7 +287,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
         }} />
       </View>}
-      {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && transaction.title.trim() &&
+      {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
