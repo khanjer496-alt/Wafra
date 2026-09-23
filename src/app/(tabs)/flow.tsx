@@ -40,6 +40,7 @@ import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 type ViewMode = 'categories' | 'activity' | 'trends';
@@ -77,9 +78,16 @@ export default function FlowScreen() {
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
-  const hasTransferSpending = useMemo(() => view === 'activity' && state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && isSpending(transaction, live, internal) && inPeriod(transaction.date, period)),
-  [view, state.transactions, live, internal, period]);
+  // Transfers that still count as spending but are listed on the Transfers
+  // screen instead of here. The test is row-local (no transfer graph on a tab)
+  // and matches getTransferActivity membership exactly for spending rows.
+  const hasTransferSpending = useMemo(() => {
+    if (view !== 'activity') return false;
+    const duplicates = duplicateTransactionIds(state.transactions);
+    return state.transactions.some(transaction => inPeriod(transaction.date, period) &&
+      isTransferCandidate(transaction) && isSpending(transaction, live, internal) &&
+      isListedExternalTransfer(transaction, duplicates));
+  }, [view, state.transactions, live, internal, period]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
@@ -154,6 +162,7 @@ export default function FlowScreen() {
     let previousDate: string | null = null;
     let newestFirst = true;
     let seenInPeriod = false;
+    let duplicates: ReadonlySet<string> | undefined;
     for (const tx of state.transactions) {
       if (newestFirst && previousDate !== null && tx.date > previousDate) newestFirst = false;
       previousDate = tx.date;
@@ -163,7 +172,11 @@ export default function FlowScreen() {
         continue;
       }
       seenInPeriod = true;
-      if (isTransferCandidate(tx) || !isSpending(tx, live, internal)) continue;
+      if (!isSpending(tx, live, internal)) continue;
+      if (isTransferCandidate(tx)) {
+        if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
+        if (isListedExternalTransfer(tx, duplicates)) continue;
+      }
       if (needle) {
         const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
         if (!haystack.includes(needle)) continue;

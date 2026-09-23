@@ -32,12 +32,11 @@ import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { countsInCashflowTotals, liveAccountIds } from '@/lib/ledger';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
-import { inPeriod, periodLabel } from '@/lib/period';
+import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
@@ -49,7 +48,6 @@ import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -238,27 +236,9 @@ export default function JournalHomeScreen() {
       state.ledgerMoney, state.transferInternalIds, state.transferNormalizationVersion,
       state.historyImport?.status, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  // Primary tabs keep the store's persisted/provisional accounting receipt.
-  // Row-local presentation checks must not force a full reconciliation graph
-  // during hydration or an intermediate import page.
-  const hasPeriodTransfers = useMemo(() => state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
-  [state.transactions, liveAccounts, period]);
-  const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
-    liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
-  [state.transactions, liveAccounts, period]);
-  const recentActivity = useMemo(() => {
-    const rows: Transaction[] = [];
-    for (const transaction of state.transactions) {
-      if (isTransferCandidate(transaction) ||
-        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds) ||
-        !inPeriod(transaction.date, period)) continue;
-      rows.push(transaction);
-      if (rows.length === 5) break;
-    }
-    return rows;
-  }, [state.transactions, liveAccounts, dashboard.internalTransactionIds, period]);
+  // Recent activity, and which transfers it leaves to the Transfers screen,
+  // come from the one dashboard projection rather than a second ledger walk.
+  const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   useEffect(() => {
@@ -466,7 +446,7 @@ export default function JournalHomeScreen() {
     return <View key={id} style={styles.section} testID="home-widget-activity">
       <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
-      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{recentActivity.map(transaction =>
+      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
         <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
       {hasPeriodTransfers && <View style={styles.section}>
         <ThemedText type="meta" themeColor="textSecondary">{transferWords.walletDetail}</ThemedText>
@@ -476,7 +456,7 @@ export default function JournalHomeScreen() {
           <ThemedText type="meta" themeColor="primary">{transferWords.viewAll}</ThemedText>
         </Pressable>
       </View>}
-      {recentActivity.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
+      {dashboard.activityRows.length === 0 && !hasPeriodTransfers && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
     </View>;
   };
 
