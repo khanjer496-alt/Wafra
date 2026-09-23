@@ -119,11 +119,22 @@ test('native change events carry no bank data and release their observer on shut
 });
 
 test('transfer reconciliation stays contextual instead of becoming Accounts or Settings navigation', () => {
+  // Accounts may link to the read-only transfer HISTORY (/transfers): browsing
+  // records is a lasting destination. The ownership-review queue
+  // (/review-transfers) is contextual work and must not become a permanent
+  // Accounts or Settings entry, whichever label it is given.
   const { createHarness, walk } = require('./reference-harness.cjs');
   const h = createHarness();
   const wallet = h.render('wallet');
-  const action = walk(wallet).find(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('accountTransferHistory') && n.props?.onPress);
-  assert.equal(action, undefined);
-  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
-  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
+  const label = h.deps['@/lib/i18n'].t('accountTransferHistory');
+  const actions = walk(wallet).filter(n => n.props?.accessibilityLabel === label && n.props?.onPress);
+  assert.ok(actions.length <= 1, 'at most one Transfers entry on Accounts');
+  for (const action of actions) {
+    const before = h.events.length;
+    action.props.onPress();
+    assert.deepEqual(h.events.slice(before), [['route', '/transfers']], 'the Accounts entry opens transfer history, not review');
+  }
+  const reviewRoute = /['"]\/review-transfers['"]/;
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), reviewRoute);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), reviewRoute);
 });
