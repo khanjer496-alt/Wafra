@@ -22,12 +22,12 @@ function scaffoldHarness(language, platform) {
 
 for (const platform of ['ios', 'android']) {
   for (const language of ['en', 'ar']) {
-    test(`${platform}/${language}: Assistant passes handled taps to its actual scroller and submits entered text`, () => {
+    test(`${platform}/${language}: Assistant passes handled taps to its actual scroller and submits entered text`, async () => {
       const h = scaffoldHarness(language, platform);
       h.deps['@react-navigation/elements'] = { useHeaderHeight: () => 90 };
       h.deps['expo-router'].useFocusEffect = () => {};
       h.deps['react-native'].AccessibilityInfo = { announceForAccessibility() {} };
-      h.deps['react-native'].Keyboard = { dismiss() {} };
+      h.deps['react-native'].Keyboard = { dismiss() {}, isVisible: () => false };
       h.deps['react-native'].useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1 });
       h.deps['@/lib/period'].periodRange = () => '';
       h.deps['@/components/assistant-evidence-sheet'] = { AssistantEvidenceSheet: props => h.jsx('EvidenceSheet', props) };
@@ -44,7 +44,13 @@ for (const platform of ['ios', 'android']) {
       const calls = [];
       h.deps['@/lib/wafra-assistant'] = {
         suggestedAssistantQuestions: () => [], assistantFollowUpQuestions: () => [],
+        latestAssistantContext: requests => requests.at(-1) ?? null, planAssistantCorrection: () => undefined,
+        executeAssistantTool: () => ({ tool: 'spending-total', title: 'Answer', body: 'A local answer' }),
         runWafraAssistant: (_state, question) => {
+          calls.push(question);
+          return { answer: { tool: 'spending-total', title: 'Answer', body: 'A local answer' }, request: { tool: 'spending-total', period: { mode: 'month', key: '2026-09' } } };
+        },
+        runWafraAssistantCooperatively: async (_state, question) => {
           calls.push(question);
           return { answer: { tool: 'spending-total', title: 'Answer', body: 'A local answer' }, request: { tool: 'spending-total', period: { mode: 'month', key: '2026-09' } } };
         },
@@ -59,6 +65,7 @@ for (const platform of ['ios', 'android']) {
       const ask = walk(tree).find(node => node.props?.testID === 'assistant-send');
       assert.equal(ask.props.disabled, false);
       ask.props.onPress();
+      await new Promise(resolve => setImmediate(resolve));
       assert.deepEqual(calls, ['What did I spend?']);
       tree = render();
       assert.equal(walk(tree).find(node => node.type === 'TextInput').props.value, '');

@@ -1,6 +1,6 @@
 # Wafra Terms of Use
 
-_Last updated: 12 September 2026_
+_Last updated: 19 September 2026_
 
 > **Launch draft — needs counsel review and one legal decision before publishing.**
 > The support contact has been supplied by the publisher. The governing-law
@@ -55,10 +55,11 @@ attempt to defeat its licensing or subscription controls.
 ## Your data
 
 Your main ledger stays in encrypted storage on your device. If you enable
-iPhone automatic capture, the relay transiently receives the selected alert
-and may hold only a sealed structured transaction until acknowledgement or
-expiry. Optional forwarded email, PDF import and trusted-device sharing also
-use the relay. What the app reads, stores and transmits is set out in the
+iPhone automatic capture, selected bank alerts pass to Wafra on that iPhone
+and stay in a protected local queue until local processing or expiry.
+No Message content is uploaded by this local capture path. Optional forwarded
+email, statement import and trusted-device sharing use the relay. What the
+app reads, stores and transmits is set out in the
 [Privacy Policy](./privacy-policy.md), which forms part of these terms.
 
 Backups and exports you create are files you control. Once you move one off

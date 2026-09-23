@@ -70,11 +70,42 @@ await check('Every spending category shows its share of total spending', async (
     assert.match(await share.innerText(), /(?:<)?\d+(?:\.\d+)?%\s+of spending/);
   }
 });
-await check('Bills separates subscriptions from utilities and telecom', async () => {
+await check('Bills filters subscriptions and utilities while preserving due-date sections', async () => {
   await go('/bills');
-  await exists('bills-subscriptions'); await exists('bills-utilities');
-  assert.match(await page.getByTestId('bills-subscriptions').innerText(), /Subscriptions/);
-  assert.match(await page.getByTestId('bills-utilities').innerText(), /Utilities & telecom/);
+  const agenda = page.getByTestId('payment-agenda');
+  await exists('payment-agenda');
+  const sectionOrder = ['overdue', 'expected-earlier', 'soon', 'later', 'paid'];
+  const visiblePayments = async () => {
+    const sections = agenda.locator('[data-testid^="bills-"]');
+    const keys = await sections.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid').replace('bills-', '')));
+    assert.ok(keys.length > 0, 'The selected payment family must have populated due-date sections');
+    assert.ok(keys.every((key, index) => sectionOrder.includes(key) &&
+      (index === 0 || sectionOrder.indexOf(key) > sectionOrder.indexOf(keys[index - 1]))),
+    `Payment sections must retain urgency/date order: ${keys}`);
+    const labels = await sections.getByRole('button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
+    assert.ok(labels.length > 0 && labels.every(label => /AED [\d,]+/.test(label)), 'Payments expose their amounts');
+    return labels;
+  };
+  const selectFamily = async (name) => {
+    const tab = page.getByRole('tab', { name, exact: true });
+    await tab.click();
+    assert.equal(await tab.getAttribute('aria-selected'), 'true');
+    return visiblePayments();
+  };
+  const subscriptions = await selectFamily('Subscriptions');
+  for (const title of ['Netflix', 'Amazon Prime']) {
+    assert.ok(subscriptions.some(label => label.startsWith(`${title}. `)), `${title} must appear in Subscriptions`);
+  }
+  assert.ok(subscriptions.every(label => !/^(?:DEWA|E&|du|Etisalat)/.test(label)), 'Utilities must not leak into Subscriptions');
+  const utilities = await selectFamily('Utilities');
+  for (const title of ['DEWA Bill', 'Etisalat Postpaid', 'du Home Internet']) {
+    assert.ok(utilities.some(label => label.startsWith(`${title}. `)), `${title} must appear in Utilities`);
+  }
+  assert.ok(utilities.every(label => !subscriptions.includes(label)), 'The payment families must be disjoint');
+  assert.ok(utilities.every(label => !/^(?:Netflix|Spotify(?: Premium)?|YouTube Premium|Amazon Prime|Fitness First)\. /.test(label)),
+    'Subscriptions must not leak into Utilities');
+  const all = await selectFamily('All');
+  assert.ok([...subscriptions, ...utilities].every(label => all.includes(label)), 'All restores both complete payment families');
 });
 await check('Spending search responds to input and recovers', async () => {
   await go('/flow?view=activity'); await exists('spending-activity');
@@ -84,13 +115,25 @@ await check('Spending search responds to input and recovers', async () => {
   await input.fill('');
   assert.ok(await page.getByTestId('spending-activity').getByRole('button').count() > 1);
 });
-await check('A category opens history and an explicit activity action', async () => {
+await check('A category opens history and its expense-filtered transaction ledger', async () => {
   await go('/flow');
-  const rows = page.getByTestId('spending-categories').locator('[role="button"][aria-label*=". AED"]');
+  const rows = page.getByTestId('spending-categories').locator('[data-testid^="spending-category-"][aria-label*=". AED"]');
   assert.ok(await rows.count() > 0, 'No category has an accessible amount');
+  const categoryId = (await rows.first().getAttribute('data-testid')).replace('spending-category-', '');
+  const categoryName = (await rows.first().getAttribute('aria-label')).split('. AED')[0];
   await rows.first().click(); await exists('category-history');
-  await page.getByRole('button', { name: 'View activity', exact: true }).click();
+  await page.getByRole('button', { name: 'View transactions', exact: true }).click();
   await page.waitForURL(/transactions.*category=/);
+  const destination = new URL(page.url());
+  assert.equal(destination.pathname, '/transactions');
+  assert.equal(destination.searchParams.get('category'), categoryId);
+  assert.equal(destination.searchParams.get('type'), 'expense');
+  await exists('transactions-summary');
+  assert.match(await page.getByTestId('transactions-summary').innerText(), /\b2 filters\b/);
+  const entries = await page.getByTestId('transaction-details-link').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
+  assert.ok(entries.length > 0, 'The category ledger must render transactions');
+  assert.ok(entries.every(label => label.includes(`, ${categoryName},`) && /, minus [\d,]+(?:\.\d+)? AED$/.test(label)),
+    `The visible ledger must contain only ${categoryName} expenses: ${entries}`);
 });
 await check('The old Stats route opens Spending trends', async () => {
   await go('/stats'); await exists('spending-trends');

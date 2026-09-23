@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory, isFixedCommitment } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { daysInMonth, formatAED, shortDate } from '@/lib/format';
+import { daysInMonth, formatAED, getMonthStartDay, shortDate } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -24,6 +24,31 @@ export interface MonthSummary {
   incomeFils: number;
   expenseFils: number;
   byCategory: { category: CategoryId; totalFils: number; share: number }[];
+}
+
+let monthSummaryCache: {
+  transactions: Transaction[];
+  period: string;
+  monthStartDay: number;
+  live?: Set<string>;
+  internal?: Set<string>;
+  value: MonthSummary;
+} | null = null;
+
+const summaryPeriodKey = (periodLike: PeriodLike): string => {
+  const period = toPeriod(periodLike);
+  if (period.mode === 'month') return `month:${period.key}`;
+  if (period.mode === 'year') return `year:${period.year}`;
+  if (period.mode === 'range') return `range:${period.from}:${period.to}`;
+  return 'all';
+};
+
+/** Cheap date-only probe. A prefix can look sorted; the whole ledger must be. */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return false;
+  }
+  return true;
 }
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
@@ -79,12 +104,30 @@ export function summarizeMonth(
   live?: Set<string>,
   internal?: Set<string>,
 ): MonthSummary {
+  const periodKey = summaryPeriodKey(period);
+  const monthStartDay = getMonthStartDay();
+  if (monthSummaryCache?.transactions === transactions &&
+      monthSummaryCache.period === periodKey &&
+      monthSummaryCache.monthStartDay === monthStartDay &&
+      monthSummaryCache.live === live && monthSummaryCache.internal === internal) {
+    return monthSummaryCache.value;
+  }
   let incomeFils = 0;
   let expenseFils = 0;
   const catTotals = new Map<CategoryId, number>();
+  const unbounded = toPeriod(period).mode === 'all';
+  const newestFirst = datesAreNewestFirst(transactions);
+  let seenInPeriod = false;
 
   for (const t of transactions) {
-    if (!inPeriod(t.date, period)) continue;
+    const inside = inPeriod(t.date, period);
+    if (!inside) {
+      // Only a fully newest-first ledger can stop after leaving the window.
+      // A sorted prefix with later in-period rows would undercount money.
+      if (seenInPeriod && newestFirst && !unbounded) break;
+      continue;
+    }
+    seenInPeriod = true;
     // One definition of spending and income, shared with every other screen
     // that adds money up. See ledger.ts for what these exclude and why.
     if (isIncome(t, live, internal)) {
@@ -105,7 +148,9 @@ export function summarizeMonth(
     }))
     .sort((a, b) => b.totalFils - a.totalFils);
 
-  return { incomeFils, expenseFils, byCategory };
+  const value = { incomeFils, expenseFils, byCategory };
+  monthSummaryCache = { transactions, period: periodKey, monthStartDay, live, internal, value };
+  return value;
 }
 
 export function spentInMonthForCategory(
@@ -182,6 +227,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
+  options: { includeRecurringAnalysis?: boolean } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
@@ -360,11 +406,23 @@ export function buildInsights(
   // headline read "Biggest purchase — AED 19,000, Outgoing Transfer" over a
   // month whose Out was 3,000.
   let largest: Transaction | null = null;
+  let largestPreviousDate: string | null = null;
+  let largestNewestFirst = true;
+  let largestSeenInPeriod = false;
+  const largestUnbounded = period.mode === 'all';
   for (const t of transactions) {
-    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
-    if (inPeriod(t.date, period) && !isFixedCommitment(t.category)) {
-      if (!largest || t.amountFils > largest.amountFils) largest = t;
+    if (largestNewestFirst && largestPreviousDate !== null && t.date > largestPreviousDate) {
+      largestNewestFirst = false;
     }
+    largestPreviousDate = t.date;
+    const inside = inPeriod(t.date, period);
+    if (!inside) {
+      if (largestSeenInPeriod && largestNewestFirst && !largestUnbounded) break;
+      continue;
+    }
+    largestSeenInPeriod = true;
+    if (!isSpending(t, liveAccounts, internalTransfers) || isFixedCommitment(t.category)) continue;
+    if (!largest || t.amountFils > largest.amountFils) largest = t;
   }
   if (largest && largest.amountFils >= 20_000) {
     insights.push({
@@ -386,13 +444,16 @@ export function buildInsights(
     });
   }
 
-  // Subscription load + price increases (true subscriptions only — rent and
-  // utilities are fixed commitments, not cancellable services)
-  const subs = activeSubscriptions(
-    trueSubscriptions(
-      detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
-    ),
-  );
+  // Subscription detection groups and orders the complete historical ledger.
+  // Full analytics/Bills still request it, but Home's tiny optional insight
+  // card must never trigger that heavy history job just after launch.
+  const subs = options.includeRecurringAnalysis === false
+    ? []
+    : activeSubscriptions(
+        trueSubscriptions(
+          detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
+        ),
+      );
   if (subs.length >= 2) {
     const monthly = subscriptionsMonthlyTotal(subs);
     if (isMonthMode && current.incomeFils > 0 && monthly / current.incomeFils >= 0.08) {

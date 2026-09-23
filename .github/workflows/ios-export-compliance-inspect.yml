@@ -1,0 +1,57 @@
+name: Inspect Wafra iOS export compliance
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ios-export-compliance-inspect.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: contains(github.event.head_commit.message, '[inspect-export]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Inspect Apple build compliance state
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
+          const pem = raw.includes('BEGIN PRIVATE KEY') ? raw : Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key = createPrivateKey(pem);
+          const kid = process.env.EXPO_ASC_KEY_ID, iss = process.env.EXPO_ASC_ISSUER_ID;
+          const b64 = d => Buffer.from(JSON.stringify(d)).toString('base64url');
+          async function req(path) {
+            const now=Math.floor(Date.now()/1000), signed=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;
+            const jwt=`${signed}.${sign('sha256',Buffer.from(signed),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`;
+            const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{headers:{Authorization:`Bearer ${jwt}`}});
+            if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+            return r.json();
+          }
+          for (const number of ['52','120']) {
+            const x=await req(`builds?filter[app]=6799171482&filter[version]=${number}&include=buildBetaDetail,preReleaseVersion&limit=20`);
+            const included=new Map((x.included||[]).map(e=>[`${e.type}:${e.id}`,e]));
+            for (const b of x.data) {
+              const pre=b.relationships?.preReleaseVersion?.data;
+              const detail=b.relationships?.buildBetaDetail?.data;
+              console.log(JSON.stringify({
+                number,
+                id:b.id,
+                attributes:b.attributes,
+                preRelease:pre?included.get(`${pre.type}:${pre.id}`)?.attributes:null,
+                beta:detail?included.get(`${detail.type}:${detail.id}`)?.attributes:null,
+                relationships:b.relationships
+              },null,2));
+            }
+          }
+          NODE

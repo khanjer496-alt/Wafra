@@ -60,6 +60,12 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
 
   const txIds = new Set(state.transactions.map((t) => t.accountId));
   const dueIds = new Set(state.cardDues.map((d) => d.accountId));
+  const duesByAccount = new Map<string, CardDue[]>();
+  for (const due of state.cardDues) {
+    const rows = duesByAccount.get(due.accountId);
+    if (rows) rows.push(due);
+    else duesByAccount.set(due.accountId, [due]);
+  }
   const billIds = new Set(
     (state.bills ?? [])
       .map((b) => b.accountId)
@@ -175,8 +181,7 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   const contradict = (rows: Account[]): boolean => {
     const byDate = new Map<string, number>();
     for (const r of rows) {
-      for (const d of state.cardDues) {
-        if (d.accountId !== r.id) continue;
+      for (const d of duesByAccount.get(r.id) ?? []) {
         const seen = byDate.get(d.dueDate);
         if (seen !== undefined && seen !== d.totalDueFils) return true;
         byDate.set(d.dueDate, d.totalDueFils);
@@ -370,11 +375,22 @@ export function repairDuplicateStatements(state: AppState): AppState {
  */
 export function repairCardPaymentAccounts(state: AppState): AppState {
   let changed = false;
+  const accountById = new Map(state.accounts.map((account) => [account.id, account] as const));
+  const creditCardsByBankAndLast4 = new Map<string, Account[]>();
+  for (const account of state.accounts) {
+    if (account.kind !== 'card' || account.cardType !== 'credit' || !account.last4 || !account.bankName) continue;
+    const bank = bankIdentityForName(account.bankName);
+    if (!bank) continue;
+    const key = `${bank}|${account.last4}`;
+    const rows = creditCardsByBankAndLast4.get(key);
+    if (rows) rows.push(account);
+    else creditCardsByBankAndLast4.set(key, [account]);
+  }
   const transactions = state.transactions.map((tx) => {
     if (tx.source !== 'sms' || tx.userEdited || !tx.isTransfer) return tx;
     const named = tx.title.match(/\bcard\s*•?(\d{4})\s*(?:payment|settlement)\b/i);
     if (!named) return tx;
-    const current = state.accounts.find((a) => a.id === tx.accountId);
+    const current = accountById.get(tx.accountId);
     if (
       current?.kind === 'card' &&
       current.cardType === 'credit' &&
@@ -383,14 +399,7 @@ export function repairCardPaymentAccounts(state: AppState): AppState {
     if (!current?.bankName) return tx;
     const currentBank = bankIdentityForName(current.bankName);
     if (!currentBank) return tx;
-    const candidates = state.accounts.filter(
-      (a) =>
-        a.kind === 'card' &&
-        a.cardType === 'credit' &&
-        a.last4 === named[1] &&
-        a.bankName !== undefined &&
-        bankIdentityForName(a.bankName) === currentBank,
-    );
+    const candidates = creditCardsByBankAndLast4.get(`${currentBank}|${named[1]}`) ?? [];
     if (candidates.length !== 1) return tx;
     changed = true;
     return { ...tx, accountId: candidates[0].id };

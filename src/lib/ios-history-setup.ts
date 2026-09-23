@@ -11,10 +11,74 @@ export type IosHistoryCardState =
   | 'review';
 
 export const IOS_HISTORY_HANDOFF_TTL_MS = 60 * 60_000;
-export const IOS_HISTORY_SHORTCUT_NAME = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1'
-  ? 'Wafra History v2'
-  : 'Wafra History Import';
-export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v1';
+export const IOS_HISTORY_BASELINE_200_URL =
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-baseline-200-20260917/Wafra-History-Baseline-200.signed.shortcut';
+/**
+ * Name Apple installs for each canonical public History record.
+ *
+ * Shortcuts' run URL resolves by the *installed* name, which is the signed
+ * file's basename at publish time, not the generator's WFWorkflowName. The
+ * run name therefore has to follow the configured install URL: a build that
+ * installs one record and runs another name fails inside Shortcuts and bounces
+ * the user back with no session. Keep this table in agreement with
+ * `scripts/release/ios-public-shortcut-check.mjs` and
+ * `PAGED_HISTORY_SHORTCUT_NAME` in `ios-paged-setup.ts`; a test pins both.
+ */
+export interface IosHistoryShortcutRecord {
+  /** Name Apple installs from the public record; the run URL must use it. */
+  name: string;
+  /**
+   * Paged graphs resume from their saved cursor when run again, so Continue
+   * can re-run them by name. The legacy two-ended graph starts a second
+   * retained-message import instead, so Continue may only reopen Shortcuts.
+   */
+  resumesOnRerun: boolean;
+}
+export const IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS: Readonly<Record<string, IosHistoryShortcutRecord>> = {
+  'bc30c7ae89d6494c9ef0aea1a666d72d': { name: 'Wafra-History-v2-typed-date.signed', resumesOnRerun: true },
+};
+/**
+ * Typed-date paged graph (v4), Apple-signed on a Mac and published as a
+ * release asset. Apple installs a signed file under its basename. Every date
+ * reaches Wafra as a typed `Date` App Intent parameter; Shortcuts never
+ * formats one as text (the v2 failure on iOS 26).
+ */
+export const IOS_HISTORY_V4_URL =
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut';
+export const IOS_HISTORY_V4_NAME = 'Wafra-History-v4.signed';
+/**
+ * v6: v4 plus date-windowed Messages queries, so Apple never has to load the
+ * whole inbox (a large inbox failed our unbounded query with Apple's own
+ * error). Requires the window-start intent shipped from build 155.
+ */
+export const IOS_HISTORY_V6_URL =
+  'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+export const IOS_HISTORY_V6_NAME = 'Wafra-History-v6.signed';
+export const IOS_HISTORY_SHORTCUT_DEFAULT_NAME = 'Wafra History Import';
+const iosHistoryShortcutRecord = (installUrl: unknown): IosHistoryShortcutRecord | null => {
+  if (installUrl === IOS_HISTORY_BASELINE_200_URL) {
+    return { name: IOS_HISTORY_SHORTCUT_DEFAULT_NAME, resumesOnRerun: false };
+  }
+  if (installUrl === IOS_HISTORY_V4_URL) {
+    return { name: IOS_HISTORY_V4_NAME, resumesOnRerun: true };
+  }
+  if (installUrl === IOS_HISTORY_V6_URL) {
+    return { name: IOS_HISTORY_V6_NAME, resumesOnRerun: true };
+  }
+  const id = typeof installUrl === 'string'
+    ? /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(installUrl)?.[1]?.toLowerCase()
+    : undefined;
+  return (id && IOS_HISTORY_SHORTCUT_INSTALLED_RECORDS[id]) || null;
+};
+export const installedIosHistoryShortcutName = (installUrl: unknown): string =>
+  iosHistoryShortcutRecord(installUrl)?.name ?? IOS_HISTORY_SHORTCUT_DEFAULT_NAME;
+export const iosHistoryShortcutResumesOnRerun = (
+  installUrl: unknown = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
+): boolean => iosHistoryShortcutRecord(installUrl)?.resumesOnRerun === true;
+export const IOS_HISTORY_SHORTCUT_NAME = installedIosHistoryShortcutName(
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL,
+);
+export const IOS_HISTORY_INSTALL_MARKER = 'wafra/ios-history-shortcut-installed/v2';
 export const IOS_HISTORY_HANDOFF_MARKER = 'wafra/ios-history-handoff-started-at/v1';
 export const IOS_HISTORY_RETURN_ORIGIN_MARKER = 'wafra/ios-history-return-origin/v1';
 
@@ -36,10 +100,16 @@ export type IosHistoryReturnRoute =
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const HISTORY_SHORTCUT_RETURN_URL = 'wafra://import-sms';
 const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
+  // Bound Combine Text input under `WFInput`, so every page reached Wafra empty.
+  '5a0da9b5d3a641d9958f3dfa37851afa',
   // Diagnostic graph retired after the physical V3 two-ended import passed.
   'cc85a21db99a4e4698c1a498de670199',
   // Build 99 legacy per-message graph. The next release uses bounded paging.
   '2869584d40ed454691cf3f916cbee158',
+  // Superseded paged-history artifacts. Both retained the old cursor/date path
+  // and must never be accepted as current again.
+  'a0e52d2ffabc43a9ad539798b4f17f17',
+  'b02fdd70b9b84805a8d8e9684dd684d5',
 ]);
 
 export interface IosHistorySetupStorage {
@@ -114,7 +184,18 @@ export const historyShortcutRunUrl = (): string => {
   )}&x-cancel=${sourceFreeReturn}&x-error=${sourceFreeReturn}`;
 };
 
+/**
+ * URL for Continue on a handoff that is already running. A paged graph
+ * resumes its saved cursor and fences the earlier runner, so it is re-run by
+ * name; the legacy graph would start a second import, so only Shortcuts opens.
+ */
+export const historyShortcutContinueUrl = (): string =>
+  iosHistoryShortcutResumesOnRerun() ? historyShortcutRunUrl() : 'shortcuts://';
+
 export const normalizeIosHistoryShortcutUrl = (value: unknown): string | null => {
+  if (value === IOS_HISTORY_BASELINE_200_URL) return IOS_HISTORY_BASELINE_200_URL;
+  if (value === IOS_HISTORY_V4_URL) return IOS_HISTORY_V4_URL;
+  if (value === IOS_HISTORY_V6_URL) return IOS_HISTORY_V6_URL;
   if (typeof value !== 'string') return null;
   const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
   if (!match) return null;

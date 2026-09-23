@@ -4,9 +4,11 @@ import type {
   Budget,
   CategoryId,
   Goal,
+  OnboardingAlertDelivery,
   OnboardingFocus,
   OnboardingJourneyStage,
   OnboardingPlanPreferences,
+  OnboardingProfile,
   OnboardingTracking,
   Transaction,
 } from '@/lib/types';
@@ -14,6 +16,23 @@ import type {
 export type OnboardingMarketId = 'AE' | 'SA';
 export type OnboardingGoalId = OnboardingPlanPreferences['goalIds'][number];
 export type OnboardingBudgetId = OnboardingPlanPreferences['budgetId'];
+
+export const MAX_PREFERRED_NAME_LENGTH = 40;
+
+/**
+ * A first name/nickname used only for lightweight product personalization.
+ * Keep Unicode intact (Arabic included), collapse accidental whitespace, and
+ * bound the value before it reaches persisted app state.
+ */
+export function normalizePreferredName(value: string): string | null {
+  const cleaned = value
+    .normalize('NFC')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return null;
+  return Array.from(cleaned).slice(0, MAX_PREFERRED_NAME_LENGTH).join('');
+}
 
 export interface OnboardingFocusPreset {
   id: OnboardingFocus;
@@ -82,6 +101,143 @@ export const TRACKING_PRESETS: readonly OnboardingTrackingPreset[] = [
     icon: 'phone',
   },
 ] as const;
+
+export interface OnboardingAlertDeliveryPreset {
+  id: OnboardingAlertDelivery;
+  titleKey: StringKey;
+  detailKey: StringKey;
+  icon: 'phone' | 'alert' | 'mail' | 'search';
+}
+
+/**
+ * Ordered so the two answers that decide the follow-up sit at the top. The
+ * wording asks what the bank DOES, never which bank it is.
+ */
+export const ALERT_DELIVERY_PRESETS: readonly OnboardingAlertDeliveryPreset[] = [
+  {
+    id: 'sms',
+    titleKey: 'onboardAlertsSms',
+    detailKey: 'onboardAlertsSmsDetail',
+    icon: 'phone',
+  },
+  {
+    id: 'notifications',
+    titleKey: 'onboardAlertsNotifications',
+    detailKey: 'onboardAlertsNotificationsDetail',
+    icon: 'alert',
+  },
+  {
+    id: 'neither',
+    titleKey: 'onboardAlertsNeither',
+    detailKey: 'onboardAlertsNeitherDetail',
+    icon: 'mail',
+  },
+  {
+    id: 'unsure',
+    titleKey: 'onboardAlertsUnsure',
+    detailKey: 'onboardAlertsUnsureDetail',
+    icon: 'search',
+  },
+] as const;
+
+/**
+ * Does this answer mean the first run cannot reconstruct the past on its own?
+ *
+ * Only a texting bank leaves an archive Wafra can read: the SMS inbox still
+ * holds last year's alerts, so a history scan genuinely recovers history. An
+ * app notification is on screen or it is gone — capturing it works from the
+ * moment access is granted and never backwards. A bank that does neither
+ * leaves nothing at all.
+ *
+ * So `sms` is the single answer that needs no statement, and an unanswered
+ * question is NOT treated as a gap: an absent answer is the state of every
+ * ledger onboarded before this step existed, and those users already have
+ * their history. Only a deliberate "I'm not sure" asks to be shown the option.
+ */
+export function onboardingHistoryGap(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'notifications' || alerts === 'neither' || alerts === 'unsure';
+}
+
+/**
+ * Should first-run capture setup lead with bank notifications rather than SMS?
+ *
+ * Answering "notifications" is the user telling us the SMS inbox will be
+ * close to empty for their main bank. The capture step still offers both —
+ * a second bank may well text — but the recommendation follows the answer.
+ */
+/**
+ * Does this answer mean Wafra has NO automatic input from that bank at all?
+ *
+ * "Neither" is not a softer version of the notification answer: a bank that
+ * sends no message of any kind leaves nothing to read now and nothing to read
+ * later. Every other answer names a channel Wafra can follow going forward,
+ * so this is the one case where future coverage must not be drawn or promised.
+ */
+export function onboardingNoAutomaticCapture(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'neither';
+}
+
+export function onboardingPrefersNotificationCapture(
+  alerts: OnboardingAlertDelivery | null | undefined,
+): boolean {
+  return alerts === 'notifications';
+}
+
+/**
+ * Set the alert-delivery answer on a ledger that may never have been asked.
+ *
+ * The person this question was written for is already onboarded: his import
+ * finished months of SMS and still missed the bank that only pushes
+ * notifications. Reaching him means letting the answer be given — and changed
+ * — after setup, which in turn means tolerating a profile that does not exist
+ * yet, because ledgers created before the profile did carry none.
+ *
+ * A profile invented here is stamped `complete`, never `welcome`: this ledger
+ * finished onboarding long ago, and a resumable stage would send its owner
+ * back through a questionnaire they already answered.
+ */
+/**
+ * Move a profile to a stage while keeping every answer it already holds.
+ *
+ * Rebuilding the object field by field is how the alert-delivery and country
+ * answers were silently dropped the moment an iPhone finished setup: the
+ * reducer replaces the whole profile, so any writer that forgets a field
+ * erases it. Spreading what is there means a field added later survives every
+ * writer by default, which is the only version of this that stays correct.
+ */
+export function onboardingProfileAtStage(
+  profile: OnboardingProfile | null | undefined,
+  stage: OnboardingJourneyStage,
+  now: number,
+): OnboardingProfile {
+  return {
+    ...(profile ?? { v: 1, stage, focus: null, tracking: null, startedAt: now }),
+    v: 1,
+    stage,
+  };
+}
+
+export function onboardingProfileWithAlerts(
+  profile: OnboardingProfile | null | undefined,
+  alerts: OnboardingAlertDelivery,
+  now: number,
+): OnboardingProfile {
+  return {
+    ...(profile ?? {
+      v: 1,
+      stage: 'complete',
+      focus: null,
+      tracking: null,
+      startedAt: now,
+    }),
+    v: 1,
+    alerts,
+  };
+}
 
 export function onboardingLandingPath(focus: OnboardingFocus | null | undefined): '/' | '/flow' | '/bills' {
   if (focus === 'spending') return '/flow';

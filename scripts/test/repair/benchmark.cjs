@@ -1,17 +1,21 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
-const path = require('node:path');
-const load = require('./load-typescript.cjs');
 const reference = require('./ledger-reference.cjs');
-const { internalTransferIds } = load(path.resolve(__dirname, '../../../src/lib/ledger.ts'));
+// ledger.ts now reads transfer ownership from transfer-reconciliation; load the
+// same actual-source graph the other repair suites use rather than the bare
+// module, which stops with an unstubbed dependency before any row is timed.
+const { internalTransferIds } = require('./load-transfer-ledger.cjs').ledger;
 const accounts = [{ id: 'checking' }, { id: 'savings', archived: true }];
 function fixture(count) {
   const rows = [];
   for (let i = 0; i < count / 2; i += 1) {
     const date = new Date(Date.UTC(2014, 0, 1) + i * 86400000).toISOString().slice(0, 10);
-    rows.push({ id: `out-${i}`, date, type: 'expense', title: 'Outgoing transfer', amountFils: 50000, accountId: 'checking', category: 'other' },
-      { id: `in-${i}`, date, type: 'income', title: 'Incoming transfer', amountFils: 50000, accountId: 'savings', category: 'other' });
+    // Explicit transfer rows: title alone no longer makes a transfer since
+    // ownership moved to transfer-reconciliation, so the fixture carries the
+    // flag a captured own-account transfer carries in the real ledger.
+    rows.push({ id: `out-${i}`, date, type: 'expense', title: 'Outgoing transfer', amountFils: 50000, accountId: 'checking', category: 'other', isTransfer: true },
+      { id: `in-${i}`, date, type: 'income', title: 'Incoming transfer', amountFils: 50000, accountId: 'savings', category: 'other', isTransfer: true });
   }
   return rows.reverse();
 }
@@ -22,7 +26,9 @@ for (const count of [1000, 5000, 10000]) {
   const rows = fixture(count);
   const expected = reference(rows, accounts);
   assert.equal(expected.size, count);
-  assert.deepEqual([...internalTransferIds(rows, accounts)], [...expected]);
+  // Membership is the contract; the two implementations walk the ledger in
+  // different orders, so compare the sets, not their insertion sequence.
+  assert.deepEqual([...internalTransferIds(rows, accounts)].sort(), [...expected].sort());
   const before = []; const after = [];
   for (let i = 0; i < 3; i += 1) {
     before.push(measure(reference, rows).ms);

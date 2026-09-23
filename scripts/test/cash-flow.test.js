@@ -604,5 +604,28 @@ const editedFundingRows = reconcilePaymentFlows([
 ]);
 eq('a user-edited funding row is never removed automatically', editedFundingRows.length, 2);
 
+const combinedEtisalatBill = reconcilePaymentFlows([
+  tx('bank-debit', 70108, {
+    title: 'E&', category: 'telecom', accountId: 'bank',
+    ts: Date.parse('2026-09-02T20:36:00Z'), date: '2026-09-02',
+  }),
+  tx('mobile-line-receipt', 24023, {
+    title: 'Etisalat', category: 'telecom', paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-09-02T20:37:00Z'), date: '2026-09-02',
+  }),
+  tx('home-line-receipt', 46085, {
+    title: 'Etisalat', category: 'telecom', paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-09-04T12:56:00Z'), date: '2026-09-04',
+  }),
+]);
+ok('two e& line receipts that exactly allocate one bank debit count once',
+  combinedEtisalatBill.length === 1 && combinedEtisalatBill[0].id === 'bank-debit');
+eq('combined e& checkout contributes only the independently observed debit',
+  summarizeCashOutflow(
+    { ...state, transactions: combinedEtisalatBill },
+    { mode: 'month', key: '2026-09' },
+  ).totalFils,
+  70108);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

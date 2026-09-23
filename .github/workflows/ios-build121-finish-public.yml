@@ -1,0 +1,56 @@
+name: Finish Wafra iOS build 121 public TestFlight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: '121'
+      WAFRA_BETA_SOURCE_SHA: d0726ccc4c58ead8d48bf2cb9361819221c7ca26
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply export-compliance declaration to build 121
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const buildId='e962cafe-1930-4e90-970c-ece86a0f0b08';
+          const raw=process.env.EXPO_ASC_API_KEY_P8||'';
+          const pem=raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          const key=createPrivateKey(pem), kid=process.env.EXPO_ASC_KEY_ID, iss=process.env.EXPO_ASC_ISSUER_ID;
+          const b64=d=>Buffer.from(JSON.stringify(d)).toString('base64url');
+          const token=()=>{const now=Math.floor(Date.now()/1000),s=`${b64({alg:'ES256',kid,typ:'JWT'})}.${b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'})}`;return `${s}.${sign('sha256',Buffer.from(s),{key,dsaEncoding:'ieee-p1363'}).toString('base64url')}`};
+          async function api(path,{method='GET',body}={}){const r=await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`,{method,headers:{Authorization:`Bearer ${token()}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const text=await r.text();if(!r.ok)throw new Error(`${method} ${path}: ${r.status} ${text}`);return text?JSON.parse(text):null;}
+          const before=await api(`builds/${buildId}`);
+          if(before.data?.attributes?.version!=='121') throw new Error(`Refusing unexpected Apple build ${before.data?.attributes?.version}`);
+          if(before.data.attributes.usesNonExemptEncryption === null) {
+            await api(`builds/${buildId}`,{method:'PATCH',body:{data:{type:'builds',id:buildId,attributes:{usesNonExemptEncryption:false}}}});
+          } else if(before.data.attributes.usesNonExemptEncryption !== false) {
+            throw new Error('Build already has a conflicting export-compliance declaration');
+          }
+          const after=await api(`builds/${buildId}?include=buildBetaDetail`);
+          console.log(JSON.stringify({build:after.data.attributes.version,usesNonExemptEncryption:after.data.attributes.usesNonExemptEncryption,processingState:after.data.attributes.processingState},null,2));
+          if(after.data.attributes.usesNonExemptEncryption !== false) throw new Error('Export-compliance declaration was not accepted');
+          NODE
+
+      - name: Add build 121 to existing public group and submit Beta App Review if needed
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Preserve publication evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build121-final-public-${{ github.run_id }}
+          path: ios-release-evidence/public-beta.json
+          if-no-files-found: ignore
+          retention-days: 14

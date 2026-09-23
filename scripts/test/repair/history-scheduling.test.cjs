@@ -15,14 +15,28 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
   const batch = Array.from({ length: 950 }, (_, i) => ({ id: 950 - i, date: 1000000 - i,
     address: 'SYNTHETIC', body: `Synthetic record ${i}` }));
   const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/local-semantic-review': load(path.join(root, 'src/lib/local-semantic-review.ts'), {
+      '@/lib/local-semantic-review-runtime': { evaluateLocalReviewWindow: async () => ({ kind: 'refused', reason: 'model-unavailable' }) },
+    }),
+    '@/lib/generic-review-entry': require('../build/generic-review-entry.js'),
     '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
+    '@/lib/foreground-history-priority': {
+      waitForForegroundHistoryIdle: async () => { yields++; sliceEnds.push(parsed); },
+    },
     'react-native': { Platform: { OS: 'android' }, AppState: appState },
     'expo-crypto': {}, 'expo-secure-store': {},
     '../../modules/notification-reader': { __esModule: true, default: null },
     '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => batch } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-01' },
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/ledger-money': { ledgerMoneySpec: currency => ({ currency, exponent: 2 }) },
+    // This suite measures parse scheduling, not trust/admission. Give the
+    // synthetic sender launch-tested Gulf identity so every row reaches the
+    // deterministic parser instead of the Review-first global SMS boundary.
+    '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
+    '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => null,
       parse: body => {
         parsed++;

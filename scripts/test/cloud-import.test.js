@@ -65,6 +65,19 @@ ok('csv response: accepted and explicitly rejected rows must reconcile to total'
 ok('pdf response: unsupported format remains a distinct user-facing error',
   pdfImportError(422, { error: 'unsupported_statement_format' }).code ===
     'unsupported_statement_format');
+ok('pdf response: skipped rows are read when sent, default to zero from an older relay, and are refused when malformed',
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 3 })?.rejectedRows === 3 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.rejectedRows === 0 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: -1 }) === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: '3' }) === null);
+ok('pdf response: accepted + rejected rows must reconcile and incomplete coverage is never persisted',
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, pages: 2, coverage: {
+    sourceKey: 'account-1', label: 'Account', startDate: '2026-01-01', endDate: '2026-01-31',
+  } })?.coverage === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 9, pages: 2 }) === null &&
+  parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, pages: 2 })?.totalRows === 10);
+ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
+  pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',
   parseEmailForwardingCredential({
     emailToken: 't'.repeat(43),
@@ -80,6 +93,7 @@ const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
 const surface = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
 const captureExecutor = fs.readFileSync(path.join(root, 'src/lib/capture-executor.ts'), 'utf8');
+const relay = fs.readFileSync(path.join(root, 'src/lib/relay.ts'), 'utf8');
 ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
   /from 'expo-file-system'/.test(transport) &&
   /from 'expo\/fetch'/.test(transport) &&
@@ -88,14 +102,52 @@ ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
 ok('CSV and TSV use a distinct authenticated statement endpoint',
   /uploadCsvStatement/.test(transport) && /\/v1\/import\/csv/.test(transport) &&
     /text\/tab-separated-values/.test(transport));
+ok('statement uploads send the authoritative ledger currency and exponent, never infer money from country',
+  /x-wafra-ledger-currency/.test(transport) &&
+    /x-wafra-ledger-exponent/.test(transport) &&
+    /ledgerMoney\.currency/.test(transport) && /ledgerMoney\.exponent/.test(transport));
+ok('statement import requires an explicit ledger currency before picking files',
+  /LedgerCurrencySheet/.test(surface) &&
+    /!state\.ledgerMoney/.test(surface) &&
+    /disabled=\{!capabilities \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
-  /pickedFile\.delete\(\)/.test(surface));
-ok('forwarding credential is compare-and-cleared on timeout and screen exit',
-  /const current = await Clipboard\.getStringAsync\(\)/.test(surface) &&
-  /if \(current === address\) await Clipboard\.setStringAsync\(''\)/.test(surface) &&
-  /if \(address\) void clearCopiedAddress\(address\)/.test(surface) &&
-  /if \(disposed\.current\)[\s\S]{0,120}?clearCopiedAddress\(address\)/.test(surface));
+  /file\.delete\(\)/.test(surface));
+ok('statement screen no longer exposes forwarded-email setup',
+  !/createEmailForwardingAddress|revokeEmailForwardingAddress|forwardingAddress|Create private address/.test(surface));
+ok('protected PDF retry keeps the picker copy only until password retry or cancel',
+  /pdf_password_required/.test(surface) && /secureTextEntry/.test(surface) &&
+    /retryProtectedPdf/.test(surface) && /pendingPdf\.file\.delete\(\)/.test(surface));
+// Coverage is persisted once the whole batch has uploaded. Awaiting a full
+// ledger persist inside the per-file loop was the "laggy import" report.
+const uploadLoop = surface.slice(
+  surface.indexOf('for (let index = 0; index < picked.assets.length'),
+  surface.indexOf('await rememberCoverage(coverage)'),
+);
+ok('statement coverage is recorded after the upload loop, not per file',
+  uploadLoop.length > 0 && !/rememberCoverage\(/.test(uploadLoop) &&
+  !/recordStatementCoverage\(/.test(uploadLoop));
+ok('password-protected PDFs are all deferred and the rest of the batch still uploads',
+  /protectedPdfs\.push\(\{ asset, file \}\);[\s\S]{0,40}continue;/.test(uploadLoop) &&
+    !/return;/.test(uploadLoop));
+ok('multiple protected PDFs are queued for sequential passwords instead of being skipped',
+  /const protectedPdfs: PendingProtectedPdf\[\] = \[\]/.test(surface) &&
+    /setPendingPdfs\(protectedPdfs\)/.test(surface) &&
+    /pendingPdfs\.length > 1/.test(surface) &&
+    !/skippedProtected|passwordSkipped/.test(surface));
+ok('a failed post-upload sync is reported, not folded into the pending status',
+  /copy\.syncFailed/.test(surface) && /syncFailureReason/.test(surface));
+ok('statement upload and relay queue drain use the same Expo native fetch transport',
+  /from 'expo\/fetch'/.test(transport) && /from 'expo\/fetch'/.test(relay) &&
+    /return await expoFetch\(url/.test(relay));
+ok('queued statement rows retry without requiring another upload',
+  /queuedRetryNeededRef/.test(surface) &&
+    /AppState\.addEventListener\('change'/.test(surface) &&
+    /setTimeout\(\(\) => \{ void retryQueued\(\); \}, 1_500\)/.test(surface));
+ok('multi-file statement imports drain full 200-row relay pages without one giant JS turn',
+  /for \(let page = 0; page < 50; page \+= 1\)/.test(surface) &&
+    /outcome\.moreQueued !== true/.test(surface) &&
+    /await new Promise<void>\(\(resolve\) => setTimeout\(resolve, 0\)\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <
@@ -119,6 +171,30 @@ ok('a supplemental sync leaves the iOS setup probe for the screen waiting on it'
 ok('email forwarding has separate create and revoke actions',
   /method: 'POST'/.test(transport) && /method: 'DELETE'/.test(transport) &&
   /\/v1\/email-token/.test(transport));
+
+// A successful upload leaves the rows safe on the relay and then files them on
+// the phone, which on a large ledger takes a visible moment. That moment used
+// to be narrated with acceptedPending -- "could not sync to this phone yet. Try
+// again in a moment." -- so a working import read as a failure the user was
+// being asked to retry, right up until it replaced itself with the success
+// line. Progress and failure must not share copy.
+const copySource = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
+const filingStatus = surface.slice(
+  surface.indexOf('const finishQueuedImport'),
+  surface.indexOf('const imported = await syncQueued()'),
+);
+ok('the in-flight filing status does not reuse the failure copy',
+  /copy\.acceptedFiling/.test(filingStatus) && !/copy\.acceptedPending/.test(filingStatus),
+  'acceptedPending tells the user to retry; nothing has failed while the rows are still being filed');
+
+ok('acceptedPending is still what a real sync failure reports',
+  /setStatus\(interpolate\(copy\.acceptedPending/.test(
+    surface.slice(surface.indexOf('} catch (e) {', surface.indexOf('const finishQueuedImport')))),
+  'the failure branch must keep the wording that asks the user to try again');
+
+ok('both languages define the filing progress line',
+  (copySource.match(/acceptedFiling:/g) || []).length === 2,
+  'a missing Arabic string would fall through to an undefined status');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

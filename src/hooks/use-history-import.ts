@@ -1,7 +1,8 @@
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { historyBackground } from '@/lib/android-history-background';
+import { androidSmsCaptureEnabled } from '@/lib/android-capture-sources';
 
 import {
   buildImportPlan,
@@ -17,10 +18,25 @@ import {
 } from '@/lib/history-import';
 import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
-const HISTORY_IMPORT_PAGE_SIZE = 2_000;
+const BACKGROUND_HISTORY_PAGE_SIZE = 512;
+const BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1;
+// Foreground pages are intentionally much smaller than background pages. Even
+// with a cooperative parser, planning + reducer work is synchronous JS; a 500
+// row page can monopolise Hermes long enough for taps and navigation to look
+// dead on a large ledger. Background keeps the throughput-oriented page size.
+const FOREGROUND_HISTORY_PAGE_SIZE = 128;
+const FOREGROUND_HISTORY_PAGES_PER_COMMIT = 1;
+const FOREGROUND_HISTORY_PAGE_GAP_MS = 120;
+// A brand-new first run may begin by itself, but a previously paused history
+// job must never restart merely because the user returned to Wafra. Re-entry is
+// an interaction-critical transition and the saved Home card already exposes
+// an explicit Continue action.
+const FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
@@ -38,10 +54,15 @@ export function useHistoryImport(): void {
     setHistoryImportProgress,
     setMarket,
   } = useStore();
+  const legacyReviewKeys = useRef<{
+    generation: number;
+    startedAt: number;
+    keys: string[];
+  } | null>(null);
   const canStart = useCallback(() => {
     const current = getStateSnapshot();
     return Platform.OS === 'android' && current.hydrated && current.onboarded &&
-      !current.captureOptOut && isProActive(current) &&
+      androidSmsCaptureEnabled(current) && isProActive(current) &&
       (current.historyImport?.status === 'paused' || current.historyImport?.status === 'running');
   }, [getStateSnapshot]);
 
@@ -54,23 +75,57 @@ export function useHistoryImport(): void {
         historyBackground.canContinue() &&
         current.hydrated &&
         current.onboarded &&
-        !current.captureOptOut &&
+        androidSmsCaptureEnabled(current) &&
         isProActive(current);
     },
     now: Date.now,
     scanPage: async (cursor: HistoryImportCursor | null) => {
+      // Foreground history repair is maintenance work, never interaction-critical.
+      // Keep pages small and leave a real idle window between them so Hermes
+      // cannot monopolize a CPU core while the user is navigating. Background
+      // execution retains the zero-delay fast path.
+      const foreground = RNAppState.currentState === 'active';
+      if (foreground) {
+        await waitForForegroundHistoryIdle(FOREGROUND_HISTORY_PAGE_GAP_MS);
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      const snapshot = getStateSnapshot();
+      const generation = getStateGeneration();
+      const historyStartedAt = snapshot.historyImport?.startedAt ?? 0;
+      const cachedLegacyKeys = legacyReviewKeys.current;
+      if (!cachedLegacyKeys ||
+          cachedLegacyKeys.generation !== generation ||
+          cachedLegacyKeys.startedAt !== historyStartedAt) {
+        legacyReviewKeys.current = {
+          generation,
+          startedAt: historyStartedAt,
+          keys: collectLegacyReviewSourceKeys(snapshot),
+        };
+      }
+      const requestedLegacyReviewKeys = legacyReviewKeys.current?.keys ?? [];
+      const scanStartedAt = Date.now();
       const page = await scanInbox(
         0,
-        getStateSnapshot().merchantOverrides,
+        snapshot.merchantOverrides,
         undefined,
         undefined,
         {
           cursor,
-          maxInboxPages: 1,
-          pageSize: HISTORY_IMPORT_PAGE_SIZE,
-          legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()),
+          // Parsing itself remains cooperative inside scanInbox. Group several
+          // provider pages before one plan/persist boundary so the expensive
+          // full-ledger indexes and React transaction-array publication are not
+          // repeated hundreds of times on a large retained inbox.
+          maxInboxPages: foreground
+            ? FOREGROUND_HISTORY_PAGES_PER_COMMIT
+            : BACKGROUND_HISTORY_PAGES_PER_COMMIT,
+          pageSize: foreground ? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE,
+          legacyReviewSourceKeys: requestedLegacyReviewKeys,
+          historyRepair: true,
+          includeNotificationQueue: false,
         },
       );
+      recordRuntimeOperation('history-scan-page', Date.now() - scanStartedAt);
       return {
         ...page,
         scanned: page.scannedCount,
@@ -98,20 +153,43 @@ export function useHistoryImport(): void {
         await reviewReceipt.durable;
       }
 
-      // Resolving promises does not give pending UI/input work a macrotask.
-      // Separate parsing/review from the synchronous planning/reducer work.
-      // This is cooperative scheduling, not a claim of off-thread parsing.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // Parsing already yields, but planning + reducer reconciliation below are
+      // synchronous JS too. Starting that work in the same turn as a user's tap
+      // can still freeze a tab/button even when the parser itself is perfectly
+      // chunked. Honour the shared navigation lease before BOTH planning and
+      // the ledger mutation. A tap extends the lease; background history keeps
+      // the immediate path because there is no visible interaction to protect.
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle();
+      } else {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
         : getStateSnapshot();
+      const planStartedAt = Date.now();
       const plan = buildImportPlan(page.parsed, ledger, page.newestTs, undefined, page.declined);
-      await importBatch({
-        ...plan.batch,
-        parserRereadComplete: page.inboxHistoryComplete,
-        historyImport: next,
-      }).durable;
+      recordRuntimeOperation('history-plan-page', Date.now() - planStartedAt);
+      if (RNAppState.currentState === 'active') {
+        await waitForForegroundHistoryIdle();
+      }
+      if (!canCommit()) return false;
+      const saveStartedAt = Date.now();
+      const applyStartedAt = Date.now();
+      const receipt = importBatch({
+          ...plan.batch,
+          parserRereadComplete: page.inboxHistoryComplete,
+          historyImport: next,
+      });
+      recordRuntimeOperation('history-apply-page', Date.now() - applyStartedAt);
+      const persistStartedAt = Date.now();
+      try {
+        await receipt.durable;
+      } finally {
+        recordRuntimeOperation('history-persist-page', Date.now() - persistStartedAt);
+        recordRuntimeOperation('history-save-page', Date.now() - saveStartedAt);
+      }
       markLaunchPhase('first-history-page');
       // Never acknowledge transient native rows before the ledger write.
       // A pause during persistence leaves them available for safe replay.
@@ -133,11 +211,21 @@ export function useHistoryImport(): void {
 
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
-    void run().catch(() => {
-      // The coordinator has persisted a body-free failure. Home and Settings
-      // own recovery; a failed cursor must not be marked complete to unblock UI.
-    });
-  }, [run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
+    const progress = getStateSnapshot().historyImport;
+    // Only a genuinely new first-history job auto-starts. A saved/paused job
+    // with real progress belongs to the explicit Continue control: silently
+    // resuming it on every cold launch was the cause of the blank/reopening
+    // state on large ledgers.
+    if (!progress || progress.status !== 'paused' || progress.scanned > 0 || progress.error) return;
+    const timer = setTimeout(() => {
+      void run().catch(() => {
+        // The coordinator has persisted a body-free failure. Home and Settings
+        // own recovery; a failed cursor must not be marked complete to unblock UI.
+      });
+    }, FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [getStateSnapshot, run, runnable, state.captureOptOut, state.androidCaptureSources?.sms,
+    state.hydrated, state.onboarded]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -145,14 +233,11 @@ export function useHistoryImport(): void {
     return () => { unsubscribe(); historyBackground.cancel(); };
   }, [run]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
-      const progress = getStateSnapshot().historyImport;
-      if (progress?.status !== 'paused' && progress?.status !== 'running') return;
-      void run().catch(() => {});
-    });
-    return () => subscription.remove();
-  }, [getStateSnapshot, run]);
+  // Do not cancel a running history job merely because the Activity becomes
+  // foreground again. scanInbox dynamically switches to the smaller foreground
+  // page and 4ms/64-row parse budget, while navigation taps extend the shared
+  // foreground-history lease. The previous foreground cancellation made a
+  // multi-hour migration bounce between running/paused every time the user
+  // reopened Wafra, which is both confusing and needlessly prolongs the heavy
+  // parser-backfill state.
 }

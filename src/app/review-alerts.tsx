@@ -1,6 +1,6 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -20,6 +20,7 @@ import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/un
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
 import { useStore } from '@/lib/store';
+import { localReviewAdvisor } from '@/lib/local-semantic-review';
 
 const FAMILY_COPY: Record<ReviewAlert['family'], { label: StringKey; icon: IconName }> = {
   purchase: { label: 'reviewAlertPossiblePurchase', icon: 'cart' },
@@ -74,6 +75,9 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   const language = useLanguage();
   const words = reviewAlertCopy[language === 'ar' ? 'ar' : 'en'];
   const event = item.event;
+  const advisory = useSyncExternalStore(localReviewAdvisor.subscribe,
+    () => localReviewAdvisor.get(item), () => null);
+  const aiCopy = words.localAi;
   const informational = !isOrdinaryUniversalPosting(event);
   const key = event.family === 'statement' ? 'genericStatement'
     : event.family === 'balance' ? 'genericBalanceUpdate'
@@ -97,6 +101,15 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
         <ThemedText type="title" tabular>{amount}</ThemedText>
         {informational ? <ThemedText type="meta" themeColor="textSecondary">{words.informationHint}</ThemedText> : null}
         <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
+        {advisory ? <View testID="review-local-ai-advisory" accessibilityLiveRegion="polite" style={{ gap: Spacing.half }}>
+          <ThemedText type="small" themeColor="textSecondary">
+            {advisory.kind === 'parser-family-advisory'
+              ? `${aiCopy.suggestion}: ${t(FAMILY_COPY[advisory.family as ReviewAlert['family']]?.label ?? 'genericReviewTitle')}`
+              : advisory.kind === 'pending' ? aiCopy.pending : aiCopy.unavailable}
+          </ThemedText>
+          {advisory.kind === 'parser-family-advisory' ?
+            <ThemedText type="meta" themeColor="textSecondary">{aiCopy.confirm}</ThemedText> : null}
+        </View> : null}
         <View style={styles.rowActions}>
           <Pressable testID="review-alert-open" accessibilityRole="button" accessibilityLabel={`${t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}. ${identity}`}
             accessibilityState={{ disabled: busy }} disabled={busy} onPress={onAdd} style={styles.addButton}>
@@ -227,7 +240,7 @@ export default function ReviewAlertsScreen() {
   };
 
   const reviewAlertsHeader: ScreenHeaderProps = {
-    title: t('reviewAlertsTitle'),
+    title: words.reviewTitle,
     back: { label: t('back'), onPress: () => router.back() },
   };
 

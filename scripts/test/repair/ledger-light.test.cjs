@@ -38,13 +38,18 @@ for(const [mode,bg,ink,accent,expense] of [
   assert.doesNotMatch(s,/LinearGradient|rotate|opacity=/);
   assert.match(read('scripts/render-icons.mjs'),/paths\.length !== 2/);
  });
- test(`${mode}: tabs retain all four routes without delayed entrance or focus transforms`,()=>{
+ test(`${mode}: tabs retain all four routes, collapse tap storms, and avoid delayed entrance or focus transforms`,()=>{
   const h=createHarness({theme:mode}),tree=h.tabTree('home');
   const tabs=walk(tree).filter(n=>n.props.accessibilityRole==='tab');assert.equal(tabs.length,4);
   assert.equal(tabs.filter(n=>n.props.accessibilityState?.selected).length,1);
   for(const tab of tabs)tab.props.onPress();
-  assert.deepEqual(h.events.map(e=>e[1]),['flow','bills','wallet']);
-  assert.equal(h.events.length,3,'selected tab must not enqueue duplicate navigation');
+  assert.deepEqual(h.events.map(e=>e[1]),['flow']);
+  assert.equal(h.events.length,1,'rapid taps must not enqueue competing navigation transactions');
+  const advanced=h.tabTree('flow');
+  const bills=walk(advanced).find(n=>n.props.testID==='main-tab-bills');
+  assert.ok(bills,'Bills remains reachable after navigation state advances');
+  bills.props.onPress();
+  assert.deepEqual(h.events.map(e=>e[1]),['flow','bills']);
   assert.doesNotMatch(read('src/components/tab-bar.tsx'),/withSpring|entering=|useSharedValue|activePill/);
  });
 }

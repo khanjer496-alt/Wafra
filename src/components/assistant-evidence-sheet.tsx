@@ -9,6 +9,7 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { tapped } from '@/lib/haptics';
 import { formatAED as formatLedgerMoney } from '@/lib/format';
 import type { AppState } from '@/lib/types';
 import type { AssistantEvidence } from '@/lib/wafra-assistant';
@@ -52,7 +53,7 @@ export function AssistantEvidenceSheet({ evidence, state, stale, onClose, onRefr
       {evidence.length > 1 ? <View style={styles.groups}>
         {evidence.map((item, index) => <Pressable key={`${item.label}-${index}`}
           accessibilityRole="button" accessibilityState={{ selected: index === groupIndex }}
-          onPress={() => { setGroupIndex(index); setPage(0); }}
+          onPress={() => { tapped(); setGroupIndex(index); setPage(0); }}
           style={[styles.group, { borderColor: theme.cardBorder,
             backgroundColor: index === groupIndex ? theme.primarySoft : theme.backgroundElement }]}>
           <ThemedText type="smallBold">{item.label}</ThemedText>
@@ -77,7 +78,7 @@ export function AssistantEvidenceSheet({ evidence, state, stale, onClose, onRefr
         const attributed = date !== row.date || accountName !== account?.name;
         return <Pressable key={row.id} testID="assistant-evidence-row" accessibilityRole="button"
           accessibilityLabel={`${row.title}, ${date}, ${formatLedgerMoney(contribution)} included. View transaction details`}
-          onPress={() => setEntryId(row.id)}
+          onPress={() => { tapped(); setEntryId(row.id); }}
           style={[styles.row, { borderBottomColor: theme.cardBorder }]}>
           <MerchantAvatar title={row.title} category={row.category} size={32} />
           <View style={styles.content}>

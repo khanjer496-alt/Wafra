@@ -8,23 +8,23 @@ const ts = require('typescript');
 
 const ROOT = path.resolve(__dirname, '../../..');
 const LEDGER = 'wafra/erase-fixture';
-const MERCHANT_KEY = 'wafra:merchant-logo:v2:choithrams';
-const BANK_KEY = 'wafra:bank-logo:v1:fab';
-const cachedRecord = value => JSON.stringify({ value, expiresAt: Date.now() + 60_000 });
-const MERCHANT_RECORD = cachedRecord({
-  id: 'brandfetch:choithrams.com',
-  domain: 'choithrams.com',
-  canonicalName: 'Choithrams',
-  logoUrl: 'https://cdn.brandfetch.io/domain/choithrams.com?c=fixture-client',
-  confidence: 1,
-  source: 'verified',
+const MERCHANT_KEY = 'wafra:merchant-logo:v4:aseer%20time';
+const BANK_KEY = 'wafra:bank-logo:v2:bank%20of%20america';
+const cachedRecord = (query, value) => JSON.stringify({ query, value, expiresAt: Date.now() + 60_000 });
+const MERCHANT_RECORD = cachedRecord('aseer time', {
+  id: 'brandfetch:aseertime.com',
+  domain: 'aseertime.com',
+  canonicalName: 'Aseer Time',
+  logoUrl: 'https://cdn.brandfetch.io/domain/aseertime.com?c=fixture-client',
+  confidence: 0.95,
+  source: 'search',
 });
-const BANK_RECORD = cachedRecord({
-  id: 'bank:bankfab.com',
-  domain: 'bankfab.com',
-  canonicalName: 'FAB',
-  logoUrl: 'https://cdn.brandfetch.io/domain/bankfab.com?c=fixture-client',
-  source: 'market',
+const BANK_RECORD = cachedRecord('bank of america', {
+  id: 'bank:bankofamerica.com',
+  domain: 'bankofamerica.com',
+  canonicalName: 'Bank of America',
+  logoUrl: 'https://cdn.brandfetch.io/domain/bankofamerica.com?c=fixture-client',
+  source: 'search',
 });
 const deferred = () => {
   let resolve;
@@ -34,7 +34,7 @@ const deferred = () => {
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 // Run real source in one isolated module graph. Only native storage, market
-// lookup and fetch are replaced. Only reviewed brand strings are used.
+// lookup and Brandfetch are replaced with deterministic fixtures.
 function harness(platform) {
   const data = new Map();
   const modules = new Map();
@@ -52,7 +52,7 @@ function harness(platform) {
   };
   const dependencies = {
     '@react-native-async-storage/async-storage': { __esModule: true, default: storage },
-    '@/lib/markets': { bankBrandForName(name) { return name === 'FAB' ? { name: 'FAB', domain: 'bankfab.com' } : null; } },
+    '@/lib/markets': { bankBrandForName() { return null; } },
     '@/lib/storage-diagnostics': { recordStorageFailure() {} },
     'expo-crypto': {},
     'expo-secure-store': { async deleteItemAsync() {} },
@@ -71,7 +71,16 @@ function harness(platform) {
     modules.set(name, exports);
     vm.runInNewContext(result.outputText, {
       exports, require: load, process: { env: { EXPO_PUBLIC_WAFRA_BRANDFETCH_CLIENT_ID: 'fixture-client' } },
-      fetch: () => { fetchCalls++; throw new Error('logo resolver must never fetch'); }, AbortController, setTimeout, clearTimeout, console,
+      fetch: async url => {
+        fetchCalls++;
+        if (String(url).includes('Aseer%20Time')) return {
+          ok: true, json: async () => [{ name: 'Aseer Time', domain: 'aseertime.com', claimed: false }],
+        };
+        if (String(url).includes('Bank%20of%20America')) return {
+          ok: true, json: async () => [{ name: 'Bank of America', domain: 'bankofamerica.com', claimed: true }],
+        };
+        return { ok: true, json: async () => [] };
+      }, AbortController, setTimeout, clearTimeout, console,
     }, { filename: file });
     return exports;
   }
@@ -83,8 +92,8 @@ function harness(platform) {
     get fetchCalls() { return fetchCalls; },
     resolvers() {
       return [
-        { resolve: load('@/lib/merchant-logo-resolver').resolveRemoteMerchantLogo, name: 'Choithrams', key: MERCHANT_KEY, record: MERCHANT_RECORD, domain: 'choithrams.com' },
-        { resolve: load('@/lib/bank-logo-resolver').resolveBankLogo, name: 'FAB', key: BANK_KEY, record: BANK_RECORD, domain: 'bankfab.com' },
+        { resolve: load('@/lib/merchant-logo-resolver').resolveRemoteMerchantLogo, name: 'Aseer Time', key: MERCHANT_KEY, record: MERCHANT_RECORD, domain: 'aseertime.com' },
+        { resolve: load('@/lib/bank-logo-resolver').resolveBankLogo, name: 'Bank of America', key: BANK_KEY, record: BANK_RECORD, domain: 'bankofamerica.com' },
       ];
     },
   };
@@ -112,7 +121,7 @@ for (const platform of ['web', 'native']) {
     await h.state.destroy(LEDGER);
     for (const entry of resolvers) assert.equal((await entry.resolve(entry.name)).domain, entry.domain);
     assert.equal(h.storageReads, reads + 2, 'fresh post-erase identities must not reuse erased memory');
-    assert.equal(h.fetchCalls, 0);
+    assert.equal(h.fetchCalls, 2, 'post-erase lookups search again after their caches are removed');
   });
 
   for (const kind of [0, 1]) {
@@ -199,6 +208,6 @@ for (const platform of ['web', 'native']) {
     newRead.resolve(null);
     assert.equal((await newLookup).domain, entry.domain);
     assert.equal((await sameNewLookup).domain, entry.domain);
-    assert.equal(h.fetchCalls, 0);
+    assert.equal(h.fetchCalls, 1, 'the new generation performs one fresh search after its empty cache read');
   });
 }

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { tapped } from '@/lib/haptics';
 import type { AssistantAnswer, AssistantFinding } from '@/lib/wafra-assistant';
 
 /** Findings are descriptions of recorded activity, with explicit local proof. */
@@ -34,10 +35,12 @@ export function AssistantCoverage({ coverage }: { coverage: NonNullable<Assistan
   const [expanded, setExpanded] = useState(false);
   return <View testID="assistant-coverage" style={[styles.coverage, { borderTopColor: theme.primaryBorder }]}>
     <Pressable accessibilityRole="button" accessibilityLabel={copy.dataUsed}
-      accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.coverageToggle}>
+      accessibilityState={{ expanded }} onPress={() => { tapped(); setExpanded((value) => !value); }} style={styles.coverageToggle}>
       <View style={styles.grow}>
         <ThemedText type="smallBold">{copy.dataUsed}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{copy.coverageCount(coverage.recordCount, coverage.accountCount, coverage.totalAccounts)}</ThemedText>
+        {expanded ? <ThemedText type="meta" themeColor="textSecondary">
+          {copy.coverageCount(coverage.recordCount, coverage.accountCount, coverage.totalAccounts)}
+        </ThemedText> : null}
       </View>
       <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} color={theme.textSecondary} />
     </Pressable>
@@ -54,7 +57,7 @@ const styles = StyleSheet.create({
   list: { gap: 12 },
   finding: { gap: 8, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
   coverage: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 4 },
-  coverageToggle: { minHeight: 48, flexDirection: 'row', gap: 8, alignItems: 'center' },
+  coverageToggle: { minHeight: 36, flexDirection: 'row', gap: 8, alignItems: 'center' },
   grow: { flex: 1, minWidth: 0, gap: 3 },
   notes: { gap: 6, paddingTop: 4 },
 });

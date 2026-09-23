@@ -17,7 +17,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { recordStorageFailure } from '@/lib/storage-diagnostics';
+import { recordStorageFailure, type StorageOp } from '@/lib/storage-diagnostics';
 import { withLogoCacheErase } from '@/lib/logo-cache-lifecycle';
 
 type Pair = readonly [string, string | null];
@@ -28,6 +28,8 @@ export interface StateStorage {
   multiGet(keys: readonly string[]): Promise<readonly Pair[]>;
   multiSet(entries: readonly WritePair[]): Promise<void>;
   multiRemove(keys: readonly string[]): Promise<void>;
+  /** Run one logically consistent snapshot read without interleaving encrypted writes. */
+  withSnapshotRead?<T>(task: () => Promise<T>): Promise<T>;
   /** Cryptographically erase this store and any pre-SQLCipher copy. */
   destroy(prefix: string): Promise<void>;
 }
@@ -35,11 +37,81 @@ export interface StateStorage {
 const DATABASE_NAME = 'wafra-private.db';
 const KEY_NAME = 'wafra.database.key.v1';
 const TABLE = 'wafra_state';
+// A large ledger can have dozens of 400-row chunks. Sending every changed
+// chunk through a separate `statement.executeAsync` call made a full repair or
+// layout conversion pay one JS/native round-trip per chunk. On the 14.8k-row
+// Android diagnostic that path lined up with 12-15 second foreground stalls.
+// Keep each SQLite statement comfortably below bind-variable limits while
+// collapsing the common 30-40 chunk save to two native calls.
+const MULTISET_ROWS_PER_STATEMENT = 32;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
+/**
+ * A failed native handle must finish closing before any caller is allowed to
+ * open the same path again. expo-sqlite caches handles by path on Android, so
+ * clearing `databasePromise` first creates a small but real window where a
+ * retry can be handed the exact half-open/poisoned connection we are closing.
+ */
+let databaseRecoveryPromise: Promise<void> | null = null;
+
+async function closeDatabaseForRecovery(db: SQLiteDatabase): Promise<void> {
+  try {
+    await db.closeAsync();
+  } catch (error) {
+    // Closing is itself source-free. Record it, but never replace the error
+    // that caused recovery or turn cleanup into another crash.
+    recordStorageFailure('connection-close', error);
+  }
+}
+
+function trackDatabaseRecovery(recovery: Promise<void>): Promise<void> {
+  const tracked = recovery.finally(() => {
+    if (databaseRecoveryPromise === tracked) databaseRecoveryPromise = null;
+  });
+  databaseRecoveryPromise = tracked;
+  return tracked;
+}
+
+function beginDatabaseRecovery(db: SQLiteDatabase): Promise<void> {
+  return trackDatabaseRecovery(closeDatabaseForRecovery(db));
+}
+
+async function waitForDatabaseRecovery(): Promise<void> {
+  // A second recovery can be installed while an earlier waiter is suspended.
+  // Loop until the path is genuinely free rather than awaiting one snapshot.
+  while (databaseRecoveryPromise) await databaseRecoveryPromise;
+}
 
 /**
- * Every write runs on the ONE keyed connection, so they are serialised here.
+ * Retire a connection that failed after it had already opened successfully.
+ *
+ * The tester incident was recorded as `op: read`, not `op: open`: the keyed
+ * connection existed, then a native read returned ERR_UNEXPECTED. Leaving the
+ * resolved `databasePromise` in place made Try again use that exact connection
+ * again. This installs the same close barrier synchronously from the promise,
+ * then clears the public handle only after the barrier is visible to callers.
+ */
+async function recoverSharedDatabaseAfterFailure(): Promise<void> {
+  const opening = databasePromise;
+  if (!opening) {
+    await waitForDatabaseRecovery();
+    return;
+  }
+
+  const recovery = trackDatabaseRecovery(opening.then(
+    (db) => closeDatabaseForRecovery(db),
+    // A rejected open owns its own cleanup in openEncryptedDatabase's catch.
+    () => undefined,
+  ));
+  // The recovery barrier is visible before the public handle is cleared, so a
+  // retry can never observe both values as null and race into openDatabaseAsync.
+  databasePromise = null;
+  await recovery;
+}
+
+/**
+ * Every ledger mutation and snapshot read runs on the ONE keyed connection, so
+ * they are serialised here.
  *
  * This used to be `withExclusiveTransactionAsync`, which does not do what it
  * looks like it does on an encrypted database — see `writeTransaction` below.
@@ -47,9 +119,11 @@ let databasePromise: Promise<SQLiteDatabase> | null = null;
  * nested transactions, so two overlapping `multiSet` calls on one connection
  * would make the second `BEGIN` fail outright.
  *
- * StoreProvider already chains its own saves, but `destroy` and
- * `migrateLegacyState` write outside that queue, so the guarantee belongs here
- * rather than in the caller.
+ * StoreProvider already chains its own saves, but the background-capture and
+ * foreground StoreProvider persistence owners can overlap. Reads must join the
+ * same queue too: expo-sqlite uses one native connection, and an async read that
+ * lands inside another owner's BEGIN IMMEDIATE transaction can observe a split
+ * snapshot or fail with an uncoded native exception.
  */
 let writeQueue: Promise<unknown> = Promise.resolve();
 
@@ -81,16 +155,15 @@ function serialiseWrite<T>(task: () => Promise<T>): Promise<T> {
  * genuinely new connection rather than racing the old one out of the cache.
  */
 async function poisonDatabase(db: SQLiteDatabase, rollbackError: unknown): Promise<void> {
-  databasePromise = null;
   // Recorded once, here. It is deliberately not rethrown — the caller's own
   // error is the one that explains what the user lost.
   recordStorageFailure('rollback', rollbackError);
-  try {
-    await db.closeAsync();
-  } catch {
-    // Nothing further to do: the handle is unreachable either way, and the
-    // next open builds a new one.
-  }
+  // Install the recovery barrier BEFORE dropping the public handle. A read or
+  // retry arriving on the next JS turn then waits for closeAsync instead of
+  // reopening the same cached NativeDatabase while it is still poisoned.
+  const recovery = beginDatabaseRecovery(db);
+  databasePromise = null;
+  await recovery;
 }
 
 /**
@@ -148,15 +221,21 @@ async function databaseKey(): Promise<string> {
 }
 
 async function openEncryptedDatabase(): Promise<SQLiteDatabase> {
+  await waitForDatabaseRecovery();
   if (databasePromise) return databasePromise;
 
+  let opened: SQLiteDatabase | null = null;
+  let failureStage: StorageOp = 'secure-key';
   databasePromise = (async () => {
     const key = await databaseKey();
+    failureStage = 'sqlite-open';
     const db = await SQLite.openDatabaseAsync(DATABASE_NAME);
+    opened = db;
 
     // The key is 32 random bytes represented as validated hex, so it cannot
     // terminate or alter this statement. SQLCipher must receive the key before
     // any other query touches the encrypted file.
+    failureStage = 'cipher-key';
     await db.execAsync(`PRAGMA key = "x'${key}'";`);
 
     // SQLCipher accepts ANY key without complaint; whether it is the right one
@@ -164,8 +243,10 @@ async function openEncryptedDatabase(): Promise<SQLiteDatabase> {
     // here, on purpose, is what turns "the key in SecureStore no longer matches
     // this file" into an error at open — attributable, and recorded below —
     // rather than an unexplained failure at the first write minutes later.
+    failureStage = 'cipher-validation';
     await db.getFirstAsync('SELECT count(*) FROM sqlite_master');
 
+    failureStage = 'schema-init';
     await db.execAsync(`
       PRAGMA cipher_memory_security = ON;
       PRAGMA journal_mode = WAL;
@@ -177,10 +258,25 @@ async function openEncryptedDatabase(): Promise<SQLiteDatabase> {
       );
     `);
     return db;
-  })().catch((error) => {
-    // A failed open must be retryable after the user unlocks the device.
-    databasePromise = null;
-    recordStorageFailure('open', error);
+  })().catch(async (error) => {
+    // Keep the exact closed-vocabulary stage: ERR_UNEXPECTED by itself told us
+    // nothing about whether SecureStore, native open, SQLCipher validation, or
+    // schema bootstrap failed on the tester's phone.
+    recordStorageFailure(failureStage, error);
+
+    // `openDatabaseAsync` can succeed and a later step can fail. On Android,
+    // expo-sqlite caches that NativeDatabase by path, so merely forgetting our
+    // promise lets Try again reacquire the same half-open handle. Register the
+    // barrier before clearing the promise, close it, and only then reject the
+    // original attempt. Callers arriving during cleanup wait at the top of this
+    // function and can only create a genuinely fresh connection afterwards.
+    if (opened) {
+      const recovery = beginDatabaseRecovery(opened);
+      databasePromise = null;
+      await recovery;
+    } else {
+      databasePromise = null;
+    }
     throw error;
   });
 
@@ -188,6 +284,7 @@ async function openEncryptedDatabase(): Promise<SQLiteDatabase> {
 }
 
 const encryptedStorage: StateStorage = {
+  withSnapshotRead: (task) => serialiseWrite(task),
   // Reads rethrow rather than returning null. A read that FAILED and a key
   // that is genuinely absent are different facts, and the caller turns the
   // second one into "this phone has never run the app" — so collapsing them
@@ -201,7 +298,8 @@ const encryptedStorage: StateStorage = {
       );
       return row?.value ?? null;
     } catch (error) {
-      recordStorageFailure('read', error);
+      recordStorageFailure('state-read', error);
+      await recoverSharedDatabaseAfterFailure();
       throw error;
     }
   },
@@ -224,7 +322,8 @@ const encryptedStorage: StateStorage = {
       const byKey = new Map(found.map((row) => [row.key, row.value] as const));
       return keys.map((key): Pair => [key, byKey.get(key) ?? null]);
     } catch (error) {
-      recordStorageFailure('read', error);
+      recordStorageFailure('state-batch-read', error);
+      await recoverSharedDatabaseAfterFailure();
       throw error;
     }
   },
@@ -244,20 +343,20 @@ const encryptedStorage: StateStorage = {
         // or opens a fresh one, and never uses a dead one.
         const db = await openEncryptedDatabase();
         return writeTransaction(db, async () => {
-          const statement = await db.prepareAsync(
-            `INSERT INTO ${TABLE} (key, value, updated_at)
-             VALUES (?, ?, ?)
-             ON CONFLICT(key) DO UPDATE SET
-               value = excluded.value,
-               updated_at = excluded.updated_at`,
-          );
-          try {
-            const now = Date.now();
-            for (const [key, value] of entries) {
-              await statement.executeAsync(key, value, now);
-            }
-          } finally {
-            await statement.finalizeAsync();
+          const now = Date.now();
+          for (let start = 0; start < entries.length; start += MULTISET_ROWS_PER_STATEMENT) {
+            const batch = entries.slice(start, start + MULTISET_ROWS_PER_STATEMENT);
+            const values = batch.map(() => '(?, ?, ?)').join(', ');
+            const params: (string | number)[] = [];
+            for (const [key, value] of batch) params.push(key, value, now);
+            await db.runAsync(
+              `INSERT INTO ${TABLE} (key, value, updated_at)
+               VALUES ${values}
+               ON CONFLICT(key) DO UPDATE SET
+                 value = excluded.value,
+                 updated_at = excluded.updated_at`,
+              ...params,
+            );
           }
         });
       });

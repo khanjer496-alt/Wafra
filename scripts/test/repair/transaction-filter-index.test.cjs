@@ -26,6 +26,7 @@ function original(rows, filters, o, language) {
     if (filters.datePreset === 'lastMonth' && k !== last) return false;
     if (filters.datePreset === '3months' && (k < three || k > o.currentKey)) return false;
     if (filters.datePreset === 'custom' && ((filters.dateFrom && t.date < filters.dateFrom) || (filters.dateTo && t.date > filters.dateTo))) return false;
+    if (o.corroborating.has(t.id)) return false;
     return !query || t.title.toLowerCase().includes(query) || getCategory(t.category).label.toLowerCase().includes(query) || categoryLabel(t.category, language).toLowerCase().includes(query);
   });
   if (filters.sort === 'largest') list.sort((a, b) => b.amountFils - a.amountFils);
@@ -48,7 +49,7 @@ const rows = Array.from({ length: 12000 }, (_, i) => ({ id: 'row-' + i,
   accountId: i % 11 ? 'active' : 'hidden', source: i % 4 ? 'sms' : 'manual', isTransfer: i % 29 === 0,
   ...(i % 31 === 0 ? { splits: [{ category: 'dining', amountFils: 5000 }, { category: 'groceries', amountFils: 5000 + i % 500 }] } : {}),
 })).sort((a, b) => b.date.localeCompare(a.date));
-const o = { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'all' }, live: new Set(['active']), internal: new Set(['row-23']) };
+const o = { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'all' }, live: new Set(['active']), internal: new Set(['row-23']), corroborating: new Set() };
 for (const language of ['en', 'ar']) for (const salaryDay of [1, 25]) {
   test(`${language}/${salaryDay}: indexed filters preserve exact order, splits, exclusions and totals`, () => {
     setMonthStartDay(salaryDay);
@@ -69,6 +70,53 @@ for (const language of ['en', 'ar']) for (const salaryDay of [1, 25]) {
     assert.equal(index.ordered('oldest'), index.ordered('oldest'), 'sort result reused for the immutable ledger');
   });
 }
+
+test('credit-card repayment stays visible but contributes zero to day and result totals', () => {
+  setMonthStartDay(1);
+  const repayment = {
+    id: 'repayment', title: 'Card •5444 payment', amountFils: 1_207_532,
+    category: 'other', type: 'income', date: '2026-09-02', accountId: 'card',
+    source: 'sms', isTransfer: true, cardPaymentSide: 'receipt',
+  };
+  const purchase = {
+    id: 'purchase', title: 'Bed And Co Furniture', amountFils: 101_900,
+    category: 'shopping', type: 'expense', date: '2026-09-02', accountId: 'card', source: 'sms',
+  };
+  const options = { ...o, period: { mode: 'all' }, live: new Set(['active', 'card']), internal: new Set() };
+  const result = projectTransactionFilter(
+    createTransactionFilterIndex([repayment, purchase], 'en'),
+    { ...defaults, datePreset: 'all' },
+    options,
+  );
+  assert.deepEqual(result.filtered.map(row => row.id), ['repayment', 'purchase']);
+  assert.equal(result.totalShown, -101_900, 'repayment must not change the result total');
+  assert.equal(result.days[0].totalFils, -101_900, 'repayment must not change Day total');
+  assert.equal(result.excluded.transfers, 1, 'repayment is visible as excluded transfer activity');
+});
+
+test('secondary bank confirmation is hidden while the canonical transfer remains visible', () => {
+  setMonthStartDay(1);
+  const canonical = {
+    id: 'fab-transfer', title: 'Outgoing transfer', amountFils: 56_500,
+    category: 'other', type: 'expense', date: '2026-09-15', accountId: 'active', source: 'sms', isTransfer: true,
+  };
+  const secondary = { ...canonical, id: 'fab-remittance', title: 'Outward remittance' };
+  const options = {
+    ...o,
+    live: new Set(['active']),
+    internal: new Set(['fab-transfer', 'fab-remittance']),
+    corroborating: new Set(['fab-remittance']),
+  };
+  const result = projectTransactionFilter(
+    createTransactionFilterIndex([canonical, secondary], 'en'),
+    { ...defaults, datePreset: 'all' },
+    options,
+  );
+  assert.deepEqual(result.filtered.map(row => row.id), ['fab-transfer']);
+  assert.equal(result.excluded.transfers, 1);
+  assert.equal(result.totalShown, 0);
+});
+
 test('records a repeat-filter benchmark without asserting phone performance or flaky wall-clock budgets', () => {
   setMonthStartDay(1); const start = performance.now(); const index = createTransactionFilterIndex(rows, 'en');
   const indexMs = performance.now() - start;
@@ -78,4 +126,36 @@ test('records a repeat-filter benchmark without asserting phone performance or f
   const originalMs = measure(() => original(rows, filters, o, 'en'));
   const indexedMs = measure(() => projectTransactionFilter(index, filters, o));
   console.log(JSON.stringify({ rows: rows.length, indexMs, originalMs, indexedMs, scope: 'local Node benchmark, not Android frame time' }));
+});
+
+test('date-bounded newest filters stop once the requested window has passed', () => {
+  setMonthStartDay(1);
+  let amountChecks = 0;
+  const dated = Array.from({ length: 1200 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 11, 31));
+    d.setUTCDate(d.getUTCDate() - i);
+    const row = {
+      id: `dated-${i}`, title: 'Cafe', category: 'dining', type: 'expense',
+      date: d.toISOString().slice(0, 10), accountId: 'active',
+    };
+    Object.defineProperty(row, 'amountFils', { enumerable: true, get() { amountChecks += 1; return 1000; } });
+    row.source = 'sms';
+    return row;
+  });
+  const index = createTransactionFilterIndex(dated, 'en');
+  amountChecks = 0;
+  const result = projectTransactionFilter(index,
+    { ...defaults, datePreset: 'custom', dateFrom: '2026-12-01', dateTo: '2026-12-31' }, o);
+  assert.equal(result.filtered.length, 31);
+  assert.ok(amountChecks <= 31,
+    `date boundary should avoid checking old rows after the range; checked ${amountChecks}`);
+});
+
+test('the filter-sheet preview is reused when Apply projects the exact same filter object', () => {
+  setMonthStartDay(1);
+  const index = createTransactionFilterIndex(rows, 'en');
+  const filters = { ...defaults, datePreset: 'custom', dateFrom: '2026-08-01', dateTo: '2026-09-30' };
+  const first = projectTransactionFilter(index, filters, o);
+  const second = projectTransactionFilter(index, filters, o);
+  assert.equal(second, first, 'Apply should reuse the result the sheet just counted');
 });

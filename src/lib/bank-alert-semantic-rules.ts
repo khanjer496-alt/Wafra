@@ -15,7 +15,7 @@ export type AutomaticSemanticMeaning =
   | 'fee';
 
 const SALARY_LANGUAGE =
-  /\b(?:salar(?:y|ies)|payroll|wages?|wps)(?:\s+(?:payment|credit|transfer))?\b|\b(?:sal(?:ary)?\s+pay|monthly\s+pay|remuneration|emoluments?)\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور|مستحقات راتب/iu;
+  /\b(?:salar(?:y|ies)|payroll|wages?|wps)(?:\s+(?:payment|credit|transfer))?\b|\b(?:sal(?:ary)?\s+pay|monthly\s+pay|net\s+pay|remuneration|emoluments?|pay[ -]?cheques?|paychecks?)\b|راتب|الراتب|مرتب|رواتب|اجر شهري|اجور|مستحقات راتب/iu;
 const OWN_ACCOUNT_LANGUAGE =
   /\b(?:own|self)\s+(?:(?:account|a\/?c)\s+)?(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:debited|credited|completed|processed|successful|dr|cr)\b|\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bown\s+(?:account|a\/?c)\s+(?:transfer|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\bcr\b(?:[^.\n]|\.(?=\d)){0,48}\b(?:account|a\/?c)\b|\btransferred\s+between\s+(?:your|my|own)\s+accounts\b|\btransfer\s+between\s+(?:your|my|own)\s+accounts\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:completed|processed|successful)\b|\bfrom\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\bto\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bfrom\s+(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:another\s+account\s+of\s+yours|another\s+of\s+your\s+accounts?)\b|\bmoved?\s+from\s+(?:your|my)\s+(?:account|a\/?c)\b[^.\n]{0,96}\b(?:to|into)\s+(?:(?:your|my)(?:\s+(?:own|other))?|another\s+of\s+(?:your|my)|another|own)\s+(?:accounts?|a\/?c)\b|\bdebited\s+from\s+(?:your\s+)?(?:account|a\/?c)\b[^.\n]{0,112}\bcredited\s+to\s+(?:another\s+of\s+your|your\s+other|your\s+own)\s+(?:accounts?|a\/?c)\b|\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,64}\bcredited\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|\breceived\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+(?:your\s+)?(?:own|other)\s+(?:account|a\/?c)\b|تحويل\s+(?:بين\s+حساباتك|بين\s+حساباتي)[\s\S]{0,72}تم\s+بنجاح|تم\s+تحويل[\s\S]{0,80}من\s+حسابك[\s\S]{0,80}(?:الي|الى)\s+حسابك/iu;
 const BUSINESS_INCOME_LANGUAGE =
@@ -48,6 +48,21 @@ const EXTERNAL_TRANSFER_LANGUAGE =
   /\b(?:sent|transferred|remitted)\b[^.\n]{0,96}\bto\s+(?!(?:your|my|own)\s+(?:account|a\/?c)\b)|\b(?:funds?|bank|instant|money)?\s*transfer\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?:a\s+)?beneficiary\b|\b(?:funds?|bank|instant|money)\s+transfer\b(?:[^.\n]|\.(?=\d)){0,96}\bto\s+(?!(?:your|my|own)\s+(?:account|a\/?c)\b)|\b(?:ben|beneficiary)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:received|cr)\b(?:[^.\n]|\.(?=\d)){0,96}\bfrom\s+your\s+(?:account|a\/?c)\b|\b(?:ft|ibft|trf)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:dr\b(?:[^.\n]|\.(?=\d)){0,48})?(?:from\s+)?(?:your\s+)?(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,96}\b(?:to\s+)?(?:a\s+)?(?:ben|beneficiary)\b|\b(?:account|a\/?c)\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b(?:[^.\n]|\.(?=\d)){0,80}\b(?:ft|ibft|trf)\b(?:[^.\n]|\.(?=\d)){0,64}\b(?:ben|beneficiary)\b|\boutward\s+remittance\b|(?:تحويل|ارسال)[^\n]{0,80}(?:صادر|الي\s+(?:ال)?مستفيد)/iu;
 const CARD_PURCHASE_LANGUAGE =
   /\b(?:card\s+purchase|purchase(?:d)?|card\b[^.\n]{0,40}\b(?:used|charged)|(?:subscription|membership)\b(?:[^.]|\.\d){0,64}\bcharged\s+(?:to|on)\s+(?:your\s+)?card|pos\s+(?:purchase|transaction)|pos\b(?:[^.\n]|\.(?=\d)){0,64}\bdr\b(?:[^.\n]|\.(?=\d)){0,48}\bcard\b|card\b(?:[^.\n]|\.(?=\d)){0,48}\bdr\b(?:[^.\n]|\.(?=\d)){0,80}\bpos\b|(?:card\s+)?pur\b(?:[^.\n]|\.(?=\d)){0,80}\bcard\b)\b|شراء|دفع بالبطاق[هة]/iu;
+
+export const isExpectedFutureMoneyNotice = (source: string): boolean => {
+  const text = normalizeArabic(source).replace(/\s+/gu, ' ');
+  return /\b(?:expected|anticipated)\s+(?:refund|reversal|credit|deposit|transfer|payment)\b/iu.test(text) ||
+    /\b(?:refund|reversal|credit|deposit|transfer|payment)\b[^.!?]{0,80}\b(?:expected|anticipated)\b/iu.test(text);
+};
+
+/** A financing/application pitch can quote a real-looking purchase amount. */
+export const isApplicationPurchaseOffer = (source: string): boolean => {
+  const text = normalizeArabic(source).replace(/\s+/gu, ' ');
+  return /\bapply\b/iu.test(text) &&
+    /\bpurchases?\b/iu.test(text) &&
+    /\b\d{1,3}\s*%/u.test(text) &&
+    /\b\d{1,3}\s+months?\b/iu.test(text);
+};
 
 export const SEMANTIC_CANDIDATE_LANGUAGE = new RegExp([
   SALARY_LANGUAGE.source,

@@ -39,10 +39,10 @@ and optional network features in the submitted AAB.
 - Android SMS/bank-notification content used for automatic tracking is processed
   on-device and is not uploaded to the relay.
 - Main ledger records are stored in encrypted app storage on the device.
-- RevenueCat, when production billing is configured, processes an anonymous app
-  user identifier and purchase/subscription information for entitlement
-  functionality. Use RevenueCat's current Play Data Safety guidance for the
-  exact SDK version before submitting the form.
+- Superwall, when production billing is configured, processes purchase/
+  subscription state plus paywall/onboarding interaction data according to its
+  shipping SDK behavior. Wafra supplies only non-financial targeting metadata
+  and never sends Android bank-alert content to Superwall.
 - Optional feedback deliberately sends the exact previewed, redacted report to
   Wafra's relay and retains it for at most 14 days.
 - Optional statement/email/trusted-device features can send user-selected data
@@ -53,11 +53,11 @@ and optional network features in the submitted AAB.
 ## Remaining Play Console blockers
 
 - Sensitive SMS permission declaration approval.
-- Final Data Safety answers checked against the uploaded AAB and RevenueCat SDK.
+- Final Data Safety answers checked against the uploaded AAB and Superwall SDK.
 - Financial features declaration, content rating, target audience and app-access
   tasks in the publisher's Play Console.
-- Production RevenueCat products/key and store-formatted pricing verification.
+- Production Superwall public key, products, `pro` entitlement, `pro_upgrade`
+  campaign and store-formatted pricing verification.
 - Global English Play screenshots and 1024×500 feature graphic captured from a
   release-like build.
 - Public Privacy/Terms/Support URLs and monitored support contact.
-

@@ -14,10 +14,10 @@
       "url": "https://u.expo.dev/fa920e7b-c661-4517-917d-26e8b4878721",
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 1500
+      "fallbackToCacheTimeout": 0
     },
     "ios": {
-      "icon": "./assets/images/icon.png",
+      "icon": "./assets/wafra.icon",
       "bundleIdentifier": "app.wafra.ios",
       "buildNumber": "1",
       "supportsTablet": false,
@@ -27,7 +27,8 @@
         ],
         "UIBackgroundModes": [
           "remote-notification"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,
@@ -163,6 +164,17 @@
         }
       ],
       "expo-sharing",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
       "./modules/wafra-message-history/plugin",
       "./modules/wafra-live-capture/plugin",
       [
@@ -180,7 +192,8 @@
             ]
           }
         }
-      ]
+      ],
+      "./plugins/onnxruntime-gradle9-compat"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -190,11 +203,9 @@
       "eas": {
         "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
       },
-      "revenueCatAndroidKey": "",
-      "revenueCatIosKey": "",
-      "privacyPolicyUrl": "",
-      "termsOfUseUrl": "",
-      "supportUrl": ""
+      "privacyPolicyUrl": "https://wafra-app-azg.pages.dev/privacy",
+      "termsOfUseUrl": "https://wafra-app-azg.pages.dev/terms",
+      "supportUrl": "https://wafra-app-azg.pages.dev/support"
     }
   }
 }

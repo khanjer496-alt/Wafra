@@ -25,6 +25,25 @@ export function universalChoices<T>(field: UniversalField<T>, key: (value: T) =>
   return [...new Map(values.map((value) => [key(value), value])).values()];
 }
 
+/**
+ * A bank alert often contains both the transaction amount and a balance/limit.
+ * Some parser packs conservatively keep both as amount alternatives. Do not ask
+ * the user to choose their AED 37 purchase from an AED 17,997 account balance:
+ * secondary money fields are evidence that those numbers mean something else.
+ * Fall back to the raw candidates if filtering would remove every possibility.
+ */
+export function reviewMoneyChoices(event: UniversalBankEvent): UniversalMoney[] {
+  const raw = universalChoices(event.amount, moneyChoiceKey)
+    .filter((value) => /^[1-9]\d*$/.test(value.minorUnits));
+  if (raw.length <= 1) return raw;
+  const secondaryFields = [event.balance, event.statementTotal, event.minimumDue, event.creditLimit];
+  const secondary = new Set(
+    secondaryFields.flatMap((field) => universalChoices(field, moneyChoiceKey).map(moneyChoiceKey)),
+  );
+  const filtered = raw.filter((value) => !secondary.has(moneyChoiceKey(value)));
+  return filtered.length > 0 ? filtered : raw;
+}
+
 export const isOrdinaryUniversalPosting = (event: UniversalBankEvent): boolean =>
   ['purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'unknown'].includes(event.family) &&
   (event.status === 'posted' || event.status === 'unknown');
@@ -76,29 +95,27 @@ export function UniversalReviewFacts({ event, includeAmount = false }: { event: 
 }
 
 export function UniversalReviewFields({ event, money, onMoneyChange, instrument, onInstrumentChange,
-  postedConfirmed, onPostedConfirmed, date, onDateChange, observedDate, observedDateLabel }: {
+  date, onDateChange, observedDate, observedDateLabel }: {
   event: UniversalBankEvent;
   money: UniversalMoney | null;
   onMoneyChange: (value: UniversalMoney) => void;
   instrument: UniversalInstrument | null;
   onInstrumentChange: (value: UniversalInstrument) => void;
-  postedConfirmed: boolean;
-  onPostedConfirmed: (value: boolean) => void;
   date: string;
   onDateChange: (value: string) => void;
   observedDate: string;
   observedDateLabel?: string;
 }) {
-  const theme = useTheme();
-  const choices = universalChoices(event.amount, moneyChoiceKey).filter((value) => /^[1-9]\d*$/.test(value.minorUnits));
+  const choices = reviewMoneyChoices(event);
   const instruments = universalChoices(event.instrument, (value) => value.kind + ':' + value.last4);
   const dates = universalChoices(event.transactionDate, String);
+  const hasRealDateChoice = dates.some((choice) => choice !== observedDate);
   return (
     <View style={styles.fields}>
       <ThemedText type="smallBold">{t(choices.length > 1 ? 'genericChooseAmount' : 'genericAmount')}</ThemedText>
       {choices.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">{t('genericMissingAmount')}</ThemedText>
-      ) : choices.length === 1 && event.amount.evidence === 'explicit' ? (
+      ) : choices.length === 1 ? (
         <ThemedText type="title" tabular style={styles.amount}>{universalMoneyLabel(choices[0])}</ThemedText>
       ) : choices.map((choice) => (
         <Choice key={moneyChoiceKey(choice)} label={universalMoneyLabel(choice)}
@@ -116,7 +133,7 @@ export function UniversalReviewFields({ event, money, onMoneyChange, instrument,
           ))}
         </View>
       ) : null}
-      {event.transactionDate.evidence !== 'explicit' ? (
+      {event.transactionDate.evidence !== 'explicit' && hasRealDateChoice ? (
         <View style={styles.fields}>
           <ThemedText type="smallBold">{t('genericChooseDate')}</ThemedText>
           {dates.map((choice) => <Choice key={choice} label={choice} selected={date === choice} onPress={() => onDateChange(choice)} />)}
@@ -124,15 +141,6 @@ export function UniversalReviewFields({ event, money, onMoneyChange, instrument,
             selected={date === observedDate} onPress={() => onDateChange(observedDate)} />
         </View>
       ) : null}
-      {event.status === 'unknown' ? (
-        <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: postedConfirmed }}
-          accessibilityLabel={t('genericConfirmPosted')} onPress={() => onPostedConfirmed(!postedConfirmed)}
-          style={[styles.choice, { borderColor: theme.controlBorder }]}>
-          <ThemedText type="small" style={styles.choiceText}>{t('genericConfirmPosted')}</ThemedText>
-          <View style={[styles.selectionMark, { borderColor: theme.controlBorder }]}>{postedConfirmed ? <Icon name="check" size={14} color={theme.primary} /> : null}</View>
-        </Pressable>
-      ) : null}
-      <UniversalReviewFacts event={event} />
     </View>
   );
 }

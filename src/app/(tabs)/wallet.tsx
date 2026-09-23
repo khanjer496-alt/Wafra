@@ -24,28 +24,26 @@ import { SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { cardFigure, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
-import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
-import { summarizeCashOutflow } from '@/lib/cash-flow';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
   formatAmount,
-  monthKey,
   parseAmountWithMoneySpec,
-  totalAsShown,
   shortDate,
   toISODate,
 } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
+import { bankPickerOptions } from '@/lib/known-banks';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
 
@@ -92,7 +90,7 @@ type Confirmation = {
 };
 
 /** The two things a long press on an account row offers. */
-type AccountAction = 'visibility' | 'delete';
+type AccountAction = 'visibility' | 'bank' | 'delete';
 
 export default function WalletScreen() {
   const theme = useTheme();
@@ -115,7 +113,7 @@ export default function WalletScreen() {
   // Every tab that shows money the inbox produces can now go and refresh it.
   const { refreshing, onRefresh } = usePullToRefresh();
 
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -132,6 +130,7 @@ export default function WalletScreen() {
   // The account a long press is asking about, and the confirmation that a
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
+  const [bankFor, setBankFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const walletHeader: ScreenHeaderProps = {
     title: t('walletTitle'),
@@ -163,9 +162,9 @@ export default function WalletScreen() {
    * Wallet no longer turns those incomplete observations into "net worth".
    * The useful fact here is the latest balance the banks actually reported;
    * card debt remains beside its statements and payment state below.
-   */
+  */
   const balances = useMemo(
-    () => netWorthBreakdown(state),
+    () => measureRuntimeOperation('wallet-balances', () => netWorthBreakdown(state)),
     // The shared balance calculator reads only accounts and transactions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions],
@@ -188,92 +187,74 @@ export default function WalletScreen() {
         });
   // cards.ts reads these three immutable arrays. Import progress, settings and
   // review status do not change statements or justify another ledger scan.
-  const dues = useMemo(() => openDues(state, now),
+  const dues = useMemo(() => measureRuntimeOperation('wallet-dues', () => openDues(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
-  const reissues = useMemo(() => reissueSuggestions(state, now),
+  const reissues = useMemo(() => measureRuntimeOperation('wallet-reissues', () => reissueSuggestions(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
-  // Totalled AS SHOWN, because this figure is printed directly above the
-  // rows it covers. Summing the exact fils and rounding once gives a heading
-  // that can differ from its own list by a dirham — the same defect that put
-  // "AED 1,025/mo" over rows adding to 1,022 on Bills.
-  const duesTotalFils = useMemo(
-    () => totalAsShown(dues.map((d) => d.remainingFils)),
+  const dueByAccountId = useMemo(
+    () => new Map(dues.map((item) => [item.due.accountId, item] as const)),
     [dues],
+  );
+  const dueAccountIds = useMemo(
+    () => new Set(state.cardDues.map((statement) => statement.accountId)),
+    [state.cardDues],
   );
 
   // Active accounts and cards share one institution-grouped source list.
   // Expired/unused ones (silent 90+ days, or hidden) live in a drawer below.
   const [showInactive, setShowInactive] = useState(false);
-  const activeSources = useMemo(
-    () => state.accounts.filter((account) => !isInactiveAccount(state, account, now)),
+  const accountActivity = useMemo(
+    () => measureRuntimeOperation('wallet-activity', () => {
+      const active: Account[] = [];
+      const inactive: Account[] = [];
+      for (const account of state.accounts) {
+        (isInactiveAccount(state, account, now) ? inactive : active).push(account);
+      }
+      let smsCount = 0;
+      for (const tx of state.transactions) {
+        if (tx.source === 'sms') smsCount += 1;
+      }
+      return { active, inactive, smsCount };
+    }),
     // Activity depends on account snapshots and transaction dates only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, now],
   );
-  const inactiveAccounts = useMemo(
-    () => state.accounts.filter((a) => isInactiveAccount(state, a, now)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, now],
-  );
+  const activeSources = accountActivity.active;
+  const inactiveAccounts = accountActivity.inactive;
+  const smsCount = accountActivity.smsCount;
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
   }`;
   // This month's spend per account, for the per-card line.
-  const smsCount = useMemo(
-    () => state.transactions.filter((tx) => tx.source === 'sms').length,
-    [state.transactions],
-  );
-
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
-  const cashOut = useMemo(
-    () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),
-    // Include the setting that changes the global reporting-month boundary.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, state.cardDues, state.monthStartDay, now, liveAccounts, internal],
-  );
-  /**
-   * Both halves of a move between the user's own accounts are excluded, as
-   * they are on Home and Flow — otherwise the second line under a card reads
-   * back the sweep that left it as money spent.
-   *
-   * The live-account set is deliberately not applied, for the reason spelled
-   * out over the same map on the Cards screen: this is a per-account figure
-   * shown on that account's own row, and no total is built from it.
-   */
-  const currencies = useMemo(() => {
-    const key = monthKey(now);
-    return summarizeForeignActivity(
-      state.transactions,
-      (transaction) => monthKey(transaction.date) === key,
-    ).groups;
-  }, [state.transactions, now]);
-  const currenciesTotalFils = useMemo(
-    () => totalAsShown(currencies.map((group) => group.localFils)),
-    [currencies],
-  );
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
-    const figure = cardFigure(state, account, now);
-    const due = dues.find((item) => item.due.accountId === account.id);
+    const due = dueByAccountId.get(account.id);
     const debtObserved = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
-      || state.cardDues.some((statement) => statement.accountId === account.id);
-    const figureFils = account.cardType === 'credit' && !debtObserved ? null
-      : figure.fils === null ? null : figure.kind === 'owed' ? Math.abs(figure.fils) : figure.fils;
+      || dueAccountIds.has(account.id);
+    // Wallet already indexed the entire ledger once in netWorthBreakdown() and
+    // openDues(). Do not call cardFigure() per account: non-credit cards can
+    // otherwise re-scan transactions account-by-account on the render path.
+    const figureFils = account.cardType === 'credit'
+      ? !debtObserved
+        ? null
+        : due
+          ? Math.abs(due.remainingFils)
+          : account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+            ? Math.abs(account.snapshotFils)
+            : 0
+      : balances.balanceByAccountId[account.id] ?? null;
+    const figureKind = account.cardType === 'credit' ? 'owed' : figureFils === null ? 'unknown' : 'balance';
     const caption = figureFils === null ? t('noBalanceYet')
-      : figure.kind === 'owed' ? t('owed')
+      : figureKind === 'owed' ? t('owed')
         : account.snapshotKind === 'balance' ? t('perBankSms') : t('trackedManually');
     const freshness = due ? `${language === 'ar' ? 'الاستحقاق' : 'Due'} ${shortDate(due.due.dueDate)}`
       : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
     return { account, figureFils, caption, freshness };
   // Captions also follow language; unrelated store metadata must not rescan rows.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dues, language]);
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language]);
 
   const openingFils = openingText.trim() === ''
     ? 0
@@ -335,7 +316,19 @@ export default function WalletScreen() {
   // stacked alerts did.
   const onAccountAction = (account: Account, action: AccountAction) => {
     if (action === 'visibility') editAccount(account.id, { archived: !account.archived });
+    else if (action === 'bank') setBankFor(account);
     else confirmDeleteAccount(account.id, account.name);
+  };
+  // The bank behind an account: known banks first, then the market's; "No
+  // bank" clears a wrong label. The badge and logo follow bankName.
+  const bankChoices = () => [
+    ...bankPickerOptions(state.knownBanks, state.marketId).map((bank) => ({ value: bank.name, label: bank.name })),
+    { value: 'none', label: t('accountNoBank') },
+  ];
+  const setBank = (account: Account, value: string) => {
+    const bank = bankPickerOptions(state.knownBanks, state.marketId).find((candidate) => candidate.name === value);
+    editAccount(account.id, bank ? { bankName: bank.name, color: bank.color } : { bankName: undefined });
+    setBankFor(null);
   };
 
   const openAccount = (account: Account) => {
@@ -370,25 +363,14 @@ export default function WalletScreen() {
             balanceCoverageText={balanceCoverageText}
             balanceFils={balances.balanceFils}
             knownBalanceCount={balanceAccountCoverage.known}
-            duesTotalFils={duesTotalFils}
-            cashOutTotalFils={cashOut.totalFils}
-            cashOutCardPaymentsFils={cashOut.cardPaymentsFils}
-            cashOutAccountOutflowFils={cashOut.accountOutflowFils}
-            currencies={currencies}
-            currenciesTotalFils={currenciesTotalFils}
             activeSourceCount={activeSources.length}
             largeText={largeText}
             theme={theme}
-            onOpenBills={() => {
-              tapped();
-              router.push('/bills');
-            }}
-            onOpenCurrency={() => router.push('/currency')}
           />
 
-          {/* Group by account purpose without implying a live bank connection. */}
-          <Button label={t('accountTransferHistory')} variant="ghost" icon="chevron-right"
-            onPress={() => router.push('/review-transfers')} />
+          {/* Accounts is the source-of-truth surface for balances and instruments.
+              Transfer reconciliation is contextual work, not a permanent section
+              between the balance hero and the accounts it summarizes. */}
           <View style={styles.section}>
 
 
@@ -781,9 +763,21 @@ export default function WalletScreen() {
               value: 'visibility' as AccountAction,
               label: optionsFor.archived ? t('unhide') : t('hideFromLists'),
             },
+            { value: 'bank' as AccountAction, label: t('accountSetBank'), detail: optionsFor.bankName },
             { value: 'delete' as AccountAction, label: t('delete') },
           ]}
           onSelect={(action) => onAccountAction(optionsFor, action)}
+        />
+      )}
+      {bankFor && (
+        <ChoiceSheet
+          visible
+          onClose={() => setBankFor(null)}
+          title={t('accountSetBank')}
+          question={t('accountBankQuestion')}
+          options={bankChoices()}
+          value={bankFor.bankName ?? 'none'}
+          onSelect={(value) => setBank(bankFor, value)}
         />
       )}
       {/* Mounted only while there is something to confirm, so the entry
@@ -1025,7 +1019,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
   },
   kindRow: {
     flexDirection: 'row',
@@ -1061,7 +1055,7 @@ const styles = StyleSheet.create({
   amountInput: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
     paddingVertical: Spacing.three,
   },
   colorRow: {

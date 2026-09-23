@@ -58,6 +58,7 @@ const { deviceKeypair, encodeKey, decodeKey } = require('./build/relay-crypto.cj
 const { parseSms } = require('./build/sms-parser');
 const { setActiveMarket } = require('./build/markets');
 const { inspectUnparsedLaunchAlert } = require('./build/unparsed-launch-alert.js');
+const { inspectGenericBankEventForReview } = require('./build/launch-alert-parser.js');
 const secure = require('./build/stub-secure-store');
 const rn = require('./build/stub-react-native');
 const worker = require('./build/worker').default;
@@ -195,6 +196,21 @@ function reviewRowFor(text, sender = 'FAB') {
     review: decision.review,
     captureSource: 'shortcut',
     receivedAt: '2026-07-17T09:00:00.000Z',
+  };
+}
+
+function universalReviewRowFor(text, sender = 'CHASE') {
+  const event = inspectGenericBankEventForReview(text, sender);
+  if (!event) throw new Error('fixture is not globally reviewable');
+  return {
+    relayReview: true,
+    reviewKind: 'universal',
+    id: `ari1_${'d'.repeat(43)}`,
+    sourceKey: `arc1_${'e'.repeat(43)}`,
+    templateKey: `art1_${'f'.repeat(43)}`,
+    event,
+    captureSource: 'shortcut',
+    receivedAt: '2026-07-17T09:01:00.000Z',
   };
 }
 
@@ -769,6 +785,32 @@ async function queueItem(id, row, publicKey) {
         !JSON.stringify(result.reviewCandidates).includes('FAB payroll'));
     eq('review row: its queue id stays distinguishable until tray persistence',
       result.reviewIds, ['56565656-5656-4656-8656-565656565656']);
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const globalText = 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.';
+    const reviewItem = await queueItem(
+      '57575757-5757-4757-8757-575757575757',
+      universalReviewRowFor(globalText),
+    );
+    net.on('GET /v1/sync', () => json(200, { items: [reviewItem] }));
+    const result = await relay.syncRelay(cfg);
+    eq('global review row: worldwide Shortcut money never enters the automatic ledger path',
+      result.parsed.length, 0);
+    eq('global review row: the phone receives one sanitized universal review candidate',
+      result.reviewCandidates.length, 1);
+    const globalReview = result.reviewCandidates[0];
+    ok('global review row: structured money and merchant survive with no raw message or sender',
+      globalReview?.kind === 'universal' &&
+        globalReview?.event?.amount?.value?.currency === 'USD' &&
+        globalReview?.event?.amount?.value?.minorUnits === '2000' &&
+        globalReview?.event?.merchant?.value === 'TARGET' &&
+        !Object.prototype.hasOwnProperty.call(globalReview, 'raw') &&
+        !Object.prototype.hasOwnProperty.call(globalReview, 'sender') &&
+        !JSON.stringify(globalReview).includes('Chase Alert'));
+    eq('global review row: queue identity stays reserved until tray durability',
+      result.reviewIds, ['57575757-5757-4757-8757-575757575757']);
   }
 
   /* ═════════════════ Revoked from another device ═════════════════
@@ -1450,19 +1492,77 @@ async function queueItem(id, row, publicKey) {
         }),
       });
 
-    const accepted = await shortcutPost(ADIB_CARD, 'ADIB');
+    // A valid random nonce may spell a bank name in base64. Exercise that
+    // deterministically while keeping the real encryption/decryption path.
+    const originalRandom = webcrypto.getRandomValues;
+    let fixedNonceUsed = false;
+    webcrypto.getRandomValues = function (bytes) {
+      if (!fixedNonceUsed && bytes instanceof Uint8Array && bytes.byteLength === 12) {
+        fixedNonceUsed = true;
+        bytes.set(Buffer.from('ADIBAAAAAAAAAAAA', 'base64'));
+        return bytes;
+      }
+      return originalRandom.call(this, bytes);
+    };
+    let accepted;
+    try { accepted = await shortcutPost(ADIB_CARD, 'ADIB'); }
+    finally { webcrypto.getRandomValues = originalRandom; }
     eq('e2e: the relay accepts a bank message', accepted.status, 202);
     const ignored = await shortcutPost(NOT_A_TRANSACTION, 'Careem');
     eq('e2e: and stores nothing for a message that is not one', ignored.status, 204);
     eq('e2e: the queue holds exactly the one transaction',
       db.prepare('SELECT COUNT(*) n FROM queue').get().n, 1);
-    const dumpAll = () =>
-      JSON.stringify([
-        db.prepare('SELECT * FROM queue').all(),
-        db.prepare('SELECT * FROM devices').all(),
-        db.prepare('SELECT * FROM ingest_receipts').all(),
-        db.prepare('SELECT * FROM push_registrations').all(),
-      ]);
+    eq('e2e: a valid opaque nonce can contain a bank-name substring',
+      db.prepare('SELECT iv FROM queue').get().iv, 'ADIBAAAAAAAAAAAA');
+    // Inspect readable database fields without confusing random base64 with
+    // plaintext. Validate known binary fields and render their identical bytes
+    // as hex; unexpected columns remain visible to the plaintext checks. The
+    // real sync below still authenticates/decrypts the stored ciphertext.
+    const binaryColumns = {
+      queue: { epk: 32, iv: 12, ct: null },
+      devices: { public_key: 32, ingest_token_hash: 32, sync_token_hash: 32,
+        admin_token_hash: 32, email_token_hash: 32 },
+      ingest_receipts: {},
+      push_registrations: { token_iv: 12, token_ct: null },
+    };
+    const binaryHex = (field, value, length) => {
+      if (typeof value !== 'string') throw new Error(`Missing binary field ${field}`);
+      const bytes = Buffer.from(value, 'base64');
+      if (bytes.toString('base64') !== value ||
+          (length === null ? bytes.length < 16 : bytes.length !== length)) {
+        throw new Error(`Invalid binary field ${field}`);
+      }
+      return bytes.toString('hex');
+    };
+    const readableRow = (table, row) => {
+      const fields = { ...row };
+      for (const [column, length] of Object.entries(binaryColumns[table])) {
+        const value = row[column];
+        if (table === 'devices' && column === 'email_token_hash' && value === null) continue;
+        fields[column] = binaryHex(`${table}.${column}`, value, length);
+      }
+      if (table === 'ingest_receipts') {
+        const parts = /^([^:]+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(row.replay_key);
+        if (!parts) throw new Error('Invalid replay-key structure');
+        fields.replay_key = `${binaryHex('ingest_receipts.replay_key', parts[1], 32)}:${parts[2]}`;
+      }
+      return fields;
+    };
+    const dumpAll = () => JSON.stringify(Object.keys(binaryColumns).map(table =>
+      db.prepare(`SELECT * FROM ${table}`).all().map(row => readableRow(table, row))));
+    const storedQueue = db.prepare('SELECT * FROM queue').get();
+    ok('e2e: readable bank and merchant metadata would still fail the privacy guard',
+      JSON.stringify(readableRow('queue', { ...storedQueue, leaked: 'ADIB LULU' })).includes('ADIB LULU'));
+    let rejectsPlaintextCrypto = false;
+    try { readableRow('queue', { ...storedQueue, ct: 'ADIB' }); }
+    catch { rejectsPlaintextCrypto = true; }
+    ok('e2e: plaintext cannot replace a cryptographic field', rejectsPlaintextCrypto);
+    const opaqueBankPrefix = 'ADIB' + 'A'.repeat(39) + '=';
+    const storedDevice = db.prepare('SELECT * FROM devices').get();
+    ok('e2e: opaque bearer digests may contain the same bank-name prefix',
+      !JSON.stringify(readableRow('devices', { ...storedDevice, ingest_token_hash: opaqueBankPrefix })).includes('ADIB'));
+    ok('e2e: opaque replay fingerprints may contain the same bank-name prefix',
+      !JSON.stringify(readableRow('ingest_receipts', { replay_key: `${opaqueBankPrefix}:${storedDevice.id}` })).includes('ADIB'));
     ok('e2e: with the message text nowhere in the database', !dumpAll().includes('LULU'));
     ok('e2e: and the bank that sent it nowhere either — it is inside the seal',
       !dumpAll().includes('ADIB'));
@@ -1546,6 +1646,31 @@ async function queueItem(id, row, publicKey) {
       !dumpAll().includes('FAB payroll') && !dumpAll().includes('WPS credit') &&
         !JSON.stringify(reviewCollected.parsed).includes('WPS'));
     await relay.ackRelay(cfg, reviewCollected.ids);
+
+    const globalShortcutText = 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.';
+    const globalAccepted = await shortcutPost(
+      globalShortcutText,
+      'CHASE',
+      '2026-07-17T10:30:00.000Z',
+      'global-us-review-01',
+      'message',
+    );
+    eq('global Shortcut e2e: a supported worldwide bank alert is accepted without UAE fallback',
+      globalAccepted.status, 202);
+    const globalCollected = await relay.syncRelay(cfg);
+    eq('global Shortcut e2e: worldwide SMS stays review-first rather than auto-posting',
+      globalCollected.parsed.length, 0);
+    ok('global Shortcut e2e: exact USD facts arrive as a sanitized universal review',
+      globalCollected.reviewCandidates.length === 1 &&
+        globalCollected.reviewCandidates[0]?.kind === 'universal' &&
+        globalCollected.reviewCandidates[0]?.event?.amount?.value?.currency === 'USD' &&
+        globalCollected.reviewCandidates[0]?.event?.amount?.value?.minorUnits === '2000' &&
+        globalCollected.reviewCandidates[0]?.event?.merchant?.value === 'TARGET' &&
+        !dumpAll().includes(globalShortcutText) &&
+        !JSON.stringify(globalCollected.reviewCandidates).includes('Chase Alert'));
+    eq('global Shortcut e2e: review row remains distinguishable until tray durability',
+      globalCollected.reviewIds.length, 1);
+    await relay.ackRelay(cfg, globalCollected.reviewIds);
 
     // A Shortcut whose HTTP action retries. The relay's keyed replay receipt
     // collapses it, so one purchase cannot be filed as two.
@@ -1691,7 +1816,7 @@ async function queueItem(id, row, publicKey) {
           buildImportPlan: (parsed) => ({ parsed }),
         };
       }
-      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1 };
+      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1, PARSER_BACKFILL_VERSION: 1 };
       throw new Error(`unexpected capture dependency ${id}`);
     };
 
@@ -1736,7 +1861,7 @@ async function queueItem(id, row, publicKey) {
             },
           };
         }
-        if (id === '@/lib/sms-parser') return { PARSER_VERSION: 24 };
+        if (id === '@/lib/sms-parser') return { PARSER_BACKFILL_VERSION: 24 };
         throw new Error(`unexpected history-capture dependency ${id}`);
       });
       let code = null;
@@ -1754,7 +1879,7 @@ async function queueItem(id, row, publicKey) {
       } catch (error) {
         code = error?.code;
       }
-      eq('parser migration: a version change requests the complete inbox', requestedSince, 0);
+      eq('parser migration: an outdated backfill receipt requests the complete inbox', requestedSince, 0);
       eq('parser migration: an empty restricted history cannot be stamped complete',
         code, 'ERR_SMS_HISTORY_UNAVAILABLE');
 
@@ -1988,6 +2113,7 @@ async function queueItem(id, row, publicKey) {
       };
       const executorModule = execute('src/lib/capture-executor.ts', (id) => {
         if (id === '@/lib/capture-trace') return require('./build/capture-trace.js');
+        if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         if (id === '@/lib/auto-import') return { buildImportPlan: () => emptyPlan };
         if (id === '@/lib/capture') {
           return {
@@ -2017,7 +2143,7 @@ async function queueItem(id, row, publicKey) {
         getState: () => hydrated,
         importBatch: () => {
           events.push('persist');
-          return { ids: ['tx_1'], durable };
+          return { ids: ['tx_1'], durable: typeof durable === 'function' ? durable() : durable };
         },
         ensureDurable: async () => void events.push('flush'),
         markParserVersion: () => void events.push('parser'),
@@ -2052,7 +2178,12 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
-        const failed = Promise.reject(new Error('SQLCipher write failed'));
+        // Create the rejection only when the executor reaches its durability
+        // boundary. Constructing an already-rejected Promise here lets modern
+        // Node report it as unhandled before execute() attaches its await/catch,
+        // terminating the entire suite instead of exercising the intended
+        // failure path.
+        const failed = () => Promise.reject(new Error('SQLCipher write failed'));
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(failed, events),
           dependencies: {
@@ -2093,7 +2224,13 @@ async function queueItem(id, row, publicKey) {
           },
         });
         const running = executor.execute('routine');
-        await Promise.resolve();
+        // executeRoutine deliberately yields with setTimeout(0) before the
+        // synchronous planner/persistence path so foreground input can paint.
+        // Wait for the phase we are asserting rather than assuming which timer
+        // was enqueued first in this Node release.
+        for (let i = 0; i < 10 && events.length === 0; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: routine acknowledgement waits while durability is pending',
           events, ['persist']);
         release();
@@ -2234,7 +2371,9 @@ async function queueItem(id, row, publicKey) {
           ledgerId: 'changed-during-review', captureOptOut: false,
         };
         releaseReview();
-        for (let i = 0; i < 10 && events.length < 3; i += 1) await Promise.resolve();
+        for (let i = 0; i < 10 && events.length < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         eq('capture executor: a mixed review and deduplicated relay page flushes the current ledger',
           events, ['review-stage', 'plan:changed-during-review', 'flush:changed-during-review']);
         releaseLedger();
@@ -2567,6 +2706,33 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('supplemental');
         eq('capture executor: supplemental persistence precedes acknowledgement and reserves probes',
           events, ['persist', 'ack:bank-row']);
+      }
+
+      {
+        const events = [];
+        const current = {
+          ...hydrated, captureOptOut: true, privateMode: false, marketId: 'AE',
+        };
+        const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE' };
+        const queued = {
+          parsed: [row(20, 'STATEMENT ROW')],
+          ids: ['statement-row'], testIds: [], unreadable: 0, testReceived: 0,
+          shortcutRows: 0, shortcutRowsWithBank: 0,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: { ...ledger(Promise.resolve(), events), getState: () => current },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => queued,
+            planRows: () => changedPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+          },
+        });
+        const outcome = await executor.execute('supplemental');
+        ok('capture executor: explicit statement import still files while automatic capture is opted out',
+          outcome.kind === 'imported' &&
+            JSON.stringify(events) === JSON.stringify(['persist', 'ack:statement-row']),
+          JSON.stringify({ outcome, events }));
       }
 
       {
@@ -2982,7 +3148,7 @@ async function queueItem(id, row, publicKey) {
       {
         const events = [];
         const executor = executorModule.createCaptureExecutor({
-          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          ledger: ledger(() => Promise.reject(new Error('SQLCipher write failed')), events),
           dependencies: {
             getRelay: async () => ({
               baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
@@ -3076,7 +3242,7 @@ async function queueItem(id, row, publicKey) {
       {
         const events = [];
         const executor = executorModule.createCaptureExecutor({
-          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          ledger: ledger(() => Promise.reject(new Error('SQLCipher write failed')), events),
           dependencies: {
             getRelay: async () => ({
               baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',

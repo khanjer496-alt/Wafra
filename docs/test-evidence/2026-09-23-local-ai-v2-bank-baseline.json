@@ -1,0 +1,2359 @@
+{
+  "generatedAt": "2026-09-23T11:02:48.939Z",
+  "fixture": "scripts/test/fixtures/local-ai-bank-v2.json",
+  "fixtureSha256": "48ed63f642e0b8de708c82dffc6165a7022761a200e9c7d97ce183318619c711",
+  "sourceSha256": {
+    "src/lib/launch-alert-parser.ts": "698e07452ebd80d6348123473424ff6bfdd3c49d15c527455568c207b40e4249",
+    "src/lib/universal-parser.ts": "965562e8c6f037f81e20ce196ec870f0f91935fc5d692b93f47969ef0f04e800",
+    "src/lib/local-semantic-model.ts": "7cad104b4b3ba7bfb655260890a045614a9e64f0cc8aeb4a89f82e8e5e994626",
+    "src/lib/local-semantic-shadow.ts": "786836942a1644efdc01dfaf8998ff1deca396652fbbdc4394daec8133a370b7",
+    "src/lib/local-semantic-review.ts": "b42c2af87e1314b584f2ac570b23c1ef89def2b10cfb95ccec672796edd58aa4"
+  },
+  "scope": "Synthetic host-only baseline at the generic review seam with UNLISTED-BANK sender. Actual production parser, semantic-window builder, and advisory eligibility execute. Counted retriever always returns null; no LLM or embedding inference, runtime readiness test, device, automatic import or ledger writes.",
+  "comparisonContract": "Positive exactness compares family, direction, explicit transaction amount currency/exponent/minor units, and posted status. Merchant, dates, instrument, ownership, source authentication, and final app import/certification are not compared. Negative metric is advisory eligibility blocked, not safe automatic posting. Generic review rejection may arise from missing generic bank context, not from recognized non-posting status.",
+  "goldNormalization": "Independent digit/punctuation normalization and BigInt minor-unit conversion; fixed ISO exponent map limited to frozen fixture currencies. Last dot/comma is decimal; spaces and Arabic thousands separator removed. No normalization is applied to model outputs.",
+  "summary": {
+    "cases": 48,
+    "positives": 26,
+    "negatives": 22,
+    "positiveCoreFactsExact": [
+      "bank-v2-001",
+      "bank-v2-002",
+      "bank-v2-004",
+      "bank-v2-006",
+      "bank-v2-009",
+      "bank-v2-010",
+      "bank-v2-014",
+      "bank-v2-017",
+      "bank-v2-018"
+    ],
+    "positiveCoreFactsNotExact": [
+      "bank-v2-003",
+      "bank-v2-005",
+      "bank-v2-007",
+      "bank-v2-008",
+      "bank-v2-011",
+      "bank-v2-012",
+      "bank-v2-013",
+      "bank-v2-015",
+      "bank-v2-016",
+      "bank-v2-019",
+      "bank-v2-020",
+      "bank-v2-021",
+      "bank-v2-022",
+      "bank-v2-023",
+      "bank-v2-024",
+      "bank-v2-025",
+      "bank-v2-026"
+    ],
+    "positiveWouldReachRetriever": [
+      "bank-v2-003",
+      "bank-v2-007",
+      "bank-v2-008",
+      "bank-v2-011",
+      "bank-v2-012",
+      "bank-v2-013",
+      "bank-v2-016"
+    ],
+    "negativeWouldReachRetriever": [
+      "bank-v2-035",
+      "bank-v2-036"
+    ],
+    "negativeEligibilityBlocked": [
+      "bank-v2-027",
+      "bank-v2-028",
+      "bank-v2-029",
+      "bank-v2-030",
+      "bank-v2-031",
+      "bank-v2-032",
+      "bank-v2-033",
+      "bank-v2-034",
+      "bank-v2-037",
+      "bank-v2-038",
+      "bank-v2-039",
+      "bank-v2-040",
+      "bank-v2-041",
+      "bank-v2-042",
+      "bank-v2-043",
+      "bank-v2-044",
+      "bank-v2-045",
+      "bank-v2-046",
+      "bank-v2-047",
+      "bank-v2-048"
+    ],
+    "noGenericReviewEvent": [
+      "bank-v2-005",
+      "bank-v2-021",
+      "bank-v2-022",
+      "bank-v2-023",
+      "bank-v2-024",
+      "bank-v2-025",
+      "bank-v2-026",
+      "bank-v2-027",
+      "bank-v2-028",
+      "bank-v2-029",
+      "bank-v2-030",
+      "bank-v2-031",
+      "bank-v2-033",
+      "bank-v2-034",
+      "bank-v2-037",
+      "bank-v2-038",
+      "bank-v2-039",
+      "bank-v2-040",
+      "bank-v2-042",
+      "bank-v2-043",
+      "bank-v2-044",
+      "bank-v2-045",
+      "bank-v2-046",
+      "bank-v2-047",
+      "bank-v2-048"
+    ],
+    "eligibilityReasons": {
+      "deterministic-family-known": 12,
+      "eligible-retriever-invoked-returned-null": 9,
+      "event-not-reviewable": 25,
+      "event-not-a-posting-candidate": 1,
+      "invalid-semantic-text": 1
+    }
+  },
+  "rows": [
+    {
+      "id": "bank-v2-001",
+      "language": "en",
+      "text": "Posted purchase: AED 84.60 at Cedar Lantern Books. Available balance: AED 2,430.15.",
+      "expected": {
+        "decision": "candidate",
+        "family": "purchase",
+        "direction": "debit",
+        "amount_text": "84.60",
+        "currency_text": "AED",
+        "merchant_text": "Cedar Lantern Books"
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "8460"
+      },
+      "event": {
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "8460",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 17,
+              "end": 26
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-002",
+      "language": "en",
+      "text": "A refund of EUR 29.95 from Velvet Finch Store has been credited to your account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "refund",
+        "direction": "credit",
+        "amount_text": "29.95",
+        "currency_text": "EUR",
+        "merchant_text": "Velvet Finch Store"
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "2995"
+      },
+      "event": {
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "2995",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 21
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-003",
+      "language": "en",
+      "text": "Outgoing transfer completed. USD 175.00 was debited from your account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "debit",
+        "amount_text": "175.00",
+        "currency_text": "USD",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "USD",
+        "exponent": 2,
+        "minorUnits": "17500"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "17500",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 39
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-004",
+      "language": "en",
+      "text": "Incoming transfer completed: GBP 640.25 credited to your account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "credit",
+        "amount_text": "640.25",
+        "currency_text": "GBP",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "GBP",
+        "exponent": 2,
+        "minorUnits": "64025"
+      },
+      "event": {
+        "decision": "review",
+        "family": "transfer",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "GBP",
+            "minorUnits": "64025",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 39
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-005",
+      "language": "en",
+      "text": "Cash withdrawal completed: AED 300.00 debited. Remaining balance AED 1,220.40.",
+      "expected": {
+        "decision": "candidate",
+        "family": "cash-withdrawal",
+        "direction": "debit",
+        "amount_text": "300.00",
+        "currency_text": "AED",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "30000"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-006",
+      "language": "en",
+      "text": "Monthly service fee of USD 4.50 has been debited from your account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "fee",
+        "direction": "debit",
+        "amount_text": "4.50",
+        "currency_text": "USD",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "USD",
+        "exponent": 2,
+        "minorUnits": "450"
+      },
+      "event": {
+        "decision": "review",
+        "family": "fee",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "450",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 23,
+              "end": 31
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-007",
+      "language": "en",
+      "text": "Credit-card repayment completed: AED 950.00 debited from your bank account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "card-payment",
+        "direction": "debit",
+        "amount_text": "950.00",
+        "currency_text": "AED",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "95000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "95000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 33,
+              "end": 43
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-008",
+      "language": "en",
+      "text": "Your credit card has received a payment of AED 950.00. The payment is posted as a credit to the card account.",
+      "expected": {
+        "decision": "candidate",
+        "family": "card-payment",
+        "direction": "credit",
+        "amount_text": "950.00",
+        "currency_text": "AED",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "95000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "95000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 43,
+              "end": 53
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-009",
+      "language": "ar",
+      "text": "تم خصم AED ٨٤٫٦٠ مقابل شراء لدى مكتبة القنديل. الرصيد المتاح AED ٢٬٤٣٠٫١٥.",
+      "expected": {
+        "decision": "candidate",
+        "family": "purchase",
+        "direction": "debit",
+        "amount_text": "٨٤٫٦٠",
+        "currency_text": "AED",
+        "merchant_text": "مكتبة القنديل"
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "8460"
+      },
+      "event": {
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "8460",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 7,
+              "end": 16
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-010",
+      "language": "ar",
+      "text": "تم إيداع مبلغ استرداد SAR ١٢٥٫٧٥ من متجر السحابة في حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "refund",
+        "direction": "credit",
+        "amount_text": "١٢٥٫٧٥",
+        "currency_text": "SAR",
+        "merchant_text": "متجر السحابة"
+      },
+      "normalizedGoldMoney": {
+        "currency": "SAR",
+        "exponent": 2,
+        "minorUnits": "12575"
+      },
+      "event": {
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "SAR",
+            "minorUnits": "12575",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 22,
+              "end": 32
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-011",
+      "language": "ar",
+      "text": "تم تنفيذ التحويل الصادر وخصم KWD ١٢٫٣٤٥ من حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "debit",
+        "amount_text": "١٢٫٣٤٥",
+        "currency_text": "KWD",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "KWD",
+        "exponent": 3,
+        "minorUnits": "12345"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "unknown",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "KWD",
+            "minorUnits": "12345",
+            "exponent": 3
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 39
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "posting-status-unresolved",
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": false,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-012",
+      "language": "ar",
+      "text": "تم استلام حوالة واردة وإضافة AED 2,100.00 إلى حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "credit",
+        "amount_text": "2,100.00",
+        "currency_text": "AED",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "210000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "unknown",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "210000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 41
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "issues": [
+          "amount-role-unresolved",
+          "posting-status-unresolved",
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": false,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-013",
+      "language": "ar",
+      "text": "تم السحب النقدي بنجاح وخصم SAR ٥٠٠ من الحساب.",
+      "expected": {
+        "decision": "candidate",
+        "family": "cash-withdrawal",
+        "direction": "debit",
+        "amount_text": "٥٠٠",
+        "currency_text": "SAR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "SAR",
+        "exponent": 2,
+        "minorUnits": "50000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "SAR",
+            "minorUnits": "50000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 27,
+              "end": 34
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-014",
+      "language": "ar",
+      "text": "تم خصم رسوم خدمة شهرية بقيمة BHD ٠٫٧٥٠ من حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "fee",
+        "direction": "debit",
+        "amount_text": "٠٫٧٥٠",
+        "currency_text": "BHD",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "BHD",
+        "exponent": 3,
+        "minorUnits": "750"
+      },
+      "event": {
+        "decision": "review",
+        "family": "fee",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "BHD",
+            "minorUnits": "750",
+            "exponent": 3
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 38
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-015",
+      "language": "ar",
+      "text": "تم سداد البطاقة الائتمانية وخصم AED ٧٢٠٫٠٠ من حسابك البنكي.",
+      "expected": {
+        "decision": "candidate",
+        "family": "card-payment",
+        "direction": "debit",
+        "amount_text": "٧٢٠٫٠٠",
+        "currency_text": "AED",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "72000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "72000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 32,
+              "end": 42
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-016",
+      "language": "ar",
+      "text": "تم قيد دفعة سداد بقيمة SAR ٣٢٠٫٠٠ كإضافة إلى حساب بطاقتك الائتمانية.",
+      "expected": {
+        "decision": "candidate",
+        "family": "card-payment",
+        "direction": "credit",
+        "amount_text": "٣٢٠٫٠٠",
+        "currency_text": "SAR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "SAR",
+        "exponent": 2,
+        "minorUnits": "32000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "SAR",
+            "minorUnits": "32000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 23,
+              "end": 33
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-017",
+      "language": "mixed",
+      "text": "تم الشراء بنجاح: AED ١٢٩٫٩٠ at Copper Kite Cafe. تم خصم المبلغ من حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "purchase",
+        "direction": "debit",
+        "amount_text": "١٢٩٫٩٠",
+        "currency_text": "AED",
+        "merchant_text": "Copper Kite Cafe"
+      },
+      "normalizedGoldMoney": {
+        "currency": "AED",
+        "exponent": 2,
+        "minorUnits": "12990"
+      },
+      "event": {
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "12990",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 17,
+              "end": 27
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-018",
+      "language": "mixed",
+      "text": "Refund posted from متجر النورس: USD 18.40. تمت إضافة المبلغ إلى حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "refund",
+        "direction": "credit",
+        "amount_text": "18.40",
+        "currency_text": "USD",
+        "merchant_text": "متجر النورس"
+      },
+      "normalizedGoldMoney": {
+        "currency": "USD",
+        "exponent": 2,
+        "minorUnits": "1840"
+      },
+      "event": {
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "1840",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 32,
+              "end": 41
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": true,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": true
+    },
+    {
+      "id": "bank-v2-019",
+      "language": "mixed",
+      "text": "Outgoing transfer completed: EUR 1.250,50. تم خصم المبلغ من حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "debit",
+        "amount_text": "1.250,50",
+        "currency_text": "EUR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "125050"
+      },
+      "event": {
+        "decision": "review",
+        "family": "transfer",
+        "status": "posted",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "125050",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 41
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": false,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": true,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-020",
+      "language": "mixed",
+      "text": "تم تنفيذ Cash withdrawal وخصم OMR ٢٠٫٠٠٠ من حسابك.",
+      "expected": {
+        "decision": "candidate",
+        "family": "cash-withdrawal",
+        "direction": "debit",
+        "amount_text": "٢٠٫٠٠٠",
+        "currency_text": "OMR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "OMR",
+        "exponent": 3,
+        "minorUnits": "20000"
+      },
+      "event": {
+        "decision": "review",
+        "family": "cash-withdrawal",
+        "status": "unknown",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "OMR",
+            "minorUnits": "20000",
+            "exponent": 3
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 30,
+              "end": 40
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "posting-status-unresolved",
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "deterministic-family-known",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "deterministic-family-known"
+        }
+      },
+      "comparison": {
+        "family": true,
+        "direction": false,
+        "amountCurrency": true,
+        "amountExponent": true,
+        "amountMinorUnits": true,
+        "statusPosted": false,
+        "explicitAmount": true
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-021",
+      "language": "fr",
+      "text": "Achat comptabilisé : EUR 1 234,56 chez Atelier Lune Bleue. Montant débité de votre compte. Solde disponible : EUR 2 000,00.",
+      "expected": {
+        "decision": "candidate",
+        "family": "purchase",
+        "direction": "debit",
+        "amount_text": "1 234,56",
+        "currency_text": "EUR",
+        "merchant_text": "Atelier Lune Bleue"
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "123456"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-022",
+      "language": "fr",
+      "text": "Virement entrant exécuté : EUR 245,80 crédités sur votre compte.",
+      "expected": {
+        "decision": "candidate",
+        "family": "transfer",
+        "direction": "credit",
+        "amount_text": "245,80",
+        "currency_text": "EUR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "24580"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-023",
+      "language": "es",
+      "text": "Compra contabilizada de EUR 67,30 en Librería Faro de Papel. Importe cargado en su cuenta.",
+      "expected": {
+        "decision": "candidate",
+        "family": "purchase",
+        "direction": "debit",
+        "amount_text": "67,30",
+        "currency_text": "EUR",
+        "merchant_text": "Librería Faro de Papel"
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "6730"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-024",
+      "language": "es",
+      "text": "Reembolso de EUR 42,10 de Tienda Nube Clara abonado en su cuenta.",
+      "expected": {
+        "decision": "candidate",
+        "family": "refund",
+        "direction": "credit",
+        "amount_text": "42,10",
+        "currency_text": "EUR",
+        "merchant_text": "Tienda Nube Clara"
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "4210"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-025",
+      "language": "de",
+      "text": "Bargeldabhebung abgeschlossen: EUR 120,00 wurden Ihrem Konto belastet.",
+      "expected": {
+        "decision": "candidate",
+        "family": "cash-withdrawal",
+        "direction": "debit",
+        "amount_text": "120,00",
+        "currency_text": "EUR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "12000"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-026",
+      "language": "de",
+      "text": "Die monatliche Kontoführungsgebühr von EUR 3,90 wurde Ihrem Konto belastet.",
+      "expected": {
+        "decision": "candidate",
+        "family": "fee",
+        "direction": "debit",
+        "amount_text": "3,90",
+        "currency_text": "EUR",
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": {
+        "currency": "EUR",
+        "exponent": 2,
+        "minorUnits": "390"
+      },
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": {
+        "family": false,
+        "direction": false,
+        "amountCurrency": false,
+        "amountExponent": false,
+        "amountMinorUnits": false,
+        "statusPosted": false,
+        "explicitAmount": false
+      },
+      "coreFactsExact": false
+    },
+    {
+      "id": "bank-v2-027",
+      "language": "en",
+      "text": "Your one-time code is 481629 to approve a purchase of AED 84.60 at Cedar Lantern Books. Do not share this code.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-028",
+      "language": "en",
+      "text": "Pending purchase authorization: USD 58.20 at Copper Kite Cafe. The final charge has not posted.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-029",
+      "language": "en",
+      "text": "Declined: your purchase of GBP 31.00 at Velvet Finch Store was not processed.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-030",
+      "language": "en",
+      "text": "This weekend only: spend AED 200.00 and earn AED 20.00 cashback at Cedar Lantern Books.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-031",
+      "language": "en",
+      "text": "Purchase posted: AED 40.00 at Copper Kite Cafe. A separate refund of AED 15.00 from Velvet Finch Store was also credited today.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-032",
+      "language": "en",
+      "text": "Your monthly credit-card statement is ready. Total amount due AED 1,800.00; minimum payment AED 90.00.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": {
+        "decision": "review",
+        "family": "statement",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "due-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-a-posting-candidate",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-a-posting-candidate"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-033",
+      "language": "ar",
+      "text": "رمز التحقق ٧٢١٤٣٨ لتأكيد تحويل SAR ٥٠٠. لا تشارك الرمز مع أحد.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-034",
+      "language": "ar",
+      "text": "عملية شراء بمبلغ AED ١٨٠٫٠٠ قيد الانتظار لدى متجر السحابة ولم يتم قيد الخصم بعد.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-035",
+      "language": "ar",
+      "text": "تم رفض السحب النقدي بمبلغ SAR ٢٠٠ ولم يتم خصم أي مبلغ من حسابك.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "SAR",
+            "minorUnits": "20000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 26,
+              "end": 33
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-036",
+      "language": "ar",
+      "text": "رصيد حسابك الحالي KWD ٣٤٥٫٦٧٨. لا توجد عمليات جديدة.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "unknown",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "KWD",
+            "minorUnits": "345678",
+            "exponent": 3
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 18,
+              "end": 29
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "issues": [
+          "amount-role-unresolved",
+          "posting-status-unresolved",
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": true,
+        "retrieverCalls": 1,
+        "wouldReachRetriever": true,
+        "reason": "eligible-retriever-invoked-returned-null",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "model-unavailable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-037",
+      "language": "ar",
+      "text": "تم خصم AED ١٠٠ لعملية شراء لدى مكتبة القنديل، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٢٥٠.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-038",
+      "language": "mixed",
+      "text": "OTP 583920 لتأكيد Card payment بقيمة AED 750.00. لم يتم تنفيذ السداد بعد.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-039",
+      "language": "mixed",
+      "text": "Refund pending: EUR 45,00 من متجر النورس. سيتم القيد بعد الموافقة.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-040",
+      "language": "mixed",
+      "text": "تم تسجيل عملية شراء لدى Copper Kite Cafe. Amount: AED 70.00 or AED 170.00; corrected amount not confirmed.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-041",
+      "language": "mixed",
+      "text": "Available balance AED 1,000.00. حد البطاقة الائتمانية AED 5,000.00.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": {
+        "decision": "review",
+        "family": "unknown",
+        "status": "unknown",
+        "direction": "unknown",
+        "amount": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "500000",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 54,
+              "end": 66
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "issues": [
+          "amount-role-unresolved",
+          "posting-status-unresolved",
+          "direction-unresolved",
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      },
+      "eligibility": {
+        "reviewEventEligible": true,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "invalid-semantic-text",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "invalid-semantic-text"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-042",
+      "language": "fr",
+      "text": "Votre code de validation est 836251 pour un achat de EUR 95,00 chez Atelier Lune Bleue.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-043",
+      "language": "fr",
+      "text": "Virement sortant de EUR 210,00 en attente de validation. Aucun débit effectué.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-044",
+      "language": "fr",
+      "text": "Deux achats comptabilisés : EUR 12,40 chez Atelier Lune Bleue et EUR 18,60 chez Boutique Plume Dorée.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-045",
+      "language": "es",
+      "text": "Compra rechazada de EUR 39,50 en Tienda Nube Clara. No se ha cargado ningún importe.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-046",
+      "language": "es",
+      "text": "Oferta: recibe EUR 10,00 de descuento si gastas EUR 100,00 en Librería Faro de Papel.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-047",
+      "language": "de",
+      "text": "Ihr aktueller Kontostand beträgt EUR 2.345,67. Es wurden keine neuen Buchungen vorgenommen.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    },
+    {
+      "id": "bank-v2-048",
+      "language": "de",
+      "text": "Kreditkartenabrechnung: Gesamtbetrag fällig EUR 820,00, Mindestzahlung EUR 41,00.",
+      "expected": {
+        "decision": "abstain",
+        "family": "unknown",
+        "direction": "unknown",
+        "amount_text": null,
+        "currency_text": null,
+        "merchant_text": null
+      },
+      "normalizedGoldMoney": null,
+      "event": null,
+      "eligibility": {
+        "reviewEventEligible": false,
+        "semanticWindowPresent": false,
+        "retrieverCalls": 0,
+        "wouldReachRetriever": false,
+        "reason": "event-not-reviewable",
+        "advisoryResult": {
+          "kind": "refused",
+          "reason": "event-not-reviewable"
+        }
+      },
+      "comparison": null,
+      "coreFactsExact": null
+    }
+  ]
+}

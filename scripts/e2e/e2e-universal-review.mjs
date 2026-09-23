@@ -48,6 +48,21 @@ const button = (page, name) => page.getByRole('button', { name, exact: true });
 const click = async (page, name, role = 'button') => (await visible(page.getByRole(role, { name, exact: true }))).click();
 const field = (page, name) => page.getByRole('textbox', { name, exact: true });
 const fill = async (page, name, value) => (await visible(field(page, name))).fill(value);
+
+/**
+ * Choose an account through the compact picker sheet.
+ *
+ * The Account field used to render every saved account as its own inline
+ * radio chip, so `click(page, name, 'radio')` matched the on-screen row
+ * directly. It is now a compact trigger that opens a bottom sheet of radios,
+ * so the click must first tap the trigger and only then match the radio by
+ * name. `exact: false` handles the case where `accountDisplayName` appends
+ * "·NNNN" to accounts that carry a `last4`, so the fixture name is enough.
+ */
+const chooseAccount = async (page, name) => {
+  await (await visible(page.getByTestId('account-picker-trigger'))).click();
+  await (await visible(page.getByRole('radio', { name, exact: false }))).click();
+};
 // TextField's visible web label is authoritative through aria-labelledby;
 // its longer native accessibilityLabel does not override that browser name.
 const DATE_LABEL = 'When';
@@ -87,7 +102,7 @@ async function remainsPending(page) {
 
 async function expectConfirmationRefusal(page) {
   await click(page, CONFIRM);
-  await visible(page.getByText('Confirm the amount, direction, account, category and date first.', { exact: true }));
+  await visible(page.getByText('Complete the missing detail before adding.', { exact: true }));
   await remainsPending(page);
 }
 
@@ -123,22 +138,20 @@ async function scenario(name, fixtureName, run, route = '/review-alerts') {
 }
 
 try {
-  await scenario('unknown issuer suggestions can be corrected and saved exactly once', 'purchase', async (page, fixture) => {
+  await scenario('known purchase facts stay compact and save exactly once', 'purchase', async (page, fixture) => {
     await openReview(page);
     await visible(page.getByText('AED 89.50', { exact: true }));
-    await visible(page.getByText('AED 1000.00', { exact: true }));
-    assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'Cedar Cafe');
-    assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-09-01');
-    await visible(page.getByRole('radio', { name: 'QA Review Card', exact: true }));
-    await click(page, 'QA Review Card', 'radio');
-    await click(page, 'Dining');
-    await fill(page, TITLE_LABEL, 'Cedar Cafe reviewed');
-    await fill(page, DATE_LABEL, '2026-09-02');
+    assert.equal(await page.getByText('AED 1000.00', { exact: true }).count(), 0,
+      'secondary balance evidence stays out of the compact posting form');
+    assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known merchant is not re-confirmed');
+    assert.equal(await field(page, DATE_LABEL).count(), 0, 'known transaction date is not re-confirmed');
+    assert.equal(await page.getByTestId('account-picker-trigger').count(), 0, 'uniquely matched card is not re-confirmed');
+    assert.equal(await button(page, 'Dining').count(), 0, 'known category is not re-confirmed');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
     const tx = saved.transactions[0];
     assert.deepEqual({ amount: tx.amountFils, title: tx.title, category: tx.category, account: tx.accountId, date: tx.date, type: tx.type },
-      { amount: 8950, title: 'Cedar Cafe reviewed', category: 'dining', account: 'qa_review_card_4844', date: '2026-09-02', type: 'expense' });
+      { amount: 8950, title: 'Cedar Cafe', category: 'dining', account: 'qa_review_card_4844', date: '2026-09-01', type: 'expense' });
     assert.equal(saved.reviewTray.tombstones.filter((item) => item.sourceKey === fixture.review.sourceKey && item.outcome === 'added').length, 1);
     assert.equal(saved.reviewTray.templateRules.length, 0, 'generic confirmation must not teach automatic rules');
     assert.ok(!JSON.stringify(saved).includes(fixture.source), 'full source must not enter persistent ledger state');
@@ -154,13 +167,11 @@ try {
 
   await scenario('single-purchase currency and date ambiguity requires explicit choices', 'ambiguous', async (page) => {
     await openReview(page);
-    await click(page, 'Dining');
+    assert.equal(await button(page, 'Dining').count(), 0, 'category is derived rather than re-confirmed');
     assert.notEqual(await page.getByRole('radio', { name: 'USD 24.90', exact: true }).getAttribute('aria-checked'), 'true');
     assert.notEqual(await page.getByRole('radio', { name: 'CAD 24.90', exact: true }).getAttribute('aria-checked'), 'true');
-    assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '');
     await expectConfirmationRefusal(page);
     await click(page, 'USD 24.90', 'radio');
-    await expectConfirmationRefusal(page);
     await click(page, '2026-04-03', 'radio');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
@@ -171,18 +182,14 @@ try {
 
   await scenario('unknown direction and posting status each need confirmation', 'unresolved', async (page) => {
     await openReview(page);
-    await fill(page, TITLE_LABEL, 'Confirmed account activity');
-    await click(page, 'QA Current Account', 'radio');
-    await click(page, 'Dining');
+    assert.equal(await field(page, TITLE_LABEL).count(), 0, 'unknown merchant uses the neutral review title');
+    await chooseAccount(page, 'QA Current Account');
     assert.notEqual(await page.getByRole('tab', { name: 'Expense', exact: true }).getAttribute('aria-selected'), 'true');
     assert.notEqual(await page.getByRole('tab', { name: 'Income', exact: true }).getAttribute('aria-selected'), 'true');
-    await click(page, 'I confirm this money has moved.', 'checkbox');
-    await expectConfirmationRefusal(page); // Posting alone cannot supply direction.
-    await click(page, 'I confirm this money has moved.', 'checkbox');
+    await expectConfirmationRefusal(page); // Account alone cannot supply direction.
     await click(page, 'Expense', 'tab');
-    await click(page, 'Dining'); // Changing direction deliberately resets category.
-    await expectConfirmationRefusal(page); // Direction alone cannot supply posting.
-    await click(page, 'I confirm this money has moved.', 'checkbox');
+    assert.equal(await page.getByRole('checkbox', { name: 'I confirm this money has moved.', exact: true }).count(), 0,
+      'posting is no longer re-confirmed separately from the explicit add action');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 4275);
@@ -192,7 +199,7 @@ try {
   await scenario('a different currency is refused without losing the review', 'mismatch', async (page) => {
     await openReview(page);
     await visible(page.getByText('USD 15.00', { exact: true }));
-    await click(page, 'Dining');
+    assert.equal(await button(page, 'Dining').count(), 0, 'known category is not re-confirmed');
     await click(page, CONFIRM);
     await visible(page.getByText('Choose an amount in your ledger’s currency.', { exact: true }));
     await remainsPending(page);
@@ -240,11 +247,11 @@ try {
   await scenario('French purchase preserves exact decimal-comma money through confirmation', 'frenchPurchase', async (page) => {
     await openReview(page);
     await visible(page.getByText('EUR 12.40', { exact: true }));
-    await visible(page.getByText('EUR 908.20', { exact: true }));
-    assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'BOULANGERIE DES PINS');
-    assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '2026-08-19');
-    await click(page, 'QA Current Account', 'radio');
-    await click(page, 'Dining');
+    assert.equal(await page.getByText('EUR 908.20', { exact: true }).count(), 0,
+      'secondary balance evidence stays out of the posting form');
+    assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known merchant stays compact');
+    assert.equal(await field(page, DATE_LABEL).count(), 0, 'known date stays compact');
+    await chooseAccount(page, 'QA Current Account');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 1240);
@@ -257,20 +264,17 @@ try {
     await waitForLedger(page, 1, 0);
   });
 
-  await scenario('Japanese held-out purchase needs a date and preserves zero-decimal yen', 'japanesePurchase', async (page) => {
+  await scenario('Japanese held-out purchase uses the observed date and preserves zero-decimal yen', 'japanesePurchase', async (page, fixture) => {
     await openReview(page);
     await visible(page.getByText('JPY 2786', { exact: true }));
-    assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'こもれび文具');
-    assert.equal(await (await visible(field(page, DATE_LABEL))).inputValue(), '');
-    await click(page, 'QA Current Account', 'radio');
-    await click(page, 'Shopping');
-    await expectConfirmationRefusal(page);
-    await fill(page, DATE_LABEL, '2026-09-05');
+    assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known merchant stays compact');
+    assert.equal(await field(page, DATE_LABEL).count(), 0, 'missing transaction date falls back to the observed alert date');
+    await chooseAccount(page, 'QA Current Account');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 2786);
     assert.equal(saved.transactions[0].title, 'こもれび文具');
-    assert.equal(saved.transactions[0].date, '2026-09-05');
+    assert.equal(saved.transactions[0].date, new Date(fixture.review.observedAt).toISOString().slice(0, 10));
     assert.equal(saved.ledgerMoney.currency, 'JPY');
     assert.equal(saved.ledgerMoney.exponent, 0);
     await page.reload({ waitUntil: 'networkidle' });
@@ -304,9 +308,9 @@ try {
   await scenario('CAD refund saves as deliberate Other income rather than salary', 'canadianRefund', async (page) => {
     await openReview(page);
     await visible(page.getByText('CAD 42.60', { exact: true }));
-    assert.equal(await (await visible(field(page, TITLE_LABEL))).inputValue(), 'LANTERN BOOKSHOP');
-    await click(page, 'QA Refund Card', 'radio');
-    await click(page, 'Other');
+    assert.equal(await field(page, TITLE_LABEL).count(), 0, 'known refund merchant stays compact');
+    assert.equal(await page.getByTestId('account-picker-trigger').count(), 0, 'uniquely matched refund card is not re-confirmed');
+    assert.equal(await button(page, 'Other').count(), 0, 'neutral refund category is derived automatically');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 4260);
@@ -320,18 +324,16 @@ try {
     assert.equal(reloaded.transactions[0].category, 'other');
   });
 
-  await scenario('explicit category correction wins over the merchant suggestion after reload', 'purchase', async (page) => {
+  await scenario('automatic merchant category survives reload without teaching a rule', 'purchase', async (page) => {
     await openReview(page);
-    await click(page, 'QA Review Card', 'radio');
-    await click(page, 'Dining');
-    await click(page, 'Transport');
+    assert.equal(await button(page, 'Dining').count(), 0, 'derived category is not exposed as redundant confirmation');
     await click(page, CONFIRM);
     const saved = await waitForLedger(page, 1, 0);
-    assert.equal(saved.transactions[0].category, 'transport');
+    assert.equal(saved.transactions[0].category, 'dining');
     assert.equal(saved.transactions[0].amountFils, 8950);
     await page.reload({ waitUntil: 'networkidle' });
     const reloaded = await waitForLedger(page, 1, 0);
-    assert.equal(reloaded.transactions[0].category, 'transport');
+    assert.equal(reloaded.transactions[0].category, 'dining');
     assert.equal(reloaded.reviewTray.templateRules.length, 0);
   });
 
@@ -349,7 +351,10 @@ try {
     assert.equal(saved.transactions[0].type, 'expense');
     await page.goto(new URL('/review-alerts', BASE).href, { waitUntil: 'networkidle' });
     await openReview(page);
-    await visible(page.getByRole('checkbox', { name: 'I confirm this money has moved.', exact: true }));
+    await visible(page.getByRole('tab', { name: 'Expense', exact: true }));
+    await visible(page.getByTestId('account-picker-trigger'));
+    assert.equal(await page.getByRole('checkbox', { name: 'I confirm this money has moved.', exact: true }).count(), 0,
+      'explicit Confirm and add replaced the redundant posting checkbox');
     assert.equal((await readLedger(page)).transactions.length, 1, 'opening the refused block cannot file it');
   }, '/import-sms?manual=1');
 } finally {

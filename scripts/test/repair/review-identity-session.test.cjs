@@ -25,6 +25,10 @@ const normalize = (text) => text.replace(/\d+/g, '#').toLowerCase();
 function harness(fail = () => false) {
   const calls = [];
   const api = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/local-semantic-review': load(path.join(root, 'src/lib/local-semantic-review.ts'), {
+      '@/lib/local-semantic-review-runtime': { evaluateLocalReviewWindow: async () => ({ kind: 'refused', reason: 'model-unavailable' }) },
+    }),
+    '@/lib/generic-review-entry': require('../build/generic-review-entry.js'),
     '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     'react-native': { Platform: { OS: 'android' } },
     'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'sha256' }, digestStringAsync: async (_, data) => {
@@ -34,6 +38,10 @@ function harness(fail = () => false) {
     '../../modules/notification-reader': { __esModule: true, default: null },
     '../../modules/sms-reader': { __esModule: true, default: null },
     '@/lib/alert-review-tray': {}, '@/lib/format': {}, '@/lib/dedupe': dedupe,
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/ledger-money': { ledgerMoneySpec: currency => ({ currency, exponent: 2 }) },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
+    '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/sms-parser': {}, '@/lib/launch-alert-parser': {},
     '@/lib/unparsed-launch-alert': { normalizeUnparsedLaunchTemplate: normalize },
     '@/lib/trusted-bank-notification-packages': {}, '@/lib/import-plan': {},

@@ -5,6 +5,9 @@ import type { TransferEvidence, TransferDecision, TransferMatch } from '@/lib/tr
 
 export type TransactionType = 'expense' | 'income';
 
+/** How an automatically captured bank event reached the parser. */
+export type CaptureSource = 'shortcut' | 'email' | 'pdf' | 'csv';
+
 export type CategoryId =
   | 'groceries'
   | 'dining'
@@ -152,6 +155,11 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /**
+   * Structured ingest provenance. PDF/CSV identify statement rows whose event
+   * time and merchant wording are intentionally coarser than a live capture.
+   */
+  captureSource?: CaptureSource;
   captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
@@ -345,12 +353,42 @@ export type OnboardingFocus = 'spending' | 'bills' | 'cashflow' | 'overview';
 /** How the person tracked money before Wafra. No provider/account identity. */
 export type OnboardingTracking = 'none' | 'bank-apps' | 'spreadsheet' | 'finance-app';
 
+/**
+ * How the person's main bank tells them a payment happened.
+ *
+ * This is the one answer Wafra cannot infer before it has read anything: a
+ * bank that only pushes an app notification leaves no retrievable history,
+ * because Android hands over the notifications that are on screen now and
+ * never the ones from last March. SMS is the opposite — the inbox IS the
+ * archive. So the answer decides whether the first run owes the user a
+ * statement import to fill the past, not whether Wafra can follow the future.
+ *
+ * Deliberately about delivery, never about which bank: no provider identity.
+ */
+export type OnboardingAlertDelivery = 'sms' | 'notifications' | 'neither' | 'unsure';
+
+/** Android capture sources are independently user-selectable after onboarding. */
+export interface AndroidCaptureSources {
+  sms: boolean;
+  notifications: boolean;
+}
+
+/** The personal outcome the user wants Wafra to help them feel first. */
+export type OnboardingIntention =
+  | 'control'
+  | 'spend-intentionally'
+  | 'stay-ahead'
+  | 'build-buffer';
+
 /** Durable first-run position so an interrupted setup resumes instead of restarting. */
 export type OnboardingJourneyStage =
   | 'welcome'
   | 'focus'
   | 'tracking'
+  | 'alerts'
+  | 'intention'
   | 'preview'
+  | 'remote-handoff'
   | 'privacy'
   | 'capture'
   | 'complete';
@@ -360,6 +398,22 @@ export interface OnboardingProfile {
   stage: OnboardingJourneyStage;
   focus: OnboardingFocus | null;
   tracking: OnboardingTracking | null;
+  /** Optional for ledgers created before the visual-intention step existed. */
+  intention?: OnboardingIntention | null;
+  /** Optional for ledgers created before the alert-delivery step existed. */
+  alerts?: OnboardingAlertDelivery | null;
+  /**
+   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   *
+   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
+   * draws, and nothing else — it never selects a parser market pack, never
+   * pins `ledgerCurrency`, and never decides how a message is read. Those
+   * follow evidence from the alerts themselves, which is why a UAE resident
+   * whose phone is set to another country still parses as UAE.
+   *
+   * Absent means nobody has said, and the device locale is still the guess.
+   */
+  country?: string | null;
   startedAt: number;
 }
 
@@ -568,6 +622,19 @@ export function mergeLocalCaptureQualifications(
   return result;
 }
 
+
+export interface StatementCoverageEntry {
+  id: string;
+  /** Stable, privacy-safe source bucket, e.g. card:credit:1234. */
+  sourceKey: string;
+  /** Human label derived only from masked instrument evidence. */
+  label: string;
+  startDate: string;
+  endDate: string;
+  importedAt: number;
+  format: 'pdf' | 'csv';
+}
+
 export interface AppState {
   hydrated: boolean;
   /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
@@ -583,13 +650,16 @@ export interface AppState {
   budgets: Budget[];
   bills: Bill[];
   cardDues: CardDue[];
+  /** Structured statement date ranges already imported; files/passwords are never retained. */
+  statementCoverage: StatementCoverageEntry[];
   goals: Goal[];
   /** First-run plan waiting for a real ledger currency before activation. */
   onboardingPlan: OnboardingPlanPreferences | null;
   /** Source-free first-run choices and resume position. */
   onboardingProfile: OnboardingProfile | null;
   /** Local currency explicitly observed in an imported bank alert. */
-  onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
+  /** ISO currency proven by captured money before deferred onboarding finalizes. */
+  onboardingCurrencyEvidence: string | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */
   merchantOverrides: Record<string, CategoryId>;
   /**
@@ -600,6 +670,8 @@ export interface AppState {
   billAliases: Record<string, BillAlias>;
   /** Card/account last4 → accountId, learned from SMS. */
   accountHints: Record<string, string>;
+  /** User-confirmed Google Play packages learned from notification Review. */
+  trustedNotificationPackages: string[];
   /** Merchants (lowercased) the user marked as NOT a subscription. */
   notSubscriptions: string[];
   /** Epoch ms of the newest SMS already scanned. */
@@ -607,21 +679,37 @@ export interface AppState {
   /** Body-free, resumable progress for Android's first full history import. */
   historyImport: HistoryImportProgress | null;
   /**
-   * The parser version the stored rows were read with. When it falls behind
-   * `PARSER_VERSION` the next scan re-reads the whole inbox so the improvements
-   * reach data already imported. Absent on states written before this existed,
-   * which correctly reads as "older than any version".
+   * Historical parser-repair receipt.
+   *
+   * This intentionally tracks PARSER_BACKFILL_VERSION, not the ordinary runtime
+   * parser revision. A grammar release does not imply that years of retained SMS
+   * must be re-read; only an explicit backfill-version bump does.
    */
   parserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
+  /**
+   * Receipt proving launch-only declined-row cleanup plus persisted capture/payment
+   * reconciliation completed under the current hydration finalizer. This is
+   * deliberately separate from parser and transfer receipts so routine relaunches
+   * do not walk the entire ledger for maintenance that already persisted.
+   */
+  hydrationFinalizeVersion?: number;
+  /**
+   * Receipt proving the persisted transaction/account graph was normalized by
+   * the current transfer matcher before it was saved. Missing/older values
+   * fail safe by rebuilding once on hydration.
+   */
+  transferNormalizationVersion?: number;
+  /** Exact reconciled internal-transfer ids for the matching normalization receipt. */
+  transferInternalIds?: string[];
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;
   appLock: boolean;
   /** Day of month the reporting month begins (salary day). 1 = calendar months. */
   monthStartDay: number;
-  /** Cached Wafra Pro entitlement supplied by the platform stores via RevenueCat. */
+  /** Cached Wafra Pro entitlement supplied by the platform stores via Superwall. */
   pro: boolean;
   /** Durable local founder grant, available only from explicitly enabled test builds. */
   founderPro: boolean;
@@ -641,6 +729,11 @@ export interface AppState {
    */
   captureOptOut: boolean;
   /**
+   * Android source selection. Optional for legacy ledgers: absence means the
+   * historical behavior (both sources allowed whenever captureOptOut=false).
+   */
+  androidCaptureSources?: AndroidCaptureSources;
+  /**
    * The nightly spend digest. Off until asked for: it is an interruption, the
    * same standing as the per-charge banner, and a finance app that pushes
    * uninvited is a finance app that gets muted along with its bill reminders.
@@ -656,6 +749,12 @@ export interface AppState {
   languagePreference?: 'system' | 'en' | 'ar';
   /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
   themePreference: string;
+  /**
+   * The banks the user said text them, by market-pack name. Optional for
+   * legacy ledgers; empty means not asked or skipped. With exactly one entry
+   * it names accounts that neither a sender nor an alert body could.
+   */
+  knownBanks?: string[];
 }
 
 /**
@@ -663,6 +762,16 @@ export interface AppState {
  * genuinely changed are present; an absent field is left alone.
  */
 export interface TxHealUpdate {
+  /** Exact original Message proof for the reproduced transposed receipt date. */
+  sourceDateCorrection?: {
+    from: string;
+    to: string;
+    sourceKey: string;
+    observedAt: number;
+    amountFils: number;
+    accountId: string;
+    instrument: Pick<CaptureInstrument, 'last4' | 'kind' | 'bankIdentity'>;
+  };
   transferEvidence?: TransferEvidence;
   clearTransferEvidence?: true;
   id: string;
@@ -734,7 +843,8 @@ export interface ImportBatchInput {
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
   /** Supported local currency explicitly observed in this bank-alert batch. */
-  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  /** ISO ledger currency proven by the imported rows, independent of parser country pack. */
+  confirmedLedgerCurrency?: string;
   /**
    * True only when Android completed a scan from the beginning of the SMS
    * inbox for the current parser. Incremental scans must never set this: an

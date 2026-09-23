@@ -4,10 +4,14 @@ import android.content.Context
 import android.os.Build
 
 /**
- * Exact package identities from current official Google Play listings plus
- * launch-tested legacy bank packages. Package name alone is not identity: a
- * sideload can claim an absent name, so capture also requires Google Play to
- * be the recorded installer. Unknown/sideloaded apps fail closed.
+ * Exact package identities from current official bank listings plus
+ * launch-tested legacy bank packages. Known bank ids may come from Play, an OEM
+ * store or an Android restore/clone. Unknown apps still require Google Play as
+ * installer plus financial context before they can enter the encrypted queue.
+ * JS parses every candidate. Curated package ids remain strongest; previously
+ * unseen Play-installed apps may also auto-import when their installed app
+ * identity is independently bank/finance-like and the real parser produces a
+ * confident posted transaction. Ambiguous app identity remains review-only.
  *
  * Keep this map byte-for-byte aligned with
  * src/lib/trusted-bank-notification-packages.ts; contracts.test.js enforces it.
@@ -16,6 +20,15 @@ object TrustedBankNotificationPackages {
   // Ordinary Android builds expose the listener. Exact Play-installed package
   // identity and the user's Notification access remain mandatory.
   val CAPTURE_ENABLED = BuildConfig.WAFRA_ANDROID_NOTIFICATION_CAPTURE_ENABLED
+
+  const val SOURCE_TRUSTED_BANK = "trusted-bank"
+  const val SOURCE_FINANCIAL_CANDIDATE = "financial-candidate"
+
+  private val FINANCIAL_CONTEXT_RE = Regex(
+    "\\b(?:debit(?:ed)?|credit(?:ed)?|purchase|payment|transaction|transfer|spent|withdraw(?:al|n)?|refund|card|account|balance|statement|merchant|pos|atm|iban|swift)\\b" +
+      "|بطاق[هة]|حساب|رصيد|معامل[هة]|عملي[هة]|شراء|دفع|تحويل|سحب|استرداد",
+    RegexOption.IGNORE_CASE,
+  )
 
   val markets: Map<String, String> = mapOf(
     "com.emiratesnbd.android" to "AE",
@@ -36,10 +49,7 @@ object TrustedBankNotificationPackages {
     "com.hdfcbank.android.now" to "IN",
   )
 
-  fun isTrusted(context: Context, packageName: String): Boolean {
-    if (!CAPTURE_ENABLED) return false
-    if (!markets.containsKey(packageName)) return false
-    val installer = try {
+  private fun installer(context: Context, packageName: String): String? = try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         context.packageManager.getInstallSourceInfo(packageName).installingPackageName
       } else {
@@ -49,6 +59,46 @@ object TrustedBankNotificationPackages {
     } catch (_: Exception) {
       null
     }
-    return installer == "com.android.vending"
+
+  private fun playInstalled(context: Context, packageName: String): Boolean =
+    CAPTURE_ENABLED && installer(context, packageName) == "com.android.vending"
+
+  /**
+   * The user-visible label Android itself shows for this installed package.
+   * This is package metadata, not notification text. It gives JS a second
+   * identity surface for previously unseen banks without persisting any raw
+   * financial content or making a network request to Play.
+   */
+  fun applicationLabel(context: Context, packageName: String): String = try {
+    val info = context.packageManager.getApplicationInfo(packageName, 0)
+    context.packageManager.getApplicationLabel(info).toString().trim()
+      .take(MAX_APPLICATION_LABEL_CHARS)
+  } catch (_: Exception) {
+    ""
   }
+
+  fun isTrusted(context: Context, packageName: String): Boolean =
+    CAPTURE_ENABLED && markets.containsKey(packageName)
+
+  /**
+   * Notification access is device-wide. Rank sources locally before queueing:
+   * exact known banks are strongest. Any other Google Play-installed app must
+   * carry clear financial context. Android does not expose the Google Play "Finance"
+   * store category through ApplicationInfo, so never infer trust from an app
+   * category that the platform cannot actually provide.
+   */
+  fun sourceClass(context: Context, packageName: String, body: String): String? {
+    // Exact curated bank package ids are accepted regardless of installer.
+    // Android restores, OEM stores and phone-clone migrations can legitimately
+    // leave installingPackageName null/non-Play even for the real bank app.
+    // A second APK cannot coexist under the same package id, so requiring the
+    // installer here made real ADCB/ENBD notifications silently disappear on
+    // otherwise healthy phones. Unknown packages still require Play provenance;
+    // this native classification alone never authorizes a ledger import.
+    if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
+    if (!playInstalled(context, packageName)) return null
+    return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null
+  }
+
+  private const val MAX_APPLICATION_LABEL_CHARS = 120
 }

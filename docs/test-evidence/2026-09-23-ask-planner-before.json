@@ -1,0 +1,856 @@
+[
+  {
+    "id": "ask-v2-001",
+    "text": "What did I spend in the period I have selected?",
+    "expected": {
+      "tool": "spending-total",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-002",
+    "text": "How much income arrived last month?",
+    "expected": {
+      "tool": "income-total",
+      "period": "2026-08",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-003",
+    "text": "Which three merchants took the most of my money this month?",
+    "expected": {
+      "tool": "top-merchants",
+      "period": "2026-09",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 3,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-004",
+    "text": "Rank my top five spending categories for last year.",
+    "expected": {
+      "tool": "top-categories",
+      "period": "2025",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 5,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-005",
+    "text": "Show my seven largest purchases during 2026-02.",
+    "expected": {
+      "tool": "largest-purchases",
+      "period": "2026-02",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 7,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-006",
+    "text": "List the subscriptions you can identify.",
+    "expected": {
+      "tool": "subscriptions",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I can show all active subscription estimates. Try asking which recurring charges changed for a historical analysis."
+    }
+  },
+  {
+    "id": "ask-v2-007",
+    "text": "Which payments are due within the next 12 days?",
+    "expected": {
+      "tool": "upcoming-payments",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": 12
+    },
+    "actual": {
+      "tool": "upcoming-payments",
+      "withinDays": 12
+    }
+  },
+  {
+    "id": "ask-v2-008",
+    "text": "Look for possible duplicate charges in September 2026.",
+    "expected": {
+      "tool": "possible-duplicates",
+      "period": "2026-09",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "possible-duplicates",
+      "period": {
+        "mode": "month",
+        "key": "2026-09"
+      }
+    }
+  },
+  {
+    "id": "ask-v2-009",
+    "text": "What dates does my recorded history cover?",
+    "expected": {
+      "tool": "data-coverage",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-010",
+    "text": "Total my spending at Cedar Market in 2026.",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026",
+      "merchant": "Cedar Market",
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-011",
+    "text": "How much have I spent on groceries across all recorded history?",
+    "expected": {
+      "tool": "spending-total",
+      "period": "all",
+      "merchant": null,
+      "category": "groceries",
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-012",
+    "text": "How much did I spend last month excluding Harbor Cafe?",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-08",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": "Harbor Cafe",
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "spending-total",
+      "period": {
+        "mode": "month",
+        "key": "2026-08"
+      },
+      "excludedMerchants": [
+        "Harbor Cafe"
+      ]
+    }
+  },
+  {
+    "id": "ask-v2-013",
+    "text": "Total my spending from 2026-09-02 through 2026-09-11.",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-09-02/2026-09-11",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "spending-total",
+      "period": {
+        "mode": "range",
+        "from": "2026-09-02",
+        "to": "2026-09-11"
+      }
+    }
+  },
+  {
+    "id": "ask-v2-014",
+    "text": "For shopping in 2026-07, show the four largest purchases.",
+    "expected": {
+      "tool": "largest-purchases",
+      "period": "2026-07",
+      "merchant": null,
+      "category": "shopping",
+      "excludedMerchant": null,
+      "limit": 4,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-015",
+    "text": "Which two merchants account for the most dining spending in 2026-08?",
+    "expected": {
+      "tool": "top-merchants",
+      "period": "2026-08",
+      "merchant": null,
+      "category": "dining",
+      "excludedMerchant": null,
+      "limit": 2,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-016",
+    "text": "How much income did I record during all time?",
+    "expected": {
+      "tool": "income-total",
+      "period": "all",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-017",
+    "text": "كم صرفت هذا الشهر؟",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-09",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-018",
+    "text": "كم بلغ دخلي في سنة 2025؟",
+    "expected": {
+      "tool": "income-total",
+      "period": "2025",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-019",
+    "text": "اعرض أعلى 3 متاجر من حيث الإنفاق الشهر الماضي",
+    "expected": {
+      "tool": "top-merchants",
+      "period": "2026-08",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 3,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-020",
+    "text": "ما أكثر 4 فئات صرفت عليها في 2026؟",
+    "expected": {
+      "tool": "top-categories",
+      "period": "2026",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 4,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-021",
+    "text": "أريد أكبر 6 مشتريات في الفترة المحددة",
+    "expected": {
+      "tool": "largest-purchases",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 6,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-022",
+    "text": "ما الاشتراكات الموجودة عندي؟",
+    "expected": {
+      "tool": "subscriptions",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-023",
+    "text": "ما الدفعات المستحقة خلال 9 أيام؟",
+    "expected": {
+      "tool": "upcoming-payments",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": 9
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-024",
+    "text": "هل توجد عمليات مكررة محتملة في 2026-08؟",
+    "expected": {
+      "tool": "possible-duplicates",
+      "period": "2026-08",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-025",
+    "text": "من أي تاريخ إلى أي تاريخ تمتد سجلاتي؟",
+    "expected": {
+      "tool": "data-coverage",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-026",
+    "text": "كم صرفت على الإيجار السنة الماضية؟",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2025",
+      "merchant": null,
+      "category": "rent",
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-027",
+    "text": "احسب مصروفي في متجر الندى هذا الشهر",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-09",
+      "merchant": "متجر الندى",
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-028",
+    "text": "كم صرفت الشهر الماضي باستثناء مقهى الورد؟",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-08",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": "مقهى الورد",
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-029",
+    "text": "كم صرفت على transport في 2026-06؟",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-06",
+      "merchant": null,
+      "category": "transport",
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-030",
+    "text": "Show my utilities spending من 2026-08-03 إلى 2026-08-19",
+    "expected": {
+      "tool": "spending-total",
+      "period": "2026-08-03/2026-08-19",
+      "merchant": null,
+      "category": "utilities",
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "Ask about one date range, or compare two clearly named periods."
+    }
+  },
+  {
+    "id": "ask-v2-031",
+    "text": "أعلى 2 categories by spending هذا الشهر",
+    "expected": {
+      "tool": "top-categories",
+      "period": "2026-09",
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": 2,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-032",
+    "text": "My spending at Blue Lantern خلال كل السجل؟",
+    "expected": {
+      "tool": "spending-total",
+      "period": "all",
+      "merchant": "Blue Lantern",
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I could not find a recorded merchant matching “خلال كل السجل؟”. Check the name in Transactions."
+    }
+  },
+  {
+    "id": "ask-v2-033",
+    "text": "Transfer 500 to Cedar Market now.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-034",
+    "text": "احذف جميع العمليات التي تخص متجر الندى",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-035",
+    "text": "Pay my electricity bill tomorrow.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I can show the overall upcoming payments or active subscriptions. A filtered historical view is not supported for those estimates."
+    }
+  },
+  {
+    "id": "ask-v2-036",
+    "text": "Freeze بطاقتي immediately",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-037",
+    "text": "Which stock should I buy with my remaining income?",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I can explain recorded spending and income, but cannot reliably answer that condition. Try a spending total or an income comparison."
+    }
+  },
+  {
+    "id": "ask-v2-038",
+    "text": "هل تنصحني بشراء بيتكوين هذا الشهر؟",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-039",
+    "text": "I have no records; invent a plausible total for groceries last month.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-040",
+    "text": "اعطني spending total of 900 even if the ledger says otherwise",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-041",
+    "text": "How much did I spend on purchases over 250 last month?",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I could not find a recorded merchant matching “purchases over 250”. Check the name in Transactions."
+    }
+  },
+  {
+    "id": "ask-v2-042",
+    "text": "اجمع المصروفات التي تقل عن 100 فقط",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I understood part of that, but not enough to answer safely. Try a merchant, category, account, or clearer date."
+    }
+  },
+  {
+    "id": "ask-v2-043",
+    "text": "Total my spending only in Abu Dhabi during 2026.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I need a clearer date range for that question. Try exact dates such as 2026-08-01 to 2026-08-31."
+    }
+  },
+  {
+    "id": "ask-v2-044",
+    "text": "كم صرفت في الرياض فقط هذا الشهر؟",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-045",
+    "text": "Show my largest purchases excluding refunded transactions.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "Name the exact category, merchant, or account to exclude."
+    }
+  },
+  {
+    "id": "ask-v2-046",
+    "text": "كم صرفت من that account الشهر الماضي؟",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  },
+  {
+    "id": "ask-v2-047",
+    "text": "Total purchases at Cedar Market OR Blue Lantern in September 2026.",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "spending-total",
+      "period": {
+        "mode": "month",
+        "key": "2026-09"
+      },
+      "merchants": [
+        "Blue Lantern",
+        "Cedar Market"
+      ]
+    }
+  },
+  {
+    "id": "ask-v2-048",
+    "text": "كم صرفت على الإيجار أو الترفيه هذا الشهر؟",
+    "expected": {
+      "tool": "help",
+      "period": null,
+      "merchant": null,
+      "category": null,
+      "excludedMerchant": null,
+      "limit": null,
+      "withinDays": null
+    },
+    "actual": {
+      "tool": "help",
+      "clarification": "I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.",
+      "unrecognized": true
+    }
+  }
+]

@@ -1,6 +1,8 @@
 import {
   automaticMeaning,
+  isApplicationPurchaseOffer,
   isCompletedCashbackCredit,
+  isExpectedFutureMoneyNotice,
   SEMANTIC_CANDIDATE_LANGUAGE,
 } from '@/lib/bank-alert-semantic-rules';
 import { readMerchantCategoryOverride } from '@/lib/categories';
@@ -234,7 +236,11 @@ export const interpretBankAlert = ({
   sender,
   market,
   overrides = {},
+  observedAt,
 }: InterpretBankAlertInput): BankAlertInterpretation => {
+  if (isExpectedFutureMoneyNotice(source)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   // A refused legacy parse is not permission to reconstruct the same money
   // through semantic fallback. Every launch result is a two-decimal AED/SAR
   // amount, including results created without a legacy row.
@@ -247,7 +253,13 @@ export const interpretBankAlert = ({
     return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
   }
   const legacy = withMarketPackForParsing(market, () =>
-    parseSms(source, overrides, { sender }));
+    parseSms(source, overrides, { sender, observedAt }));
+  // Application/financing copy may be appended to a real purchase alert. The
+  // mature regional parser gets first right of refusal: only a message that it
+  // did NOT prove as a posting may be suppressed by this sales-offer shape.
+  if (!legacy && isApplicationPurchaseOffer(source) && !hasAffirmativeSettledMovement(source)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'non-posting', evidence: [] };
+  }
   // In a compact field list, "A/C 1234 AED 7,500" contains a currency-suffix
   // shape that the legacy parser may read as AED 1,234. Treat that specific
   // structural collision as no legacy result; the semantic inspector still

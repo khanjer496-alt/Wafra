@@ -55,10 +55,12 @@ export type ReviewPromotionPlan =
       counterpartId?: string;
       reviewTray: AlertReviewTrayState;
       ledgerMoney: LedgerMoneySpec;
+      learnedNotificationPackage?: string;
     }
   | {
       outcome: 'duplicate';
       reviewTray: AlertReviewTrayState;
+      learnedNotificationPackage?: string;
     }
   | { outcome: 'refused'; reason: ReviewPromotionFailure };
 
@@ -154,6 +156,12 @@ export const planReviewPromotion = (
   if (!item) return { outcome: 'refused', reason: 'not-found' };
   if (!captureSourceTimeMatches(item.sourceKey, item.observedAt)) return { outcome: 'refused', reason: 'source-changed' };
   if (item.expiresAt <= now) return { outcome: 'refused', reason: 'expired' };
+  const learnedNotificationPackage = item.channel === 'push' &&
+    item.sourceClass === 'financial-candidate' &&
+    typeof item.sourcePackage === 'string' &&
+    /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(item.sourcePackage)
+    ? item.sourcePackage
+    : undefined;
 
   if (isUniversalReviewAlert(item)) {
     if (!prepareUniversalReviewAlert(item) || !Number.isSafeInteger(item.expiresAt) ||
@@ -187,6 +195,7 @@ export const planReviewPromotion = (
     if (planned.outcome === 'duplicate') return {
       outcome: 'duplicate',
       reviewTray: resolveReviewAlert(state.reviewTray, item.id, 'duplicate', now),
+      ...(learnedNotificationPackage ? { learnedNotificationPackage } : {}),
     };
     const transaction = planned.batch.transactions[0];
     const money = planned.batch.importMoney;
@@ -199,6 +208,7 @@ export const planReviewPromotion = (
         ...(item.channel === 'push' ? { viaPush: true } : {}) },
       // Generic evidence never teaches a registered automatic template.
       reviewTray: resolveReviewAlert(state.reviewTray, item.id, 'added', now),
+      ...(learnedNotificationPackage ? { learnedNotificationPackage } : {}),
     };
   }
 
@@ -242,6 +252,7 @@ export const planReviewPromotion = (
     return {
       outcome: 'duplicate',
       reviewTray: resolveReviewAlert(state.reviewTray, item.id, 'duplicate', now),
+      ...(learnedNotificationPackage ? { learnedNotificationPackage } : {}),
     };
   }
 
@@ -251,6 +262,7 @@ export const planReviewPromotion = (
     outcome: 'added',
     ledgerMoney: state.ledgerMoney ?? expectedMoney,
     reviewTray: rememberTemplateRule(resolvedTray, item, input, now),
+    ...(learnedNotificationPackage ? { learnedNotificationPackage } : {}),
     transaction: {
       id: transactionId,
       type: input.type,

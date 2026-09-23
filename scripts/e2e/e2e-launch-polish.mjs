@@ -19,7 +19,7 @@ const PROFILES = [
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome' });
 const results = [], requests = [], errors = [], layouts = [], cdnResponses = [];
-const expectedDomains = new Set(['choithrams.com','bankfab.com','emiratesnbd.com','alrajhibank.com.sa','nestogroup.com','sharafdg.com','starbucks.com']);
+const expectedDomains = new Set(['choithrams.com','aseertime.com','bankfab.com','emiratesnbd.com','alrajhibank.com.sa','nestogroup.com','sharafdg.com','starbucks.com']);
 const words = {
   en: { home:'Home', spending:'Spending', activity:'Activity', bills:'Bills', accounts:'Accounts', privacy:'Messages & privacy', review:'Review online features', close:'Close', cancel:'Cancel' },
   ar: { home:'الرئيسية', spending:'المصروفات', activity:'العمليات', bills:'الفواتير', accounts:'الحسابات', privacy:'الرسائل والخصوصية', review:'مراجعة الميزات المتصلة', close:'إغلاق', cancel:'إلغاء' },
@@ -29,8 +29,15 @@ async function intercept(context, name, permitImages) {
     const request = route.request(); const url = new URL(request.url());
     if (url.origin === new URL(BASE).origin || ['data:','blob:'].includes(url.protocol)) return route.continue();
     requests.push({ scenario:name, url:url.href, resource:request.resourceType() });
-    // Count AND block forbidden searches. Only fixed reviewed image domains may
-    // reach the CDN; fixtures contain no actual account or message data.
+    // Brand Search is mocked: this run must never depend on provider search
+    // availability and the only searched name is a public synthetic fixture.
+    if (permitImages && url.hostname === 'api.brandfetch.io' && url.pathname.startsWith('/v2/search/')) {
+      const name = decodeURIComponent(url.pathname.slice('/v2/search/'.length));
+      return route.fulfill({ status:200, contentType:'application/json', body:JSON.stringify(
+        name === 'Aseer Time' ? [{name:'Aseer Time',domain:'aseertime.com',claimed:false,brandId:'fixture-aseer'}] : []) });
+    }
+    // Count AND block all other external traffic. Only approved image domains
+    // may reach the CDN; fixtures contain no actual account or message data.
     if (permitImages && url.hostname === 'cdn.brandfetch.io' && request.resourceType() === 'image' &&
       expectedDomains.has(decodeURIComponent(url.pathname.replace('/domain/', '')))) return route.continue();
     return route.abort();
@@ -108,8 +115,8 @@ try {
   await initial.close();
   const now=Date.now();
   const today=new Date(now).toISOString().slice(0,10);
-  financial.push(...[['polish_fixed','Choithrams',11100],['polish_unknown','Fixture Health Clinic',22200]].map(([id,title,amountFils],index)=>({
-    id,title,amountFils,type:'expense',category:'groceries',date:today,ts:now+index,accountId:meta.accounts[0].id,source:'manual',
+  financial.push(...[['polish_fixed','Choithrams',11100,'groceries'],['polish_search','Aseer Time',22200,'dining']].map(([id,title,amountFils,category],index)=>({
+    id,title,amountFils,type:'expense',category,date:today,ts:now+index,accountId:meta.accounts[0].id,source:'manual',
   })));
   meta.txChunks=1;meta.txChunkOrder='oldest-first';meta.captureOptOut=true;meta.dailySummary=false;
   function seed(language,mode,privateMode=false){return [[STATE,JSON.stringify({...meta,language,languagePreference:language,themePreference:mode,privateMode})],[STATE+':tx:0',JSON.stringify(financial)]];}
@@ -218,7 +225,13 @@ try {
       await context.close();
     }finally{await headed.close();}
   }
-  await check('zero-brandfetch-searches',async()=>assert.equal(requests.filter(item=>/api\.brandfetch\.io\/v2\/search/.test(item.url)).length,0));
+  await check('local-only-blocks-brandfetch-searches',async()=>assert.equal(
+    requests.filter(item=>item.scenario?.startsWith('legacy-')&&/api\.brandfetch\.io\/v2\/search/.test(item.url)).length,0));
+  await check('global-brandfetch-search-uses-clean-name-only',async()=>{
+    const searches=requests.filter(item=>/api\.brandfetch\.io\/v2\/search/.test(item.url));
+    assert.ok(searches.some(item=>decodeURIComponent(new URL(item.url).pathname).endsWith('/Aseer Time')),'global merchant lookup requested');
+    assert.ok(searches.every(item=>!/222|account|card|sms/i.test(decodeURIComponent(new URL(item.url).pathname))),'financial details never enter the search path');
+  });
   await check('fixed-merchant-and-bank-CDN-requests-preserved',async()=>{
     assert.ok(requests.some(item=>item.url.includes('cdn.brandfetch.io/domain/choithrams.com')),'fixed merchant artwork requested');
     assert.ok(requests.some(item=>item.url.includes('cdn.brandfetch.io/domain/bankfab.com')),'verified bank artwork requested');

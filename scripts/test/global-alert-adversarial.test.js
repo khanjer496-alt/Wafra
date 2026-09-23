@@ -71,6 +71,22 @@ for (const testCase of cases) {
 }
 
 const markets = [...new Set(corpus.map((row) => row.market))].sort();
+{
+  const oneParser = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: 'AED' });
+  ok('launch session exposes one production parser boundary',
+    typeof oneParser.parse === 'function' && !Object.prototype.hasOwnProperty.call(oneParser, 'interpret'),
+    JSON.stringify(Object.keys(oneParser)));
+}
+
+{
+  const session = createLaunchAlertSession({ overrides: {}, activeMarket: 'AE', pinnedCurrency: null });
+  const ae = 'Purchase of AED 20.00 with Debit Card ending 1234 at SAMPLE STORE.';
+  const sa = 'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234.';
+  ok('one Gulf session cannot switch market through the universal fallback',
+    session.parse(ae, 'ENBD', session.inspect(ae, 'ENBD')) !== null &&
+      session.parse(sa, 'ALRAJHI', session.inspect(sa, 'ALRAJHI')) === null,
+    session.detectedMarket());
+}
 for (const market of markets) {
   const marketRows = corpus.filter((row) => row.market === market);
   const posted = marketRows.find((row) => row.expected.status === 'posted');
@@ -97,6 +113,49 @@ for (const market of markets) {
   ok(`${market}: conflicting foreign issuer is ambiguous`,
     conflict.decision === 'ambiguous' && conflict.market === null,
     JSON.stringify(conflict));
+
+  const globalLedger = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: posted.expected.currency,
+  });
+  const universalParsed = globalLedger.parse(
+    posted.body,
+    posted.sender,
+    globalLedger.inspect(posted.body, posted.sender),
+  );
+  ok(`${market}: matching-currency ledger can auto-parse the posted worldwide alert`,
+    universalParsed !== null &&
+      universalParsed.currency === posted.expected.currency &&
+      String(universalParsed.amountFils) === posted.expected.minorUnits,
+    JSON.stringify(universalParsed));
+}
+
+{
+  const unknownUsd = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: 'USD',
+  });
+  const body = 'Card purchase USD 19.99 was debited at SAMPLE SHOP.';
+  const parsed = unknownUsd.parse(body, 'BANK-WAFRA-HAS-NEVER-SEEN', null);
+  ok('unknown USD bank auto-parses from universal structure alone',
+    parsed !== null && parsed.currency === 'USD' && parsed.amountFils === 1999 &&
+      parsed.type === 'expense',
+    JSON.stringify(parsed));
+}
+
+{
+  const gulf = createLaunchAlertSession({
+    overrides: {},
+    activeMarket: 'AE',
+    pinnedCurrency: 'AED',
+  });
+  const body = 'Enjoy 10% cashback on dining with your FAB Credit Card. Get bonus points on purchases above AED 1000. Apply now.';
+  const inspection = gulf.inspect(body, 'AD-FAB');
+  const parsed = gulf.parse(body, 'AD-FAB', inspection);
+  ok('known UAE sender cannot be resurrected by worldwide fallback after regional refusal',
+    parsed === null, JSON.stringify({ inspection: inspection?.route, parsed }));
 }
 
 const hardNegatives = [

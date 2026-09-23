@@ -93,6 +93,56 @@ function stripComments(text) {
 const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
   'src/app/(tabs)/bills.tsx',
 ];
+// The shipping Home: `src/app/(tabs)/index.tsx` re-exports it. The
+// ledger-home-screen list further down keeps its persistent-reveal contract
+// for the day that screen is rendered again; today nothing imports it, so a
+// stall there is not a stall the user can hit, and this list guards the Home
+// that is.
+const SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION = [
+  'src/screens/journal-home-screen.tsx',
+];
+
+// ---------------------------------------------------------------------------
+// 120 Hz capability: keep it in Expo config so clean EAS/prebuilds preserve it.
+// ---------------------------------------------------------------------------
+
+{
+  const appConfig = stripComments(read('app.config.js'));
+  // The plugin deliberately stores generated native source inside JS template
+  // strings. `stripComments` would treat `//` inside those strings as real JS
+  // comments and erase the rest of the generated Kotlin from this inspection.
+  const highRefresh = read('modules/wafra-high-refresh/plugin/index.js');
+
+  ok('the high-refresh native plugin is part of every Expo prebuild',
+    /\.\/modules\/wafra-high-refresh\/plugin/.test(appConfig) &&
+      /plugins:\s*\[\.\.\.withPagedPlugins, highRefreshPlugin\]/.test(appConfig),
+    'a native-only edit is lost by clean EAS/prebuild; the plugin has to be registered in app.config.js');
+
+  ok('iOS clean builds keep the ProMotion opt-in',
+    /CADisableMinimumFrameDurationOnPhone/.test(highRefresh) &&
+      /next\.modResults\[IOS_PROMOTION_KEY\]\s*=\s*true/.test(highRefresh),
+    'without CADisableMinimumFrameDurationOnPhone, supported iPhones can remain capped below ProMotion refresh rates');
+
+  ok('Android 14+ tells the scheduler Wafra intends to render at 120 fps',
+    /Build\.VERSION\.SDK_INT\s*>=\s*Build\.VERSION_CODES\.UPSIDE_DOWN_CAKE/.test(highRefresh) &&
+      /120f/.test(highRefresh) &&
+      /params\.preferredRefreshRate\s*=\s*targetRate/.test(highRefresh),
+    'preferredRefreshRate is the window-level hint; do not switch display modes just to request refresh rate');
+
+  ok('older Android versions request an actual supported refresh rate',
+    /defaultDisplay\.supportedRefreshRates/.test(highRefresh) &&
+      /minByOrNull/.test(highRefresh),
+    'before Android 14 preferredRefreshRate must match a supported rate, so hard-coding 120 can be ignored on 90/144 Hz devices');
+
+  ok('Android 15+ keeps high-refresh interactions compatible with idle power saving',
+    /Build\.VERSION_CODES\.VANILLA_ICE_CREAM/.test(highRefresh) &&
+      /window\.setFrameRatePowerSavingsBalanced\(true\)/.test(highRefresh),
+    'finance screens are often static; allowing refresh-rate balancing avoids holding the panel high while nothing moves');
+
+  ok('high-refresh support does not force a display resolution/mode',
+    !/preferredDisplayModeId/.test(highRefresh),
+    'Wafra only needs a frame-rate preference; changing the display mode can also change resolution');
+}
 
 // New Spending components do not run a delayed entering sequence.
 for (const rel of ['src/app/(tabs)/flow.tsx', 'src/components/spending/spending-overview.tsx', 'src/components/spending/spending-trends.tsx']) {
@@ -196,6 +246,17 @@ for (const rel of PERSISTENT_REVEAL_TAB_SCREENS) {
     'Section registers a layout entrance and does not know it is on a detachable tab');
 }
 
+for (const rel of SHIPPING_TAB_SCREENS_WITHOUT_LAYOUT_ANIMATION) {
+  const src = stripComments(read(rel));
+  ok(`${rel}: has no detachable-screen layout animation`,
+    !/\bentering=\{/.test(src) && !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
+    'entering/exiting/layout animations can replay when react-native-screens reattaches a tab');
+  ok(`${rel}: does not use Section, which carries its own entrance`,
+    !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
+      !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
+    'Section registers a layout entrance and does not know it is on a detachable tab');
+}
+
 const motionReveal = stripComments(read('src/components/ui/motion-reveal.tsx'));
 
 ok('MotionReveal animates persistent paint properties, not layout',
@@ -250,6 +311,21 @@ const tabBar = stripComments(read('src/components/tab-bar.tsx'));
   ok('src/components/tab-bar.tsx: selected state is exposed without motion',
     /accessibilityState=\{\{ selected: focused \}\}/.test(tabBar) && !/Animated|withSpring/.test(tabBar),
     'selection is immediate for every user including Reduce Motion');
+
+  ok('src/components/tab-bar.tsx: rapid taps cannot enqueue overlapping navigation transitions',
+    /navigationPendingRef/.test(tabBar) &&
+      /if \(!focused && navigationPendingRef\.current !== null\) return/.test(tabBar) &&
+      /navigationPendingRef\.current = route\.key/.test(tabBar) &&
+      /\}, \[state\.index\]\)/.test(tabBar) &&
+      /setTimeout\([\s\S]*?750\)/.test(tabBar),
+    'the selected index can lag a physical tap; a second destination must wait for the first ' +
+      'fragment/navigation transaction instead of piling more work onto a stalled UI thread');
+
+  ok('src/components/tab-bar.tsx: tap storms leave only a source-free diagnostic breadcrumb',
+    /recordRuntimeInteraction\('main-tab-press'\)/.test(tabBar) &&
+      !/recordRuntimeInteraction\([^)]*route\.name/.test(tabBar),
+    'a crash report may count pressure, but it must not persist which financial destination ' +
+      'the user was viewing');
 }
 
 // ---------------------------------------------------------------------------
@@ -602,6 +678,40 @@ function fastest(fn, runs = 7) {
         'agreeing, budget warnings would quote a different number from the one Flow draws');
   }
   fmt.setMonthStartDay(1);
+
+  const july = [];
+  for (let d = 31; d >= 1; d--) {
+    july.push({
+      id: `jul-${d}`,
+      date: `2026-07-${String(d).padStart(2, '0')}`,
+      title: 'Shop',
+      amountFils: 1000,
+      type: 'expense',
+      category: 'dining',
+      accountId: 'acc-1',
+      source: 'sms',
+    });
+  }
+  const older = [];
+  for (let i = 0; i < 3000; i++) {
+    older.push({
+      id: `old-${i}`,
+      date: `2025-01-${String((i % 28) + 1).padStart(2, '0')}`,
+      title: 'Old',
+      amountFils: 500,
+      type: 'expense',
+      category: 'shopping',
+      accountId: 'acc-1',
+      source: 'sms',
+    });
+  }
+  const newestFirst = [...july, ...older];
+  const period = { mode: 'month', key: '2026-07' };
+  const windowed = insights.summarizeMonth(newestFirst, period);
+  const onlyJuly = insights.summarizeMonth(july, period);
+  ok('a newest-first 3,000-row tail does not change this month\'s summary',
+    windowed.expenseFils === onlyJuly.expenseFils && windowed.expenseFils === 31_000,
+    `newest-first ${windowed.expenseFils} vs July-only ${onlyJuly.expenseFils} — early-exit must not drop in-period rows or pick up older months`);
 }
 
 {
@@ -619,6 +729,57 @@ function fastest(fn, runs = 7) {
   ok('buildInsights does not re-scan the ledger once per budget',
     !/spentInMonthForCategory\(/.test(body),
     'the per-budget spend has to come from the summary this function already computed');
+}
+
+// ---------------------------------------------------------------------------
+// Interaction hot paths: visible rows and entry opening must stay O(visible).
+// ---------------------------------------------------------------------------
+
+{
+  const merchantAvatar = read('src/components/ui/merchant-avatar.tsx');
+  const bankAvatar = read('src/components/ui/bank-avatar.tsx');
+  const merchantLogoResolver = read('src/lib/merchant-logo-resolver.ts');
+  const bankLogoResolver = read('src/lib/bank-logo-resolver.ts');
+  const detail = read('src/components/entry-detail-sheet.tsx');
+  const haptics = read('src/lib/haptics.ts');
+
+  ok('merchant avatars subscribe only to Private Mode, not the whole ledger',
+    /usePrivateMode/.test(merchantAvatar) && !/useStore\s*\(/.test(merchantAvatar) && /React\.memo\(MerchantAvatarInner\)/.test(merchantAvatar),
+    'a transaction list can have hundreds of avatars; a full StoreContext subscription rerenders all of them on every unrelated ledger update');
+
+  ok('bank avatars subscribe only to Private Mode, not the whole ledger',
+    /usePrivateMode/.test(bankAvatar) && !/useStore\s*\(/.test(bankAvatar) && /React\.memo\(BankAvatarInner\)/.test(bankAvatar),
+    'account artwork should not rebuild when transactions, budgets, or import progress change');
+
+  ok('remote merchant artwork has bounded JS metadata and unresolved work',
+    /MAX_MEMORY_CACHE_ENTRIES\s*=\s*128/.test(merchantLogoResolver) &&
+      /MAX_PENDING_RESOLUTIONS\s*=\s*24/.test(merchantLogoResolver) &&
+      /pending\.size >= MAX_PENDING_RESOLUTIONS/.test(merchantLogoResolver) &&
+      /while \(memory\.size > MAX_MEMORY_CACHE_ENTRIES\)/.test(merchantLogoResolver),
+    'a long transaction history can expose thousands of unique merchant strings; presentation enrichment must not become a process-lifetime Map/promise backlog');
+
+  ok('remote bank artwork has bounded JS metadata and unresolved work',
+    /MAX_MEMORY_CACHE_ENTRIES\s*=\s*64/.test(bankLogoResolver) &&
+      /MAX_PENDING_RESOLUTIONS\s*=\s*8/.test(bankLogoResolver) &&
+      /pending\.size >= MAX_PENDING_RESOLUTIONS/.test(bankLogoResolver) &&
+      /while \(memory\.size > MAX_MEMORY_CACHE_ENTRIES\)/.test(bankLogoResolver),
+    'wallet navigation must not retain every remote institution lookup for the lifetime of the process');
+
+  ok('Android remote logos use disk cache instead of process-wide decoded-image memory',
+    /Platform\.OS === 'android'[\s\S]*?'disk'\s*:\s*'memory-disk'/.test(merchantAvatar) &&
+      /Platform\.OS === 'android'\s*\?\s*'disk'\s*:\s*'memory-disk'/.test(bankAvatar),
+    'decoded remote artwork has unbounded brand cardinality on imported ledgers; disk cache keeps reuse without retaining every image in RAM');
+
+  ok('opening an entry does not reconcile the full transfer graph',
+    !/reconcileTransfers\s*\(/.test(detail) && /transferOwnership\(transaction\)/.test(detail),
+    'the selected row already carries normalized transfer evidence; rebuilding the whole ledger graph on every tap blocks the JS thread');
+
+  const tapped = bodyOf(haptics, 'export function tapped');
+  ok('routine Android taps reserve navigation first and defer a short haptic until the next frame',
+    !!tapped && tapped.includes('prioritizeForegroundNavigation()') &&
+      tapped.includes("Platform.OS === 'android'") && tapped.includes('requestAnimationFrame') &&
+      tapped.includes('performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click)'),
+    'the haptic must not compete with the JS turn that handles navigation, but Android taps still need physical feedback');
 }
 
 // ---------------------------------------------------------------------------
@@ -723,7 +884,7 @@ function bodyOf(source, header) {
    * scrambled order, which is enough to change which of two duplicate rows
    * `reconcileCaptureDuplicates` keeps.
    */
-  const load = bodyOf(ledgerPersistenceSource, 'const readSnapshot = async');
+  const load = bodyOf(ledgerPersistenceSource, 'const readExistingSnapshot = async');
   ok('the loader reads the stored chunk layout before reassembling',
     !!load &&
       /parsed\.txChunkOrder === currentChunkOrder/.test(load) &&
@@ -734,9 +895,377 @@ function bodyOf(source, header) {
   const persist = bodyOf(ledgerPersistenceSource, 'const writeSnapshot = async');
   ok('every meta record says which layout the chunks on disk are in',
     !!persist && /txChunkOrder: order/.test(persist) &&
-      /chunks \? currentChunkOrder : storedChunkOrder/.test(persist),
+      /const order = needsChunks \? targetOrder : storedChunkOrder/.test(persist),
     'meta is written on saves that do not touch transactions too, and one of those stamping ' +
       'the new layout over old chunks is the same data-scrambling bug from the other side');
+}
+
+
+// ---------------------------------------------------------------------------
+// Automatic capture must distinguish source-free maintenance from real arrivals.
+// ---------------------------------------------------------------------------
+
+{
+  const autoImport = stripComments(read('src/hooks/use-auto-import.ts'));
+  ok('real Android arrival edges acknowledge a durable import while source-free maintenance stays quiet',
+    /liveEvent && !interactive/.test(autoImport) &&
+      /showLiveCaptureFeedback\(outcome\.transactions\)/.test(autoImport) &&
+      /latestScan\.current\(false, true\)/.test(autoImport) &&
+      /runAndroidNotificationDrain\(true\)/.test(autoImport) &&
+      /latestScan\.current\(false\)/.test(autoImport),
+    'only a source-backed SMS/notification edge should get the short live success feedback; launch/resume safety scans remain silent');
+
+  ok('daily summary work is keyed to ledger changes, not every store mutation',
+    /\[getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
+      !/\}, \[state, watchForeground\]\);/.test(autoImport),
+    'history pages, settings changes, and other unrelated reducer updates must not reschedule the daily summary; completion may schedule once');
+
+  ok('Android resume catch-up leaves the first reopened frames to UI/input',
+    /ANDROID_RESUME_SCAN_GRACE_MS\s*=\s*5_000/.test(autoImport) &&
+      /ANDROID_INITIAL_SCAN_GRACE_MS\s*=\s*6_000/.test(autoImport) &&
+      /waitForForegroundHistoryIdle/.test(autoImport) &&
+      /initialScanCancelled/.test(autoImport) &&
+      /shouldSkipFreshAndroidResumeScan\(\)/.test(autoImport) &&
+      /setTimeout\([\s\S]*?scheduler\.request\(\)[\s\S]*?ANDROID_RESUME_SCAN_GRACE_MS\)/.test(autoImport),
+    'a fresh source-free resume should do no inbox work, and a stale one must not start it while Android restores the window');
+
+  ok('launch notification and digest maintenance respect the navigation lease',
+    /ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\s*=\s*10_000/.test(autoImport) &&
+      /DAILY_SUMMARY_MAINTENANCE_GRACE_MS\s*=\s*9_000/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(DAILY_SUMMARY_MAINTENANCE_GRACE_MS\)/.test(autoImport),
+    'source-free maintenance must keep yielding priority to real taps even after its wall-clock grace expires');
+
+  ok('Android bank-app queue is not reopened on every quick resume without a change signal',
+    /ANDROID_NOTIFICATION_RECHECK_MS\s*=\s*30_000/.test(autoImport) &&
+      /ANDROID_NOTIFICATION_RECOVERY_GRACE_MS\s*=\s*10_000/.test(autoImport) &&
+      /androidNotificationDrainRequired\s*=\s*false/.test(autoImport) &&
+      /getPendingCount/.test(autoImport) &&
+      /pending <= 0/.test(autoImport) &&
+      /NotificationReader\.addListener\('onQueueChanged',[\s\S]*?androidNotificationDrainRequired = true[\s\S]*?scheduler\.request\(\)/.test(autoImport) &&
+      /androidNotificationDrainRequired = false[\s\S]*?androidNotificationLastCheckedAt = Date\.now\(\)/.test(autoImport),
+    'cold launch/resume must inspect only a source-free pending count after an idle grace; a real native queue edge still forces an immediate drain');
+
+  const notificationListener = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt'));
+  const notificationStore = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt'));
+  const notificationModule = stripComments(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt'));
+  ok('notification-listener reconnect recovery never runs KeyStore sweep inline',
+    /override fun onListenerConnected\(\)[\s\S]*?scheduleSweep\(\)/.test(notificationListener) &&
+      /recoveryExecutor\.execute/.test(notificationListener) &&
+      /fun scheduleSweepConnected\(\)/.test(notificationListener) &&
+      /if \(!wasEnabled && nowEnabled\) BankNotificationListenerService\.scheduleSweepConnected\(\)/.test(notificationModule),
+    'Android can reconnect NotificationListenerService during launch; encrypted shade recovery must be pushed off that callback path');
+
+  ok('bank notification admission touches the encrypted queue only once per candidate',
+    /val appendResult = NotificationCaptureStore\.append\(/.test(notificationListener) &&
+      !/NotificationCaptureStore\.admissionBlockReason\(/.test(notificationListener) &&
+      /fun append\([\s\S]*?\): String/.test(notificationStore) &&
+      /return "duplicate"/.test(notificationStore),
+    'a duplicate preflight followed by append decrypted the same AndroidKeyStore queue twice for every visible bank notification');
+
+  const historyImport = stripComments(read('src/hooks/use-history-import.ts'));
+  ok('Android history repair keeps running across foreground transitions without auto-starting old paused jobs',
+    /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS\s*=\s*8_000/.test(historyImport) &&
+      /progress\.scanned > 0/.test(historyImport) &&
+      !/RNAppState\.addEventListener\('change'/.test(historyImport) &&
+      /historyRepair:\s*true/.test(historyImport) &&
+      /includeNotificationQueue:\s*false/.test(historyImport),
+    'a saved paused job still needs explicit Continue, but a job already running must not pause every time Android foregrounds the Activity');
+
+  ok('history planning and commit both honor the foreground navigation lease',
+    /FOREGROUND_HISTORY_PAGE_GAP_MS\s*=\s*120/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE\s*=\s*128/.test(historyImport) &&
+      /BACKGROUND_HISTORY_PAGE_SIZE\s*=\s*512/.test(historyImport) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*1/.test(historyImport) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT\s*=\s*1/.test(historyImport) &&
+      /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyImport) &&
+      (historyImport.match(/await waitForForegroundHistoryIdle\(\);/g) ?? []).length >= 2,
+    'yielding only while parsing still lets synchronous planning or ledger reconciliation start on the same turn as a tap');
+
+  const autoImportSource = stripComments(read('src/lib/auto-import.ts'));
+  ok('history repair rejects impossible personal/non-money rows before heavy parsing',
+    /historyRepair\?: boolean/.test(autoImportSource) &&
+      /if \(options\.historyRepair\)/.test(autoImportSource) &&
+      /!hasBankAlertMoneyHint\(sms\.body\)/.test(autoImportSource) &&
+      /launchSenderMarket === null && !hasGenericBankAlertContext\(sms\.body, sms\.address\)/.test(autoImportSource),
+    'a multi-year repair must not run regional/worldwide grammars over ordinary personal SMS that cannot produce ledger money');
+
+  const importPlanSource = stripComments(read('src/lib/import-plan.ts'));
+  ok('history exact-source repairs keep generalized duplicate indexes lazy',
+    /let guardCache: ReturnType<typeof duplicateGuard> \| null = null/.test(importPlanSource) &&
+      /if \(exactPrior\) \{[\s\S]*?healFromReparse\([\s\S]*?continue;[\s\S]*?const duplicate = guard\(\)/.test(importPlanSource) &&
+      /let rowsByTimestampCache: Map<number, Transaction\[\]> \| null = null/.test(importPlanSource) &&
+      /let transferRepairCandidatesCache: Map<string, Transaction\[\]> \| null = null/.test(importPlanSource),
+    'an exact retained-message identity should heal directly instead of allocating every cross-channel/title/timestamp index over a large ledger');
+
+  ok('source-identity planning allocates collision arrays only for actual collisions',
+    /const collidingPriorsBySmsKey = new Map<string, Transaction\[\]>\(\)/.test(importPlanSource) &&
+      !/const priorsBySmsKey = new Map<string, Transaction\[\]>\(\)/.test(importPlanSource) &&
+      /if \(prior\) \{[\s\S]*?collidingPriorsBySmsKey\.set\(sourceKey, \[prior, t\]\)/.test(importPlanSource),
+    'a 15k-row ledger with unique source identities must not allocate 15k single-item arrays on every history checkpoint');
+
+  const smsParserSource = stripComments(read('src/lib/sms-parser.ts'));
+  const captureSource = stripComments(read('src/lib/capture.ts'));
+  const ledgerImportSource = stripComments(read('src/lib/ledger-import.ts'));
+  ok('history checkpoints merge into the already-sorted ledger without a full re-sort',
+    /transactions:\s*mergeSortedTransactions\(batch\.transactions, existing\)/.test(ledgerImportSource) &&
+      !/transactions:\s*incrementalFastPath[\s\S]*?sortTransactions\(\[\.\.\.batch\.transactions, \.\.\.existing\]\)/.test(ledgerImportSource),
+    'ordinary healing preserves dates; only an admitted source-date correction needs to restore order before the linear merge');
+  // A deliberate historical repair can advance this independent version.
+  // Pin the separate numeric contract, not a particular release number.
+  const backfillRevision = smsParserSource.match(/const PARSER_BACKFILL_VERSION\s*=\s*(\d+)\s*;/);
+  const runtimeRevision = smsParserSource.match(/const PARSER_VERSION\s*=\s*(\d+)\s*;/);
+  ok('runtime parser revisions are decoupled from expensive historical backfill',
+      backfillRevision !== null && runtimeRevision !== null &&
+      Number(backfillRevision[1]) > 0 && Number(backfillRevision[1]) <= Number(runtimeRevision[1]) &&
+      /\(state\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(captureSource) &&
+      /parserRereadComplete \? PARSER_BACKFILL_VERSION/.test(ledgerImportSource) &&
+      /\(next\.parserVersion \?\? 0\) < PARSER_BACKFILL_VERSION/.test(stripComments(read('src/lib/store.tsx'))),
+    'ordinary parser releases must not automatically force a full retained-inbox reread or launch-time saved-row reparse');
+
+  const captureExecutor = stripComments(read('src/lib/capture-executor.ts'));
+  ok('routine capture yields between collection and synchronous import planning',
+    /collected\.parsed\.length > 0 \|\| collected\.declined\.length > 0/.test(captureExecutor) &&
+      /await yieldForegroundTurn\(\)/.test(captureExecutor),
+    'a completed native inbox read must give pending UI/input a turn before planning and reconciliation');
+
+  const ledgerPersistence = stripComments(read('src/lib/ledger-persistence.ts'));
+  ok('ledger persistence does not retain a second serialized copy of every transaction chunk',
+    !/previousChunks|chunkBodies|nextChunks/.test(ledgerPersistence) &&
+      /previousTransactions/.test(ledgerPersistence) &&
+      /chunkRowsUnchanged/.test(ledgerPersistence),
+    'keeping every JSON chunk string alive beside parsed transactions raises steady-state memory and GC pressure on large ledgers');
+
+  const store = stripComments(read('src/lib/store.tsx'));
+  ok('completed hydration maintenance is receipt-gated instead of walking the ledger every launch',
+    /HYDRATION_FINALIZE_VERSION\s*=\s*1/.test(store) &&
+      /finalizationReceiptCurrent/.test(store) &&
+      /finalizationReceiptCurrent\s*\?\s*paymentsRepaired\s*:\s*removeDeclinedTransactions/.test(store) &&
+      /finalizationReceiptCurrent[\s\S]*?\?\s*declinesRemoved\.transactions[\s\S]*?:\s*finalizeHydrationTransactions/.test(store),
+    'decline cleanup plus capture/payment reconciliation cost hundreds of ms on a 14k-row persisted ledger and must run only when its receipt is stale');
+
+  ok('unfinished history hydration reuses its provisional transfer receipt instead of rebuilding the graph',
+    /historyImportIncomplete\(reduced\.historyImport\)/.test(store) &&
+      /historyImportIncomplete\(next\.historyImport\)/.test(store),
+    'a persisted running job hydrates as paused; treating only literal running as provisional caused multi-second 15k-row graph rebuilds on every relaunch');
+
+  ok('build-262 ledgers can adopt the hydration-finalize receipt without one extra slow launch',
+    /legacyFinalizationReceipt/.test(store) &&
+      /hydrationReparseKey === exactReparseKey/.test(store) &&
+      /transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION/.test(store) &&
+      /Array\.isArray\(action\.state\.transferInternalIds\)/.test(store),
+    'the immediately previous build already persisted this exact maintenance under current parser and transfer receipts');
+
+  const home = stripComments(read('src/screens/journal-home-screen.tsx'));
+  const settings = stripComments(read('src/app/settings.tsx'));
+  ok('Home never schedules category/parser cleanup scans after becoming usable',
+    /includeCleanupPrompts:\s*false/.test(home) &&
+      !/homeCleanupReady|setHomeCleanupReady/.test(home),
+    'uncategorisedMerchants and unreadFormatCount are full-history maintenance; dedicated screens own them, not Home');
+
+  ok('Settings renders cleanup routes without scanning the full ledger for badge counts',
+    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings) &&
+      /sortShopsSettingsDetail/.test(settings) &&
+      /improveAccuracySettingsDetail/.test(settings),
+    'opening Settings to change a toggle or send diagnostics must stay independent of transaction count');
+
+  ok('Home resume clock does not invalidate full-ledger projections within the same day',
+    /const projectionDay\s*=/.test(home) &&
+      (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&
+      !/state\.marketId, period, now\]/.test(home),
+    'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
+
+  ok('Home defers optional historical insight work until after the first usable frame',
+    /InteractionManager\.runAfterInteractions/.test(home) &&
+      /!homeAnalysisReady \|\| !insightWidgetVisible/.test(home) &&
+      /projectDashboardInsight\(state, period, now\)/.test(home) &&
+      !/const homeInsight = useMemo/.test(home) &&
+      !/surface: 'dashboard', includeInsights: true/.test(home),
+    'a 10k+ row ledger must not run subscription/history analysis before Home can accept input, and must not hitch the render that just painted a new SMS');
+
+  const notifications = stripComments(read('src/lib/notifications.ts'));
+  const reminders = stripComments(read('src/lib/reminders.ts'));
+  ok('automatic Android reminder setup never runs synchronous full-ledger recurrence detection',
+      /detectSubscriptionsCooperatively\(/.test(notifications) &&
+      /historyImportIncomplete\(state\.historyImport\)/.test(notifications) &&
+      /detectedSubscriptions = \[\]/.test(notifications) &&
+      /recordRuntimeOperation\('reminder-projection'/.test(notifications) &&
+      /buildPaymentReminders\(state, now, MAX_REMINDERS, detectedSubscriptions\)/.test(notifications) &&
+      /SESSION_REMINDER_SYNC_GRACE_MS\s*=\s*8_000/.test(autoImport) &&
+      /waitForForegroundHistoryIdle\(SESSION_REMINDER_SYNC_GRACE_MS\)/.test(autoImport) &&
+      /syncPaymentReminders\(current\)/.test(autoImport),
+    'launch reminder setup runs after Home appears; recurrence analysis must yield between slices instead of freezing Hermes');
+
+  const testerDiagnostics = stripComments(read('src/lib/android-tester-diagnostics.ts'));
+  const diagnosticMessages = stripComments(read('src/lib/diagnostic-messages.ts'));
+  ok('one-tap tester diagnostics page the native inbox instead of reading 1,000 SMS in one JS turn',
+    /maxPageSize: 50/.test(testerDiagnostics) &&
+      /maxPageSize\?: number/.test(read('src/lib/diagnostic-messages.ts')) &&
+      /Math\.min\(maxPage, remaining\)/.test(diagnosticMessages),
+    'a 14k-row ledger plus a 1,000-message inbox read froze the support button for 5-20s');
+
+  const smsReaderNative = stripComments(read(
+    'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt'));
+  ok('native SMS pages LIMIT the provider cursor instead of opening the whole inbox',
+    /DESC LIMIT \$limit/.test(smsReaderNative) &&
+      /remaining \+ 32/.test(smsReaderNative) &&
+      /fun collectInboxPage\(/.test(smsReaderNative) &&
+      /if \(rejectSensitive && SensitiveMessageFilter\.shouldReject\(body\)\) continue/.test(smsReaderNative),
+    'a native inbox read without LIMIT stalled Send diagnostics and routine capture on CPH2653');
+
+  ok('routine capture pages 128 inbox rows instead of 1,000',
+    /pageSize: 128/.test(captureSource) &&
+      /maxInboxPages: fullHistoricalReread \? 1 : undefined/.test(captureSource),
+    'incremental capture still drains every newer message; it must not parse a thousand bodies before yielding');
+
+  ok('SMS inbox pages yield to the UI between provider reads',
+    /waitForForegroundHistoryIdle\(FOREGROUND_PARSE_YIELD_MS\)/.test(autoImportSource),
+    'a multi-page catch-up after a week offline must not monopolise Hermes');
+
+  ok('Home FX repair stops after 16 fallback rows instead of filtering 14k',
+    /if \(pending\.length === 16\) break/.test(home),
+    'reference FX is a bounded repair, not a full-ledger scan');
+
+
+  ok('reminder planning accepts a precomputed recurrence projection',
+    /detectedSubscriptions\?: readonly Subscription\[\]/.test(reminders) &&
+      /detectedSubscriptions[\s\S]*?detectSubscriptions\(/.test(reminders),
+    'the cooperative Android caller must be able to supply the exact recurrence result without the pure planner rescanning synchronously');
+
+  const bills = stripComments(read('src/app/(tabs)/bills.tsx'));
+  const subscriptions = stripComments(read('src/lib/subscriptions.ts'));
+  const cards = stripComments(read('src/lib/cards.ts'));
+  const assistant = stripComments(read('src/lib/wafra-assistant.ts'));
+  const assistantScreen = stripComments(read('src/app/assistant.tsx'));
+  ok('the first Android Bills frame does not synchronously run recurring detection',
+    /androidRecurring/.test(bills) &&
+      /InteractionManager\.runAfterInteractions/.test(bills) &&
+      (bills.match(/requestAnimationFrame/g) ?? []).length >= 2 &&
+      /detectSubscriptionsCooperatively\(/.test(bills) &&
+      /Platform\.OS === 'android'[\s\S]*?androidRecurring \?\? \[\]/.test(bills),
+    'Bills is lazy-mounted on the navigation tap; full-ledger recurrence work must start only after the tab has painted');
+
+  ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
+    /function\* subscriptionDetectionWorker/.test(subscriptions) &&
+      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*2/.test(subscriptions) &&
+      /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
+      /waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)/.test(subscriptions),
+    'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
+
+  ok('recurrence detection drops impossible one-off/two-off merchant groups before yielding cadence work',
+    /if \(txs\.length < 2\) continue/.test(subscriptions) &&
+      /if \(txs\.length === 2\)/.test(subscriptions) &&
+      /knownTwoChargeProvider/.test(subscriptions) &&
+      /billLikeTwoChargeGroup/.test(subscriptions),
+    'a large imported ledger has thousands of one-off merchants; they must not each consume a cooperative timer turn');
+
+  ok('Bills never restarts recurrence from row zero on tab churn',
+    /UPCOMING_RECURRENCE_IDLE_MS\s*=\s*4_000/.test(bills) &&
+      /needsRecurrenceNow/.test(bills) &&
+      /agendaView === 'cards'/.test(bills) &&
+      /subscriptionDetectionInFlight/.test(subscriptions) &&
+      /if \(existing\) return existing\.promise/.test(subscriptions) &&
+      /callers simply ignore the eventual value/.test(read('src/lib/subscriptions.ts')),
+    'one immutable ledger snapshot must own one cooperative recurrence job; focus changes may ignore the result but must not cancel/restart the underlying scan');
+
+  ok('default Upcoming does not start recurrence in the navigation-critical window',
+    /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
+      /agendaView === 'subscriptions' \|\| agendaView === 'utilities' \|\| agendaView === 'all'/.test(bills),
+    'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
+
+  ok('Bills does not compute recently-paid card history for the default Upcoming view',
+    /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
+      /needsPaidCards[\s\S]*?bills-paid-cards[\s\S]*?recentlySettledDues\(state, now\)[\s\S]*?: \[\]/.test(bills),
+    'recent settled statements are invisible on Upcoming and must not block the first Bills tap');
+
+  const billsLogic = stripComments(read('src/lib/bills.ts'));
+  ok('manual bill reconciliation is cached across Home and Bills for one immutable ledger/day',
+    /let billsForMonthCache:/.test(billsLogic) &&
+      /billsForMonthCache\.transactions === transactions/.test(billsLogic) &&
+      /billsForMonthCache\.bills === bills/.test(billsLogic) &&
+      /return billsForMonthCache\.value\.slice\(\)/.test(billsLogic),
+    'Home already computes card/bill upcoming data; opening Bills must reuse that result rather than retokenize the full ledger');
+
+  ok('manual bill reconciliation stops after the current money month on a newest-first ledger',
+    /function spendingInMonth\(/.test(billsLogic) &&
+      /if \(seenInMonth && newestFirst\) break/.test(billsLogic) &&
+      /const monthRows = spendingInMonth\(transactions, key, live, internal\)/.test(billsLogic) &&
+      /candidatePayments\(bill, monthRows, key, live, internal\)/.test(billsLogic),
+    'Home leaving-soon and Bills must not retokenize 14k historical rows to settle this month\'s three bills');
+
+  const dailySummaryLogic = stripComments(read('src/lib/daily-summary.ts'));
+  ok('daily spend summary stops after leaving today on a newest-first ledger',
+    /function forEachInDateWindow\(/.test(dailySummaryLogic) &&
+      /if \(seen && newestFirst\) break/.test(dailySummaryLogic) &&
+      /forEachInDateWindow\(state\.transactions, \(date\) => date === dayISO/.test(dailySummaryLogic),
+    'reminder setup must not walk 2019 to total today\'s coffees');
+
+  ok('settled-card history is cached by immutable card inputs and day',
+    /let recentlySettledDuesCache:/.test(cards) &&
+      /recentlySettledDuesCache\.withinDays === withinDays/.test(cards) &&
+      /sameInputs\(recentlySettledDuesCache, state\)/.test(cards),
+    'Cards/All should not replay statement allocation when revisiting Bills on an unchanged ledger');
+
+  ok('card statement allocation is cached once per card and immutable ledger snapshot',
+    /let allocationCache:/.test(cards) && /sameInputs\(allocationCache, state\)/.test(cards) &&
+      /allocationCache\.byAccount\.get\(accountId\)/.test(cards),
+    'Bills history and card detail must not replay the same payment allocation once per statement');
+
+  ok('Ask Wafra paints Android Send state before interpreting the ledger',
+    /Platform\.OS === 'android'[\s\S]*?new Promise<void>\(\(resolve\) => requestAnimationFrame/.test(assistantScreen) &&
+      /runWafraAssistantCooperatively/.test(assistantScreen),
+    'the input must clear and pending turn must paint before any large-ledger calculation starts');
+
+  ok('Ask Wafra suggestions never run recurrence detection just to choose a chip',
+    /state\.bills\.length > 0 \|\| state\.cardDues\.length > 0/.test(assistant) &&
+      !/suggestedAssistantQuestions[\s\S]{0,1800}leavingSoon\(/.test(assistant.slice(assistant.indexOf('export function suggestedAssistantQuestions'))),
+    'opening the Assistant should not trigger subscription analysis before the user asks a question');
+
+  const paymentAgenda = stripComments(read('src/components/bills/payment-agenda.tsx'));
+  const referencePresentation = stripComments(read('src/lib/reference-presentation.ts'));
+  ok('Bills renders long agendas progressively instead of mounting every row at once',
+    /PAYMENT_AGENDA_PAGE_SIZE\s*=\s*24/.test(paymentAgenda) &&
+      /groupPaymentAgendaWindow\(visibleItems, includePaid, renderLimit\)/.test(paymentAgenda) &&
+      /section\.items\.slice\(0, remaining\)/.test(paymentAgenda) &&
+      /setRenderLimit\(\(current\) => current \+ PAYMENT_AGENDA_PAGE_SIZE\)/.test(paymentAgenda),
+    'large imported histories can create many recurring rows; the ScrollView must keep first mount bounded');
+
+  ok('Bills bounds agenda sorting to the visible window before React receives recurrence results',
+    /export function groupPaymentAgendaWindow/.test(referencePresentation) &&
+      /kept\.length === boundedLimit/.test(referencePresentation) &&
+      /kept\.splice\(low, 0, item\)/.test(referencePresentation) &&
+      /if \(kept\.length > boundedLimit\) kept\.pop\(\)/.test(referencePresentation),
+    'pagination after fully sorting every recurring candidate still leaves the expensive synchronous work on the JS thread');
+
+  const insightSource = stripComments(read('src/lib/insights.ts'));
+  const flow = stripComments(read('src/app/(tabs)/flow.tsx'));
+  const wallet = stripComments(read('src/app/(tabs)/wallet.tsx'));
+  ok('month summaries stop after leaving a newest-first bounded period',
+    /if \(seenInPeriod && newestFirst && !unbounded\) break/.test(insightSource),
+    'a 14k-row history must not walk 2019 just to total this month');
+
+  ok('month early-exit requires the whole ledger to be newest-first, not a sorted prefix',
+    /function datesAreNewestFirst/.test(insightSource) &&
+      /const newestFirst = datesAreNewestFirst\(transactions\)/.test(insightSource),
+    'a newest-first prefix with later in-period rows would undercount money if we stopped at the first inversion');
+
+  ok('Wallet reissue suggestions are cached on the immutable ledger snapshot',
+    /let reissueCache:/.test(cards) &&
+      /reissueCache\?\.transactions === state\.transactions/.test(cards),
+    'opening Wallet three times on an unchanged 14k-row ledger was 122ms each');
+
+  ok('Wallet does not filter the whole ledger a second time just to count SMS rows',
+    !/state\.transactions\.filter\(\(tx\) => tx\.source === 'sms'\)/.test(wallet),
+    'smsCount belongs on the activity pass already walking accounts');
+
+  ok('Flow activity preview stops after eight newest matches',
+    /ACTIVITY_PREVIEW_LIMIT/.test(flow) &&
+      /out\.length >= ACTIVITY_PREVIEW_LIMIT/.test(flow) &&
+      !/\.filter\(\(tx\) => isSpending\(tx, live, internal\) && inPeriod\(tx\.date, period\)\)/.test(flow),
+    'the preview is eight rows; copying the whole period of spending is wasted JS');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

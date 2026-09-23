@@ -30,7 +30,11 @@ import {
   MARKETS,
   withMarketPackForParsing,
 } from '@/lib/markets';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { interpretBankAlert } from '@/lib/bank-alert-interpreter';
+import { inspectUniversalAlert } from '@/lib/alert-market-detection';
+import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
+import { inspectGenericBankEventForReview } from '@/lib/launch-alert-parser';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
 import { normalizeUnparsedLaunchTemplate } from '@/lib/unparsed-launch-alert';
@@ -73,8 +77,39 @@ import {
   type PushEnv,
 } from './push';
 
+interface DiagnosticEmailBinding {
+  send(message: {
+    to: string;
+    from: string;
+    subject: string;
+    text: string;
+    attachments: Array<{
+      content: string;
+      filename: string;
+      type: string;
+      disposition: 'attachment';
+    }>;
+  }): Promise<{ messageId: string }>;
+}
+
+interface RateLimitBinding {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env extends PushEnv {
   DB: D1Database;
+  /** Cloudflare-native, pre-D1 guard for unauthenticated public write routes. */
+  PUBLIC_RATE_LIMITER?: RateLimitBinding;
+  /** Cloudflare-native guard for token-scoped relay traffic before D1 auth. */
+  AUTH_RATE_LIMITER?: RateLimitBinding;
+  /** Tighter guard for CPU-heavy statement parsing. */
+  IMPORT_RATE_LIMITER?: RateLimitBinding;
+  /** Optional Cloudflare Email Service binding for final-test diagnostic copies. */
+  DIAGNOSTIC_EMAIL?: DiagnosticEmailBinding;
+  /** Verified destination mailbox that receives tester diagnostic attachments. */
+  REPORT_EMAIL?: string;
+  /** Sender on a domain onboarded to Cloudflare Email Service. */
+  REPORT_FROM_EMAIL?: string;
   /** Domain routed to this Email Worker, for token@domain forwarding. */
   EMAIL_DOMAIN?: string;
   /**
@@ -88,6 +123,10 @@ export interface Env extends PushEnv {
   GITHUB_DISPATCH_TOKEN?: string;
   /** `owner/repo` the dispatch is aimed at. Not secret; a [vars] entry. */
   GITHUB_REPOSITORY?: string;
+  /** Emergency kill switch. `0`, `false`, or `off` disables cloud imports. */
+  IMPORTS_ENABLED?: string;
+  /** Emergency kill switch for feedback -> GitHub coding-agent dispatch only. */
+  FEEDBACK_AGENT_ENABLED?: string;
 }
 
 /** Longer than any real bank SMS; anything bigger is abuse or a mistake. */
@@ -102,6 +141,15 @@ const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_BYTES = 1024 * 1024;
 const MAX_PDF_PAGES = 100;
 const MAX_IMPORT_ROWS = 200;
+/**
+ * Real-world PDF readers tolerate a small transport/publisher preamble before
+ * the `%PDF-` header. Bank document generators occasionally emit one (for
+ * example a BOM or a few whitespace/metadata bytes), so requiring the magic at
+ * byte zero rejects a file that pdf.js can otherwise open. Keep the scan tight:
+ * this is only a cheap media-type gate before the bounded pdf.js parse below.
+ */
+const MAX_PDF_HEADER_OFFSET = 1024;
+const PDF_HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d] as const; // %PDF-
 const CSV_CONTENT_TYPES = new Set([
   'text/csv',
   'application/csv',
@@ -113,6 +161,23 @@ const MAX_VAULT_DEVICES = 8;
 const PAIR_PER_MINUTE = 60;
 /** Per-device ingest ceiling. UAE banks send tens of alerts a day, not hundreds. */
 const INGEST_PER_HOUR = 300;
+/** Heavy file parsing: generous for a person, finite for a loop or leaked token. */
+const STATEMENT_IMPORTS_PER_HOUR = 12;
+/** Account-wide backstop for a bad release repeatedly uploading statements. */
+const GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000;
+/** Forwarded alerts are more frequent than statements, but still bounded. */
+const EMAIL_IMPORTS_PER_HOUR = 120;
+const GLOBAL_EMAIL_IMPORTS_PER_HOUR = 5_000;
+/**
+ * A 200-row import can fan out to as many as eight trusted phones. This budget
+ * counts attempted sealed deliveries, not just HTTP requests, because that is
+ * what drives queue + replay-receipt writes in D1.
+ */
+const SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR = 25_000;
+const GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR = 100_000;
+/** Half-hour recovery cron may inspect/wake at most this many devices per run. */
+const MAX_SCHEDULED_WAKE_DEVICES = 250;
+const SCHEDULED_WAKE_CONCURRENCY = 20;
 /** Retry idempotency window; exact repeat purchases remain possible later. */
 const REPLAY_WINDOW_SECONDS = 15 * 60;
 /** Bounded abuse without making a normal long-offline phone lose history. */
@@ -149,6 +214,54 @@ const DEFAULT_MARKET = 'AE';
 const PUSH_COALESCE_SECONDS = 600;
 const textEncoder = new TextEncoder();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ANDROID_TESTER_DIAGNOSTIC_TEXT = 'Android tester diagnostics.';
+
+function featureEnabled(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  return !['0', 'false', 'off'].includes(value.trim().toLowerCase());
+}
+
+function importsEnabled(env: Env): boolean {
+  return featureEnabled(env.IMPORTS_ENABLED);
+}
+
+function feedbackAgentEnabled(env: Env): boolean {
+  return featureEnabled(env.FEEDBACK_AGENT_ENABLED);
+}
+
+/**
+ * Cloudflare's binding is the cheap first line and D1 counters remain the exact
+ * backstop. If a configured binding itself errors, fail closed: availability of
+ * an optional import/feedback operation is less important than accidentally
+ * bypassing the cost firewall during a provider/configuration fault.
+ */
+async function rateLimitExceeded(binding: RateLimitBinding | undefined, key: string): Promise<boolean> {
+  if (!binding) return false;
+  try {
+    return !(await binding.limit({ key })).success;
+  } catch {
+    return true;
+  }
+}
+
+function publicRateLimitKey(req: Request, route: string): string {
+  // Cloudflare already sees this address at the edge. It is used only as the
+  // ephemeral Rate Limiting API key and is never written to D1 or application logs.
+  // Health is machine traffic rather than a user action. A route-global key
+  // prevents a distributed address spray in one Cloudflare location from
+  // turning a public liveness probe into repeated D1 schema reads.
+  if (route === '/v1/health') return route;
+  const address = req.headers.get('cf-connecting-ip')?.trim() || 'unknown';
+  return `${route}:${address}`;
+}
+
+function authenticatedTrafficScope(method: string, pathname: string): string | null {
+  if (!pathname.startsWith('/v1/')) return null;
+  if (['/v1/pair', '/v1/join', '/v1/feedback', '/v1/health'].includes(pathname)) return null;
+  if (/^\/v1\/feedback\/[^/]+$/.test(pathname)) return `${method}:feedback-item`;
+  if (/^\/v1\/devices\/[^/]+$/.test(pathname)) return `${method}:device-item`;
+  return `${method}:${pathname}`;
+}
 
 function headers(contentType?: string): HeadersInit {
   return {
@@ -219,6 +332,21 @@ async function readBytes(
   return { bytes: buffer.slice(0, length), tooLarge: false };
 }
 
+function pdfHeaderOffset(bytes: Uint8Array): number {
+  const last = Math.min(MAX_PDF_HEADER_OFFSET, bytes.length - PDF_HEADER.length);
+  for (let offset = 0; offset <= last; offset += 1) {
+    let matches = true;
+    for (let index = 0; index < PDF_HEADER.length; index += 1) {
+      if (bytes[offset + index] !== PDF_HEADER[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return offset;
+  }
+  return -1;
+}
+
 interface Device {
   id: string;
   vault_id: string;
@@ -241,8 +369,64 @@ function validMarket(id: unknown): string | null {
   return MARKETS.some((market) => market.id === up) ? up : null;
 }
 
+function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): {
+  sourceKey: string; label: string; startDate: string; endDate: string;
+} | null {
+  const dates = rows.map((row) => row.date).filter((date): date is string =>
+    typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
+  if (dates.length === 0) return null;
+  dates.sort();
+  const instruments = new Map<string, { key: string; label: string }>();
+  for (const row of rows) {
+    if (!row.card || !/^\d{4}$/.test(row.card.last4)) continue;
+    const kind = row.card.kind === 'account' ? 'account' : 'card';
+    const key = `${kind}:${row.card.kind}:${row.card.last4}`;
+    instruments.set(key, { key, label: `${kind === 'account' ? 'Account' : 'Card'} •${row.card.last4}` });
+  }
+  const banks = [...new Set(rows.map((row) => row.bankHint?.trim()).filter((value): value is string => !!value))];
+  const source = instruments.size === 1
+    ? [...instruments.values()][0]
+    : banks.length === 1
+      ? { key: `bank:${banks[0].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48)}`, label: banks[0].slice(0, 60) }
+      : { key: 'bank-statements', label: 'Bank statements' };
+  return { sourceKey: source.key, label: source.label, startDate: dates[0], endDate: dates[dates.length - 1] };
+}
+
+function pdfPassword(req: Request): string | undefined {
+  const value = req.headers.get('x-wafra-pdf-password');
+  if (!value) return undefined;
+  if (value.length > 128 || /[\r\n\0]/.test(value)) return undefined;
+  return value;
+}
+
+function pdfPasswordFailure(error: unknown): 'pdf_password_required' | 'pdf_password_incorrect' | null {
+  if (!error || typeof error !== 'object') return null;
+  const row = error as { name?: unknown; code?: unknown; message?: unknown };
+  if (row.name !== 'PasswordException') return null;
+  if (row.code === 1 || /password.*required|no password/i.test(String(row.message ?? ''))) return 'pdf_password_required';
+  return 'pdf_password_incorrect';
+}
+
 function statementCurrencyForMarket(market: string): 'AED' | 'SAR' {
   return market === 'SA' ? 'SAR' : 'AED';
+}
+
+function statementCurrencyForRequest(
+  req: Request,
+  legacyMarket: string,
+): { currency: string } | { error: true } {
+  const rawCurrency = req.headers.get('x-wafra-ledger-currency');
+  const rawExponent = req.headers.get('x-wafra-ledger-exponent');
+  // Backwards compatibility for already-shipped clients. Current builds always
+  // send the ledger's explicit ISO denomination and never infer it from country.
+  if (rawCurrency === null && rawExponent === null) {
+    return { currency: statementCurrencyForMarket(legacyMarket) };
+  }
+  if (rawCurrency === null || rawExponent === null) return { error: true };
+  const spec = ledgerMoneySpec(rawCurrency);
+  const exponent = Number(rawExponent);
+  if (!spec || !Number.isInteger(exponent) || spec.exponent !== exponent) return { error: true };
+  return { currency: spec.currency };
 }
 
 /**
@@ -380,31 +564,15 @@ async function overPairRateLimit(env: Env): Promise<boolean> {
          ELSE 1
        END,
        window_start = excluded.window_start
+     WHERE pair_limits.window_start != excluded.window_start
+        OR pair_limits.request_count < ?2
      RETURNING request_count`,
   )
-    .bind(windowStart)
+    .bind(windowStart, PAIR_PER_MINUTE)
     .first<{ request_count: number }>();
-  return (row?.request_count ?? PAIR_PER_MINUTE + 1) > PAIR_PER_MINUTE;
-}
-
-/** Fixed hourly window without retaining an IP address or message fingerprint. */
-async function overRateLimit(env: Env, deviceId: string): Promise<boolean> {
-  const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
-  const row = await env.DB.prepare(
-    `INSERT INTO ingest_limits (device_id, window_start, request_count)
-     VALUES (?1, ?2, 1)
-     ON CONFLICT(device_id) DO UPDATE SET
-       request_count = CASE
-         WHEN ingest_limits.window_start = excluded.window_start
-         THEN ingest_limits.request_count + 1
-         ELSE 1
-       END,
-       window_start = excluded.window_start
-     RETURNING request_count`,
-  )
-    .bind(deviceId, windowStart)
-    .first<{ request_count: number }>();
-  return (row?.request_count ?? INGEST_PER_HOUR + 1) > INGEST_PER_HOUR;
+  // NULL means the existing window was already full. Crucially, the guarded
+  // UPSERT also made ZERO writes, so rejected abuse cannot itself inflate D1.
+  return row === null;
 }
 
 /**
@@ -436,9 +604,13 @@ async function consumeShortcutRateLimit(
        SELECT 1 FROM devices
         WHERE id = ?1 AND shortcut_ingest_enabled = 1
      )
+       AND (
+         ingest_limits.window_start != excluded.window_start
+         OR ingest_limits.request_count < ?3
+       )
      RETURNING request_count`,
   )
-    .bind(deviceId, windowStart)
+    .bind(deviceId, windowStart, INGEST_PER_HOUR)
     .first<{ request_count: number }>();
   return row?.request_count ?? null;
 }
@@ -474,11 +646,86 @@ async function overFeedbackWindow(env: Env, bucket: string, ceiling: number): Pr
          ELSE 1
        END,
        window_start = excluded.window_start
+     WHERE feedback_limits.window_start != excluded.window_start
+        OR feedback_limits.request_count < ?3
      RETURNING request_count`,
   )
-    .bind(bucket, windowStart)
+    .bind(bucket, windowStart, ceiling)
     .first<{ request_count: number }>();
-  return (row?.request_count ?? ceiling + 1) > ceiling;
+  return row === null;
+}
+
+/**
+ * Exact hourly cost budget. Unlike a normal "count then reject" limiter, the
+ * ceiling lives in the UPSERT's WHERE clause. Once exhausted, later requests
+ * return no row and cause no further D1 writes. `actorId = global` is the
+ * account-wide circuit breaker; device UUIDs are independent per-user budgets.
+ */
+async function consumeCostBudget(
+  env: Env,
+  actorId: string,
+  scope: string,
+  ceiling: number,
+  units = 1,
+): Promise<boolean> {
+  if (!Number.isInteger(units) || units <= 0 || units > ceiling) return false;
+  const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+  const row = await env.DB.prepare(
+    `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+     VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(actor_id, scope) DO UPDATE SET
+       usage_count = CASE
+         WHEN cost_limits.window_start = excluded.window_start
+         THEN cost_limits.usage_count + excluded.usage_count
+         ELSE excluded.usage_count
+       END,
+       window_start = excluded.window_start
+     WHERE cost_limits.window_start != excluded.window_start
+        OR cost_limits.usage_count + excluded.usage_count <= ?5
+     RETURNING usage_count`,
+  )
+    .bind(actorId, scope, windowStart, units, ceiling)
+    .first<{ usage_count: number }>();
+  return row !== null;
+}
+
+async function consumeRequestBudget(
+  env: Env,
+  deviceId: string,
+  scope: 'statement_requests' | 'email_requests',
+): Promise<boolean> {
+  const perDevice = scope === 'statement_requests'
+    ? STATEMENT_IMPORTS_PER_HOUR
+    : EMAIL_IMPORTS_PER_HOUR;
+  const global = scope === 'statement_requests'
+    ? GLOBAL_STATEMENT_IMPORTS_PER_HOUR
+    : GLOBAL_EMAIL_IMPORTS_PER_HOUR;
+  if (!(await consumeCostBudget(env, deviceId, scope, perDevice))) return false;
+  return consumeCostBudget(env, 'global', scope, global);
+}
+
+async function reserveSupplementalDeliveries(
+  env: Env,
+  deviceId: string,
+  rowCount: number,
+  targetCount: number,
+): Promise<boolean> {
+  const units = rowCount * targetCount;
+  if (units === 0) return true;
+  if (!(await consumeCostBudget(
+    env,
+    deviceId,
+    'supplemental_deliveries',
+    SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR,
+    units,
+  ))) return false;
+  return consumeCostBudget(
+    env,
+    'global',
+    'supplemental_deliveries',
+    GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR,
+    units,
+  );
 }
 
 /**
@@ -526,6 +773,61 @@ async function sendRepositoryDispatch(env: Env, feedbackId: string): Promise<voi
   )
     .bind(feedbackId, status)
     .run();
+}
+
+/** Best-effort convenience copy for the owner's final-test inbox. */
+async function sendTesterDiagnosticEmail(
+  env: Env,
+  feedbackId: string,
+  record: {
+    appVersion: string;
+    platform: string;
+    locale: string | null;
+    text: string;
+    diagnostic: string | null;
+  },
+): Promise<void> {
+  if (!env.DIAGNOSTIC_EMAIL || !env.REPORT_EMAIL || !env.REPORT_FROM_EMAIL) return;
+  if (record.text !== ANDROID_TESTER_DIAGNOSTIC_TEXT || record.platform !== 'android') return;
+
+  const diagnostic = (() => {
+    if (!record.diagnostic) return null;
+    try {
+      return JSON.parse(record.diagnostic) as unknown;
+    } catch {
+      return null;
+    }
+  })();
+  const attachment = JSON.stringify({
+    id: feedbackId,
+    appVersion: record.appVersion,
+    platform: record.platform,
+    locale: record.locale,
+    text: record.text,
+    diagnostic,
+  }, null, 2);
+
+  try {
+    await env.DIAGNOSTIC_EMAIL.send({
+      to: env.REPORT_EMAIL,
+      from: env.REPORT_FROM_EMAIL,
+      subject: `Wafra Android diagnostic · ${record.appVersion} · ${feedbackId.slice(0, 8)}`,
+      text:
+        `A Wafra Android tester diagnostic was received.\n\n` +
+        `Report ID: ${feedbackId}\n` +
+        `App version: ${record.appVersion}\n` +
+        `Locale: ${record.locale ?? 'unknown'}\n\n` +
+        `The privacy-safe diagnostic JSON is attached. The Cloudflare D1 copy remains available for 14 days.`,
+      attachments: [{
+        content: b64encode(textEncoder.encode(attachment)),
+        filename: `wafra-diagnostic-${feedbackId}.json`,
+        type: 'application/json',
+        disposition: 'attachment',
+      }],
+    });
+  } catch {
+    // D1 storage already succeeded. Email is only a convenience channel.
+  }
 }
 
 async function queueIsFull(env: Env, deviceId: string): Promise<boolean> {
@@ -689,6 +991,18 @@ type QueueStructuredRowOptions =
     targetDeviceId?: string | null;
   };
 
+interface QueueTarget {
+  id: string;
+  public_key: string;
+}
+
+async function supplementalQueueTargets(env: Env, device: Device): Promise<QueueTarget[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT d.id, d.public_key FROM devices d WHERE d.vault_id = ?1`,
+  ).bind(device.vault_id).all<QueueTarget>();
+  return results ?? [];
+}
+
 async function queueStructuredRow(
   env: Env,
   device: Device,
@@ -696,18 +1010,18 @@ async function queueStructuredRow(
   replayKey: string,
   receiptTtlSeconds: number,
   options: QueueStructuredRowOptions,
+  knownTargets?: readonly QueueTarget[],
 ): Promise<string[]> {
   const targetDeviceId = options.targetDeviceId ?? null;
-  const { results: vaultDevices } = await env.DB.prepare(
-    `SELECT d.id, d.public_key
-       FROM devices d
-      WHERE d.vault_id = ?1
-        AND (?3 IS NULL OR d.id = ?3)
-        AND (SELECT COUNT(*) FROM queue q WHERE q.device_id = d.id) < ?2`,
-  )
-    .bind(device.vault_id, MAX_QUEUED_ROWS, targetDeviceId)
-    .all<{ id: string; public_key: string }>();
-  const targets = vaultDevices ?? [];
+  const targets = knownTargets
+    ? knownTargets.filter((target) => targetDeviceId === null || target.id === targetDeviceId)
+    : (await env.DB.prepare(
+      `SELECT d.id, d.public_key
+         FROM devices d
+        WHERE d.vault_id = ?1
+          AND (?3 IS NULL OR d.id = ?3)
+          AND (SELECT COUNT(*) FROM queue q WHERE q.device_id = d.id) < ?2`,
+    ).bind(device.vault_id, MAX_QUEUED_ROWS, targetDeviceId).all<QueueTarget>()).results ?? [];
   if (targets.length === 0) return [];
   const sealedTargets = await Promise.all(targets.map(async (target) => ({
     id: target.id,
@@ -742,10 +1056,12 @@ async function queueStructuredRow(
       env.DB.prepare(
         `INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
          SELECT ?1, ?2, ?3, ?4, ?5, unixepoch()
-          WHERE NOT EXISTS (
-            SELECT 1 FROM ingest_receipts
-             WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
-          )`,
+          WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?2 AND vault_id = ?9)
+            AND (SELECT COUNT(*) FROM queue WHERE device_id = ?2) < ?8
+            AND NOT EXISTS (
+              SELECT 1 FROM ingest_receipts
+               WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
+            )`,
       ).bind(
         target.queueId,
         target.id,
@@ -754,6 +1070,8 @@ async function queueStructuredRow(
         target.sealed.ct,
         device.id,
         `${replayKey}:${target.id}`,
+        MAX_QUEUED_ROWS,
+        device.vault_id,
       ));
   // A replay receipt belongs to one source event AND one target. A shared
   // receipt lets one full phone suppress delivery to itself after a peer
@@ -799,6 +1117,24 @@ async function queueStructuredRow(
     .map((target) => target.id);
 }
 
+async function queueSupplementalRows(
+  env: Env,
+  device: Device,
+  rows: readonly { row: Record<string, unknown>; replayKey: string; receiptTtlSeconds: number }[],
+  targets: readonly QueueTarget[],
+): Promise<Set<string>> {
+  const wake = new Set<string>();
+  const CONCURRENCY = 8;
+  for (let start = 0; start < rows.length; start += CONCURRENCY) {
+    const inserted = await Promise.all(rows.slice(start, start + CONCURRENCY).map((item) =>
+      queueStructuredRow(env, device, item.row, item.replayKey, item.receiptTtlSeconds,
+        { sourceScope: 'supplemental' }, targets),
+    ));
+    for (const ids of inserted) for (const id of ids) wake.add(id);
+  }
+  return wake;
+}
+
 const opaqueFingerprint = (value: string): string => value
   .replace(/\+/g, '-')
   .replace(/\//g, '_')
@@ -809,6 +1145,7 @@ async function queueEmailRows(
   device: Device,
   normalized: string,
   eventMaterial: string,
+  knownTargets?: readonly QueueTarget[],
 ): Promise<{ acceptedRows: number; wake: Set<string> }> {
   // Forwarded single alerts use the same per-alert AED/SAR routing as the
   // Shortcut. The paired device market remains the default only for
@@ -840,23 +1177,18 @@ async function queueEmailRows(
   const receivedAt = alert
     ? [new Date().toISOString()]
     : rowReceiptTimes(parsedRows, Date.now());
-  const wake = new Set<string>();
-  for (let index = 0; index < parsedRows.length; index++) {
-    const inserted = await queueStructuredRow(
-      env,
-      device,
-      {
-        ...withoutRaw(parsedRows[index]),
-        captureSource: 'email',
-        market: alert ? alertMarket : device.market,
-        receivedAt: receivedAt[index],
-      },
-      `${baseKey}:${index}`,
-      REPLAY_WINDOW_SECONDS,
-      { sourceScope: 'supplemental' },
-    );
-    for (const targetId of inserted) wake.add(targetId);
+  const targets = knownTargets ?? await supplementalQueueTargets(env, device);
+  if (!(await reserveSupplementalDeliveries(env, device.id, parsedRows.length, targets.length))) {
+    throw new Error('supplemental_budget_exceeded');
   }
+  const wake = await queueSupplementalRows(
+    env, device,
+    parsedRows.map((_, index) => ({
+      row: { ...withoutRaw(parsedRows[index]), captureSource: 'email', market: alert ? alertMarket : device.market, receivedAt: receivedAt[index] },
+      replayKey: `${baseKey}:${index}`, receiptTtlSeconds: REPLAY_WINDOW_SECONDS,
+    })),
+    targets,
+  );
   return { acceptedRows: parsedRows.length, wake };
 }
 
@@ -923,6 +1255,34 @@ export default {
   ): Promise<Response> {
     const url = new URL(req.url);
     if (!secureTransport(url)) return json({ error: 'https_required' }, 400);
+
+    // These bindings execute before any D1 query. The D1 fixed windows below
+    // remain exact/accounting-safe backstops; this first layer keeps ordinary
+    // floods and accidental client loops from reaching the database at all.
+    if (
+      req.method === 'POST' &&
+      (url.pathname === '/v1/pair' || url.pathname === '/v1/join' || url.pathname === '/v1/feedback') &&
+      await rateLimitExceeded(
+        env.PUBLIC_RATE_LIMITER,
+        publicRateLimitKey(req, url.pathname),
+      )
+    ) return json({ error: 'rate_limited' }, 429);
+    if (
+      req.method === 'GET' &&
+      url.pathname === '/v1/health' &&
+      await rateLimitExceeded(env.PUBLIC_RATE_LIMITER, publicRateLimitKey(req, url.pathname))
+    ) return json({ error: 'rate_limited' }, 429);
+
+    const authTrafficScope = authenticatedTrafficScope(req.method, url.pathname);
+    const presentedBearer = authTrafficScope ? bearerToken(req) : '';
+    if (
+      authTrafficScope &&
+      presentedBearer &&
+      await rateLimitExceeded(
+        env.AUTH_RATE_LIMITER,
+        `${authTrafficScope}:${await hashToken(presentedBearer)}`,
+      )
+    ) return json({ error: 'rate_limited' }, 429);
 
     // ── Pairing: the app posts its X25519 public key, gets a bearer token ──
     //
@@ -1186,6 +1546,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(target.id),
+        env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(target.id),
       ]);
@@ -1212,6 +1573,9 @@ export default {
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM ingest_limits WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
+        ).bind(device.vault_id),
+        env.DB.prepare(
+          'DELETE FROM cost_limits WHERE actor_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM automation_generations WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
@@ -1281,9 +1645,12 @@ export default {
         rateLimitWindowStart,
       );
       if (shortcutRequestCount === null) {
-        return json({ error: 'unauthorized' }, 401);
-      }
-      if (shortcutRequestCount > INGEST_PER_HOUR) {
+        // NULL has two meanings by design: retirement/deletion won the guarded
+        // write race, or this device already spent its exact hourly budget.
+        // Distinguish them without reintroducing a write on the rejected path.
+        if (await shortcutIngestEnabled(env, device.id) !== true) {
+          return json({ error: 'unauthorized' }, 401);
+        }
         return json({ error: 'rate_limited' }, 429);
       }
       if (await queueIsFull(env, device.id)) return json({ error: 'queue_full' }, 429);
@@ -1348,6 +1715,13 @@ export default {
           : null;
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
+      const universalInspection = !isTest
+        ? inspectUniversalAlert({ source: text, sender: sender ?? '' })
+        : null;
+      const routedGlobalMarket = universalInspection?.route.decision === 'single' &&
+        universalInspection.route.market !== 'AE' && universalInspection.route.market !== 'SA'
+        ? universalInspection.route.market
+        : null;
       // Choose UAE/Saudi from this alert's sender/currency evidence. The
       // paired device market is only a fallback for older formats without
       // explicit evidence; it must not turn SAR into AED on an en-US phone.
@@ -1359,25 +1733,28 @@ export default {
       // rules (islamic / ownPot / brand) never fire without it.
       const parsedMarket = isTest
         ? device.market
-        : detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
-      const interpretation = !isTest && sender
+        : routedGlobalMarket ?? detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
+      const interpretation = !isTest && !routedGlobalMarket && sender
         ? interpretBankAlert({
             source: text,
             sender,
             market: parsedMarket as 'AE' | 'SA',
           })
         : null;
-      const parsedWithoutSender = !isTest && !sender
+      const parsedWithoutSender = !isTest && !routedGlobalMarket && !sender
         ? withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () => parseSms(text))
         : null;
       const parsed = interpretation?.outcome === 'parsed'
         ? interpretation.parsed
         : parsedWithoutSender;
       const review = interpretation?.outcome === 'review' ? interpretation.review : null;
+      const universalReview = !parsed && !review && !isTest
+        ? sanitizeUniversalReviewEvent(inspectGenericBankEventForReview(text, sender ?? ''))
+        : null;
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
       // from the sender, and most of them are none of our business.
-      if (!parsed && !isTest && !review) return empty(204);
+      if (!parsed && !isTest && !review && !universalReview) return empty(204);
 
       const receivedAt = new Date(
         isTest ? Date.now() : resolveReceivedAt(body?.receivedAt, Date.now()),
@@ -1407,13 +1784,23 @@ export default {
           device.requestSecret,
           `review-template:${sender ?? ''}:${normalizeUnparsedLaunchTemplate(text)}`,
         ));
-        return {
-          relayReview: true as const,
-          id: `ari1_${sourceDigest}`,
-          sourceKey: `arc1_${sourceDigest}`,
-          templateKey: `art1_${templateDigest}`,
-          review,
-        };
+        return review
+          ? {
+              relayReview: true as const,
+              reviewKind: 'launch' as const,
+              id: `ari1_${sourceDigest}`,
+              sourceKey: `arc1_${sourceDigest}`,
+              templateKey: `art1_${templateDigest}`,
+              review,
+            }
+          : {
+              relayReview: true as const,
+              reviewKind: 'universal' as const,
+              id: `ari1_${sourceDigest}`,
+              sourceKey: `arc1_${sourceDigest}`,
+              templateKey: `art1_${templateDigest}`,
+              event: universalReview!,
+            };
       })();
       const rowWithReceipt = {
         ...row,
@@ -1487,23 +1874,24 @@ export default {
     if (req.method === 'GET' && url.pathname === '/v1/import/capabilities') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      const enabled = importsEnabled(env);
       return json({
         email: {
-          enabled: !!env.EMAIL_DOMAIN,
+          enabled: enabled && !!env.EMAIL_DOMAIN,
           accepts: ['text/plain', 'text/html', 'message/rfc822'],
           maxBytes: MAX_EMAIL_BYTES,
         },
         pdf: {
-          enabled: true,
+          enabled,
           accepts: ['application/pdf'],
           maxBytes: MAX_PDF_BYTES,
           maxRows: MAX_IMPORT_ROWS,
           maxPages: MAX_PDF_PAGES,
-          parser: 'text-explicit-direction-v1',
-          note: 'Scans and ambiguous visual debit/credit columns are rejected, not guessed.',
+          parser: 'text-structured-direction-v2',
+          note: 'Supports explicit debit/credit and strongly identified credit-card Total Amount tables; ambiguous rows are rejected, not guessed.',
         },
         csv: {
-          enabled: true,
+          enabled,
           accepts: [...CSV_CONTENT_TYPES],
           maxBytes: MAX_CSV_BYTES,
           maxRows: MAX_IMPORT_ROWS,
@@ -1516,6 +1904,7 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/email-token') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
       if (!env.EMAIL_DOMAIN) return json({ error: 'email_not_configured' }, 503);
       const emailToken = randomToken();
       await env.DB.prepare('UPDATE devices SET email_token_hash = ?1 WHERE id = ?2')
@@ -1539,7 +1928,10 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/email/ingest') {
       const device = await authenticate(req, env, 'email');
       if (!device) return json({ error: 'unauthorized' }, 401);
-      if (await overRateLimit(env, device.id)) return json({ error: 'rate_limited' }, 429);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (!(await consumeRequestBudget(env, device.id, 'email_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       const incoming = await readBody(req, MAX_EMAIL_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
       const body = (() => {
@@ -1578,6 +1970,9 @@ export default {
       try {
         imported = await queueEmailRows(env, device, normalized, eventMaterial);
       } catch (error) {
+        if (error instanceof Error && error.message === 'supplemental_budget_exceeded') {
+          return json({ error: 'rate_limited' }, 429);
+        }
         if (error instanceof Error && error.message === 'too_many_rows') {
           return json({ error: 'too_many_rows' }, 413);
         }
@@ -1593,15 +1988,21 @@ export default {
     if (req.method === 'POST' && url.pathname === '/v1/import/pdf') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:pdf`)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      const requestedMoney = statementCurrencyForRequest(req, device.market);
+      if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       if (req.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/pdf') {
         return json({ error: 'pdf_required' }, 415);
       }
       const incoming = await readBytes(req, MAX_PDF_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
-      if (
-        incoming.bytes.length < 5 ||
-        String.fromCharCode(...incoming.bytes.subarray(0, 5)) !== '%PDF-'
-      ) return json({ error: 'invalid_pdf' }, 400);
+      if (pdfHeaderOffset(incoming.bytes) < 0) return json({ error: 'invalid_pdf' }, 400);
 
       // BEFORE the extract, not after. extractPdfStatementRows hands the array
       // to pdf.js, which takes OWNERSHIP of the underlying buffer and detaches
@@ -1618,9 +2019,17 @@ export default {
       try {
         extracted = await extractPdfStatementRows(
           incoming.bytes,
-          statementCurrencyForMarket(device.market),
+          requestedMoney.currency,
+          pdfPassword(req),
         );
-      } catch {
+      } catch (error) {
+        const passwordError = pdfPasswordFailure(error);
+        if (passwordError) return json({ error: passwordError }, 422);
+        // A text PDF past the extraction budget is a limit, not a scan; the
+        // generic code below carries the "scanned PDF" copy on the phone.
+        if (error instanceof Error && error.message === 'pdf_too_long') {
+          return json({ error: 'pdf_too_long' }, 413);
+        }
         return json({ error: 'unreadable_pdf' }, 422);
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
@@ -1630,36 +2039,54 @@ export default {
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
         }, 422);
       }
-      if (extracted.rows.length > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
+      if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
-      const wake = new Set<string>();
-      for (let index = 0; index < extracted.rows.length; index++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(extracted.rows[index]),
-            captureSource: 'pdf',
-            receivedAt: receivedAt[index],
-          },
-          `${baseKey}:${index}`,
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-        );
-        for (const targetId of inserted) wake.add(targetId);
+      const targets = await supplementalQueueTargets(env, device);
+      if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
+        return json({ error: 'rate_limited' }, 429);
       }
+      const wake = await queueSupplementalRows(
+        env, device,
+        extracted.rows.map((_, index) => ({
+          row: { ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index] },
+          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+        })),
+        targets,
+      );
       if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
-      return json({ acceptedRows: extracted.rows.length, pages: extracted.pages }, 202);
+      // rejectedRows is a count of date-led money lines the parser would not
+      // read: without it a statement that half-imported looked, on the phone,
+      // like it had imported completely. Counts and coverage only, never rows.
+      return json({
+        acceptedRows: extracted.rows.length,
+        rejectedRows: extracted.rejectedRows,
+        totalRows: extracted.totalRows,
+        pages: extracted.pages,
+        // Coverage means "this range is fully represented locally". Never
+        // claim it when the parser explicitly counted rows it refused.
+        coverage: extracted.completeRowAccounting && extracted.rejectedRows === 0
+          ? statementCoverage(extracted.rows)
+          : null,
+      }, 202);
     }
 
     if (req.method === 'POST' && url.pathname === '/v1/import/csv') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
+      if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
+      if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:csv`)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      const requestedMoney = statementCurrencyForRequest(req, device.market);
+      if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
       if (!CSV_CONTENT_TYPES.has(contentType)) return json({ error: 'csv_required' }, 415);
       const incoming = await readBytes(req, MAX_CSV_BYTES);
@@ -1670,7 +2097,7 @@ export default {
       try {
         parsed = parseStatementCsv(
           decodeCsv(incoming.bytes),
-          statementCurrencyForMarket(device.market),
+          requestedMoney.currency,
           MAX_IMPORT_ROWS,
         );
       } catch (error) {
@@ -1689,22 +2116,18 @@ export default {
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
-      const wake = new Set<string>();
-      for (let index = 0; index < parsed.rows.length; index++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(parsed.rows[index]),
-            captureSource: 'csv',
-            receivedAt: receivedAt[index],
-          },
-          `${baseKey}:${index}`,
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-        );
-        for (const targetId of inserted) wake.add(targetId);
+      const targets = await supplementalQueueTargets(env, device);
+      if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
+        return json({ error: 'rate_limited' }, 429);
       }
+      const wake = await queueSupplementalRows(
+        env, device,
+        parsed.rows.map((row, index) => ({
+          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index] },
+          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+        })),
+        targets,
+      );
       if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
@@ -1713,6 +2136,7 @@ export default {
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
+        coverage: parsed.rejectedRows === 0 ? statementCoverage(parsed.rows) : null,
       }, 202);
     }
 
@@ -1867,6 +2291,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(device.id),
+        env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(device.id),
       ]);
@@ -1931,7 +2356,9 @@ export default {
       let dispatchStatus = 'skipped_no_consent';
       let dispatched = false;
       if (validated.aiReviewConsent) {
-        if (!githubRepository(env.GITHUB_REPOSITORY) || !env.GITHUB_DISPATCH_TOKEN) {
+        if (!feedbackAgentEnabled(env)) {
+          dispatchStatus = 'skipped_disabled';
+        } else if (!githubRepository(env.GITHUB_REPOSITORY) || !env.GITHUB_DISPATCH_TOKEN) {
           dispatchStatus = 'skipped_unconfigured';
         } else if (await overFeedbackWindow(env, 'dispatch', FEEDBACK_AGENT_RUNS_PER_HOUR)) {
           dispatchStatus = 'skipped_budget';
@@ -1963,6 +2390,15 @@ export default {
       // The report is already durable. A GitHub/network failure updates the row
       // to `failed` without turning a successful submission into a client error.
       if (dispatched) ctx.waitUntil(sendRepositoryDispatch(env, id));
+      if (validated.text === ANDROID_TESTER_DIAGNOSTIC_TEXT && validated.platform === 'android') {
+        ctx.waitUntil(sendTesterDiagnosticEmail(env, id, {
+          appVersion: validated.appVersion,
+          platform: validated.platform,
+          locale: validated.locale,
+          text: validated.text,
+          diagnostic: validated.diagnostic,
+        }));
+      }
       return json({ id, dispatched }, 202);
     }
 
@@ -2069,6 +2505,9 @@ export default {
         await env.DB.prepare(
           'SELECT device_id, generation FROM automation_generations LIMIT 0',
         ).all();
+        await env.DB.prepare(
+          'SELECT actor_id, scope, usage_count FROM cost_limits LIMIT 0',
+        ).all();
       } catch {
         // The exception text can name internals, and this endpoint is public.
         return json({ ok: false, error: 'schema_drift' }, 503);
@@ -2093,7 +2532,14 @@ export default {
       message.setReject('This Wafra forwarding address is no longer active.');
       return;
     }
-    if (message.rawSize > MAX_RAW_EMAIL_BYTES || await overRateLimit(env, device.id)) {
+    if (!importsEnabled(env)) {
+      message.setReject('Wafra imports are temporarily disabled.');
+      return;
+    }
+    if (
+      message.rawSize > MAX_RAW_EMAIL_BYTES ||
+      !(await consumeRequestBudget(env, device.id, 'email_requests'))
+    ) {
       message.setReject('This forwarded email exceeds Wafra import limits.');
       return;
     }
@@ -2109,6 +2555,9 @@ export default {
     const messageId = message.headers.get('message-id')?.slice(0, 512) ?? crypto.randomUUID();
     const wake = new Set<string>();
     let importedRows = 0;
+    // Reuse this target set for the whole MIME message. Previously every row of
+    // every attachment rediscovered the vault devices, multiplying D1 reads.
+    const targets = await supplementalQueueTargets(env, device);
     if (parsedEmail.text) {
       try {
         const imported = await queueEmailRows(
@@ -2116,11 +2565,16 @@ export default {
           device,
           parsedEmail.text,
           `mime:${messageId}`,
+          targets,
         );
         importedRows += imported.acceptedRows;
         for (const id of imported.wake) wake.add(id);
-      } catch {
-        message.setReject('This forwarded email has too many statement rows.');
+      } catch (error) {
+        message.setReject(
+          error instanceof Error && error.message === 'supplemental_budget_exceeded'
+            ? 'Wafra import limit reached; try again later.'
+            : 'This forwarded email has too many statement rows.',
+        );
         return;
       }
     }
@@ -2158,9 +2612,13 @@ export default {
       if (
         extracted.pages > MAX_PDF_PAGES ||
         extracted.rows.length === 0 ||
-        extracted.rows.length > MAX_IMPORT_ROWS ||
+        extracted.totalRows > MAX_IMPORT_ROWS ||
         importedRows + extracted.rows.length > MAX_IMPORT_ROWS
       ) continue;
+      if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
+        message.setReject('Wafra import limit reached; try again later.');
+        return;
+      }
       const baseKey = await keyedFingerprint(
         device.requestSecret,
         `mime-pdf:${messageId}:${attachmentIndex}:${digest}`,
@@ -2179,6 +2637,7 @@ export default {
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
+          targets,
         );
         for (const id of inserted) wake.add(id);
       }
@@ -2202,6 +2661,10 @@ export default {
         continue;
       }
       if (parsed.rows.length === 0 || importedRows + parsed.rows.length > MAX_IMPORT_ROWS) continue;
+      if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
+        message.setReject('Wafra import limit reached; try again later.');
+        return;
+      }
       const digest = b64encode(
         await crypto.subtle.digest(
           'SHA-256',
@@ -2225,6 +2688,7 @@ export default {
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
+          targets,
         );
         for (const id of inserted) wake.add(id);
       }
@@ -2253,16 +2717,18 @@ export default {
     // disappear. Retry the same id for two hours, at most once per cron tick.
     // The workflow concurrency key is the id, so an accepted dispatch whose
     // response was lost cannot create two simultaneous agent runs.
-    const { results: failedFeedback } = await env.DB.prepare(
-      `SELECT id FROM feedback
-        WHERE dispatch_status = 'failed'
-          AND created_at > unixepoch() - 7200
-          AND dispatched_at <= unixepoch() - 900
-        ORDER BY created_at ASC
-        LIMIT 5`,
-    ).all<{ id: string }>();
-    for (const row of failedFeedback ?? []) {
-      await sendRepositoryDispatch(env, row.id);
+    if (feedbackAgentEnabled(env)) {
+      const { results: failedFeedback } = await env.DB.prepare(
+        `SELECT id FROM feedback
+          WHERE dispatch_status = 'failed'
+            AND created_at > unixepoch() - 7200
+            AND dispatched_at <= unixepoch() - 900
+          ORDER BY created_at ASC
+          LIMIT 5`,
+      ).all<{ id: string }>();
+      for (const row of failedFeedback ?? []) {
+        await sendRepositoryDispatch(env, row.id);
+      }
     }
     await env.DB.prepare('DELETE FROM push_registrations WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM device_invites WHERE expires_at <= unixepoch()').run();
@@ -2281,6 +2747,9 @@ export default {
       'DELETE FROM ingest_limits WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
     await env.DB.prepare(
+      "DELETE FROM cost_limits WHERE actor_id <> 'global' AND actor_id NOT IN (SELECT id FROM devices)",
+    ).run();
+    await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
     await env.DB.prepare(
@@ -2290,11 +2759,20 @@ export default {
       'DELETE FROM vaults WHERE id NOT IN (SELECT DISTINCT vault_id FROM devices)',
     ).run();
     const { results: pending } = await env.DB.prepare(
-      `SELECT DISTINCT q.device_id AS id
-         FROM queue q
-         JOIN push_registrations p ON p.device_id = q.device_id
-        WHERE p.expires_at > unixepoch()`,
-    ).all<{ id: string }>();
-    await Promise.all((pending ?? []).map((row) => wakeDevice(env, row.id)));
+      `SELECT p.device_id AS id
+         FROM push_registrations p
+        WHERE p.expires_at > unixepoch()
+          AND EXISTS (SELECT 1 FROM queue q WHERE q.device_id = p.device_id)
+        ORDER BY p.updated_at ASC
+        LIMIT ?1`,
+    ).bind(MAX_SCHEDULED_WAKE_DEVICES).all<{ id: string }>();
+    const pendingRows = pending ?? [];
+    for (let start = 0; start < pendingRows.length; start += SCHEDULED_WAKE_CONCURRENCY) {
+      await Promise.all(
+        pendingRows
+          .slice(start, start + SCHEDULED_WAKE_CONCURRENCY)
+          .map((row) => wakeDevice(env, row.id)),
+      );
+    }
   },
 } satisfies ExportedHandler<Env>;

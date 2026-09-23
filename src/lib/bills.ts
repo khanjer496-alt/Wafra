@@ -79,6 +79,22 @@ export interface BillWithStatus {
   autoReconciled?: boolean;
 }
 
+// Home already projects the user's manual bills for the Upcoming card before
+// the Bills tab is opened. On a large imported ledger, recomputing that exact
+// answer on the navigation tap means tokenising/scanning the complete history
+// once per bill again. Store snapshots are immutable and live/internal scope
+// sets are identity-cached, so these references + money day are an exact cache
+// key rather than a heuristic.
+let billsForMonthCache: {
+  bills: Bill[];
+  transactions: Transaction[];
+  key: string;
+  day: string;
+  live?: Set<string>;
+  internal?: Set<string>;
+  value: BillWithStatus[];
+} | null = null;
+
 function normalize(s: string): string {
   return s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
@@ -262,6 +278,41 @@ function nests(bill: Bill, t: Transaction): boolean {
   return x.includes(b) || b.includes(x);
 }
 
+/**
+ * Same-month spending for bill reconciliation. Home's leaving-soon and Bills
+ * both call `billsForMonth` on first paint; walking 14k rows per bill froze
+ * that path. A newest-first ledger can stop once the current money month is
+ * behind us. Unsorted callers still get a full scan — a sorted prefix is not
+ * enough, or a later in-month payment after an older row would be missed.
+ */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return false;
+  }
+  return true;
+}
+
+function spendingInMonth(
+  transactions: Transaction[],
+  key: string,
+  live?: Set<string>,
+  internal?: Set<string>,
+): Transaction[] {
+  const newestFirst = datesAreNewestFirst(transactions);
+  const out: Transaction[] = [];
+  let seenInMonth = false;
+  for (const t of transactions) {
+    if (monthKey(t.date) !== key) {
+      if (seenInMonth && newestFirst) break;
+      continue;
+    }
+    seenInMonth = true;
+    if (!isSpending(t, live, internal)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
 /** Status of each bill for the month containing `today`, sorted most urgent first. */
 export function billsForMonth(
   bills: Bill[],
@@ -272,6 +323,17 @@ export function billsForMonth(
 ): BillWithStatus[] {
   const key = monthKey(today);
   const todayISO = toISODate(today);
+  if (billsForMonthCache &&
+      billsForMonthCache.bills === bills &&
+      billsForMonthCache.transactions === transactions &&
+      billsForMonthCache.key === key &&
+      billsForMonthCache.day === todayISO &&
+      billsForMonthCache.live === live &&
+      billsForMonthCache.internal === internal) {
+    // The result is a shared projection. Return a shallow copy so a caller
+    // sorting/splicing its own list cannot poison the next screen's cache hit.
+    return billsForMonthCache.value.slice();
+  }
 
   /**
    * The bills that fall due inside THIS money month, and where.
@@ -303,7 +365,8 @@ export function billsForMonth(
    * Better an unreconciled bill the user marks by hand than a
    * bill that says paid while the money is still owed.
    */
-  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, transactions, key, live, internal));
+  const monthRows = spendingInMonth(transactions, key, live, internal);
+  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, monthRows, key, live, internal));
   const explicitlyClaimed = new Set<string>();
   candidates.forEach((rows, index) => {
     for (const transaction of rows) {
@@ -347,5 +410,6 @@ export function billsForMonth(
 
   const rank: Record<BillStatus, number> = { overdue: 0, 'due-soon': 1, upcoming: 2, paid: 3 };
   rows.sort((a, b) => rank[a.status] - rank[b.status] || a.daysLeft - b.daysLeft);
-  return rows;
+  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows };
+  return rows.slice();
 }

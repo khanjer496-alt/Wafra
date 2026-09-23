@@ -1,18 +1,18 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/ui/icon';
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
-import { useStore } from '@/lib/store';
+import { usePrivateMode } from '@/lib/store';
 
-export function BankAvatar({ account, size = 36 }: { account: Account; size?: number }) {
+function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
-  const { state } = useStore();
-  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
+  const privateMode = usePrivateMode();
+  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -21,10 +21,17 @@ export function BankAvatar({ account, size = 36 }: { account: Account; size?: nu
     setLogo(null);
     setFailed(false);
     if (!allowRemote || !account.bankName) return () => { alive = false; };
-    void resolveBankLogo(account.bankName).then(value => {
-      if (alive) setLogo(value);
+    // Wallet can render many discovered accounts at once. Artwork is optional;
+    // defer its cache/network work until interaction has a chance to paint.
+    const idle = requestIdleCallback(() => {
+      void resolveBankLogo(account.bankName).then(value => {
+        if (alive) setLogo(value);
+      });
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      cancelIdleCallback(idle);
+    };
   }, [account.bankName, allowRemote]);
 
   if (!allowRemote || !logo || failed) {
@@ -55,7 +62,7 @@ export function BankAvatar({ account, size = 36 }: { account: Account; size?: nu
     <Image
       source={{ uri: logo.logoUrl }}
       contentFit="contain"
-      cachePolicy="memory-disk"
+      cachePolicy={Platform.OS === 'android' ? 'disk' : 'memory-disk'}
       recyclingKey={logo.id}
       transition={0}
       accessible={false}
@@ -64,6 +71,8 @@ export function BankAvatar({ account, size = 36 }: { account: Account; size?: nu
     />
   </View>;
 }
+
+export const BankAvatar = React.memo(BankAvatarInner);
 
 const styles = StyleSheet.create({
   tile: {

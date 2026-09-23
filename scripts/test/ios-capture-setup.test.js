@@ -1090,7 +1090,8 @@ struct WafraBankSenderRegistryParityTests {
         : { status: -1, stderr: paritySwiftBuild.stderr || paritySwiftBuild.stdout };
       ok('Swift matches TypeScript for combining-mark and escaped sender aliases',
         paritySwiftRun.status === 0,
-        paritySwiftBuild.stderr || paritySwiftBuild.stdout || paritySwiftRun.stderr || paritySwiftRun.stdout);
+        paritySwiftBuild.error?.code || paritySwiftRun.error?.code ||
+          paritySwiftBuild.stderr || paritySwiftBuild.stdout || paritySwiftRun.stderr || paritySwiftRun.stdout);
 
       const swiftTest = path.join(tempDirectory, 'WafraBankSenderRegistryTests.swift');
       const swiftBinary = path.join(tempDirectory, 'WafraBankSenderRegistryTests');
@@ -1113,7 +1114,8 @@ struct WafraBankSenderRegistryTests {
         ? spawnSync(swiftBinary, [], { encoding: 'utf8' })
         : { status: -1, stderr: swiftBuild.stderr || swiftBuild.stdout };
       ok('generated Swift exactly admits and refuses sender aliases', swiftRun.status === 0,
-        swiftBuild.stderr || swiftBuild.stdout || swiftRun.stderr || swiftRun.stdout);
+        swiftBuild.error?.code || swiftRun.error?.code ||
+          swiftBuild.stderr || swiftBuild.stdout || swiftRun.stderr || swiftRun.stdout);
 
       eq('generated Swift is current', fs.readFileSync(generatedSwift, 'utf8'),
         fs.readFileSync(generatedSwiftPath, 'utf8'));
@@ -1121,7 +1123,7 @@ struct WafraBankSenderRegistryTests {
         fs.readFileSync(generatedTypeScriptPath, 'utf8'));
       const swiftTypecheck = spawnSync('swiftc', ['-typecheck', generatedSwift], { encoding: 'utf8' });
       ok('generated Swift sender registry type-checks', swiftTypecheck.status === 0,
-        swiftTypecheck.stderr || swiftTypecheck.stdout);
+        swiftTypecheck.error?.code || swiftTypecheck.stderr || swiftTypecheck.stdout);
     } finally {
       fs.rmSync(tempDirectory, { recursive: true, force: true });
     }
@@ -3537,6 +3539,12 @@ struct WafraBankSenderRegistryTests {
         if (id === '@/lib/background-relay') {
           return { enableRelayBackgroundSync: async () => false };
         }
+        if (id === '@/lib/android-capture-sources') {
+          return {
+            androidSmsCaptureEnabled: () => true,
+            androidNotificationCaptureEnabled: () => true,
+          };
+        }
         if (id === '@/lib/capture') {
           return {
             getIosCaptureNativeModule: () => native,
@@ -3563,6 +3571,9 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/haptics') return { committed: () => {} };
+        if (id === '@/lib/history-import') {
+          return { historyImportIncomplete: (progress) => !!progress && progress.status !== 'complete' };
+        }
         if (id === '@/lib/i18n') return { t: (key) => key, tf: (key) => key };
         if (id === '@/lib/notifications') {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
@@ -3765,6 +3776,12 @@ struct WafraBankSenderRegistryTests {
         if (id === '@/lib/background-relay') {
           return { enableRelayBackgroundSync: async () => false };
         }
+        if (id === '@/lib/android-capture-sources') {
+          return {
+            androidSmsCaptureEnabled: () => true,
+            androidNotificationCaptureEnabled: () => false,
+          };
+        }
         if (id === '@/lib/capture') {
           return {
             getIosCaptureNativeModule: () => null,
@@ -3787,11 +3804,15 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/haptics') return { committed: () => {} };
+        if (id === '@/lib/history-import') {
+          return { historyImportIncomplete: (progress) => !!progress && progress.status !== 'complete' };
+        }
         if (id === '@/lib/i18n') return { t: (key) => key, tf: (key) => key };
         if (id === '@/lib/notifications') {
           return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
         }
         if (id === '@/lib/purchases') return { isProActive: () => true };
+        if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         if (id === '@/lib/relay') {
           return {
             getRelayConfig: async () => null,
@@ -4114,15 +4135,27 @@ struct WafraBankSenderRegistryTests {
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
 
-  eq('setup trigger guard: one explicitly selected bank sender is supported',
+  eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
+    setupModule.isSupportedIosMessageAutomationTrigger({
+      selectedSenderCount: 0,
+      messageContains: null,
+    }), true);
+  eq('setup trigger guard: explicitly selected Contacts remain supported',
     setupModule.isSupportedIosMessageAutomationTrigger({
       selectedSenderCount: 1,
       messageContains: null,
     }), true);
+  // iOS 26 keeps Next disabled with both filters empty; the guided filter is a
+  // single space, which every bank alert contains.
+  eq('setup trigger guard: the guided single-space filter is supported',
+    setupModule.isSupportedIosMessageAutomationTrigger({
+      selectedSenderCount: 0,
+      messageContains: ' ',
+    }), true);
   for (const [name, trigger] of [
-    ['Any Sender', { selectedSenderCount: 'any', messageContains: null }],
-    ['blank universal trigger', { selectedSenderCount: 0, messageContains: null }],
-    ['space trigger', { selectedSenderCount: 0, messageContains: ' ' }],
+    ['non-numeric sender count', { selectedSenderCount: 'any', messageContains: null }],
+    ['negative sender count', { selectedSenderCount: -1, messageContains: null }],
+    ['empty-string filter', { selectedSenderCount: 0, messageContains: '' }],
     ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
     ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
   ]) {
@@ -4295,9 +4328,10 @@ struct WafraBankSenderRegistryTests {
     const harness = controllerHarness();
     await harness.controller.send({ type: 'load' });
     await harness.controller.send({ type: 'open-automation' });
-    eq('setup controller: opening automation does not enable native admission',
+    // The button lands on Shortcuts' New Automation trigger picker directly.
+    eq('setup controller: opening automation lands on the New Automation picker and does not enable native admission',
       { checks: harness.capabilityChecks, opens: harness.opened, enable: harness.enableCalls },
-      { checks: ['shortcuts://'], opens: ['shortcuts://'], enable: [] });
+      { checks: ['shortcuts://'], opens: ['shortcuts://create-automation'], enable: [] });
     harness.controller.dispose();
   }
 

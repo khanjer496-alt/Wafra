@@ -27,10 +27,13 @@ import type {
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
 
 export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
 export interface CaptureImportSummary {
+  /** Relay returned a full page; supplemental callers should drain another page after yielding. */
+  moreQueued?: boolean;
   transactions: number;
   dues: number;
   bills: number;
@@ -123,7 +126,14 @@ const EMPTY_SUMMARY: CaptureImportSummary = {
 
 const hasChanges = (plan: ImportPlan): boolean =>
   plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0 ||
-  (plan.batch.newBills?.length ?? 0) > 0;
+  plan.newAccountCount > 0 ||
+  (plan.batch?.newBills?.length ?? 0) > 0 ||
+  Object.keys(plan.batch?.snapshots ?? {}).length > 0 ||
+  Object.keys(plan.batch?.bankNames ?? {}).length > 0 ||
+  Object.keys(plan.batch?.cardTypes ?? {}).length > 0;
+
+const yieldForegroundTurn = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
 
 const summary = (
   plan: ImportPlan,
@@ -230,7 +240,9 @@ export const createCaptureExecutor = ({
     const tracing = captureTraceEnabled();
     const traceStarted = tracing ? Date.now() : 0;
     captureTrace('routine:start');
+    const collectStarted = Date.now();
     const collected = await dependencies.collectRoutine(state, { notificationOnly });
+    recordRuntimeOperation('capture-collect', Date.now() - collectStarted);
     captureTrace('collect:done', collected.parsed.length, tracing ? Date.now() - traceStarted : 0);
     if (collected.needsSetup) return { kind: 'needs-setup' };
     // Inbox/relay I/O can overlap a hand edit or another import. Do not use
@@ -266,12 +278,26 @@ export const createCaptureExecutor = ({
     }
 
     alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
+    // Native inbox collection returns a whole page at once. Even though parsing
+    // itself yields cooperatively, its final promise can resolve in the same JS
+    // turn as planning/reconciliation. Give pending input/render work one turn
+    // before the synchronous money planner, matching the relay path below.
+    if (collected.parsed.length > 0 || collected.declined.length > 0) {
+      await yieldForegroundTurn();
+    }
+    if (captureStopped(activeLedger, collected.source)) {
+      return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+    }
     // This is deliberately after the final pre-import await. importBatch
     // dispatches synchronously below, so a stale plan can never stamp a
     // restored ledger as having completed a historical parser migration.
     const stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
-    const planStarted = tracing ? Date.now() : 0;
+    // Runtime diagnostics are always on for Android tester builds, independently
+    // of the verbose capture trace flag. Starting this clock at zero when trace
+    // was disabled produced epoch-sized "capture-plan" durations and hid the
+    // real operation that could be blocking the JS thread.
+    const planStarted = Date.now();
     captureTrace('plan:start', collected.parsed.length);
     const plan = dependencies.planRows(
       collected.parsed,
@@ -280,6 +306,7 @@ export const createCaptureExecutor = ({
       new Date(),
       collected.declined,
     );
+    recordRuntimeOperation('capture-plan', Date.now() - planStarted);
     captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
@@ -300,10 +327,14 @@ export const createCaptureExecutor = ({
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
           importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
-        const saveStarted = tracing ? Date.now() : 0;
+        // Runtime diagnostics are always active in tester builds. Do not zero
+        // this clock when verbose capture tracing is off; that records an
+        // epoch-sized fake duration and hides the real save cost.
+        const saveStarted = Date.now();
         captureTrace('save:start');
         const cursorReceipt = activeLedger.importBatch(importBatch);
         await cursorReceipt.durable;
+        recordRuntimeOperation('capture-save', Date.now() - saveStarted);
         captureTrace('save:done', cursorReceipt.ids.length, tracing ? Date.now() - saveStarted : 0);
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -348,10 +379,11 @@ export const createCaptureExecutor = ({
       };
     }
 
-    const saveStarted = tracing ? Date.now() : 0;
+    const saveStarted = Date.now();
     captureTrace('save:start', plan.txCount + plan.healedCount);
     const receipt = activeLedger.importBatch(importBatch);
     await receipt.durable;
+    recordRuntimeOperation('capture-save', Date.now() - saveStarted);
     captureTrace('save:done', receipt.ids.length, tracing ? Date.now() - saveStarted : 0);
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -373,7 +405,18 @@ export const createCaptureExecutor = ({
 
   const executeSupplemental = async (): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
-    if (!activeLedger.getState().hydrated) return { kind: 'not-hydrated' };
+    const startingState = activeLedger.getState();
+    if (!startingState.hydrated) return { kind: 'not-hydrated' };
+    // Supplemental statement import is an explicit foreground action. A user
+    // who disabled automatic capture can still choose a statement file. If
+    // they opt out during an import that started enabled, honor that new choice
+    // before any later persistence/proof/ACK. Private Mode always blocks relay.
+    const startedOptedOut = startingState.captureOptOut === true;
+    const supplementalStopped = (): boolean => {
+      const current = activeLedger.getState();
+      return !current.hydrated || current.privateMode ||
+        (!startedOptedOut && current.captureOptOut === true);
+    };
     const stopped = (): CaptureExecutionOutcome => ({
       kind: 'up-to-date',
       source: 'none',
@@ -381,11 +424,11 @@ export const createCaptureExecutor = ({
     });
 
     const cfg = await dependencies.getRelay();
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     if (!cfg) return { kind: 'needs-setup' };
 
     const queued = await dependencies.sync(cfg);
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     // Network collection can overlap a foreground import or an edit. Plan
     // against the authoritative ledger after that wait, not the snapshot that
@@ -398,42 +441,62 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       state = activeLedger.getState();
     }
     const newestTs = queued.parsed.reduce(
       (max, row) => Math.max(max, row.smsTs ?? 0),
       state.lastScanTs,
     );
+    if (queued.parsed.length > 0) await yieldForegroundTurn();
+    if (supplementalStopped()) return stopped();
+    const supplementalTracing = captureTraceEnabled();
+    const planStarted = supplementalTracing ? Date.now() : 0;
+    captureTrace('plan:start', queued.parsed.length);
     const plan = dependencies.planRows(queued.parsed, state, newestTs);
+    captureTrace('plan:done', plan.txCount + plan.healedCount,
+      supplementalTracing ? Date.now() - planStarted : 0);
     let transactionIds: string[] = [];
-    if (queued.parsed.length > 0) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (queued.parsed.length > 0 && hasChanges(plan)) {
+      if (supplementalStopped()) return stopped();
+      await yieldForegroundTurn();
+      if (supplementalStopped()) return stopped();
+      const saveStarted = supplementalTracing ? Date.now() : 0;
+      captureTrace('save:start', plan.txCount + plan.healedCount);
       const receipt = activeLedger.importBatch(plan.batch);
       transactionIds = receipt.ids;
       await receipt.durable;
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      captureTrace('save:done', receipt.ids.length,
+        supplementalTracing ? Date.now() - saveStarted : 0);
+      if (supplementalStopped()) return stopped();
     } else if (reviewCandidates.length === 0) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
+      const saveStarted = supplementalTracing ? Date.now() : 0;
+      captureTrace('save:start');
       await activeLedger.ensureDurable();
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      captureTrace('save:done', 0, supplementalTracing ? Date.now() - saveStarted : 0);
+      if (supplementalStopped()) return stopped();
     }
 
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     await recordForegroundAutomationProof(queued.parsed, cfg);
-    if (captureStopped(activeLedger, 'relay')) return stopped();
+    if (supplementalStopped()) return stopped();
     const acknowledge = acknowledgementsFor(queued, true);
     if (acknowledge.length > 0) {
-      if (captureStopped(activeLedger, 'relay')) return stopped();
+      if (supplementalStopped()) return stopped();
       await dependencies.acknowledge(cfg, acknowledge);
     }
+    const pageSummary = {
+      ...summary(plan, transactionIds, reviewAlerts),
+      moreQueued: queued.pageFull === true,
+    };
     return hasChanges(plan)
-      ? { kind: 'imported', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) }
-      : { kind: 'up-to-date', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) };
+      ? { kind: 'imported', source: 'relay', ...pageSummary }
+      : { kind: 'up-to-date', source: 'relay', ...pageSummary };
   };
 
   const executeBackground = async (): Promise<CaptureExecutionOutcome> => {

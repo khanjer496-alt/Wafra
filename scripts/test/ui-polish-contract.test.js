@@ -25,7 +25,9 @@ assert.match(add, /promoteReviewAlert/);
 assert.match(add, /addTransaction/);
 
 const bills = code(read('src/app/(tabs)/bills.tsx'));
-assert.match(bills, /useState<'upcoming' \| 'all'>/);
+const billsFilter = code(read('src/components/bills/bills-segment-control.tsx'));
+assert.match(bills, /useState<BillsSegment>\('upcoming'\)/);
+assert.match(billsFilter, /'upcoming' \| 'subscriptions' \| 'utilities' \| 'cards' \| 'all'/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -38,7 +40,7 @@ assert.match(flow, /summarizeMonth\(/);
 assert.match(flow, /spendingCategoryRows\(/);
 
 const pro = read('src/app/pro.tsx');
-for (const seam of ['loadStorePrices(', 'purchasePro(', 'restorePro(', 'priceString']) {
+for (const seam of ['useWafraBilling(', 'purchasePro(', 'fetchProOffers(', 'restorePro(', 'subscriptionManagementUrl(']) {
   assert.ok(pro.includes(seam), `Pro lost ${seam}`);
 }
 
@@ -58,8 +60,12 @@ assert.doesNotMatch(recurringRow, /formatAED\(sub\.monthlyEquivalentFils/,
 
 // Payment/deletion safeguards are unchanged; the shared agenda owns detail navigation.
 const agenda=code(read('src/components/bills/payment-agenda.tsx'));
-// Payment type is now the outer hierarchy; status/date sections retain all rows.
-assert.match(agenda,/group\.sections\.map/);
+// The Bills tabs choose payment type; due timing remains the outer hierarchy.
+// Only the current render window is ordered eagerly so a large recurrence
+// result cannot stall the JS thread before most rows are discarded.
+assert.match(agenda,/const visibleItems = useMemo\([\s\S]*?paymentGroupFor\(item\) === selectedGroup[\s\S]*?\[selectedGroup, items\]/);
+assert.match(agenda,/const sections = useMemo\([\s\S]*?groupPaymentAgendaWindow\(visibleItems, includePaid, renderLimit\)[\s\S]*?\[visibleItems, includePaid, renderLimit\]/);
+assert.match(agenda,/sections\.map/);
 assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
@@ -103,7 +109,7 @@ assert.match(cardDetailSheet, /CardDetailSheet\(\{ account, onClose, footer \}/)
 assert.match(cardDetailSheet, /<BottomSheet[^>]*footer=\{footer\}/);
 
 const interactionCards = code(read('src/app/cards.tsx'));
-assert.match(interactionCards, /type CardAction = 'visibility' \| 'delete'/);
+assert.match(interactionCards, /type CardAction = 'visibility' \| 'bank' \| 'delete'/);
 assert.doesNotMatch(interactionCards, /CardAction =[^\n]*'limit'|value: 'limit'|onPress=\{isCredit && limitLeft/);
 const cardsDetail = interactionCards.match(
   /<CardDetailSheet[\s\S]*?(?=\n\s*<BottomSheet visible=\{limitFor)/,
@@ -158,7 +164,10 @@ const task3Add = read('src/app/add-transaction.tsx');
 assert.match(task3Add, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="inline"/);
 assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}\}/);
 assert.match(task3Add, /footer=\{/);
-assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 3, 'Add keeps three labelled editable TextFields');
+assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
+  'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
+assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
+  'captured-alert review does not ask the user to rewrite a title Wafra already has');
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);
@@ -168,7 +177,7 @@ assert.match(task3Add, /Platform\.OS === 'web' \? [a-zA-Z]+WebAriaProps : \{\}/)
 assert.doesNotMatch(task3Add, /useKeyboardHeight/);
 
 const task3Scaffold = read('src/components/ui/screen-scaffold.tsx');
-assert.match(task3Scaffold, /useKeyboardHeight\(\)/);
+assert.match(task3Scaffold, /useKeyboardHeight\(keyboardAware && Platform\.OS !== 'ios'\)/);
 assert.match(task3Scaffold, /contentInset: \{ top, bottom:/);
 assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyboardHeight/);
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
@@ -180,6 +189,9 @@ assert.match(task4Flow, /summarizeMonth\(/);
 assert.match(task4Flow, /spendingCategoryRows\(/);
 assert.match(task4Flow, /router\.push\(`\/transactions\?type=expense&category=\$\{id\}`\)/);
 assert.match(task4Flow, /<SpendingOverview/); assert.match(task4Flow, /<SpendingTrends/);
+assert.match(task4Flow, /foreign\.transactions\.length > 0[\s\S]*?testID="foreign-spending-entry"[\s\S]*?router\.push\('\/currency'\)/);
+assert.match(task4Flow, /live\.has\(tx\.accountId\) && !internal\.has\(tx\.id\) && inPeriod\(tx\.date, period\)/,
+  'Foreign spending uses the same live-account and transfer exclusions as Spending totals');
 
 const task4Stats = read('src/app/stats.tsx');
 assert.match(task4Stats,/import \{ Redirect \} from 'expo-router'/);
@@ -194,6 +206,14 @@ assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRa
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
 assert.match(overview,/accessibilityLabel=\{`\$\{categoryLabel[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/);
+assert.match(overview,/function categoryPaletteIndex\(/,
+  'Spending list gives tail categories a stable visible accent instead of the donut neutral');
+assert.match(overview,/donutColors\.get\(row\.category\) \?\?[\s\S]*?palette\[categoryPaletteIndex\(row\.category, palette\.length\)\]/,
+  'categories collapsed into the donut Other wedge still use readable categorical ink in the list');
+assert.doesNotMatch(overview,/const sliceColor = donutColors\.get\(row\.category\) \?\? neutral/,
+  'dark-mode tail rows must never reuse the near-background donut neutral');
+assert.match(overview,/trackColor=\{scheme === 'dark' \? theme\.cardBorderStrong : theme\.track\}/,
+  'thin category progress tracks keep enough dark-mode contrast');
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);
@@ -202,18 +222,18 @@ assert.match(trends,/backgroundColor: theme\.primary/);
 assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
 const task5Bills = read('src/app/(tabs)/bills.tsx');
-const task5Segments = read('src/components/ui/segmented-control.tsx');
+const task5Segments = read('src/components/bills/bills-segment-control.tsx');
 assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
 assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 1, 'Bills keeps only its bounded subscription-history scroller');
 assert.match(task5Bills, /testID="subscription-history-scroll"/);
-assert.match(task5Bills,/<SegmentedControl[\s\S]*?label=\{t\('billsTitle'\)\}/);
+assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
 assert.match(task5Segments,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
-assert.ok(Number(task5Segments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','refAll']) assert.ok(task5Bills.includes(`t('${label}')`));
+for (const label of ['refUpcoming','subscriptionsSeg','utilitiesSeg','cardsSeg','refAll']) assert.ok(task5Segments.includes(`t('${label}')`));
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
@@ -281,24 +301,19 @@ assert.match(task7Settings, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?h
 assert.match(task7Pro, /const proHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('wafraPro'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
 assert.match(task7Pro, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{proHeader\}/);
 assert.doesNotMatch(task7Pro, /footer=\{purchaseFooter\}/);
-assert.match(
-  task7Pro,
-  /!entitled && \([\s\S]*?<Section index=\{3\}[\s\S]*?<\/Section>\s*\)\}\s*\{purchaseFooter\}\s*<View style=\{styles\.legalLinks\}>/,
-  'Pro keeps purchase controls in the page scroll after plan selection and before legal links',
-);
-assert.match(task7Pro, /purchaseBar: \{[\s\S]*?paddingTop: Spacing\.two/);
+assert.match(task7Pro, /<View style=\{styles\.actions\}>[\s\S]*?<View style=\{\[styles\.legalLinks/);
 
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 9, 'Settings renders exactly nine groups');
+assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight compact groups');
 const settingsGroupMarkers = [
   '<Block onPress={() => router.push(\'/pro\')}>',
-  "<SectionHeader title={t('settingsMoneyHeader')} />",
   "<SectionHeader title={t('settingsImportsHeader')} />",
   "<SectionHeader title={t('settingsNotificationsHeader')} />",
-  "<SectionHeader title={t('settingsAppearanceLanguageHeader')} />",
+  "<SectionHeader title={t('settingsPreferencesHeader')} />",
   "<SectionHeader title={t('privacyHeader')} />",
+  '<SectionHeader title={words.needsReview} />',
   "<SectionHeader title={t('dataHeader')} />",
   "<SectionHeader title={t('supportHeader')} />",
   "<SectionHeader title={t('settingsDangerHeader')} />",
@@ -311,15 +326,14 @@ for (const marker of settingsGroupMarkers) {
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
 assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
-assert.match(task7Settings, /from '@\/components\/ui\/segmented-control'/);
-assert.match(task7Settings, /<SegmentedControl[\s\S]*?onChange=\{setThemePreference\}/);
+assert.doesNotMatch(task7Settings, /from '@\/components\/ui\/segmented-control'/);
+assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
 assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
 
 for (const [key, en, ar] of [
-  ['settingsMoneyHeader', 'Money', 'المال'],
   ['settingsImportsHeader', 'Imports', 'الاستيراد'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
-  ['settingsAppearanceLanguageHeader', 'Appearance & language', 'المظهر واللغة'],
+  ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],
@@ -364,7 +378,7 @@ for (const row of [
 assert.match(task7Settings, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
 
 const proPublicRows = task7Pro.match(
-  /const publicLinkRow[\s\S]*?(?=\n  const purchaseFooter)/,
+  /const publicLinkRow[\s\S]*?\n  \};/,
 )?.[0] ?? '';
 assert.ok(proPublicRows.length > 0, 'Pro public-link row helper was not found');
 assert.match(proPublicRows, /if \(url\) return \([\s\S]*?<Pressable[\s\S]*?accessibilityRole="link"[\s\S]*?openLegal\(url\)/);
@@ -377,14 +391,12 @@ assert.doesNotMatch(unavailableProPublicRow, /onPress|chevron/);
 assert.match(task7Pro, /publicLinkRow\(t\('privacyPolicy'\), privacyPolicyUrl\)[\s\S]*publicLinkRow\(t\('termsOfUse'\), termsOfUseUrl, true\)/);
 
 for (const seam of [
-  'loadStorePrices(', 'storePrices?.[candidate]?.priceString', 'purchasePro(', 'restorePro(',
-  'subscriptionManagementUrl(', 'legalReady', 'savingPercent',
+  'useWafraBilling(', 'billing.purchasePro(', 'billing.restorePro(',
+  'subscriptionManagementUrl(', 'legalReady',
 ]) assert.ok(task7Pro.includes(seam), `Pro lost ${seam}`);
 assert.match(task7Pro, /notice && \([\s\S]*?accessibilityLiveRegion="polite"/);
-assert.match(task7Pro, /completion && \([\s\S]*?accessibilityLiveRegion="polite"/);
 assert.match(task7Pro, /if \(!legalReady\)[\s\S]*?purchaseLegalMissingBody/);
-assert.match(task7Pro, /!entitled && \([\s\S]*?accessibilityRole="radiogroup"/);
-assert.match(task7Pro, /completion \? \([\s\S]*?proContinue[\s\S]*?: state\.founderPro \? \([\s\S]*?proContinue[\s\S]*?: state\.pro \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?onPress=\{buy\}[\s\S]*?restorePurchase[\s\S]*?onPress=\{restore\}/);
+assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?buySelectedPlan\(\)[\s\S]*?restorePurchase/);
 
 const task8Routes = [
   ['accuracy', 'accuracyHeader'],
@@ -411,25 +423,49 @@ assert.doesNotMatch(task8Accuracy, /accuracyShareUncategorized/);
 const task8Categorise = read('src/app/categorise.tsx');
 assert.match(task8Categorise, /const \[openKey, setOpenKey\] = useState<string \| null>\(null\)/);
 assert.match(task8Categorise, /const \[sortedRows, setSortedRows\] = useState\(0\)/);
-assert.match(task8Categorise, /const at = merchants\.findIndex\(\(m\) => m\.key === key\)[\s\S]*?const next = at >= 0 \? merchants\[at \+ 1\] : undefined/);
-assert.match(task8Categorise, /setMerchantOverride\(merchant, category, true\)/);
-assert.match(task8Categorise, /setSortedRows\(\(n\) => n \+ count\)[\s\S]*?setOpenKey\(next \? next\.key : null\)/);
-for (const count of ['summary.rowCount', 'm.count', 'sortedRows']) {
+assert.match(task8Categorise, /const at = items\.findIndex\([\s\S]*?const next = at >= 0 \? items\[at \+ 1\] : undefined/);
+assert.match(task8Categorise, /setMerchantOverride\(item\.merchant, category, true\)/);
+assert.match(task8Categorise, /setBillAlias\(item\.sourceTitle, item\.billIdentity, item\.sourceTitle, category, true\)/);
+assert.match(task8Categorise, /INITIAL_VISIBLE_ITEMS = 12/);
+assert.match(task8Categorise, /summary\.paymentPurposes[\s\S]*?kind: 'payment-purpose'/);
+for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
   assert.ok(task8Categorise.includes(count), `Categorise lost ${count}`);
 }
 
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
-  'summarizeForeignActivity(', 'inPeriod(tx.date, period)', 'ledgerCurrency,',
-  'visibleGroups', 'visibleTransactions', 'normalizedQuery', '<PeriodSheet', '<EntryDetailSheet',
+  'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
+  'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIdsForState(',
+  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
-const currencyScaffoldContent = task8Currency.match(
-  /<ScreenScaffold[\s\S]*?<PeriodPill[\s\S]*?<TextField/,
+assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,
+  'Foreign spending virtualizes its transaction history instead of mounting the whole ledger in a ScrollView');
+assert.match(task8Currency, /<FlatList[\s\S]*?ListHeaderComponent=\{listHeader\}/);
+assert.match(task8Currency, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task8Currency, /removeClippedSubviews=\{Platform\.OS === 'android'\}/);
+assert.doesNotMatch(task8Currency, /visibleTransactions\.map|summary\.transactions\.map/,
+  'hundreds of foreign charges must not be mounted eagerly');
+assert.match(task8Currency, /const INITIAL_CURRENCY_ROWS = 5/);
+assert.match(task8Currency, /summary\.groups\.slice\(0, INITIAL_CURRENCY_ROWS\)/);
+assert.match(task8Currency, /const percent = summary\.totalLocalFils > 0[\s\S]*?group\.localFils \/ summary\.totalLocalFils/);
+assert.match(task8Currency, /styles\.currencyTrack[\s\S]*?styles\.currencyFill/,
+  'currency impact stays a restrained Ledger & Light progress treatment rather than decorative cards');
+assert.match(task8Currency, /setSelectedCurrency\(\(current\) => current === currency \? null : currency\)/);
+assert.match(task8Currency, /transaction\.originalCurrency\?\.toUpperCase\(\) !== selectedCurrency/);
+const currencyHierarchy = task8Currency.match(
+  /<Money[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
 )?.[0] ?? '';
-assert.ok(currencyScaffoldContent.length > 0, 'Currency keeps PeriodPill before its search field');
+assert.ok(currencyHierarchy.length > 0,
+  'Currency hierarchy remains total → currencies → transactions/search');
+assert.match(task8Currency, /const showSearch = chargeCount >= 12/);
 assert.match(task8Currency, /<TextField[\s\S]*?label=\{t\('searchForeignSpending', language\)\}[\s\S]*?value=\{query\}[\s\S]*?onChangeText=\{setQuery\}/);
 assert.match(task8Currency, /leading=\{<Icon name="search"/);
-assert.match(task8Currency, /<ActionIconButton[\s\S]*?label=\{t\('clearSearch', language\)\}[\s\S]*?variant="plain"[\s\S]*?onPress=\{\(\) => setQuery\(''\)\}/);
+assert.match(task8Currency, /formatOriginalCurrency\([\s\S]*?item\.originalAmountMinor![\s\S]*?formatAED\(item\.amountFils/,
+  'Foreign rows keep original and ledger amounts together');
+assert.doesNotMatch(task8Currency, /FadeInDown|Animated\.View/,
+  'data-heavy foreign spending should not delay Android readability with entrance animation');
+assert.doesNotMatch(task8Currency, /conversionQuality|bankQuoted|referenceRate|offlineEstimate/,
+  'Foreign spending should not expose FX diagnostics as a primary page section');
 
 const task8Feedback = read('src/app/feedback.tsx');
 assert.match(task8Feedback, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="native"[\s\S]*?header=\{feedbackHeader\}/);

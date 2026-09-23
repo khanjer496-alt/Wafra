@@ -2,10 +2,17 @@
 import { normalizeAlertReviewTray } from '@/lib/alert-review-tray';
 import { categorySupportsType } from '@/lib/categories';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
+import { getGrowthFunnelDiagnostics } from '@/lib/growth-funnel-diagnostics';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
-import { countsInTotals, internalTransferIds, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
-import { nonPostingReason, PARSER_VERSION } from '@/lib/sms-parser';
+import { getLaunchMetrics } from '@/lib/launch-performance';
+import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
+import { nonPostingReason, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
+import { getStabilityDiagnostics } from '@/lib/stability-diagnostics';
+import { localSemanticInboxShadowStatus } from '@/lib/local-semantic-inbox-shadow';
+import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
+import { localSemanticShadowSnapshot } from '@/lib/local-semantic-shadow';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
 
@@ -48,7 +55,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   await diagnosticYield();
   assertDiagnosticContinues(active);
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   const transfers = reconcileTransfers(state.transactions, state.accounts);
   const accounts = new Map(state.accounts.map(account => [account.id, account]));
   const sourceCounts = new Map<string, number>();
@@ -134,9 +141,22 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   }
   assertDiagnosticContinues(active);
   options.onProgress?.(state.transactions.length, state.transactions.length);
+  const [growthFunnel, stability] = await Promise.all([
+    getGrowthFunnelDiagnostics(now).catch(() => null),
+    getStabilityDiagnostics(now).catch(() => null),
+  ]);
+  assertDiagnosticContinues(active);
   return {
     schema: 'wafra-diagnostics-v1', exportedAt: new Date(now).toISOString(),
-    build: { ...fields(build, 'version build platform'), parserVersion: PARSER_VERSION, storedParserVersion: state.parserVersion ?? null },
+    build: {
+      ...fields(build, 'version build platform'),
+      parserVersion: PARSER_VERSION,
+      // Compatibility aliases retained for older support tooling. The stored
+      // value is now explicitly a backfill receipt, not the runtime grammar.
+      storedParserVersion: state.parserVersion ?? null,
+      historyRepairVersion: PARSER_BACKFILL_VERSION,
+      storedHistoryRepairVersion: state.parserVersion ?? null,
+    },
     delivery: { mode: 'manual', uploadedByWafra: false, destinationChosenByUser: true },
     notice: 'Sensitive financial data, not a restore backup. Includes all recorded periods and hidden accounts. No automatic corrections are made by this report.',
     coverage: { allRecordedTransactions: true, transactionCount: transactions.length,
@@ -162,6 +182,25 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),
     issues,
+    operationalDiagnostics: {
+      // Both sources contain only closed event labels, timing/counter data and
+      // source-code crash frames. They are local until this user-owned export
+      // is explicitly shared by the user.
+      growthFunnel,
+      stability,
+      localSemantic: {
+        runtime: localSemanticRuntimeStatus(),
+        shadow: localSemanticShadowSnapshot(),
+        inboxPass: localSemanticInboxShadowStatus(),
+      },
+    },
+    // Only in an internal capture-trace build: launch phases and capture page
+    // timings as phase names, counts and milliseconds. No message content,
+    // identifier or date is recorded by either sink.
+    timings: captureTraceEnabled()
+      ? { launch: getLaunchMetrics().map(metric => ({ phase: metric.phase, elapsedMs: Math.round(metric.elapsedMs) })),
+        capture: captureTraceSnapshot() }
+      : null,
   };
 }
 

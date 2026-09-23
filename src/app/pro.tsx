@@ -2,15 +2,14 @@ import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useLanguage } from '@/hooks/use-language';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Linking,
-  Platform,
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import {
+  useWafraBilling,
+  type ProPlanOffer,
+  type ProPurchaseOutcome,
+} from '@/components/superwall-billing-context';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -19,23 +18,10 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { alignEnd, t, tf } from '@/lib/i18n';
-import {
-  autoCaptureMethod,
-  PRO_PRICES,
-  PRO_REFERENCE_PRICE_STRINGS,
-  trialDaysLeft,
-  type ProPlan,
-} from '@/lib/purchases';
-import {
-  isBillingAvailable,
-  loadStorePrices,
-  purchasePro,
-  restorePro,
-  subscriptionManagementUrl,
-  type StorePrices,
-} from '@/lib/billing';
+import { t, tf } from '@/lib/i18n';
+import { autoCaptureMethod, billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
+import { subscriptionManagementUrl } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
 type FeatureRow = {
@@ -44,16 +30,12 @@ type FeatureRow = {
   textKey: Parameters<typeof t>[0];
 };
 
-type PriceStatus = 'unavailable' | 'loading' | 'ready' | 'failed';
-type BillingAction = 'buy' | 'restore' | 'manage' | null;
-type Completion = 'purchase' | 'restore' | null;
+type BillingAction = 'purchase' | 'restore' | 'manage' | null;
+type OfferState = 'loading' | 'ready' | 'unavailable';
 
-/**
- * The list is built per platform, because the same feature is delivered two
- * different ways and describing the iPhone one as "reads your bank SMS" would
- * promise something Apple forbids. A paywall that oversells is the most
- * expensive copy in an app: the refund happens on the App Store review page.
- */
+/** Yearly first: it is the plan the screen recommends when the store has both. */
+const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
+
 function features(): FeatureRow[] {
   return [
     {
@@ -62,166 +44,166 @@ function features(): FeatureRow[] {
       textKey:
         autoCaptureMethod() === 'localAutomation' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
     },
+    { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
   ];
 }
 
 /**
- * Wafra Pro paywall. Purchases run through the platform's own billing on a
- * store build — Play Billing on Android, StoreKit on iPhone. Side-load builds
- * explain why a purchase cannot be completed there.
+ * Wafra's own Pro screen owns the subscription purchase.
  *
- * The screen also states what is NOT behind this wall. Wafra sells the work it
- * does on its own; handing it a message yourself stays free on both platforms,
- * and saying so here is what keeps the wall from reading as a hostage note to
- * an iPhone user who cannot use the automatic path yet.
+ * Superwall stays the storefront seam — it supplies the localized product
+ * prices, runs the platform checkout sheet, restores purchases and answers for
+ * the `pro` entitlement — but the surface a customer reads and taps is this
+ * native, localized screen rather than a remote paywall. Every price on it is
+ * the string the device's own store returned; a plan the store does not return
+ * is shown as unavailable instead of being advertised at a guessed figure.
  */
 export default function ProScreen() {
   const words = workflowCopy(useLanguage());
   const theme = useTheme();
   const router = useRouter();
-  const { state, setPro } = useStore();
-  const [plan, setPlan] = useState<ProPlan>('yearly');
-  const [storePrices, setStorePrices] = useState<StorePrices | null>(null);
-  const billingAvailable = isBillingAvailable();
-  const [priceStatus, setPriceStatus] = useState<PriceStatus>(
-    billingAvailable ? 'loading' : 'unavailable',
-  );
-  const [priceRequest, setPriceRequest] = useState(0);
+  const { state } = useStore();
+  const billing = useWafraBilling();
   const [billingAction, setBillingAction] = useState<BillingAction>(null);
+  const [offers, setOffers] = useState<ProPlanOffer[]>([]);
+  const [offerState, setOfferState] = useState<OfferState>('loading');
+  const [selectedPlan, setSelectedPlan] = useState<ProPlan>('yearly');
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
-  const [completion, setCompletion] = useState<Completion>(null);
+  const offerRequest = useRef(0);
+  // `billingAction` is React state, so it is not visible to a second tap that
+  // lands in the same frame. A money action needs a guard that closes on the
+  // first call, not on the next render.
+  const actionLatch = useRef(false);
   const trial = trialDaysLeft(state);
   const entitled = state.pro || state.founderPro;
-  const rows = features();
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
   const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
+  const store = billingStore();
+  const checkoutReady = billing.available && billing.configured;
   const proHeader: ScreenHeaderProps = {
     title: t('wafraPro'),
     back: { label: t('back'), onPress: () => router.back() },
   };
 
-  useEffect(() => {
-    if (!billingAvailable) return;
-    let live = true;
-    setPriceStatus('loading');
-    void loadStorePrices().then((prices) => {
-      if (!live) return;
-      setStorePrices(prices);
-      if (!prices) {
-        setPriceStatus('failed');
-        return;
-      }
-      setPriceStatus('ready');
-      setPlan((current) =>
-        prices[current] ? current : prices.yearly ? 'yearly' : 'monthly',
-      );
-    });
-    return () => {
-      live = false;
-    };
-  }, [billingAvailable, priceRequest]);
+  // Read through a ref so a new billing snapshot (a status refresh, a customer
+  // info event) cannot restart a price fetch that is already in flight.
+  const billingRef = useRef(billing);
+  billingRef.current = billing;
 
-  const savingPercent = useMemo(() => {
-    const monthly = storePrices?.monthly;
-    const yearly = storePrices?.yearly;
-    if (monthly && yearly && monthly.currencyCode === yearly.currencyCode) {
-      const fullYear = monthly.price * 12;
-      if (fullYear <= 0 || yearly.price >= fullYear) return null;
-      return Math.floor((1 - yearly.price / fullYear) * 100);
-    }
-    if (Platform.OS !== 'web') return null;
-    const fullYear = PRO_PRICES.monthly.fils * 12;
-    return Math.floor((1 - PRO_PRICES.yearly.fils / fullYear) * 100);
-  }, [storePrices]);
-
-  const displayPrice = (candidate: ProPlan): string =>
-    storePrices?.[candidate]?.priceString ??
-    (Platform.OS === 'web'
-      ? PRO_REFERENCE_PRICE_STRINGS[candidate]
-      : t(priceStatus === 'loading' ? 'priceLoading' : 'priceUnavailable'));
-
-  const selectedStorePrice = storePrices?.[plan]?.priceString ?? null;
-
-  /**
-   * What the last tap on Get Pro or Restore had to say.
-   *
-   * Every one of these answers was an `Alert.alert`, and `isBillingAvailable()`
-   * is false on the web export — where `Alert.alert` is an empty method. So on
-   * the one build the end-to-end suite drives, the two buttons on the screen
-   * that sells the product did nothing, said nothing and logged nothing.
-   *
-   * It is drawn in the persistent purchase region rather than over the screen:
-   * none of these outcomes asks the user to decide anything, so none of them
-   * has earned a modal. What it has to do is stay visible, which an alert did
-   * not reliably do in the web preview or after a store sheet closes.
-   */
-  const buy = async () => {
-    if (billingAction) return;
-    setNotice(null);
-    if (!billingAvailable) {
-      setNotice({ title: t('playOnlyTitle'), body: t('playOnlyBody') });
+  const loadOffers = useCallback(async () => {
+    if (entitled || !checkoutReady) {
+      setOfferState('unavailable');
       return;
     }
+    const request = ++offerRequest.current;
+    setOfferState('loading');
+    // Drop what the last fetch returned before asking again. A price left on
+    // screen while its refresh is in flight is a price the CTA could still
+    // charge, and the storefront it came from may no longer be this one.
+    setOffers([]);
+    const loaded = await billingRef.current.fetchProOffers();
+    if (request !== offerRequest.current) return;
+    setOffers(loaded);
+    setOfferState(loaded.length > 0 ? 'ready' : 'unavailable');
+    setSelectedPlan((current) =>
+      loaded.some((offer) => offer.plan === current) ? current : loaded[0]?.plan ?? current);
+  }, [checkoutReady, entitled]);
+
+  useEffect(() => {
+    void loadOffers();
+    return () => { offerRequest.current += 1; };
+  }, [loadOffers]);
+
+  const selectedOffer = offerState === 'ready'
+    ? offers.find((offer) => offer.plan === selectedPlan) ?? null
+    : null;
+  const missingPlans = PLAN_ORDER.filter(
+    (plan) => !offers.some((offer) => offer.plan === plan));
+
+  /**
+   * The one action that can charge money. It refuses before the store is asked
+   * when the required legal links or the storefront itself are missing, and it
+   * reports the store's answer literally: a cancellation is not a failure, a
+   * deferred approval is not a purchase, and a completed transaction that the
+   * `pro` entitlement has not confirmed says so rather than claiming Pro.
+   */
+  const buySelectedPlan = useCallback(async () => {
+    if (actionLatch.current) return;
+    setNotice(null);
     if (!legalReady) {
       setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') });
       return;
     }
-    if (!storePrices?.[plan]) {
+    if (!checkoutReady) {
+      setNotice({
+        title: t('purchaseUnavailable'),
+        body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody'),
+      });
+      return;
+    }
+    if (!selectedOffer) {
       setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
       return;
     }
-    setBillingAction('buy');
+    actionLatch.current = true;
+    setBillingAction('purchase');
+    let outcome: ProPurchaseOutcome;
     try {
-      const outcome = await purchasePro(plan);
-      if (outcome === 'granted') {
-        setPro(true);
-        setCompletion('purchase');
-      }
-      // 'cancelled' is the user closing the sheet, and gets no dialogue —
-      // telling someone their own decision failed is noise. 'failed' is the
-      // store: an unactivated SKU, an SDK that would not configure, a throw.
-      // Without this branch the button was simply inert forever, which reads as
-      // a broken app rather than a broken listing.
-      else if (outcome === 'failed')
-        setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
+      outcome = await billing.purchasePro(selectedOffer.productId);
     } finally {
+      actionLatch.current = false;
       setBillingAction(null);
     }
-  };
-
-  const restore = async () => {
-    if (billingAction) return;
-    setNotice(null);
-    if (!isBillingAvailable()) {
-      setNotice({ title: t('nothingToRestore'), body: t('nothingToRestoreBody') });
+    if (outcome === 'cancelled') return;
+    if (outcome === 'purchased') {
+      setNotice({ title: t('proPurchaseSuccessTitle'), body: t('proPurchaseSuccessBody') });
       return;
     }
+    if (outcome === 'pending') {
+      setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') });
+      return;
+    }
+    if (outcome === 'unavailable') {
+      setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') });
+      return;
+    }
+    setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
+  }, [billing, checkoutReady, legalReady, selectedOffer]);
+
+  const restore = async () => {
+    if (actionLatch.current) return;
+    setNotice(null);
+    if (!checkoutReady) {
+      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
+      return;
+    }
+    actionLatch.current = true;
     setBillingAction('restore');
+    let restored: boolean | null;
     try {
-      const restored = await restorePro();
-      if (restored) {
-        setPro(true);
-        setCompletion('restore');
-      }
-      // null is "could not ask the store", NOT "never paid". A subscriber
-      // reinstalling on a bad connection must not be told their purchase does
-      // not exist — they should be told to try again.
-      else if (restored === null)
-        setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
-      else setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
+      restored = await billing.restorePro();
     } finally {
+      actionLatch.current = false;
       setBillingAction(null);
+    }
+    if (restored === null) {
+      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
+    } else if (!restored) {
+      setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
+    } else {
+      setNotice({ title: t('proRestoreSuccessTitle'), body: t('proRestoreSuccessBody') });
     }
   };
 
   const manage = async () => {
-    if (billingAction) return;
-    setBillingAction('manage');
+    if (actionLatch.current) return;
     setNotice(null);
+    actionLatch.current = true;
+    setBillingAction('manage');
+    const url = await subscriptionManagementUrl();
     try {
-      const url = await subscriptionManagementUrl();
-      if (!url) {
+      if (!url || !(await Linking.canOpenURL(url))) {
         setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
         return;
       }
@@ -229,6 +211,7 @@ export default function ProScreen() {
     } catch {
       setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
     } finally {
+      actionLatch.current = false;
       setBillingAction(null);
     }
   };
@@ -271,131 +254,66 @@ export default function ProScreen() {
     );
   };
 
-  const purchaseFooter = (
+  const planRow = (offer: ProPlanOffer) => {
+    const selected = offer.plan === selectedPlan;
+    const label = offer.plan === 'yearly' ? t('yearly') : t('monthly');
+    const period = offer.plan === 'yearly' ? t('perYear') : t('perMonth');
+    return (
+      <Pressable
+        key={offer.productId}
+        accessibilityRole="radio"
+        accessibilityState={{ selected }}
+        accessibilityLabel={`${label} · ${offer.priceString}`}
+        onPress={() => setSelectedPlan(offer.plan)}
+        style={[
+          styles.planRow,
+          {
+            borderColor: selected ? theme.primary : theme.cardBorder,
+            backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
+          },
+        ]}>
+        <View style={styles.featureText}>
+          <ThemedText type="smallBold">{label}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">{period}</ThemedText>
+        </View>
+        <ThemedText type="smallBold">{offer.priceString}</ThemedText>
+        <View
+          style={[
+            styles.planMark,
+            { borderColor: selected ? theme.primary : theme.cardBorder },
+          ]}>
+          {selected && <Icon name="check" size={13} color={theme.primary} />}
+        </View>
+      </Pressable>
+    );
+  };
+
+  /**
+   * A plan the store did not return. It is drawn rather than dropped: a
+   * catalogue missing one SKU is a storefront or configuration fault, and
+   * silently showing a single plan hides it from the only person who can see
+   * it happen. The row carries no price and cannot be selected.
+   */
+  const unavailablePlanRow = (plan: ProPlan) => (
     <View
+      key={`unavailable-${plan}`}
+      accessibilityRole="summary"
       style={[
-        styles.purchaseBar,
-        { borderColor: theme.cardBorder, backgroundColor: theme.background },
+        styles.planRow,
+        { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
       ]}>
-      {notice && (
-        <View
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-          style={[
-            styles.notice,
-            { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
-          ]}>
-          <Icon name="alert" size={18} color={theme.expense} />
-          <View style={styles.noticeCopy}>
-            <ThemedText type="smallBold">{notice.title}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">
-              {notice.body}
-            </ThemedText>
-          </View>
-        </View>
-      )}
-
-      {completion && (
-        <View
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-          style={[
-            styles.success,
-            { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft },
-          ]}>
-          <View style={[styles.successIcon, { backgroundColor: theme.primary }]}>
-            <Icon name="check" size={20} color={theme.onPrimary} />
-          </View>
-          <View style={styles.successCopy}>
-            <ThemedText type="smallBold">
-              {t(
-                completion === 'purchase'
-                  ? 'proPurchaseSuccessTitle'
-                  : 'proRestoreSuccessTitle',
-              )}
-            </ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">
-              {t(
-                completion === 'purchase'
-                  ? 'proPurchaseSuccessBody'
-                  : 'proRestoreSuccessBody',
-              )}
-            </ThemedText>
-          </View>
-        </View>
-      )}
-
-      {completion ? (
-        <Button label={t('proContinue')} icon="check" onPress={() => router.back()} />
-      ) : state.founderPro ? (
-        <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
-      ) : state.pro ? (
-        <>
-          {Platform.OS !== 'web' && (
-            <Button
-              variant="outline"
-              label={t('manageSubscription')}
-              disabled={billingAction !== null}
-              onPress={manage}
-            />
-          )}
-          <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
-        </>
-      ) : (
-        <>
-          <View style={styles.purchaseSummary}>
-            <View style={styles.purchaseSummaryCopy}>
-              <ThemedText type="micro" themeColor="textTertiary">
-                {plan === 'yearly' ? t('yearly') : t('monthly')}
-              </ThemedText>
-              <ThemedText type="subtitle" tabular>
-                {displayPrice(plan)}
-              </ThemedText>
-            </View>
-            <ThemedText
-              type="meta"
-              themeColor="textSecondary"
-              style={[styles.chargeTiming, { textAlign: alignEnd() }]}>
-              {selectedStorePrice
-                ? tf(
-                    plan === 'yearly'
-                      ? 'proChargeTimingYear'
-                      : 'proChargeTimingMonth',
-                    { price: selectedStorePrice },
-                  )
-                : t('proStoreConfirmsPrice')}
-            </ThemedText>
-          </View>
-          <Button
-            label={
-              billingAction === 'buy'
-                ? t('purchaseInProgress')
-                : selectedStorePrice
-                  ? tf('startPlanWithPrice', {
-                      plan: plan === 'yearly' ? t('yearly') : t('monthly'),
-                      price: selectedStorePrice,
-                    })
-                  : t('getPro')
-            }
-            onPress={buy}
-            disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
-          />
-          <Button
-            variant="ghost"
-            label={t('restorePurchase')}
-            disabled={billingAction !== null}
-            onPress={restore}
-          />
-          <ThemedText type="nano" themeColor="textTertiary" style={styles.renewalTerms}>
-            {t(
-              Platform.OS === 'ios'
-                ? 'subscriptionRenewalTermsIos'
-                : 'subscriptionRenewalTermsAndroid',
-            )}
-          </ThemedText>
-        </>
-      )}
+      <View style={styles.featureText}>
+        <ThemedText type="smallBold">{plan === 'yearly' ? t('yearly') : t('monthly')}</ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary">{t('priceUnavailable')}</ThemedText>
+      </View>
+      <Icon name="alert" size={16} color={theme.warning} />
     </View>
+  );
+
+  const retryPrices = (
+    <Pressable accessibilityRole="button" onPress={() => void loadOffers()} hitSlop={8}>
+      <ThemedText type="micro" style={{ color: theme.primary }}>{t('retryPrices')}</ThemedText>
+    </Pressable>
   );
 
   return (
@@ -404,195 +322,211 @@ export default function ProScreen() {
       header={proHeader}
       contentStyle={styles.content}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
-          <Section index={0} style={styles.hero}>
-            <WorkflowHero title={t('wafraPro')} body={words.proBody} icon="diamond" />
-            <ThemedText type="default" themeColor="textSecondary">
-              {entitled
-                ? t('proActiveThanks')
-                : trial > 0
-                  ? tf('proTrialActiveBody', {
-                      left: trial,
-                      s: trial === 1 ? '' : 's',
-                    })
-                  : t('proTrialEndedBody')}
+      <Section index={0} style={styles.hero}>
+        <WorkflowHero title={t('wafraPro')} body={words.proBody} icon="diamond" />
+        <ThemedText type="default" themeColor="textSecondary">
+          {entitled
+            ? t('proActiveThanks')
+            : trial > 0
+              ? tf('proTrialActiveBody', { left: trial, s: trial === 1 ? '' : 's' })
+              : t('proTrialEndedBody')}
+        </ThemedText>
+        {!entitled && trial > 0 && (
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder },
+            ]}>
+            <View style={[styles.statusDot, { backgroundColor: theme.primary }]} />
+            <ThemedText type="nano" style={{ color: theme.primary }}>
+              {tf('settingsTrialDays', { count: trial, s: trial === 1 ? '' : 's' })}
             </ThemedText>
-            {!entitled && trial > 0 && (
-              <View
-                style={[
-                  styles.statusPill,
-                  { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder },
-                ]}>
-                <View style={[styles.statusDot, { backgroundColor: theme.primary }]} />
-                <ThemedText type="nano" style={{ color: theme.primary }}>
-                  {tf('settingsTrialDays', {
-                    count: trial,
-                    s: trial === 1 ? '' : 's',
-                  })}
-                </ThemedText>
-              </View>
-            )}
-          </Section>
+          </View>
+        )}
+      </Section>
 
-          <Section index={1} style={[styles.featuresCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
-            <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
-              {t('proBenefitsTitle')}
-            </ThemedText>
-            {rows.map((f, i) => (
-              <Row key={f.titleKey} last={i === rows.length - 1}>
-                <View style={[styles.featureIcon, { backgroundColor: theme.backgroundSelected }]}>
-                  <Icon name={f.icon} size={18} color={theme.textSecondary} />
-                </View>
+      <Section
+        index={1}
+        style={[styles.featuresCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
+          {t('proBenefitsTitle')}
+        </ThemedText>
+        {features().map((feature, index, rows) => (
+          <Row key={feature.titleKey} last={index === rows.length - 1}>
+            <View style={[styles.featureIcon, { backgroundColor: theme.backgroundSelected }]}>
+              <Icon name={feature.icon} size={18} color={theme.textSecondary} />
+            </View>
+            <View style={styles.featureText}>
+              <ThemedText type="small">{t(feature.titleKey)}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">{t(feature.textKey)}</ThemedText>
+            </View>
+          </Row>
+        ))}
+      </Section>
+
+      {!entitled && (
+        <Section index={2} style={styles.plans}>
+          <ThemedText type="meta" themeColor="textTertiary">{t('proChoosePlan')}</ThemedText>
+          {offerState === 'loading' ? (
+            <ThemedText type="small" themeColor="textSecondary">{t('priceLoading')}</ThemedText>
+          ) : offerState === 'ready' ? (
+            <>
+              {PLAN_ORDER.map((plan) => {
+                const offer = offers.find((candidate) => candidate.plan === plan);
+                return offer ? planRow(offer) : unavailablePlanRow(plan);
+              })}
+              {missingPlans.length > 0 && (
                 <View style={styles.featureText}>
-                  <ThemedText type="small">{t(f.titleKey)}</ThemedText>
                   <ThemedText type="meta" themeColor="textTertiary">
-                    {t(f.textKey)}
+                    {t('priceUnavailableBody')}
                   </ThemedText>
+                  {retryPrices}
                 </View>
-              </Row>
-            ))}
-          </Section>
-
-          {/* What the wall does NOT hold back. It belongs on the paywall rather
-              than only in a help page: the trial ends on the day this screen
-              matters most, and a user who thinks Wafra has stopped working
-              deletes it instead of pasting one message. */}
-          <Section index={2}>
+              )}
+              {selectedOffer && (
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {tf(
+                    selectedPlan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth',
+                    { price: selectedOffer.priceString },
+                  )}
+                </ThemedText>
+              )}
+              <ThemedText type="meta" themeColor="textTertiary">
+                {store === 'appStore'
+                  ? t('subscriptionRenewalTermsIos')
+                  : store === 'play'
+                    ? t('subscriptionRenewalTermsAndroid')
+                    : t('proStoreConfirmsPrice')}
+              </ThemedText>
+            </>
+          ) : (
             <View
               style={[
                 styles.freeNote,
                 { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
               ]}>
               <View style={styles.featureIcon}>
-                <Icon name="check" size={19} color={theme.income} />
+                <Icon name="alert" size={19} color={theme.warning} />
               </View>
               <View style={styles.featureText}>
-                <ThemedText type="small">{t('featPasteFree')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('featPasteFreeText')}
+                <ThemedText type="small">
+                  {checkoutReady ? t('priceUnavailable') : t('playOnlyTitle')}
                 </ThemedText>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push('/import-sms')}
-                  hitSlop={8}>
-                  <ThemedText type="micro" style={{ color: theme.primary }}>
-                    {t('pasteBankMessage')}
-                  </ThemedText>
-                </Pressable>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
+                </ThemedText>
+                {checkoutReady && retryPrices}
               </View>
             </View>
-          </Section>
-
-          {!entitled && (
-            <Section index={3} style={styles.planSection}>
-              <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
-                {t('proChoosePlan')}
-              </ThemedText>
-              <View style={styles.plans} accessibilityRole="radiogroup">
-                {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
-                  const selected = plan === p;
-                  const unavailable =
-                    billingAvailable && priceStatus === 'ready' && !storePrices?.[p];
-                  return (
-                    <Pressable
-                      key={p}
-                      accessibilityRole="radio"
-                      accessibilityState={{
-                        checked: selected,
-                        disabled: unavailable,
-                      }}
-                      disabled={unavailable}
-                      onPress={() => {
-                        setNotice(null);
-                        setPlan(p);
-                      }}
-                      style={({ pressed }) => [
-                        styles.planRow,
-                        {
-                          backgroundColor: selected ? theme.primarySoft : 'transparent',
-                          borderColor: selected ? theme.primaryBorder : theme.cardBorder,
-                          opacity: unavailable ? 0.45 : pressed ? 0.78 : 1,
-                        },
-                      ]}>
-                      <View
-                        style={[
-                          styles.radio,
-                          { borderColor: selected ? theme.primary : theme.cardBorderStrong },
-                        ]}>
-                        {selected && (
-                          <View style={[styles.radioDot, { backgroundColor: theme.primary }]} />
-                        )}
-                      </View>
-                      <View style={styles.planCopy}>
-                        <View style={styles.planHeading}>
-                          <ThemedText type="smallBold">
-                            {p === 'yearly' ? t('yearly') : t('monthly')}
-                          </ThemedText>
-                          {p === 'yearly' && savingPercent !== null && savingPercent > 0 && (
-                            <View
-                              style={[
-                                styles.savingBadge,
-                                { backgroundColor: theme.primary, borderColor: theme.primary },
-                              ]}>
-                              <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                                {tf('proSavePercent', { percent: savingPercent })}
-                              </ThemedText>
-                            </View>
-                          )}
-                        </View>
-                        <ThemedText type="meta" themeColor="textTertiary">
-                          {p === 'yearly' ? t('perYear') : t('perMonth')}
-                        </ThemedText>
-                      </View>
-                      <ThemedText
-                        type="subtitle"
-                        tabular
-                        style={[styles.planPrice, { textAlign: alignEnd() }]}>
-                        {displayPrice(p)}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {billingAvailable && priceStatus === 'failed' && (
-                <Button
-                  variant="ghost"
-                  label={t('retryPrices')}
-                  onPress={() => {
-                    setNotice(null);
-                    setPriceRequest((request) => request + 1);
-                  }}
-                />
-              )}
-            </Section>
           )}
+        </Section>
+      )}
 
-          {purchaseFooter}
-
-          <View style={styles.legalLinks}>
-            {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
-            {publicLinkRow(t('termsOfUse'), termsOfUseUrl, true)}
+      <Section index={3}>
+        <View
+          style={[
+            styles.freeNote,
+            { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+          ]}>
+          <View style={styles.featureIcon}>
+            <Icon name="check" size={19} color={theme.income} />
           </View>
+          <View style={styles.featureText}>
+            <ThemedText type="small">{t('featPasteFree')}</ThemedText>
+            <ThemedText type="meta" themeColor="textTertiary">{t('featPasteFreeText')}</ThemedText>
+            <Pressable accessibilityRole="button" onPress={() => router.push('/import-sms')} hitSlop={8}>
+              <ThemedText type="micro" style={{ color: theme.primary }}>{t('pasteBankMessage')}</ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Section>
+
+      {notice && (
+        <View
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="smallBold">{notice.title}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{notice.body}</ThemedText>
+        </View>
+      )}
+
+      <View style={styles.actions}>
+        {entitled ? (
+          <>
+            {!state.founderPro && Platform.OS !== 'web' && (
+              <Button
+                variant="outline"
+                label={t('manageSubscription')}
+                disabled={billingAction !== null}
+                onPress={manage}
+              />
+            )}
+            <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
+          </>
+        ) : (
+          <>
+            <Button
+              label={billingAction === 'purchase'
+                ? t('purchaseInProgress')
+                : selectedOffer
+                  ? tf('startPlanWithPrice', {
+                      plan: selectedPlan === 'yearly' ? t('yearly') : t('monthly'),
+                      price: selectedOffer.priceString,
+                    })
+                  : t('getPro')}
+              disabled={billingAction !== null}
+              onPress={() => void buySelectedPlan()}
+            />
+            <Button
+              variant="ghost"
+              label={t('restorePurchase')}
+              disabled={billingAction !== null}
+              onPress={() => void restore()}
+            />
+          </>
+        )}
+      </View>
+
+      <View style={[styles.legalLinks, { borderColor: theme.cardBorder }]}>
+        {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
+        {publicLinkRow(t('termsOfUse'), termsOfUseUrl, true)}
+      </View>
     </ScreenScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  featuresCard: { padding: 16, borderRadius: 20, borderWidth: 1 },
-  content: {
-    gap: Spacing.four,
-  },
-  hero: {
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-    paddingTop: Spacing.two,
-  },
-  heroMark: {
-    width: 48,
-    height: 48,
-    borderRadius: Radius.control,
+  content: { gap: Spacing.four },
+  hero: { alignItems: 'flex-start', gap: Spacing.two, paddingTop: Spacing.two },
+  featuresCard: { padding: Spacing.four, borderRadius: 20, borderWidth: 1 },
+  sectionLabel: { marginBottom: Spacing.two },
+  featureIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.two,
+  },
+  featureText: { flex: 1, gap: 3 },
+  plans: { gap: Spacing.two },
+  planMark: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planRow: {
+    minHeight: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
   },
   statusPill: {
     minHeight: 32,
@@ -603,138 +537,32 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.three,
   },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: Radius.full,
-  },
-  sectionLabel: {
-    marginBottom: Spacing.two,
-  },
-  featureIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
+  statusDot: { width: 7, height: 7, borderRadius: Radius.full },
   freeNote: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
+    gap: Spacing.three,
+    padding: Spacing.four,
+    borderRadius: Radius.sheet,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-  },
-  planSection: {
-    gap: Spacing.two,
-  },
-  plans: {
-    gap: Spacing.two,
-  },
-  legalLinks: {
-    gap: Spacing.three,
-  },
-  legalLink: {
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  planRow: {
-    minHeight: 76,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderRadius: Radius.sheet,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioDot: {
-    width: 12,
-    height: 12,
-    borderRadius: Radius.full,
-  },
-  planCopy: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  planHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  savingBadge: {
-    borderWidth: 1,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-  },
-  planPrice: {
-    flexShrink: 0,
-  },
-  success: {
-    minHeight: 88,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.three,
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-  },
-  successIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  successCopy: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  purchaseBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.two,
-    gap: Spacing.two,
-  },
-  purchaseSummary: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.three,
-  },
-  purchaseSummaryCopy: {
-    minWidth: 104,
-    gap: Spacing.one,
-  },
-  chargeTiming: {
-    flex: 1,
-  },
-  renewalTerms: {
-    textAlign: 'center',
   },
   notice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    gap: Spacing.one,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.sheet,
-    padding: Spacing.two,
-    gap: Spacing.two,
+    padding: Spacing.three,
   },
-  noticeCopy: {
-    flex: 1,
-    gap: Spacing.one,
+  actions: { gap: Spacing.two },
+  legalLinks: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    overflow: 'hidden',
+    marginBottom: Spacing.four,
+  },
+  legalLink: {
+    minHeight: 46,
+    paddingHorizontal: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 });

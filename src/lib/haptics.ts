@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
+import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
 
 /**
  * The app's haptic vocabulary — three verbs, and a rule for when each applies.
@@ -25,11 +26,21 @@ const native = Platform.OS === 'ios' || Platform.OS === 'android';
 /** A choice registered: tab, chip, segment, toggle, period, row selection. */
 export function tapped(): void {
   if (!native) return;
+  // The user's tap outranks parser/history maintenance. Most call sites route
+  // through this one helper, so reserving the interaction window here protects
+  // buttons, chips and rows as well as the tab bar without adding dozens of
+  // separate scheduling hooks.
+  prioritizeForegroundNavigation();
   if (Platform.OS === 'android') {
-    // Expo SDK 55 recommends Android's haptics engine over a simulated
-    // Vibrator impact. Segment_Tick is the native semantic for a discrete
-    // choice and does not require the VIBRATE permission.
-    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Segment_Tick).catch(() => {});
+    // Give navigation/state handling the current frame, then ask Android for
+    // its shortest contextual click. The old implementation called the bridge
+    // in the same press turn (janky on some OEMs); the later workaround removed
+    // Android tap haptics entirely. Deferring one frame keeps the interaction
+    // responsive while restoring the physical feedback the app is designed to
+    // have.
+    requestAnimationFrame(() => {
+      Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click).catch(() => {});
+    });
     return;
   }
   Haptics.selectionAsync().catch(() => {});

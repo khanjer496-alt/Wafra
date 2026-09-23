@@ -169,6 +169,61 @@ ok('opening the database verifies the key against page 1',
   /sqlite_master/.test(storage),
   'PRAGMA key never fails; only a read proves the key is right');
 
+const openEncryptedBody = bodyOf(storage, 'async function openEncryptedDatabase');
+ok('a retry waits for failed-handle cleanup before consulting the shared connection',
+  !!openEncryptedBody &&
+    inOrder(openEncryptedBody, 'await waitForDatabaseRecovery()', 'if (databasePromise)'),
+  'expo-sqlite caches Android handles by path; checking databasePromise first can let a retry ' +
+    'reuse a NativeDatabase that the previous failed open has not finished closing');
+
+ok('open failures are attributed to a closed-vocabulary stage before arbitrary native text is dropped',
+  !!openEncryptedBody &&
+    inOrder(
+      openEncryptedBody,
+      "failureStage = 'sqlite-open'",
+      "failureStage = 'cipher-key'",
+      "failureStage = 'cipher-validation'",
+      "failureStage = 'schema-init'",
+      'recordStorageFailure(failureStage, error)',
+    ),
+  'ERR_UNEXPECTED by itself cannot tell support whether SecureStore, native SQLite open, ' +
+    'SQLCipher page validation or schema bootstrap failed');
+
+ok('a handle opened before a later initialization failure is closed before the retry rejects',
+  !!openEncryptedBody &&
+    inOrder(
+      openEncryptedBody,
+      'opened = db',
+      'const recovery = beginDatabaseRecovery(opened)',
+      'databasePromise = null',
+      'await recovery',
+      'throw error',
+    ),
+  'clearing the JS promise without closeAsync leaves expo-sqlite free to hand the same cached ' +
+    'half-open handle straight back to Try again');
+
+const recoverReadBody = bodyOf(storage, 'async function recoverSharedDatabaseAfterFailure');
+ok('a native read failure retires the already-open shared connection before retry',
+  !!recoverReadBody &&
+    inOrder(
+      recoverReadBody,
+      'const opening = databasePromise',
+      'const recovery = trackDatabaseRecovery',
+      'databasePromise = null',
+      'await recovery',
+    ),
+  'the incident was recorded as a read failure: keeping a resolved databasePromise would make ' +
+    'Try again reuse the same failing NativeDatabase even though open itself had succeeded');
+
+const singleReadBody = bodyOf(storage, 'async getItem(key)');
+const batchReadBody = bodyOf(storage, 'async multiGet(keys)');
+ok('single and batched hydration reads record distinct safe stages and recover the connection',
+  !!singleReadBody && !!batchReadBody &&
+    inOrder(singleReadBody, "recordStorageFailure('state-read', error)", 'await recoverSharedDatabaseAfterFailure()', 'throw error') &&
+    inOrder(batchReadBody, "recordStorageFailure('state-batch-read', error)", 'await recoverSharedDatabaseAfterFailure()', 'throw error'),
+  'support needs to distinguish the ledger metadata read from the chunk batch without retaining ' +
+    'the native error message or any ledger content');
+
 ok('ledger chunk hydration uses one batched SQLite read',
   /SELECT key, value FROM \$\{TABLE\} WHERE key IN/.test(storage) &&
     /getAllAsync<\{ key: string; value: string \}>/.test(storage),
@@ -223,6 +278,16 @@ for (const method of ['async multiSet(entries)', 'async multiRemove(keys)']) {
       'the whole difference');
 }
 
+const multiSetBody = bodyOf(storage, 'async multiSet(entries)');
+ok('large encrypted ledger saves batch changed chunks across the native SQLite bridge',
+  !!multiSetBody &&
+    /MULTISET_ROWS_PER_STATEMENT/.test(multiSetBody) &&
+    /entries\.slice\(start, start \+ MULTISET_ROWS_PER_STATEMENT\)/.test(multiSetBody) &&
+    /batch\.map\(\(\) => '\(\?, \?, \?\)'\)\.join\(', '\)/.test(multiSetBody) &&
+    /await db\.runAsync\(/.test(multiSetBody) &&
+    !/for \(const \[key, value\] of entries\)/.test(multiSetBody),
+  'a 10k-20k row repair must not issue one awaited native execute per persisted 400-row chunk');
+
 // ---------------------------------------------------------------------------
 // 1b. A ROLLBACK that fails poisons the connection.
 //
@@ -234,12 +299,24 @@ for (const method of ['async multiSet(entries)', 'async multiRemove(keys)']) {
 // real cause. Only a close actually releases it.
 // ---------------------------------------------------------------------------
 
+const recoveryCloseBody = bodyOf(storage, 'async function closeDatabaseForRecovery');
+const recoveryTrackBody = bodyOf(storage, 'function trackDatabaseRecovery');
+const recoveryBody = bodyOf(storage, 'function beginDatabaseRecovery');
+ok('failed native handles are closed behind a shared recovery barrier',
+  !!recoveryCloseBody && !!recoveryTrackBody && !!recoveryBody &&
+    /closeAsync/.test(recoveryCloseBody) &&
+    /recordStorageFailure\('connection-close'/.test(recoveryCloseBody) &&
+    inOrder(recoveryTrackBody, 'const tracked', 'databaseRecoveryPromise = tracked', 'return tracked') &&
+    /trackDatabaseRecovery\(closeDatabaseForRecovery\(db\)\)/.test(recoveryBody),
+  'dropping a promise alone is not enough: the native cache would hand the same poisoned ' +
+    'connection back to the next open, while a close failure still needs safe attribution');
+
 const poisonBody = bodyOf(storage, 'async function poisonDatabase');
-ok('a failed ROLLBACK drops the shared handle and closes it',
+ok('a failed ROLLBACK installs the close barrier before dropping the shared handle',
   !!poisonBody &&
-    inOrder(poisonBody, 'databasePromise = null', 'closeAsync'),
-  'dropping the promise alone is not enough: the native cache would hand the same poisoned ' +
-    'connection back to the next open');
+    inOrder(poisonBody, 'beginDatabaseRecovery(db)', 'databasePromise = null', 'await recovery'),
+  'the barrier must exist before databasePromise becomes null or another read can race into ' +
+    'openDatabaseAsync while the poisoned handle is still cached');
 
 const writeTxnBody = bodyOf(storage, 'async function writeTransaction');
 ok('the poison path is awaited from the ROLLBACK catch, before the original error is thrown',
@@ -319,6 +396,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
   });
   const parser = {
     PARSER_VERSION: 999,
+    PARSER_BACKFILL_VERSION: 999,
     normalizeServiceName: (title) => title === 'Legacy service' ? 'Canonical service' : null,
     guessCategory: (title, _type, overrides) =>
       overrides?.[title.trim().toLowerCase()] ??
@@ -356,8 +434,15 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
   const identityState = (state) => state;
   const modules = {
     'react/jsx-runtime': {
-      jsx: (_type, props) => captureProvider ? props.value : {},
-      jsxs: (_type, props) => captureProvider ? props.value : {},
+      // StoreProvider now wraps StoreContext.Provider in PrivateModeContext.Provider,
+      // whose value is the private-mode boolean; the store value is the inner
+      // element, already captured as this element's child.
+      jsx: (_type, props) => captureProvider
+        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        : {},
+      jsxs: (_type, props) => captureProvider
+        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        : {},
       Fragment: Symbol('Fragment'),
     },
     react,
@@ -397,9 +482,14 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
-    '@/lib/ledger': { internalTransferIds: () => new Set() },
+    '@/lib/ledger': {
+      internalTransferIds: () => new Set(),
+      primeInternalTransferIds() {},
+    },
     '@/lib/categories': require('./build/categories'),
     '@/lib/review-source-bindings': require('./build/review-source-bindings'),
+    '@/lib/local-semantic-review': require('./build/local-semantic-review'),
+    '@/lib/local-semantic-background-policy': require('./build/local-semantic-background-policy'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/bills': require('./build/bills'),
     '@/lib/bill-alias': require('./build/bill-alias'),
@@ -423,11 +513,21 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/review-promotion': require('./build/review-promotion'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
+    '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/lib/trusted-bank-notification-packages': {
+      bankNotificationAdmissionExpiresAt: () => Date.now() + 86_400_000,
+    },
     // The REAL predicate, not a stub. It is what decides which rows a merchant
     // rule rewrites, and stubbing it here would let the store's blast radius
     // drift from the count the categorise screen prints beside the tap — the
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
+    // Also the REAL module. sanitizeKnownBanks rewrites `parsed.knownBanks` on
+    // every hydrate and accountsLabelledWithBank relabels accounts from it, so
+    // both decide what a restored ledger actually contains. A stub here would
+    // let hydration drift from what the app does, which is the one thing this
+    // harness exists to pin.
+    '@/lib/known-banks': require('./build/known-banks'),
     './balances': {},
     ...realModules,
   };
@@ -440,6 +540,18 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
 const hydration = loadHydrationExports();
 const { buildLaunchBenchmarkBackup } = require('./build/launch-benchmark.js');
 const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
+
+ok('ledger metadata and transaction chunks are read under one native storage lease',
+  /withSnapshotRead: \(task\) => serialiseWrite\(task\)/.test(storage) &&
+    /withSnapshotRead[\s\S]*?storage\.withSnapshotRead[\s\S]*?readExistingSnapshot[\s\S]*?withSnapshotRead[\s\S]*?storage\.getItem[\s\S]*?storage\.multiGet/.test(ledgerPersistenceSource),
+  'foreground hydration and a headless capture share one SQLCipher connection. Reading meta ' +
+    'before a background write and chunks after it can produce a split snapshot or an uncoded ' +
+    'native read failure; the complete snapshot read must hold the same queue as writes');
+
+ok('legacy migration is outside the snapshot-read lease before the ledger is reread',
+  /const readSnapshot[\s\S]*?readExistingSnapshot\(\)[\s\S]*?migrateLegacyState\(prefix\)[\s\S]*?readExistingSnapshot\(\)/.test(ledgerPersistenceSource),
+  'legacy migration writes through the same encrypted queue, so attempting it while the read ' +
+    'lease is held would deadlock behind itself');
 
 ok('a failed hydration latches writes off',
   /mode = 'blocked'/.test(ledgerPersistenceSource) &&
@@ -530,6 +642,11 @@ if (!gateSrc || !recoverySrc) {
     '"force-stop and reopen" is not a recovery instruction to give someone whose ledger is ' +
       'on the line');
 
+  ok('Android recovery does not show the iOS unlock hint',
+    /Platform\.OS === 'ios' && !keyMismatch && !erased/.test(recovery),
+    'the existing hint describes iOS protected storage; Android ERR_UNEXPECTED/SQLite recovery ' +
+      'is not fixed by telling the user to unlock an already-unlocked phone');
+
   /**
    * Reachability, not source order. The erase handler is defined near the top
    * of the component and the button that opens the confirmation is near the
@@ -585,11 +702,19 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /const loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
-    /const loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
+    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
+    /loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
     'branch that leaves a genuinely new install latched off forever');
+
+ok('transient encrypted read failures get exactly one automatic fresh-handle retry',
+  !!hydrateBody &&
+    /storageReadFailureMayRetry\(firstFailure\)/.test(hydrateBody) &&
+    (hydrateBody.match(/await persistence\.load\(\)/g) ?? []).length === 2 &&
+    /await new Promise<void>\(\(resolve\) => setTimeout\(resolve, 32\)\)/.test(hydrateBody),
+  'the first ERR_UNEXPECTED batch read should not immediately replace the app with recovery, ' +
+    'but retry must stay bounded to one fresh SQLCipher connection');
 
 ok('the browser demo ledger is isolated to an explicit E2E export',
   /Platform\.OS === 'web'\s*&&\s*process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1'/.test(store) &&
@@ -1219,6 +1344,21 @@ const tx = (id, extra = {}) => ({
     genuine.length === 2 && genuine.some((row) => row.id === first.id) &&
       genuine.some((row) => row.id === second.id));
 
+  const genuineInput = [first, second];
+  const genuineIdentity = hydration.finalizeHydrationTransactions(genuineInput);
+  ok('unchanged hydration preserves the transaction array identity',
+    genuineIdentity === genuineInput);
+
+  const editedIdentityRow = tx('edited-identity', {
+    title: 'User corrected merchant',
+    note: 'keep exactly',
+    userEdited: true,
+  });
+  const editedIdentityInput = [editedIdentityRow, first];
+  const editedIdentity = hydration.finalizeHydrationTransactions(editedIdentityInput);
+  ok('unchanged hydration with a userEdited row preserves the transaction array identity',
+    editedIdentity === editedIdentityInput);
+
   const edited = tx('edited-capture', {
     title: 'My coffee correction',
     note: 'keep exactly',
@@ -1670,6 +1810,64 @@ asyncSuites.push((async () => {
         legacyLoaded.transactions.map((row) => row.id).join(',') === 'new-1,new-2,old-1,old-2');
   }
 
+  for (const edit of ['metadata-only', 'one-row']) {
+    // Inline snapshots have no durable chunk bodies, even when their metadata
+    // names the current layout. Reusing unchanged row identities here used to
+    // replace the only full snapshot with metadata referencing missing chunks.
+    const original = Array.from({ length: 5 }, (_, index) => ({
+      id: `inline-${index}`, amountFils: 1000 + index,
+    }));
+    const memory = memoryStorage({
+      [LEDGER_KEY]: JSON.stringify({
+        transactions: original, txChunks: 0, txChunkOrder: 'oldest-first',
+      }),
+    });
+    const persistence = createPersistence(memory);
+    const loaded = await persistence.load();
+    const transactions = edit === 'metadata-only' ? loaded.transactions
+      : loaded.transactions.map((row, index) => index === 0
+        ? { ...row, transferDecision: { ownership: 'external' } } : row);
+    await persistence.save(snapshot('converted', transactions));
+    const reloaded = await createPersistence(memory).load();
+    ok(`inline ledger survives ${edit} save and a fresh persistence instance`,
+      JSON.stringify(reloaded.transactions) === JSON.stringify(transactions) &&
+        reloaded.transactions.length === 5,
+      `expected 5 rows, reloaded ${reloaded.transactions.length}`);
+    ok(`inline ${edit} conversion keeps exact money and row identities`,
+      JSON.stringify(reloaded.transactions.map(({ id, amountFils }) => [id, amountFils])) ===
+        JSON.stringify(original.map(({ id, amountFils }) => [id, amountFils])));
+  }
+
+  {
+    // Chunk bodies are reused by ROW IDENTITY, not by re-serializing the whole
+    // ledger on every save. Store snapshots are immutable, so a chunk made of
+    // the same row objects has the same bytes; only a chunk holding a new or
+    // replaced object is stringified and written.
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const oldest = { id: 'o1' }; const older = { id: 'o2' };
+    const newer = { id: 'n1' }; const newest = { id: 'n2' };
+    await persistence.save(snapshot('base', [newest, newer, older, oldest]));
+    const setsAfterBase = memory.calls.filter((call) => call.op === 'set').length;
+    const keysWritten = () => memory.calls.filter((call) => call.op === 'set').at(-1).entries.map(([key]) => key);
+
+    // A fresh array of the very same objects: rows "changed" by identity,
+    // bodies did not, so no chunk is written — only the meta key.
+    await persistence.save(snapshot('same-rows', [newest, newer, older, oldest]));
+    const sameRowsWrites = keysWritten();
+    // Replacing one object in the newest chunk rewrites that chunk alone.
+    await persistence.save(snapshot('edited', [{ id: 'n2', title: 'edited' }, newer, older, oldest]));
+    const editedWrites = keysWritten();
+    ok('an unchanged chunk is reused by row identity and never rewritten',
+      memory.calls.filter((call) => call.op === 'set').length === setsAfterBase + 2 &&
+        sameRowsWrites.length === 1 && sameRowsWrites[0] === LEDGER_KEY &&
+        editedWrites.length === 2 && editedWrites.includes(`${LEDGER_KEY}:tx:1`) &&
+        !editedWrites.includes(`${LEDGER_KEY}:tx:0`) &&
+        JSON.parse(memory.data.get(`${LEDGER_KEY}:tx:1`))[0].title === 'edited' &&
+        memory.data.get(`${LEDGER_KEY}:tx:0`) === JSON.stringify([older, oldest]));
+  }
+
   {
     const memory = memoryStorage();
     const persistence = createPersistence(memory);
@@ -1687,8 +1885,48 @@ asyncSuites.push((async () => {
   }
 
   {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const rows = Array.from({ length: 6 }, (_, index) => ({
+      id: `history-${index}`,
+      title: `row-${index}`,
+    }));
+    const running = (transactions) => ({
+      ...snapshot('history-running', transactions),
+      historyImport: {
+        status: 'running', cursor: { beforeDateMs: 1, beforeId: 1 },
+        scanned: 500, found: 100, startedAt: 1, updatedAt: 2, error: null,
+      },
+    });
+    await persistence.save(running(rows));
+
+    const edited = [...rows];
+    edited[3] = { ...edited[3], title: 'healed' };
+    const originalStringify = JSON.stringify;
+    let transactionChunkSerializations = 0;
+    JSON.stringify = function(value, ...args) {
+      if (Array.isArray(value) && value.length > 0 &&
+          value.every((row) => row && typeof row === 'object' && /^history-/.test(row.id ?? ''))) {
+        transactionChunkSerializations += 1;
+      }
+      return originalStringify.call(JSON, value, ...args);
+    };
+    try {
+      await persistence.save(running(edited));
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+    ok('one history-page heal serializes only the chunk containing changed row identities',
+      transactionChunkSerializations === 1,
+      `${transactionChunkSerializations} transaction chunks serialized`);
+  }
+
+  {
     const rows = [{ id: 'n1' }, { id: 'n2' }, { id: 'o1' }, { id: 'o2' }];
-    const chunks = testChunkTransactions(rows);
+    // Oldest-first bodies: chunk 0 holds the oldest rows, exactly as the
+    // persistence module serializes them.
+    const chunks = [JSON.stringify(rows.slice(2)), JSON.stringify(rows.slice(0, 2))];
     const memory = memoryStorage({
       [LEDGER_KEY]: JSON.stringify({ txChunks: 2, txChunkOrder: 'oldest-first' }),
       [`${LEDGER_KEY}:tx:0`]: chunks[0],
@@ -1972,6 +2210,17 @@ if (!fs.existsSync(diagBuild)) {
         !JSON.stringify(unknown).includes('500.00') &&
         unknown.code === null,
       JSON.stringify(unknown));
+
+    const locked = new Error('database is locked');
+    locked.code = 'SQLITE_BUSY';
+    const lockedFailure = diagnostics.recordStorageFailure('state-batch-read', locked);
+    ok('only transient read categories are eligible for one automatic retry',
+      diagnostics.storageReadFailureMayRetry(unknown) === true &&
+        diagnostics.storageReadFailureMayRetry(lockedFailure) === true &&
+        diagnostics.storageReadFailureMayRetry(mismatch) === false &&
+        diagnostics.storageReadFailureMayRetry(record) === false,
+      'unknown/locked may recover on a freshly opened handle; key mismatch and corruption must ' +
+        'fail closed without repeatedly touching the encrypted ledger');
 
     /** A merchant name is not an error code, however single-word it is. */
     const fakeCode = new Error('boom');
@@ -2720,6 +2969,39 @@ asyncSuites.push((async () => {
     saved.at(-1).transactions[0].smsKey === 'ha17t' + now);
 })().catch((error) => ok('generic store integration completes', false, String(error))));
 
+// Replacing the ledger invalidates the real session-only AI cache, including
+// work queued before React can rerender the Review screen.
+asyncSuites.push((async () => {
+  const { localReviewAdvisor } = require('./build/local-semantic-review');
+  const runtime = loadHydrationExports({}, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const event = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
+    amount: { evidence: 'explicit', value: { currency: 'AED', minorUnits: '4500', exponent: 2 }, alternatives: [] } };
+  const item = { kind: 'universal', id: 'synthetic-ai-review', sourceKey: 'synthetic-ai-source',
+    observedAt: Date.now(), expiresAt: Date.now() + 60000, event };
+  const pending = localReviewAdvisor.enqueue(item, event, 'movement <money>');
+  ok('store reset fixture has real pending AI review advice', localReviewAdvisor.get(item)?.kind === 'pending');
+  const previousGeneration = ledger.getStateGeneration();
+  const background = require('./build/local-semantic-background-policy');
+  background.setLocalSemanticAppActive(true);
+  const cancelled = background.localSemanticBackgroundCancellation();
+  const restored = ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1, data: { transactions: [] } }));
+  ok('successful ledger replacement synchronously clears stale AI review advice',
+    restored && ledger.getStateGeneration() !== previousGeneration && localReviewAdvisor.get(item) === null);
+  ok('ledger replacement invalidates optional AI work before returning', cancelled());
+  await pending;
+  ok('old queued AI work cannot repopulate advice after ledger replacement', localReviewAdvisor.get(item) === null);
+  const privateCancelled = background.localSemanticBackgroundCancellation();
+  const privateSaved = ledger.setPrivateMode(true);
+  ok('enabling private mode cancels queued AI before persistence finishes', privateCancelled());
+  await privateSaved;
+  const captureCancelled = background.localSemanticBackgroundCancellation();
+  const captureSaved = ledger.setCaptureOptOut(true);
+  ok('capture opt-out cancels queued AI before persistence finishes', captureCancelled());
+  await captureSaved;
+  background.setLocalSemanticAppActive(false);
+})().catch(error => ok('AI review generation reset integration completes', false, String(error))));
+
 // Transfer decisions use the authoritative reducer snapshot and explicit
 // encrypted-write acknowledgement, including edits before React re-renders.
 asyncSuites.push((async () => {
@@ -2763,10 +3045,13 @@ asyncSuites.push((async () => {
 
 {
   let calls = 0;
+  let normalizeCalls = 0;
+  let guessCalls = 0;
   const parser = {
     PARSER_VERSION: 999,
-    normalizeServiceName: () => null,
-    guessCategory: () => 'other',
+    PARSER_BACKFILL_VERSION: 999,
+    normalizeServiceName: () => { normalizeCalls++; return null; },
+    guessCategory: () => { guessCalls++; return 'other'; },
     parseSms: () => { calls++; return null; },
   };
   const h = loadHydrationExports({ '@/lib/sms-parser': parser });
@@ -2777,28 +3062,126 @@ asyncSuites.push((async () => {
     transactions: [tx('retained-raw', { raw: 'temporarily unsupported source' })],
   }, options);
   ok('inbox parserVersion cannot bypass the first saved-SMS migration', calls === 1);
+  const firstGuessCalls = guessCalls;
   const before = JSON.stringify(first.transactions);
   const repeat = h.migratePersistedState(JSON.parse(JSON.stringify(first)), options);
   ok('unchanged saved SMS do not re-enter the parser on the next launch', calls === 1);
+  ok('a current hydration receipt skips the full row-local transform pass on the next launch',
+    firstGuessCalls > 0 && guessCalls === firstGuessCalls,
+    `first=${firstGuessCalls} repeat=${guessCalls}`);
   ok('cached startup retains exact transaction data and independent inbox receipt',
     JSON.stringify(repeat.transactions) === before && repeat.parserVersion === 999);
   parser.PARSER_VERSION++;
   const upgraded = h.migratePersistedState(JSON.parse(JSON.stringify(repeat)), options);
-  ok('a new parser version rechecks retained raw SMS', calls === 2);
+  ok('a runtime parser revision does not recheck retained raw SMS', calls === 1);
+  // Saving a merchant rule must NOT re-read the whole ledger. `healPatch`
+  // refuses to apply a pinned category to an existing row ("remember for
+  // future" is a default for new rows), so the pass this used to trigger did
+  // the work and threw the result away — while the rows a rule pins are
+  // exactly the ones heal keeps `raw` on, so each new rule made the next
+  // launch slower than the last.
   upgraded.merchantOverrides.cafe = 'shopping';
   h.migratePersistedState(upgraded, options);
-  ok('changed merchant rules invalidate saved-SMS parsing', calls === 3);
+  ok('a saved merchant rule does not re-read the ledger on the next launch', calls === 1);
   upgraded.marketId = 'SA';
   h.migratePersistedState(upgraded, options);
-  ok('changed parser market invalidates saved-SMS parsing', calls === 4);
+  ok('changed parser market invalidates saved-SMS parsing', calls === 2);
   h.migratePersistedState(upgraded);
-  ok('ordinary migration callers still force saved-SMS repair', calls === 5);
+  ok('ordinary migration callers still force saved-SMS repair', calls === 3);
+  const beforeRestoreNormalize = normalizeCalls;
   const restored = h.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: upgraded }));
-  ok('restored backups cannot use a local startup receipt to bypass repair', restored && calls === 6);
+  ok('restored backups cannot use a local startup receipt to bypass repair',
+    restored && calls === 4 && normalizeCalls > beforeRestoreNormalize);
+  // Upgrading to the grammar-only receipt must not cost a re-read. A stored
+  // revision-1 receipt naming this same parser version and market already
+  // proves the ledger was healed under this grammar, so it is accepted and
+  // restamped rather than discarded for being the wrong shape.
+  const legacyReceipt = JSON.stringify([
+    1, parser.PARSER_BACKFILL_VERSION, 'SA', [['cafe', 'shopping']],
+  ]);
+  const legacy = { ...upgraded, hydrationReparseKey: legacyReceipt };
+  const before1 = calls;
+  const accepted = h.migratePersistedState(legacy, options);
+  ok('a revision-1 receipt for this grammar is accepted without re-reading the ledger',
+    calls === before1);
+  ok('the accepted receipt is upgraded in place so later launches compare by equality',
+    accepted.hydrationReparseKey === JSON.stringify([2, parser.PARSER_BACKFILL_VERSION, 'SA']));
+  // ...but only when it genuinely names this grammar.
+  const staleGrammar = {
+    ...upgraded,
+    hydrationReparseKey: JSON.stringify([1, parser.PARSER_BACKFILL_VERSION - 1, 'SA', []]),
+  };
+  const before2 = calls;
+  h.migratePersistedState(staleGrammar, options);
+  ok('a revision-1 receipt naming an older grammar still forces a re-read', calls > before2);
+  const corrupt = { ...upgraded, hydrationReparseKey: 'not-json' };
+  const before3 = calls;
+  h.migratePersistedState(corrupt, options);
+  ok('an unreadable receipt is repaired rather than trusted', calls > before3);
+
+  // Narrowing the TRIGGER must not narrow the DATA: when an explicit historical
+  // backfill change does
+  // re-read the ledger, the current rules still reach the parser.
+  let sawOverrides;
+  parser.parseSms = (_raw, overrides) => { calls++; sawOverrides = overrides; return null; };
+  parser.PARSER_BACKFILL_VERSION++;
+  h.migratePersistedState(upgraded, options);
+  ok('a backfill re-read still parses saved SMS against the current merchant rules',
+    sawOverrides?.cafe === 'shopping');
   parser.parseSms = () => { throw new Error('synthetic parser failure'); };
   const failed = { ...upgraded, hydrationReparseKey: 'obsolete' };
   try { h.migratePersistedState(failed, options); } catch { /* Expected. */ }
   ok('failed startup parsing never stamps a completed receipt', failed.hydrationReparseKey === 'obsolete');
+}
+
+{
+  let calls = 0;
+  const parser = {
+    PARSER_VERSION: 1000,
+    PARSER_BACKFILL_VERSION: 1000,
+    normalizeServiceName: () => null,
+    guessCategory: () => 'other',
+    parseSms: () => { calls++; return null; },
+  };
+  const androidRuntime = {
+    AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+    I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
+    Platform: { OS: 'android' },
+  };
+  const h = loadHydrationExports({
+    'react-native': androidRuntime,
+    '@/lib/sms-parser': parser,
+  });
+  const options = { reuseCompletedReparse: true };
+  const upgrading = h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 999,
+    hydrationReparseKey: JSON.stringify([2, 999, 'AE']),
+    transactions: [tx('android-parser-upgrade', { raw: 'retained source for migration' })],
+  }, options);
+  ok('Android parser upgrades do not synchronously reparse retained SMS during launch', calls === 0);
+  ok('Android hands the grammar receipt to durable history while parserVersion remains pending',
+    upgrading.parserVersion === 999 &&
+      upgrading.hydrationReparseKey === JSON.stringify([2, 1000, 'AE']));
+
+  const sameVersionNeedsLocalRepair = h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 1000,
+    hydrationReparseKey: 'missing-local-repair',
+    transactions: [tx('android-local-repair', { raw: 'retained source for local repair' })],
+  }, options);
+  ok('Android still runs a missing same-version local repair once', calls === 1 && !!sameVersionNeedsLocalRepair);
+
+  h.migratePersistedState({
+    onboarded: true,
+    marketId: 'AE',
+    parserVersion: 999,
+    hydrationReparseKey: JSON.stringify([2, 999, 'AE']),
+    transactions: [tx('android-backup-repair', { raw: 'retained source in restored backup' })],
+  });
+  ok('backup-style migration still repairs retained SMS immediately on Android', calls === 2);
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

@@ -100,21 +100,56 @@ export const reconcileReviewSourceBindings = (
     chosen.push([...group].sort((a, b) => providerNumber(a) < providerNumber(b) ? -1 :
       providerNumber(a) > providerNumber(b) ? 1 : 0)[0]);
   }
-  const accepted = chosen.filter((item) => {
-    if (chosen.some((other) => other.legacySourceKey !== item.legacySourceKey &&
-      (other.id === item.id ||
-        canonicalUniversalSourceKey(other.sourceKey, other.observedAt) === canonicalUniversalSourceKey(item.sourceKey, item.observedAt)))) return false;
+  // Index exact identities once. A migration page can attest hundreds of old
+  // sources against a large ledger; rescanning every row for every binding
+  // blocks Android's JS thread after the otherwise yielding inbox scan.
+  if (!chosen.length) return unchanged();
+  type SourceOwners = { first: string; multiple: boolean };
+  const recordSource = (index: Map<string, SourceOwners>, key: string, source: string): void => {
+    const owners = index.get(key);
+    if (owners) owners.multiple ||= owners.first !== source;
+    else index.set(key, { first: source, multiple: false });
+  };
+  const hasOtherSource = (index: Map<string, SourceOwners>, key: string, source: string): boolean => {
+    const owners = index.get(key);
+    return owners !== undefined && (owners.multiple || owners.first !== source);
+  };
+  const canonicalByLegacy = new Map<string, string>();
+  const chosenIds = new Map<string, SourceOwners>();
+  const chosenSources = new Map<string, SourceOwners>();
+  for (const item of chosen) {
     const canonical = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
-    if (state.reviewTray.pending.some((pending) =>
-      (pending.sourceKey === item.legacySourceKey &&
-        (pending.id !== item.legacyId || pending.observedAt !== item.observedAt)) ||
-      (pending.sourceKey !== item.legacySourceKey &&
-        (pending.id === item.id || canonicalUniversalSourceKey(pending.sourceKey, pending.observedAt) === canonical)))) return false;
+    canonicalByLegacy.set(item.legacySourceKey, canonical);
+    recordSource(chosenIds, item.id, item.legacySourceKey);
+    recordSource(chosenSources, canonical, item.legacySourceKey);
+  }
+  const pendingIds = new Map<string, SourceOwners>();
+  const pendingSources = new Map<string, SourceOwners>();
+  const pendingBySource = new Map<string, { id: string; observedAt: number; conflicting: boolean }>();
+  for (const pending of state.reviewTray.pending) {
+    recordSource(pendingIds, pending.id, pending.sourceKey);
+    recordSource(pendingSources, canonicalUniversalSourceKey(pending.sourceKey, pending.observedAt), pending.sourceKey);
+    const existing = pendingBySource.get(pending.sourceKey);
+    if (existing) existing.conflicting ||= existing.id !== pending.id || existing.observedAt !== pending.observedAt;
+    else pendingBySource.set(pending.sourceKey, { id: pending.id, observedAt: pending.observedAt, conflicting: false });
+  }
+  const transactionSources = new Map<string, SourceOwners>();
+  for (const transaction of state.transactions) {
+    if (transaction.smsKey && isUsableCaptureSourceIdentity(transaction.smsKey, transaction.ts)) {
+      recordSource(transactionSources, canonicalUniversalSourceKey(transaction.smsKey, transaction.ts), transaction.smsKey);
+    }
+  }
+  const accepted = chosen.filter((item) => {
+    const canonical = canonicalByLegacy.get(item.legacySourceKey)!;
+    if (hasOtherSource(chosenIds, item.id, item.legacySourceKey) ||
+      hasOtherSource(chosenSources, canonical, item.legacySourceKey)) return false;
+    const pending = pendingBySource.get(item.legacySourceKey);
+    if (pending && (pending.conflicting || pending.id !== item.legacyId || pending.observedAt !== item.observedAt)) return false;
+    if (hasOtherSource(pendingIds, item.id, item.legacySourceKey) ||
+      hasOtherSource(pendingSources, canonical, item.legacySourceKey)) return false;
     // Re-keying cannot merge two existing confirmed occurrences. Keep them
     // intact for explicit resolution instead of silently assigning one source.
-    if (state.transactions.some((transaction) => transaction.smsKey !== item.legacySourceKey &&
-      transaction.smsKey && isUsableCaptureSourceIdentity(transaction.smsKey, transaction.ts) &&
-      canonicalUniversalSourceKey(transaction.smsKey, transaction.ts) === canonical)) return false;
+    if (hasOtherSource(transactionSources, canonical, item.legacySourceKey)) return false;
     return true;
   });
   if (!accepted.length) return unchanged();

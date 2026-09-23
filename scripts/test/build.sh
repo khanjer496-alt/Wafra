@@ -42,12 +42,14 @@ rewrite() {
       -e "s|import('@/components/ui/icon').IconName|string|g" \
       -e "s|from '../../modules/notification-reader'|from './notification-reader'|" \
       -e "s|from '../../modules/sms-reader'|from './sms-reader'|" \
+      -e "s|from '../../modules/wafra-stability'|from './wafra-stability'|" \
       -e "s|from '../../modules/wafra-live-capture'|from './wafra-live-capture-types'|" \
       -e "s|from '../../modules/wafra-message-history/src/WafraMessageHistory.types'|from './wafra-message-history-types'|" \
       -e "s|from 'react-native'|from './stub-react-native'|" \
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
       -e "s|from 'expo-constants'|from './stub-expo-constants'|" \
       -e "s|from 'expo-crypto'|from './stub-expo-crypto'|" \
+      -e "s|from 'expo/fetch'|from './stub-expo-fetch'|" \
       -e "s|from 'expo-secure-store'|from './stub-secure-store'|" \
       -e "s|from '@react-native-async-storage/async-storage'|from './stub-async-storage'|" \
       "$1" > "$2"
@@ -63,22 +65,24 @@ rewrite() {
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
 for f in types routes format categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
-         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases markets i18n system-language balances \
-         brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
-         history-import diagnostic-export diagnostic-messages transaction-filter capture-trace \
-         launch-performance launch-benchmark \
+         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases markets known-banks i18n system-language balances \
+         brand-marks leaving-soon accounts heal accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
+         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-filter capture-trace \
+         launch-performance launch-benchmark runtime-performance \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
-         universal-types universal-dates universal-fields universal-money universal-parser universal-import universal-categorization \
+         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import universal-categorization \
          ledger-money backup-validation ledger-export review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture \
-         wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences; do
+         wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
+         local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
+         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -95,14 +99,18 @@ done
 # so the rename costs nothing here and the guard below stops the next collision
 # from being discovered the same way.
 [ -f ../../src/lib/feedback.ts ] && rewrite ../../src/lib/feedback.ts build/app-feedback.ts
+# Copied through rewrite() rather than cp: a stub that stands in for an app
+# module may need the app's own types, and it must spell that import the way
+# the app does (`@/lib/...`). rewrite() is a no-op on every stub that imports nothing.
 for f in stubs/*.ts; do
-  cp "$f" "build/$(basename "$f")"
+  rewrite "$f" "build/$(basename "$f")"
 done
 # The app's own native module wrappers, compiled for real against a
 # requireOptionalNativeModule that returns null — which is what they do on iOS
 # and in Expo Go anyway.
 rewrite ../../modules/sms-reader/index.ts build/sms-reader.ts
 rewrite ../../modules/notification-reader/index.ts build/notification-reader.ts
+rewrite ../../modules/wafra-stability/index.ts build/wafra-stability.ts
 rewrite ../../modules/wafra-live-capture/src/WafraLiveCapture.types.ts \
   build/wafra-live-capture-types.ts
 rewrite ../../modules/wafra-message-history/src/WafraMessageHistory.types.ts \

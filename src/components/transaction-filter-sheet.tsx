@@ -6,7 +6,7 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button, Chip } from '@/components/ui/controls';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
   },
   rangeTextInput: {
     fontSize: 14,
-    fontWeight: '500',
+    fontFamily: Fonts.sansMedium,
   },
   rangeClear: {
     minHeight: 44,

@@ -2,6 +2,16 @@
 
 Accepted direction, 8 September 2026: an interactive example followed by setup choices. Work starts from canonical `main` at `d6dd2eef92f34d04b64dd44e72f911d6c1caad15`.
 
+## Personalized reveal update — 16 September 2026
+
+The required first-run path is now deliberately shorter: Welcome → what the user wants to understand → how they track money today → a personalized starting view → the platform capture choice → a completion reveal. Goals and budget style stay optional and outside the required path.
+
+Privacy is explained at the moment Wafra asks for bank-alert access instead of on a separate mandatory screen. The capture choice states local processing, no bank login, and that the choice can be changed later. Web remains manual-only and does not render phone-specific privacy claims.
+
+Android no longer renders the old zero-valued scanning screen. After SMS permission is granted, Wafra durably stages the resumable history import and shows the completion reveal; the user then enters Wafra while the real history job runs in the background. Real `historyImport.scanned` and `historyImport.found` values remain the source of truth for progress elsewhere. The reveal checkpoint is persisted so an interrupted first run resumes there rather than repeating permission setup.
+
+iPhone keeps its native Shortcut and Message-automation checklist. Once that checklist is actually complete, onboarding now shows the personalized starting insight before the final Continue action.
+
 ## Experience
 
 1. **See the value.** A charcoal Ledger & Light welcome shows an explicitly labeled sample coffee purchase. “Organize this alert” switches it to a categorized entry. The example is optional, reversible, and component-local; it never sets currency or writes financial/setup data. “Choose how to start” is available immediately.

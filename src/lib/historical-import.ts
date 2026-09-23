@@ -13,7 +13,9 @@ import {
   createLaunchAlertSession,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
-import { bankFromSender } from '@/lib/markets';
+import { bankFromSender, detectLaunchMarketFromSender, soleBankNamedInText, withMarketPackForParsing } from '@/lib/markets';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
+import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import type { CategoryId } from '@/lib/types';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
@@ -80,7 +82,7 @@ const inspectHistoricalRefusal = (input: {
       },
     };
   }
-  if (decision.kind === 'ignored') return decision;
+  if (decision.kind === 'ignored') return { kind: 'ignored' };
   const identity = appleMessageReviewIdentity(input.record.id);
   if (!identity) return { kind: 'ignored' };
   const identified = identifySourceFreeReviewAlert(
@@ -310,10 +312,16 @@ export function parseHistoricalMessageRecords(
     newestTs = Math.max(newestTs, timestamp);
 
     const sender = record.sender?.trim();
-    const senderBank = sender ? bankFromSender(sender)?.name : undefined;
     const inspection = launchSession.inspect(record.text, sender ?? '');
-    const result = launchSession.parse(record.text, sender ?? '', inspection);
-    if (!result) {
+    // Match Android SMS's review requirement for worldwide institutions.
+    // A Gulf currency token does not turn a known foreign issuer into a
+    // launch-tested bank. Keep the existing senderless Gulf history grammar.
+    const foreignIssuer = !detectLaunchMarketFromSender(sender) && hasUniversalInstitutionSender(sender);
+    const foreignRoute = inspection?.route.decision === 'single' &&
+      inspection.route.market !== 'AE' && inspection.route.market !== 'SA';
+    const result = foreignIssuer || foreignRoute ? null
+      : launchSession.parse(record.text, sender ?? '', inspection, undefined, timestamp);
+    if (!result || (result.currency !== 'AED' && result.currency !== 'SAR')) {
       const refusal = inspectHistoricalRefusal({
         record,
         timestamp,
@@ -344,9 +352,25 @@ export function parseHistoricalMessageRecords(
     // Never spread `raw` across this boundary: historical source text is more
     // sensitive than an ordinary Android scan and is not needed after parse.
     const { raw: _raw, ...structured } = result;
+    // Retain the same bounded bank/account facts the Android planner reads
+    // from its ephemeral body. Resolve them in the parsed money's market,
+    // which may differ from the user's initial device preference.
+    const market = result.currency === 'AED' ? 'AE' : result.currency === 'SAR' ? 'SA' : undefined;
+    const sourceFacts = () => {
+      // iOS 26's Find Messages exposes no sender, so a record may carry none;
+      // the one bank the body names is then its only bank identity.
+      const bankHint = structured.bankHint ?? bankFromSender(sender)?.name ??
+        soleBankNamedInText(record.text)?.name;
+      return {
+        bankHint,
+        transferEvidence: buildTransferEvidence({ ...result, bankHint, sender }, true),
+      };
+    };
+    const facts = market ? withMarketPackForParsing(market, sourceFacts) : sourceFacts();
     parsed.push({
       ...structured,
-      bankHint: structured.bankHint ?? senderBank,
+      ...facts,
+      ...(market ? { market } : {}),
       // Receipt time dates a transaction, never an unstated card deadline.
       date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(timestamp)),
       smsTs: timestamp,

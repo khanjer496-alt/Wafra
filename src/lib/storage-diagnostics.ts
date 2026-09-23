@@ -46,6 +46,22 @@
 /** The persistence operation that failed. Never a value, never a key. */
 export type StorageOp =
   | 'open'
+  /** SecureStore key lookup/generation before SQLite is touched. */
+  | 'secure-key'
+  /** Native expo-sqlite handle creation. */
+  | 'sqlite-open'
+  /** Applying PRAGMA key to the newly opened connection. */
+  | 'cipher-key'
+  /** The first page-1 read that proves the SQLCipher key is usable. */
+  | 'cipher-validation'
+  /** Pragmas/table bootstrap after the key has been validated. */
+  | 'schema-init'
+  /** Closing a failed/poisoned native handle before another open is allowed. */
+  | 'connection-close'
+  /** One encrypted key/value read after the connection is already open. */
+  | 'state-read'
+  /** The batched encrypted chunk read used during ledger hydration. */
+  | 'state-batch-read'
   | 'read'
   | 'write'
   | 'remove'
@@ -89,6 +105,21 @@ export interface StorageFailure {
   code: string | null;
   /** Closed-vocabulary classification. Never text taken from the error. */
   category: StorageCategory;
+}
+
+/**
+ * Whether one fresh-connection read retry is safe and useful.
+ *
+ * The native adapter retires the failing SQLCipher handle before rethrowing a
+ * state read error. `locked` and an otherwise `unknown` native failure can be
+ * transient and deserve one bounded retry. Everything else is deliberately
+ * fail-closed: retrying a wrong key, corrupt file, exhausted device, read-only
+ * store, or schema bug only delays recovery and can add more resource pressure.
+ */
+export function storageReadFailureMayRetry(
+  failure: Pick<StorageFailure, 'category'>,
+): boolean {
+  return failure.category === 'unknown' || failure.category === 'locked';
 }
 
 const FILE_NAME = 'wafra-storage-diagnostics.json';
@@ -293,6 +324,20 @@ function ensureLoaded(): void {
     recent = loadFromDisk();
   } catch {
     recent = [];
+  }
+}
+
+/**
+ * Read the bounded, source-free storage failure ring for an explicit support
+ * report. The returned rows contain only the closed vocabularies documented in
+ * {@link StorageFailure}; arbitrary native error text never reaches this API.
+ */
+export function getStorageFailures(): StorageFailure[] {
+  try {
+    ensureLoaded();
+    return recent.map((failure) => ({ ...failure }));
+  } catch {
+    return [];
   }
 }
 

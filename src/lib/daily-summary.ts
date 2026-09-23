@@ -20,11 +20,35 @@
  */
 import { formatAED, monthKey } from '@/lib/format';
 import { tf } from '@/lib/i18n';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import type { AppState, Transaction } from '@/lib/types';
 
 /** Rows named individually before the rest collapse into "+N more". */
 export const SUMMARY_ROWS = 5;
+
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return false;
+  }
+  return true;
+}
+
+function forEachInDateWindow(
+  transactions: readonly Transaction[],
+  inside: (date: string) => boolean,
+  visit: (t: Transaction) => void,
+): void {
+  const newestFirst = datesAreNewestFirst(transactions);
+  let seen = false;
+  for (const t of transactions) {
+    if (!inside(t.date)) {
+      if (seen && newestFirst) break;
+      continue;
+    }
+    seen = true;
+    visit(t);
+  }
+}
 
 export interface DailySummary {
   /** Total spent on the day, in fils. Always > 0 — see `buildDailySummary`. */
@@ -43,16 +67,15 @@ export interface DailySummary {
  */
 export function buildDailySummary(state: AppState, dayISO: string): DailySummary | null {
   const live = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   const rows: Transaction[] = [];
   let totalFils = 0;
-  for (const t of state.transactions) {
-    if (t.date !== dayISO) continue;
-    if (!isSpending(t, live, internal)) continue;
+  forEachInDateWindow(state.transactions, (date) => date === dayISO, (t) => {
+    if (!isSpending(t, live, internal)) return;
     rows.push(t);
     totalFils += t.amountFils;
-  }
+  });
   if (rows.length === 0 || totalFils <= 0) return null;
 
   // Largest first. A summary read on a lock screen gets four seconds, and the
@@ -109,12 +132,11 @@ function budgetProgress(
 
   const key = monthKey(dayISO);
   let spent = 0;
-  for (const t of state.transactions) {
-    if (monthKey(t.date) !== key) continue;
-    if (!limits.has(t.category)) continue;
-    if (!isSpending(t, live, internal)) continue;
+  forEachInDateWindow(state.transactions, (date) => monthKey(date) === key, (t) => {
+    if (!limits.has(t.category)) return;
+    if (!isSpending(t, live, internal)) return;
     spent += t.amountFils;
-  }
+  });
   return tf('dailySummaryBudget', {
     spent: formatAED(spent, { decimals: false }),
     limit: formatAED(totalLimit, { decimals: false }),

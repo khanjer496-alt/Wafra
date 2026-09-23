@@ -3,7 +3,7 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
 import { t, tf } from '@/lib/i18n';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 
 import {
   activeSubscriptions,
@@ -40,6 +40,13 @@ export interface Outgoing {
   billId?: string;
 }
 
+type LeavingSoonOptions = {
+  withinDays?: number;
+  kinds?: OutgoingKind[];
+  /** Exact recurrence projection supplied by a cooperative caller. */
+  detectedSubscriptions?: readonly Subscription[];
+};
+
 /**
  * Everything with a date on it, in one list: card statements, fixed bills and
  * detected subscriptions.
@@ -51,11 +58,16 @@ export interface Outgoing {
 export function leavingSoon(
   state: AppState,
   today: Date,
-  opts: { withinDays?: number; kinds?: OutgoingKind[] } = {},
+  opts: LeavingSoonOptions = {},
 ): Outgoing[] {
   const withinDays = opts.withinDays ?? 9;
   const kinds = new Set<OutgoingKind>(opts.kinds ?? ['card', 'bill', 'subscription']);
   const items: Outgoing[] = [];
+  // Bills and subscriptions both need the ledger's visibility rules. Compute
+  // them once; `internalTransferIds` is identity-cached, so this is free when
+  // another screen has already asked for the same arrays.
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   if (kinds.has('card')) {
     for (const { due, daysLeft, remainingFils, stale } of openDues(state, today)) {
@@ -77,10 +89,16 @@ export function leavingSoon(
   }
 
   if (kinds.has('bill')) {
+    // The same live/internal pair the Bills tab passes. Without it a charge
+    // on an archived card, or the arriving half of a move between the user's
+    // own accounts, reconciled a bill to "paid" here while Bills still listed
+    // it as due — Home and Bills disagreeing about the same reminder.
     for (const { bill, status, daysLeft, dueISO } of billsForMonth(
       state.bills,
       state.transactions,
       today,
+      liveAccounts,
+      internal,
     )) {
       if (status === 'paid') continue;
       items.push({
@@ -104,10 +122,10 @@ export function leavingSoon(
   }
 
   if (kinds.has('subscription')) {
-    const liveAccounts = liveAccountIds(state.accounts);
-    const internal = internalTransferIds(state.transactions, state.accounts);
     const subs = activeSubscriptions(
-      detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
+      opts.detectedSubscriptions
+        ? [...opts.detectedSubscriptions]
+        : detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
     );
     for (const sub of subs) {
       // Frequent prepaid top-ups are real commitments without a schedule.

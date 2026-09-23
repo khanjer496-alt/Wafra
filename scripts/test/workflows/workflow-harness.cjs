@@ -14,6 +14,9 @@ function createWorkflowHarness(options={}) {
  native.Share={share:record('share')};native.AccessibilityInfo={announceForAccessibility:record('announce')};
  d['@/hooks/use-reduced-motion']={useReducedMotion:()=>true,useMotionPreference:()=>({ready:true,reducedMotion:true})};
  d.react.useLayoutEffect=()=>{};
+ // This harness renders explicitly; each render reads the current external
+ // store snapshot. Async subscription/cancellation behavior has its own suite.
+ d.react.useSyncExternalStore=(_subscribe,getSnapshot)=>getSnapshot();
  d['expo-router'].useFocusEffect=()=>{};
  d['expo-router'].useGlobalSearchParams=()=>options.params??{};
  d['expo-router'].usePathname=()=>options.path??'/';
@@ -26,32 +29,45 @@ function createWorkflowHarness(options={}) {
  d['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};
  h.local('@/components/ui/layout');h.local('@/components/wafra-logo');
  h.local('@/lib/workflow-copy','src/lib/workflow-copy.ts');
- h.local('@/components/onboarding/money-preview');
+ // The welcome scene reads real source; artwork, locale and the logo CDN are explicit boundaries.
+ d['expo-image']={Image:p=>jsx('Image',p)};d['expo-localization']={getLocales:()=>[{regionCode:'AE'}]};
+ d['@/lib/verified-logo-identities']={verifiedLogoUrl:()=>null};
+ d['react-native-reanimated'].default.createAnimatedComponent=component=>component;
+ Object.assign(d['react-native-reanimated'],{withDelay:(_delay,value)=>value,withSpring:value=>value,withRepeat:value=>value,Easing:{...d['react-native-reanimated'].Easing,out:easing=>easing,inOut:easing=>easing,cubic:value=>value,sin:value=>value,linear:value=>value}});
+ h.local('@/lib/onboarding-bank-examples','src/lib/onboarding-bank-examples.ts');
+ h.local('@/lib/onboarding-alert-examples','src/lib/onboarding-alert-examples.ts');
+ h.local('@/components/onboarding/alive-scenes');
+ // The country control renders for real; only its sheet chrome is a boundary,
+ // so the closed state renders exactly the row a first-run user sees.
+ d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
+ h.local('@/components/onboarding/country-confirm');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
+ d['@/components/onboarding/setup-shell']={SetupShell:p=>jsx('SetupShell',p),SetupHeader:p=>d['@/components/ui/screen-header'].ScreenHeader(p)};
  d['@/components/themed-view']={ThemedView:p=>jsx('View',{...p,style:[{backgroundColor:h.theme.background},p.style]})};
  d['@/components/storage-recovery']={StorageRecovery:p=>jsx('Boundary',{name:'StorageRecovery',...p})};
  d['@/components/ledger-currency-sheet']={LedgerCurrencySheet:p=>jsx('LedgerCurrencySheet',p),suggestedLedgerCurrency:()=> 'AED'};
  d['expo-constants']={__esModule:true,default:{expoConfig:{version:'test',extra:{}},platform:{},executionEnvironment:'standalone'}};
  for(const name of ['expo-document-picker','expo-local-authentication','expo-print','expo-sharing','expo-crypto','expo-device'])d[name]={};
  const store=d['@/lib/store'].useStore();
- for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','importBackup','clearAll'])store[name]=record(name);
- Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,storageFailure:null,...options.state});
+ for(const name of ['dismissReviewAlert','setAppLock','setDailySummary','setPrivateMode','setTheme','setThemePreference','setLanguage','setMarket','ensureDurable','setOnboarded','setOnboardingPlan','setOnboardingProfile','setAndroidCaptureSources','importBackup','clearAll'])store[name]=record(name);
+ Object.assign(h.state,{appLock:false,dailySummary:false,themePreference:'system',founderPro:false,pro:true,userName:'',storageFailure:null,marketId:'AE',knownBanks:['Emirates NBD'],...options.state});
  Object.assign(store,{storageFailure:null,storageRecoveryState:null,hydrationFailed:false});
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
- Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'}}],canSelectMarket:()=>true});
- d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],rowCount:0},overrideAppliesTo:()=>false};
+ Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
+ d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
+ d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
  d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
  d['@/lib/background-relay']={clearBackgroundRelayRows:record('clearBackgroundRelayRows'),getChargeAlertPreference:async()=>false,setChargeAlertsEnabled:record('setChargeAlertsEnabled'),disableRelayBackgroundSync:record('disableRelayBackgroundSync')};
  Object.assign(d['@/lib/notifications'],{cancelDailySummary:record('cancelDailySummary'),requestNotificationPermission:async()=>false,syncDailySummary:record('syncDailySummary')});
- Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission')});
+ Object.assign(d['@/lib/auto-import'],{hasSmsPermission:async()=>false,requestSmsPermission:record('requestSmsPermission'),requestSmsDeliveryPermission:record('requestSmsDeliveryPermission'),hasBankNotificationSystemAccess:()=>false,openBankNotificationAccessSettings:async()=>true,isSmsScanningAvailable:()=>true});
  d['@/lib/founder-pro']={EMPTY_FOUNDER_TAP_SEQUENCE:[],isFounderUnlockBuild:()=>false,recordFounderTap:()=>({})};
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};
@@ -64,12 +80,13 @@ function createWorkflowHarness(options={}) {
   trackGrowthEvent:()=>{},
  };
  d['@/lib/reimbursement-report']={buildExpenseReportHtml:()=>'',reportExpenses:()=>[]};
- d['../../modules/notification-reader']={};d['../../modules/sms-reader']={};
- d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false};
+ d['../../modules/notification-reader']={__esModule:true,default:{setCaptureEnabled:async()=>true}};d['../../modules/sms-reader']={};
+ d['@/lib/trusted-bank-notification-packages']={isBankNotificationCaptureAvailable:()=>false,bankNotificationAdmissionExpiresAt:()=>Date.now()+86400000};
  Object.assign(d['@/lib/launch-performance'],{isInternalLaunchDiagnosticsEnabled:()=>false,serializeLaunchMetrics:()=>''});
  d['@/lib/growth-funnel']={GROWTH_PLACEMENTS:{onboarding:'onboarding_main',postImportPro:'post_import_pro',settingsPro:'settings_pro'},trackGrowthEvent:(...args)=>h.events.push(['growth',...args])};
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
+ h.local('@/lib/android-capture-sources','src/lib/android-capture-sources.ts');
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
@@ -86,6 +103,11 @@ function createWorkflowHarness(options={}) {
   if(screen==='pro'){
    h.local('@/lib/purchases','src/lib/purchases.ts');
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
+   d['@/components/superwall-billing-context']={useWafraBilling:()=>({
+    available:false,configured:false,configurationError:null,paywallStatus:'idle',
+    fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',
+    presentProPaywall:async()=>{},restorePro:async()=>null,
+   })};
    store.setPro=record('setPro');
   }
   if(screen==='trusted-devices')h.local('@/lib/trusted-device-contract','src/lib/trusted-device-contract.ts');

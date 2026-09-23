@@ -104,7 +104,10 @@ export default function ReviewTransfersScreen() {
   const [filter, setFilter] = useState<'pending' | 'reviewed'>(() =>
     transactionId && !reconcileTransfers(state.transactions, state.accounts).pendingIds.has(transactionId) ? 'reviewed' : 'pending');
   const [showAll, setShowAll] = useState(false);
-  const [scope, setScope] = useState<TransferHistoryScope>('recent');
+  // This screen is an exception handler, not a second transaction-history
+  // browser. Show every unresolved item and keep ordinary/confirmed transfers
+  // in the normal activity surfaces.
+  const [scope, setScope] = useState<TransferHistoryScope>('all');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -127,7 +130,12 @@ export default function ReviewTransfersScreen() {
   }, [state.accounts, state.transactions, words]);
   const focusedId = showAll ? undefined : transactionId;
   const todayISO = toISODate(new Date());
-  const candidates = useMemo<Group[]>(() => filter === 'pending' ? reconciliation.groups : state.transactions
+  const candidates = useMemo<Group[]>(() => filter === 'pending'
+    ? reconciliation.groups.flatMap((group) => {
+        const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id));
+        return transactionIds.length > 0 ? [{ ...group, transactionIds }] : [];
+      })
+    : state.transactions
       .filter((row) => {
         if (row.transferDecision) return true;
         const assessment = reconciliation.byId.get(row.id);
@@ -142,6 +150,10 @@ export default function ReviewTransfersScreen() {
         counterparty: row.transferEvidence?.counterparty, bulkEligible: false,
         counterpartyName: row.transferEvidence?.counterpartyName,
       })), [filter, reconciliation, state.transactions]);
+  const candidateTransactionCount = useMemo(
+    () => candidates.reduce((count, group) => count + group.transactionIds.length, 0),
+    [candidates],
+  );
   const searching = deferredQuery.trim().length > 0;
   const searchIndex = useMemo(() => searching
     ? indexTransferHistory(candidates, transactionsById, accountLabels, amount => state.ledgerMoney
@@ -266,25 +278,12 @@ export default function ReviewTransfersScreen() {
         contentContainerStyle={insets.contentContainerStyle} contentInset={insets.contentInset}
         scrollIndicatorInsets={insets.scrollIndicatorInsets} contentInsetAdjustmentBehavior="automatic"
         ListHeaderComponent={<View style={styles.intro}>
-          <View style={styles.filters} accessibilityRole="tablist">
-            {(['pending', 'reviewed'] as const).map((value) => <Pressable key={value}
-              testID={`transfer-filter-${value}`} accessibilityRole="tab" accessibilityState={{ selected: filter === value }}
-              accessibilityLabel={words[value]} onPress={() => { setFilter(value); setExpanded(new Set()); setLimits({}); }}
-              style={[styles.filter, { borderColor: filter === value ? theme.primary : theme.cardBorder }]}>
-              <ThemedText type="smallBold">{words[value]}</ThemedText>
-            </Pressable>)}
-          </View>
-          <ThemedText type="small" themeColor="textSecondary">{filter === 'pending' ? words.intro : words.reviewedIntro}</ThemedText>
-          {focusedId ? <Button variant="ghost" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} /> : <>
-            <View style={styles.filters}>
-              {(['recent', 'all'] as const).map(value => <Pressable key={value} testID={`transfer-scope-${value}`}
-                accessibilityRole="button" accessibilityState={{ selected: scope === value }}
-                accessibilityLabel={value === 'recent' ? words.recent : words.allHistory}
-                onPress={() => browse(value)} style={[styles.scope, { borderColor: theme.cardBorder,
-                  backgroundColor: scope === value ? theme.backgroundSelected : 'transparent' }]}>
-                <ThemedText type="smallBold">{value === 'recent' ? words.recent : words.allHistory}</ThemedText>
-              </Pressable>)}
-            </View>
+          {!focusedId && candidates.length > 0 ? (
+            <ThemedText type="small" themeColor="textSecondary">{words.intro}</ThemedText>
+          ) : null}
+          {focusedId ? (
+            <Button variant="ghost" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} />
+          ) : candidateTransactionCount > 8 ? (
             <TextField testID="transfer-search" label={words.search} value={query} onChangeText={setQuery}
               autoCapitalize="none" autoCorrect={false} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()}
               leading={<Icon name="search" size={16} color={theme.textSecondary} />}
@@ -292,18 +291,13 @@ export default function ReviewTransfersScreen() {
                 onPress={() => setQuery('')} style={styles.clearSearch}>
                 <Icon name="close" size={16} color={theme.textSecondary} />
               </Pressable> : undefined} />
-            <ThemedText testID="transfer-browse-summary" type="meta" themeColor="textSecondary">
-              {words.shown(projection.count, groups.length)} · {words.newestFirst}
-            </ThemedText>
-          </>}
+          ) : null}
         </View>}
         ListEmptyComponent={<View style={styles.empty}>
-          <ThemedText type="subtitle" accessibilityRole="header">{focusedId ? transactionsById.has(focusedId) ? words.notPending : words.missingRoute : deferredQuery.trim() ? words.searchEmpty : filter === 'pending' ? scope === 'recent' ? words.recentEmpty : words.empty : words.reviewedEmpty}</ThemedText>
+          <ThemedText type="subtitle" accessibilityRole="header">{focusedId ? transactionsById.has(focusedId) ? words.notPending : words.missingRoute : deferredQuery.trim() ? words.searchEmpty : filter === 'pending' ? words.empty : words.reviewedEmpty}</ThemedText>
           {focusedId && reconciliation.byId.get(focusedId) ? <ThemedText type="small" themeColor="textSecondary">{statusLabel(reconciliation.byId.get(focusedId)!.status, words)}</ThemedText> : null}
-          {!focusedId ? <ThemedText type="small" themeColor="textSecondary">{deferredQuery.trim() ? words.searchEmptyBody : filter === 'pending' ? words.emptyBody : words.reviewedEmptyBody}</ThemedText> : null}
+          {!focusedId && deferredQuery.trim() ? <ThemedText type="small" themeColor="textSecondary">{words.searchEmptyBody}</ThemedText> : null}
         </View>}
-        ListFooterComponent={!focusedId && scope === 'recent' && projection.outsideRecentCount > 0
-          ? <View style={styles.historyLink}><Button wrapLabel variant="ghost" label={words.historyAvailable(projection.outsideRecentCount)} onPress={() => browse('all')} /></View> : null}
         renderItem={({ item }) => item.kind === 'group' ? <View testID="transfer-review-group"
           style={[styles.group, { borderTopColor: theme.cardBorder }]}>
           <Pressable testID="transfer-group-toggle" accessibilityRole="button"

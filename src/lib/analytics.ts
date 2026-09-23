@@ -1,6 +1,6 @@
 import { isFixedCommitment } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { countsInTotals, internalTransferIds, isSpending } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import {
   comparablePreviousPeriod,
   inPeriod,
@@ -150,7 +150,7 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   // account being retired, and pairing over the live set alone meant hiding
   // that account restored the arrival to the series as fresh money. Whether an
   // account is shown is a separate question, asked below on `live`.
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   return keys.map((key) => {
     let fils = opening;
@@ -205,15 +205,17 @@ export function categoryTrend(
   const nowKey = endKey ?? monthKey(new Date());
   const keys: string[] = [];
   for (let i = months - 1; i >= 0; i--) keys.push(shiftMonthKey(nowKey, -i));
-  return keys.map((key) => {
-    let fils = 0;
-    for (const t of transactions) {
-      if (isSpending(t, live, internal) && monthKey(t.date) === key) {
-        fils += amountInCategory(t, category);
-      }
-    }
-    return { key, fils };
-  });
+  const buckets = keys.map((key) => ({ key, fils: 0 }));
+  if (buckets.length === 0) return buckets;
+  const byMonth = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  // Input can be shuffled. One complete pass preserves each month's source
+  // accumulation order without revisiting years of history for every bucket.
+  for (const t of transactions) {
+    if (!isSpending(t, live, internal)) continue;
+    const bucket = byMonth.get(monthKey(t.date));
+    if (bucket) bucket.fils += amountInCategory(t, category);
+  }
+  return buckets;
 }
 
 export interface TrendShape {

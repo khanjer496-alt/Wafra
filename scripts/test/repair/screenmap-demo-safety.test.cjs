@@ -21,10 +21,14 @@ test('Screenmap uses only the synthetic iOS development ledger', () => {
     /const SYNTHETIC_DEMO_LEDGER = E2E_DEMO_LEDGER \|\| SCREENMAP_DEMO_LEDGER/);
   assert.match(source,
     /SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/);
-  assert.match(source,
-    /if \(SCREENMAP_DEMO_LEDGER\) \{[\s\S]*?dispatch\(\{ type: 'hydrate', state: demoState\(\) \}\);[\s\S]*?return true;[\s\S]*?\}\s*const loaded = await persistence\.load\(\);/,
-    'Screenmap must hydrate synthetic data before encrypted persistence is read',
-  );
+  const screenmapGuard = source.indexOf('if (SCREENMAP_DEMO_LEDGER) {');
+  const encryptedRead = source.indexOf('persistence.load()', screenmapGuard);
+  assert.ok(screenmapGuard >= 0 && encryptedRead > screenmapGuard,
+    'Screenmap guard must execute before encrypted persistence is read');
+  const beforeEncryptedRead = source.slice(screenmapGuard, encryptedRead);
+  assert.match(beforeEncryptedRead, /dispatch\(\{ type: 'hydrate', state: demoState\(\) \}\);/);
+  assert.match(beforeEncryptedRead, /return true;/,
+    'Screenmap must finish synthetic hydration before encrypted persistence is read');
   assert.match(source,
     /const persist = useCallback\(\(snapshot: AppState\): Promise<boolean> => \{[\s\S]*?if \(SCREENMAP_DEMO_LEDGER\) return Promise\.resolve\(true\);[\s\S]*?persistence\.save\(snapshot\)/,
     'Screenmap must not write its synthetic ledger to encrypted persistence',

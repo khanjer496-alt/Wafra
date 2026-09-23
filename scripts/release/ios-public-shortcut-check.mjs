@@ -9,11 +9,41 @@ import { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } from '../b
 const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
-  { kind: 'history', id: '5bd032fe9a464af390ac1aae22af2f08', installedName: 'Wafra History v2', build: buildPagedHistoryShortcut, verify: verifyPagedHistoryShortcut },
+  { kind: 'history-v2', id: 'bc30c7ae89d6494c9ef0aea1a666d72d', installedName: 'Wafra-History-v2-typed-date.signed', build: buildPagedHistoryShortcut, verify: verifyPagedHistoryShortcut },
   { kind: 'future', id: '822bcc1dd2964b9f887ef9b93601441d', installedName: 'Wafra Capture v2', build: buildLocalCaptureShortcut, verify: verifyLocalCaptureShortcutGraph },
+];
+// The typed-date v4 record is an Apple-signed release asset (AEA, opaque), so
+// it is pinned by exact byte digest: the generator graph it was signed from is
+// `buildRowHistoryShortcut`, verified at signing time on the Mac.
+const assets = [
+  { kind: 'history', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut',
+    installedName: 'Wafra-History-v6.signed', sha256: 'de2364c4eb98a36547129ffdfc1328915f112db9a4adb95f1b52b950d6a44ad7', bytes: 43703 },
+  { kind: 'history-v4', url: 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v4-20260919/Wafra-History-v4.signed.shortcut',
+    installedName: 'Wafra-History-v4.signed', sha256: '6b34bc3563ec86e228db32cd7d0fdb443f6e7e9c074fe55e3ec0c84deef909b6', bytes: 31795 },
 ];
 const report = { sourceCommit: process.env.GITHUB_SHA, checkedAt: new Date().toISOString(), scope: 'public artifact equality only, not physical automation execution', results: [] };
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+for (const asset of assets) {
+  const item = { kind: asset.kind, assetUrl: asset.url, installedName: asset.installedName, expectedSha256: asset.sha256 };
+  report.results.push(item);
+  try {
+    const url = new URL(asset.url);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com') throw new Error('unexpected-asset-host');
+    item.installedNameMatches = url.pathname.endsWith(`/${asset.installedName}.shortcut`);
+    const download = await fetch(url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
+    item.assetHttpStatus = download.status;
+    if (!download.ok) throw new Error('graph-download-failed');
+    const bytes = Buffer.from(await download.arrayBuffer());
+    if (bytes.byteLength > 2000000) throw new Error('graph-too-large');
+    item.downloadSha256 = sha256(bytes);
+    item.downloadBytes = bytes.byteLength;
+    item.appleSigned = bytes.subarray(0, 4).toString('latin1') === 'AEA1';
+    item.publicValidation = item.appleSigned && item.installedNameMatches && item.downloadSha256 === asset.sha256 && bytes.byteLength === asset.bytes ? 'passed' : 'mismatch';
+  } catch (error) {
+    const allowed = new Set(['unexpected-asset-host', 'graph-download-failed', 'graph-too-large']);
+    item.publicValidation = 'not-verified'; item.failure = allowed.has(error.message) ? error.message : 'fetch-or-validation-failed';
+  }
+}
 const decoder = 'import sys,plistlib,json\nx=plistlib.loads(sys.stdin.buffer.read())\nprint(json.dumps(x))\n';
 const python = process.platform === 'darwin' ? '/usr/bin/python3' : 'python3';
 for (const check of checks) {

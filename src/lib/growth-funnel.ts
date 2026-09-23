@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import type { OnboardingFocus, OnboardingTracking } from '@/lib/types';
+import type { OnboardingAlertDelivery, OnboardingFocus, OnboardingTracking } from '@/lib/types';
 
 /**
  * Stable identifiers that can be copied into Adapty later.
@@ -18,6 +18,8 @@ export type GrowthEvent =
   | 'onboarding_started'
   | 'onboarding_focus_selected'
   | 'onboarding_tracking_selected'
+  | 'onboarding_alerts_selected'
+  | 'onboarding_history_gap_import_opened'
   | 'onboarding_value_previewed'
   | 'onboarding_privacy_seen'
   | 'capture_setup_started'
@@ -31,9 +33,12 @@ export type GrowthEvent =
 export interface GrowthEventPayload {
   focus?: OnboardingFocus | null;
   tracking?: OnboardingTracking | null;
+  /** How the bank delivers alerts. A channel, never a provider identity. */
+  alerts?: OnboardingAlertDelivery | null;
   platform?: 'ios' | 'android' | 'web' | 'other';
   placement?: (typeof GROWTH_PLACEMENTS)[keyof typeof GROWTH_PLACEMENTS];
   outcome?: 'automatic' | 'manual' | 'denied' | 'failed';
+  source?: 'sms' | 'bank-notifications';
 }
 
 export type GrowthEventSink = (event: GrowthEvent, payload: GrowthEventPayload) => void;

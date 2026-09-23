@@ -1,4 +1,3 @@
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
@@ -16,15 +15,23 @@ import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
+import { tapped } from '@/lib/haptics';
+import { t, tf } from '@/lib/i18n';
+import { groundLocalAssistantRequest, isIndependentAssistantQuestion, localAssistantPreviousRequest, normalizeLocalAssistantQuestion } from '@/lib/local-assistant-grounding';
+import { improveAssistantRequestLocally } from '@/lib/local-semantic-assistant';
+import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { periodLabel, periodRange } from '@/lib/period';
+import { currentMonthPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
+import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { AppState } from '@/lib/types';
 import {
-  assistantFollowUpQuestions, executeAssistantTool, runWafraAssistant, suggestedAssistantQuestions,
-  type AssistantAnswer, type AssistantFinding, type AssistantToolRequest,
+  assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
+  runWafraAssistantCooperatively, suggestedAssistantQuestions,
+  type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
 } from '@/lib/wafra-assistant';
 
 const MAX_TURNS = 12;
@@ -49,11 +56,11 @@ export default function AssistantScreen() {
   const params = useLocalSearchParams<{ question?: string }>();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
   const { fontScale, height } = useWindowDimensions();
-  const { state, getStateSnapshot, getStateGeneration } = useStore();
+  const { state, getStateSnapshot, getStateGeneration, editTransaction, resolveTransfers,
+    setMerchantOverride, setNotSubscription } = useStore();
   const { period } = usePeriod();
   const periodKey = JSON.stringify(period);
   const generation = getStateGeneration();
@@ -62,24 +69,43 @@ export default function AssistantScreen() {
   const scrollFrame = useRef<number | null>(null);
   const nextId = useRef(0);
   const routeQuestionHandled = useRef<string | null>(null);
+  const sendingRef = useRef(false);
   const previousGeneration = useRef(generation);
   const hadHydratedLedger = useRef(false);
   const previousPeriod = useRef(periodKey);
   const [question, setQuestion] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [modelState, setModelState] = useState(() => localSemanticRuntimeStatus().state);
+  useFocusEffect(useCallback(() => {
+    const update = () => setModelState(localSemanticRuntimeStatus().state);
+    update();
+    const timer = setInterval(update, 2000);
+    return () => clearInterval(timer);
+  }, []));
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [droppedTurns, setDroppedTurns] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const [evidenceSelection, setEvidenceSelection] = useState<{ turnId: number; findingId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [today, setToday] = useState(() => toISODate(new Date()));
+  const [composerHeight, setComposerHeight] = useState(0);
   const minInputHeight = Math.max(48, Math.ceil(22 * fontScale) + 24);
   const maxInputHeight = Math.max(minInputHeight, Math.min(160, height * 0.25));
   const [inputHeight, setInputHeight] = useState(minInputHeight);
   const currentTurns = turns.filter((turn) => turn.generation === generation);
   const latest = currentTurns.at(-1);
-  const contextPeriod = latest && 'period' in latest.request ? latest.request.period : period;
-  const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [], [state, period]);
-  const followUps = latest?.answer.suggestions ?? (latest ? assistantFollowUpQuestions(latest.request) : []);
+  const correctionContextTurn = [...currentTurns].reverse().find((turn) => turn.answer.tool !== 'help');
+  const conversationContext = latestAssistantContext(currentTurns.map((turn) => turn.request));
+  const contextPeriod = conversationContext && 'period' in conversationContext ? conversationContext.period : period;
+  const suggestions = useMemo(() => state.hydrated ? suggestedAssistantQuestions(state, period) : [],
+    // Suggestions read the ledger, not capture/progress metadata.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.hydrated, state.transactions, state.bills, state.cardDues, state.budgets, state.accounts, state.notSubscriptions, state.monthStartDay, period]);
+  const latestSuggestions = latest?.answer.suggestions?.length &&
+    (latest.request.tool !== 'help' || latest.request.suggestions?.length)
+    ? latest.answer.suggestions : undefined;
+  const followUps = latestSuggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []);
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));
@@ -123,19 +149,169 @@ export default function AssistantScreen() {
       setEvidenceSelection({ turnId: id });
     }
     if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(result.answer.title + '. ' + result.answer.body);
+    return id;
   };
 
-  const ask = (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
-    const clean = value.trim().slice(0, 1000);
+  const appendCorrectionResult = (
+    clean: string,
+    summary: string,
+    beforeGeneration: number,
+    answeredAt: Date,
+    contextRequest?: AssistantToolRequest,
+  ) => {
     const snapshot = getStateSnapshot();
-    if (!clean || !snapshot.hydrated || generation !== getStateGeneration()) return;
-    const now = new Date();
+    const currentGeneration = getStateGeneration();
+    // This generation change was caused by the correction the user just asked
+    // for. Preserve the transcript, but keep the old input references so those
+    // earlier answers visibly become stale rather than silently changing.
+    previousGeneration.current = currentGeneration;
+    const base = contextRequest
+      ? executeAssistantTool(snapshot, contextRequest, answeredAt)
+      : executeAssistantTool(snapshot, { tool: 'help', clarification: summary }, answeredAt);
+    const answer: AssistantAnswer = contextRequest
+      ? { ...base, title: tf('assistantCorrectionUpdatedTitle', { title: base.title }), body: `${summary} ${base.body}` }
+      : base;
+    const request = contextRequest ?? { tool: 'help' as const, clarification: summary };
+    const id = ++nextId.current;
+    needsScroll.current = true;
+    setTurns((current) => {
+      const rebased = current.filter((turn) => turn.generation === beforeGeneration)
+        .map((turn) => ({ ...turn, generation: currentGeneration }));
+      return [...rebased.slice(-(MAX_TURNS - 1)), {
+        id, generation: currentGeneration, question: clean, request, answer,
+        answeredAt, inputs: ledgerInputs(snapshot),
+      }];
+    });
+    setQuestion('');
+    setInputHeight(minInputHeight);
+    setEvidenceSelection(null);
+    setError(null);
+    setToday(toISODate(answeredAt));
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(answer.title + '. ' + answer.body);
+  };
+
+  const applyCorrection = async (
+    clean: string,
+    correction: Exclude<AssistantCorrectionPlan, { kind: 'clarification' }>,
+    snapshot: AppState,
+    now: Date,
+  ) => {
+    const beforeGeneration = getStateGeneration();
+    const contextRequest = correctionContextTurn?.request ?? conversationContext;
+    const correctionLanguage: 'en' | 'ar' = snapshot.language === 'ar' ? 'ar' : 'en';
+    let summary: string;
+    if (correction.kind === 'merchant-category') {
+      setMerchantOverride(correction.merchant, correction.category, true, correction.direction);
+      summary = tf(
+        correction.direction === 'income'
+          ? 'assistantCorrectionMerchantCategoryIncome'
+          : 'assistantCorrectionMerchantCategoryExpense',
+        {
+          merchant: correction.merchant,
+          category: categoryLabel(correction.category, correctionLanguage),
+        },
+      );
+    } else if (correction.kind === 'transaction-category') {
+      editTransaction(correction.transactionId, { category: correction.category });
+      summary = tf('assistantCorrectionTransactionCategory', {
+        category: categoryLabel(correction.category, correctionLanguage),
+      });
+    } else if (correction.kind === 'not-subscription') {
+      setNotSubscription(correction.merchant, true);
+      summary = tf('assistantCorrectionNotSubscription', { merchant: correction.merchant });
+    } else {
+      const row = snapshot.transactions.find((transaction) => transaction.id === correction.transactionId);
+      if (!row) throw new Error(t('assistantCorrectionTargetMissing'));
+      await resolveTransfers({
+        ids: [row.id], ownership: correction.ownership,
+        expectedFingerprints: { [row.id]: transferFingerprint(row) }, expectedGeneration: beforeGeneration,
+      });
+      summary = correction.ownership === 'own'
+        ? t('assistantCorrectionOwnTransfer')
+        : t('assistantCorrectionExternalTransfer');
+    }
+    appendCorrectionResult(clean, summary, beforeGeneration, now, contextRequest);
+  };
+
+  const ask = async (value = question, usePrevious = true, contextRequest?: AssistantToolRequest) => {
+    const clean = value.trim().slice(0, 1000);
+    const initialSnapshot = getStateSnapshot();
+    if (!clean || !initialSnapshot.hydrated || sendingRef.current) return;
+    sendingRef.current = true;
+    setIsSending(true);
+    setPendingQuestion(clean);
+    setQuestion('');
+    setError(null);
+    Keyboard.dismiss();
     try {
-      const result = runWafraAssistant(snapshot, clean, now, usePrevious ? contextRequest ?? latest?.request : null, period);
+      // Android must get a committed frame before any ledger interpretation.
+      // Without this yield, state updates above are batched with the synchronous
+      // local engine: on a large history the text stays in the field and the
+      // Send button looks dead until all calculation has already finished.
+      if (Platform.OS === 'android') {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const snapshot = getStateSnapshot();
+      if (!snapshot.hydrated) throw new Error(copy.stale);
+      const startGeneration = getStateGeneration();
+      const renderIsCurrent = generation === startGeneration;
+      if (!renderIsCurrent) previousGeneration.current = startGeneration;
+      const now = new Date();
+      const correction = usePrevious && renderIsCurrent
+        ? planAssistantCorrection(snapshot, clean, correctionContextTurn?.answer)
+        : undefined;
+      if (correction?.kind === 'clarification') {
+        const request: AssistantToolRequest = { tool: 'help', clarification: correction.body, suggestions: correction.suggestions };
+        appendAnswer(clean, { request, answer: executeAssistantTool(snapshot, request, now) }, snapshot, now);
+        return;
+      }
+      if (correction) {
+        await applyCorrection(clean, correction, snapshot, now);
+        return;
+      }
+      const interpretedQuestion = normalizeLocalAssistantQuestion(clean);
+      const previous = usePrevious && renderIsCurrent
+        ? contextRequest ?? localAssistantPreviousRequest(snapshot, interpretedQuestion, conversationContext, now, period)
+        : null;
+      let result = Platform.OS === 'android'
+        ? await runWafraAssistantCooperatively(
+            snapshot,
+            interpretedQuestion,
+            now,
+            previous,
+            period,
+            () => startGeneration !== getStateGeneration(),
+          )
+        : runWafraAssistant(snapshot, interpretedQuestion, now, previous, period);
+      if (result === null) return;
+      // The native wrapper returns this answer immediately while an unavailable
+      // model warms/retries under its backoff. A failed startup download must
+      // not strand Ask in deterministic-only mode until the next app restart.
+      if (result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
+        const improved = await improveAssistantRequestLocally({
+          question: clean,
+          deterministicRequest: result.request,
+          previousRequest: null,
+          groundRequest: (candidate) => groundLocalAssistantRequest(snapshot, clean, candidate, now, period),
+          defaultPeriod: period,
+          currentPeriod: currentMonthPeriod(now),
+          cancelled: () => startGeneration !== getStateGeneration(),
+        });
+        if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
+        if (improved !== result.request) {
+          result = { request: improved, answer: executeAssistantTool(snapshot, improved, now) };
+        }
+      }
+      if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
       appendAnswer(clean, result, snapshot, now);
     } catch {
-      // Keep the question available to edit; financial records never enter logs.
+      // Restore the draft when submission fails; financial records never enter logs.
+      setQuestion((current) => current || clean);
       setError(copy.failed);
+    } finally {
+      sendingRef.current = false;
+      setIsSending(false);
+      setPendingQuestion(null);
     }
   };
   const askRef = useRef(ask);
@@ -247,45 +423,63 @@ export default function AssistantScreen() {
   return <>
     <ScreenScaffold testID="assistant-screen"
       keyboardAware={Platform.OS === 'ios'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      // ScreenScaffold owns this screen's header. `useHeaderHeight()` cannot be
+      // used here because the root stack starts with `headerShown: false`; on
+      // Android it throws before the first frame, leaving only the window
+      // background visible. The keyboard-avoiding view already lives below the
+      // native header on iOS, so no navigator-header offset is required.
+      keyboardVerticalOffset={0}
       scrollRef={scrollRef}
+      contentStyle={composerHeight > 0 ? { paddingBottom: composerHeight + 12 } : undefined}
       scrollProps={{ keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
         onContentSizeChange: scrollToLatest, onLayout: scrollToLatest }}
       header={{ title: copy.title,
         back: { label: copy.back, onPress: () => router.canGoBack() ? router.back() : router.replace('/') },
         actions: currentTurns.length > 0 ? [{ label: copy.newChat, onPress: resetConversation }] : [],
       }}
-      footer={<View testID="assistant-composer" style={[styles.composer, {
+      footer={<View testID="assistant-composer" onLayout={(event) => {
+        const next = Math.ceil(event.nativeEvent.layout.height);
+        if (next !== composerHeight) setComposerHeight(next);
+      }} style={[styles.composer, {
         borderColor: theme.cardBorder,
-        marginBottom: Platform.OS === 'android' ? Math.max(0, keyboardHeight - insets.bottom) : 0,
+        // keyboardDidHide can occasionally be missed on some Android OEMs.
+        // Never keep a stale keyboard height lifting the composer after the OS
+        // itself says the keyboard is gone.
+        marginBottom: Platform.OS === 'android' && Keyboard.isVisible()
+          ? Math.max(0, keyboardHeight - insets.bottom)
+          : 0,
       }]}>
         <View style={styles.context}>
           <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
-            onPress={() => { Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
+            onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
             <Icon name="calendar" size={15} color={theme.textSecondary} />
             <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
             <Icon name="chevron-down" size={12} color={theme.textSecondary} />
           </Pressable>
-          <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyCode()}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {`${ledgerCurrencyCode()} · ${copy.localShort}`}
+          </ThemedText>
         </View>
+        {Platform.OS !== 'web' ? <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary">
+          {modelState === 'ready' ? copy.localAiReady : modelState === 'downloading' ? copy.localAiPreparing : copy.localAiUnavailable}
+        </ThemedText> : null}
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
         <View style={styles.inputRow}>
           <TextInput testID="assistant-input" value={question} onChangeText={(value) => { setQuestion(value); setError(null); }}
             onSubmitEditing={() => ask()} returnKeyType="send" submitBehavior="submit" multiline
-            accessibilityLabel={copy.placeholder} maxLength={1000} editable={state.hydrated}
+            accessibilityLabel={copy.placeholder} maxLength={1000} editable={state.hydrated && !isSending}
             placeholder={copy.placeholder} placeholderTextColor={theme.textTertiary}
             selectionColor={theme.primary} autoComplete="off" textAlignVertical="top"
             onContentSizeChange={(event) => setInputHeight(event.nativeEvent.contentSize.height)}
             style={[styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
               color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]} />
           <Pressable testID="assistant-send" accessibilityRole="button" accessibilityLabel={copy.send}
-            accessibilityState={{ disabled: !question.trim() || !state.hydrated }}
-            disabled={!question.trim() || !state.hydrated} onPress={() => ask()}
-            style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated ? 1 : 0.4 }]}>
+            accessibilityState={{ disabled: !question.trim() || !state.hydrated || isSending, busy: isSending }}
+            disabled={!question.trim() || !state.hydrated || isSending} onPress={() => { tapped(); void ask(); }}
+            style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated && !isSending ? 1 : 0.4 }]}>
             <Icon name="arrow-up" size={20} color={theme.onPrimary} />
           </Pressable>
         </View>
-        <ThemedText type="meta" themeColor="textTertiary">{copy.local}</ThemedText>
       </View>}>
       {currentTurns.length === 0 ? <View style={styles.hero}>
         <ThemedText type="heading">{copy.heading}</ThemedText>
@@ -299,13 +493,19 @@ export default function AssistantScreen() {
           <Button label={copy.import} onPress={() => router.push('/import-sms')} />
           <Button label={copy.add} variant="outline" onPress={() => router.push('/add-transaction')} />
         </View> : currentTurns.length === 0 ? <View style={styles.suggestions}>
-          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
+          {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
             style={[styles.suggestion, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="small" style={styles.suggestionText}>{item}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textTertiary} />
           </Pressable>)}
         </View> : null}
       {droppedTurns ? <ThemedText type="meta" themeColor="textTertiary">{copy.recentQuestions(MAX_TURNS)}</ThemedText> : null}
+      {pendingQuestion ? <View style={styles.turn} testID="assistant-pending-turn">
+        <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+          <ThemedText type="smallBold" selectable>{pendingQuestion}</ThemedText>
+        </View>
+        <ThemedText type="meta" themeColor="textTertiary" accessibilityRole="progressbar">{copy.understanding}</ThemedText>
+      </View> : null}
       {currentTurns.map((turn, index) => <View key={turn.id} style={styles.turn} testID="assistant-turn">
         <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
           <ThemedText type="smallBold" selectable>{turn.question}</ThemedText>
@@ -313,7 +513,10 @@ export default function AssistantScreen() {
         <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'}
           style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
           <ThemedText type="micro" themeColor="primary">{turn.answer.title}</ThemedText>
-          <ThemedText selectable>{turn.answer.body}</ThemedText>
+          {turn.answer.headline ? <>
+            <ThemedText type="heading" tabular selectable>{turn.answer.headline}</ThemedText>
+            {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
+          </> : <ThemedText selectable>{turn.answer.body}</ThemedText>}
           {turn.answer.facts?.length ? <View style={styles.facts}>
             {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
               <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
@@ -335,8 +538,8 @@ export default function AssistantScreen() {
           </>}
         </View>
       </View>)}
-      {currentTurns.length > 0 && followUps.length > 0 ? <View style={styles.quickFollowUps}>
-        {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => ask(item)}
+      {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.quickFollowUps}>
+        {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
           style={[styles.followUpChip, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
           <ThemedText type="meta" style={styles.followUpText}>{item}</ThemedText>
         </Pressable>)}
@@ -355,20 +558,20 @@ const styles = StyleSheet.create({
   suggestion: { minHeight: 48, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.control,
     paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   suggestionText: { flex: 1, minWidth: 0 },
-  answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 14, gap: 12 },
-  turn: { gap: 8, paddingTop: 4 },
+  answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 12, gap: 8 },
+  turn: { gap: 6, paddingTop: 2 },
   questionBubble: { alignSelf: 'flex-end', maxWidth: '90%', borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.control, paddingHorizontal: 12, paddingVertical: 10 },
-  facts: { gap: 8 },
+  facts: { gap: 6 },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1, minWidth: 0 },
   factValue: { flexShrink: 1 },
   quickFollowUps: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  followUpChip: { minHeight: 44, maxWidth: '100%', flexShrink: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'center' },
+  followUpChip: { minHeight: 40, maxWidth: '100%', flexShrink: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
   followUpText: { flexShrink: 1, minWidth: 0 },
-  composer: { gap: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  composer: { gap: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth },
   context: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   period: { minHeight: 44, flexShrink: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },

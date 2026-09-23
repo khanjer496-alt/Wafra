@@ -108,6 +108,8 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Require the approved Claude design baseline
         run: node scripts/check-design-baseline.mjs
@@ -204,12 +206,10 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
             --github-summary "$GITHUB_STEP_SUMMARY"
           )
-          if [ "$PROFILE" = "preview" ] || [ "$PROFILE" = "history-beta" ]; then
-            node "${args[@]}"
-          else
-            printf -v check_command '%q ' node "${args[@]}"
-            npx --yes eas-cli@22.4.0 env:exec production "$check_command" --non-interactive
-          fi
+          # Public production config is pinned in app.json/eas.json, so this
+          # check must not depend on node_modules or a remote env wrapper before
+          # the Install dependencies step below.
+          node "${args[@]}"
 
       # ---- The Apple credentials.
       #
@@ -868,7 +868,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_commit || github.sha }}
+          ref: ${{ inputs.source_commit || 'main' }}
           fetch-depth: 0
 
       - name: Pin and verify main-line build source
@@ -888,8 +888,9 @@ jobs:
           BEST=$(ls -d /Applications/Xcode*.app | grep -v -i beta | sort -V | tail -1)
           test -n "$BEST"
           sudo xcode-select -s "$BEST/Contents/Developer"
-          xcodebuild -version
-          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          xcodebuild -version > "$RUNNER_TEMP/xcode-version.txt"
+          cat "$RUNNER_TEMP/xcode-version.txt"
+          VER=$(sed -n '1s/^Xcode //p' "$RUNNER_TEMP/xcode-version.txt")
           node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if (!(major>26 || (major===26 && minor>=2))) process.exit(1)' "$VER"
 
       - uses: ruby/setup-ruby@v1

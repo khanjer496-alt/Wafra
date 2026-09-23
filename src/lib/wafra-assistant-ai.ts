@@ -37,9 +37,15 @@ export const ASSISTANT_TOOL_CATALOG: readonly {
   { tool: 'upcoming-payments', purpose: 'Bills, card dues and subscriptions due soon', arguments: ['withinDays'] },
   { tool: 'cash-outflow', purpose: 'Recorded cash outflow, optionally for locally resolved accounts', arguments: ['period', 'accountIds', 'excludedAccountIds'] },
   { tool: 'month-forecast', purpose: 'Current-month pace estimate when observed history is sufficient', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'historical-baseline', purpose: 'Compare recorded spending with prior monthly history without assuming missing months are zero', arguments: [...PERIOD_FILTER_ARGUMENTS, 'baseline'] },
+  { tool: 'account-inventory', purpose: 'Count or list locally recorded accounts or cards, optionally filtered by a bank named by the user', arguments: ['accountKind', 'bankName'] },
+  { tool: 'top-accounts', purpose: 'Rank locally known accounts or cards by recorded spending or purchase count', arguments: [...PERIOD_FILTER_ARGUMENTS, 'accountKind', 'metric', 'limit'] },
+  { tool: 'obligation-status', purpose: 'Check a locally resolved credit-card statement or bill reminder status without guessing payment completion', arguments: ['obligation', 'accountId', 'billId', 'query', 'monthKey'] },
+  { tool: 'credit-card-settlement-summary', purpose: 'Check whether all locally recorded credit-card statements are settled, optionally for one calendar month', arguments: ['monthKey'] },
   { tool: 'recurring-changes', purpose: 'Review comparable recorded recurring-charge changes', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'unusual-charges', purpose: 'Review purchases unusually high against established earlier history', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'possible-duplicates', purpose: 'Review possible duplicate purchases without changing any records', arguments: PERIOD_FILTER_ARGUMENTS },
+  { tool: 'money-review', purpose: 'Combine conservative duplicate, unusual-purchase and recurring-change checks', arguments: PERIOD_FILTER_ARGUMENTS },
   { tool: 'data-coverage', purpose: 'Describe recorded activity and known import limitations without claiming full bank coverage', arguments: PERIOD_FILTER_ARGUMENTS },
 ] as const;
 
@@ -162,6 +168,19 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'help':
     case 'subscriptions':
       return true;
+    case 'credit-card-settlement-summary':
+      return candidate.monthKey === undefined || (typeof candidate.monthKey === 'string' && validMonthKey(candidate.monthKey));
+    case 'obligation-status':
+      return (candidate.obligation === 'card' || candidate.obligation === 'bill') &&
+        ['summary', 'remaining', 'payments', 'paid-date'].includes(String(candidate.query)) &&
+        (candidate.monthKey === undefined || (candidate.obligation === 'card' &&
+          typeof candidate.monthKey === 'string' && validMonthKey(candidate.monthKey))) &&
+        (candidate.obligation === 'card'
+          ? validName(candidate.accountId) && candidate.billId === undefined
+          : validName(candidate.billId) && candidate.accountId === undefined);
+    case 'account-inventory':
+      return (candidate.accountKind === undefined || ['all', 'bank', 'card', 'credit-card', 'debit-card'].includes(String(candidate.accountKind))) &&
+        (candidate.bankName === undefined || validName(candidate.bankName));
     case 'upcoming-payments':
       return candidate.withinDays === undefined ||
         (Number.isSafeInteger(candidate.withinDays) && (candidate.withinDays as number) > 0 &&
@@ -179,6 +198,13 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
         (candidate.limit === undefined ||
           (Number.isSafeInteger(candidate.limit) && (candidate.limit as number) >= 1 &&
             (candidate.limit as number) <= 10));
+    case 'top-accounts':
+      return validPeriod(candidate.period) &&
+        (candidate.accountKind === undefined || ['all', 'bank', 'card'].includes(String(candidate.accountKind))) &&
+        (candidate.metric === undefined || ['amount', 'count'].includes(String(candidate.metric))) &&
+        (candidate.limit === undefined || (Number.isSafeInteger(candidate.limit) && (candidate.limit as number) >= 1 && (candidate.limit as number) <= 10));
+    case 'historical-baseline':
+      return validPeriod(candidate.period) && ['highest-month', 'typical-month', 'closest-month', 'last-similar-month'].includes(String(candidate.baseline));
     case 'spending-total':
     case 'income-total':
     case 'compare-periods':
@@ -189,6 +215,7 @@ export function isAssistantToolRequest(value: unknown): value is AssistantToolRe
     case 'recurring-changes':
     case 'unusual-charges':
     case 'possible-duplicates':
+    case 'money-review':
     case 'data-coverage':
       return validPeriod(candidate.period);
     default:

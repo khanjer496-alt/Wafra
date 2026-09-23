@@ -460,15 +460,94 @@ export function bankFromSender(
  * their own name in promo footers ("download the new FAB mobile banking app"),
  * and co-branded cards name a partner that is not the issuer.
  */
+// Cache grammar only, never message text or inferred identities. The registry
+// expression is stable across market switches; replacing it earns a new rule.
+const bankMessagePatterns = new WeakMap<RegExp, RegExp>();
+
 export function bankFromMessage(
   text: string | undefined,
 ): { name: string; color: string; domain?: string } | null {
   if (!text) return null;
   for (const b of active.banks) {
-    const re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+    let re = bankMessagePatterns.get(b.re);
+    if (!re) {
+      re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+      bankMessagePatterns.set(b.re, re);
+    }
     if (re.test(text)) return { name: b.name, color: b.color, domain: b.domain };
   }
   return null;
+}
+
+/**
+ * The one bank a message body claims as the reader's own, in bankFromSender's
+ * shape, or null when it claims none or more than one.
+ *
+ * iOS 26's Find Messages entity exposes a message's body, identifier and date
+ * but no sender (device probes, 2026-09-20), so an imported alert can arrive
+ * with nothing for bankFromSender to read. Bank alerts usually name their bank
+ * next to the instrument ("your ADIB Covered Card", "Your FAB account") or as
+ * a leading header ("ADCB: …", "RAKBANK" on its own first line), and those
+ * two shapes are the only bank identity such a record has. A transfer's
+ * destination ("to your FAB Account") is named by the sending bank, so a
+ * claim preceded by "to" counts only when the body has no transfer, payment
+ * or debit wording ("salary credited to your RAKBANK Account" does). A bank named anywhere else is not the issuer:
+ * another bank's ATM, a remitter, or a merchant whose name contains a bank
+ * token ("ADIBA FLOWERS") must not become the account's bank, because the
+ * import planner would then mint a wrong-bank account and refuse to bind the
+ * row to the real one. Two banks claimed as yours in one body resolve to null
+ * rather than a guess.
+ */
+const bankClaimedPatterns = new WeakMap<RegExp, RegExp>();
+function bankClaimedPattern(re: RegExp): RegExp {
+  let claimed = bankClaimedPatterns.get(re);
+  if (!claimed) {
+    const bank = `(?:${re.source})\\b\\.?`;
+    // Group 1 captures a leading "to"/"into": "to your FAB Account" is a transfer's
+    // destination, which the sending bank's alert names without naming
+    // itself, so that claim is discarded by bankClaimed below. The header
+    // form deliberately has no `m` flag: only the body's first line counts.
+    // The cached pattern is global; only bankClaimed may use it, and it resets
+    // lastIndex before every scan.
+    claimed = new RegExp(
+      `(?:\\b(to|into|unto)\\s+)?\\byour\\s+${bank}[^\\n.]{0,24}?\\b(?:card|account|acc|a\\/c|acct|wallet)\\b` +
+      `|^\\s*(?:from\\s+)?${bank}\\s*(?:[:\\-\u2013|]|alert\\b|\\n)`,
+      'ig',
+    );
+    bankClaimedPatterns.set(re, claimed);
+  }
+  return claimed;
+}
+
+/**
+ * Wording that makes "to your <bank> account" a destination rather than the
+ * sender's own account: a transfer (also "Trf"/"Tfr"), a payment, a debit,
+ * a wire or something "processed" or "moved". Without any of it,
+ * "salary credited to your RAKBANK Account" is the bank talking about itself.
+ */
+const MOVEMENT_WORDING = /\b(?:transfer\w*|trf\w*|tfr\w*|sent|remit\w*|payment|paid|instruction\w*|debit\w*|withdraw\w*|moved|wire\w*|processed)\b/i;
+
+function bankClaimed(re: RegExp, text: string): boolean {
+  const pattern = bankClaimedPattern(re);
+  pattern.lastIndex = 0;
+  const moved = MOVEMENT_WORDING.test(text);
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    if (!match[1] || !moved) return true;
+  }
+  return false;
+}
+
+export function soleBankNamedInText(
+  text: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!text) return null;
+  let found: { name: string; color: string; domain?: string } | null = null;
+  for (const b of active.banks) {
+    if (!bankClaimed(b.re, text)) continue;
+    if (found) return null;
+    found = { name: b.name, color: b.color, domain: b.domain };
+  }
+  return found;
 }
 
 /** The active market's entry for a bank name, in bankFromSender's shape. */

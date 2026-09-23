@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInCashflowTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
@@ -17,6 +17,8 @@ export interface DashboardProjectionRequest {
   dismissedInsightId?: string | null;
   /** Screens that do not render insights need not run their historical analysis. */
   includeInsights?: boolean;
+  /** Home can paint money first and defer cleanup scans until after interaction. */
+  includeCleanupPrompts?: boolean;
   /** Home renders cashflow, cards/bills and one priority prompt. */
   surface?: 'dashboard' | 'home';
 }
@@ -48,21 +50,60 @@ export interface HomeDashboardProjection extends Pick<DashboardProjection,
 
 const UPCOMING_WITHIN_DAYS = 9;
 
+/**
+ * The Home insight widget needs one ranked observation, not the entire dashboard
+ * projection. Keep this separate so Home does not also build cash-outflow, period
+ * comparison, foreign-activity and a second subscription timeline just to render
+ * one optional card.
+ */
+export function projectDashboardInsight(
+  state: AppState,
+  period: Period,
+  now: Date,
+  dismissedInsightId?: string | null,
+): Insight | null {
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIdsForState(state);
+  return buildInsights(
+    state.transactions,
+    state.budgets,
+    period,
+    now,
+    state.notSubscriptions,
+    liveAccounts,
+    internal,
+    { includeRecurringAnalysis: false },
+  ).find((item) => item.id !== dismissedInsightId) ?? null;
+}
+
 export function projectDashboard(request: DashboardProjectionRequest & { surface: 'home' }): HomeDashboardProjection;
 export function projectDashboard(request: DashboardProjectionRequest & { surface?: 'dashboard' }): DashboardProjection;
 export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection;
 export function projectDashboard(request: DashboardProjectionRequest): DashboardProjection | HomeDashboardProjection {
-  const { state, period, now, dismissedInsightId, includeInsights = true } = request;
+  const {
+    state,
+    period,
+    now,
+    dismissedInsightId,
+    includeInsights = true,
+    includeCleanupPrompts = true,
+  } = request;
   const homeOnly = request.surface === 'home';
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = summary.expenseFils;
   const incomeFils = summary.incomeFils;
-  const uncategorisedSummary = uncategorisedMerchants(state);
+  const historyImportBusy = homeOnly && state.historyImport?.status === 'running';
+  // Parser exceptions no longer occupy Home. They remain available from the
+  // bank-alert/settings workflow, so they must not suppress unrelated cleanup
+  // prompts such as merchant categorisation or unread formats here.
+  const uncategorisedSummary = historyImportBusy || (homeOnly && !includeCleanupPrompts)
+    ? { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }
+    : uncategorisedMerchants(state);
   const uncategorised = { summary: uncategorisedSummary, shouldPrompt: worthPrompting(uncategorisedSummary) };
-  const hideUnreadPrompt = homeOnly && (uncategorised.shouldPrompt ||
-    state.reviewTray.pending.some((item) => item.expiresAt > now.getTime()));
+  const hideUnreadPrompt = historyImportBusy ||
+    (homeOnly && (!includeCleanupPrompts || uncategorised.shouldPrompt));
   const unreadCount = hideUnreadPrompt ? null : unreadFormatCount(state);
   const unreadFormats = unreadCount === null ? null
     : { count: unreadCount, shouldPrompt: unreadCount >= REPORT_PROMPT_THRESHOLD };

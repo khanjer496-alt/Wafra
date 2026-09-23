@@ -160,8 +160,8 @@ test('entry edit does not rescan merchant history for every typed character', ()
     'editable title/category must not drive a full-ledger merchant scan');
   assert.match(source, /countMerchantMatches\(merchant, category\)/,
     'the current edited merchant is counted once when Save actually needs the rule prompt');
-  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 2,
-    'category and account rails must cooperate with the vertical sheet scroll');
+  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 1,
+    'the category rail must cooperate with the vertical sheet scroll; the account rail is now a picker bottom sheet, not an inline horizontal ScrollView');
 });
 
 test('narrow screens give search full width without reducing the font size', () => {

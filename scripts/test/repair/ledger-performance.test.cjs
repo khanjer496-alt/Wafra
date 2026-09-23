@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const ledger = require('../build/ledger');
-const { reconcileTransfers } = require('../build/transfer-reconciliation');
+const { reconcileTransfers, TRANSFER_NORMALIZATION_VERSION } = require('../build/transfer-reconciliation');
 const day = 86400000;
 const start = Date.UTC(2026, 0, 1, 12);
 const accounts = [
@@ -112,4 +112,97 @@ test('12,000 repeated evidence collisions stay bounded and fail closed', () => {
   assert.equal(ledger.internalTransferIds(rows, accounts).size, 0);
   assert.equal(reconcileTransfers(rows, accounts).pendingIds.size, rows.length);
   assert.ok(performance.now() - began < 5000, 'bounded evidence-index scans must avoid quadratic repeated-amount work');
+});
+
+test('current persisted transfer receipt bypasses graph reconciliation for UI totals', () => {
+  const rows = Array.from({ length: 12000 }, (_, i) => row(`receipt-${i}`, i % 2 ? 'income' : 'expense', start));
+  const state = {
+    transactions: rows,
+    accounts,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+    transferInternalIds: ['receipt-1', 'receipt-7'],
+    historyImport: { status: 'complete' },
+  };
+  const first = ledger.internalTransferIdsForState(state);
+  const second = ledger.internalTransferIdsForState(state);
+  assert.equal(first, second, 'same immutable snapshot should reuse the receipt-backed Set');
+  assert.deepEqual([...first].sort(), ['receipt-1', 'receipt-7']);
+
+  const stale = ledger.internalTransferIdsForState({
+    ...state,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION - 1,
+    transferInternalIds: ['invented-id'],
+  });
+  assert.equal(stale.has('invented-id'), false, 'an old receipt must never override live reconciliation');
+  const staleAgain = ledger.internalTransferIdsForState({
+    ...state,
+    transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION - 1,
+    transferInternalIds: ['invented-id'],
+  });
+  assert.equal(staleAgain, stale,
+    'same immutable stale-receipt snapshot reuses the canonical live reconciliation');
+});
+
+test('unfinished history import may use the store provisional transfer receipt after process death', () => {
+  const base = {
+    transactions: [row('pending-out', 'expense', start)],
+    accounts,
+    transferNormalizationVersion: undefined,
+    transferInternalIds: ['provisional-only-id'],
+  };
+  for (const status of ['running', 'paused', 'failed']) {
+    assert.deepEqual(
+      [...ledger.internalTransferIdsForState({ ...base, historyImport: { status } })],
+      ['provisional-only-id'],
+      `${status} import must not rebuild the complete transfer graph`,
+    );
+  }
+  const complete = ledger.internalTransferIdsForState({ ...base, historyImport: { status: 'complete' } });
+  assert.equal(complete.has('provisional-only-id'), false, 'completion requires the final canonical receipt');
+});
+
+test('FAB complementary transfer alerts collapse to one displayed event without full reconciliation', () => {
+  const fabAccounts = [{ id: 'fab', name: 'FAB ·0002', kind: 'bank', bankName: 'FAB', last4: '0002' }];
+  const transfer = (id, form, at, reference = 'FABREF984512') => ({
+    id,
+    type: 'expense',
+    ts: at,
+    date: '2026-09-15',
+    amountFils: 56_500,
+    accountId: 'fab',
+    title: form === 'transfer-detail' ? 'Outgoing transfer' : 'Outward remittance',
+    category: 'other',
+    source: 'sms',
+    smsKey: `s${at}-${id}`,
+    captureInstrument: { last4: '0002', kind: 'account', bankIdentity: 'FAB' },
+    transferEvidence: {
+      version: 1, currency: 'AED', attribution: 'source', sourceBank: 'FAB',
+      reference, postingForm: form,
+    },
+  });
+  const detail = transfer('detail', 'transfer-detail', start);
+  const confirmation = transfer('confirmation', 'remittance-debit', start + 30_000);
+  const noise = Array.from({ length: 14_761 }, (_, i) => ({
+    id: `ordinary-${i}`, type: 'expense', date: '2026-09-01', amountFils: 100 + i,
+    accountId: 'fab', title: 'Shop', category: 'other', source: 'sms',
+  }));
+  const state = { transactions: [detail, confirmation, ...noise], accounts: fabAccounts };
+  const first = ledger.corroboratingTransferIdsForState(state);
+  const second = ledger.corroboratingTransferIdsForState(state);
+  assert.equal(first, second, 'same immutable ledger reuses the cheap display projection');
+  assert.deepEqual([...first], ['confirmation']);
+
+  const ambiguous = {
+    transactions: [detail, transfer('detail-2', 'transfer-detail', start + 10_000), confirmation],
+    accounts: fabAccounts,
+  };
+  assert.deepEqual([...ledger.corroboratingTransferIdsForState(ambiguous)], [],
+    'two possible primaries fail closed instead of hiding a real transfer');
+
+  const contradicted = {
+    transactions: [detail, transfer('other-ref', 'remittance-debit', start + 30_000, 'DIFFERENT984512')],
+    accounts: fabAccounts,
+  };
+  assert.deepEqual([...ledger.corroboratingTransferIdsForState(contradicted)], [],
+    'different bank references are two events, not a display duplicate');
 });

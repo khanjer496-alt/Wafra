@@ -26,6 +26,7 @@ const route = read('src/app/review-alerts.tsx');
 const home = read('src/screens/journal-home-screen.tsx');
 const settings = read('src/app/settings.tsx');
 const add = read('src/app/add-transaction.tsx');
+const reviewFields = read('src/components/universal-review-fields.tsx');
 const store = read('src/lib/store.tsx');
 const onboarding = read('src/components/onboarding-gate.tsx');
 const copy = read('src/lib/i18n.ts');
@@ -34,19 +35,21 @@ ok('review route reads the structured tray directly',
   /state\.reviewTray\.pending/.test(route) && /type ReviewEntry/.test(route) && /isUniversalReviewAlert/.test(route));
 ok('review route never reads or renders source-message fields',
   !/\.raw\b|\.sourceKey\b|\.sender\b|\.reasons\b/.test(route));
-ok('review route offers explicit correction before promotion, never silent import',
+ok('review route asks only for unresolved facts before promotion, never silent import',
   /pathname:\s*['"]\/add-transaction['"][\s\S]*reviewId/.test(route) &&
     /promoteReviewAlert/.test(add) && /reviewAlertOwnAccounts/.test(add) &&
-    /reviewAlertDateA11y/.test(add) &&
+    /reviewMoneyChoices/.test(add) && /observedReviewDate/.test(add) &&
+    !/postedConfirmed/.test(add) && !/genericConfirmPosted/.test(reviewFields) &&
     /type:\s*['"]promoteReviewAlert['"]/.test(store) &&
     /dismissReviewAlert\(item\.id, ['"]dismissed['"]\)/.test(route));
-ok('review candidates require explicit choices unless a prior local correction supplies them',
+ok('review candidates infer safe defaults and still expose genuinely ambiguous accounts',
   /rememberedReview\?\.accountId \?\? matchedAccount\?\.id \?\? ''/.test(add) &&
     /suggestUniversalCategory/.test(add) && /!categorySuggestion\.needsReview/.test(add) && /categorySupportsType\(reviewCategory, reviewType\)/.test(add) && /matchingAccounts\.length === 1/.test(add) &&
     /reviewTemplateRuleFor/.test(add) &&
-    /!!category/.test(add) &&
+    /: 'other' : 'groceries'/.test(add) &&
+    /!reviewItem \|\| !matchedAccount \|\| event\?\.instrument\.evidence === 'ambiguous'/.test(add) &&
     /reviewAlertChooseAccount/.test(add) &&
-    /reviewAlertChooseCategory/.test(add));
+    /!reviewItem \? <View[\s\S]{0,200}categoryRef/.test(add));
 ok('a review-only cash event defaults to the cash-withdrawal category',
   /reviewFamily === 'cash-withdrawal'[\s\S]{0,80}\? 'cash-withdrawal'/.test(add));
 ok('review amounts stay exact instead of crossing floating point',
@@ -71,14 +74,13 @@ ok('structured-only privacy is visible on the route',
     /The bank-alert text is not stored/.test(copy));
 
 const captureAt = home.indexOf('testID="journal-import-controls"');
-const reviewAt = home.indexOf('{reviewCount > 0 ?');
-ok('Home shows one aggregate review prompt below capture',
-  /state\.reviewTray\.pending/.test(home) &&
-    /\{words\.review\} · \{reviewCount\}/.test(home) &&
-    captureAt >= 0 && reviewAt > captureAt &&
-    /router\.push\('\/review-alerts'\)/.test(home));
-ok('Home hides the prompt when there is nothing to review',
-  /reviewCount > 0 \?/.test(home));
+ok('Home keeps parser exceptions out of the primary money experience',
+  captureAt >= 0 &&
+    !/reviewCount/.test(home) &&
+    !/router\.push\('\/review-alerts'\)/.test(home));
+ok('review remains an exception workflow rather than a Home status concept',
+  !/state\.reviewTray\.pending/.test(home) &&
+    /state\.reviewTray\.pending/.test(settings));
 ok('Settings exposes pending reviews without promoting an empty destination',
   /state\.reviewTray\.pending/.test(settings) &&
     /reviewAlertsSettingsCount/.test(settings) &&

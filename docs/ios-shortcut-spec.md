@@ -90,6 +90,18 @@ cards ending in the same four digits at two banks are indistinguishable, and a
 payment can settle the wrong card's statement. Android reads this off the inbox
 row it scans, so this field is a prerequisite for iOS parity.
 
+The history import route cannot supply it. On iOS 26 the `MessageEntity`
+returned by Find Messages exposes Body, GUID and Date only; `Sender` and every
+related field are absent as properties and are dropped silently as filters
+(device probes, see `docs/test-evidence/ios-sender-field-2026-09-20.md`). A
+history record therefore reaches the parser without a sender, and the bank
+comes from the one bank the body claims as the reader's own, "your ADIB …
+card/account" or a leading "ADCB:" header (`soleBankNamedInText`), and stays
+unknown otherwise; a bank named as an ATM owner, remitter, merchant or
+transfer destination ("to your FAB Account") never counts. The live-capture route
+keeps sending the automation's Sender; the same body fallback applies there
+only when that value resolves no bank.
+
 It is a label and nothing else. The relay discards a `sender` that is not a
 string, contains control characters or bidi overrides, or is longer than 80
 characters. It still accepts and parses the transaction without bank identity:

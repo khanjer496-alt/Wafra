@@ -172,6 +172,14 @@ eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Dat
     /25%/.test(s4.body) && !/525%/.test(s4.body), s4.body);
   ok('summary: no limits set means no budget line',
     !/%/.test(ds.buildDailySummary(day, '2026-08-06').body));
+
+  const unsorted = { ...base, transactions: [
+    row('today-a', 'Coffee', 1500, { date: '2026-08-06' }),
+    row('last-month', 'Old', 9000, { date: '2026-07-01' }),
+    row('today-b', 'Lunch', 4000, { date: '2026-08-06' }),
+  ] };
+  eq('summary: a sorted prefix cannot drop a later in-day row',
+    ds.buildDailySummary(unsorted, '2026-08-06').totalFils, 5500);
 }
 
 // ── a fixed bill reconciles against the charge that paid it ──
@@ -990,6 +998,31 @@ ok('trial: expires after day 3',
 ok('trial: purchase beats an expired trial',
   purch.isProActive({ pro: true, trialStartTs: T0 }, T0 + 30 * DAY));
 
+// ── Pro plans: only what the storefront actually returned ──
+const playOffers = purch.proOffersFromProducts([
+  { productIdentifier: 'wafra_pro_monthly:p1m', localizedPrice: 'AED 36.99' },
+  { productIdentifier: 'wafra_pro_yearly:p1y', localizedPrice: 'AED 274.99' },
+]);
+ok('plans: a Play base-plan suffix still resolves to Wafra\'s two plans',
+  playOffers.length === 2 &&
+    playOffers.every((offer) => offer.productId.includes(':')) &&
+    playOffers.find((offer) => offer.plan === 'yearly').priceString === 'AED 274.99');
+ok('plans: the App Store identifiers resolve unchanged',
+  JSON.stringify(purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_monthly', localizedPrice: 'AED 36.99' },
+  ])) === JSON.stringify([
+    { plan: 'monthly', productId: 'wafra_pro_monthly', priceString: 'AED 36.99' },
+  ]));
+ok('plans: a plan the store priced blank is dropped rather than shown priceless',
+  purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_yearly', localizedPrice: '  ' },
+  ]).length === 0);
+ok('plans: a foreign product is never sold as a Wafra plan',
+  purch.proOffersFromProducts([
+    { productIdentifier: 'wafra_pro_monthly_legacy', localizedPrice: 'AED 1.00' },
+    { productIdentifier: 'some_other_app_yearly', localizedPrice: 'AED 2.00' },
+  ]).length === 0);
+
 // ── market packs: automatic localization (runs last: mutates globals) ──
 const markets = require('./build/markets');
 const mparser = require('./build/sms-parser');
@@ -1066,6 +1099,14 @@ ok('net worth breakdown row figures agree with the reliable-balance contract',
       const projected = worthBreakdown.balanceByAccountId[account.id];
       return reliable === null ? projected === null : projected === reliable;
     }));
+const legacyCaptureBalanceState = {
+  accounts: [mkAcc({ id: 'legacy-captured', kind: 'bank', openingFils: 50000 })],
+  transactions: [{ id: 'legacy-row', accountId: 'legacy-captured', type: 'expense', amountFils: 1200,
+    date: '2026-07-03', title: 'Legacy capture', category: 'other', smsKey: 's1783036800000-1200' }],
+};
+ok('net worth preserves legacy captured-row balance semantics without the modern source marker',
+  bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] ===
+    bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]));
 
 // ── One payment must not settle two overlapping statements ──
 const allocLib = require('./build/cards');
@@ -4956,6 +4997,15 @@ eq('analytics: the category trend follows the split too',
     });
     const febNow = new Date(2026, 1, 20); // 20 Feb 2026 — February has 28 days
 
+    const unchanged = remState();
+    ok('reminders: unchanged ledger references need no native schedule rebuild',
+      remind.reminderScheduleInputsChanged(unchanged, { ...unchanged }) === false);
+    ok('reminders: a transaction-array change requires a native schedule rebuild',
+      remind.reminderScheduleInputsChanged(
+        unchanged,
+        { ...unchanged, transactions: [...unchanged.transactions] },
+      ) === true);
+
     eq('billDueISO clamps day 31 into February', bills.billDueISO(31, '2026-02'), '2026-02-28');
     eq('billDueISO clamps day 31 into a leap February', bills.billDueISO(31, '2028-02'), '2028-02-29');
     eq('billDueISO leaves a day that fits alone', bills.billDueISO(15, '2026-07'), '2026-07-15');
@@ -5008,6 +5058,15 @@ eq('analytics: the category trend follows the split too',
       subsForRem && subRem.length === 1 &&
         subRem[0].dateISO === fmt.shiftISO(subsForRem.nextExpectedISO, -1),
       JSON.stringify(subRem.map((r) => r.dateISO)));
+    const precomputedSubRem = remind.buildPaymentReminders(
+      remState({ transactions: subTxs }),
+      febNow,
+      remind.MAX_REMINDERS,
+      subsForRem ? [subsForRem] : [],
+    );
+    eq('reminders: precomputed recurrence produces the same notification plan',
+      precomputedSubRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })),
+      subRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })));
     ok('reminders: a merchant already tracked as a bill is not reminded twice',
       remind.buildPaymentReminders(
         remState({ transactions: subTxs, bills: [mkRemBill('Netflix', 5)] }), febNow,

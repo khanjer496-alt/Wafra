@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
@@ -9,7 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
 import type { CategoryId } from '@/lib/types';
-import { useStore } from '@/lib/store';
+import { usePrivateMode } from '@/lib/store';
 
 interface MerchantAvatarProps {
   title: string;
@@ -18,23 +18,28 @@ interface MerchantAvatarProps {
 }
 
 /** Bundled artwork first; only locally verified identities may use CDN artwork. */
-export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
-  const { state } = useStore();
-  const allowRemote = !state.privateMode; // Preserve the existing local-only opt-out.
+function MerchantAvatarInner({ title, category, size = 34 }: MerchantAvatarProps) {
+  const privateMode = usePrivateMode();
+  const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
 
   useEffect(() => {
     let alive = true;
     setRemote(null);
-    // `other` frequently contains user-created biller names and local one-off
-    // merchants. Keep the local category fallback unless reviewed bundled
-    // artwork already established an identity above this guard.
-    if (!allowRemote || bundled || category === 'other') return () => { alive = false; };
-    void resolveRemoteMerchantLogo(title).then(value => {
-      if (alive) setRemote(value);
+    if (!allowRemote || bundled) return () => { alive = false; };
+    // Remote logo enrichment is presentation-only. Defer cache/network work
+    // until the JS thread is idle so virtualized rows never compete with
+    // scrolling, navigation, or opening a transaction.
+    const idle = requestIdleCallback(() => {
+      void resolveRemoteMerchantLogo(title).then(value => {
+        if (alive) setRemote(value);
+      });
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      cancelIdleCallback(idle);
+    };
   }, [title, category, bundled, allowRemote]);
 
   if (bundled) {
@@ -45,6 +50,8 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
   }
   return <CategoryAvatar category={category} size={size} />;
 }
+
+export const MerchantAvatar = React.memo(MerchantAvatarInner);
 
 function LogoTile({ id, source, tint, category, size }: {
   id: string;
@@ -71,7 +78,11 @@ function LogoTile({ id, source, tint, category, size }: {
       <Image
         source={source}
         contentFit="contain"
-        cachePolicy="memory-disk"
+        // Remote logos are decorative and can have very high cardinality on a
+        // long ledger. On Android keep the durable disk cache but do not grow
+        // Expo Image's process-wide decoded-image memory cache as the user
+        // scrolls through new merchants. Bundled assets stay memory-backed.
+        cachePolicy={Platform.OS === 'android' && typeof source !== 'number' ? 'disk' : 'memory-disk'}
         recyclingKey={id}
         transition={0}
         tintColor={tint === 'theme' || (tint === 'dark' && dark) ? theme.text : undefined}

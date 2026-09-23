@@ -20,6 +20,11 @@ const autoImportSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/u
 const homeSource = fs.readFileSync(path.join(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const historyHookSource = fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8');
+const tabBarSource = fs.readFileSync(path.join(__dirname, '../../src/components/tab-bar.tsx'), 'utf8');
+const prioritySource = fs.readFileSync(path.join(
+  __dirname,
+  '../../src/lib/foreground-history-priority.ts',
+), 'utf8');
 const smsReaderNativeSource = fs.readFileSync(path.join(
   __dirname,
   '../../modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
@@ -77,12 +82,68 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
     /scanned: page\.scannedCount/.test(historyHookSource) &&
       /found: page\.parsed\.length \+ page\.reviewCandidates\.length/.test(historyHookSource),
   );
+  // Foreground work uses small interaction-safe pages; background keeps the
+  // larger throughput-oriented page size because no visible UI is competing.
   ok(
-    'resumable history uses a larger bounded page to reduce encrypted-ledger checkpoints',
-    /HISTORY_IMPORT_PAGE_SIZE = 2_000/.test(historyHookSource) &&
-      /pageSize: HISTORY_IMPORT_PAGE_SIZE/.test(historyHookSource) &&
+    'foreground history uses small pages while background keeps throughput',
+    /BACKGROUND_HISTORY_PAGE_SIZE = 512/.test(historyHookSource) &&
+      /BACKGROUND_HISTORY_PAGES_PER_COMMIT = 1/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_SIZE = 128/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGES_PER_COMMIT = 1/.test(historyHookSource) &&
+      /FOREGROUND_HISTORY_PAGE_GAP_MS = 120/.test(historyHookSource) &&
+      /maxInboxPages: foreground[\s\S]*?FOREGROUND_HISTORY_PAGES_PER_COMMIT[\s\S]*?BACKGROUND_HISTORY_PAGES_PER_COMMIT/.test(historyHookSource) &&
+      /pageSize: foreground \? FOREGROUND_HISTORY_PAGE_SIZE : BACKGROUND_HISTORY_PAGE_SIZE/.test(historyHookSource) &&
       /max\.coerceIn\(1, 2_000\)/.test(smsReaderNativeSource),
   );
+  ok(
+    'history repair caches legacy review-key discovery for one durable run',
+    /legacyReviewKeys = useRef/.test(historyHookSource) &&
+      /cachedLegacyKeys\.generation !== generation/.test(historyHookSource) &&
+      /cachedLegacyKeys\.startedAt !== historyStartedAt/.test(historyHookSource),
+  );
+  ok(
+    'foregrounding Wafra no longer cancels a running history repair',
+    /FOREGROUND_HISTORY_FIRST_RUN_GRACE_MS = 8_000/.test(historyHookSource) &&
+      /progress\.scanned > 0/.test(historyHookSource) &&
+      !/RNAppState\.addEventListener\('change'/.test(historyHookSource) &&
+      /historyRepair:\s*true/.test(historyHookSource) &&
+      /includeNotificationQueue:\s*false/.test(historyHookSource),
+  );
+  ok(
+    'tab touch-down reserves foreground JS time before navigation renders',
+    /onPressIn=\{\(\) => prioritizeForegroundNavigation\(\)\}/.test(tabBarSource),
+  );
+  ok(
+    'parser yields and page commits both respect the navigation-priority lease',
+    /waitForForegroundHistoryIdle\(FOREGROUND_PARSE_YIELD_MS\)/.test(
+      fs.readFileSync(path.join(__dirname, '../../src/lib/auto-import.ts'), 'utf8'),
+    ) &&
+      /waitForForegroundHistoryIdle\(FOREGROUND_HISTORY_PAGE_GAP_MS\)/.test(historyHookSource) &&
+      /await waitForForegroundHistoryIdle\(\);/.test(historyHookSource) &&
+      /blockedUntil = Math\.max\(blockedUntil, now \+ quietMs\)/.test(prioritySource),
+  );
+  ok(
+    'history page timings separate scan, planning, and durable save',
+    /recordRuntimeOperation\('history-scan-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-plan-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-apply-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-persist-page'/.test(historyHookSource) &&
+      /recordRuntimeOperation\('history-save-page'/.test(historyHookSource),
+  );
+  ok(
+    'intermediate history pages defer every full-ledger repair until completion',
+    /if \(historyStillRunning\)[\s\S]*?transferNormalizationVersion:\s*undefined/.test(
+      fs.readFileSync(path.join(__dirname, '../../src/lib/ledger-import.ts'), 'utf8'),
+    ) &&
+      /historyImportIncomplete\(next\.historyImport\)/.test(storeSource) &&
+      /historyImportIncomplete\(reduced\.historyImport\)/.test(storeSource),
+  );
+
+  ok('unfinished history status includes process-death pause and retryable failure',
+    history.historyImportIncomplete({ status: 'running' }) &&
+    history.historyImportIncomplete({ status: 'paused' }) &&
+    history.historyImportIncomplete({ status: 'failed' }) &&
+    !history.historyImportIncomplete({ status: 'complete' }));
 
   eq('a new import starts paused with no provider cursor',
     history.createHistoryImportProgress(100), {

@@ -3,6 +3,7 @@ import { inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
+import { isApplicationPurchaseOffer, isExpectedFutureMoneyNotice } from '@/lib/bank-alert-semantic-rules';
 
 const emptyEvent = (issue: string): UniversalBankEvent => ({
     version: 1, decision: 'ignore', family: 'unknown', status: 'unknown', direction: 'unknown',
@@ -14,7 +15,10 @@ const emptyEvent = (issue: string): UniversalBankEvent => ({
 
 // These supply existing language vocabularies, not a claim about the source's
 // country. ISO money remains inspectable outside this finite market registry.
-const LANGUAGE_PACKS: readonly UniversalMarket[] = ['US', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA'];
+const LANGUAGE_PACKS: readonly UniversalMarket[] = [
+  'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL',
+  'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+];
 const commonDirection = (directions: MoneyDirection[]): MoneyDirection => {
   const known = [...new Set(directions.filter((value) => value === 'debit' || value === 'credit'))];
   return known.length === 1 ? known[0] : 'unknown';
@@ -53,6 +57,7 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     phrase(String.raw`pagamento\s+con\s+carta\s+eseguito`),
     phrase(String.raw`acquisto\s+completato`),
     phrase(String.raw`kaartbetaling\s+voltooid`),
+    phrase(String.raw`afgeschreven\s+voor\s+(?:een\s+)?pasbetaling`),
     phrase(String.raw`overboeking\s+voltooid[\s\S]{0,100}afgeschreven`),
     phrase(String.raw`alışveriş(?:iniz)?\s+(?:gerçekleşmiştir|tamamlandı)`),
     phrase(String.raw`تم\s+(?:سداد|خصم)`),
@@ -141,6 +146,9 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
     return { status: 'informational', family: 'statement' };
   }
   const declined = [
+    // Explicit completed rejection, anchored to a clause so conditional advice
+    // such as `إذا تم رفض السحب النقدي` cannot negate an unrelated purchase.
+    /(?:^|[.!?;؟])\s*تم\s+رفض\s+(?:عملية\s+)?السحب\s+النقدي(?=\s|[.!?;؟]|$)/u,
     /(?:^|[.!?;])\s*(?:your\s+)?(?:card\s+)?(?:payment|transaction|purchase)\s+(?:(?:was|is|has\s+been)\s+)?(?:declined|failed|rejected|not\s+approved)(?=\s*(?:[.!?;]|$))/iu,
     /\b(?:kartenzahlung|zahlung)\b[^!?]{0,180}\babgelehnt(?=\s*(?:[.!?]|$))/iu,
     /\b(?:betaling|kaartbetaling)\b[^!?]{0,180}\bgeweigerd(?=\s*(?:op\b|[.!?]|$))/iu,
@@ -149,6 +157,10 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
     /(?:^|[。.!?])\s*(?:カード決済|カード支払い|決済|支払い)(?:が|は)?拒否されました/u,
   ];
   if (declined.some((pattern) => unconditional(pattern))) return { status: 'failed' };
+  if (isExpectedFutureMoneyNotice(text)) {
+    return { status: 'future' };
+  }
+  if (isApplicationPurchaseOffer(text)) return { status: 'informational' };
   if (!includeLifecycle) return null;
   if (unconditional(/\boverboeking\b[^!?]{0,180}\baangevraagd\b/iu)) return { status: 'informational' };
   if (unconditional(/\b(?:subscription|membership)\s+will\s+(?:renew|be\s+renewed)\b/iu) ||

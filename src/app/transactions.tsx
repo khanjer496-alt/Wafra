@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Keyboard,
   Platform,
@@ -18,7 +18,7 @@ import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
 import { Icon } from '@/components/ui/icon';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -26,7 +26,12 @@ import { CATEGORIES } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { internalTransferIds, liveAccountIds, UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
+import {
+  corroboratingTransferIdsForState,
+  internalTransferIdsForState,
+  liveAccountIds,
+  UNASSIGNED_INCOME_ACCOUNT_ID,
+} from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
@@ -147,7 +152,12 @@ export default function TransactionsScreen() {
   const [smsOnly, setSmsOnly] = useState(source === 'sms');
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const pendingFilterFrame = useRef<number | null>(null);
   const listInsets = useScreenContentInsets({ hasFooter: false });
+
+  useEffect(() => () => {
+    if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
+  }, []);
 
   const todayISO = toISODate(new Date());
   const currentKey = monthKey(new Date());
@@ -170,10 +180,8 @@ export default function TransactionsScreen() {
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = internalTransferIdsForState(state);
+  const corroborating = corroboratingTransferIdsForState(state);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -202,7 +210,8 @@ export default function TransactionsScreen() {
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal }), [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal]);
+    live: liveAccounts, internal, corroborating }),
+  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded } = projection;
@@ -222,6 +231,23 @@ export default function TransactionsScreen() {
     setMerchantFilter(null);
     setSmsOnly(false);
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
+  }, []);
+
+  const applyFilters = useCallback((nextFilters: Filters, resetScope: boolean) => {
+    // Closing an Android Modal and projecting a 10k+ row ledger in the same
+    // press made the date-filter button feel as if it had not registered. Let
+    // the sheet disappear and Android present that frame first. The exact
+    // projection the sheet just previewed is cached by the filter index, so in
+    // the common case the next render reuses it without another ledger walk.
+    setSheetVisible(false);
+    const commit = () => {
+      pendingFilterFrame.current = null;
+      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
+      setFilters(nextFilters);
+    };
+    if (Platform.OS !== 'android') { commit(); return; }
+    if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
+    pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
   const transactionResults = useMemo(() => (
@@ -248,7 +274,7 @@ export default function TransactionsScreen() {
                       accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                       onPress={() => setMerchantFilter(null)}
                       style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                         {merchantFilter}
                       </ThemedText>
                       <Icon name="close" size={13} color={theme.primary} />
@@ -260,7 +286,7 @@ export default function TransactionsScreen() {
                       accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
                       onPress={() => setSmsOnly(false)}
                       style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                         {tr('smsImportsOnly')}
                       </ThemedText>
                       <Icon name="close" size={13} color={theme.primary} />
@@ -311,7 +337,7 @@ export default function TransactionsScreen() {
                   accessibilityLabel={tr('clearAllFilters')}
                   hitSlop={8}
                   onPress={clearFilters}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                     {tr('clearFilter')}
                   </ThemedText>
                 </Pressable>
@@ -447,11 +473,7 @@ export default function TransactionsScreen() {
 
       {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
         accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
-        onClose={() => setSheetVisible(false)} onApply={(nextFilters, resetScope) => {
-          if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
-          setFilters(nextFilters);
-          setSheetVisible(false);
-        }} />}
+        onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
       <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
     </>

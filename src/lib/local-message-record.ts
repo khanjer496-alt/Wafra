@@ -17,6 +17,8 @@ import type { LaunchAlertSession } from '@/lib/launch-alert-parser';
 import {
   MARKETS,
   bankFromSender,
+  soleBankNamedInText,
+  withMarketPackForParsing,
   bankIdentityForName,
   detectLaunchMarketFromAlert,
 } from '@/lib/markets';
@@ -232,6 +234,9 @@ function sanitizedRefusal(
       row: {
         smsTs: observedAt,
         channel: 'inbox',
+        // Message timestamps can collide at whole-second precision. Preserve
+        // exact Apple identity so a decline cannot sweep an unrelated posting.
+        ...(SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
         reason: decision.reason,
       },
       milestone: 'decline-candidate',
@@ -280,6 +285,7 @@ export function parseLocalMessageRecord(
       envelope.sender,
       inspection,
       expectedMarket,
+      observedAt,
     );
     if (!parsed) {
       return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection);
@@ -301,8 +307,12 @@ export function parseLocalMessageRecord(
       sender: _sender,
       ...structured
     } = parsedWithEphemeralSender;
+    // A Shortcut sender that names no bank (a number, a contact label) leaves
+    // the one bank the body names as the record's only bank identity.
     const bankHint = structured.bankHint ?? bankFromSender(envelope.sender)?.name ??
-      attribution?.bankHint;
+      attribution?.bankHint ??
+      withMarketPackForParsing(expectedMarket, () => soleBankNamedInText(envelope.text)?.name) ??
+      undefined;
     if (attribution && canonicalBankId(bankHint ?? '') !== attribution.bankId) {
       return { kind: 'invalid', milestone: 'none' };
     }

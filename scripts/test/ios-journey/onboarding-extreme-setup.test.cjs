@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '../../..');
 const PROGRESS = 'wafra/ios-message-setup-progress/v1';
 const HANDOFF = 'wafra/ios-history-handoff-started-at/v1';
 const ORIGIN = 'wafra/ios-history-return-origin/v1';
-const INSTALLED = 'wafra/ios-history-shortcut-installed/v1';
+const INSTALLED = 'wafra/ios-history-shortcut-installed/v2';
 const LIVE_URL = 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef';
 const HISTORY_URL = 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789';
 const deferred = () => {
@@ -22,7 +22,7 @@ const deferred = () => {
 async function screen(t, options = {}) {
   const slots = [], effects = [], listeners = new Set(), receipts = [], routes = [];
   const urls = [], discards = [], storageEvents = [], growth = [], announcements = [];
-  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0;
+  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0, dismissals = 0;
   const params = { fromOnboarding: '1', ...options.params };
   const slot = initial => slots[cursor++] ?? (slots[cursor - 1] = initial());
   const react = {
@@ -112,22 +112,30 @@ async function screen(t, options = {}) {
   });
   const router = {
     push: value => routes.push(['push', value]), replace: value => routes.push(['replace', value]),
+    navigate: value => routes.push(['navigate', value]),
+    // Pops to the existing root; not a destination. The navigate after it is.
+    dismissAll: () => { dismissals++; },
     back: () => routes.push(['back']), canGoBack: () => options.canGoBack !== false,
     setParams: patch => Object.assign(params, patch),
   };
   const store = {
-    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null },
+    // "Which banks text you?" gates both sections; these journeys exercise the
+    // checklist behind it, so the question is answered unless a case says
+    // otherwise (scripts/test/ios-setup-ux.test.js pins the question itself).
+    state: { accounts: [], transactions: [], language: options.language ?? 'en', onboardingProfile: null,
+      marketId: 'AE', knownBanks: options.knownBanks ?? ['Emirates NBD'] },
     async ensureDurable() { durableCalls++; await controls.beforeDurable?.(durableCalls); },
     setOnboarded() { onboarded = true; receipts.push(['onboarded']); },
     setOnboardingProfile(profile) { store.state.onboardingProfile = profile; },
     async setCaptureOptOut(value) { receipts.push(['optOut', value]); await controls.beforeOptOut?.(value); },
+    setKnownBanks(names) { store.state.knownBanks = [...names]; receipts.push(['knownBanks', [...names]]); },
   };
   const ui = {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': platform, '@/lib/i18n': copy,
     '@/components/themed-text': { ThemedText: 'Text' },
-    '@/components/ui/controls': { Button: 'Button' },
+    '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
   };
   const Details = source('src/components/ios-message-setup/details-sheet.tsx', {
@@ -141,6 +149,7 @@ async function screen(t, options = {}) {
     '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
     '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
     '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },
+    '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
     '@/components/themed-view': { ThemedView: 'ThemedView' },
     '@/components/ui/confirm-sheet': { ConfirmSheet: 'ConfirmSheet' },
     '@/components/ui/layout': { Block: 'Block' },
@@ -151,7 +160,16 @@ async function screen(t, options = {}) {
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
-    '@/lib/onboarding': { onboardingLandingPath: () => '/' }, '@/lib/store': { useStore: () => store },
+    // Real module, with only the two surfaces this harness pins overridden —
+    // a hand-listed stub silently drops functions setup later starts calling.
+    '@/lib/onboarding': {
+      ...require('../build/onboarding'),
+      onboardingLandingPath: () => '/',
+      onboardingInsightKeys: () => ({
+        title: 'onboardInsightOverviewTitle',
+        body: 'onboardInsightOverviewBody',
+      }),
+    }, '@/lib/store': { useStore: () => store },
     '../../modules/wafra-message-history': { __esModule: true, default: options.historyAvailable === false ? {} : native },
   }).default;
   const render = () => { if (disposed) return; cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
@@ -187,6 +205,7 @@ async function screen(t, options = {}) {
   await flush();
   return {
     all, button, press, flush, values, controls, nativeStatus, receipts, routes, urls, discards, storageEvents,
+    get dismissals() { return dismissals; },
     growth, announcements, store, copy, dispose, history, progress,
     saved: () => JSON.parse(values.get(PROGRESS)),
     get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },

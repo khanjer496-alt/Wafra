@@ -149,7 +149,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     const exposed = new Set([...kt.matchAll(/(?:Async)?Function\("([a-zA-Z]+)"/g)].map((m) => m[1]));
     // Expo NativeModule supplies addListener for explicitly declared events;
     // it is not a hand-written Function in the module's Kotlin definition.
-    if (dir === 'sms-reader' && /Events\("onInboxChanged"\)/.test(kt)) exposed.add('addListener');
+    if (/Events\(/.test(kt)) exposed.add('addListener');
     const ts = read(`modules/${dir}/index.ts`);
     const jsName = ts.match(/requireOptionalNativeModule<[^>]+>\('([^']+)'\)/)?.[1];
     const expects = [...ts.matchAll(/^ {2}([a-zA-Z]+)\??\(/gm)].map((m) => m[1]);
@@ -210,6 +210,12 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   );
   const jsPackages = read('src/lib/trusted-bank-notification-packages.ts');
   const scanner = code(read('src/lib/auto-import.ts'));
+  ok('a moneyRejected verdict records whether a currency word, a digit, and a text field were present',
+    service.includes('recordAdmission("moneyRejected"') &&
+      service.includes('private val MONEY_CURRENCY_WORD_RE') &&
+      service.includes('recordAdmission("mrCurrencyWord"') &&
+      service.includes('recordAdmission("mrDigit"') &&
+      service.includes('recordAdmission("mrNoTextField"'));
   ok('notification bodies are sealed with AndroidKeyStore AES-GCM before persistence',
     store.includes('AndroidKeyStore') && store.includes('AES/GCM/NoPadding') &&
       store.includes('.put("ct"') && !service.includes('getSharedPreferences('));
@@ -220,10 +226,13 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     .map((match) => match[1]).sort();
   const jsPackageIds = [...jsPackages.matchAll(/'([A-Za-z0-9_.]+)': '[A-Z]{2}'/g)]
     .map((match) => match[1]).sort();
-  ok('notification parsing is restricted to curated Play-installed bank packages',
+  ok('notification intake requires Play provenance while curated packages remain strongest issuer evidence',
     kotlinPackageIds.length >= 10 && JSON.stringify(kotlinPackageIds) === JSON.stringify(jsPackageIds) &&
       nativePackages.includes('installingPackageName') && nativePackages.includes('com.android.vending') &&
-      service.includes('TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)') &&
+      !nativePackages.includes('ApplicationInfo.CATEGORY_FINANCE') &&
+      nativePackages.includes('SOURCE_FINANCIAL_CANDIDATE') &&
+      service.includes('TrustedBankNotificationPackages.sourceClass(this, sbn.packageName, body)') &&
+      service.includes('SensitiveNotificationFilter.shouldReject(body)') &&
       scanner.includes('trustedBankNotificationMarket(n.pkg)'));
   const notificationGradle = read('modules/notification-reader/android/build.gradle');
   ok('normal Android builds expose bank capture while local consent and OS access still gate collection',
@@ -236,6 +245,20 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('AsyncFunction("setCaptureEnabled")') &&
       scanner.includes('isBankNotificationCaptureAvailable(notificationReader?.isAvailable?.() === true)') &&
       nativeModule.includes('Function("isAvailable")'));
+  const promotion = code(read('src/lib/review-promotion.ts'));
+  const stateTypes = code(read('src/lib/types.ts'));
+  ok('strong installed bank identity can auto-import on first sight while ambiguous apps still require review',
+    scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
+      scanner.includes("verifiedFinancialAppSender(n.appLabel ?? '')") &&
+      scanner.includes("sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned") &&
+      scanner.includes("const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'") &&
+      scanner.includes("shouldReviewParsedIncome(p) || !autoAuthorized") &&
+      scanner.includes("p && autoAuthorized && !reviewed") &&
+      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender") &&
+      nativeModule.includes('"appLabel" to TrustedBankNotificationPackages.applicationLabel(context, row.pkg)') &&
+      promotion.includes("item.sourceClass === 'financial-candidate'") &&
+      promotion.includes('learnedNotificationPackage') &&
+      stateTypes.includes('trustedNotificationPackages: string[]'));
   ok('notification erase prevents old shade rows from being swept back in',
     store.includes('CLEARED_THROUGH') && store.includes('.putLong(CLEARED_THROUGH, clearedThrough)') &&
       store.includes('if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return'));
@@ -385,21 +408,24 @@ function ktSources(dir) {
       /backup\/restore remain free/.test(listingCopy) &&
       /backup\/restore keep working without Pro/.test(releaseGuide));
 
-  ok('the paywall renders the storefront price instead of ledger Money',
-    /storePrices\?\.\[[a-zA-Z]+\]\?\.priceString/.test(pro) &&
-      /loadStorePrices/.test(pro) &&
-      !/<Money[^>]*PRO_PRICES/.test(pro));
-  ok('native pricing never falls back to an unlabeled USD reference',
-    /Platform\.OS === 'web'[\s\S]{0,100}PRO_REFERENCE_PRICE_STRINGS/.test(pro) &&
-      /if \(!storePrices\?\.\[plan\]\)/.test(pro) &&
-      /billingAvailable && !storePrices\?\.\[plan\]/.test(pro));
-  ok('a failed catalog load can be retried without reopening the paywall',
-    /priceStatus === 'failed'/.test(pro) &&
-      /setPriceRequest\(\(request\) => request \+ 1\)/.test(pro));
-  ok('the paywall discloses renewal and reaches store subscription management',
-    /subscriptionRenewalTerms/.test(pro) &&
+  ok('the native Pro screen owns checkout and never presents the remote paywall',
+    /billing\.purchasePro\(/.test(pro) &&
+      /fetchProOffers\(\)/.test(pro) &&
+      /useWafraBilling/.test(pro) &&
       /subscriptionManagementUrl/.test(pro) &&
-      /manageSubscription/.test(pro));
+      !/presentProPaywall/.test(pro) &&
+      !/loadStorePrices|PRO_REFERENCE_PRICE_STRINGS|PRO_PRICES/.test(pro));
+  ok('every price on the native screen is the string the storefront returned',
+    /offer\.priceString/.test(pro) &&
+      /t\('priceUnavailable'\)/.test(pro) &&
+      !/PRO_PRICES|formatAED|\bfils\b/.test(pro) &&
+      /localizedPrice/.test(read('src/lib/purchases.ts')) &&
+      !/localizedPrice\s*\?\?\s*['"`]/.test(read('src/lib/purchases.ts')));
+  ok('an unconfigured Superwall build explains itself instead of disabling both actions',
+    /const checkoutReady = billing\.available && billing\.configured/.test(pro) &&
+      !/disabled=\{billingAction !== null \|\| !checkoutReady\}/.test(pro));
+  ok('the purchase contract keeps store subscription management reachable',
+    /manageSubscription/.test(pro) && /subscriptionManagementUrl/.test(pro));
 
   // No English sentence built inline: every user-visible string goes through
   // t() or tf(), so Arabic gets Arabic.
@@ -421,7 +447,7 @@ function ktSources(dir) {
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',
     /pro: _pro,[\s\S]{0,120}trialStartTs: _trial/.test(store) &&
-      /pro: state\.pro,[\s\S]{0,120}trialStartTs: state\.trialStartTs/.test(store));
+      /const current = authoritativeState\.current;[\s\S]{0,180}pro: current\.pro,[\s\S]{0,180}trialStartTs: current\.trialStartTs/.test(store));
 }
 
 
@@ -495,79 +521,77 @@ function ktSources(dir) {
 }
 
 
-/* ── billing ──────────────────────────────────────────────────────────
- *
- * Nothing here can exercise the store SDK, so these check the things that
- * are wrong in the SOURCE rather than at runtime — which is where the
- * expensive mistakes in a billing file live. */
+/* ── billing / Superwall ────────────────────────────────────────────── */
 {
   const src = read('src/lib/purchases.ts');
   const sdk = read('src/lib/billing.ts');
+  const provider = read('src/components/superwall-billing-provider.native.tsx');
+  const remoteOnboarding = read('src/components/superwall-onboarding.native.tsx');
   const layout = read('src/components/app-root-layout.tsx');
+  const pkg = JSON.parse(read('package.json'));
 
-  // The entitlement id is a string shared with a dashboard nobody can grep.
   ok('the entitlement id is named once and exported',
     /export const ENTITLEMENT_ID = 'pro'/.test(src) &&
       (src.match(/'pro'/g) || []).length === 1);
-
-  // Entitlement has to be asked for at launch. Without it `pro` is a local
-  // boolean that survives a lapsed subscription, a refund and a cancellation.
-  ok('entitlement is re-checked on launch',
-    /observeEntitlement/.test(layout) && /refreshEntitlement\(\)/.test(layout));
-
-  // ...and the answer has three states, not two. Treating "could not reach
-  // the store" as "has not paid" locks a paying customer out of their own
-  // ledger the first time they open the app on a plane.
-  ok('a null entitlement leaves the cached flag alone',
-    /generation === refreshGeneration && snapshot\) void apply\(snapshot, allowEqual\)/
-      .test(layout));
-  ok('refreshEntitlement can return null',
-    /Promise<EntitlementSnapshot \| null>/.test(sdk));
-  ok('billing snapshots carry the exact RevenueCat expiration into native capture',
+  ok('Superwall owns the native purchase stack',
+    pkg.dependencies?.['expo-superwall'] && !pkg.dependencies?.['react-native-purchases']);
+  ok('the root is wrapped in the Superwall billing provider',
+    /SuperwallBillingProvider/.test(layout));
+  ok('native Wafra onboarding owns first run while Superwall stays mounted for billing',
+  /SuperwallOnboarding/.test(layout) &&
+    /<OnboardingGate>\{children\}<\/OnboardingGate>/.test(remoteOnboarding) &&
+    !/presentOnboardingFlow/.test(remoteOnboarding));
+  ok('the provider uses public platform keys and named placements',
+    /EXPO_PUBLIC_SUPERWALL_IOS_API_KEY/.test(provider) &&
+      /EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY/.test(provider) &&
+      /pro_upgrade/.test(provider) && /onboarding: 'onboarding'/.test(provider));
+  ok('the remote handoff validates every personalization value and is durable',
+    /wafra_onboarding_handoff/.test(provider) &&
+      /\['spending', 'bills', 'cashflow', 'overview'\]/.test(provider) &&
+      /\['none', 'bank-apps', 'spreadsheet', 'finance-app'\]/.test(provider) &&
+      /'control'/.test(provider) && /'spend-intentionally'/.test(provider) &&
+      /'stay-ahead'/.test(provider) && /'build-buffer'/.test(provider) &&
+      /stage: 'remote-handoff'/.test(provider) && /await ensureDurable\(\)/.test(provider));
+  ok('the local first name is never sent to Superwall',
+    !/userName/.test(provider) && /user's name/.test(provider));
+  ok('unknown storefront state preserves the cached Pro flag',
+    /status\.status === 'UNKNOWN'\) return null/.test(sdk) &&
+      /if \(!snapshot\) return/.test(provider));
+  ok('resolved entitlements are re-checked and mirrored on launch/foreground',
+    /entitlementSnapshot\(\s*subscriptionStatus,\s*customerInfo,/.test(provider) &&
+      /AppState\.addEventListener\('change'/.test(provider) &&
+      /await getUserAttributes\(\)/.test(provider) &&
+      /setPro\(snapshot\.active\)/.test(provider));
+  ok('foreground refresh never synthesizes inactive from an empty entitlement fetch',
+    !/const resolved: SubscriptionStatus = entitlements\.active/.test(
+      provider.match(/const refresh = useCallback[\s\S]*?\n  \}, \[[^\]]*\]\);/)?.[0] ?? '',
+    ));
+  ok('store snapshots carry a bounded or exact expiration into native capture',
     /expirationDateMs: number \| null/.test(sdk) &&
-      /entitlement\.expirationDateMillis/.test(sdk) &&
+      /STORE_CAPTURE_FALLBACK_LEASE_MS/.test(sdk) &&
       /setIosStoreCaptureEntitlementLease/.test(sdk) &&
-      /syncStoreCaptureEntitlement/.test(layout));
-  ok('active-to-active renewals update native capture before the cached Pro shortcut',
-    /await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?snapshot\.active === currentPro\.current/
-      .test(layout));
-  ok('offline unknown never writes a storefront capture lease',
-    /generation === refreshGeneration && snapshot/.test(layout) &&
-      !/refreshEntitlement\(\)[\s\S]{0,180}else[\s\S]{0,120}syncStoreCaptureEntitlement/.test(layout));
-  ok('purchase and restore mirror their exact CustomerInfo before reporting completion',
-    /purchasePackage\(selectedPackage\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return 'granted'/.test(sdk) &&
-      /restorePurchases\(\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return snapshot\.active/.test(sdk));
-
-  // A secret key in the client is a real incident. RevenueCat's platform
-  // public SDK keys may be committed because native builds need them baked
-  // into Expo config; local development may deliberately leave them empty.
-  const appJson = JSON.parse(read('app.json'));
-  const extra = appJson.expo.extra || {};
-  ok('the Android RevenueCat key is empty or a Google public SDK key',
-    extra.revenueCatAndroidKey === '' || /^goog_[A-Za-z0-9]+$/.test(extra.revenueCatAndroidKey));
-  ok('the iOS RevenueCat key is empty or an Apple public SDK key',
-    extra.revenueCatIosKey === '' || /^appl_[A-Za-z0-9]+$/.test(extra.revenueCatIosKey));
-  ok('no secret RevenueCat key is committed',
-    !/sk_[A-Za-z0-9]{10}/.test(read('app.json') + src + sdk));
+      /syncStoreCaptureEntitlement/.test(provider));
+  ok('restore has three answers and refreshes the pro entitlement',
+    /Promise<boolean \| null>/.test(provider) &&
+      /restored\.result === 'failed'\) return null/.test(provider) &&
+      /return active/.test(provider));
   const releaseCheck = read('scripts/lib/release-readiness.mjs');
-  ok('the release gate rejects prefix-only RevenueCat placeholders',
-    /\^goog_\[A-Za-z0-9\]\+\$/.test(releaseCheck) &&
-      /\^appl_\[A-Za-z0-9\]\+\$/.test(releaseCheck));
+  ok('the release gate requires both Superwall public keys',
+    /EXPO_PUBLIC_SUPERWALL_IOS_API_KEY/.test(releaseCheck) &&
+      /EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY/.test(releaseCheck));
+  ok('no RevenueCat client dependency remains',
+    !/react-native-purchases/.test(read('package.json')) &&
+      !/revenueCat(?:Android|Ios)Key/.test(read('app.json')));
 
-  // Billing must be impossible rather than broken when unconfigured, or the
-  // paywall opens a flow that cannot complete.
-  ok('billing is unavailable without a key', /apiKey\(\) !== null/.test(sdk));
-  ok('billing is unavailable on web', /Platform\.OS !== 'web'/.test(sdk));
-
-  // Product ids are store configuration; native prices come back localized.
   const { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS } = require('./build/purchases');
   ok('both plans have a product id and an explicit USD preview reference',
     Object.keys(PRO_SKUS).every(
       (k) => PRO_SKUS[k] && /^US\$/.test(PRO_REFERENCE_PRICE_STRINGS[k]),
     ),
     { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS });
-  ok('the setup doc names the same product ids',
-    Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)));
+  ok('the setup doc names the same product ids and Superwall placement',
+    Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)) &&
+      read('docs/billing.md').includes('pro_upgrade'));
 }
 
 /* ── private ledger persistence ───────────────────────────────────────
@@ -711,9 +735,13 @@ function ktSources(dir) {
     /kind: 'wafra\.sync'/.test(wake) &&
       /_contentAvailable: true/.test(wake) &&
       !/\btitle:|\bbody:|merchant|amountFils/.test(wake));
-  ok('Android notification permission is never requested on cold launch',
-    !/requestNotificationPermission/.test(home) &&
-      !/requestNotificationPermission/.test(onboarding));
+  ok('Android notification permission is requested only from an explicit user action',
+    /onPress:\s*\(\) => void \(async \(\) => \{[\s\S]{0,420}requestNotificationPermission\(\)/.test(home) &&
+      /const startScan = async \(\) => \{[\s\S]{0,1800}requestVisibleNotificationPermission\(\)/.test(onboarding) &&
+      /const finishNotificationChoice = async[\s\S]{0,650}requestVisibleNotificationPermission\(\)/.test(onboarding) &&
+      (home.match(/requestNotificationPermission\(\)/g) ?? []).length === 1 &&
+      (onboarding.match(/requestVisibleNotificationPermission\(\)/g) ?? []).length === 2,
+    'cold launch may offer an Enable action, but it must not open Android permission UI until the user taps it');
   ok('headless sync writes SQLCipher before relay acknowledgement',
     executor.indexOf('await background.stage(queued.parsed)') <
       executor.indexOf(
@@ -888,12 +916,13 @@ function ktSources(dir) {
     /<AutomationGuide/.test(setup) &&
       automationGuide.includes("'iosMessageGuideRunShortcut'") &&
       /tf\(step, \{ shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME \}\)/.test(automationGuide) &&
-      /iosMessageGuideRunShortcut:\s*\{ en: 'Run \{shortcut\} · full Received Message'/.test(copy));
+      /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\), then Done'/.test(copy));
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
       /run with no input invokes the native setup-proof action/.test(shortcutSpec));
-  ok('iOS setup discloses selected-sender retention and raw Message deletion',
-    /bank sender you select/.test(copy) &&
+  ok('iOS setup discloses the unfiltered trigger, queue retention and raw Message deletion',
+    /runs with an empty Sender for every new message/.test(copy) &&
+      !/Apple requires a bank sender you select|alerts only from bank senders you select/.test(copy) &&
       /protected queue on this iPhone/.test(copy) &&
       /After a durable local result, Wafra deletes the raw Message/.test(copy) &&
       /uploads no Message data/.test(copy));
@@ -918,10 +947,10 @@ function ktSources(dir) {
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'شغّل \{shortcut\} · الرسالة المستلمة كاملة'/.test(copy) &&
+    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)، ثم تم'/.test(copy) &&
       /أكملت الإعداد/.test(copy) &&
-      /اختر مرسلي البنوك/.test(copy) &&
-      /مرسل بنك تختاره/.test(copy) &&
+      /جهات الاتصال فقط/.test(copy) &&
+      /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
       /يحذف وفرة الرسالة الخام/.test(copy));
   ok('the next production build rejects every exact retired Capture Shortcut snapshot',
@@ -988,13 +1017,15 @@ function ktSources(dir) {
       scan.includes("const background = RNAppState?.currentState === 'background'") &&
       scan.includes('Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS)') &&
       scan.includes('state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE)') &&
-      // Inbox parsing, its proven-duplicate fast path, the retired delivery
-      // buffer and trusted bank notifications each keep the same UI yield.
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
+      // Every parsing path keeps the same UI yield. History repair also has a
+      // cheap pre-parser rejection branch now, so do not pin the exact number
+      // of call sites: adding another safe early exit must not fail this
+      // contract as long as the bounded yield remains present throughout.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length >= 5,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
-    /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
-      /importInFlight = \{ promise: operation, interactive \}/.test(home));
+    /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive, liveEvent\)/.test(home) &&
+      /importInFlight = \{ promise: operation, interactive, liveEvent \}/.test(home));
   // ...and the thing they join is MODULE-level, not a component ref. Four tabs
   // now mount this hook; a per-component ref would have given each screen its
   // own "one" scan, which is four inbox reads racing four import plans built
@@ -1008,7 +1039,7 @@ function ktSources(dir) {
   // outcome and go unanswered. It must run its own follow-up once the shared
   // scan settles, without re-entering as a second concurrent scan.
   ok('an interactive join preserves feedback without duplicating a successful scan',
-    /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
+    /if \(existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
       /shouldReplayJoinedAutoImport/.test(home) &&
       /return startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home) &&
       /if \([^\n]*outcome === 'up-to-date'\)[\s\S]*upToDateNoNew/.test(home));
@@ -1057,6 +1088,26 @@ function ktSources(dir) {
     /function CaptureOwner/.test(tabsLayout) &&
       /useAutoImport\(true, false\)/.test(tabsLayout) &&
       /<CaptureOwner \/>/.test(tabsLayout));
+  const iosTabsLayout = read('src/components/app-tabs-layout.ios.tsx');
+  const tabClearance = read('src/hooks/use-tab-bar-clearance.ts');
+  ok('the iOS tabs shell also owns parser migrations',
+    /function CaptureOwner/.test(iosTabsLayout) &&
+      /useAutoImport\(true, false\)/.test(iosTabsLayout) &&
+      /<CaptureOwner \/>/.test(iosTabsLayout));
+  ok('the iOS tabs shell uses native tabs with the same four destinations',
+    /from 'expo-router\/unstable-native-tabs'/.test(iosTabsLayout) &&
+      ['index', 'flow', 'bills', 'wallet'].every((name) => iosTabsLayout.includes(`name: '${name}'`)));
+  ok('iOS native tabs leave content insets to ScreenScaffold',
+    /disableAutomaticContentInsets/.test(code(iosTabsLayout)));
+  ok('the iOS shell declares native chrome so clearance reads the inset, not the custom bar height',
+    /<TabBarMetricsProvider nativeChrome>/.test(iosTabsLayout) &&
+      /if \(nativeChrome\) \{[\s\S]*?return Math\.max\(insets\.bottom, NATIVE_TAB_BAR_FLOOR\) \+ Spacing\.three;/.test(code(tabClearance)));
+  ok('bottom sheets pad for the window inset, not the per-tab inset that includes the iOS tab bar',
+    /Math\.min\(insets\.bottom, initialWindowMetrics\?\.insets\.bottom \?\? insets\.bottom\)/.test(read('src/components/ui/bottom-sheet.tsx')));
+  ok('iOS native tab icons come from the shared SF Symbol vocabulary',
+    ['house', 'chart.bar.xaxis', 'doc.text', 'wallet.pass'].every((sf) => iosTabsLayout.includes(`'${sf}'`)));
+  ok('iOS uses the Icon Composer asset',
+    JSON.parse(read('app.json')).expo.ios.icon === './assets/wafra.icon');
   ok('Home observes status without registering a second foreground scan',
     /useAutoImport\(false, true\)/.test(home));
   ok('a hidden SMS access failure reaches Home unless bank notifications remain available',
@@ -1101,7 +1152,7 @@ function ktSources(dir) {
   // The other half of the same contract, in capture.ts: a zero watermark is
   // what turns the next scan into a full-history re-read.
   ok('a zero watermark reads the whole inbox, not just what is new',
-    /state\.lastScanTs <= 0 \? 0 : state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
+    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
     /if \(!state\.hydrated\) return;/.test(hook) &&
       /Platform\.OS !== 'ios' && !state\.onboarded/.test(hook) &&
@@ -1109,7 +1160,8 @@ function ktSources(dir) {
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
       /Platform\.OS !== 'ios'[\s\S]*Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS/.test(hook) &&
-      /if \(!state\.captureOptOut && entitlementActive\)\s*\{\s*scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated\);/.test(hook));
+      /const force = state\.lastScanTs <= 0 \|\| captureJustEnabled \|\| entitlementJustActivated;/.test(hook) &&
+      /scan\(force\)/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
   // who has just erased everything and is being shown the Shortcut cleanup
@@ -1270,15 +1322,14 @@ function ktSources(dir) {
   const captureErase = capture.match(
     /export const eraseIosCaptureStore[\s\S]*?\n\};/,
   )?.[0] || '';
+  const billingProvider = read('src/components/superwall-billing-provider.native.tsx');
   ok('native erase deterministically requests local and store entitlement reseeding',
     /await native\.eraseAll\(\)[\s\S]*publishIosCaptureEntitlementReset\(\)/.test(captureErase) &&
-      /subscribeIosCaptureEntitlementReset\(syncLocalCaptureLease\)/.test(layout) &&
-      /subscribeIosCaptureEntitlementReset\(\(\) => \{[\s\S]*apply\(latestSnapshot, true\)/
-        .test(layout));
-  ok('erase can replay the same verified store snapshot while ordinary duplicates stay deduped',
-    /const apply = async \(snapshot: EntitlementSnapshot, allowEqual = false\)/.test(layout) &&
-      /!allowEqual && snapshot\.requestDateMs === latestRequestDateMs/.test(layout) &&
-      /apply\(latestSnapshot, true\)/.test(layout));
+      /subscribeIosCaptureEntitlementReset\(syncLocalCaptureLease\)/.test(billingProvider) &&
+      /subscribeIosCaptureEntitlementReset\(\(\) => \{[\s\S]*latestSnapshot\.current/.test(billingProvider));
+  ok('erase replays the last verified store snapshot without inventing a new entitlement',
+    /const snapshot = latestSnapshot\.current/.test(billingProvider) &&
+      /if \(snapshot\) void applySnapshot\(snapshot\)/.test(billingProvider));
   ok('storage recovery offers conditional legacy Shortcut cleanup after a successful erase',
     /const hadLegacyShortcut = isLegacyShortcutCaptureActive\(relay\)/.test(recovery) &&
       /await clearAll\(cleanupCaptureQueue\)[\s\S]*?shortcutCleanupApplies\(hadLegacyShortcut\)[\s\S]*?openShortcutsApp\(\)/.test(recovery) &&
@@ -1395,7 +1446,6 @@ function ktSources(dir) {
   )?.[0] || '';
   ok('Accuracy renders a local-capture-aware iOS source-retention state',
     /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(accuracyScreen) &&
-      /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(settings) &&
       /noFormats === 'ios-local'[\s\S]*?'formatsNotKeptIosLocal'/.test(accuracyScreen) &&
       /processed Message text is not retained in the ledger/.test(settingsAccuracyRow) &&
       /pending records expire after 30 days/.test(settingsAccuracyRow) &&
@@ -1440,7 +1490,7 @@ function ktSources(dir) {
 
   ok('the budget editor derives the live-account and internal-transfer sets',
     /liveAccountIds\(state\.accounts\)/.test(sheet) &&
-      /internalTransferIds\(state\.transactions, state\.accounts\)/.test(sheet));
+      /internalTransferIdsForState\(state\)/.test(sheet));
   ok('every spend figure in the budget editor applies both exclusions',
     calls === 2 &&
       flat.includes('spentInMonthForCategory(state.transactions,key,picked,liveAccounts,internal)') &&
@@ -1606,18 +1656,32 @@ function ktSources(dir) {
 for (const rel of ['src/app/cards.tsx']) {
   const screen = read(rel);
   ok(`${rel} derives the internal-transfer set`,
-    /internalTransferIds\(state\.transactions, state\.accounts\)/.test(screen));
+    /internalTransferIdsForState\(state\)/.test(screen));
   ok(`${rel} excludes own-account moves from per-account spend`,
     /isSpending\(\w+, undefined, internal\)/.test(screen),
     screen.match(/isSpending\([^)]*\)/g));
 }
 
-// Accounts removed per-account spending. Keep it on canonical card/cashflow values.
+{
+  const statement = read('src/components/card-payment-sheet.tsx');
+  ok('credit-card statement activity uses canonical spending rather than a hand-written transfer check',
+    /internalTransferIdsForState\(state\)/.test(statement) &&
+      /isSpending\(t, undefined, internal\)/.test(statement) &&
+      !/t\.isTransfer \|\| t\.type !== 'expense'/.test(code(statement)),
+    'statement charge totals must exclude the same unresolved/internal movements as every other spending surface');
+}
+
+// Accounts removed per-account spending and cash-flow drilldowns. Its render
+// path now consumes the already-indexed balance and due projections instead of
+// calling cardFigure() once per account (which can rescan the ledger). Keep the
+// same no-spending/no-cashflow boundary while pinning that cheaper projection.
 {
  const wallet=read('src/app/(tabs)/wallet.tsx');
- ok('Wallet uses shared card figures and transfer-aware cash outflow',
-  /cardFigure\(state, account, now\)/.test(wallet) && /summarizeCashOutflow\(state,[\s\S]*?internal/.test(wallet) &&
-  !/monthSpendByAccount|isSpending\(/.test(wallet));
+ ok('Wallet uses indexed balance and due figures without rebuilding spending or cash-flow summaries',
+  /dueByAccountId\.get\(account\.id\)/.test(wallet) &&
+  /balances\.balanceByAccountId\[account\.id\]/.test(wallet) &&
+  !/cardFigure\(state, account, now\)/.test(code(wallet)) &&
+  !/summarizeCashOutflow\(|monthSpendByAccount|isSpending\(/.test(wallet));
 }
 /* ── subscriptions and the expense export learn the same two exclusions ── */
 //
@@ -1659,7 +1723,7 @@ for (const rel of ['src/app/cards.tsx']) {
     const flat = text.replace(/\s/g, '');
     ok(`${rel} derives the live-account and internal-transfer sets`,
       /liveAccountIds\(state\.accounts\)/.test(text) &&
-        /internalTransferIds\(state\.transactions, ?state\.accounts\)/.test(text));
+        /internalTransferIdsForState\(state\)/.test(text));
     ok(`${rel} threads both sets into its subscription/export call`,
       flat.includes(callNeedle), rel);
   }
@@ -1764,18 +1828,25 @@ ok('the spoken label agrees with the sign on screen',
 {
   const types = read('src/lib/types.ts');
   const store = read('src/lib/store.tsx');
-  const branch = store.match(/case 'editTransaction': \{[\s\S]*?\n    \}/)[0];
+  const editHelper = store.match(/function applyTransactionEdit\([\s\S]*?\n\}/)[0];
+  // The reducer branch, not the earlier transfer-normalization switch that
+  // shares the case label.
+  const branch = store.match(/case 'editTransaction': \{\s*const index = state\.transactions\.findIndex[\s\S]*?\n    \}/)[0];
   const override = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
 
   ok('titleEdited is an optional, additive field on Transaction',
     /titleEdited\?: boolean;/.test(types),
     'existing rows must read as absent, which is correct for them');
   ok('an edit sets titleEdited only when the title actually changed',
-    /const renamed = action\.patch\.title !== undefined && action\.patch\.title !== t\.title;/
-      .test(branch),
+    /const renamed = patch\.title !== undefined && patch\.title !== transaction\.title;/
+      .test(editHelper),
     'editing an amount, a date or an account is not a renaming');
   ok('titleEdited stays true once set',
-    /renamed \|\| t\.titleEdited/.test(branch));
+    /renamed \|\| transaction\.titleEdited/.test(editHelper));
+  ok('a normal one-row edit does not rescan the full ledger just to prove sort order',
+    /state\.transactions\.slice\(\)/.test(branch) &&
+      /edited\.date !== previous\.date \? sortTxs\(transactions\) : transactions/.test(branch),
+    'only an actual posting-date change may require a whole-ledger sort check');
   ok('a bulk merchant rule never claims the title was retyped',
     !/titleEdited/.test(code(override)),
     'that path does not touch titles');
@@ -1815,7 +1886,9 @@ ok('the spoken label agrees with the sign on screen',
     'otherwise a 400-groceries/100-dining charge adds 500 to a groceries total');
 
   ok('"Last 3 months" is bounded at both ends',
-    /month < three \|\| month > options\.currentKey/.test(projection),
+    /filters\.datePreset === '3months'\) \{ monthFrom = three; monthTo = options\.currentKey; \}/.test(projection) &&
+      /belowMonth = monthFrom !== null && month < monthFrom/.test(projection) &&
+      /aboveMonth = monthTo !== null && month > monthTo/.test(projection),
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',
@@ -1922,24 +1995,39 @@ ok('the spoken label agrees with the sign on screen',
 
 /* ── a store that cannot be reached is not a customer who never paid ─── */
 {
-  const sdk = read('src/lib/billing.ts');
+  const provider = read('src/components/superwall-billing-provider.native.tsx');
   const pro = read('src/app/pro.tsx');
   const strings = read('src/lib/i18n.ts');
 
-  ok('restorePro has three answers, not two',
-    /export async function restorePro\(\): Promise<boolean \| null>/.test(sdk),
-    'false meant both "never bought it" and "could not ask"');
-  ok('the paywall tells a subscriber to retry rather than that nothing exists',
-    /restored === null/.test(code(pro)) && /restoreFailed/.test(pro),
-    'a reinstall on bad connectivity read as "No purchase found"');
-
-  ok('a purchase reports why it did not happen',
-    /export type PurchaseOutcome = 'granted' \| 'cancelled' \| 'failed'/.test(sdk));
-  ok('backing out of the store sheet is told apart from a broken store',
-    /userCancelled/.test(code(sdk)),
-    'an unactivated SKU made "Get Pro" silently inert, forever');
-  ok('the paywall reports a failed purchase and stays silent on a cancelled one',
-    /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
+  ok('restorePro keeps failure distinct from no active purchase',
+    /Promise<boolean \| null>/.test(provider) &&
+      /restored\.result === 'failed'\) return null/.test(provider) &&
+      /return active/.test(provider));
+  ok('the paywall tells an unreachable-store restore apart from no purchase found',
+    /restored === null/.test(code(pro)) && /restoreFailed/.test(pro) &&
+      /!restored/.test(code(pro)) && /noPurchaseFound/.test(pro));
+  ok('the purchase UI is Wafra\'s own screen driving the storefront checkout',
+    /billing\.purchasePro\(/.test(code(pro)) && !/presentProPaywall/.test(pro));
+  ok('a completed transaction is not Pro until the entitlement confirms it',
+    /verifyProEntitlement/.test(provider) &&
+      /'unconfirmed'/.test(provider) &&
+      /outcome === 'purchased'/.test(code(pro)) &&
+      /t\('purchaseFailed'\)/.test(pro));
+  ok('a price refresh cannot leave a stale figure the CTA would charge',
+    /setOffers\(\[\]\);/.test(code(pro)) &&
+      /const selectedOffer = offerState === 'ready'/.test(code(pro)));
+  ok('a second tap in the same frame cannot start a second checkout',
+    /if \(actionLatch\.current\) return;/.test(code(pro)) &&
+      (code(pro).match(/actionLatch\.current = false;/g) ?? []).length === 3 &&
+      (code(pro).match(/if \(actionLatch\.current\) return;/g) ?? []).length === 3);
+  ok('a plan the storefront did not return is drawn as unavailable, not dropped',
+    /unavailablePlanRow/.test(code(pro)) &&
+      /missingPlans/.test(code(pro)) &&
+      !/\.filter\(\(offer\): offer is ProPlanOffer => offer != null\)/.test(pro));
+  ok('a cancelled purchase and a deferred one are not reported as failures',
+    /outcome === 'cancelled'\) return;/.test(code(pro)) &&
+      /purchasePendingTitle/.test(pro) &&
+      /result\.type === 'pending'\) return 'pending'/.test(code(provider)));
   ok('an unconfirmed entitlement never guarantees that the store charged nothing',
     !/Nothing has been charged/.test(strings) && !/لم يتم خصم أي مبلغ/.test(strings));
   ok('the paywall exposes one live announcement path instead of announcing twice',
@@ -2236,6 +2324,10 @@ ok('the spoken label agrees with the sign on screen',
   const reviewDraftModules = new Set([
     'unparsed-launch-alert.ts', 'parser-research.ts', 'universal-dates.ts',
     'universal-fields.ts', 'universal-money.ts', 'universal-types.ts',
+    // The on-device semantic layer sees deterministic spans only to replace
+    // them with typed placeholders before anything is embedded; it is a
+    // redactor, and its own contract below keeps it away from ledger writers.
+    'local-semantic-model.ts',
   ]);
   ok('drafts reach only the reviewed extraction modules and isolated research redactor',
     alertConsumers.length === reviewDraftModules.size &&
@@ -2262,10 +2354,15 @@ ok('the spoken label agrees with the sign on screen',
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
-  const globalExtractor = read('src/lib/universal-parser.ts');
+  // The universal extractor reads market packs to inspect alerts; template
+  // certification reads them only to refuse a market-inconsistent currency.
+  // Neither may write the ledger or reach the network.
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts']);
+  const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
-    marketReviewConsumers.length === 1 && marketReviewConsumers[0].endsWith(`${path.sep}universal-parser.ts`) &&
-    !/(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(globalExtractor) &&
+    marketReviewConsumers.length === marketReviewModules.size &&
+    marketReviewConsumers.every((file) => marketReviewModules.has(path.basename(file)) &&
+      !directWriterOrTransport.test(fs.readFileSync(file, 'utf8'))) &&
     /decision: 'review' \| 'ignore'/.test(read('src/lib/universal-types.ts')),
     marketReviewConsumers.join(' | '));
 }
@@ -2281,10 +2378,14 @@ ok('the spoken label agrees with the sign on screen',
     path.join(root, '.github/scripts/feedback-prompt.mjs'),
     'utf8',
   );
-  ok('the workflow checks explicit AI consent after fetching the report',
+  const input = read('.github/scripts/feedback-input.mjs');
+  const publisher = read('.github/scripts/feedback-publish.mjs');
+  ok('generation and publication each validate original consent through trusted input code',
     /Verify explicit third-party AI consent/.test(workflow) &&
-    /item\.aiReviewConsent !== true/.test(workflow) &&
-    /diagnostic\?\.delivery\?\.thirdPartyAi === true/.test(workflow));
+    /feedback-input\.mjs/.test(workflow) &&
+    /item\.aiReviewConsent !== true/.test(input) &&
+    /diagnostic\?\.delivery\?\.thirdPartyAi !== true/.test(input) &&
+    /validateFeedback\(/.test(input) && /await fetchFeedbackItem\(/.test(publisher));
   ok('the prompt builder independently refuses reports without AI consent',
     /item\.aiReviewConsent !== true/.test(prompt) &&
     /diagnostic\?\.delivery\?\.thirdPartyAi !== true/.test(prompt) &&
@@ -2377,22 +2478,14 @@ ok('the spoken label agrees with the sign on screen',
     />\s*"\$WORK\/agent\.log"/.test(invocation) && !/\btee\b/.test(invocation),
     `${wfPath}: ${invocation.trim()}`);
 
-  /**
-   * And a refused pull request does not take the summary down with it.
-   *
-   * `gh pr create` is the last call of the run. On a repository with "Allow
-   * GitHub Actions to create and approve pull requests" turned off it answers
-   * `not permitted`, and under `set -e` that ended the step — after the agent
-   * turn, two full suite runs and the verbatim gate had all passed, and with
-   * the branch already on the remote. Everything of value survived except the
-   * one thing that only existed in $RUNNER_TEMP: the body.
-   *
-   * It is safe to print at that point and only at that point, because the
-   * verbatim gate two steps earlier has already cleared it.
-   */
-  ok('a refused pull request still publishes the body it would have used',
-    /cat "\$WORK\/pr-body\.md"/.test(wf) && /compare\/\$\{branch\}/.test(wf),
-    `${wfPath}: the gh failure path must survive to write the summary`);
+  // A refused PR leaves a uniquely named branch. Its safe identifier is
+  // reported without reprinting candidate prose or server error bodies.
+  const publisher = read('.github/scripts/feedback-publish.mjs');
+  ok('a refused draft reports its surviving checked branch without publishing raw output',
+    /Draft PR creation failed; the checked branch remains at/.test(publisher) &&
+    /feedback\/\$\{feedbackId\}-\$\{runId\}-\$\{attempt\}/.test(publisher) &&
+    !/cat "\$WORK\/(?:agent\.log|pr-body\.md)"/.test(wf));
+
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

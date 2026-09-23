@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
+  Platform,
   Pressable,
   type GestureResponderEvent,
   type PressableProps,
@@ -48,6 +49,36 @@ interface SpringPressableProps extends Omit<PressableProps, 'style'> {
  * Reduce Motion retains an immediate opacity cue without moving the surface.
  */
 export const SpringPressable = ({
+  ...props
+}: SpringPressableProps) => {
+  if (Platform.OS === 'android') {
+    return <AndroidPressable {...props} />;
+  }
+  return <AnimatedSpringPressable {...props} />;
+};
+
+const AndroidPressable = ({
+  disabled,
+  onPressIn,
+  onPressOut,
+  opacityTo = 0.88,
+  scaleTo: _scaleTo,
+  style,
+  ...props
+}: SpringPressableProps) => (
+  <Pressable
+    {...props}
+    disabled={disabled}
+    onPressIn={onPressIn}
+    onPressOut={onPressOut}
+    style={({ pressed }) => [
+      style,
+      { opacity: pressed && !disabled ? opacityTo : 1 },
+    ]}
+  />
+);
+
+const AnimatedSpringPressable = ({
   disabled,
   onPressIn,
   onPressOut,
@@ -74,24 +105,27 @@ export const SpringPressable = ({
     if (disabled) pressed.value = 0;
   }, [disabled, pressed]);
 
-  const setPressed = (next: 0 | 1) => {
+  // Stable across renders: these are props on the Pressable, and this
+  // component wraps most rows in the app. Rebuilding them each render made
+  // every row's Pressable re-render whenever its list re-rendered.
+  const setPressed = useCallback((next: 0 | 1) => {
     if (disabled && next === 1) return;
     if (reducedMotion) {
       pressed.value = next;
       return;
     }
     pressed.value = withSpring(next, next === 1 ? PRESS_IN : PRESS_OUT);
-  };
+  }, [disabled, pressed, reducedMotion]);
 
-  const handlePressIn = (event: GestureResponderEvent) => {
+  const handlePressIn = useCallback((event: GestureResponderEvent) => {
     setPressed(1);
     onPressIn?.(event);
-  };
+  }, [onPressIn, setPressed]);
 
-  const handlePressOut = (event: GestureResponderEvent) => {
+  const handlePressOut = useCallback((event: GestureResponderEvent) => {
     setPressed(0);
     onPressOut?.(event);
-  };
+  }, [onPressOut, setPressed]);
 
   return (
     <AnimatedPressable

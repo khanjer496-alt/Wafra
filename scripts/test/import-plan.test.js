@@ -144,6 +144,31 @@ ok('an explicitly stated AED amount confirms the deferred ledger currency',
     foreignPlan.batch.confirmedLedgerCurrency === undefined,
     foreignPlan.batch.confirmedLedgerCurrency);
 }
+
+// A fresh global ledger is denominated by the bank event itself, not by the
+// UAE/Saudi parser preference that happens to be active on this test device.
+for (const [currency, exponent, minor] of [
+  ['USD', 2, 2490],
+  ['EUR', 2, 1234],
+  ['JPY', 0, 2400],
+  ['KWD', 3, 12345],
+]) {
+  const ts = T0 + 200_000 + exponent;
+  const row = {
+    kind: 'transaction', type: 'expense', amountFils: minor, currency,
+    merchant: `Global ${currency} Shop`, date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: { last4: '9876', kind: 'debit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'shopping', categoryDeliberate: true,
+    smsTs: ts, sender: 'GLOBALBANK', channel: 'push',
+  };
+  const plan = buildImportPlan([row], BASE, ts);
+  ok(`${currency}/${exponent}: a fresh global bank row pins its exact ledger money`,
+    plan.txCount === 1 && plan.batch.importMoney?.currency === currency &&
+      plan.batch.importMoney?.exponent === exponent &&
+      plan.batch.confirmedLedgerCurrency === currency &&
+      plan.batch.transactions[0]?.amountFils === minor,
+    plan.batch);
+}
 const afterFirst = apply(BASE, first);
 
 /* ── supplemental statements heal transfer semantics without guessing ─── */
@@ -630,7 +655,7 @@ const afterFirst = apply(BASE, first);
   const smsTs = T0 + 4_400_000;
   const reminder = {
     kind: 'billDue', type: 'expense', amountFils: 77581, currency: 'AED',
-    merchant: 'E&', date: '2026-08-15', dueDay: 15, minDueFils: null,
+    merchant: 'Etisalat', date: '2026-08-15', dueDay: 15, minDueFils: null,
     card: null, reference: null, transferHint: false,
     snapshotFils: null, snapshotKind: null, categoryGuess: 'telecom', raw: '',
     smsTs, sender: 'e&', channel: 'inbox',
@@ -648,7 +673,7 @@ const afterFirst = apply(BASE, first);
     plan.batch.updates.some((u) => u.id === 'phantom-e&' && u.remove),
     plan.batch.updates);
   ok('and the reminder itself lands as a bill due',
-    plan.billDues.length === 1 && plan.billDues[0].merchant === 'E&', plan.billDues);
+    plan.billDues.length === 1 && plan.billDues[0].merchant === 'Etisalat', plan.billDues);
   ok('...and never as a transaction', plan.txCount === 0, plan.batch.transactions);
 
   const newerReminder = {
@@ -984,6 +1009,30 @@ const DECLINE_SMS = [{
   ok('identity resolution: bare card wording reuses one unambiguous known card',
     againstKnown.newAccountCount === 0 && againstKnown.batch.transactions[0]?.accountId === 'adcb1111',
     againstKnown.batch);
+  ok('identity resolution: an already-known issuer is not re-emitted as fake account metadata',
+    Object.keys(againstKnown.batch.bankNames).length === 0,
+    againstKnown.batch.bankNames);
+
+  const explicitKnownDebit = {
+    ...BASE,
+    accounts: [{
+      id: 'adcb-debit-1111', name: 'ADCB Debit Card •1111', kind: 'card', cardType: 'debit',
+      last4: '1111', bankName: 'ADCB', openingFils: 0, color: '#f00',
+    }],
+    accountHints: { 'ADCB|debit|1111': 'adcb-debit-1111', '1111': 'adcb-debit-1111' },
+  };
+  const explicitKnownDebitPurchase = {
+    ...unknownPurchase,
+    card: { last4: '1111', kind: 'debit' },
+    raw: 'Debit Card ending 1111',
+    smsTs: unknownPurchase.smsTs + 1,
+  };
+  const againstKnownDebit = buildImportPlan(
+    [explicitKnownDebitPurchase], explicitKnownDebit, explicitKnownDebitPurchase.smsTs);
+  ok('identity resolution: an unchanged known card type stays off the live-import mutation path',
+    Object.keys(againstKnownDebit.batch.bankNames).length === 0 &&
+      Object.keys(againstKnownDebit.batch.cardTypes).length === 0,
+    { bankNames: againstKnownDebit.batch.bankNames, cardTypes: againstKnownDebit.batch.cardTypes });
 
   const sameBatch = buildImportPlan([unknownPurchase, creditStatement], BASE, creditStatement.smsTs, new Date(2026, 7, 2));
   ok('identity resolution: bare purchase plus statement creates one account in one scan',
@@ -1413,6 +1462,116 @@ const DECLINE_SMS = [{
   ok('two real same-amount charges on one day are two rows', plan.txCount === 2, plan.txCount);
 }
 
+/* ── statement rows reconcile with live captures by money facts, not title ──
+ *
+ * A statement names the acquirer descriptor and usually has only a posting
+ * date; the live alert names the friendly merchant and has the actual clock.
+ * Treating those strings/timestamps as identity produced two rows for one
+ * charge. The safe universal boundary is explicit PDF/CSV provenance + same
+ * resolved account + direction + amount/date, consumed one-for-one.
+ */
+{
+  const { duplicateGuard } = require('./build/dedupe.js');
+  const account = {
+    id: 'adcb-card', name: 'ADCB Credit •3215', kind: 'card', cardType: 'credit',
+    last4: '3215', bankName: 'ADCB', openingFils: 0, color: '#fff',
+  };
+  const liveTs = Date.parse('2026-09-13T11:08:00Z');
+  const midnight = Date.parse('2026-09-13T00:00:00Z');
+  const live = {
+    id: 'live-endurance', type: 'expense', amountFils: 3215, category: 'software',
+    accountId: account.id, title: 'Endurancein', date: '2026-09-13', source: 'sms',
+    ts: liveTs, smsKey: `s${liveTs}-3215`,
+    captureInstrument: { last4: '3215', kind: 'credit', bankIdentity: 'adcb' },
+  };
+
+  {
+    const guard = duplicateGuard([live]);
+    const statement = {
+      date: '2026-09-13', amountFils: 3215, title: 'PAYPAL *ENDURANCEIN', type: 'expense',
+      accountId: account.id, ts: midnight, smsKey: `s${midnight}-3215`, captureSource: 'csv',
+      captureInstrument: { last4: '3215', kind: 'unknown', bankIdentity: 'adcb' },
+    };
+    ok('statement dedupe: different statement descriptor and date-only clock still match the live charge',
+      guard.has(statement) && guard.takeMatchedId() === null);
+  }
+
+  {
+    const statementStored = {
+      ...live,
+      id: 'statement-endurance', title: 'PAYPAL *ENDURANCEIN', ts: midnight,
+      smsKey: `s${midnight}-3215`, captureSource: 'pdf',
+      captureInstrument: { last4: '3215', kind: 'unknown', bankIdentity: 'adcb' },
+    };
+    const guard = duplicateGuard([statementStored]);
+    const incomingLive = {
+      date: live.date, amountFils: live.amountFils, title: live.title, type: live.type,
+      accountId: live.accountId, ts: live.ts, smsKey: live.smsKey, channel: 'inbox',
+      captureInstrument: live.captureInstrument,
+    };
+    ok('statement dedupe: reverse arrival finds the stored statement row so the richer live capture can heal it',
+      guard.has(incomingLive) && guard.takeMatchedId() === 'statement-endurance');
+  }
+
+  {
+    const repeated = duplicateGuard([
+      live,
+      { ...live, id: 'live-endurance-2', title: 'Different friendly title', ts: liveTs + 3_600_000,
+        smsKey: `s${liveTs + 3_600_000}-3215` },
+    ]);
+    const firstStatement = {
+      date: '2026-09-13', amountFils: 3215, title: 'NETWORK DESCRIPTOR A', type: 'expense',
+      accountId: account.id, ts: midnight, smsKey: `s${midnight}-3215`, captureSource: 'pdf',
+    };
+    const secondStatement = {
+      ...firstStatement, title: 'NETWORK DESCRIPTOR B', ts: midnight + 1,
+      smsKey: `s${midnight + 1}-3215`,
+    };
+    ok('statement dedupe: two statement rows consume two equal live charges one-for-one',
+      repeated.has(firstStatement) && repeated.has(secondStatement));
+  }
+
+  {
+    const driftGuard = duplicateGuard([live]);
+    const postedNextDayRounded = {
+      date: '2026-09-14', amountFils: 3214, title: 'PAYPAL *ENDURANCEIN', type: 'expense',
+      accountId: account.id, ts: Date.parse('2026-09-14T00:00:00Z'),
+      smsKey: `s${Date.parse('2026-09-14T00:00:00Z')}-3214`, captureSource: 'pdf',
+    };
+    ok('statement dedupe: explicit statement provenance permits bounded adjacent-date/one-fil posting drift',
+      driftGuard.has(postedNextDayRounded));
+
+    const ordinaryGuard = duplicateGuard([live]);
+    ok('statement dedupe: the same fuzzy money match is forbidden for an ordinary capture',
+      !ordinaryGuard.has({ ...postedNextDayRounded, captureSource: undefined, channel: 'inbox' }));
+
+    const otherAccountGuard = duplicateGuard([live]);
+    ok('statement dedupe: same money on another account is never collapsed',
+      !otherAccountGuard.has({ ...postedNextDayRounded, accountId: 'other-card' }));
+  }
+
+  {
+    const statementRow = {
+      kind: 'transaction', type: 'expense', amountFils: 3215, currency: 'AED',
+      merchant: 'PAYPAL *ENDURANCEIN', date: '2026-09-13', dueDay: null, minDueFils: null,
+      card: { last4: '3215', kind: 'credit' }, reference: null, transferHint: false,
+      snapshotFils: null, snapshotKind: null, categoryGuess: 'software', categoryDeliberate: true,
+      captureSource: 'csv', smsTs: midnight, sender: 'ADCB', channel: 'inbox',
+    };
+    const state = { ...BASE, accounts: [account], accountHints: { 3215: account.id }, transactions: [live] };
+    const overlap = buildImportPlan([statementRow], state, midnight);
+    ok('statement dedupe: real import path does not append a second differently named row',
+      overlap.txCount === 0, overlap.batch.transactions);
+
+    const fresh = buildImportPlan([{ ...statementRow, amountFils: 9999, smsTs: midnight + 10 }], {
+      ...BASE, accounts: [account], accountHints: { 3215: account.id }, transactions: [],
+    }, midnight + 10);
+    ok('statement provenance: a newly imported statement row persists its PDF/CSV source',
+      fresh.txCount === 1 && fresh.batch.transactions[0]?.captureSource === 'csv',
+      fresh.batch.transactions[0]);
+  }
+}
+
 {
   const fresh = [{ body: 'Purchase of AED 42.00 with Debit Card ending 1234 at TALABAT, DUBAI.', ts: T0 + 600_000 }];
   const s = scan(fresh);
@@ -1468,6 +1627,33 @@ const DECLINE_SMS = [{
   ok('the lookup is trimmed and case-folded like setMerchantOverride',
     casedPlan.batch.transactions[0]?.category === 'groceries',
     casedPlan.batch.transactions[0]);
+
+  const nicknameReceipt = {
+    ...relayRow,
+    merchant: 'Fishbasket',
+    categoryGuess: 'other',
+    categoryDeliberate: false,
+    paymentFlowSide: 'receipt',
+    billIdentity: 'consumer:4036',
+    smsTs: TALABAT_TS + 3000,
+  };
+  const unsafeMerchantRulePlan = buildImportPlan([nicknameReceipt], {
+    ...overrideState,
+    merchantOverrides: { fishbasket: 'shopping' },
+    billAliases: {},
+  }, nicknameReceipt.smsTs);
+  ok('a relay bill-payment nickname ignores a merchant-wide override',
+    unsafeMerchantRulePlan.batch.transactions[0]?.category === 'other',
+    unsafeMerchantRulePlan.batch.transactions[0]);
+
+  const scopedBillRulePlan = buildImportPlan([nicknameReceipt], {
+    ...overrideState,
+    merchantOverrides: { fishbasket: 'shopping' },
+    billAliases: { 'consumer:4036|fishbasket': { title: 'Fishbasket', category: 'utilities' } },
+  }, nicknameReceipt.smsTs);
+  ok('the bill-identity rule still categorises that same nickname safely',
+    scopedBillRulePlan.batch.transactions[0]?.category === 'utilities',
+    scopedBillRulePlan.batch.transactions[0]);
 }
 
 /* Android is untouched: it already had the override applied during parsing,
@@ -2391,7 +2577,7 @@ const DECLINE_SMS = [{
   );
   ok('a current utility reminder is part of the same durable import batch',
     currentPlan.batch.newBills?.length === 1 &&
-      currentPlan.batch.newBills[0].title === 'E&' &&
+      currentPlan.batch.newBills[0].title === 'Etisalat' &&
       currentPlan.batch.newBills[0].category === 'telecom' &&
       currentPlan.batch.newBills[0].dueDay === 15,
     currentPlan.batch.newBills);
@@ -2978,6 +3164,40 @@ const DECLINE_SMS = [{
   const titled = { ...prior, titleEdited: true, title: 'My saved title' };
   ok('cashback role cleanup preserves a separately pinned title',
     applyHealPatch(titled, healPatch(titled, parsed)).title === 'My saved title');
+}
+
+{
+  // iOS 26 hands over no sender, and some banks never name themselves in the
+  // body. The user's own "Which banks text you?" answer then names the account,
+  // but only when exactly one bank is known; two known banks would be a guess.
+  setActiveMarket('AE');
+  const body = 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR, DUBAI.';
+  const ts = Date.UTC(2026, 6, 12, 10, 30);
+  const senderless = scan([{ body, ts, sender: '+971501234567' }]);
+  const bare = buildImportPlan(senderless.parsed, BASE, ts);
+  ok('a card no sender or body can name is minted without a bank',
+    bare.batch.newAccounts.length === 1 && bare.batch.newAccounts[0].bankName === undefined, bare.batch.newAccounts);
+  const one = buildImportPlan(senderless.parsed, { ...BASE, knownBanks: ['ADIB'] }, ts);
+  ok('with exactly one known bank, that bank names and colours the minted card',
+    one.batch.newAccounts.length === 1 && one.batch.newAccounts[0].bankName === 'ADIB' &&
+    one.batch.newAccounts[0].name === 'ADIB Debit Card •1234' && one.batch.newAccounts[0].color === '#0E5AA7', one.batch.newAccounts);
+  const two = buildImportPlan(senderless.parsed, { ...BASE, knownBanks: ['ADIB', 'FAB'] }, ts);
+  ok('with two known banks the minted card stays unnamed rather than guessed',
+    two.batch.newAccounts.length === 1 && two.batch.newAccounts[0].bankName === undefined, two.batch.newAccounts);
+  const withSender = scan([{ body, ts, sender: 'ENBD' }]);
+  const sender = buildImportPlan(withSender.parsed, { ...BASE, knownBanks: ['ADIB'] }, ts);
+  // The known-bank label is a default, not evidence: an alert that names a
+  // different bank for the same card corrects the label rather than minting a
+  // second account (before this, matchesCard treated the label as identity).
+  const labelled = apply({ ...BASE, knownBanks: ['ADIB'] }, one);
+  const fabRow = scan([{ body: 'AED 45.00 spent on your FAB Debit Card ending 1234 at LULU HYPERMARKET on 12/07/26.', ts: ts + 60000, sender: '+971501234567' }]);
+  const corrected = buildImportPlan(fabRow.parsed, labelled, ts);
+  const account = labelled.accounts.find((candidate) => candidate.last4 === '1234');
+  ok('an alert naming another bank corrects a known-bank label instead of splitting the card',
+    corrected.batch.newAccounts.length === 0 && account && corrected.batch.transactions[0]?.accountId === account.id &&
+    corrected.batch.bankNames?.[account.id] === 'FAB', { newAccounts: corrected.batch.newAccounts, bankNames: corrected.batch.bankNames });
+  ok('a resolving sender still outranks the known bank',
+    sender.batch.newAccounts.length === 1 && sender.batch.newAccounts[0].bankName === 'Emirates NBD', sender.batch.newAccounts);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

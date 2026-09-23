@@ -21,7 +21,7 @@ test('only authoritative bounded native progress can render; no raw text/capabil
 test('run link contains only the matching Shortcut name and local return routes', () => {
   const url = new URL(api.pagedHistoryRunUrl());
   assert.equal(url.protocol, 'shortcuts:');
-  assert.equal(url.searchParams.get('name'), 'Wafra History v2');
+  assert.equal(url.searchParams.get('name'), 'Wafra-History-v2-typed-date.signed');
   assert.equal(url.searchParams.get('x-error'), 'wafra://ios-paging-beta');
   assert.equal(url.searchParams.get('x-cancel'), 'wafra://ios-paging-beta');
   assert.equal([...url.searchParams].length, 3);
@@ -29,21 +29,44 @@ test('run link contains only the matching Shortcut name and local return routes'
   assert.equal(api.PAGED_HISTORY_INSTALL_URL, null);
   const beta = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
-    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d',
   } } });
   assert.equal(beta.pagedHistoryEnabled(), true);
-  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/5bd032fe9a464af390ac1aae22af2f08');
+  assert.equal(beta.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
+  // Production installs the verified paged record without the beta flag. The
+  // paged surfaces (progress, resume, review) must follow the record the build
+  // actually installs, or users run a paged Shortcut against the legacy UI.
+  const production = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d',
+  } } });
+  assert.equal(production.pagedHistoryEnabled(), true);
+  assert.equal(production.PAGED_HISTORY_INSTALL_URL, 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d');
+  const unverified = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1',
+    EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789',
+  } } });
+  assert.equal(unverified.pagedHistoryEnabled(), true);
+  assert.equal(unverified.PAGED_HISTORY_INSTALL_URL, null);
 });
-test('production keeps paging UI off while every iOS binary retains the native paging intents', () => {
+test('every iOS profile installs the windowed v6 record and retains the native paging intents', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'eas.json')));
-  for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
-    assert.equal(config.build['history-beta'].env[key], '1');
-    assert.equal(config.build.production.env[key], undefined);
+  const v4 = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+  for (const profile of ['history-beta', 'production', 'ios-parity-device']) {
+    assert.equal(config.build[profile].env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL, v4, profile);
   }
+  // The paged surfaces follow the installed record, so the beta flag stays off.
+  for (const key of ['WAFRA_PAGED_HISTORY_BETA', 'EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA']) {
+    assert.equal(config.build['history-beta'].env[key], '0');
+  }
+  const v4Setup = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: { EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: v4 } } });
+  assert.equal(v4Setup.PAGED_HISTORY_SHORTCUT_NAME, 'Wafra-History-v6.signed');
+  assert.equal(v4Setup.PAGED_HISTORY_INSTALL_URL, v4);
+  assert.equal(v4Setup.pagedHistoryEnabled(), true);
+  assert.equal(new URL(v4Setup.pagedHistoryRunUrl()).searchParams.get('name'), 'Wafra-History-v6.signed');
   const base = { name: 'Wafra', plugins: ['original'] };
   const factory = require(path.join(root, 'app.config.js'));
   assert.deepEqual(factory({ config: base }).plugins,
-    ['original', './modules/wafra-message-history/plugin/paged']);
+    ['original', './modules/wafra-message-history/plugin/paged', './modules/wafra-high-refresh/plugin']);
 });
 test('normal setup routes to bounded history without retiring the published original', () => {
   const screen = fs.readFileSync(path.join(root, 'src/app/ios-setup.tsx'), 'utf8');

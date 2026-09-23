@@ -43,10 +43,10 @@ const catalog = compile('src/components/ui/merchant-logo-assets.ts', (id) => {
 });
 const matches = {
   Careem: 'careem', 'Careem Food': 'careem', 'Careem Dubai': 'careem',
-  Talabat: 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
+  Talabat: 'talabat', 'Talabat sales': 'talabat', 'Talabat Business': 'talabat', 'طلبات': 'talabat', 'Talabat.com UAE': 'talabat',
   Deliveroo: 'deliveroo', 'Carrefour': 'carrefour', 'CARREFOUR HYPER #004 DUBAI ARE': 'carrefour',
   'كارفور الشارقة': 'carrefour', 'Lulu Hypermarket': 'lulu', 'LuLu Hyper Market': 'lulu',
-  'لُولُو هايبرماركت': 'lulu', Spinneys: 'spinneys', 'Noon.com': 'noon', 'نون': 'noon',
+  'لُولُو هايبرماركت': 'lulu', Spinneys: 'spinneys', 'Noon.com': 'noon', 'Noon Send': 'noon', 'نون': 'noon',
   'Amazon.ae': 'amazon', 'Amazon Prime': 'amazon', 'أمازون': 'amazon',
   Netflix: 'netflix', 'NETFLIX.COM': 'netflix', 'Spotify Premium': 'spotify',
   'YouTube Premium': 'youtube', 'GOOGLE *YOUTUBE PREMIUM': 'youtube',
@@ -56,7 +56,9 @@ const matches = {
   Emirates: 'emirates', 'طيران الإمارات': 'emirates', 'Booking.com': 'bookingdotcom',
   Airbnb: 'airbnb', Claude: 'claude', Anthropic: 'claude', 'GitHub Copilot': 'github',
   Notion: 'notion', 'Discord Nitro': 'discord', 'Telegram Premium': 'telegram', Dropbox: 'dropbox',
-  'RTA Nol Top-up': 'rta', 'ENOC Fuel': 'enoc', 'EPPCO': 'enoc', 'ADNOC Oasis': 'adnoc',
+  'RTA Nol Top-up': 'rta', 'ENOC Fuel': 'enoc', 'EPPCO': 'enoc',
+  'Emirates Petroleum': 'enoc', 'Emirates Petroleum Com': 'enoc', 'ADNOC Oasis': 'adnoc',
+  'Careem Pay Topup': 'careem',
   'du Home Internet': 'du', 'Etisalat Postpaid': 'etisalat', 'e& UAE': 'etisalat',
   'OSN+': 'osn', 'DEWA Bill': 'dewa', '  Ｃａｒｅｅｍ  ': 'careem',
 };
@@ -92,6 +94,7 @@ const samples = ['', null, undefined, 123, 'LuLu Exchange', 'Lulu International 
   'لولو للصرافة', 'كريم', 'كَرِيم', 'كريم دبي', 'كَرِيم دبي', 'كريم للبشرة', 'Cafe near Carrefour', 'PayPal Talabat',
   'Talabat Starbucks', 'Apple Cafe', 'Pineapple Cafe', 'Amazon Cafe', 'Noon Saloon',
   'Emirates NBD', 'Emirates Islamic Dubai', 'Emirates Cooperative Society',
+  'Emirates Petroleum Cafe',
   'Uberoi Restaurant', 'Notionally Trading', 'Shop at IKEA', 'Google Unknown Shop',
   'ADNOC employee transfer', 'DU BAI CAFE', 'Unknown Place', 'constructor', '__proto__',
   'toString', 'https://merchant.invalid/logo.png', 'Careem' + ' '.repeat(241),
@@ -113,12 +116,13 @@ function loadAvatar(identities) {
   return compile('src/components/ui/merchant-avatar.tsx', (id) => {
     switch (id) {
       case 'react/jsx-runtime': return { jsx, jsxs: jsx };
-      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined };
-      case 'react-native': return { StyleSheet: { create: (value) => value }, View: 'view' };
+      // The avatar is a React.memo component; the harness calls it directly.
+      case 'react': return { useState: () => [failed, (value) => { failed = value; }], useEffect: () => undefined, memo: (component) => component };
+      case 'react-native': return { Platform: { OS: 'android' }, StyleSheet: { create: (value) => value }, View: 'view' };
       case 'expo-image': return { Image: 'image' };
       case '@/components/ui/category-avatar': return { CategoryAvatar: 'category' };
       case '@/components/ui/merchant-logo-assets': return identities;
-      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }) };
+      case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), usePrivateMode: () => false };
       case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
       case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
       case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
@@ -174,5 +178,10 @@ const real = MerchantAvatar({ title: 'Lulu Hypermarket', category: 'groceries', 
 assert.equal(real.key, 'lulu');
 assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');
 const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
-assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{64\}/);
+assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{52\}/,
+  'transaction details keep the current compact merchant-logo treatment');
+const avatarSource = fs.readFileSync(path.join(root, 'src/components/ui/merchant-avatar.tsx'), 'utf8');
+assert.match(avatarSource,
+  /Platform\.OS === 'android' && typeof source !== 'number' \? 'disk' : 'memory-disk'/,
+  'Android remote merchant artwork stays off the process-wide decoded-image memory cache');
 console.log(`✓ ${assets.size} bundled logos; ${Object.keys(matches).length} identity cases; ${samples.length} negative cases; asset integrity, privacy, accessibility and failure recovery`);

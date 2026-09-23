@@ -1,6 +1,7 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
+import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 
@@ -13,6 +14,7 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
@@ -20,7 +22,9 @@ import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { projectDashboard } from '@/lib/dashboard-projection';
+import { projectDashboard, projectDashboardInsight } from '@/lib/dashboard-projection';
+import type { Insight } from '@/lib/insights';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { formatAmount } from '@/lib/format';
@@ -28,7 +32,10 @@ import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { moneyPictureProgress } from '@/lib/money-picture-progress';
+import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
+import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
@@ -38,22 +45,27 @@ import type { CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
+import { loadViewedRecaps } from '@/lib/recap-view-state';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
   en: { journal: 'Your money, in view', month: 'THIS PERIOD', activity: 'Recent transactions',
     add: 'Add an entry', breakdown: 'View spending', upcoming: 'Upcoming',
     import: 'Bank alerts', paused: 'History import paused', resume: 'Resume',
-    review: 'Review alerts', more: 'View all payments', accounts: 'Your accounts',
+    more: 'View all payments', accounts: 'Your accounts',
     income: 'Money in', spent: 'Spent', netNote: 'Income minus spending · not your bank balance',
     progress: 'Reading history', attention: 'Needs your attention' },
   ar: { journal: 'أموالك بوضوح', month: 'هذه الفترة', activity: 'حركتك المالية',
     add: 'إضافة حركة', breakdown: 'عرض الإنفاق', upcoming: 'الدفعات القادمة',
     import: 'تنبيهات البنك', paused: 'استيراد السجل متوقف مؤقتاً', resume: 'متابعة',
-    review: 'مراجعة التنبيهات', more: 'عرض كل الدفعات', accounts: 'حساباتك',
+    more: 'عرض كل الدفعات', accounts: 'حساباتك',
     income: 'الدخل', spent: 'الإنفاق', netNote: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك' },
 } as const;
+
+const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
+  a === b || JSON.stringify(a) === JSON.stringify(b);
 
 // A native reminder call cannot be cancelled when Home unmounts. New Home
 // instances join this manual-refresh lane before starting another one.
@@ -73,7 +85,15 @@ export default function JournalHomeScreen() {
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
-  const { state, getStateSnapshot, getStateGeneration, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
+  const {
+    state,
+    getStateSnapshot,
+    getStateGeneration,
+    applyFxUpdates,
+    setCaptureOptOut,
+    beginHistoryImport,
+    unlockFounderPro,
+  } = useStore();
   const { period } = usePeriod();
   // Restores can change denomination while all three figures stay identical.
   // Make it a prop so compiled children cannot retain ambient currency text.
@@ -87,6 +107,14 @@ export default function JournalHomeScreen() {
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
+  const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
+  const [homeInsight, setHomeInsight] = useState<Insight | null>(null);
+  const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
+  // The clock is refreshed on every foreground resume for greeting/review
+  // freshness, but Home's money projections are day-based. Keep the derived
+  // day key above every effect that depends on it so recap discovery and the
+  // dashboard share the same stable invalidation boundary.
+  const projectionDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const lastFxAttempt = useRef('');
   const refreshInFlight = useRef<number | null>(null);
   const reminderSync = useRef<{
@@ -116,15 +144,66 @@ export default function JournalHomeScreen() {
   useEffect(() => {
     if (!focused) return;
     let alive = true;
-    void loadHomeWidgetPreferences().then((preferences) => { if (alive) setHomeWidgets(preferences); });
+    // Every return to this tab reloads the preference. Only publish a new
+    // object when something actually changed, so the tab switch itself does
+    // not re-render Home a second time.
+    void loadHomeWidgetPreferences().then((preferences) => {
+      if (!alive) return;
+      setHomeWidgets((current) => sameHomeWidgets(current, preferences) ? current : preferences);
+    });
     return () => { alive = false; };
   }, [focused]);
 
   useEffect(() => {
-    if (focused && privacyGateCleared && state.hydrated && state.onboarded) {
-      markLaunchPhase('first-usable-home');
-    }
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    // Mark Home usable from the first committed ledger frame. Category/parser
+    // cleanup is intentionally NOT scheduled from Home: both dedicated tools
+    // remain available in Settings, and a large ledger must not pay multiple
+    // full-history scans a moment after the first frame just to render a prompt.
+    markLaunchPhase('first-usable-home');
   }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
+  useEffect(() => {
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
+    // The insight is lower priority again. Its Home variant deliberately skips
+    // subscription detection; Bills owns that full historical analysis.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => setHomeAnalysisReady(true), 1_800);
+    });
+    return () => {
+      task.cancel();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [focused, homeAnalysisReady, privacyGateCleared, state.hydrated, state.onboarded]);
+  useEffect(() => {
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Recap is celebratory, never launch-critical. Wait until Home and its
+    // existing insight lane are settled, then do only the cheap period presence
+    // check. The full ledger projection runs after the user taps the W.
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        const candidates = recapCandidates(now).filter((descriptor) =>
+          hasRecapActivity(state.transactions, descriptor));
+        if (candidates.length === 0) {
+          if (alive) setRecapEntry(null);
+          return;
+        }
+        void loadViewedRecaps().then((viewed) => {
+          const descriptor = candidates.find((candidate) => !viewed.has(candidate.id)) ?? candidates[0]!;
+          if (alive) setRecapEntry({ descriptor, unread: !viewed.has(descriptor.id) });
+        });
+      }, 2_600);
+    });
+    return () => {
+      alive = false;
+      task.cancel();
+      if (timer !== null) clearTimeout(timer);
+    };
+    // A new day can cross a salary-month boundary and produce a new recap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, state.transactions, projectionDay]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', (next) => {
       if (next === 'active') setNow(new Date());
@@ -132,27 +211,78 @@ export default function JournalHomeScreen() {
     return () => listener.remove();
   }, []);
 
-  const reviewCount = state.reviewTray.pending.filter((item) => item.expiresAt > now.getTime()).length;
-  const hasPendingReview = reviewCount > 0;
-  const dashboard = useMemo(() => projectDashboard({ state, period, now, surface: 'home', includeInsights: false }),
-    // Status/progress changes must not recompute the financial projection.
+  // Depending on the Date object itself made every reopen synchronously
+  // re-walk a large ledger twice before Android could feel responsive, even
+  // when no money changed. A review expiring still invalidates the Home
+  // projection explicitly below.
+  const dashboard = useMemo(() => projectDashboard({
+    state,
+    period,
+    now,
+    surface: 'home',
+    includeInsights: false,
+    // Cleanup counts are useful only when the user chooses the cleanup tool.
+    // Keeping them off Home makes the normal navigation path O(current period)
+    // rather than O(full ledger) on a 10k+ row history.
+    includeCleanupPrompts: false,
+  }),
+    // Progress counters do not change totals. Transfer receipts can change
+    // financial scope even when finalization preserves the ledger arrays.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
-      state.ledgerMoney, state.marketId, period, now, hasPendingReview]);
+      state.ledgerMoney, state.transferInternalIds, state.transferNormalizationVersion,
+      state.historyImport?.status, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
-  const homeInsight = useMemo(() => projectDashboard({ state, period, now, surface: 'dashboard', includeInsights: true }).insight,
-    // Insight inputs are intentionally enumerated so capture/progress state does not rerun historical analysis.
+  const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
+  const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
+  useEffect(() => {
+    if (!homeAnalysisReady || !insightWidgetVisible || historyAnalysisBlocked) {
+      setHomeInsight(null);
+      return;
+    }
+    let cancelled = false;
+    // Keep the previous card on screen while this recomputes. A 14k-row
+    // insight must not hitch the same React turn that just painted a new SMS.
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      const next = measureRuntimeOperation('home-insight', () =>
+        projectDashboardInsight(state, period, now));
+      if (!cancelled) setHomeInsight(next);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+    // Capture/progress state must not restart historical analysis. The optional
+    // insight is computed only after Home is already interactive and only while
+    // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, state.budgets, state.bills, state.cardDues, state.notSubscriptions,
-      state.merchantOverrides, state.ledgerMoney, state.marketId, period, now]);
+  }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
+    state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
+    state.historyImport?.status, state.marketId, period, projectionDay]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
+  const moneyPicture = moneyPictureProgress({
+    nowMs: now.getTime(),
+    trialStartTs: state.trialStartTs,
+    history: state.historyImport,
+    transactionCount: state.transactions.length,
+    activeAccountCount: state.accounts.reduce((count, account) => count + (account.archived ? 0 : 1), 0),
+    obligationCount: state.bills.length + state.cardDues.length,
+    captureReady: status === 'waiting-for-alert' || status === 'first-alert-captured' ||
+      (Platform.OS === 'android' && !state.captureOptOut && !needsPermission),
+  });
 
   useEffect(() => {
     if (!state.hydrated || state.privateMode) return;
-    const pending = state.transactions.filter((transaction) => transaction.fxSource === 'fallback').slice(0, 16);
+    const pending: typeof state.transactions = [];
+    for (const transaction of state.transactions) {
+      if (transaction.fxSource !== 'fallback') continue;
+      pending.push(transaction);
+      if (pending.length === 16) break;
+    }
     if (pending.length === 0) return;
     const signature = pending.map((transaction) => `${transaction.id}:${transaction.originalCurrency}:${transaction.date}`).join('|');
     if (signature === lastFxAttempt.current) return;
@@ -201,6 +331,7 @@ export default function JournalHomeScreen() {
       getStateGeneration() === generation;
     refreshInFlight.current = epoch;
     setRefreshing(true);
+    const before = getStateSnapshot();
     try {
       await runAutoImport(true);
       if (!isCurrent()) return;
@@ -214,8 +345,8 @@ export default function JournalHomeScreen() {
         if (sync.alive && sync.epoch === epoch) setRefreshing(false);
       }
     }
-    requestReminderSync();
-  }, [getStateGeneration, requestReminderSync, runAutoImport, toast]);
+    if (reminderScheduleInputsChanged(before, getStateSnapshot())) requestReminderSync();
+  }, [getStateGeneration, getStateSnapshot, requestReminderSync, runAutoImport, toast]);
 
   const openCapture = () => {
     if (status === 'paused') { router.push('/pro'); return; }
@@ -249,10 +380,33 @@ export default function JournalHomeScreen() {
           : status === 'migration-retry' ? 'captureIosMigrationRetry'
             : status === 'needs-automation' ? 'captureIosNeedsAutomation' : 'captureIosOff');
   const healthy = status === 'waiting-for-alert' || status === 'first-alert-captured';
-  const greeting = language === 'ar'
+  const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+  const unlockFounder = founderUnlockEnabled && !state.founderPro
+    ? () => {
+        void unlockFounderPro()
+          .then(() => toast.show('Founder Pro unlocked'))
+          .catch(() => toast.show('Founder Pro could not be saved', { tone: 'error' }));
+      }
+    : undefined;
+  const openRecap = recapEntry ? () => {
+    const descriptor = recapEntry.descriptor;
+    const value = descriptor.kind === 'year' ? descriptor.year : descriptor.key;
+    setRecapEntry((current) => current ? { ...current, unread: false } : current);
+    router.push(`/recap?kind=${descriptor.kind}&value=${encodeURIComponent(String(value))}` as never);
+  } : undefined;
+  const preferredName = state.userName === 'there' ? null : normalizePreferredName(state.userName);
+  const greetingBase = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
-  const dateLabel = now.toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const greeting = preferredName
+    ? `${greetingBase}${language === 'ar' ? '،' : ','} ${preferredName}`
+    : greetingBase;
+  // Hermes' Intl date formatting with options is slow enough to notice on a
+  // screen that re-renders on every store update; the label changes by day.
+  const dateLabel = useMemo(
+    () => now.toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectionDay, language]);
 
   const renderWidget = (id: HomeWidgetId) => {
     if (!homeWidgetVisible(homeWidgets, id)) return null;
@@ -307,9 +461,21 @@ export default function JournalHomeScreen() {
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
-          onSpending={() => router.push('/flow')} />
-        {/* Blocking states stay visible, but a healthy connection is not a banner. */}
-        {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
+          onSpending={() => router.push('/flow')}
+          brandMark={openRecap ? <RecapLogoTrigger
+            unread={recapEntry?.unread ?? false}
+            accessibilityLabel={language === 'ar'
+              ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
+              : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
+            onPress={openRecap}
+            onLongPress={unlockFounder}
+          /> : undefined}
+          onFounderUnlock={unlockFounder} />
+        {/* First week: one truthful progress surface. After it retires, blocking
+            history states keep their existing compact recovery card. */}
+        {moneyPicture
+          ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
+          : history ? <HistoryReadingStatus progress={history} onResume={retryHistory} /> : null}
 
         {homeWidgets.order.map(renderWidget)}
 
@@ -322,12 +488,11 @@ export default function JournalHomeScreen() {
               <ThemedText type="meta" themeColor="textSecondary">{captureLabel}</ThemedText></View>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} />
           </Pressable>
-          {reviewCount > 0 ? <Pressable onPress={() => router.push('/review-alerts')} accessibilityRole="button" style={styles.footerAction}>
-            <ThemedText type="smallBold" style={{ color: theme.warning }}>{words.review} · {reviewCount}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.warning} /></Pressable>
-          : dashboard.uncategorised.shouldPrompt ? <Pressable onPress={() => router.push('/categorise')} accessibilityRole="button" style={styles.footerAction}>
-            <ThemedText type="meta">{tf('uncategorisedMerchantCount', { count: dashboard.uncategorised.summary.merchants.length,
-              s: dashboard.uncategorised.summary.merchants.length === 1 ? '' : 's' })}</ThemedText>
+          {dashboard.uncategorised.shouldPrompt ? <Pressable onPress={() => router.push('/categorise')} accessibilityRole="button" style={styles.footerAction}>
+            <ThemedText type="meta">{tf('uncategorisedMerchantCount', {
+              count: dashboard.uncategorised.summary.merchants.length + dashboard.uncategorised.summary.paymentPurposes.length,
+              s: dashboard.uncategorised.summary.merchants.length + dashboard.uncategorised.summary.paymentPurposes.length === 1 ? '' : 's',
+            })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
           : dashboard.unreadFormats?.shouldPrompt ? <Pressable onPress={() => router.push('/accuracy')} accessibilityRole="button" style={styles.footerAction}>
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,

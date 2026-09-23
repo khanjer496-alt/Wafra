@@ -9,7 +9,7 @@ const turn = () => new Promise(resolve => setImmediate(resolve));
 
 // Executes the real component's state/effect lifecycle while replacing only
 // React/native rendering and the resolver boundary. No device data or network.
-function harness(kind, { privateMode = false, bundled = null } = {}) {
+function harness(kind, { privateMode = false, bundled = null, merchantCategory = 'groceries' } = {}) {
   const hooks = [];
   let cursor = 0;
   let effects = [];
@@ -30,14 +30,19 @@ function harness(kind, { privateMode = false, bundled = null } = {}) {
         effects.push(() => { previous?.cleanup?.(); hooks[index] = { deps, cleanup: effect() }; });
       }
     },
+    // The avatars are React.memo components; the harness calls the inner
+    // function directly, so memo is identity here.
+    memo: component => component,
   };
   const jsx = (type, props) => ({ type, props });
   const resolve = (...args) => { calls++; return resolveLogo(...args); };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { View: 'View', StyleSheet: { create: v => v } },
+    'react-native': { View: 'View', Platform: { OS: 'android' }, StyleSheet: { create: v => v } },
     'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {} },
-    '@/lib/store': { useStore: () => ({ state }) },
+    // Avatars subscribe to the narrow private-mode context, not the whole
+    // store, so a ledger mutation cannot re-render every row's artwork.
+    '@/lib/store': { useStore: () => ({ state }), usePrivateMode: () => state.privateMode },
     '@/hooks/use-theme': { useTheme: () => ({}) }, '@/components/ui/icon': { Icon: 'Icon' },
     '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
     '@/components/ui/category-avatar': { CategoryAvatar: 'Category' },
@@ -45,9 +50,12 @@ function harness(kind, { privateMode = false, bundled = null } = {}) {
     '@/lib/merchant-logo-resolver': { resolveRemoteMerchantLogo: resolve },
     '@/lib/bank-logo-resolver': { resolveBankLogo: resolve },
   };
-  const module = load(path.join(root, `src/components/ui/${kind}-avatar.tsx`), deps);
+  // Remote artwork resolution is deferred to an idle turn on the phone; the
+  // harness runs it immediately so `flush` still observes every effect.
+  const module = load(path.join(root, `src/components/ui/${kind}-avatar.tsx`), deps,
+    { requestIdleCallback: callback => { callback(); return 1; }, cancelIdleCallback: () => {} });
   const Component = kind === 'merchant' ? module.MerchantAvatar : module.BankAvatar;
-  const props = kind === 'merchant' ? { title: 'Choithrams', category: 'groceries' } : { account: { bankName: 'FAB', kind: 'bank' } };
+  const props = kind === 'merchant' ? { title: 'Choithrams', category: merchantCategory } : { account: { bankName: 'FAB', kind: 'bank' } };
   return {
     state, identity, get calls() { return calls; }, setResolve: fn => { resolveLogo = fn; },
     render: () => { cursor = 0; return Component(props); },
@@ -90,4 +98,10 @@ test('bundled merchant artwork remains available with the legacy local-only pref
   const node = h.render(); h.flush();
   assert.equal(node.props.source, 42);
   assert.equal(h.calls, 0);
+});
+test('merchant: uncategorised names can still use global logo enrichment', async () => {
+  const h = harness('merchant', { merchantCategory: 'other' });
+  h.render(); h.flush(); await turn();
+  assert.equal(h.calls, 1, 'Other is a classification fallback, not a reason to disable brand lookup');
+  assert.equal(remoteSources(h.render()).length, 1);
 });

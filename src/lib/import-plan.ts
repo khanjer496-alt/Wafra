@@ -5,11 +5,20 @@ import {
   bankFromSender,
   bankIdentityForName,
   bankFromName,
+  getActiveMarket,
+  withMarketPackForParsing,
 } from '@/lib/markets';
-import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureInstrument } from '@/lib/dedupe';
+import { singleKnownBank } from '@/lib/known-banks';
+import {
+  bodyPrint,
+  compatibleCaptureInstrument,
+  duplicateGuard,
+  mergeCaptureInstrument,
+  type DuplicateCandidate,
+} from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
 import { toISODate } from '@/lib/format';
-import { healPatch } from '@/lib/heal';
+import { canApplySourceDateCorrection, healPatch } from '@/lib/heal';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { isUnassignedTransferAccount, unassignedTransferAccountId } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
@@ -28,7 +37,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
-import type { Account, AppState, Bill, CaptureInstrument, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
+import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
 /**
@@ -56,7 +65,7 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Structured settlement side survives server raw-body discard on iOS. */
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
-  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  captureSource?: CaptureSource;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -179,14 +188,69 @@ function emptyPlan(): ImportPlan {
  * `originalCurrency`; a foreign-only charge does, so it cannot silently pin
  * AED/SAR from the current pack.
  */
-function confirmedLedgerCurrency(rows: readonly ScannedSms[]): 'AED' | 'SAR' | undefined {
-  const observed = new Set<'AED' | 'SAR'>();
+function confirmedLedgerCurrency(rows: readonly ScannedSms[]): string | undefined {
+  const observed = new Set<string>();
   for (const row of rows) {
-    if (row.currency !== 'AED' && row.currency !== 'SAR') continue;
+    if (!ledgerMoneySpec(row.currency)) continue;
     if (row.originalCurrency && row.originalCurrency !== row.currency) continue;
     observed.add(row.currency);
   }
   return observed.size === 1 ? [...observed][0] : undefined;
+}
+
+interface SourceIdentityIndex {
+  readonly priorBySmsKey: ReadonlyMap<string, Transaction>;
+  readonly collidingPriorsBySmsKey: ReadonlyMap<string, readonly Transaction[]>;
+}
+
+// History checkpoints preserve the transaction array when no money changed.
+// Reuse its source index across those pages instead of validating and indexing
+// every retained row again. Healing, edits, restore and new rows replace the
+// array, so they cannot reuse stale identities. Weak keys let retired ledger
+// snapshots and their indexes be collected together.
+const sourceIdentityIndexes = new WeakMap<readonly Transaction[], SourceIdentityIndex>();
+
+// Date repair needs stricter uniqueness than ordinary healing, including
+// collisions with manual rows. Pay for this extra index only for date evidence.
+const sourceDateCounts = new WeakMap<readonly Transaction[], ReadonlyMap<string, number>>();
+function sourceDateCount(transactions: readonly Transaction[], key: string): number {
+  let counts = sourceDateCounts.get(transactions);
+  if (!counts) {
+    const next = new Map<string, number>();
+    for (const tx of transactions) {
+      const source = tx.smsKey ? canonicalCaptureSourceKey(tx.smsKey, tx.ts) : '';
+      if (/^h[a-f0-9]{64}$/.test(source)) next.set(source, (next.get(source) ?? 0) + 1);
+    }
+    counts = next;
+    sourceDateCounts.set(transactions, counts);
+  }
+  return counts.get(key) ?? 0;
+}
+
+function sourceIdentityIndex(transactions: readonly Transaction[]): SourceIdentityIndex {
+  const cached = sourceIdentityIndexes.get(transactions);
+  if (cached) return cached;
+  const priorBySmsKey = new Map<string, Transaction>();
+  // Preserve input order in collision buckets: exact healing chooses the first
+  // compatible collision, while direct source lookup retains the last row.
+  const collidingPriorsBySmsKey = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (!isUsableCaptureSourceIdentity(t.smsKey, t.ts)) continue;
+    if (t.smsKey && t.source === 'sms') {
+      const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
+      if (isUnboundAndroidSourceKey(sourceKey)) continue;
+      const prior = priorBySmsKey.get(sourceKey);
+      if (prior) {
+        const rows = collidingPriorsBySmsKey.get(sourceKey);
+        if (rows) rows.push(t);
+        else collidingPriorsBySmsKey.set(sourceKey, [prior, t]);
+      }
+      priorBySmsKey.set(sourceKey, t);
+    }
+  }
+  const index: SourceIdentityIndex = { priorBySmsKey, collidingPriorsBySmsKey };
+  sourceIdentityIndexes.set(transactions, index);
+  return index;
 }
 
 /**
@@ -207,6 +271,28 @@ export function buildImportPlan(
    * against an empty ledger) are correct with the default.
    */
   declined: DeclinedSms[] = [],
+): ImportPlan {
+  // Source-free iOS history cannot recover a lost issuer from the sender
+  // later. Resolve banks in the batch's proven money system, just as Android
+  // does after detecting its inbox market. Do not change device preferences.
+  const currency = parsed[0]?.currency;
+  const market = currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : undefined;
+  if (state.hydrated && market && market !== getActiveMarket().id &&
+      parsed.every((row) => row.currency === currency)) {
+    const plan = withMarketPackForParsing(market, () =>
+      buildImportPlanInMarket(parsed, state, newestTs, today, declined));
+    if (!plan) throw new ImportMoneyError();
+    return plan;
+  }
+  return buildImportPlanInMarket(parsed, state, newestTs, today, declined);
+}
+
+function buildImportPlanInMarket(
+  parsed: ScannedSms[],
+  state: AppState,
+  newestTs: number,
+  today: Date,
+  declined: DeclinedSms[],
 ): ImportPlan {
   // An unhydrated store is not an empty ledger, it is an unknown one — and
   // every duplicate check below is a lookup against `state.transactions`.
@@ -234,8 +320,13 @@ export function buildImportPlan(
     !isUsableCaptureSourceIdentity(`h${row.sourceEventId}`, row.smsTs))) {
     throw new Error('Native message identity requires a valid original timestamp');
   }
-  const matchableTransactions = state.transactions.filter((row) =>
-    isUsableCaptureSourceIdentity(row.smsKey, row.ts));
+  const sourceIdentityMatchable = (row: Transaction): boolean =>
+    isUsableCaptureSourceIdentity(row.smsKey, row.ts);
+  let matchableTransactionsCache: Transaction[] | null = null;
+  const matchableTransactions = (): Transaction[] => {
+    matchableTransactionsCache ??= state.transactions.filter(sourceIdentityMatchable);
+    return matchableTransactionsCache;
+  };
 
   // Currency survives transport as a parser fact. Validate it before account
   // resolution, snapshots, dedupe or healing can change the ledger. Empty
@@ -243,13 +334,9 @@ export function buildImportPlan(
   const storedMoney = migrateLegacyLedgerMoney(state);
   const currencies = new Set(parsed.map((row) => row.currency));
   const singleCurrency = currencies.size === 1 ? [...currencies][0] : undefined;
-  const importMoney = storedMoney ?? (
-    singleCurrency === 'AED' || singleCurrency === 'SAR' ? ledgerMoneySpec(singleCurrency) : null
-  );
-  const acceptsLaunchMoney = importMoney !== null && importMoney.exponent === 2 &&
-    ledgerMoneyMatchesCurrentMetadata(importMoney) &&
-    (importMoney.currency === 'AED' || importMoney.currency === 'SAR');
-  const validMoney = (row: ScannedSms): boolean => acceptsLaunchMoney && row.currency === importMoney!.currency &&
+  const importMoney = storedMoney ?? (singleCurrency ? ledgerMoneySpec(singleCurrency) : null);
+  const acceptsImportedMoney = importMoney !== null && ledgerMoneyMatchesCurrentMetadata(importMoney);
+  const validMoney = (row: ScannedSms): boolean => acceptsImportedMoney && row.currency === importMoney!.currency &&
     Number.isSafeInteger(row.amountFils) && row.amountFils > 0 &&
     (row.minDueFils == null || (Number.isSafeInteger(row.minDueFils) && row.minDueFils >= 0)) &&
     (row.snapshotFils == null || Number.isSafeInteger(row.snapshotFils));
@@ -260,7 +347,23 @@ export function buildImportPlan(
   const staleDueCutoff = toISODate(new Date(today.getTime() - 45 * 86400000));
   // Three fingerprints, because the same transaction can reach us through
   // three capture channels. See dedupe.ts for why one is not enough.
-  const guard = duplicateGuard(matchableTransactions);
+  const protectedEditedPushConsumed = new Set<string>();
+  const protectedReplacementCandidates: DuplicateCandidate[] = [];
+  // The generalized duplicate guard builds several complete-ledger indexes
+  // (title/time, exact source, cross-channel, statement overlap, card-payment
+  // sides). A parser backfill whose exact provider identity already exists does
+  // not need any of them. Keep the heavy structure lazy so the common history
+  // repair path can heal exact rows without duplicating a 10k+ ledger into
+  // temporary Maps on every durable page.
+  let guardCache: ReturnType<typeof duplicateGuard> | null = null;
+  const guard = (): ReturnType<typeof duplicateGuard> => {
+    if (!guardCache) {
+      guardCache = duplicateGuard(matchableTransactions(), true);
+      for (const id of protectedEditedPushConsumed) guardCache.consume(id);
+      for (const candidate of protectedReplacementCandidates) guardCache.add(candidate);
+    }
+    return guardCache;
+  };
   const captureInstrumentOf = (p: ScannedSms): CaptureInstrument | undefined => {
     if (!p.card) return undefined;
     const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
@@ -270,26 +373,77 @@ export function buildImportPlan(
       ...(bank ? { bankIdentity: bankIdentityForName(bank.name) } : {}),
     };
   };
+  let protectedEditedPushIndex: Map<string, Transaction[]> | null = null;
+  const editedPushKey = (date: string, amountFils: number, type: Transaction['type']) =>
+    `${date}|${amountFils}|${type}`;
+  const protectedEditedPushFor = (p: ScannedSms, date: string): Transaction | undefined => {
+    if (p.channel === 'push' || !Number.isFinite(p.smsTs)) return undefined;
+    if (!protectedEditedPushIndex) {
+      const index = new Map<string, Transaction[]>();
+      for (const row of state.transactions) {
+        if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true || !Number.isFinite(row.ts)) continue;
+        const key = editedPushKey(row.date, row.amountFils, row.type);
+        const rows = index.get(key);
+        if (rows) rows.push(row);
+        else index.set(key, [row]);
+      }
+      protectedEditedPushIndex = index;
+    }
+    const incomingInstrument = captureInstrumentOf(p);
+    let best: Transaction | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const row of protectedEditedPushIndex.get(editedPushKey(date, p.amountFils, p.type)) ?? []) {
+      if (protectedEditedPushConsumed.has(row.id)) continue;
+      if (!compatibleCaptureInstrument(row.captureInstrument, incomingInstrument)) continue;
+      const distance = Math.abs(row.ts! - p.smsTs!);
+      if (distance > 120_000 || distance >= bestDistance) continue;
+      best = row;
+      bestDistance = distance;
+    }
+    return best;
+  };
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
-  const priorBySmsKey = new Map<string, Transaction>();
-  const priorsBySmsKey = new Map<string, Transaction[]>();
-  const priorById = new Map<string, Transaction>();
-  for (const t of matchableTransactions) {
-    priorById.set(t.id, t);
-    if (t.smsKey && t.source === 'sms') {
-      const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
-      if (isUnboundAndroidSourceKey(sourceKey)) continue;
-      priorBySmsKey.set(sourceKey, t);
-      const rows = priorsBySmsKey.get(sourceKey) ?? [];
-      rows.push(t);
-      priorsBySmsKey.set(sourceKey, rows);
+  const { priorBySmsKey, collidingPriorsBySmsKey } = sourceIdentityIndex(state.transactions);
+  let priorByIdCache: Map<string, Transaction> | null = null;
+  const priorById = (): Map<string, Transaction> => {
+    if (priorByIdCache) return priorByIdCache;
+    const result = new Map<string, Transaction>();
+    for (const t of state.transactions) result.set(t.id, t);
+    priorByIdCache = result;
+    return result;
+  };
+  let transferRepairCandidatesCache: Map<string, Transaction[]> | null = null;
+  const transferRepairKey = (accountId: string, type: Transaction['type'], amountFils: number, date: string) =>
+    `${accountId}|${type}|${amountFils}|${date}`;
+  // Statement healing must still consider legacy SMS rows that predate
+  // portable source identity, but index them once instead of filtering the
+  // entire ledger for every incoming statement row.
+  const transferRepairCandidates = (): Map<string, Transaction[]> => {
+    if (transferRepairCandidatesCache) return transferRepairCandidatesCache;
+    const result = new Map<string, Transaction[]>();
+    for (const t of state.transactions) {
+      if (t.source !== 'sms' || t.userEdited || t.transferDecision || t.splits) continue;
+      const key = transferRepairKey(t.accountId, t.type, t.amountFils, t.date);
+      const rows = result.get(key);
+      if (rows) rows.push(t);
+      else result.set(key, [t]);
     }
-  }
+    transferRepairCandidatesCache = result;
+    return result;
+  };
   const compatiblePrior = (key: string, p: ScannedSms): Transaction | undefined => {
-    const candidates = priorsBySmsKey.get(key) ?? [];
-    return candidates.find((t) => key.startsWith('h') ||
-      compatibleCaptureInstrument(t.captureInstrument, captureInstrumentOf(p)));
+    const candidates = collidingPriorsBySmsKey.get(key);
+    if (candidates) {
+      return candidates.find((t) => key.startsWith('h') ||
+        compatibleCaptureInstrument(t.captureInstrument, captureInstrumentOf(p)));
+    }
+    const prior = priorBySmsKey.get(key);
+    if (!prior) return undefined;
+    return key.startsWith('h') ||
+      compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p))
+      ? prior
+      : undefined;
   };
   /**
    * Stable identity for a local SMS across parser money corrections.
@@ -308,15 +462,27 @@ export function buildImportPlan(
     const match = t.smsKey?.match(/^s(\d+)-/);
     return match ? Number(match[1]) : undefined;
   };
-  const rowsByTimestamp = new Map<number, Transaction[]>();
-  for (const t of matchableTransactions) {
-    if (t.source !== 'sms') continue;
-    const ts = rowTimestamp(t);
-    if (ts === undefined) continue;
-    const bucket = rowsByTimestamp.get(ts);
-    if (bucket) bucket.push(t);
-    else rowsByTimestamp.set(ts, [t]);
-  }
+  let rowsByTimestampCache: Map<number, Transaction[]> | null = null;
+  // Relay/PDF/CSV rows deliberately carry no raw source text, so they cannot
+  // use Android timestamp recovery. Skip building this full-ledger index for
+  // statement imports.
+  const hasLocalSourceEvidence = parsed.some((row) => row.raw !== undefined);
+  const rowsByTimestamp = (): Map<number, Transaction[]> => {
+    if (rowsByTimestampCache) return rowsByTimestampCache;
+    const result = new Map<number, Transaction[]>();
+    if (hasLocalSourceEvidence) {
+      for (const t of state.transactions) {
+        if (!sourceIdentityMatchable(t) || t.source !== 'sms') continue;
+        const ts = rowTimestamp(t);
+        if (ts === undefined) continue;
+        const bucket = result.get(ts);
+        if (bucket) bucket.push(t);
+        else result.set(ts, [t]);
+      }
+    }
+    rowsByTimestampCache = result;
+    return result;
+  };
   const parsedTimestampCounts = new Map<number, number>();
   const androidTimestampCounts = new Map<number, number>();
   for (const p of parsed) {
@@ -330,7 +496,7 @@ export function buildImportPlan(
   const stableLocalPrior = (p: ScannedSms): Transaction | undefined => {
     if (p.sourceEventId || p.channel === 'push' || !Number.isFinite(p.smsTs)) return undefined;
     if (parsedTimestampCounts.get(p.smsTs!) !== 1) return undefined;
-    const rows = rowsByTimestamp.get(p.smsTs!);
+    const rows = rowsByTimestamp().get(p.smsTs!);
     if (!rows || rows.length !== 1) return undefined;
     const prior = rows[0];
     if (!compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p))) return undefined;
@@ -354,10 +520,9 @@ export function buildImportPlan(
       ? value.replace(/[\s/-]/g, '').toUpperCase() || undefined
       : undefined;
     const incomingRef = normalizedRef(evidence.reference);
-    const candidates = state.transactions.filter((candidate) => {
-      if (candidate.source !== 'sms' || candidate.userEdited || candidate.transferDecision || candidate.splits ||
-          candidate.accountId !== accountId || candidate.type !== p.type || candidate.amountFils !== p.amountFils ||
-          candidate.date !== p.date) return false;
+    const candidates = (transferRepairCandidates().get(
+      transferRepairKey(accountId, p.type, p.amountFils, p.date),
+    ) ?? []).filter((candidate) => {
       const priorRef = normalizedRef(candidate.transferEvidence?.reference);
       const sameReference = !!incomingRef && !!priorRef && incomingRef === priorRef;
       const structurallyTransferLike = candidate.isTransfer === true || STRUCTURAL_TITLES.has(candidate.title.trim()) ||
@@ -418,7 +583,7 @@ export function buildImportPlan(
     resolvedAccountId?: string,
     cardPaymentSide?: 'debit' | 'receipt',
   ) => {
-    const prior = priorById.get(matchedId);
+    const prior = priorById().get(matchedId);
     if (!prior) return;
     // A hand-entered row may explain one bank alert, but the history importer
     // must not rewrite the user's category/direction or attach an SMS identity
@@ -473,7 +638,7 @@ export function buildImportPlan(
     if (!p.sourceEventId || !/^a\d+$/.test(p.sourceEventId) || p.channel === 'push' ||
         !Number.isFinite(p.smsTs) || !p.raw || !p.card || p.type !== 'expense' || !p.transferHint) return;
     if (androidTimestampCounts.get(p.smsTs!) !== 1) return;
-    const rows = rowsByTimestamp.get(p.smsTs!);
+    const rows = rowsByTimestamp().get(p.smsTs!);
     if (rows?.length !== 1) return;
     const prior = rows[0];
     if (prior.source !== 'sms' || prior.viaPush || prior.smsKey !== `s${p.smsTs}-${p.amountFils}` ||
@@ -508,6 +673,9 @@ export function buildImportPlan(
   const newBills: Omit<Bill, 'id' | 'paidMonths'>[] = [];
   const billDues: ScannedSms[] = [];
   const fallbackAccountId = state.accounts[0]?.id ?? '';
+  const existingAccountById = new Map(state.accounts.map((account) => [account.id, account] as const));
+  const accountCandidates: Array<{ ref: string; account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> }> =
+    state.accounts.map((account) => ({ ref: account.id, account }));
 
   // Bank identity per account, learned from SMS sender IDs (existing accounts
   // that predate this get theirs backfilled).
@@ -519,6 +687,9 @@ export function buildImportPlan(
     /** False when multiple compatible accounts made attribution unsafe. */
     confident: boolean;
   }
+  // The user's sole known bank: names a card nothing else could, and yields
+  // to explicit evidence (see matchesCard and the backfill below).
+  const soleKnownBankName = singleKnownBank(state.knownBanks)?.name;
   const hintKey = (bankName: string | undefined, last4: string, kind: string) =>
     `${bankName ?? '?'}|${kind}|${last4}`;
   const unassignedCardRef = (
@@ -531,7 +702,7 @@ export function buildImportPlan(
     ref: string,
   ): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> | undefined => {
     if (/^\d+$/.test(ref)) return newAccounts[Number(ref)];
-    return state.accounts.find((a) => a.id === ref);
+    return existingAccountById.get(ref);
   };
   const effectiveCardType = (
     ref: string,
@@ -555,17 +726,18 @@ export function buildImportPlan(
       }
     }
     // A missing bank can be learned from this sender. A different known bank
-    // cannot: last four digits are not globally unique.
+    // cannot: last four digits are not globally unique. The one exception is
+    // a label that came from the user's "Which banks text you?" answer when
+    // exactly one bank is known: that is a default, not evidence, so an alert
+    // that names another bank for the same card corrects it instead of
+    // minting a second account.
     return (
       !bankName ||
       !account.bankName ||
+      account.bankName === soleKnownBankName ||
       bankIdentityForName(account.bankName) === bankIdentityForName(bankName)
     );
   };
-  const accountCandidates = () => [
-    ...state.accounts.map((account) => ({ ref: account.id, account })),
-    ...newAccounts.map((account, index) => ({ ref: String(index), account })),
-  ];
   const isGeneratedUnknownHolding = (
     ref: string,
     account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'>,
@@ -605,7 +777,8 @@ export function buildImportPlan(
           return { accountId: hinted, confident: true };
         }
         if (createMissing) {
-          const bank = bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
+          const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ??
+            bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
           const bankName = bank?.name ?? evidence.sourceBank;
           const idx = newAccounts.length;
           newAccounts.push({
@@ -616,6 +789,7 @@ export function buildImportPlan(
             color: bank?.color ?? colorForHint(evidence.sourceAccountKey.slice(-4)),
           });
           const ref = String(idx);
+          accountCandidates.push({ ref, account: newAccounts[idx] });
           hints[sourceHint] = ref;
           newHints[sourceHint] = ref;
           bankNames[ref] = bankName;
@@ -674,7 +848,15 @@ export function buildImportPlan(
       const known = effectiveCardType(ref);
       // A statement or payment's explicit credit evidence is stronger than a
       // purchase alert whose missing type made the parser fall back to debit.
-      if (kind === 'credit' || known !== 'credit') cardTypes[ref] = kind;
+      // Existing cards already carrying this exact type need no reducer patch.
+      // Re-emitting unchanged metadata on every normal purchase disabled the
+      // incremental-capture fast path and forced a whole-ledger reconciliation
+      // for one new row. Keep provisional same-batch refs explicit because
+      // later rows in this plan may still upgrade them.
+      const existingRef = !/^\d+$/.test(ref);
+      if (!existingRef || (kind === 'credit' ? known !== 'credit' : known === undefined)) {
+        cardTypes[ref] = kind;
+      }
       if (kind === 'credit' && snapshots[ref]?.kind === 'balance') {
         snapshots[ref] = { ...snapshots[ref], kind: 'limit' };
       }
@@ -688,11 +870,19 @@ export function buildImportPlan(
       // reused legacy holding is deliberately non-confident; stamping the SMS
       // sender onto it would make later resolver passes treat that guess as
       // established identity.
-      if (bank && confident) bankNames[ref] ??= bank.name;
+      if (bank && confident) {
+        const account = accountAtRef(ref);
+        const existingRef = !/^\d+$/.test(ref);
+        // Learning a missing issuer is a real mutation. Re-stating the issuer
+        // already persisted on this exact account is not.
+        if (!existingRef || !account?.bankName || account.bankName === soleKnownBankName) {
+          bankNames[ref] ??= bank.name;
+        }
+      }
       noteType(ref);
       return { accountId: ref, confident };
     };
-    const compatible = accountCandidates().filter(({ ref, account }) =>
+    const compatible = accountCandidates.filter(({ ref, account }) =>
       matchesCard(ref, account, last4, kind, bank?.name) ||
       (sourceKindAmbiguous && matchesCard(ref, account, last4, 'account', bank?.name)));
     // Explicit type evidence may safely choose the sole account already known
@@ -761,19 +951,23 @@ export function buildImportPlan(
       return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
     }
     // Auto-create; reference by index until the store assigns real ids.
+    // When neither sender nor body named the bank, the user's own answer to
+    // "Which banks text you?" does, provided it is exactly one bank.
+    const label = bank ?? singleKnownBank(state.knownBanks);
     const idx = newAccounts.length;
     newAccounts.push({
-      name: bank
-        ? `${bank.name} ${cardAccountName(last4, kind)}`
+      name: label
+        ? `${label.name} ${cardAccountName(last4, kind)}`
         : cardAccountName(last4, kind),
       kind: kind === 'credit' || kind === 'debit' || kind === 'unknown' ? 'card' : 'bank',
       cardType: kind === 'credit' ? 'credit' : kind === 'debit' ? 'debit' : undefined,
       last4,
-      bankName: bank?.name,
+      bankName: label?.name,
       openingFils: 0,
-      color: bank?.color ?? colorForHint(last4),
+      color: label?.color ?? colorForHint(last4),
     });
     const ref = String(idx);
+    accountCandidates.push({ ref, account: newAccounts[idx] });
     const confident = eligible.length === 0;
     if (confident) {
       hints[last4] = ref;
@@ -840,6 +1034,11 @@ export function buildImportPlan(
   const overrides = state.merchantOverrides ?? {};
   const billAliases = state.billAliases ?? {};
   const applyMerchantOverride = (p: ScannedSms): ScannedSms => {
+    // Bank bill-pay nicknames are not merchant identities. They are learned by
+    // the billIdentity-scoped alias pass below; a global merchant override here
+    // could turn a Fishbasket utility nickname and a real Fishbasket purchase
+    // into the same category.
+    if (p.paymentFlowSide === 'receipt') return p;
     if (p.raw !== undefined) return p;
     const hit = overrides[p.merchant.trim().toLowerCase()];
     if (!hit || hit === p.categoryGuess) return p;
@@ -923,7 +1122,7 @@ export function buildImportPlan(
       if (p.date < staleDueCutoff) continue;
       const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
-        ? accountCandidates().filter(
+        ? accountCandidates.filter(
             ({ ref, account }) =>
               account.kind === 'card' &&
               effectiveCardType(ref, account) === 'credit' &&
@@ -971,11 +1170,18 @@ export function buildImportPlan(
         p.minDueFils === null &&
         existingDue.minDueEstimated === true &&
         existingDue.minDueFils !== 0;
+      const removesContradictoryMinimum =
+        existingDue !== undefined &&
+        p.minDueFils === null &&
+        existingDue.minDueFils > existingDue.totalDueFils;
       // A parser-version rescan of an identical obligation is idempotent. A
       // newly authoritative minimum, or removing the old UAE-only 5% fallback
       // from a Saudi due, is the reason to re-offer it to the reducer's
       // monotonic due merge.
-      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate) continue;
+      // v47 could retain a contradictory minimum above this exact statement's
+      // total. Re-offer the corrected unknown minimum so the merge can repair
+      // it without resetting payment evidence or weakening a valid minimum.
+      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate && !removesContradictoryMinimum) continue;
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.
@@ -997,6 +1203,27 @@ export function buildImportPlan(
     if (p.kind === 'cardPayment') {
       const smsKey = smsKeyOf(p);
       const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
+      if (exactPrior) {
+        // Admit a date-only correction before account discovery or snapshots;
+        // new issuer evidence must not create an unused account as a side effect.
+        // A re-import may change this one date only when the parser reproduced
+        // the known template error from the exact original Apple Message.
+        // Keep this separate from fuzzy healing and from account/role repairs.
+        const proof = p.dateRepairFrom && p.date && p.sourceEventId &&
+          /^[a-f0-9]{64}$/.test(p.sourceEventId) && p.smsTs !== undefined && exactPrior.captureInstrument
+          ? { from: p.dateRepairFrom, to: p.date, sourceKey: `h${p.sourceEventId}`,
+              observedAt: p.smsTs, amountFils: p.amountFils, accountId: exactPrior.accountId,
+              instrument: { last4: exactPrior.captureInstrument.last4, kind: exactPrior.captureInstrument.kind,
+                ...(exactPrior.captureInstrument.bankIdentity ? { bankIdentity: exactPrior.captureInstrument.bankIdentity } : {}) } }
+          : undefined;
+        if (proof && sourceDateCount(state.transactions, proof.sourceKey) === 1 &&
+            p.cardPaymentSide === 'receipt' && exactPrior.captureInstrument && p.card &&
+            compatibleCaptureInstrument(exactPrior.captureInstrument, captureInstrumentOf(p)) &&
+            canApplySourceDateCorrection(exactPrior, proof)) {
+          updates.push({ id: exactPrior.id, sourceDateCorrection: proof });
+          continue;
+        }
+      }
       const stablePrior = exactPrior ?? stableLocalPrior(p);
       const prior = stablePrior;
       const resolution = resolveAccount(p, prior?.accountId);
@@ -1004,6 +1231,19 @@ export function buildImportPlan(
       if (!accountId) continue;
       if (resolution.confident) noteSnapshot(accountId, p);
       const cardPaymentSide = cardPaymentSideOf(p);
+      if (exactPrior) {
+        // Exact retained-message identity is already one-to-one. Do not build
+        // the generalized duplicate/cross-channel indexes just to rediscover
+        // the same row during a parser backfill.
+        healFromReparse(
+          smsKey,
+          p,
+          resolution.confident ? accountId : undefined,
+          cardPaymentSide,
+          exactPrior,
+        );
+        continue;
+      }
       if (!exactPrior && stablePrior) {
         healFromReparse(
           undefined,
@@ -1018,12 +1258,14 @@ export function buildImportPlan(
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
         type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+        captureSource: p.captureSource,
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
         captureInstrument: captureInstrumentOf(p),
       };
-      if (guard.has(candidate)) {
-        const matchedId = guard.takeMatchedId();
-        const matchedPrior = matchedId ? priorById.get(matchedId) : undefined;
+      const duplicate = guard();
+      if (duplicate.has(candidate)) {
+        const matchedId = duplicate.takeMatchedId();
+        const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
         const matchedOppositeSettlementSide =
           matchedPrior?.cardPaymentSide !== undefined &&
           cardPaymentSide !== undefined &&
@@ -1039,7 +1281,7 @@ export function buildImportPlan(
             resolution.confident ? accountId : undefined,
             cardPaymentSide,
           );
-          guard.consumeCapture(matchedId);
+          duplicate.consumeCapture(matchedId);
         }
         // A row imported as a plain expense before this message was
         // recognized as a card payment becomes a transfer now.
@@ -1051,7 +1293,7 @@ export function buildImportPlan(
         );
         continue;
       }
-      guard.add(candidate);
+      duplicate.add(candidate);
       transactions.push({
         type: 'income', // money arriving INTO the card account
         amountFils: p.amountFils,
@@ -1062,6 +1304,7 @@ export function buildImportPlan(
         ts: p.smsTs,
         source: 'sms',
         smsKey,
+        captureSource: p.captureSource,
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1078,34 +1321,50 @@ export function buildImportPlan(
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+      captureSource: p.captureSource,
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
+    const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
+    if (protectedEditedPush && smsKey) {
+      protectedEditedPushConsumed.add(protectedEditedPush.id);
+      protectedReplacementCandidates.push(captureCandidate);
+      // This is deliberately the rare escape hatch that may instantiate the
+      // generalized matcher: preserving a user-edited push needs its consumed
+      // state reflected immediately so a second genuine SMS cannot reuse it.
+      const duplicate = guard();
+      duplicate.consume(protectedEditedPush.id);
+      duplicate.add(captureCandidate);
+      if (p.sourceEventId) {
+        promoteMatchedHistory(protectedEditedPush.id, smsKey, p);
+      }
+      continue;
+    }
     if (sourceCorrectionPrior?.userEdited && smsKey) {
       // Promote technical identity only. Resolving a new account first would
       // create an unused account even though the user's assignment is kept.
       promoteMatchedHistory(sourceCorrectionPrior.id, smsKey, p);
-      guard.consume(sourceCorrectionPrior.id);
-      guard.add(captureCandidate);
+      const duplicate = guard();
+      duplicate.consume(sourceCorrectionPrior.id);
+      duplicate.add(captureCandidate);
       continue;
     }
-    const protectedSupersededId = guard.supersedes(captureCandidate);
-    if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
-      // The fuller SMS still proves the notification was a duplicate, but it
-      // must not overwrite the user's corrected title/category/account.
-      // That push row has now been accounted for, though: without saying so,
-      // the NEXT same-value message in the window was dropped against it too,
-      // and that one was a real charge nobody ever saw.
-      guard.consume(protectedSupersededId);
-      if (p.sourceEventId && smsKey) {
-        // Technical source identity is safe to promote even when every
-        // user-facing field is protected. It also prevents the next distinct
-        // history Message from consuming this same push row through the title
-        // index after the cross-channel index was consumed.
-        promoteMatchedHistory(protectedSupersededId, smsKey, p);
+    // Cross-channel supersession has to run before account resolution because
+    // a protected push row may already be the one durable event. Resolving the
+    // fuller SMS first can mint an unused account even though the SMS is then
+    // deduped against that user-edited push. Exact retained-message identities
+    // skip this entirely and stay on the lightweight history fast path.
+    if (!exactPrior) {
+      const duplicate = guard();
+      const protectedSupersededId = duplicate.supersedes(captureCandidate);
+      if (protectedSupersededId && priorById().get(protectedSupersededId)?.userEdited) {
+        duplicate.consume(protectedSupersededId);
+        if (p.sourceEventId && smsKey) {
+          promoteMatchedHistory(protectedSupersededId, smsKey, p);
+        }
+        duplicate.add(captureCandidate);
+        continue;
       }
-      guard.add(captureCandidate);
-      continue;
     }
     // A proven business receipt without a readable instrument is money in,
     // not permission to attach it to the first (possibly hidden) bank account.
@@ -1125,13 +1384,18 @@ export function buildImportPlan(
     const healedAccountId = resolution.confident || unassignedIncome ||
       (!prior?.userEdited && !prior?.captureInstrument && accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) ||
       (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
+    if (exactPrior) {
+      healFromReparse(smsKey, p, healedAccountId, undefined, exactPrior);
+      continue;
+    }
+    const duplicate = guard();
     const statementPrior = !exactPrior && !stablePrior && resolution.confident
       ? statementTransferPrior(p, accountId)
       : undefined;
     if (statementPrior) {
       healFromReparse(undefined, p, accountId, undefined, statementPrior);
-      guard.consume(statementPrior.id);
-      guard.add({ ...captureCandidate, accountId });
+      duplicate.consume(statementPrior.id);
+      duplicate.add({ ...captureCandidate, accountId });
       continue;
     }
     const accountForMatchedPrior = (matched: Transaction | undefined) =>
@@ -1140,8 +1404,8 @@ export function buildImportPlan(
         ? undefined : healedAccountId;
     if (sourceCorrectionPrior && smsKey) {
       promoteMatchedHistory(sourceCorrectionPrior.id, smsKey, p, healedAccountId);
-      guard.consume(sourceCorrectionPrior.id);
-      guard.add({ ...captureCandidate, accountId });
+      duplicate.consume(sourceCorrectionPrior.id);
+      duplicate.add({ ...captureCandidate, accountId });
       continue;
     }
     if (!exactPrior && stablePrior) {
@@ -1155,9 +1419,9 @@ export function buildImportPlan(
       continue;
     }
     const candidate = { ...captureCandidate, accountId };
-    if (guard.has(candidate)) {
-      const matchedId = guard.takeMatchedId();
-      const matchedPrior = matchedId ? priorById.get(matchedId) : undefined;
+    if (duplicate.has(candidate)) {
+      const matchedId = duplicate.takeMatchedId();
+      const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
       if (p.sourceEventId && matchedId) {
         // Promote the matched live capture to the exact retained-Message key.
         // The next distinct history GUID can then survive reducer hydration.
@@ -1170,7 +1434,7 @@ export function buildImportPlan(
         // One stored row is indexed by both title and capture channel. A
         // history match consumes it in both places or h2 can reuse the push
         // index after h1 consumed the title index.
-        guard.consume(matchedId);
+        duplicate.consume(matchedId);
       } else {
         // An older notification row can match this authoritative SMS through
         // the duplicate index while having a different timestamp/s-key. Heal
@@ -1189,24 +1453,24 @@ export function buildImportPlan(
     // The same charge already in the ledger from a bank-app notification.
     // The SMS is the better read, so it rewrites that row rather than
     // becoming a second one.
-    const supersededId = guard.supersedes(candidate);
+    const supersededId = duplicate.supersedes(candidate);
     if (supersededId) {
-      if (!priorById.get(supersededId)?.userEdited) {
+      if (!priorById().get(supersededId)?.userEdited) {
         const transferEvidence = buildTransferEvidence(p, resolution.confident);
         updates.push({
           id: supersededId,
           title: p.merchant,
           category: p.categoryGuess,
           type: p.type,
-          ...(accountForMatchedPrior(priorById.get(supersededId)) ? { accountId } : {}),
+          ...(accountForMatchedPrior(priorById().get(supersededId)) ? { accountId } : {}),
           ts: p.smsTs,
           smsKey,
           viaPush: false,
           ...(p.card ? { captureInstrument: mergeCaptureInstrument(
-            captureInstrumentOf(p), priorById.get(supersededId)?.captureInstrument) } : {}),
+            captureInstrumentOf(p), priorById().get(supersededId)?.captureInstrument) } : {}),
           isTransfer: p.transferHint,
           ...(transferEvidence ? { transferEvidence } : {}),
-          ...(priorById.get(supersededId)?.transferEvidence && !transferEvidence
+          ...(priorById().get(supersededId)?.transferEvidence && !transferEvidence
             ? { clearTransferEvidence: true as const } : {}),
           paymentFlowSide: p.paymentFlowSide,
           billIdentity: p.billIdentity,
@@ -1220,11 +1484,11 @@ export function buildImportPlan(
       // supersede the SAME push row twice; the store keys patches by id and
       // keeps the last, so the first message's charge was never written at
       // all — AED 25 of spending gone, with no duplicate to hint at it.
-      guard.consume(supersededId);
-      guard.add(candidate);
+      duplicate.consume(supersededId);
+      duplicate.add(candidate);
       continue;
     }
-    guard.add(candidate);
+    duplicate.add(candidate);
     // Low-confidence rows keep their source text so the user can report
     // unrecognized bank formats from Settings → Improve accuracy.
     // Structurally-understood rows (ATM, VAT, transfers...) stay out.
@@ -1255,6 +1519,7 @@ export function buildImportPlan(
       captureInstrument: captureInstrumentOf(p),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,
@@ -1320,7 +1585,7 @@ export function buildImportPlan(
     const parsedTs = new Set<number>();
     for (const p of parsed) if (p.smsTs !== undefined) parsedTs.add(p.smsTs);
     const rowsByTs = new Map<number, Transaction[]>();
-    for (const t of matchableTransactions) {
+    for (const t of matchableTransactions()) {
       const ts = rowTs(t);
       if (ts === undefined) continue;
       const bucket = rowsByTs.get(ts);
@@ -1455,7 +1720,7 @@ export function buildImportPlan(
   // its resolver still has to prove a unique compatible account. Without this
   // check the first scan and its replay alternated the same tail between banks.
   const tailCounts = new Map<string, number>();
-  for (const { account } of accountCandidates()) {
+  for (const { account } of accountCandidates) {
     if (account.last4) tailCounts.set(account.last4, (tailCounts.get(account.last4) ?? 0) + 1);
   }
   for (const key of Object.keys(newHints)) {

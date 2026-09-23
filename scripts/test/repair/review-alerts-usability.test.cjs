@@ -142,6 +142,23 @@ test('ordinary posted/uncertain purchases retain the original confirmation flow;
   assert.ok(!text(tree).includes(h.deps['@/lib/i18n'].t('genericOpenCards')));
   assert.deepEqual(h.events, []);
 });
+test('a balance-like amount alternative is removed so a normal payment needs no fake choice', () => {
+  const payment = money('3762');
+  const balance = money('1799724');
+  const item = pending('purchase', {
+    amount: { value: null, evidence: 'ambiguous', alternatives: [payment, balance] },
+    balance: field(balance),
+    instrument: field({ kind: 'account', last4: '4821' }),
+  });
+  const h = detailHarness(item);
+  const tree = h.render();
+  const rendered = text(tree);
+  assert.ok(rendered.includes('AED 37.62'));
+  assert.ok(!rendered.includes('AED 17997.24'));
+  assert.ok(!rendered.includes(h.deps['@/lib/i18n'].t('genericConfirmPosted')));
+  assert.equal(walk(tree).filter(node => node.props?.accessibilityRole === 'radio').length, 0,
+    'known direction/date/account facts do not become review questions');
+});
 test('an old informational confirmation cannot dismiss a replacement, expired source or changed route', async () => {
   for (const change of ['replacement', 'expiry', 'missing', 'route', 'generation', 'posting']) {
     const item = pending('statement', { statementTotal: field(money()) });

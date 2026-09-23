@@ -1,5 +1,30 @@
-import type { Account, Transaction } from '@/lib/types';
-import { isTransferCandidate, isUnassignedTransferAccount, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
+import type { Account, AppState, Transaction } from '@/lib/types';
+import { bankIdentityForName } from '@/lib/markets';
+import { historyImportIncomplete } from '@/lib/history-import';
+import {
+  isTransferEvidence,
+  isTransferCandidate,
+  isUnassignedTransferAccount,
+  reconcileTransfers,
+  reconciliationInternalIds,
+  transferOwnership,
+  TRANSFER_NORMALIZATION_VERSION,
+} from '@/lib/transfer-reconciliation';
+
+/**
+ * Human-readable account label with its last-four bank identifier appended
+ * as `·NNNN`, unless the name already ends with those four digits.
+ *
+ * Two identically-named cards ("FAB Credit Card") are only distinguishable by
+ * their last four, so the label carries them wherever a picker or a details
+ * row shows an account. Guards against double-appending — some entries store
+ * the digits inside `name` already ("FAB ·4821") — by returning `name` as is
+ * when it contains the full last-four sequence.
+ */
+export function accountDisplayName(account: Pick<Account, 'name' | 'last4'>): string {
+  if (!account.last4) return account.name;
+  return account.name.includes(account.last4) ? account.name : `${account.name} ·${account.last4}`;
+}
 
 /** A known business receipt with unknown bank attribution. Not a bank account
  * and never a balance/snapshot target. The user assigns it from entry details. */
@@ -11,9 +36,14 @@ export const isUnassignedIncome = (transaction: Transaction): boolean =>
   transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type === 'income';
 
 /** Account visibility is applied to totals, never to transfer identity. */
+let liveAccountIdsCache: { accounts: Account[]; value: Set<string> } | null = null;
+
 export function liveAccountIds(accounts: Account[]): Set<string> {
-  return new Set([UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID,
+  if (liveAccountIdsCache?.accounts === accounts) return liveAccountIdsCache.value;
+  const value = new Set([UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID,
     ...accounts.filter((account) => !account.archived).map((account) => account.id)]);
+  liveAccountIdsCache = { accounts, value };
+  return value;
 }
 
 export function isTransfer(transaction: Transaction): boolean {
@@ -114,10 +144,231 @@ export function isInboundTransfer(transaction: Transaction): boolean {
  * Legacy Set callers can still exclude explicit/user-owned rows, but cannot
  * establish a bank identity. New callers should supply the full account list.
  */
+let internalIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  value: Set<string>;
+  /**
+   * Provisional history receipts are intentionally cheap while import is
+   * unfinished, but must never be reused once completion requires canonical
+   * reconciliation. A computed/live reconciliation is safe to reuse for the
+   * same immutable arrays even when no durable receipt exists yet.
+   */
+  canonical: boolean;
+} | null = null;
+let persistedInternalIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  ids: string[];
+  value: Set<string>;
+} | null = null;
+let corroboratingDisplayIdsCache: {
+  transactions: Transaction[];
+  accounts: Account[];
+  value: Set<string>;
+} | null = null;
+
+/**
+ * Seed the analytics cache from the exact durable reconciliation receipt.
+ * Store snapshots are immutable, so matching array identities make this cache
+ * authoritative until a transaction/account mutation replaces either array.
+ */
+export function primeInternalTransferIds(
+  transactions: Transaction[],
+  accounts: Account[],
+  ids: readonly string[],
+  canonical = true,
+): void {
+  internalIdsCache = { transactions, accounts, value: new Set(ids), canonical };
+}
+
 export function internalTransferIds(
   transactions: Transaction[], accounts: Set<string> | Account[],
 ): Set<string> {
-  const result = reconcileTransfers(transactions, Array.isArray(accounts) ? accounts : []);
-  if (!result.corroboratingIds.size && !result.cardRepaymentPairs.size && !result.knownCardRepayments.size) return result.internalIds;
-  return new Set([...result.internalIds, ...result.corroboratingIds, ...result.cardRepaymentPairs.keys(), ...result.knownCardRepayments.keys()]);
+  if (Array.isArray(accounts) &&
+      internalIdsCache?.transactions === transactions && internalIdsCache.accounts === accounts) {
+    return internalIdsCache.value;
+  }
+  const accountRows = Array.isArray(accounts) ? accounts : [];
+  const value = reconciliationInternalIds(reconcileTransfers(transactions, accountRows));
+  if (Array.isArray(accounts)) internalIdsCache = { transactions, accounts, value, canonical: true };
+  return value;
+}
+
+/**
+ * Fast UI/analytics path for a complete AppState snapshot.
+ *
+ * The store persists the exact reconciliation result together with a semantic
+ * version and primes the in-memory cache after every authoritative dispatch.
+ * Rebuilding the complete transfer graph from a 10k-20k row ledger on a tab
+ * press is therefore redundant work and can hold React Native's JS thread for
+ * seconds. Use the durable receipt when it describes this snapshot; fall back
+ * to full reconciliation only for old/restored states that do not have one.
+ *
+ * While an Android history import is running the store deliberately exposes a
+ * provisional receipt for UI calculations. It is not stamped as final until
+ * import completion, but it is the same snapshot the rest of the UI uses.
+ */
+export function internalTransferIdsForState(
+  state: Pick<AppState,
+    'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion' | 'historyImport'>,
+): Set<string> {
+  const ids = state.transferInternalIds;
+  const receiptUsable = Array.isArray(ids) && (
+    state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+    historyImportIncomplete(state.historyImport)
+  );
+  if (!receiptUsable) {
+    // Do not route through internalTransferIds() here. A provisional history
+    // receipt intentionally primes that legacy array-identity cache so every UI
+    // caller sees the same cheap answer while import is unfinished. Once the
+    // job completes (or the receipt otherwise becomes unusable), the same
+    // immutable arrays may still be present; consulting the legacy cache would
+    // then return the stale provisional ids instead of the required canonical
+    // reconciliation. Reconcile explicitly and replace the cache with the live
+    // result at this state-aware boundary.
+    if (internalIdsCache?.transactions === state.transactions &&
+        internalIdsCache.accounts === state.accounts &&
+        internalIdsCache.canonical) {
+      return internalIdsCache.value;
+    }
+    const value = reconciliationInternalIds(reconcileTransfers(state.transactions, state.accounts));
+    internalIdsCache = {
+      transactions: state.transactions,
+      accounts: state.accounts,
+      value,
+      canonical: true,
+    };
+    return value;
+  }
+  if (persistedInternalIdsCache?.transactions === state.transactions &&
+      persistedInternalIdsCache.accounts === state.accounts &&
+      persistedInternalIdsCache.ids === ids) {
+    return persistedInternalIdsCache.value;
+  }
+  const value = new Set(ids);
+  persistedInternalIdsCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    ids,
+    value,
+  };
+  // Keep the legacy array-identity cache hot for callers that still only have
+  // transactions/accounts. This makes mixed old/new call sites converge on the
+  // same O(1) result instead of unexpectedly rebuilding the graph later.
+  internalIdsCache = {
+    transactions: state.transactions,
+    accounts: state.accounts,
+    value,
+    canonical: state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
+  };
+  return value;
+}
+
+/**
+ * Secondary bank alerts that corroborate an already-recorded transfer.
+ *
+ * FAB can emit both a transfer-detail alert and an outward-remittance debit for
+ * the same movement. The reconciliation engine intentionally keeps both source
+ * rows so the ledger preserves the bank evidence, but rendering both makes one
+ * transfer look like two transactions. Rebuilding the complete transfer graph
+ * just to hide that confirmation would undo the large-ledger performance work,
+ * so this is the same narrow issuer rule expressed as a cheap, cached display
+ * projection: exact account + exact money + opposite posting forms + <=90 sec,
+ * with reference contradictions and ambiguous multi-matches failing closed.
+ */
+export function corroboratingTransferIdsForState(
+  state: Pick<AppState, 'transactions' | 'accounts'>,
+): Set<string> {
+  if (corroboratingDisplayIdsCache?.transactions === state.transactions &&
+      corroboratingDisplayIdsCache.accounts === state.accounts) {
+    return corroboratingDisplayIdsCache.value;
+  }
+
+  type Candidate = {
+    id: string;
+    at: number;
+    form: 'transfer-detail' | 'remittance-debit';
+    smsKey?: string;
+    reference?: string;
+  };
+  const accounts = new Map(state.accounts.map((account) => [account.id, account] as const));
+  const groups = new Map<string, Candidate[]>();
+  const sourceTime = (transaction: Transaction): number | undefined => {
+    if (typeof transaction.ts === 'number' && Number.isSafeInteger(transaction.ts) && transaction.ts >= 0) {
+      return transaction.ts;
+    }
+    const match = typeof transaction.smsKey === 'string' ? /^s(\d{10,16})-/.exec(transaction.smsKey) : null;
+    const parsed = match ? Number(match[1]) : NaN;
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+  };
+  for (const transaction of state.transactions) {
+    if (transaction.type !== 'expense' || transaction.userEdited ||
+        !Number.isSafeInteger(transaction.amountFils) || transaction.amountFils <= 0) continue;
+    const evidence = isTransferEvidence(transaction.transferEvidence) ? transaction.transferEvidence : undefined;
+    const form = evidence?.postingForm;
+    if (evidence?.attribution !== 'source' ||
+        (form !== 'transfer-detail' && form !== 'remittance-debit')) continue;
+    const account = accounts.get(transaction.accountId);
+    if (!account || (account.kind !== 'bank' && !(account.kind === 'card' && account.cardType === 'debit'))) continue;
+    const accountBank = account.bankName ? bankIdentityForName(account.bankName) : undefined;
+    const sourceBank = evidence.sourceBank ? bankIdentityForName(evidence.sourceBank) : undefined;
+    const captureBank = transaction.captureInstrument?.bankIdentity
+      ? bankIdentityForName(transaction.captureInstrument.bankIdentity)
+      : undefined;
+    const banks = [accountBank, sourceBank, captureBank].filter((bank): bank is string => !!bank);
+    if (!banks.length || banks.some((bank) => bank !== 'fab')) continue;
+    if (transaction.captureInstrument?.kind === 'credit' ||
+        (account.last4 && transaction.captureInstrument?.last4 &&
+          account.last4 !== transaction.captureInstrument.last4)) continue;
+    const at = sourceTime(transaction);
+    if (at === undefined) continue;
+    const key = JSON.stringify([
+      transaction.accountId,
+      transaction.amountFils,
+      transaction.originalCurrency ?? null,
+      transaction.originalAmountMinor ?? null,
+    ]);
+    const bucket = groups.get(key) ?? [];
+    bucket.push({
+      id: transaction.id,
+      at,
+      form,
+      ...(transaction.smsKey ? { smsKey: transaction.smsKey } : {}),
+      ...(evidence.reference ? { reference: evidence.reference } : {}),
+    });
+    groups.set(key, bucket);
+  }
+
+  const value = new Set<string>();
+  const WINDOW_MS = 90_000;
+  const MAX_SCAN = 64;
+  for (const bucket of groups.values()) {
+    bucket.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+    const matches = new Map<string, string[]>();
+    let left = 0;
+    for (const entry of bucket) {
+      while (left < bucket.length && bucket[left].at < entry.at - WINDOW_MS) left += 1;
+      const candidates: string[] = [];
+      let scanned = 0;
+      for (let otherIndex = left;
+        otherIndex < bucket.length && bucket[otherIndex].at <= entry.at + WINDOW_MS;
+        otherIndex += 1) {
+        const other = bucket[otherIndex];
+        if (++scanned > MAX_SCAN) { candidates.length = 0; break; }
+        if (entry.id === other.id || entry.form === other.form ||
+            (entry.smsKey && other.smsKey && entry.smsKey === other.smsKey) ||
+            (entry.reference && other.reference && entry.reference !== other.reference)) continue;
+        candidates.push(other.id);
+      }
+      matches.set(entry.id, candidates);
+    }
+    for (const entry of bucket) {
+      if (entry.form !== 'remittance-debit') continue;
+      const candidates = matches.get(entry.id) ?? [];
+      if (candidates.length === 1 && matches.get(candidates[0])?.length === 1) value.add(entry.id);
+    }
+  }
+  corroboratingDisplayIdsCache = { transactions: state.transactions, accounts: state.accounts, value };
+  return value;
 }

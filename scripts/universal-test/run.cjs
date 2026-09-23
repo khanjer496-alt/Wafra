@@ -1,6 +1,6 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
-const suites = ['fields', 'money', 'parser', 'import', 'pipeline', 'categorization'];
+const suites = ['fields', 'money', 'parser', 'import', 'pipeline', 'categorization', 'arabic-nonposting-safety'];
 let failures = 0;
 for (const suite of suites) {
   const result = spawnSync(process.execPath, [path.join(__dirname, suite + '.test.cjs')], { stdio: 'inherit' });

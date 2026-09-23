@@ -41,8 +41,6 @@ const validFixture = () => {
     }]],
     extra: {
       eas: { projectId: 'fa920e7b-c661-4517-917d-26e8b4878721' },
-      revenueCatAndroidKey: 'goog_PUBLIC123',
-      revenueCatIosKey: 'appl_PUBLIC123',
       privacyPolicyUrl: 'https://wafra.example/privacy',
       termsOfUseUrl: 'https://wafra.example/terms',
       supportUrl: 'https://wafra.example/support',
@@ -56,6 +54,8 @@ const validFixture = () => {
         EXPO_PUBLIC_WAFRA_RELAY_URL: 'https://relay.wafra.example',
         EXPO_PUBLIC_WAFRA_SHORTCUT_URL: `https://www.icloud.com/shortcuts/${'a'.repeat(32)}`,
         EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: `https://www.icloud.com/shortcuts/${'b'.repeat(32)}`,
+        EXPO_PUBLIC_SUPERWALL_IOS_API_KEY: 'sw_ios_PUBLIC123',
+        EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: 'sw_android_PUBLIC123',
       } },
       'production-candidate': {
         extends: 'production',
@@ -150,6 +150,14 @@ const validFixture = () => {
     });
     ok('store release rejects an iOS encryption flag that disagrees with the retained decision',
       report.findings.some(({ code }) => code === 'apple-export-compliance-config'));
+    write(root, 'docs/store-compliance/apple-export-compliance.json', {
+      schemaVersion: 1, status: 'approved', itsAppUsesNonExemptEncryption: false,
+    });
+    const exemptReport = await assessReleaseReadiness({
+      root, intent: { kind: 'store-release', platform: 'ios' },
+    });
+    ok('an approved exempt declaration is a valid false value, not a missing decision',
+      !exemptReport.findings.some(({ code }) => code.startsWith('apple-export-compliance')));
     fs.rmSync(root, { recursive: true, force: true });
   }
 
@@ -420,9 +428,9 @@ const validFixture = () => {
 
   {
     const root = validFixture();
-    const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
-    app.expo.extra.revenueCatAndroidKey = '';
-    write(root, 'app.json', app);
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.production.env.EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY = '';
+    write(root, 'eas.json', eas);
     const ios = await assessReleaseReadiness({
       root,
       intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
@@ -432,9 +440,9 @@ const validFixture = () => {
       intent: { kind: 'store-release', platform: 'all' },
     });
     ok('platform-scoped builds do not inherit the other store billing gate',
-      !ios.findings.some(({ code }) => code === 'revenuecat-android-key'));
+      !ios.findings.some(({ code }) => code === 'superwall-android-key'));
     ok('the full launch gate still checks both storefronts',
-      all.findings.some(({ code }) => code === 'revenuecat-android-key'));
+      all.findings.some(({ code }) => code === 'superwall-android-key'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 

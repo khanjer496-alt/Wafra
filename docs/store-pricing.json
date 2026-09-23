@@ -7,7 +7,7 @@
     "preserveExistingSubscribers": true,
     "introductoryOffer": false,
     "reason": "Wafra grants its own local three-day access period; a store trial would create a second clock.",
-    "display": "Always use the Apple or Google storefront-formatted price returned by RevenueCat.",
+    "display": "Always use the Apple or Google storefront-formatted price returned through Superwall.",
     "manualFxPricing": false
   },
   "readBackSampleCurrencies": ["JPY", "USD", "KWD"],

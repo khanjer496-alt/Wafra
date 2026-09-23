@@ -133,13 +133,19 @@ const futureGuideKeys = [
   'iosMessageGuideImmediate',
   'iosMessageGuideRunShortcut',
 ];
-eq('iOS message setup: Future guide has the four exact sender-scoped choices',
+eq('iOS message setup: Future guide tells the user to leave Sender empty because bank SMS IDs are not Contacts',
   futureGuideKeys.map((key) => translated(key, 'en')), [
     'Message',
-    'Choose bank senders',
-    'Run Immediately',
-    'Run {shortcut} · full Received Message',
+    'Sender: leave empty · Message Contains: one space',
+    'Choose Run Immediately, turn off Notify When Run, tap Next',
+    'Pick {shortcut} from the list (not New Blank Automation), then Done',
   ]);
+ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
+  translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
+    translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
+    translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
+    !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(
     [screen, detailsSheet, read('src/lib/i18n.ts')].join('\n'),
@@ -163,11 +169,10 @@ ok('iOS message setup: completion copy never calls the automation verified',
   !/verified|trigger worked|automation worked/i.test(
     [translated('iosLocalWaitingTitle', 'en'), translated('iosLocalWaitingBody', 'en')].join(' '),
   ));
-ok('iOS message setup: Help explains unavailable bank senders',
+ok('iOS message setup: Help explains why no Contact is picked as Sender',
   /iosMessageSenderUnavailable/.test(detailsSheet) &&
-    translated('iosMessageSenderUnavailable', 'en')?.includes(
-      'Apple cannot automate this sender.',
-    ));
+    translated('iosMessageSenderUnavailable', 'en')?.includes('Do not pick a Contact as Sender') &&
+    translated('iosMessageSenderUnavailable', 'en')?.includes('bank SMS IDs are not Contacts'));
 
 eq('iOS message setup: Past row keeps only the compact inline disclosures', [
   translated('iosMessagePastDetail', 'en'),
@@ -225,7 +230,7 @@ ok('iOS message setup: every Shortcuts handoff persists progress before opening'
     historyRunFlow.indexOf("type: 'history-status-changed'") <
       historyRunFlow.indexOf('beginIosHistoryHandoff') &&
     historyRunFlow.indexOf('beginIosHistoryHandoff') <
-      historyRunFlow.indexOf('Linking.openURL(newHandoff ? historyShortcutRunUrl()'));
+      historyRunFlow.indexOf('Linking.openURL(newHandoff ? historyShortcutRunUrl() : historyShortcutContinueUrl())'));
 
 ok('iOS message setup: onboarding lifecycle is explicit and Settings never starts it',
   /if \(fromOnboarding\)[\s\S]{0,180}type: 'onboarding-started'/.test(screen) &&
@@ -242,11 +247,13 @@ ok('iOS message setup: guided back clears its return marker and cannot bypass cl
     screen,
   ) &&
     /gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired/.test(screen));
-ok('iOS message setup: only the guarded Finish action can complete onboarding',
+ok('iOS message setup: guarded automatic and manual completion paths can finish onboarding',
   !/setOnboarded\(\)/.test(screen) &&
     /completeIosMessageOnboardingAttempt\(\{[\s\S]{0,500}\n\s+setOnboarded,/.test(screen) &&
     /const finish = useCallback/.test(screen) &&
-    !/finishLater|skipIncomplete/.test(screen) &&
+    /const continueWithoutAutomaticCapture = useCallback/.test(screen) &&
+    /setCaptureOptOut\(true\)/.test(screen) &&
+    /iosMessageContinueManual/.test(screen) &&
     !/openHistory[\s\S]{0,500}setOnboarded/.test(screen));
 
 ok('iOS message setup: long privacy, retention, migration, and coverage copy lives in Learn more',
@@ -289,11 +296,13 @@ ok('iOS local setup: large Dynamic Type changes layout instead of clipping',
   /useLargeTextLayout/.test(screen) &&
     /const largeText = useLargeTextLayout\(\)/.test(screen) &&
     /largeText \? styles\.[A-Za-z]+ : undefined/.test(screen));
-ok('iOS message setup: sender-scoped guide preserves statement and payment coverage',
+ok('iOS message setup: sender guide is explicit that Sender stays empty in both languages',
   /iosMessageGuideNoFilter/.test(read('src/components/ios-message-setup/automation-guide.tsx')) &&
-    translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
-    translated('iosMessageGuideNoFilter', 'en').includes('leave empty') &&
-    translated('iosMessageGuideNoFilter', 'ar').includes('فارغاً'));
+    translated('iosMessageGuideSender', 'en').includes('leave empty') &&
+    translated('iosMessageGuideSender', 'ar').includes('فارغاً') &&
+    // iOS 26 keeps Next disabled with both filters empty: the guide asks for a single space.
+    translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
+    translated('iosMessageGuideNoFilter', 'ar').includes('مسافة واحدة'));
 ok('iOS local setup: readiness and failures are announced to VoiceOver',
   /previousReadiness\.current !== setup\.readiness/.test(screen) &&
     /AccessibilityInfo\.announceForAccessibility\(futureReadyLabel\)/.test(screen) &&
@@ -322,7 +331,7 @@ eq('iOS local setup: milestone copy covers every durable qualifying outcome',
 eq(
   'iOS local setup: privacy copy states queue retention and no upload precisely',
   translated('iosLocalPrivacyBody', 'en'),
-  'Apple does not give Wafra access to your Messages inbox. A personal automation can pass new Messages from a bank sender you select to Wafra’s protected queue on this iPhone. Wafra checks the complete Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
+  'Apple does not give Wafra access to your Messages inbox. A Message automation you create in Shortcuts passes each new Message to Wafra’s protected queue on this iPhone. Apple’s Sender picker lists Contacts only and bank SMS IDs are not Contacts, so the automation runs with an empty Sender for every new message. Wafra checks Content and Sender locally, keeps only supported structured financial results, and uploads no Message data. After a durable local result, Wafra deletes the raw Message. If processing cannot finish, raw Content and Sender stay protected for up to 30 days and are removed on the next capture or queue check.',
 );
 eq('iOS local setup: migration copy discloses the old upload until retirement',
   translated('iosLocalMigrationBody', 'en'),
@@ -330,7 +339,8 @@ eq('iOS local setup: migration copy discloses the old upload until retirement',
 ok(
   'iOS local setup: Arabic privacy copy includes local processing, 30 days, and migration',
   /الآيفون/.test(translated('iosLocalPrivacyBody', 'ar')) &&
-    /مرسل بنك تختاره/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /معرّفات رسائل البنوك ليست جهات اتصال/.test(translated('iosLocalPrivacyBody', 'ar')) &&
+    /بمرسل فارغ لكل رسالة جديدة/.test(translated('iosLocalPrivacyBody', 'ar')) &&
     /بعد حفظ نتيجة محلية بشكل دائم/.test(
       translated('iosLocalPrivacyBody', 'ar'),
     ) &&
@@ -381,6 +391,53 @@ async function historyCardTests() {
     setup.historyShortcutRunUrl(),
     'shortcuts://x-callback-url/run-shortcut?name=Wafra%20History%20Import&x-cancel=wafra%3A%2F%2Fimport-sms&x-error=wafra%3A%2F%2Fimport-sms',
   );
+  eq(
+    'iOS history: Continue on the legacy graph only reopens Shortcuts',
+    [setup.iosHistoryShortcutResumesOnRerun(), setup.historyShortcutContinueUrl()],
+    [false, 'shortcuts://'],
+  );
+  // The production profile installs the paged record without setting the
+  // paging-beta flag. The run name must follow the install URL, not the flag:
+  // Apple installs that record as its signed file basename, and Shortcuts'
+  // run URL resolves by installed name.
+  const savedHistoryUrl = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+  const savedPagedFlag = process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut';
+  delete process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA;
+  try {
+    const production = execute('src/lib/ios-history-setup.ts', {
+      '@react-native-async-storage/async-storage': storage,
+    });
+    eq(
+      'iOS history: a production build runs the name Apple installs for its configured record',
+      [production.IOS_HISTORY_SHORTCUT_NAME, new URL(production.historyShortcutRunUrl()).searchParams.get('name')],
+      ['Wafra-History-v6.signed', 'Wafra-History-v6.signed'],
+    );
+    eq(
+      'iOS history: Continue re-runs a paged graph because it resumes its saved cursor',
+      [production.iosHistoryShortcutResumesOnRerun(), production.historyShortcutContinueUrl()],
+      [true, production.historyShortcutRunUrl()],
+    );
+    const pagedSetup = read('src/lib/ios-paged-setup.ts');
+    const releaseCheck = read('scripts/release/ios-public-shortcut-check.mjs');
+    eq(
+      'iOS history: the paged module and the public-record check name the same installed Shortcut',
+      [
+        /Wafra-History-v6\.signed\.shortcut': 'Wafra-History-v6\.signed'/.test(pagedSetup),
+        /installedName: 'Wafra-History-v6\.signed'/.test(releaseCheck),
+      ],
+      [true, true],
+    );
+    eq(
+      'iOS history: an unknown record falls back to the generator name',
+      production.installedIosHistoryShortcutName('https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789'),
+      'Wafra History Import',
+    );
+  } finally {
+    if (savedHistoryUrl === undefined) delete process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+    else process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL = savedHistoryUrl;
+    if (savedPagedFlag !== undefined) process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA = savedPagedFlag;
+  }
   if (typeof setup.normalizeIosHistoryShortcutUrl !== 'function') {
     ok(
       'iOS history: runtime accepts only trusted signed Shortcut install URLs',
@@ -392,10 +449,13 @@ async function historyCardTests() {
       'iOS history: runtime accepts only trusted signed Shortcut install URLs',
       [
         setup.normalizeIosHistoryShortcutUrl(
-          'https://www.icloud.com/shortcuts/E0BA137DF950416E8C8CBA8528287D95',
+          'https://www.icloud.com/shortcuts/BC30C7AE89D6494C9EF0AEA1A666D72D',
         ),
         setup.normalizeIosHistoryShortcutUrl(
           'https://www.icloud.com/shortcuts/cc85a21db99a4e4698c1a498de670199',
+        ),
+        setup.normalizeIosHistoryShortcutUrl(
+          'https://www.icloud.com/shortcuts/5a0da9b5d3a641d9958f3dfa37851afa',
         ),
         setup.normalizeIosHistoryShortcutUrl(
           'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95?x=1',
@@ -411,7 +471,8 @@ async function historyCardTests() {
         ),
       ],
       [
-        'https://www.icloud.com/shortcuts/e0ba137df950416e8c8cba8528287d95',
+        'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d',
+        null,
         null,
         null,
         null,
@@ -2253,7 +2314,7 @@ async function messageOnboardingProgressTests() {
   );
 
   values.clear();
-  values.set('wafra/ios-history-shortcut-installed/v1', 'true');
+  values.set('wafra/ios-history-shortcut-installed/v2', 'true');
   eq(
     'iOS message onboarding: the existing history install confirmation is reconciled without native status',
     await progress.loadIosMessageSetupProgress(storage),

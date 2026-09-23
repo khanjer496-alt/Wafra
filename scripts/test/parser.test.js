@@ -1,6 +1,7 @@
 const {
   parseSms,
   parseSmsBatch,
+  classifyMerchantDescription,
   bankProfileForSender,
   extractOutgoingTransferParties,
   isDeclinedMessage,
@@ -74,7 +75,159 @@ function ok(name, condition, detail) {
 // ── The exact failure modes from the user's phone ──
 t('merchant stops at "with"',
   'Purchase of AED 50.00 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
-  { merchant: 'Tabby', amountFils: 5000, category: 'shopping', type: 'expense' });
+  { merchant: 'Tabby', amountFils: 5000, category: 'loan', type: 'expense' });
+
+t('Sharjah Islamic neutral foreign-currency transaction parses like the AED twin',
+  'A transaction on your Card ending 1234 at SAMPLE CAFE for JOD 25.50 on 18-Sep at 14:30 is successful. Your available balance is 1234.56',
+  { type: 'expense', merchant: 'Sample Cafe', category: 'dining',
+    originalAmountMinor: 2550, originalCurrency: 'JOD' });
+t('Sharjah Islamic EUR neutral transaction also survives the posted-evidence gate',
+  'A transaction on your Card ending 1234 at SAMPLE CAFE for EUR 9.99 on 18-Sep at 14:30 is successful. Your available balance is 1234.56',
+  { type: 'expense', merchant: 'Sample Cafe', category: 'dining',
+    originalAmountMinor: 999, originalCurrency: 'EUR' });
+t('a foreign available balance alone is still not posting evidence',
+  'Your Card ending 1234 is active. Your available balance is JOD 1,234.56.',
+  null);
+t('Sharjah Islamic yearless card due keeps total and minimum separate',
+  'Your Card ending with XXXX1234 payment is due on 25-Sep is AED 1,234.56, minimum payment due is AED 123.45.',
+  { kind: 'cardStatement', amountFils: 123456, minDueFils: 12345, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } });
+
+t('Salik Arabic recharge uses the bare added amount, not the later balance',
+  'تم إضافة مبلغ 50 إلى الحساب رقم 12345678 باستخدام بطاقة ائتمان. رصيد حسابك 202.00 درهم.',
+  { type: 'expense', amountFils: 5000, merchant: 'Salik', category: 'transport',
+    snapshotFils: 20200, snapshotKind: 'balance' },
+  { sender: 'SALIK' });
+t('Salik bare amount rule is sender-scoped',
+  'تم إضافة مبلغ 50 إلى الحساب رقم 12345678 باستخدام بطاقة ائتمان. رصيد حسابك 202.00 درهم.',
+  { amountFils: 20200 });
+t('Salik amount-added notice with no stated recharge amount never imports its new balance',
+  'تم إضافة مبلغ لحساب سالك رقم 12345678 باستخدام بطاقة إضافة رصيد سالك. رصيدك الجديد 202.00 درهم.',
+  null,
+  { sender: 'SALIK' });
+
+t('FAB field-list card tail cannot become the amount before AED .99',
+  'Credit Card Purchase Card No 1234 AED .99 SAMPLE STORE 18/09/26 14:30 Available Balance AED 10000.00',
+  { type: 'expense', amountFils: 99, card: { last4: '1234', kind: 'credit' } });
+t('ordinary suffix amount after a charge verb still parses',
+  'Your card ending 1234 was charged 100 AED at SAMPLE STORE.',
+  { type: 'expense', amountFils: 10000 });
+
+t('mobile-credit campaign amount is not spending',
+  'You have credit to win a prize. Dial *123*45 to participate in offer AED 50 of mobile credit bonus.',
+  null);
+t('mobile-credit overdraft offer amount is not spending',
+  'Ran out of credit! Dial *108*1# to opt in & get up to AED 50 of mobile credit that you can use for calls, SMS or buy data.',
+  null);
+t('mobile-credit overdraft offer without up-to is not income',
+  'Do not have credit to make a call? Dial *108*1# to opt in and get AED 50 of mobile credit that you can use for calls or data.',
+  null);
+t('future purchase threshold is not spending',
+  'GET 2 FOR 1! Spend AED250 on your next purchase and enter the draw.',
+  null);
+t('loyalty next-purchase amount is not spending',
+  'Double your rewards on your next purchase of AED 150. Offer ends tomorrow.',
+  null);
+t('get-value-on-every-purchase offer is not spending',
+  'SHOP FOR FREE! Get AED250 on every purchase of AED250 till July 7. T&C apply.',
+  null);
+t('cash-prize campaign amount is not income',
+  'You have the chance to win a cash prize of 3000 AED daily when you participate in our survey.',
+  null);
+t('spend-to-enter-draw threshold is not spending',
+  'Every AED 500 spent gives 1 entry into the MEGA draw for a free trip.',
+  null);
+t('loan and credit-card sales offer is not salary or income',
+  'We offer personal loans, Islamic personal finance, and credit cards. Bundle Offer Upto AED 12500 Rewards.',
+  null);
+t('application financing offer with a purchase amount is not spending',
+  'Apply now for 0% over 12 months on a purchase of AED 1000 with your FAB Credit Card.',
+  null,
+  { sender: 'FAB' });
+t('a settled purchase survives an application-financing footer',
+  'AED 75.00 was debited at SAMPLE STORE using your FAB Credit Card. Apply now for 0% over 12 months on purchases of AED 1000.',
+  { type: 'expense', amountFils: 7500 });
+t('unknown bank parses a completed debit from structure alone',
+  'Transaction with an amount of AED 123.45 has been successfully paid to SAMPLE STORE.',
+  { type: 'expense', amountFils: 12345 },
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
+t('unknown bank parses a settled account credit from structure alone',
+  'AED 850.00 has been credited to your account successfully.',
+  { type: 'income', amountFils: 85000 },
+  { sender: 'NEW-BANK-SENDER-XYZ' });
+t('unknown bank parses a completed purchase without a card number',
+  'Purchase of AED 77.25 at SAMPLE CAFE was successfully processed.',
+  { type: 'expense', amountFils: 7725, merchant: 'Sample Cafe' },
+  { sender: 'TOTALLY-UNKNOWN-BANK' });
+t('unknown bank pending transaction still stays out of the ledger',
+  'Transaction with an amount of AED 123.45 is pending processing.',
+  null,
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
+t('unknown bank promotion still stays out of the ledger',
+  'Spend AED 123.45 on your next purchase and enter the prize draw.',
+  null,
+  { sender: 'BANK-WAFRA-NEVER-SEEN-001' });
+t('minimum-purchase instalment campaign is not spending',
+  'Shop your favorite brands with FAB Credit Cards and enjoy 0% interest instalments for up to 12 months with ZERO processing fee on a purchase of AED 1,000 or more until 31 Dec 2026. Conditions apply.',
+  null);
+t('standalone monthly-instalment conversion offer does not repeat an existing purchase',
+  'Enjoy easy monthly instalments on your purchase of AED 787.50 at TABBY Dubai with an attractive profit rate and zero processing fee.',
+  null);
+t('FAB field-list purchase survives a contest footer',
+  'Credit Card Purchase\nCard No XXXX9960\nAED 34.15\nTALABAT DUBAI ARE\n07/08/24 23:10\nAvailable Balance AED 13938.80\nYour August statement payment due date is 26/08/2024\nTravel now, pay later with NO fees & a chance to win spends back. Conditions apply.',
+  { kind: 'transaction', type: 'expense', amountFils: 3415, merchant: 'Talabat', category: 'dining',
+    card: { last4: '9960', kind: 'credit' } });
+t('a real debit survives a mobile-credit campaign footer',
+  'AED 25.00 has been debited at SAMPLE STORE. Join the promotion for AED 50 mobile credit bonus.',
+  { type: 'expense', amountFils: 2500 });
+
+t('purchase-shaped debit-card refund uses the purchase figure, not available balance',
+  'Purchase amount of AED 49.50 at SAMPLE STORE on your Debit Card ending 1234 has been successfully refunded. Available balance is AED 1,234.56.',
+  { type: 'income', amountFils: 4950, merchant: 'Sample Store',
+    card: { last4: '1234', kind: 'debit' } });
+// Derived from four corroborated foreign purchase-refund alerts; all private
+// merchant, card and money values are replaced. The AED footer is a snapshot.
+const foreignPurchaseRefund =
+  'Purchase amount of THB 340.00 at SAMPLE STORE on your Debit Card ending 1234 has been refunded to your card account. Avl Bal is AED 9,001.00.';
+t('foreign purchase refund preserves the original money and fallback provenance',
+  foreignPurchaseRefund,
+  { type: 'income', amountFils: 3673, currency: 'AED', merchant: 'Sample Store',
+    originalAmountMinor: 34000, originalCurrency: 'THB', fxSource: 'fallback',
+    snapshotFils: 900100, snapshotKind: 'balance' });
+{
+  const refund = parseSms(foreignPurchaseRefund);
+  ok('foreign purchase refund retains the fallback rate, not the balance ratio',
+    Math.abs(refund.fxRate - 3.6725 / 34) < 1e-12);
+  const localRefund = parseSms(foreignPurchaseRefund.replace('THB 340.00', 'AED 49.50'));
+  ok('local purchase refund has no invented foreign-money fields',
+    localRefund.amountFils === 4950 && localRefund.type === 'income' &&
+    localRefund.originalAmountMinor === undefined && localRefund.originalCurrency === undefined &&
+    localRefund.fxRate === undefined && localRefund.fxSource === undefined);
+}
+t('foreign purchase refund with a quoted local amount preserves the bank rate',
+  foreignPurchaseRefund.replace('has been refunded', 'has been refunded AED 37.40'),
+  { type: 'income', amountFils: 3740, originalAmountMinor: 34000,
+    originalCurrency: 'THB', fxSource: 'bank', snapshotFils: 900100 });
+{
+  const refund = parseSms(foreignPurchaseRefund.replace('has been refunded', 'has been refunded AED 37.40'));
+  ok('purchase refund records the quoted local-to-original ratio', refund.fxRate === 3740 / 34000);
+  const collision = parseSms(foreignPurchaseRefund.replace('THB 340.00', 'AED 495.00').replace('SAMPLE STORE', 'CAD 3 TRADING LLC'));
+  ok('purchase refund does not invent FX metadata from a merchant currency-code collision',
+    collision.amountFils === 49500 && collision.originalCurrency === undefined && collision.fxSource === undefined);
+}
+t('approved return credit is a refund even without the word refund',
+  'Return: SAMPLE123456 is approved. AED 176.00 is now in your account.',
+  { type: 'income', amountFils: 17600, merchant: 'Refund' });
+t('approved wallet return credit is also a refund',
+  'Return: SAMPLE654321 is approved. AED 152.10 is now in your wallet.',
+  { type: 'income', amountFils: 15210, merchant: 'Refund' });
+t('successful amount-only insurance transaction is posted spending',
+  'Dear Customer, Your transaction for an amount of AED 1680.00 against the premium of policy number 09/601/64H/2022/4133 was successful.',
+  { type: 'expense', amountFils: 168000, merchant: 'Insurance premium' });
+t('successfully-paid amount-only gateway transaction is posted spending',
+  'Your transaction with an amount of AED 353.50 has been successfully paid.',
+  { type: 'expense', amountFils: 35350, merchant: 'AjmanPay' },
+  { sender: 'AJMANPAY' });
 
 t('noon minutes → groceries, stops at with',
   'AED 43.00 was debited for payment to NOON MINUTES with Card no. XX99',
@@ -181,6 +334,11 @@ const ownTransfer = parseSms('AED 5,000.00 was debited from your account for own
 if (ownTransfer && ownTransfer.transferHint === true) { pass++; console.log('✓ own-account transfer flagged'); }
 else { fail++; console.log('✗ own-account transfer flagged', JSON.stringify(ownTransfer)); }
 
+t('owned destination transfer is titled as an own-account transfer, never a card payment',
+  'AED 5,000.00 was debited from your account XX9012 and credited to your other account XX7788',
+  { type: 'expense', amountFils: 500000, merchant: 'Own account transfer', transfer: true,
+    category: 'other', deliberate: true });
+
 const normalSpend = parseSms('Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026');
 if (normalSpend && normalSpend.transferHint === false) { pass++; console.log('✓ normal purchase not flagged as transfer'); }
 else { fail++; console.log('✗ normal purchase not flagged as transfer'); }
@@ -231,6 +389,55 @@ if (payout && payout.type === 'income' && payout.merchant === 'Talabat Middle Ea
 const salaryStill = parseSms('Salary of AED 18,500.00 has been credited to your account ending 5678');
 if (salaryStill && salaryStill.categoryGuess === 'salary') { pass++; console.log('✓ salary keyword still wins for income'); }
 else { fail++; console.log('✗ salary keyword still wins for income', JSON.stringify(salaryStill && salaryStill.categoryGuess)); }
+
+for (const [label, body] of [
+  ['WPS', 'WPS payment AED 7,500.00 successfully credited to account 1234.'],
+  ['monthly pay', 'Monthly pay AED 7,500.00 was credited into your account 1234.'],
+  ['remuneration', 'Remuneration of AED 7,500.00 was deposited into your account 1234.'],
+  ['emoluments', 'Emoluments AED 7,500.00 were credited to your account 1234.'],
+  ['wage credit', 'Wage credit AED 7,500.00 posted to account 1234.'],
+  ['paycheck', 'Paycheck AED 7,500.00 deposited into account 1234.'],
+  ['pay cheque', 'Pay cheque AED 7,500.00 deposited into account 1234.'],
+  ['net pay', 'Net pay AED 7,500.00 credited into account 1234.'],
+]) {
+  t(`${label} salary wording is income categorized as salary`, body,
+    { kind: 'transaction', type: 'income', amountFils: 750000, merchant: 'Salary', category: 'salary', deliberate: true });
+}
+
+for (const [label, description] of [
+  ['WPS statement', 'WPS payment AED 7,500.00 credited to account 1234'],
+  ['monthly pay statement', 'Monthly pay AED 7,500.00'],
+  ['remuneration statement', 'Remuneration AED 7,500.00'],
+  ['emoluments statement', 'Emoluments AED 7,500.00'],
+  ['paycheck statement', 'Paycheck AED 7,500.00'],
+  ['pay cheque statement', 'Pay cheque AED 7,500.00'],
+  ['net pay statement', 'Net pay AED 7,500.00'],
+]) {
+  const classified = classifyMerchantDescription(description, 'income', 'AE');
+  ok(`${label} classifies as salary during statement/import parsing`,
+    classified.categoryGuess === 'salary' && classified.categoryDeliberate === true,
+    JSON.stringify(classified));
+}
+
+t('a future paycheck is not posted salary yet',
+  'Your paycheck of AED 7,500.00 will be deposited into account 1234 tomorrow.', null);
+t('future net pay is not posted salary yet',
+  'Net pay AED 7,500.00 will be credited to your account 1234 on 25 Sep.', null);
+{
+  const payrollFee = parseSms('Payroll service fee of AED 25.00 was debited from your account 1234.');
+  ok('a payroll service fee is an expense, never salary income',
+    payrollFee?.type === 'expense' && payrollFee.categoryGuess !== 'salary', JSON.stringify(payrollFee));
+}
+{
+  const paycheckCafe = parseSms('Purchase of AED 45.00 with Debit Card ending 1234 at PAYCHECK CAFE, DUBAI.');
+  ok('a merchant named Paycheck cannot turn a card purchase into salary',
+    paycheckCafe?.type === 'expense' && paycheckCafe.categoryGuess !== 'salary', JSON.stringify(paycheckCafe));
+}
+{
+  const eos = parseSms('End of service benefit AED 20,000.00 was credited to your account 1234.');
+  ok('end-of-service benefit remains income but is not monthly salary',
+    eos?.type === 'income' && eos.categoryGuess !== 'salary', JSON.stringify(eos));
+}
 
 const spendStill = parseSms('Purchase of AED 55.00 at TALABAT with Debit Card ending 1234');
 if (spendStill && spendStill.type === 'expense' && spendStill.categoryGuess === 'dining') {
@@ -467,6 +674,33 @@ const fabCredit = parseSms(
   }
   if (errs.length) { fail++; console.log(`✗ FAB "Your balance is" account credit\n    ${errs.join('\n    ')}`); }
   else { pass++; console.log('✓ FAB "Your balance is" account credit'); }
+}
+
+// The owner corpus also contains FAB's terse field-list variant. It has no
+// "credited" verb, so it must be sender-gated rather than widening the global
+// meaning of the noun phrase "Credit Account".
+const fabFieldCredit = parseSms(
+  'Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/2026\nBalance AED 40,191.68',
+  undefined,
+  { sender: 'FAB' },
+);
+if (
+  fabFieldCredit &&
+  fabFieldCredit.type === 'income' &&
+  fabFieldCredit.amountFils === 125075 &&
+  fabFieldCredit.card?.last4 === '0004' &&
+  fabFieldCredit.card?.kind === 'account' &&
+  fabFieldCredit.snapshotKind === 'balance' &&
+  fabFieldCredit.snapshotFils === 4019168
+) {
+  pass++; console.log('✓ FAB field-list Credit Account is an incoming account credit');
+} else {
+  fail++; console.log('✗ FAB field-list Credit Account is an incoming account credit', JSON.stringify(fabFieldCredit));
+}
+if (parseSms('Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/2026\nBalance AED 40,191.68') === null) {
+  pass++; console.log('✓ field-list Credit Account requires FAB sender context');
+} else {
+  fail++; console.log('✗ field-list Credit Account requires FAB sender context');
 }
 
 t('bare "daily limit" mention is NOT a snapshot source of truth',
@@ -785,15 +1019,52 @@ t('SEWA bill notice is a due reminder, not an expense',
 // hasDebit true and isBillDue requires !hasDebit.
 t('e& due-date notice is a reminder, not a charge',
   'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due for FISH BASKET REST. with the Party-ID 3014835 on 15-08-2026 . To pay your bill, please visit businessonline.etisalat.ae/quickpay. Kindly disregard this message if you have already paid. Thank you.',
-  { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15,
+  { kind: 'billDue', merchant: 'Etisalat', amountFils: 77581, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'party:4835' });
 
+// NOTE: the Arabic bill paths title this biller `E&` while every descriptor
+// path now titles it `Etisalat` (1096fba). `subscriptions.ts` and
+// `bank-alert-semantic-output.ts` say `E&` too, so the canonical ledger name is
+// genuinely split across subsystems and one biller can reach a ledger twice.
+// These five pin the behaviour as it ships; which name wins is a product
+// decision, not something to settle by editing a green test.
 t('Arabic e& monthly statement creates one telecom reminder',
   'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
   'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
   'اضغط هنا لدفع فاتورتك عبر تطبيق e& UAE\nhttps://www.eand.ae/smsebill',
   { kind: 'billDue', merchant: 'E&', amountFils: 45045, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('legacy Arabic Etisalat monthly statement tolerates punctuation after the total',
+  'عزيزي العميل، فاتورتك لشهر ابريل للحساب رقم 123456789 متاحة الآن. ' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 مايو 2026 هو: 245.50. درهماً (يشمل ضريبة القيمة المضافة). ' +
+  'يمكنك الدفع عبر تطبيق My Etisalat UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 24550, date: '2026-05-15', dueDay: 15,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('Arabic Etisalat amount-due reminder is a telecom bill, not spending',
+  'يرجى سداد مبلغ وقدره 245.50 درهماً لفاتورة حسابك في اتصالات رقم 123456789 وذلك في موعد الاستحقاق 25/09/2026. يمكنك السداد بسهولة عبر تطبيق e& UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 24550, date: '2026-09-25', dueDay: 25,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('Arabic Etisalat due-today reminder may keep an unknown deadline',
+  'نود تذكيرك أن اليوم هو موعد استحقاق فاتورتك لحساب اتصالات رقم 123456789. يمكنك بسهولة دفع مبلغ وقدره 180 درهماً عبر تطبيق e& UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 18000, category: 'telecom',
+    billIdentity: 'account:6789', deliberate: true });
+
+t('legacy Arabic Etisalat due reminder keeps the account and stated deadline',
+  'اقترب تاريخ استحقاق الفاتورة: لديك مبلغ وقدره 180 درهماً مستحق الدفع على الحساب رقم 123456789 بتاريخ 25/09/2026. ادفع بسهولة عبر تطبيق My Etisalat UAE.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 18000, date: '2026-09-25', dueDay: 25,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('du dated collection reminder is a bill due, not spending',
+  "Please note your payment for 07/04/2023 - 06/05/2023 bill of AED 208.95 in respect of your du account no. 1.23456789 is due on 20/05/2023. Log in to My du app to pay your bill. If you've already paid your bill, please ignore.",
+  { kind: 'billDue', merchant: 'Du', amountFils: 20895, date: '2023-05-20', dueDay: 20,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('undated overdue du statement is not a posted expense',
+  "Overdue bill: Please note your 07/04/2023 - 06/05/2023 bill for du account no. 1.23456789 is still overdue by AED 208.95. Settle your outstanding payment in the du app. If you've already paid, please ignore.",
+  null);
 
 t('Arabic e& bill with an impossible deadline is refused',
   'فاتورتك لشهر فبراير للحساب رقم 123456789 متاحة الآن. ' +
@@ -822,7 +1093,7 @@ t('a postpaid bill reminder is not a payment',
 // still has to post. Suppression must never beat evidence.
 t('an e& bill actually debited still posts',
   'AED 775.81 has been debited from your account XXXX0002 for your e& bill payment on 15/08/2026.',
-  { kind: 'transaction', type: 'expense', merchant: 'E&', amountFils: 77581 });
+  { kind: 'transaction', type: 'expense', merchant: 'Etisalat', amountFils: 77581 });
 
 // Grubtech sells a POS/order-management system TO restaurants. Nobody has
 // ever eaten at one — it is a monthly software bill for the operator, and 55
@@ -849,13 +1120,17 @@ t('qlub is still a restaurant bill',
 // one ("Authorisation code:", "Amount:" are all in this corpus), so the match
 // failed outright and both charges arrived titled "Card purchase" — a title no
 // bill reminder can ever reconcile against.
+// ...and the two channel codes resolve to ONE biller, which is what makes the
+// reminder reconcilable: `ETISALAT TELEP` and `ETISALAT GSM` are the same payee
+// billing through two rails, and titling them apart left a bill reminder with
+// two merchants to match and neither of them the one it names.
 t('a bank channel code in front of the payee is not the payee',
   'Your ADCB Credit Card XXX2518 has been used for AED 450.45 at MB BILL DR:ETISALAT TELEP DUBAI on 04/08/2026.',
-  { merchant: 'Etisalat Telep', amountFils: 45045, category: 'telecom', type: 'expense' });
+  { merchant: 'Etisalat', amountFils: 45045, category: 'telecom', type: 'expense' });
 
 t('...and the same shape on the other Etisalat line',
   'Your ADCB Credit Card XXX2518 has been used for AED 313.95 at MB BILL DR:ETISALAT GSM DUBAI on 04/08/2026.',
-  { merchant: 'Etisalat Gsm', amountFils: 31395, category: 'telecom' });
+  { merchant: 'Etisalat', amountFils: 31395, category: 'telecom' });
 
 // The emirate is peeled by cleanDescriptor like any other descriptor tail, so
 // a one-word payee survives the whole path.
@@ -1032,17 +1307,24 @@ t('the owner nickname does not classify an ordinary Fishbasket card purchase',
   'Purchase of AED 125.00 at FISHBASKET with Credit Card ending 4821',
   { merchant: 'Fishbasket', category: 'other', type: 'expense', deliberate: false });
 
-const correctedFishbasket = parseSms(
+const globallyCorrectedFishbasket = parseSms(
   'Dear Customer, Your payment instructions of AED 125.00 to Fishbasket for consumer number 1234036 has been processed on 01/08/2026 18:27',
   { fishbasket: 'shopping' },
 );
-if (correctedFishbasket?.categoryGuess === 'shopping' && correctedFishbasket.categoryPinned === true) {
-  pass++; console.log('✓ the user category rule still outranks the corpus-backed biller hint');
+
+t('an e& confirmation never promotes its billing month to merchant',
+  'AED 240.23 has been debited from your account XXXX0002 for August. e& UAE confirms your bill payment.',
+  { merchant: 'Etisalat', amountFils: 24023, category: 'telecom', type: 'expense' });
+if (globallyCorrectedFishbasket?.categoryGuess === 'other' && globallyCorrectedFishbasket.categoryPinned !== true &&
+    globallyCorrectedFishbasket.paymentFlowSide === 'receipt' && globallyCorrectedFishbasket.billIdentity === 'consumer:4036') {
+  pass++; console.log('✓ a merchant-wide rule cannot classify a registered bill-payment nickname');
 } else {
-  fail++; console.log('✗ the user category rule still outranks the corpus-backed biller hint',
-    JSON.stringify(correctedFishbasket && {
-      category: correctedFishbasket.categoryGuess,
-      pinned: correctedFishbasket.categoryPinned,
+  fail++; console.log('✗ a merchant-wide rule cannot classify a registered bill-payment nickname',
+    JSON.stringify(globallyCorrectedFishbasket && {
+      category: globallyCorrectedFishbasket.categoryGuess,
+      pinned: globallyCorrectedFishbasket.categoryPinned,
+      flow: globallyCorrectedFishbasket.paymentFlowSide,
+      billIdentity: globallyCorrectedFishbasket.billIdentity,
     }));
 }
 
@@ -1436,6 +1718,55 @@ t('a sports playground is health', shop('OLE FOR SPORTS PLAYGR', 'AJMAN'), { cat
 t('a football academy is health', shop('FOOTBALL ACADEMY', 'DUBAI'), { category: 'health' });
 t('a sportswear retailer is still shopping', shop('SUN & SAND SPORTS', 'DUBAI'), { category: 'shopping' });
 t('majid al futtaim is retail', shop('MAJID AL FUTTAIM', 'DUBAI'), { category: 'shopping' });
+t('Majid Al Futtaim Cinemas is entertainment, not parent-company retail',
+  shop('MAJID AL FUTTAIM CINEMAS', 'DUBAI'), { category: 'entertainment' });
+t('Karam Al Sham Gents is personal care, not a restaurant matched by Karam',
+  shop('KARAM AL SHAM GENTS', 'SHARJAH'), { category: 'personal-care' });
+t('Uber Eats is dining, not an Uber ride',
+  shop('UBER EATS HELP.UBER', 'DUBAI'), { category: 'dining' });
+t('Family Mart is groceries before the generic store rule',
+  shop('FAMILY MART GUANGZHOU', 'CHINA'), { category: 'groceries' });
+t('7 Eleven with a space is groceries too',
+  shop('7 ELEVEN BEIJING SHANGHAI', 'CHINA'), { category: 'groceries' });
+t('Lawson Store is groceries before the generic store rule',
+  shop('LAWSON STORE', 'TOKYO'), { category: 'groceries' });
+t('a minimart in a free-zone descriptor remains groceries',
+  shop('JOUDI MINIMART DMCC', 'DUBAI'), { category: 'groceries' });
+t('a truncated supermarket beats a government-like brand token',
+  shop('SHAMS AL BUHAIRA SUPER', 'SHARJAH'), { category: 'groceries' });
+t('a truncated supermarket beats a restaurant-family name',
+  shop('WARDT ALSHAM SUPERMARK', 'SHARJAH'), { category: 'groceries' });
+t('Occidental hotel is travel; dental must not match inside Occidental',
+  shop('OCCIDENTAL TARGET HOTEL', 'SHARJAH'), { category: 'travel' });
+t('Emirates Health Services is health, not generic Emirates travel',
+  shop('EMIRATES HEALTH SERVICES', 'DUBAI'), { category: 'health' });
+t('truncated Emirates Health Services still stays health',
+  shop('EMIRATES HEALTH SERVIC', 'DUBAI'), { category: 'health' });
+t('Mc Donalds with an acquirer space is still dining',
+  shop('MC DONALDS ENOC', 'DUBAI'), { category: 'dining' });
+t('shaurma transliteration is dining',
+  shop('POS U SHAURMA N1', 'TBILISI'), { category: 'dining' });
+t('restoran transliteration is dining',
+  shop('SAVALAN RESTORAN', 'BAKU'), { category: 'dining' });
+t('baklava shop is dining',
+  shop('BAKLAVA 6', 'TBILISI'), { category: 'dining' });
+t('pide shop is dining',
+  shop('PIDE LAND LLC', 'TBILISI'), { category: 'dining' });
+t('jiu jitsu is health/fitness',
+  shop('ENTROPY JIU JITSU LLC', 'DUBAI'), { category: 'health' });
+t('generic Zoho descriptor is software',
+  shop('ZOHO-ZOHO CORP', 'US'), { category: 'software' });
+t('Luluat Al Khaleej Gift is shopping, not Lulu groceries',
+  shop('LULUAT AL KHALEEJ GIFT', 'SHARJAH'), { category: 'shopping' });
+t('Binance beats unrelated telecom/card branding',
+  'Purchase of AED 200.00 with Etisalat Credit Card ending 4744 at HTTP //WWW.BINANCE.COM, DUBAI. Avl Balance is AED 4,019.17.',
+  { merchant: 'Binance', category: 'investing' });
+t('Disney+ beats App Store processor words',
+  'Purchase of AED 39.99 with Credit Card ending 4744 at APP STORE DISNEY+, DUBAI.',
+  { category: 'entertainment' });
+t('Amazon Prime beats generic Amazon shopping',
+  'Purchase of AED 16.00 with Credit Card ending 4744 at AMAZON PRIME, DUBAI.',
+  { category: 'entertainment' });
 t('bioniq is supplements', shop('SP BIONIQ-GLOBAL', '+9715474'), { category: 'health' });
 t('a finance house instalment is a loan', shop('AAFAQ ISLAMIC FINANCE', 'DUBAI'), { category: 'loan' });
 
@@ -1515,9 +1846,19 @@ t('payment-for survives the newline banks put before the card number',
   'Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with\n 4110. Available limit AED 63,155.07.',
   { merchant: 'Caribou Coffee', amountFils: 2600, category: 'dining' });
 
+// Punctuation in the middle of a descriptor must survive the payee grammar,
+// which is what this shape used to be read for. It needs a descriptor that is
+// nobody's known identity to show it: a fuel site IS one, and now resolves.
 t('payment-for keeps a descriptor with punctuation in it',
+  'Payment for BRIGHT STAR TR. - 49/6915 of AED 108.01 has been made using Credit Card ending with 4110. Available limit AED 65,810.74.',
+  { merchant: 'Bright Star Tr. - 49/6915', amountFils: 10801, type: 'expense' });
+
+// The same shape once a known biller is behind the punctuation. A fuel site
+// number is not part of who was paid, and keeping it split the same station
+// across as many merchants as it has pumps.
+t('a known biller behind a site number is still that biller',
   'Payment for ENOC SITE - 49/6915 of AED 108.01 has been made using Credit Card ending with 4110. Available limit AED 65,810.74.',
-  { merchant: 'ENOC Site - 49/6915', amountFils: 10801, category: 'transport' });
+  { merchant: 'ENOC', amountFils: 10801, category: 'transport' });
 
 // The acquirer descriptor is a fixed-width field, so the city is glued onto a
 // truncated name with no separator at all.
@@ -1571,7 +1912,7 @@ t('a refund says so',
 
 t("Etisalat's own app is telecom, not Other",
   'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
-  { merchant: 'E& Digital App', category: 'telecom' });
+  { merchant: 'Etisalat', category: 'telecom' });
 
 t('a truncated government descriptor still reads as government',
   'Your Credit Card ending *** 6383 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Your available limit is AED 1659.58',
@@ -1644,6 +1985,11 @@ t('an invoice payment received from a client is business income',
   { type: 'income', amountFils: 1000000, merchant: 'Acme Llc', category: 'business',
     card: { last4: '1234', kind: 'account' } });
 
+t('a source-proven paid invoice is business income even when the payer name is absent',
+  'Invoice INV-9921 was paid. AED 2,400.00 credited to your account ending 0099',
+  { type: 'income', amountFils: 240000, merchant: 'Invoice payment', category: 'business',
+    card: { last4: '0099', kind: 'account' }, deliberate: true });
+
 t('a refund paid BACK to your card is income, not a second purchase',
   'AED 300.00 refund from NOON has been paid back to your Card 1234.',
   { type: 'income', amountFils: 30000, merchant: 'Noon', category: 'other',
@@ -1711,6 +2057,26 @@ t(
   'an authorisation code is an approval reference on a posting, not an OTP',
   'AED 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456.',
   { type: 'expense', amountFils: 25000, merchant: 'Noon' },
+);
+t(
+  'a numbered code used to complete a payment is a challenge, not a posting',
+  'Code 458213 to complete your payment with card ending 1234 at SAMPLE AIRLINE for AED 720.00.',
+  null,
+);
+t(
+  'a numbered PIN used to confirm a transaction is a challenge, not a posting',
+  'PIN 583214 to confirm this transaction with card ending 1234 for AED 85.00.',
+  null,
+);
+t(
+  'a PIN-first transaction challenge with the code at the end is not a posting',
+  'PIN for transaction with HSBC Card ending 1234 for AED 85.00 at SAMPLE STORE is 583214. Call the bank if you did not request this.',
+  null,
+);
+t(
+  'an overdue card collection reminder is a statement obligation, not a posted payment',
+  'Dear Customer, as promised please deposit the overdue payment of AED 1,179.57 for your Credit Card ending with 1234 by 25/09/2026. Login to view your statement.',
+  { kind: 'cardStatement', amountFils: 117957, date: '2026-09-25', dueDay: 25, transferHint: false },
 );
 t(
   '3D Secure plus a reference number is still a posting',
@@ -1811,6 +2177,12 @@ t('a stopped purchase on a blocked card is a decline', 'Your card 1234 was block
 // Issuer reason codes arrive with no refusal verb at all — the code IS the signal.
 t('"DO NOT HONOUR" is a decline', 'Purchase of AED 500.00 at NOON. Reason: DO NOT HONOUR.', null);
 t('an expired card is a decline', 'Purchase of AED 500.00 at NOON. Reason: card expired.', null);
+t('a card-expiry notice cannot become a fake income transaction',
+  'HSBC Credit Card ending 231 is Expiring on 08/09/2026. Please review your card details.',
+  null);
+t('card-expiry wording before the card is also informational',
+  'Expiring 08/09/2026: your Credit Card ending 231 will be renewed automatically.',
+  null);
 t('a card blocked for online use is a decline', 'Purchase of AED 500.00 at NOON. Your card is blocked for online transactions.', null);
 // These returned null before only because they carried no known debit verb.
 // Teaching the parser "transaction of ..." would have turned each into a
@@ -1837,6 +2209,11 @@ t('the NOUN form of the same reversal reads identically',
   'A reversal of AED 500.00 has been credited to your account 1234.',
   { type: 'income', amountFils: 50000, merchant: 'Refund', category: 'other',
     card: { last4: '1234', kind: 'account' } });
+
+t('a reversed incoming salary credit is money leaving again, not a refund',
+  'Salary credit of AED 10,000.00 was reversed from your account ending 0099',
+  { type: 'expense', amountFils: 1000000, merchant: 'Credit reversal', category: 'other',
+    card: { last4: '0099', kind: 'account' }, transfer: false, deliberate: true });
 
 // A chargeback is an offset against an earlier expense. Filing it as Business
 // invents revenue, which is a claim about the user's tax position.
@@ -2116,7 +2493,7 @@ t('a salary payment credited to a BANK-named account is still income',
   { type: 'income', amountFils: 1200000, merchant: 'Salary', category: 'salary' });
 t('profit credited to an Islamic savings account is income',
   'Profit of AED 34.22 has been credited to your ADIB Savings Account 1234.',
-  { type: 'income', amountFils: 3422, merchant: 'Incoming transfer' });
+  { type: 'income', amountFils: 3422, merchant: 'Bank profit' });
 
 // ── Paying a biller is spending, whatever verb the biller chose ──
 // The first pass covered "credited" only, so the rest of the family still
@@ -2161,9 +2538,24 @@ t('an instalment-plan threshold does not fabricate a purchase',
   'Enjoy 0% instalment plans on purchases above AED 1,000.00 with your Mashreq card.', null);
 t('a points offer at "any store" does not fabricate a purchase',
   'Offer: Purchase of AED 250.00 at any store earns you double points this month.', null);
+t('"Get rewards for every 1 AED" is a reward rate, not a purchase',
+  'Get 2 FAB Rewards for every 1 AED spent with your card. Apply in the app.',
+  null);
+t('an Arabic prize-draw message is not an ATM withdrawal or purchase',
+  'اربح الذهب هذا الشهر! حوّل رصيد بمبلغ 20 درهم أو أكثر وادخل في السحب الكبير لفرصة للفوز بالذهب.',
+  null);
 // The controls that were already right and must stay so.
 t('a cashback offer is still skipped',
   'Get 50% cashback up to AED 200.00 when you use your ADCB card at Carrefour this weekend.', null);
+t('an Arabic device promotion with a purchase-sized price is not spending',
+  'هدية العيد لا تفوتها! احصل على جهاز SAMPLE ب 1,500 درهم فقط خلال عرض اتصالات للأجهزة. تسوق لدى المراكز الآن.',
+  null);
+t('a percentage purchase threshold is an offer, not a charge',
+  'Enjoy 20% discount on your purchase of AED 300 and above at SAMPLE STORE. Apply now.',
+  null);
+t('a settled purchase survives an offer-shaped percentage footer',
+  'AED 50.00 has been debited from your account at SAMPLE CAFE. Enjoy 20% discount on your next purchase of AED 300 and above.',
+  { type: 'expense', amountFils: 5000, merchant: 'Sample Cafe' });
 t('a credit-limit increase is not a transaction',
   'Your credit limit has been increased to AED 50,000.00.', null);
 
@@ -3213,7 +3605,7 @@ fmt('RECON', 'salary credited to the account',
 // not business revenue.
 fmt('RECON', 'profit credited is income but never business revenue',
   'Profit of AED 34.22 has been credited to your ADIB Savings Account XXXX1234. Available Balance AED 20,034.22',
-  { type: 'income', amountFils: 3422, category: 'other', merchant: 'Incoming transfer',
+  { type: 'income', amountFils: 3422, category: 'other', merchant: 'Bank profit',
     card: { last4: '1234', kind: 'account' }, snapshotFils: 2003422 });
 
 fmt('RECON', 'Covered Card statement with a total, a minimum and a due day',
@@ -4543,9 +4935,12 @@ t('Western Union is not a shop',
   same('FEWA: the truncated federal descriptor', 'Federal Electricity An', 'FEWA');
   same('DEWA keeps its name', 'DEWA', 'DEWA');
   same('district cooling is its own biller', 'Empower', 'Empower');
-  // Must NOT over-reach: these are pinned by other tests.
+  // Must NOT over-reach: this is pinned by other tests.
   same('a shop is not a utility', 'Carrefour', null);
-  same('telecom descriptors are left alone', 'Etisalat Gsm', null);
+  // ...but a telecom descriptor IS owned here, so both rails of the same biller
+  // reach one ledger name. Left alone they titled one payee two ways.
+  same('a telecom rail descriptor resolves to its biller', 'Etisalat Gsm', 'Etisalat');
+  same('and so does the current brand', 'e& UAE', 'Etisalat');
 }
 
 
@@ -5016,6 +5411,47 @@ ok('a generic pending notice carries bounded repair evidence',
 t('a currency-anchored local figure may omit its leading zero',
   'Purchase of AED .99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
   { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+// Spacing mutation of the existing sub-unit fixture: the decimal belongs to
+// the amount even when it immediately follows the currency code.
+t('an unspaced local sub-unit figure keeps its decimal point',
+  'Purchase of AED.99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+t('an optional dot in the Dhs alias cannot swallow a sub-unit decimal',
+  'Purchase of Dhs.99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+// Currency punctuation mutations of the established purchase format must
+// still validate the whole money token before converting it.
+for (const amount of ['AED. 3,50', 'AED. 42.123', 'Dhs. 3,50', 'Dhs. 42.123']) {
+  t(`punctuated currency does not bypass amount validation: ${amount}`,
+    `Purchase of ${amount} with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.`,
+    null);
+}
+t('the Dhs punctuation alias preserves a grouped whole-unit amount',
+  'Purchase of Dhs. 3,500.00 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 350000, merchant: 'Test Merchant' });
+// The statement paths must obey the same currency/decimal boundary as purchases.
+for (const currency of ['AED', 'Dhs']) {
+  t(`a sub-unit statement total retains its decimal for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}.99. Minimum due AED 0.50 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 99, minDueFils: 50 });
+  t(`a sub-unit statement minimum retains its decimal for ${currency}`,
+    `Your credit card statement is ready. Total due AED 100.00. Minimum due ${currency}.99 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 10000, minDueFils: 99 });
+  t(`a punctuated statement total and minimum retain their amounts for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}. 3,500.00. Minimum due ${currency}. 42.10 by 05/08/2026`,
+    { kind: 'cardStatement', amountFils: 350000, minDueFils: 4210 });
+  t(`a punctuated malformed statement total is refused for ${currency}`,
+    `Your credit card statement is ready. Total due ${currency}. 3,50. Minimum due AED 42.10 by 05/08/2026`,
+    null);
+  for (const label of ['Avl Balance is', 'Balance', 'Outstanding balance']) {
+    t(`a sub-unit ${label} snapshot retains its decimal for ${currency}`,
+      `Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. ${label} ${currency}.99`,
+      { kind: 'transaction', amountFils: 5000, snapshotFils: 99 });
+    t(`a punctuated ${label} snapshot retains its grouped amount for ${currency}`,
+      `Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. ${label} ${currency}. 3,500.00`,
+      { kind: 'transaction', amountFils: 5000, snapshotFils: 350000 });
+  }
+}
 t('a currency-anchored foreign figure may omit its leading zero',
   'Purchase of USD .99 with Debit Card ending 8783 at TEST MERCHANT, NEW YORK. Avl Balance is AED 900.00.',
   { type: 'expense', amountFils: 364, originalCurrency: 'USD', originalAmountMinor: 99,
@@ -5037,13 +5473,22 @@ t('an expanded account-reference footer cannot replace a named seller',
 t('an unknown reference payee does not invent a utility bill',
   'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 ABO ALO NO.-8765. The available balance is AED 7,587.88.',
   { merchant: 'Abo Alo', category: 'other', amountFils: 193841 });
-for (const [title, message] of [
-  ['SEWA', 'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.'],
-  ['Homeinet', 'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 1234026 has been processed on 13/07/2026 22:01'],
-]) {
-  const corrected = parseSms(message, { [title.toLowerCase()]: 'other' });
-  ok(`a user-pinned Other category survives the ${title} biller default`,
+{
+  const corrected = parseSms(
+    'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',
+    { sewa: 'other' },
+  );
+  ok('a user-pinned Other category survives the SEWA direct-debit biller default',
     corrected?.categoryGuess === 'other' && corrected?.categoryPinned === true);
+}
+{
+  const corrected = parseSms(
+    'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 1234026 has been processed on 13/07/2026 22:01',
+    { homeinet: 'other' },
+  );
+  ok('a merchant-wide pin cannot override a registered Homeinet bill-payment nickname',
+    corrected?.categoryGuess === 'utilities' && corrected?.categoryPinned !== true &&
+      corrected?.paymentFlowSide === 'receipt' && corrected?.billIdentity === 'consumer:4026');
 }
 const dewaReminder = 'Your DEWA bill of AED 450.00 is due on 25/07/2026.';
 for (const suffix of [
@@ -5183,6 +5628,156 @@ t('Etisalat branded-card fixture with furniture payee follows the shop, not plas
 t('an Etisalat merchant containing Card Services remains telecom',
   'Purchase of AED 45.00 with Credit Card ending 1234 at ETISALAT CARD SERVICES.',
   { kind: 'transaction', amountFils: 4500, category: 'telecom' });
+
+// ── USER-PROVIDED ADIB HISTORY DATASET: REAL TEMPLATE REGRESSIONS ──
+// Source identifiers/amounts are replaced, but the bank's grammar and word
+// order are retained exactly enough to pin the parser behaviour.
+t('ADIB subject-first credited card repayment is settlement, not fresh spending',
+  'Dear Customer, your payment of AED 42.10 on 11/09/2026 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', type: 'expense', amountFils: 4210, merchant: 'Card •1234 payment',
+    transfer: true, side: 'receipt', card: { last4: '1234', kind: 'credit' } });
+
+// Date-only mutations of that source-backed template. Context must prove the
+// month-first reading; the senderless legacy path remains day-first.
+t('subject-first receipt uses original UAE received day to disambiguate January 10',
+  'Dear Customer, your payment of AED 42.10 on 01/10/2021 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2021-01-10' },
+  { observedAt: Date.parse('2021-01-10T12:00:00Z') });
+t('confirmed ADIB receipt reads September 8 even when imported much later',
+  'Dear Customer, your payment of AED 42.10 on 09/08/2020 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2020-09-08' },
+  { sender: 'ADIB', observedAt: Date.parse('2026-09-19T12:00:00Z') });
+t('unknown receipt sender without received-day evidence preserves existing date order',
+  'Dear Customer, your payment of AED 42.10 on 01/10/2021 for card ending with **1234 has been credited. Thank you.',
+  { kind: 'cardPayment', amountFils: 4210, side: 'receipt', date: '2021-10-01' });
+
+t('ADIB cheque received and sent for clearing is not posted income yet',
+  'Dear Customer, Chq No. 123456 for AED 42.10 received for a/c ****1234 and sent for clearing. We will inform you once the Chq is cleared. Thank you',
+  null);
+ok('ADIB sent-for-clearing cheque carries repairable pending evidence',
+  nonPostingReason('Dear Customer, Chq No. 123456 for AED 42.10 received for a/c ****1234 and sent for clearing. We will inform you once the Chq is cleared. Thank you') === 'pending-processing');
+
+t('ADIB deposit-machine cheque awaiting confirmation is not posted income yet',
+  'Dear customer cheque no:123456 has been deposited to your account ****1234 through deposit machine. Deposit will be confirmed after successful cheque clearing 11-09-2026 17:10:20',
+  null);
+ok('ADIB deposit-machine clearing notice carries repairable pending evidence',
+  nonPostingReason('Dear customer cheque no:123456 has been deposited to your account ****1234 through deposit machine. Deposit will be confirmed after successful cheque clearing 11-09-2026 17:10:20') === 'pending-processing');
+
+t('ADIB cleared cheque accepts punctuated AED label only after settlement',
+  'Dear Customer, Chq No.123456 has been cleared. AED. 42.10 deposited to a/c. ****1234',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Cash deposit' });
+// Amount mutation of the same source-backed cheque format.
+t('a punctuated AED label preserves a grouped whole-unit deposit',
+  'Dear Customer, Chq No.123456 has been cleared. AED. 3,500.00 deposited to a/c. ****1234',
+  { kind: 'transaction', type: 'income', amountFils: 350000, merchant: 'Cash deposit' });
+
+t('ADIB account profit credit is genuine income, not an unresolved incoming transfer',
+  'Dear Customer, profit of AED 42.10 was credited to your account ****1234.',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Bank profit',
+    category: 'other', deliberate: true });
+
+// The uploaded workbook contains ~4.5k historical ADIB messages which collapse
+// to ~70 privacy-sanitized recurring shapes. Pin the remaining high-risk shape
+// classes here so the corpus protects posting semantics, not just the four v45
+// fixes above. Values/ids are synthetic replacements; grammar/word order match
+// the source dataset families.
+t('ADIB generic account debit keeps the movement amount separate from balance',
+  'Dear Customer, AED 42.10 was debited from your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, snapshotFils: 123456,
+    snapshotKind: 'balance' }, { sender: 'ADIB' });
+t('ADIB generic account credit keeps the movement amount separate from balance',
+  'Dear Customer, AED 42.10 was credited to your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'income', amountFils: 4210, snapshotFils: 123456,
+    snapshotKind: 'balance' }, { sender: 'ADIB' });
+t('ADIB approved card grammar posts the purchase and not the available card balance',
+  'Trx. of AED 42.10 on your card ending **1234 at SMILES, UAE is Approved. Avl. card bal is 1234.56. Trx Date: 11/09/26 17:10',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, date: '2026-09-11',
+    card: { last4: '1234', kind: 'unknown' } }, { sender: 'ADIB' });
+t('ADIB account merchant debit keeps the merchant transaction separate from balance',
+  'Transaction of AED 42.10 debited from your a/c ****1234 at GULF PASTRY LLC ABU DHABI AE. Avl Bal is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB terse account merchant transaction remains a posted expense',
+  'Trx. of AED 42.10 on your a/c ****1234 at ABU DHABI NATIONAL OIL ABU DHABI AE. Avl Bal is AED 1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210 }, { sender: 'ADIB' });
+// The original privacy-sanitized values contradicted each other. Keep that
+// input as a safety regression, then exercise sane values in the same grammar.
+t('ADIB mini statement drops a minimum larger than its stated total',
+  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 1234.56 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: null, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('ADIB mini statement keeps total and minimum due separate',
+  'ADIB Covered card Mini stmt. Total amount due AED 42.10 on card ending **1234. Min due AED 4.21 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: 421, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('ADIB mini statement keeps a consistent total and minimum due separate',
+  'ADIB Covered card Mini stmt. Total amount due AED 1234.56 on card ending **1234. Min due AED 42.10 by 25SEP26. Please pay before due date.',
+  { kind: 'cardStatement', amountFils: 123456, minDueFils: 4210, dueDay: 25,
+    card: { last4: '1234', kind: 'credit' } }, { sender: 'ADIB' });
+t('a cardless statement also drops an over-total minimum',
+  'Your credit card statement is ready. Total amount due AED 42.10. Minimum due AED 1234.56 by 05/08/2026',
+  { kind: 'cardStatement', amountFils: 4210, minDueFils: null });
+t('a zero statement total never promotes a positive minimum into debt',
+  'Your credit card statement for card 1234 is ready. Total due AED 0.00. Minimum due AED 425.00 by 18/08/2026',
+  null);
+t('a statement credit balance never promotes a positive minimum into debt',
+  'Your credit card statement for card 1234 is ready. Total due AED -425.00. Minimum due AED 425.00 by 18/08/2026',
+  null);
+t('ADIB ATM cash withdrawal is posted cash movement, not a balance amount',
+  'Dear Customer, ATM Cash Withdrawal for AED 42.10 was debited from your account ****1234. Your Avl Bal is AED 1234.56.',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, category: 'cash-withdrawal' },
+  { sender: 'ADIB' });
+t('ADIB explicit salary credit keeps salary semantics',
+  'Dear Customer, your Salary of AED 42.10 was credited to your account ****1234. Your available account balance is AED 1234.56',
+  { kind: 'transaction', type: 'income', amountFils: 4210, merchant: 'Salary', category: 'salary' },
+  { sender: 'ADIB' });
+t('ADIB rejected Covered Card transaction never posts',
+  'Trx. for Covered Card ending **1234 at TALABAT, UAE on 11/09/26 17:10 for AED 42.10 has been rejected due to insufficient balance',
+  null, { sender: 'ADIB' });
+t('ADIB OTP transaction challenge never posts',
+  'Please do not share your OTP with anyone. One-Time-Password for Online Trx Etisalat Digital AE for AED 42.10 using ADIB card ending **1234. OTP is:123456',
+  null, { sender: 'ADIB' });
+t('ADIB Apple Pay enrollment OTP never posts',
+  'Dear Customer, 123456 is the OTP for adding your card ending 1234 into Apple Pay. Please DO NOT share your one time password with anyone. Thank you',
+  null, { sender: 'ADIB' });
+t('ADIB completed Apple Pay setup is service information, not money movement',
+  'Dear Customer, your card ending 1234 has been added into Apple Pay. If you did not initiate this, please call 123456',
+  null, { sender: 'ADIB' });
+t('ADIB card reversal is a posted refund, not another purchase',
+  'Trx. of AED 42.10 on your card ending **1234 at SMART DUBAI GOVE, UAE is Reversed. Trx Date: 11/09/26 17:10',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB POS account reversal is a posted refund',
+  'A POS Trxn on your Account No ****1234 at Smart Dubai Government, Dubai in AE on 11/09/26 for AED 42.10 is reversed.',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB Covered Card payment debit stays a transfer funding leg, not spending',
+  'Dear Customer, AED 42.10 payment for your Covered Card was debited from your account ****1234. Your available account balance is AED -1234.56',
+  { kind: 'transaction', type: 'expense', amountFils: 4210, merchant: 'Card payment', transfer: true },
+  { sender: 'ADIB' });
+t('ADIB explicit Covered Card refund is income',
+  'Dear Customer, a transaction of AED 42.10 at Hotel at Booking on your Covered Card ending with **1234 has been refunded.',
+  { kind: 'transaction', type: 'income', amountFils: 4210 }, { sender: 'ADIB' });
+t('ADIB incorrect-CVV attempt never posts',
+  'Dear Customer, the CVV entered for the attempted transaction of AED 42.10 at bank.example on your Covered Card ending with **1234 was incorrect. Please try again with the correct CVV.',
+  null, { sender: 'ADIB' });
+t('ADIB transfer-request OTP never posts the requested transfer',
+  'You have requested to transfer funds AED 42.10 to SAMPLE BENEFICIARY. Do not share the one-time password (OTP) with anyone. Your OTP is: 123456',
+  null, { sender: 'ADIB' });
+t('ADIB fee-reversal service request is not a refund until money actually posts',
+  'Dear Customer, We received your request pertaining to Annual Fees reversal on your card ending with **1234. Reference ID REF123456.',
+  null, { sender: 'ADIB' });
+t('ADIB rejected fee-reversal request is not money movement',
+  'We are unable to proceed with your fee reversal request # 123456 for card ending with **1234, as we are unable to reach you.',
+  null, { sender: 'ADIB' });
+t('ADIB closed fee-reversal request is not money movement',
+  'Dear Customer, your request # 123456 pertaining to fee reversal on your card # ending with **1234 has been closed.',
+  null, { sender: 'ADIB' });
+t('ADIB account-created notice is not a transaction',
+  'Account ****1234 has been created for you.', null, { sender: 'ADIB' });
+t('ADIB account-opening welcome is not a transaction',
+  'Dear Customer, thank you for opening a new AED account with ADIB. Your a/c number is: ****1234. For any assistance please call 123456 or visit bank.example.',
+  null, { sender: 'ADIB' });
+t('ADIB chequebook request is not a transaction',
+  'Dear Customer, thank you for requesting a new chequebook for your A/C NO: ****1234. Your request will be fulfilled at the earliest. Sincerely, ADIB',
+  null, { sender: 'ADIB' });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

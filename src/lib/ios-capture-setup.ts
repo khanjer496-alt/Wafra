@@ -124,9 +124,17 @@ const iosVersionMajor = (): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const SENDER_SCOPED_MESSAGE_TRIGGER = {
-  selectedSenderCount: 1,
-  messageContains: null,
+// The guided automation. Apple's Sender picker lists Contacts only and bank
+// SMS IDs are not Contacts. iOS 26 refuses a Message automation with neither
+// filter (Next stays disabled, verified on the owner's iPhone on 25 August and
+// 19 September 2026), so the guide asks for a single space in "Message
+// Contains": every message with a space matches, and Wafra keeps only
+// supported bank alerts on-device.
+/** Shortcuts' own route to the New Automation trigger picker. */
+export const IOS_CREATE_AUTOMATION_URL = 'shortcuts://create-automation';
+const UNFILTERED_MESSAGE_TRIGGER = {
+  selectedSenderCount: 0,
+  messageContains: ' ',
 } as const;
 
 const defaultDependencies = (): IosSetupDependencies => ({
@@ -149,12 +157,22 @@ export function resolveIosSetupReadiness(
   return 'not-added';
 }
 
+/**
+ * A Message automation Wafra can process. Zero selected senders is the guided
+ * configuration (Apple cannot select bank SMS IDs); explicitly selected
+ * Contacts are still accepted. "Message Contains" may be empty or the guided
+ * whitespace-only filter, which every bank alert satisfies. A keyword filter
+ * is not accepted: it would silently drop alerts without that keyword.
+ */
 export const isSupportedIosMessageAutomationTrigger = (
   trigger: IosMessageAutomationTrigger,
 ): boolean =>
   Number.isSafeInteger(trigger.selectedSenderCount) &&
-  Number(trigger.selectedSenderCount) > 0 &&
-  trigger.messageContains === null;
+  Number(trigger.selectedSenderCount) >= 0 &&
+  (trigger.messageContains === null ||
+    (typeof trigger.messageContains === 'string' &&
+      trigger.messageContains.length > 0 &&
+      trigger.messageContains.trim().length === 0));
 
 export const resolveIosFutureSetupStep = (
   progress: {
@@ -351,17 +369,26 @@ export function createIosCaptureSetup({
       }
       return;
     }
+    // `shortcuts://create-automation` lands on the New Automation trigger
+    // picker (one screen away from "Message"), sparing the Automation tab and
+    // "+" taps. It is an undocumented but stable Shortcuts route; Apple offers
+    // no way to pre-fill a trigger or create the automation itself. Fall back
+    // to plainly opening Shortcuts if the route is refused.
     try {
-      await dependencies.openUrl('shortcuts://');
+      await dependencies.openUrl(IOS_CREATE_AUTOMATION_URL);
     } catch {
-      if (!disposed && generation === operationGeneration) {
-        publish({ failure: 'shortcut-run' });
+      try {
+        await dependencies.openUrl('shortcuts://');
+      } catch {
+        if (!disposed && generation === operationGeneration) {
+          publish({ failure: 'shortcut-run' });
+        }
       }
     }
   });
 
   const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
-    if (!isSupportedIosMessageAutomationTrigger(SENDER_SCOPED_MESSAGE_TRIGGER)) {
+    if (!isSupportedIosMessageAutomationTrigger(UNFILTERED_MESSAGE_TRIGGER)) {
       publish({ failure: 'shortcut-run' });
       return;
     }

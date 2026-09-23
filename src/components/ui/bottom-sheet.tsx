@@ -24,7 +24,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -51,6 +51,12 @@ type BottomSheetCommonProps = {
   onClose: () => void;
   /** Caps label in the sheet header. */
   title: string;
+  /** Optional secondary line directly beneath the sheet title. */
+  subtitle?: string;
+  /** Optional visual identity shown before the title block. */
+  headerLeading?: React.ReactNode;
+  /** Keep the 44dp close target while allowing visually lighter sheets. */
+  closeVariant?: 'outline' | 'plain';
   children: React.ReactNode;
   testID?: string;
 };
@@ -70,6 +76,9 @@ export function BottomSheet({
   visible,
   onClose,
   title,
+  subtitle,
+  headerLeading,
+  closeVariant = 'outline',
   children,
   dismissible = true,
   footer,
@@ -87,13 +96,20 @@ export function BottomSheet({
   const dragging = useSharedValue(false);
   const opened = useRef(false);
 
+  // Every caller passes an inline `onClose`, and a sheet that reads the store
+  // re-renders on every ledger update while open. Holding the callback in a
+  // ref keeps `finishDismiss`, the dismiss handlers and the pan gesture
+  // stable, so a background import does not rebuild the native gesture
+  // handler under the user's finger.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const finishDismiss = useCallback(() => {
     setMounted(false);
-    onClose();
-  }, [onClose]);
+    onCloseRef.current();
+  }, []);
 
   const requestDismiss = useCallback(() => {
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       finishDismiss();
       return;
     }
@@ -118,7 +134,7 @@ export function BottomSheet({
     if (visible || !mounted) return;
     opened.current = false;
 
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       setMounted(false);
       return;
     }
@@ -136,7 +152,7 @@ export function BottomSheet({
       opened.current = false;
       return;
     }
-    if (reducedMotion) {
+    if (reducedMotion || Platform.OS === 'android') {
       // A screen reader or Reduce Motion can be enabled while the entrance is
       // already running. Assigning the resting value cancels that spring
       // immediately instead of waiting for the sheet to finish moving.
@@ -154,7 +170,11 @@ export function BottomSheet({
   const drag = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(dismissible && !reducedMotion)
+        // Android Modal + gesture/spring animations can leave a stale window
+        // composited for a frame (or longer when Hermes is busy). Android keeps
+        // the explicit close/backdrop controls and settles sheets immediately;
+        // iOS retains the native-feeling swipe interaction.
+        .enabled(dismissible && !reducedMotion && Platform.OS !== 'android')
         .activeOffsetY(8)
         .failOffsetX([-24, 24])
         .onStart(() => {
@@ -201,7 +221,10 @@ export function BottomSheet({
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [0, screenHeight], [1, 0], Extrapolation.CLAMP),
   }));
-  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom);
+  const windowBottomInset = Platform.OS === 'ios'
+    ? Math.min(insets.bottom, initialWindowMetrics?.insets.bottom ?? insets.bottom)
+    : insets.bottom;
+  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : windowBottomInset);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
 
   // Keep the dismissal lifecycle, but do not build hidden native sheet trees.
@@ -273,9 +296,17 @@ export function BottomSheet({
                     />
                   ) : null}
                   <View style={styles.header}>
-                    <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
-                      {title}
-                    </ThemedText>
+                    {headerLeading}
+                    <View style={styles.headerCopy}>
+                      <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
+                        {title}
+                      </ThemedText>
+                      {subtitle ? (
+                        <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                          {subtitle}
+                        </ThemedText>
+                      ) : null}
+                    </View>
                     {dismissible ? (
                       <Pressable
                         accessibilityRole="button"
@@ -285,6 +316,7 @@ export function BottomSheet({
                         style={[
                           styles.close,
                           Platform.OS === 'android' && styles.androidClose,
+                          closeVariant === 'plain' && styles.closePlain,
                           { borderColor: theme.controlBorder },
                         ]}>
                         <Icon name="close" size={20} color={theme.textSecondary} />
@@ -327,7 +359,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   sheetBody: { flexShrink: 1, minHeight: 0 },
-  title: { flex: 1, minWidth: 0 },
+  headerCopy: { flex: 1, minWidth: 0, gap: 1 },
+  title: { minWidth: 0 },
   dragRegion: {
     flexShrink: 0,
     paddingTop: Spacing.two,
@@ -357,6 +390,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   androidClose: { width: 48, height: 48 },
+  closePlain: { borderWidth: 0 },
   scroll: { flexShrink: 1, minHeight: 0 },
   content: {
     gap: Spacing.four - 4,

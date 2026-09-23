@@ -12,6 +12,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
@@ -24,11 +25,12 @@ import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, I
 import { parseAmountToFils, parseAmountWithMoneySpec, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
+import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
-import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting } from '@/components/universal-review-fields';
+import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting, reviewMoneyChoices } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { CategoryId, TransactionType } from '@/lib/types';
@@ -95,8 +97,19 @@ export default function AddTransactionScreen() {
       : reviewFamily === 'cash-withdrawal'
         ? 'cash-withdrawal'
         : null;
-  const reviewTitle = rememberedReview?.title ?? (event
-    ? event.merchant.evidence === 'explicit' ? event.merchant.value ?? '' : ''
+  const universalFallbackTitle = event ? tUi(event.family === 'purchase' || event.family === 'recurring-payment'
+    ? 'genericCardPayment'
+    : event.family === 'transfer' ? 'reviewAlertPossibleTransfer'
+      : event.family === 'cash-withdrawal' ? 'reviewAlertPossibleCash'
+        : event.family === 'refund' ? 'reviewAlertPossibleRefund'
+          : event.family === 'fee' ? 'reviewAlertPossibleFee'
+            : event.family === 'utility' ? 'reviewAlertPossibleUtility'
+              : 'newTransaction') : '';
+  const explicitMerchantTitle = event?.merchant.evidence === 'explicit'
+    ? event.merchant.value?.trim() ?? ''
+    : '';
+  const reviewTitle = rememberedReview?.title?.trim() || (event
+    ? explicitMerchantTitle || universalFallbackTitle
     : registeredItem ? defaultReviewTitle(registeredItem) : '');
   const matchingAccounts = reviewInstrument?.last4 ? state.accounts.filter((account) =>
     account.last4 === reviewInstrument.last4 &&
@@ -107,30 +120,40 @@ export default function AddTransactionScreen() {
 
   const [type, setType] = useState<TransactionType>(reviewType);
   const [directionConfirmed, setDirectionConfirmed] = useState(!event || event.direction === 'debit' || event.direction === 'credit');
-  const [postedConfirmed, setPostedConfirmed] = useState(event?.status === 'posted');
-  const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(event?.amount.evidence === 'explicit' ? event.amount.value : null);
+  const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(() => {
+    if (!event) return null;
+    if (event.amount.evidence === 'explicit' && event.amount.value) return event.amount.value;
+    const choices = reviewMoneyChoices(event);
+    return choices.length === 1 ? choices[0] : null;
+  });
   const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
     rememberedReview ? rememberedReview.category as CategoryId : reviewItem
-      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : null : 'groceries',
+      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : 'other' : 'groceries',
   );
   const [accountId, setAccountId] = useState(
     reviewItem ? rememberedReview?.accountId ?? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
   );
   const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
+  const observedReviewDate = reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '';
+  const explicitReviewDate = event?.transactionDate.evidence === 'explicit'
+    ? event.transactionDate.value
+    : null;
   const [reviewDate, setReviewDate] = useState(
-    event ? event.transactionDate.evidence === 'explicit' ? event.transactionDate.value ?? '' : ''
-      : reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
+    explicitReviewDate && validReviewDate(explicitReviewDate) ? explicitReviewDate : observedReviewDate,
   );
   const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(
     rememberedReview?.betweenOwnAccounts ?? false,
   );
+  const reviewDirectionKnown = reviewDirection === 'credit' || reviewDirection === 'debit';
   const [saving, setSaving] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [accountSearch, setAccountSearch] = useState('');
   const amountRef = useRef<TextInput>(null);
   const categoryRef = useRef<View>(null);
   const accountRef = useRef<View>(null);
@@ -160,7 +183,7 @@ export default function AddTransactionScreen() {
   const moneyMatchesLedger = !selectedMoney || !state.ledgerMoney ||
     (state.ledgerMoney.currency === selectedMoney.currency && state.ledgerMoney.exponent === selectedMoney.exponent);
   const genericReady = !event || (ordinaryPosting && !sourceChanged && !!selectedMoney &&
-    /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed && postedConfirmed &&
+    /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed &&
     title.trim().length > 0 && title.trim().length <= 80 &&
     (event.instrument.evidence !== 'ambiguous' || selectedInstrument !== null));
   const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid && genericReady &&
@@ -169,8 +192,6 @@ export default function AddTransactionScreen() {
   const amountInvalid = showValidation && !reviewItem && !amountFils;
   const categoryInvalid = showValidation && !category;
   const accountInvalid = showValidation && !accountId;
-  const reviewDateInvalid = showValidation && !!reviewItem &&
-    !validReviewDate(reviewDate);
   const categoryLabelId = 'add-transaction-category-label';
   const categoryErrorId = 'add-transaction-category-error';
   const accountLabelId = 'add-transaction-account-label';
@@ -197,7 +218,7 @@ export default function AddTransactionScreen() {
     setType(t);
     setDirectionConfirmed(true);
     const suggestion = event ? suggestUniversalCategory(event, { type: t, overrides: state.merchantOverrides }) : null;
-    setCategory(reviewItem ? suggestion && !suggestion.needsReview ? suggestion.category : null
+    setCategory(reviewItem ? suggestion && !suggestion.needsReview ? suggestion.category : 'other'
       : t === 'expense' ? 'groceries' : 'salary');
   };
 
@@ -353,7 +374,7 @@ export default function AddTransactionScreen() {
       keyboardAware
       headerMode="inline"
       header={{
-        title: tUi(genericItem ? 'genericReviewTitle' : reviewItem ? 'reviewAlertAddTitle' : 'newTransaction'),
+        title: tUi(reviewItem ? 'genericReviewTitle' : 'newTransaction'),
         back: { label: tUi('close'), icon: 'close', onPress: () => router.back() },
       }}
       scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
@@ -384,8 +405,10 @@ export default function AddTransactionScreen() {
           </Pressable>
         </View>
       )}>
-      {/* Type switch */}
-      <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+      {/* A captured alert asks only what Wafra genuinely does not know. If the
+          bank already supplied debit/credit direction, do not make the person
+          reconfirm it. Manual entries still need the normal type switch. */}
+      {(!reviewItem || !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
                 const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
@@ -408,7 +431,7 @@ export default function AddTransactionScreen() {
                   </Pressable>
                 );
               })}
-      </View>
+      </View> : null}
 
       {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
       {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
@@ -445,7 +468,6 @@ export default function AddTransactionScreen() {
       {event && genericItem ? (
         <UniversalReviewFields event={event} money={selectedMoney} onMoneyChange={setSelectedMoney}
           instrument={selectedInstrument} onInstrumentChange={(value) => { setSelectedInstrument(value); setAccountId(''); }}
-          postedConfirmed={postedConfirmed} onPostedConfirmed={setPostedConfirmed}
           date={reviewDate} onDateChange={setReviewDate} observedDate={toISODate(new Date(genericItem.observedAt))}
           observedDateLabel={tUi(genericItem.channel === 'paste' ? 'genericUsePasteDate' : 'genericUseMessageDate')} />
       ) : registeredItem ? (
@@ -494,7 +516,7 @@ export default function AddTransactionScreen() {
               </Pressable>
       )}
 
-      <View
+      {!reviewItem ? <View
         ref={categoryRef}
         collapsable={false}
         accessibilityRole="radiogroup"
@@ -525,13 +547,16 @@ export default function AddTransactionScreen() {
                   {tUi('reviewAlertChooseCategory')}
                 </ThemedText>
               )}
-      </View>
+      </View> : null}
 
-      {/* Account */}
-      <View
+      {/* Account picker: a compact selected-pill trigger that opens a sheet.
+          The old inline chip list rendered every account as its own 52-tall
+          row; users with 30-40 saved cards saw the field eat the whole page.
+          Hidden entirely when a review already matched a single account and
+          the parsed instrument is unambiguous — that's just a re-confirmation. */}
+      {(!reviewItem || !matchedAccount || event?.instrument.evidence === 'ambiguous') ? <View
         ref={accountRef}
         collapsable={false}
-        accessibilityRole="radiogroup"
         accessibilityLabel={tUi('account')}
         accessibilityLabelledBy={accountLabelId}
         accessibilityHint={tUi('reviewAlertChooseAccount')}
@@ -543,33 +568,33 @@ export default function AddTransactionScreen() {
           nativeID={accountLabelId}>
           {tUi('account')}
         </ThemedText>
-              {/* Bleeds to both screen edges. Inset inside the page padding, a
-                  chip that overflowed was sliced 16px short of the edge — it
-                  read as a clipped label ("Casl"), not as a row that scrolls.
-                  Cut at the edge itself, it reads as more to come. */}
-              <View style={styles.accountRow}>
-                {state.accounts.map((a) => {
-                  const active = accountId === a.id;
-                  return (
-                    <Pressable
-                      key={a.id}
-                      accessibilityRole="radio"
-                      accessibilityLabel={a.name}
-                      accessibilityState={{ checked: active }}
-                      onPress={() => setAccountId(a.id)}
-                      style={[
-                        styles.accountChip,
-                        {
-                          backgroundColor: active ? `${a.color}26` : theme.backgroundElement,
-                          borderColor: active ? a.color : theme.cardBorder,
-                        },
-                      ]}>
-                      <View style={[styles.accountDot, { backgroundColor: a.color }]} />
-                      <ThemedText type="small" style={{ flex: 1, flexShrink: 1 }}>{a.name}</ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
+        {state.accounts.length > 0 ? (() => {
+          const selected = state.accounts.find((a) => a.id === accountId) ?? null;
+          const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
+          return (
+            <Pressable
+              testID="account-picker-trigger"
+              accessibilityRole="button"
+              accessibilityLabel={selected ? `${tUi('account')}: ${accountDisplayName(selected)}` : tUi('reviewAlertChooseAccount')}
+              accessibilityHint={tUi('reviewAlertChooseAccount')}
+              onPress={() => setAccountPickerOpen(true)}
+              style={({ pressed }) => [
+                styles.accountTrigger,
+                {
+                  borderColor,
+                  backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                },
+              ]}>
+              {selected ? <>
+                <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
+                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
+              </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
+                {tUi('reviewAlertChooseAccount')}
+              </ThemedText>}
+              <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+            </Pressable>
+          );
+        })() : null}
         {accountInvalid && (
           <ThemedText
             type="meta"
@@ -577,36 +602,23 @@ export default function AddTransactionScreen() {
             nativeID={accountErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-                  {tUi('reviewAlertChooseAccount')}
-                </ThemedText>
-              )}
-              {state.accounts.length === 0 && (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push('/wallet')}
-                  style={styles.emptyAccountAction}>
-                  <ThemedText type="small" style={{ color: theme.primary }}>
-                    {tUi('reviewAlertCreateAccount')}
-                  </ThemedText>
-                </Pressable>
-              )}
-      </View>
+            {tUi('reviewAlertChooseAccount')}
+          </ThemedText>
+        )}
+        {state.accounts.length === 0 && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/wallet')}
+            style={styles.emptyAccountAction}>
+            <ThemedText type="small" style={{ color: theme.primary }}>
+              {tUi('reviewAlertCreateAccount')}
+            </ThemedText>
+          </Pressable>
+        )}
+      </View> : null}
 
       {/* Date quick-pick */}
-      <View style={styles.fieldBlock}>
-              {reviewItem ? (
-          <TextField
-            ref={reviewDateRef}
-            label={tUi('when')}
-                  value={reviewDate}
-                  onChangeText={setReviewDate}
-                  accessibilityLabel={tUi('reviewAlertDateA11y')}
-                  placeholder="YYYY-MM-DD"
-            inputMode="numeric"
-            invalid={reviewDateInvalid}
-            errorText={reviewDateInvalid ? tUi('reviewAlertDateA11y') : undefined}
-                />
-              ) : (
+      {!reviewItem ? <View style={styles.fieldBlock}>
           <>
             <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
               <View style={styles.dateRow}>
@@ -635,13 +647,12 @@ export default function AddTransactionScreen() {
                     </Pressable>
                   );
                 })}
-              </View>
+            </View>
           </>
-              )}
-      </View>
+      </View> : null}
 
       {/* Title */}
-      <TextField
+      {!reviewItem ? <TextField
         label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
                 value={title}
                 onChangeText={setTitle}
@@ -650,7 +661,7 @@ export default function AddTransactionScreen() {
                 invalid={!!genericItem && (title.length > 80 || (showValidation && !title.trim()))}
                 errorText={genericItem && title.length > 80 ? tUi('genericShortenTitle') : undefined}
                 placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
-              />
+              /> : null}
     </ScreenScaffold>
     <LedgerCurrencySheet
       visible={currencySheetVisible}
@@ -658,6 +669,50 @@ export default function AddTransactionScreen() {
       onClose={() => setCurrencySheetVisible(false)}
       onSelect={setLedgerMoney}
     />
+    <BottomSheet
+      visible={accountPickerOpen}
+      onClose={() => { setAccountPickerOpen(false); setAccountSearch(''); }}
+      title={tUi('account')}
+      testID="account-picker-sheet">
+      <View accessibilityRole="radiogroup" accessibilityLabel={tUi('account')} style={styles.pickerContent}>
+        <TextField
+          label={tUi('searchLabel')}
+          value={accountSearch}
+          onChangeText={setAccountSearch}
+          placeholder={tUi('searchAccounts')}
+          autoCorrect={false}
+        />
+        <View style={styles.pickerList}>
+          {state.accounts
+            .filter((a) => {
+              const needle = accountSearch.trim().toLocaleLowerCase();
+              return !needle || accountDisplayName(a).toLocaleLowerCase().includes(needle);
+            })
+            .map((a) => {
+              const active = accountId === a.id;
+              return (
+                <Pressable
+                  key={a.id}
+                  accessibilityRole="radio"
+                  accessibilityLabel={accountDisplayName(a)}
+                  accessibilityState={{ checked: active }}
+                  onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    {
+                      borderColor: theme.cardBorder,
+                      backgroundColor: active ? `${a.color}22` : pressed ? theme.backgroundSelected : 'transparent',
+                    },
+                  ]}>
+                  <View style={[styles.accountDot, { backgroundColor: a.color }]} />
+                  <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{accountDisplayName(a)}</ThemedText>
+                  {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
+                </Pressable>
+              );
+            })}
+        </View>
+      </View>
+    </BottomSheet>
     </>
   );
 }
@@ -722,28 +777,34 @@ const styles = StyleSheet.create({
   fieldBlock: {
     gap: Spacing.two,
   },
-  accountScroll: {
-    marginHorizontal: -Spacing.three,
-  },
-  accountRow: {
-    gap: Spacing.two,
-    paddingHorizontal: 0,
-  },
-  accountChip: {
+  accountTrigger: {
     minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.two + 4,
+    paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two,
-    borderRadius: Radius.full,
+    borderRadius: Radius.control,
     borderWidth: 1.5,
   },
+  accountTriggerName: { flex: 1, minWidth: 0 },
   accountDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
+  pickerContent: { gap: Spacing.three - 2, maxHeight: 480 },
+  pickerList: { gap: 0 },
+  pickerRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three - 4,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pickerRowName: { flex: 1, minWidth: 0 },
   emptyAccountAction: {
     minHeight: 44,
     alignSelf: 'flex-start',

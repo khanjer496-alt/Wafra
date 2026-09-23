@@ -1,47 +1,135 @@
-import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, SectionHeader } from '@/components/ui/layout';
+import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
-  createEmailForwardingAddress,
   getImportCapabilities,
-  revokeEmailForwardingAddress,
   uploadCsvStatement,
   uploadPdfStatement,
+  type PickedStatement,
 } from '@/lib/cloud-import';
 import {
   CloudImportError,
   type ImportCapabilities,
+  type StatementImportCoverage,
 } from '@/lib/cloud-import-contract';
 import {
-  clearRelayEmailCredential,
   DEFAULT_RELAY_URL,
   getRelayConfig,
   pairDevice,
-  saveRelayEmailCredential,
+  RelayError,
   type RelayConfig,
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { t } from '@/lib/i18n';
+import { committed, failed } from '@/lib/haptics';
+import type { StatementCoverageEntry } from '@/lib/types';
 
+type Busy = 'connect' | 'capabilities' | 'statement' | null;
 
-type Busy = 'connect' | 'capabilities' | 'statement' | 'email-create' | 'email-check' | 'email-revoke' | null;
+type PendingProtectedPdf = {
+  asset: PickedStatement;
+  file: File;
+};
+
+type CoverageSummary = {
+  sourceKey: string;
+  label: string;
+  range: string;
+  throughMonth: string;
+  sortDate: string;
+  missing: string[];
+};
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
+}
+
+function monthKey(date: string): string {
+  return date.slice(0, 7);
+}
+
+function monthIndex(key: string): number {
+  const [year, month] = key.split('-').map(Number);
+  return year * 12 + month - 1;
+}
+
+function monthFromIndex(index: number): string {
+  const year = Math.floor(index / 12);
+  const month = index % 12 + 1;
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function nextMonth(key: string): string {
+  const [year, month] = key.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonth(key: string, language: string): string {
+  const [year, month] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : 'en-AE', {
+    month: 'short', year: 'numeric', timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+function summarizeCoverage(entries: readonly StatementCoverageEntry[], language: string): CoverageSummary[] {
+  const groups = new Map<string, StatementCoverageEntry[]>();
+  for (const entry of entries) {
+    const list = groups.get(entry.sourceKey) ?? [];
+    list.push(entry);
+    groups.set(entry.sourceKey, list);
+  }
+  const today = new Date();
+  const lastCompleteDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+  const lastCompleteMonth = `${lastCompleteDate.getUTCFullYear()}-${String(lastCompleteDate.getUTCMonth() + 1).padStart(2, '0')}`;
+  return [...groups.entries()].map(([sourceKey, rows]) => {
+    const ordered = [...rows].sort((a, b) => a.startDate.localeCompare(b.startDate));
+    const firstMonth = monthKey(ordered[0].startDate);
+    const lastImportedMonth = monthKey(ordered[ordered.length - 1].endDate);
+    const covered = new Set<string>();
+    for (const row of ordered) {
+      let cursor = monthKey(row.startDate);
+      const end = monthKey(row.endDate);
+      for (let guard = 0; guard < 240; guard += 1) {
+        covered.add(cursor);
+        if (cursor === end) break;
+        cursor = nextMonth(cursor);
+      }
+    }
+    const missing: string[] = [];
+    const lastCompleteIndex = monthIndex(lastCompleteMonth);
+    const firstExpected = monthFromIndex(Math.max(monthIndex(firstMonth), lastCompleteIndex - 11));
+    let cursor = firstExpected;
+    for (let guard = 0; guard < 12; guard += 1) {
+      if (!covered.has(cursor)) missing.push(formatMonth(cursor, language));
+      if (cursor === lastCompleteMonth) break;
+      cursor = nextMonth(cursor);
+    }
+    return {
+      sourceKey,
+      label: ordered[ordered.length - 1].label,
+      range: firstMonth === lastImportedMonth
+        ? formatMonth(firstMonth, language)
+        : `${formatMonth(firstMonth, language)} – ${formatMonth(lastImportedMonth, language)}`,
+      throughMonth: formatMonth(lastCompleteMonth, language),
+      sortDate: ordered[ordered.length - 1].endDate,
+      missing,
+    };
+  }).sort((a, b) => b.sortDate.localeCompare(a.sortDate));
 }
 
 export function SupplementImports() {
@@ -51,29 +139,26 @@ export function SupplementImports() {
   const theme = useTheme();
   const {
     state,
+    getStateSnapshot,
     importBatch,
     stageReviewAlerts,
     ensureDurable,
     setMarket,
+    setLedgerMoney,
+    stageStatementCoverage,
   } = useStore();
-  const stateRef = useRef(state);
-  stateRef.current = state;
   const captureExecutor = useMemo(
-    () =>
-      createCaptureExecutor({
-        ledger: {
-          getState: () => stateRef.current,
-          importBatch,
-          stageReviewAlerts,
-          ensureDurable,
-          setMarket: (market) => setMarket(market),
-        },
-      }),
-    [ensureDurable, importBatch, setMarket, stageReviewAlerts],
+    () => createCaptureExecutor({
+      ledger: {
+        getState: getStateSnapshot,
+        importBatch,
+        stageReviewAlerts,
+        ensureDurable,
+        setMarket: (market) => setMarket(market),
+      },
+    }),
+    [ensureDurable, getStateSnapshot, importBatch, setMarket, stageReviewAlerts],
   );
-  const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const copiedAddress = useRef<string | null>(null);
-  const disposed = useRef(false);
 
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -81,8 +166,37 @@ export function SupplementImports() {
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
+  const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
+  const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
+  const pendingPdf = pendingPdfs[0] ?? null;
+  const queuedRetryNeededRef = useRef(false);
+  const queuedRetryInFlightRef = useRef(false);
+  const queuedRetryContextRef = useRef<{
+    files: number;
+    accepted: number;
+    rejected: number;
+    pages: number;
+  } | null>(null);
+  const [pdfPassword, setPdfPassword] = useState('');
+  const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  const coverage = useMemo(
+    () => summarizeCoverage(state.statementCoverage ?? [], language),
+    [language, state.statementCoverage],
+  );
+
+  useEffect(() => {
+    pendingPdfsRef.current = pendingPdfs;
+  }, [pendingPdfs]);
+
+  useEffect(() => () => {
+    for (const pending of pendingPdfsRef.current) {
+      try {
+        if (pending.file.exists) pending.file.delete();
+      } catch {
+        // Picker cache cleanup is best effort.
+      }
+    }
+  }, []);
 
   const errorText = useCallback((value: unknown): string => {
     if (!(value instanceof CloudImportError)) return copy.errUnexpected;
@@ -94,26 +208,16 @@ export function SupplementImports() {
     ) return copy.errInvalid;
     if (value.code === 'too_large' || value.code === 'too_many_pages' || value.code === 'too_many_rows') return copy.errLarge;
     if (value.code === 'unreadable_pdf') return copy.errUnreadable;
+    if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
+    if (value.code === 'pdf_password_incorrect') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'rate_limited' || value.code === 'queue_full') return copy.errRate;
-    if (value.code === 'email_not_configured') return copy.errEmailOff;
     if (value.code === 'service') return copy.serviceError;
     return copy.errUnexpected;
   }, [copy]);
 
-  const clearCopiedAddress = useCallback(async (address: string): Promise<void> => {
-    try {
-      const current = await Clipboard.getStringAsync();
-      if (current === address) await Clipboard.setStringAsync('');
-    } catch {
-      // Best effort: never replace a different clipboard value while cleaning.
-    } finally {
-      if (copiedAddress.current === address) copiedAddress.current = null;
-    }
-  }, []);
-
   const loadCapabilities = useCallback(async (active: RelayConfig) => {
-    if (stateRef.current.privateMode) return;
+    if (getStateSnapshot().privateMode) return;
     setBusy('capabilities');
     setError(null);
     try {
@@ -124,28 +228,21 @@ export function SupplementImports() {
     } finally {
       setBusy(null);
     }
-  }, [errorText]);
+  }, [errorText, getStateSnapshot]);
 
   useEffect(() => {
     let live = true;
-    disposed.current = false;
     void getRelayConfig()
       .then((existing) => {
         if (!live) return;
         setCfg(existing);
-        if (existing && !stateRef.current.privateMode) void loadCapabilities(existing);
+        if (existing && !getStateSnapshot().privateMode) void loadCapabilities(existing);
       })
       .finally(() => {
         if (live) setLoadingConfig(false);
       });
-    return () => {
-      live = false;
-      disposed.current = true;
-      if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
-      const address = copiedAddress.current;
-      if (address) void clearCopiedAddress(address);
-    };
-  }, [clearCopiedAddress, loadCapabilities]);
+    return () => { live = false; };
+  }, [getStateSnapshot, loadCapabilities]);
 
   const connect = async () => {
     if (loadingConfig || busy !== null) return;
@@ -157,9 +254,6 @@ export function SupplementImports() {
     setError(null);
     setStatus(null);
     try {
-      // Keychain is authoritative at the action boundary too: another screen
-      // may have connected while this surface was mounted. Never mint a new
-      // identity over the token already installed in the user's Shortcut.
       const existing = await getRelayConfig();
       if (existing) {
         setCfg(existing);
@@ -169,7 +263,7 @@ export function SupplementImports() {
       const connected = await pairDevice(DEFAULT_RELAY_URL);
       setCfg(connected);
       await loadCapabilities(connected);
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      committed();
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -178,135 +272,257 @@ export function SupplementImports() {
   };
 
   const syncQueued = useCallback(async (): Promise<number> => {
-    const outcome = await captureExecutor.execute('supplemental');
-    if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
-    if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
-    return outcome.kind === 'imported' || outcome.kind === 'up-to-date'
-      ? outcome.transactions
-      : 0;
-  }, [captureExecutor, copy.notHydrated, copy.unavailable]);
+    let imported = 0;
+    // The relay intentionally serves at most 200 rows per page. A multi-file
+    // statement import can queue more than that, so one successful page must not
+    // be mistaken for a completed import. Drain page-by-page, yielding between
+    // durable commits so the Settings screen and tab bar stay responsive.
+    for (let page = 0; page < 50; page += 1) {
+      const outcome = await captureExecutor.execute('supplemental');
+      if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
+      if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
+      if (outcome.kind !== 'imported' && outcome.kind !== 'up-to-date') return imported;
+      imported += outcome.transactions;
+      if (outcome.moreQueued !== true) return imported;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    throw new Error(copy.syncFailedUnknown);
+  }, [captureExecutor, copy.notHydrated, copy.syncFailedUnknown, copy.unavailable]);
+
+  // Coverage is written after the whole batch has uploaded, not between files.
+  // recordStatementCoverage persists the full encrypted ledger on every call,
+  // and awaiting it inside the per-file loop stalled the picker once per
+  // statement — the "laggy import" report. Duplicate ranges (the same account
+  // exported twice) collapse to one write here rather than one persist each.
+  const rememberCoverage = useCallback(async (
+    items: readonly { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[],
+  ) => {
+    const importedAt = Date.now();
+    const seen = new Set<string>();
+    for (const { item, format } of items) {
+      if (!item) continue;
+      const key = `${format}:${item.sourceKey}:${item.startDate}:${item.endDate}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      stageStatementCoverage({ ...item, format, importedAt });
+    }
+  }, [stageStatementCoverage]);
+
+  // Why the sync failed, in words that carry no statement content. Import
+  // errors are already user copy; a relay error is classified rather than
+  // echoed, because its message is an English sentence from the transport
+  // layer; anything else is named generically.
+  const syncFailureReason = useCallback((value: unknown): string => {
+    if (value instanceof CloudImportError) return errorText(value);
+    if (value instanceof RelayError) return value.retryable ? copy.syncFailedOffline : copy.syncFailedUnknown;
+    if (value instanceof Error && (value.message === copy.notHydrated || value.message === copy.unavailable)) {
+      return value.message;
+    }
+    return copy.syncFailedUnknown;
+  }, [copy, errorText]);
+
+  const finishQueuedImport = useCallback(async (
+    files: number,
+    accepted: number,
+    rejected: number,
+    pages: number,
+  ): Promise<boolean> => {
+    setStatus(interpolate(copy.acceptedFiling, { accepted }));
+    try {
+      // Paint the accepted state before planning/reconciling a potentially large ledger.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const imported = await syncQueued();
+      queuedRetryNeededRef.current = false;
+      queuedRetryContextRef.current = null;
+      setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+        files, accepted, rejected, pages, imported,
+      }));
+      committed();
+      return true;
+    } catch (e) {
+      // The rows stay queued on the relay; say what stopped them landing here
+      // instead of folding every failure into the "not synced yet" status.
+      setStatus(interpolate(copy.acceptedPending, { accepted }));
+      setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
+      queuedRetryNeededRef.current = true;
+      queuedRetryContextRef.current = { files, accepted, rejected, pages };
+      failed();
+      return false;
+    }
+  }, [copy, syncFailureReason, syncQueued]);
+
+  // Successful upload means the normalized rows are already safe in the relay
+  // queue. If the immediate phone-side drain loses a network turn, retry once
+  // shortly afterwards and again whenever the app returns to foreground. The
+  // capture executor still owns save-before-ACK, so a retry cannot retire rows
+  // until the local encrypted ledger write is durable.
+  useEffect(() => {
+    if (!cfg || state.privateMode) return;
+
+    const retryQueued = async () => {
+      if (!queuedRetryNeededRef.current || queuedRetryInFlightRef.current) return;
+      queuedRetryInFlightRef.current = true;
+      try {
+        const imported = await syncQueued();
+        queuedRetryNeededRef.current = false;
+        const context = queuedRetryContextRef.current;
+        queuedRetryContextRef.current = null;
+        setError(null);
+        if (context) {
+          setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+            ...context,
+            imported,
+          }));
+        }
+        committed();
+      } catch {
+        // Keep the queued rows untouched. A later foreground transition gets
+        // another chance without asking the user to upload the statement again.
+      } finally {
+        queuedRetryInFlightRef.current = false;
+      }
+    };
+
+    const timer = setTimeout(() => { void retryQueued(); }, 1_500);
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void retryQueued();
+    });
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [cfg, copy.statementsNoNew, copy.statementsSuccess, state.privateMode, syncQueued]);
 
   const pickAndUpload = async () => {
-    if (!cfg || !capabilities) return;
+    if (!cfg || !capabilities || pendingPdfs.length > 0) return;
+    if (!state.ledgerMoney) {
+      setCurrencySheetVisible(true);
+      return;
+    }
     setError(null);
     setStatus(null);
-    let pickedFile: File | null = null;
+    const pickedFiles: File[] = [];
+    const retainedUris = new Set<string>();
+    // Declared outside the try so a failure later in the batch still hands the
+    // deferred locked PDFs to the password prompt instead of leaking their copies.
+    const protectedPdfs: PendingProtectedPdf[] = [];
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
       });
-      if (picked.canceled || !picked.assets[0]) return;
-      const asset = picked.assets[0];
-      pickedFile = new File(asset.uri);
+      if (picked.canceled || picked.assets.length === 0) return;
       setBusy('statement');
-      const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
-        capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
-      const accepted = csv
-        ? await uploadCsvStatement(cfg, asset, capabilities)
-        : await uploadPdfStatement(cfg, asset, capabilities);
-      try {
-        const imported = await syncQueued();
-        if ('pages' in accepted) {
-          setStatus(interpolate(imported > 0 ? copy.pdfSuccess : copy.pdfNoNew, {
-            accepted: accepted.acceptedRows,
-            pages: accepted.pages,
-            imported,
-          }));
-        } else {
-          setStatus(interpolate(imported > 0 ? copy.csvSuccess : copy.csvNoNew, {
-            accepted: accepted.acceptedRows,
-            rejected: accepted.rejectedRows,
-            imported,
-          }));
+      let acceptedRows = 0;
+      let rejectedRows = 0;
+      let pages = 0;
+      let uploadedFiles = 0;
+      const coverage: { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[] = [];
+      for (let index = 0; index < picked.assets.length; index += 1) {
+        const asset = picked.assets[index];
+        const file = new File(asset.uri);
+        pickedFiles.push(file);
+        const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
+          capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        try {
+          const accepted = csv
+            ? await uploadCsvStatement(cfg, asset, capabilities, state.ledgerMoney)
+            : await uploadPdfStatement(cfg, asset, capabilities, state.ledgerMoney);
+          acceptedRows += accepted.acceptedRows;
+          rejectedRows += accepted.rejectedRows;
+          uploadedFiles += 1;
+          if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
+          coverage.push({ item: accepted.coverage, format: csv ? 'csv' : 'pdf' });
+        } catch (e) {
+          if (!csv && e instanceof CloudImportError &&
+              (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
+            // Retain every locked picker copy and ask for one password at a
+            // time. Keeping the secrets sequential means Wafra can accept a
+            // mixed batch of protected statements without ever holding a list
+            // of passwords in memory or asking the user to re-pick skipped
+            // files.
+            retainedUris.add(asset.uri);
+            protectedPdfs.push({ asset, file });
+            continue;
+          }
+          throw e;
         }
-        if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch {
-        setStatus(interpolate(copy.acceptedPending, { accepted: accepted.acceptedRows }));
+        if (index + 1 < picked.assets.length) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      await rememberCoverage(coverage);
+      if (protectedPdfs.length > 0) {
+        setPendingPdfs(protectedPdfs);
+        setPdfPassword('');
+        setError(null);
+      }
+      if (uploadedFiles > 0) {
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
       }
     } catch (e) {
+      if (protectedPdfs.length > 0) {
+        setPendingPdfs(protectedPdfs);
+        setPdfPassword('');
+      }
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      failed();
     } finally {
-      try {
-        if (pickedFile?.exists) pickedFile.delete();
-      } catch {
-        // The OS may already have reclaimed its picker cache copy.
+      for (const file of pickedFiles) {
+        if (retainedUris.has(file.uri)) continue;
+        try {
+          if (file.exists) file.delete();
+        } catch {
+          // The OS may already have reclaimed this picker cache copy; the
+          // remaining copies in the batch still get their turn.
+        }
       }
       setBusy(null);
     }
   };
 
-  const createAddress = async () => {
-    if (!cfg) return;
-    setBusy('email-create');
-    setError(null);
-    try {
-      const issued = await createEmailForwardingAddress(cfg);
-      const next = await saveRelayEmailCredential(cfg, issued.emailToken, issued.forwardingAddress);
-      setCfg(next);
-      if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const copyAddress = async () => {
-    if (!cfg?.forwardingAddress) return;
-    const address = cfg.forwardingAddress;
-    copiedAddress.current = address;
-    await Clipboard.setStringAsync(address);
-    if (disposed.current) {
-      await clearCopiedAddress(address);
+  const retryProtectedPdf = async () => {
+    if (!cfg || !capabilities || !pendingPdf || !pdfPassword || busy !== null) return;
+    if (!state.ledgerMoney) {
+      setCurrencySheetVisible(true);
       return;
     }
-    setCopied(true);
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
-    clipboardTimer.current = setTimeout(() => {
-      void clearCopiedAddress(address);
-      setCopied(false);
-    }, 60_000);
-  };
-
-  const checkEmail = async () => {
-    if (!cfg) return;
-    setBusy('email-check');
+    setBusy('statement');
     setError(null);
-    setStatus(null);
     try {
-      const imported = await syncQueued();
-      setStatus(interpolate(imported > 0 ? copy.emailSuccess : copy.emailNoNew, { imported }));
+      const accepted = await uploadPdfStatement(
+        cfg,
+        pendingPdf.asset,
+        capabilities,
+        state.ledgerMoney,
+        pdfPassword,
+      );
+      await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
+      await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
+      try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
+      setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+        ? current.slice(1)
+        : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
+      setPdfPassword('');
     } catch (e) {
-      setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
+      setError(errorText(e));
+      if (!(e instanceof CloudImportError) || e.code !== 'pdf_password_incorrect') failed();
     } finally {
+      // Clear the entered secret from React state after a failed attempt too.
+      setPdfPassword('');
       setBusy(null);
     }
   };
 
-  /**
-   * The revocation itself, reachable from the confirmation sheet and from
-   * nowhere else — it used to sit inside an alert button's `onPress`, which on
-   * the web export is code no tap can reach: `Alert.alert` is `static alert() {}`
-   * there, so "Revoke address" did nothing at all and said nothing about it.
-   */
-  const revokeAddress = () => {
-    if (!cfg) return;
-    void (async () => {
-      setBusy('email-revoke');
-      setError(null);
-      try {
-        await revokeEmailForwardingAddress(cfg);
-        setCfg(await clearRelayEmailCredential(cfg));
-      } catch (e) {
-        setError(errorText(e));
-      } finally {
-        setBusy(null);
-      }
-    })();
+  const cancelProtectedPdf = () => {
+    if (!pendingPdf) return;
+    try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
+    setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+      ? current.slice(1)
+      : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
+    setPdfPassword('');
+    setError(null);
   };
 
   const locked = state.privateMode;
@@ -333,9 +549,7 @@ export function SupplementImports() {
           <Button label={copy.reviewPrivacy} variant="outline" onPress={() => router.push('/settings?section=privacy')} />
         </Block>
       ) : loadingConfig ? (
-        <Block>
-          <ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText>
-        </Block>
+        <Block><ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText></Block>
       ) : !cfg ? (
         <Block>
           <View style={styles.cardHead}>
@@ -355,12 +569,7 @@ export function SupplementImports() {
             <ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText>
           )}
           {!capabilities && busy !== 'capabilities' && (
-            <Button
-              variant="outline"
-              label={copy.retry}
-              onPress={() => void loadCapabilities(cfg)}
-              disabled={busy !== null}
-            />
+            <Button variant="outline" label={copy.retry} onPress={() => void loadCapabilities(cfg)} disabled={busy !== null} />
           )}
 
           <Block style={styles.importCard}>
@@ -376,68 +585,97 @@ export function SupplementImports() {
             {capabilities && (
               <ThemedText type="nano" themeColor="textTertiary" tabular>
                 {interpolate(copy.statementLimits, {
-                  pdfMb,
-                  csvMb,
-                  pages: capabilities.pdf.maxPages,
-                  rows: capabilities.pdf.maxRows,
+                  pdfMb, csvMb, pages: capabilities.pdf.maxPages, rows: capabilities.pdf.maxRows,
                 })}
               </ThemedText>
             )}
+            {!state.ledgerMoney && (
+              <View style={styles.currencyPrompt}>
+                <View style={styles.cardCopy}>
+                  <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyBody')}</ThemedText>
+                </View>
+                <Button
+                  variant="outline"
+                  label={t('chooseLedgerCurrency')}
+                  onPress={() => setCurrencySheetVisible(true)}
+                  disabled={busy !== null}
+                />
+              </View>
+            )}
             <Button
               icon="upload"
-              label={busy === 'statement' ? copy.uploading : copy.chooseStatement}
+              label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
-              disabled={!capabilities || busy !== null}
+              disabled={!capabilities || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
           </Block>
 
-          <Block style={styles.importCard}>
-            <View style={styles.cardHead}>
-              <View style={[styles.iconWell, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="mail" size={20} color={theme.text} />
-              </View>
-              <View style={styles.cardCopy}>
-                <ThemedText type="small">{copy.emailTitle}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">{copy.emailBody}</ThemedText>
-              </View>
-            </View>
-            {cfg.forwardingAddress ? (
-              <>
-                <View style={[styles.address, { borderColor: theme.cardBorderStrong, backgroundColor: theme.background }]}>
-                  <ThemedText type="code" selectable style={styles.addressText}>
-                    {cfg.forwardingAddress}
+          {pendingPdf && (
+            <Block style={styles.passwordCard}>
+              <View style={styles.cardHead}>
+                <View style={[styles.iconWell, { backgroundColor: theme.primarySoft }]}>
+                  <Icon name="lock" size={20} color={theme.primary} />
+                </View>
+                <View style={styles.cardCopy}>
+                  <ThemedText type="small">{copy.passwordTitle}</ThemedText>
+                  <ThemedText type="meta" numberOfLines={1}>{pendingPdf.asset.name}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {pendingPdfs.length > 1
+                      ? interpolate(copy.passwordQueueBody, { count: pendingPdfs.length })
+                      : copy.passwordBody}
                   </ThemedText>
                 </View>
-                <Button
-                  icon="mail"
-                  label={copied ? copy.copied : copy.copyAddress}
-                  onPress={() => void copyAddress()}
-                  disabled={busy !== null}
-                />
-                <Button
-                  variant="outline"
-                  label={busy === 'email-check' ? copy.checkingEmail : copy.checkEmail}
-                  onPress={() => void checkEmail()}
-                  disabled={busy !== null}
-                />
-                <Button
-                  variant="ghost"
-                  label={busy === 'email-revoke' ? copy.revoking : copy.revoke}
-                  onPress={() => setConfirmingRevoke(true)}
-                  disabled={busy !== null}
-                />
-              </>
-            ) : (
-              <>
-                <ThemedText type="meta" themeColor="textTertiary">{copy.oldConnection}</ThemedText>
-                <Button
-                  icon="mail"
-                  label={busy === 'email-create' ? copy.creatingAddress : copy.createAddress}
-                  onPress={() => void createAddress()}
-                  disabled={!capabilities?.email.enabled || busy !== null}
-                />
-              </>
-            )}
+              </View>
+              <TextField
+                label={copy.passwordLabel}
+                value={pdfPassword}
+                onChangeText={(value) => { setPdfPassword(value); setError(null); }}
+                placeholder={copy.passwordPlaceholder}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
+              />
+              <View style={styles.actions}>
+                <Button inline label={copy.passwordCancel} variant="outline" onPress={cancelProtectedPdf} disabled={busy !== null} />
+                <Button inline label={busy === 'statement' ? copy.uploading : copy.passwordRetry}
+                  onPress={() => void retryProtectedPdf()} disabled={!pdfPassword || busy !== null} />
+              </View>
+            </Block>
+          )}
+
+          <Block style={styles.coverageCard}>
+            <View style={styles.cardHead}>
+              <View style={[styles.iconWell, { backgroundColor: theme.backgroundSelected }]}>
+                <Icon name="calendar" size={20} color={theme.text} />
+              </View>
+              <View style={styles.cardCopy}>
+                <ThemedText type="small">{copy.coverageTitle}</ThemedText>
+                {coverage.length === 0 && (
+                  <ThemedText type="meta" themeColor="textTertiary">{copy.coverageEmpty}</ThemedText>
+                )}
+              </View>
+            </View>
+            {coverage.map((item) => {
+              const shownMissing = item.missing.slice(0, 4);
+              const more = item.missing.length - shownMissing.length;
+              return (
+                <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
+                  <View style={styles.coverageHead}>
+                    <ThemedText type="smallBold" style={styles.coverageLabel}>{item.label}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
+                  </View>
+                  <ThemedText type="meta" themeColor={item.missing.length ? 'expense' : 'textTertiary'}>
+                    {item.missing.length
+                      ? interpolate(copy.coverageMissing, {
+                          months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
+                        })
+                      : interpolate(copy.coverageComplete, { month: item.throughMonth })}
+                  </ThemedText>
+                </View>
+              );
+            })}
           </Block>
         </>
       )}
@@ -462,25 +700,12 @@ export function SupplementImports() {
           <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
         </View>
       </View>
-
-      {/* A sibling, not a nested sheet: this block is a section of a scrolling
-          screen, not a presented modal, so there is no parent to stack under.
-          Mounted only while there is something to confirm, so the sheet's
-          entry animation runs on every open. The address guard was the alert's
-          own early return and still has to hold — the button is drawn only in
-          that branch, but the sheet's own confirm must not fire against a
-          config that lost its credential while the sheet was open. */}
-      {confirmingRevoke && cfg?.forwardingAddress && (
-        <ConfirmSheet
-          visible
-          onClose={() => setConfirmingRevoke(false)}
-          question={copy.revokeTitle}
-          body={copy.revokeBody}
-          confirmLabel={copy.revoke}
-          destructive
-          onConfirm={revokeAddress}
-        />
-      )}
+      <LedgerCurrencySheet
+        visible={currencySheetVisible}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetVisible(false)}
+        onSelect={setLedgerMoney}
+      />
     </View>
   );
 }
@@ -489,6 +714,9 @@ const styles = StyleSheet.create({
   root: { gap: Spacing.three },
   hero: { gap: Spacing.one },
   importCard: { gap: Spacing.three },
+  currencyPrompt: { gap: Spacing.two },
+  passwordCard: { gap: Spacing.three },
+  coverageCard: { gap: Spacing.two },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2 },
   cardCopy: { flex: 1, gap: Spacing.half },
   iconWell: {
@@ -498,8 +726,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  address: { borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three },
-  addressText: { writingDirection: 'ltr', textAlign: 'left' },
+  actions: { flexDirection: 'row', gap: Spacing.two },
+  coverageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.two, gap: Spacing.half },
+  coverageHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: Spacing.two, flexWrap: 'wrap' },
+  coverageLabel: { flexShrink: 1 },
   message: {
     flexDirection: 'row',
     alignItems: 'flex-start',

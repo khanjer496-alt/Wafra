@@ -1,5 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import {
+  InteractionManager,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,9 +13,10 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
+import { BillsSegmentControl, type BillsSegment } from '@/components/bills/bills-segment-control';
 import { PaymentAgenda } from '@/components/bills/payment-agenda';
-import { SegmentedControl } from '@/components/ui/segmented-control';
-import type { PaymentAgendaItem } from '@/lib/reference-presentation';
+import { Money } from '@/components/ui/money';
+import { paymentGroupFor, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -27,6 +31,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
+import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
@@ -40,11 +45,13 @@ import {
   toISODate,
   totalAsShown,
 } from '@/lib/format';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { measureRuntimeOperation, recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
   activeSubscriptions,
   billCommitments,
   detectSubscriptions,
+  detectSubscriptionsCooperatively,
   daysUntilNext,
   fixedCommitments,
   otherCommitments,
@@ -84,10 +91,13 @@ export function recurringChargePresentation(sub: Subscription): { amountFils: nu
   };
 }
 
+const UPCOMING_RECURRENCE_IDLE_MS = 4_000;
+
 export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
+  const focused = useIsFocused();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStore();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
@@ -100,11 +110,14 @@ export default function BillsScreen() {
    */
   const { refreshing, onRefresh } = usePullToRefresh();
 
-  const now = useMemo(() => new Date(), []);
+  const now = useToday();
   const key = monthKey(now);
   const todayISO = toISODate(now);
+  // Recurrence is day-based. Reusing the same Date for the whole day prevents
+  // every Android foreground/resume from invalidating a full-ledger projection.
+  const recurrenceToday = useMemo(() => new Date(`${todayISO}T12:00:00`), [todayISO]);
 
-  const [agendaView, setAgendaView] = useState<'upcoming' | 'all'>('upcoming');
+  const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
   const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
@@ -119,6 +132,7 @@ export default function BillsScreen() {
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  const [androidRecurring, setAndroidRecurring] = useState<Subscription[] | null>(null);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -148,26 +162,88 @@ export default function BillsScreen() {
 
   // Card projections read accounts, transactions and statements, not the
   // frequently changing import-progress or review-status fields.
-  const dues = useMemo(() => openDues(state, now),
+  const dues = useMemo(() => measureRuntimeOperation('bills-open-dues', () => openDues(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
   const selectedDue = useMemo(
     () => dues.find(({ due }) => due.id === selectedDueId) ?? null,
     [dues, selectedDueId],
   );
-  const paidCards = useMemo(() => recentlySettledDues(state, now),
+  // Recently-paid history is invisible in the default Upcoming view (and in
+  // the subscription/utility filters). Do not make the first Bills tap replay
+  // historical card settlement just to immediately filter those rows away.
+  // Cards/All compute it when the user actually asks for that history.
+  const needsPaidCards = agendaView === 'cards' || agendaView === 'all';
+  const paidCards = useMemo(() => needsPaidCards
+    ? measureRuntimeOperation('bills-paid-cards', () => recentlySettledDues(state, now))
+    : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.accounts, state.transactions, state.cardDues, now]);
+    [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, state.accounts),
-    [state.transactions, state.accounts],
-  );
+  const internal = measureRuntimeOperation('bills-transfer-scope', () => internalTransferIdsForState(state));
+  // Recurrence detection walks the complete ledger. It is useful on Upcoming,
+  // but it is not required to make Bills usable. Never start that historical
+  // job in the same interaction window as the first tab paint. Explicit
+  // Subscriptions/Utilities/All requests start it immediately after paint; the
+  // default Upcoming view only warms it after an idle grace period. A shared
+  // detector in subscriptions.ts means reminders/Bills join one job instead of
+  // racing duplicate scans, and leaving the tab no longer throws completed work
+  // away and restarts from row zero next time.
+  useEffect(() => {
+    setAndroidRecurring(null);
+  }, [state.transactions, state.notSubscriptions, state.accounts, state.transferInternalIds, todayISO]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !focused || androidRecurring !== null || agendaView === 'cards') return;
+    let cancelled = false;
+    let delay: ReturnType<typeof setTimeout> | null = null;
+    let firstFrame: number | null = null;
+    let secondFrame: number | null = null;
+    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+
+    const startProjection = () => {
+      if (cancelled) return;
+      task = InteractionManager.runAfterInteractions(() => {
+        firstFrame = requestAnimationFrame(() => {
+          secondFrame = requestAnimationFrame(() => {
+            const projectionStartedAt = Date.now();
+            void detectSubscriptionsCooperatively(
+              state.transactions,
+              state.notSubscriptions,
+              recurrenceToday,
+              liveAccounts,
+              internal,
+              () => cancelled,
+            ).then((value) => {
+              recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
+              if (cancelled || value === null) return;
+              startTransition(() => setAndroidRecurring(value));
+            });
+          });
+        });
+      });
+    };
+
+    const needsRecurrenceNow = agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
+    if (needsRecurrenceNow) startProjection();
+    else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
+
+    return () => {
+      cancelled = true;
+      if (delay !== null) clearTimeout(delay);
+      task?.cancel();
+      if (firstFrame !== null) cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [agendaView, androidRecurring, focused, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.
   const rows = useMemo(
-    () => billsForMonth(state.bills, state.transactions, now, liveAccounts, internal),
+    () => measureRuntimeOperation(
+      'bills-manual',
+      () => billsForMonth(state.bills, state.transactions, now, liveAccounts, internal),
+    ),
     [state.bills, state.transactions, now, liveAccounts, internal],
   );
   const selectedReminder = useMemo(
@@ -175,9 +251,10 @@ export default function BillsScreen() {
     [rows, selectedReminderId],
   );
   const detected = useMemo(
-    () =>
-      detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
-    [state.transactions, state.notSubscriptions, now, liveAccounts, internal],
+    () => Platform.OS === 'android'
+      ? androidRecurring ?? []
+      : detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
+    [androidRecurring, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
   const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
   const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);
@@ -204,15 +281,15 @@ export default function BillsScreen() {
     [state.bills],
   );
 
-  const agendaItems = useMemo<PaymentAgendaItem[]>(() => {
+  const agendaItems = useMemo<PaymentAgendaItem[]>(() => measureRuntimeOperation('bills-agenda-items', () => {
     const accountNames = new Map(state.accounts.map((a) => [a.id, a.name]));
     const items: PaymentAgendaItem[] = dues.map(({ due, daysLeft, remainingFils }) => ({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
-      kind: 'card', dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
+      kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
     }));
     for (const { due, daysLeft } of paidCards) items.push({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
-      kind: 'card', dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
+      kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
     });
     for (const { bill, status, dueISO, daysLeft } of rows) items.push({
       id: `bill-${bill.id}`, title: bill.title, category: bill.category, kind: 'bill', dateISO: dueISO,
@@ -229,10 +306,42 @@ export default function BillsScreen() {
       items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, title: sub.title, category: sub.category,
         kind: 'recurring', dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now),
         group: sub.group === 'subscription' ? 'subscriptions' : undefined,
-        amountFils: charge.amountFils, estimated: true, paid: false });
+        amountFils: charge.amountFils, estimated: charge.estimated, paid: false });
     }
     return items;
-  }, [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
+  }), [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
+
+  const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
+    if (agendaView === 'subscriptions') return 'subscriptions';
+    if (agendaView === 'utilities') return 'utilities';
+    if (agendaView === 'cards') return 'cards';
+    return undefined;
+  }, [agendaView]);
+  const visibleAgendaItems = useMemo(
+    () => selectedAgendaGroup
+      ? agendaItems.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
+      : agendaItems,
+    [agendaItems, selectedAgendaGroup],
+  );
+  const includePaidAgenda = agendaView !== 'upcoming';
+  const summary = useMemo(() => {
+    const openItems = visibleAgendaItems.filter((item) => !item.paid);
+    const label = agendaView === 'subscriptions'
+      ? t('billsSubscriptionsTotal')
+      : agendaView === 'utilities'
+        ? t('billsUtilitiesTotal')
+        : agendaView === 'cards'
+          ? t('billsCardsTotal')
+          : agendaView === 'all'
+            ? t('billsAllTotal')
+            : t('billsUpcomingTotal');
+    return {
+      label,
+      totalFils: openItems.reduce((sum, item) => sum + item.amountFils, 0),
+      count: openItems.length,
+      estimated: openItems.filter((item) => item.estimated).length,
+    };
+  }, [agendaView, visibleAgendaItems]);
 
   // Everything the detail sheet needs about the tapped subscription: its raw
   // charges (newest first), which cards paid it, first charge, lifetime total.
@@ -398,7 +507,7 @@ export default function BillsScreen() {
 
   const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
     // Keep the paid statement's result visible after the last open due settles.
-    setAgendaView('all');
+    setAgendaView('cards');
     setConfirmation({
       question: tf('payAccountTitle', { name: accName }),
       body: tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
@@ -552,9 +661,39 @@ export default function BillsScreen() {
         }
         contentStyle={largeText && styles.headerLarge}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <SegmentedControl label={t('billsTitle')} value={agendaView} onChange={setAgendaView}
-          segments={[{ value: 'upcoming', label: words.upcoming }, { value: 'all', label: words.all }]} />
-        <PaymentAgenda items={agendaItems} includePaid={agendaView === 'all'} onOpen={(item) => {
+        <BillsSegmentControl segment={agendaView} onChange={setAgendaView} />
+        <View
+          accessible
+          accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', {
+            count: summary.count,
+            s: summary.count === 1 ? '' : 's',
+          })}`}
+          style={[styles.summary, { borderColor: theme.cardBorder }]}>
+          <ThemedText type="micro" themeColor="textSecondary" style={styles.summaryLabel}>
+            {summary.label}
+          </ThemedText>
+          <Money fils={summary.totalFils} type="display" decimals />
+          <View style={styles.summaryMeta}>
+            <ThemedText type="meta" themeColor="textSecondary">
+              {tf('billsSummaryPayments', {
+                count: summary.count,
+                s: summary.count === 1 ? '' : 's',
+              })}
+            </ThemedText>
+            {summary.estimated > 0 && <>
+              <ThemedText type="meta" themeColor="textTertiary">·</ThemedText>
+              <ThemedText type="meta" style={{ color: theme.gold }}>
+                {tf('billsSummaryEstimated', { count: summary.estimated })}
+              </ThemedText>
+            </>}
+          </View>
+        </View>
+        <PaymentAgenda
+          items={visibleAgendaItems}
+          accounts={state.accounts}
+          includePaid={includePaidAgenda}
+          group={selectedAgendaGroup}
+          onOpen={(item) => {
           if (item.kind === 'card') {
             const id = item.id.slice(5);
             const due = state.cardDues.find((due) => due.id === id);
@@ -890,6 +1029,15 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
+  summary: {
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    gap: Spacing.one,
+  },
+  summaryLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
+  summaryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   referenceGroup: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },
   duesBlock: {

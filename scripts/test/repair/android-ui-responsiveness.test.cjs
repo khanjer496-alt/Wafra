@@ -44,7 +44,7 @@ function filterProbe(language = 'en', options = {}) {
     '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/components/ui/category-chips': { CategoryChips: 'Categories' },
     '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({}) },
-    '@/constants/theme': { Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
+    '@/constants/theme': { Fonts: { sansMedium: 'Geist-Medium' }, Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
   });
   const filters = load(path.join(root, 'src/lib/transaction-filter.ts'), deps);
   deps['@/lib/transaction-filter'] = filters;
@@ -55,7 +55,7 @@ function filterProbe(language = 'en', options = {}) {
   ];
   const props = { initialFilters: defaults(), resetFilters: defaults(), accounts: [{ id: 'bank', name: 'Bank' }],
     hasUnassignedIncome: false, index: filters.createTransactionFilterIndex(rows, language),
-    options: { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'month', key: '2026-09' }, live: new Set(['bank']), internal: new Set(), ...options },
+    options: { query: '', merchant: null, smsOnly: false, currentKey: '2026-09', period: { mode: 'month', key: '2026-09' }, live: new Set(['bank']), internal: new Set(), corroborating: new Set(), ...options },
     onClose: () => events.push(['close']), onApply: (filters, resetScope) => events.push(['apply', filters, resetScope]) };
   const { TransactionFilterSheet } = load(path.join(root, 'src/components/transaction-filter-sheet.tsx'), deps);
   const render = () => { react.begin(); return TransactionFilterSheet(props); };
@@ -121,7 +121,10 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   const insets = { contentContainerStyle: {}, contentInset: { top: 0, bottom: 0 }, scrollIndicatorInsets: { top: 0, bottom: 0 } };
   h.deps['@/components/ui/screen-scaffold'].useScreenContentInsets = () => insets;
   h.deps['@/lib/period'].periodRange = () => '';
-  const Screen = load(path.join(root, 'src/app/transactions.tsx'), h.deps).default;
+  const Screen = load(path.join(root, 'src/app/transactions.tsx'), h.deps, {
+    requestAnimationFrame: callback => { callback(); return 1; },
+    cancelAnimationFrame() {},
+  }).default;
   const render = () => { react.begin(); return Screen(); };
   let tree = render(); const original = walk(tree).find(n => n.type === 'SectionList'); assert.ok(original);
   walk(tree).find(n => n.props?.inputMode === 'search').props.onChangeText('Cafe');
@@ -136,7 +139,21 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   assert.ok(updated.props.sections.flatMap(section => section.data).every(row => row.type === 'income'));
 });
 
-test('entry reconciliation reuses unchanged inputs but refreshes after financial state changes', () => {
+test('Android filter Apply dismisses the sheet before committing the expensive projection', () => {
+  const fs = require('fs');
+  const source = fs.readFileSync(path.join(root, 'src/app/transactions.tsx'), 'utf8');
+  const apply = source.match(/const applyFilters = useCallback\([\s\S]*?\n  \}, \[\]\);/)?.[0] ?? '';
+  assert.match(apply, /setSheetVisible\(false\)/);
+  assert.match(apply, /requestAnimationFrame\(commit\)/);
+  assert.ok(apply.indexOf('setSheetVisible(false)') < apply.indexOf('requestAnimationFrame(commit)'),
+    'Android must paint the sheet dismissal before the filter projection can run');
+});
+
+// The sheet used to reconcile the complete ledger once per selected entry and
+// again on every financial state change; the interaction-stall fix replaced
+// that with per-row transfer ownership, so opening an entry never walks the
+// ledger's transfer graph at all. Pin the absence rather than the old cache.
+test('opening an entry never reconciles the complete ledger, before or after financial state changes', () => {
   const h = createHarness(), react = hooks();
   Object.assign(h.deps.react, react);
   h.deps['react/jsx-runtime'] = { jsx, jsxs: jsx, Fragment: 'Fragment' };
@@ -144,9 +161,19 @@ test('entry reconciliation reuses unchanged inputs but refreshes after financial
   let calls = 0;
   h.deps['@/lib/transfer-reconciliation'].reconcileTransfers = (...args) => { calls++; return original(...args); };
   const render = () => { react.begin(); return h.renderDetail(); };
-  render(); assert.equal(calls, 1);
+  render(); assert.equal(calls, 0);
   for (let i = 0; i < 20; i++) render();
-  assert.equal(calls, 1, 'form/parent rerenders must not reconcile the complete ledger again');
-  h.state.transactions = [...h.state.transactions]; render(); assert.equal(calls, 2);
-  h.state.accounts = [...h.state.accounts]; render(); assert.equal(calls, 3);
+  assert.equal(calls, 0, 'form/parent rerenders must not reconcile the complete ledger');
+  h.state.transactions = [...h.state.transactions]; render(); assert.equal(calls, 0);
+  h.state.accounts = [...h.state.accounts]; render(); assert.equal(calls, 0);
+});
+
+test('Android bottom sheets do not animate a separate modal window across interaction frames', () => {
+  const fs = require('fs');
+  const source = fs.readFileSync(path.join(root, 'src/components/ui/bottom-sheet.tsx'), 'utf8');
+  assert.match(source, /reducedMotion \|\| Platform\.OS === 'android'/);
+  assert.ok((source.match(/reducedMotion \|\| Platform\.OS === 'android'/g) ?? []).length >= 3,
+    'open, external-close and explicit-dismiss paths should all settle immediately on Android');
+  assert.match(source, /\.enabled\(dismissible && !reducedMotion && Platform\.OS !== 'android'\)/,
+    'Android must not re-enter the animated dismissal path through the drag gesture');
 });

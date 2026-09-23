@@ -1,50 +1,20 @@
 name: Feedback agent
 
-# The far half of feedback → agent → pull request.
-#
-# server/src/index.ts stores a feedback item in D1 and POSTs a
-# `repository_dispatch` carrying ITS ID AND NOTHING ELSE. This job fetches the
-# item back with its own read-only scoped token, hands it to an agent, proves
-# the agent's work goes red before green against the real corpus, and opens a
-# DRAFT pull request. Nothing here merges anything.
-#
-# THREE RULES THIS FILE IS BUILT AROUND, in descending order of how expensive
-# they are to get wrong:
-#
-# 1. THE USER'S WORDS DO NOT LEAVE THIS RUNNER. This app reads bank SMS. A
-#    feedback report is prose a user typed, and the most useful thing they can
-#    put in it is the alert that parsed wrong — their bank, their card's last
-#    four, an amount they spent. The relay keeps that fourteen days behind a
-#    token; a pull request keeps it forever, in public, on something anyone can
-#    fork. So the report is written to $RUNNER_TEMP, never into the workspace,
-#    never echoed to a log, and never quoted in the pull request body — and the
-#    verbatim-quote gate below FAILS THE RUN rather than publishing a leak.
-#
-# 2. RED BEFORE GREEN, PROVEN. "Add a failing test" is unfalsifiable as a
-#    prompt instruction, so it is checked instead: the test change ALONE is
-#    applied to a clean tree and the suite must FAIL, then the whole change is
-#    applied and it must PASS. An agent that "fixed" a bug it never reproduced
-#    cannot get past it.
-#
-# 3. EXPLICIT AI CONSENT. Ordinary feedback still returns false. Only the
-#    internal parser-research screen can return true, after showing its fully
-#    redacted templates and naming this workflow. The gate below also stops a
-#    manual dispatch from bypassing that choice.
-
+# Only exact, consented, redacted parser research may reach the model. Candidate
+# code is untrusted. It never runs on a host that later receives a write token.
+# No job shares a writable dependency cache. Raw input and logs are not artifacts.
 on:
   repository_dispatch:
-    # Must match FEEDBACK_DISPATCH_EVENT in server/src/feedback.ts.
     types: [wafra-feedback]
   workflow_dispatch:
     inputs:
       feedback_id:
-        description: 'Feedback id to work on. Use this to re-run an item the relay could not dispatch, or one whose first run failed.'
+        description: 'Consented parser-research feedback UUID to process.'
         type: string
         required: true
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: feedback-agent-${{ github.event.client_payload.feedbackId || github.event.inputs.feedback_id }}
@@ -54,463 +24,201 @@ defaults:
   run:
     shell: bash
 
+env:
+  FEEDBACK_ID: ${{ github.event.client_payload.feedbackId || github.event.inputs.feedback_id }}
+  RELAY_URL: ${{ vars.WAFRA_RELAY_URL }}
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
 jobs:
-  agent:
+  generate:
+    # A manual dispatch from a repair branch must not load different trusted code.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # Two full runs of the app suite plus an agent turn. Generous rather than
-    # tight: a job killed half-way leaves a branch and no pull request, which is
-    # a worse state to debug than a slow one.
     timeout-minutes: 60
-    env:
-      # This job never runs the e2e suite, so npm postinstall must not fetch a
-      # browser for it.
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-      FEEDBACK_ID: ${{ github.event.client_payload.feedbackId || github.event.inputs.feedback_id }}
-      # Repository VARIABLE (Settings → Secrets and variables → Actions →
-      # Variables), e.g. https://wafra-relay.<account>.workers.dev
-      RELAY_URL: ${{ vars.WAFRA_RELAY_URL }}
-      # WORK is deliberately NOT here. It is set in the first step instead,
-      # because neither way of writing it in this block works:
-      #
-      #   ${{ runner.temp }}  — the `runner` context exists only inside a step,
-      #     and using it here does not fail at runtime: GitHub refuses to LOAD
-      #     the whole workflow, so the file never registers and the
-      #     repository_dispatch it exists for matches nothing.
-      #   ${RUNNER_TEMP}      — a job-level `env:` value is a literal string,
-      #     never passed through a shell. `$WORK` then expanded to the seven
-      #     characters `${RUNNER_TEMP}/feedback`, a RELATIVE path, so the
-      #     user's report was written inside the git workspace — which
-      #     `git add -A` below would have swept into a public pull request,
-      #     the one thing rule 1 of this file forbids.
-      # The agent CLI's flags live here so correcting them is one line rather
-      # than an edit inside a shell step. See "Run the agent" for what about
-      # them could not be verified.
-      #
-      # `--add-dir` is deliberately NOT here even though it belongs with the
-      # rest: its argument is $WORK, and the paragraph above is about why a
-      # `$NAME` in this block is seven literal characters. It is passed on the
-      # command line, where a shell expands it.
-      #
-      # `--allowed-tools` is variadic (`<tools...>`), so the names are separated
-      # by SPACES and the next `--flag` ends the list. Not commas: if the CLI
-      # does not split on them then `Bash,Edit,Write` is one tool name that
-      # matches nothing, every tool is refused, and it fails exactly the silent
-      # way this whole edit exists to stop.
-      CLAUDE_ARGS: '--print --permission-mode acceptEdits --allowed-tools Bash Edit Write'
-
+    permissions:
+      contents: read
     steps:
-      # ── Refuse to start rather than fail half-way ──
-      #
-      # Each of these is a configuration mistake a human makes once, and each
-      # otherwise surfaces three steps later as a curl exit code or an empty
-      # file. Same convention as deploy-relay.yml: the run ends in a sentence in
-      # the job summary, not a stack trace.
-      - name: Preflight
-        env:
-          FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          set -euo pipefail
-          missing=()
-          [ -n "${RELAY_URL:-}" ]           || missing+=("variable WAFRA_RELAY_URL")
-          [ -n "${FEEDBACK_READ_TOKEN:-}" ] || missing+=("secret WAFRA_FEEDBACK_READ_TOKEN")
-          [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || missing+=("secret CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token')")
-          if [ ${#missing[@]} -gt 0 ]; then
-            {
-              echo "## Cannot start"
-              echo
-              for name in "${missing[@]}"; do echo "- \`$name\` is not set"; done
-              echo
-              echo "Add them under **Settings → Secrets and variables → Actions**."
-              echo "\`WAFRA_FEEDBACK_READ_TOKEN\` must equal the Worker secret \`FEEDBACK_READ_TOKEN\`"
-              echo "(\`npx wrangler secret put FEEDBACK_READ_TOKEN\` — see \`server/wrangler.toml\`)."
-              echo
-              echo "The feedback item is still in the relay. Re-run this workflow once they are set."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          # The id arrives in a repository_dispatch client_payload and is about
-          # to be interpolated into a URL and a git branch name, so it is
-          # matched against the shape the Worker generates rather than trusted.
-          if ! printf '%s' "$FEEDBACK_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
-            echo "::error::feedback id is not a UUID. Refusing to put it in a URL or a branch name."
-            exit 1
-          fi
-          echo "Working on feedback \`$FEEDBACK_ID\`." >> "$GITHUB_STEP_SUMMARY"
-          # Expanded by a shell, which is the only place $RUNNER_TEMP becomes a
-          # path, and exported so every later step sees the same absolute one.
-          echo "WORK=$RUNNER_TEMP/feedback" >> "$GITHUB_ENV"
-
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream 2026-09-12
         with:
-          # The branch is pushed from here; a shallow clone makes that awkward.
-          fetch-depth: 0
-          # The coding agent must not inherit a credential that can push. The
-          # final PR step authenticates Git after every gate passes.
+          ref: ${{ github.sha }}
           persist-credentials: false
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, verified upstream 2026-09-12
         with:
           node-version: 22.22.3
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            server/package-lock.json
+      - name: Prepare isolated generation image
+        run: |
+          set -euo pipefail
+          docker build --tag wafra-feedback --file - . <<'DOCKERFILE'
+          FROM node:22.22.3-bookworm@sha256:2d178f2785b96dfbf62a416ca2e40f50e30150b4ff3320d706f0d96e90600eb3 AS node-runtime
+          FROM swift:6.2.4-bookworm@sha256:da5a812247285bddb8cf3a242f882a3affa156f34deb16df1b3267efe7129aff
+          COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+          COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+          RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+              ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+              test "$(node --version)" = "v22.22.3" && \
+              test "$(npm --version)" = "10.9.8" && swiftc --version
+          RUN apt-get update && apt-get install -y --no-install-recommends default-jdk-headless sqlite3 make python3 && rm -rf /var/lib/apt/lists/*
+          ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+          WORKDIR /opt/wafra
+          COPY package.json package-lock.json ./
+          COPY scripts/patch-react-native-screens.cjs ./scripts/
+          RUN npm ci
+          COPY server/package.json server/package-lock.json ./server/
+          RUN npm --prefix server ci
+          # Exact npm registry version verified 2026-09-12; no floating latest.
+          RUN npm install -g @anthropic-ai/claude-code@2.1.269
+          WORKDIR /workspace
+          DOCKERFILE
+          mkdir -p "$RUNNER_TEMP/feedback" "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/handoff"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/candidate"
+          ln -s /opt/wafra/node_modules "$RUNNER_TEMP/candidate/node_modules"
+          ln -s /opt/wafra/server/node_modules "$RUNNER_TEMP/candidate/server/node_modules"
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install relay dependencies
-        working-directory: server
-        run: npm ci
-
-      # ── Fetch the report ──
-      #
-      # Into $RUNNER_TEMP, outside the git workspace, so no later `git add -A`
-      # can sweep it into a commit. Nothing here prints the body.
-      - name: Fetch the feedback item
+      - name: Verify explicit third-party AI consent and exact redaction schema
         env:
-          # Same value as the Worker's FEEDBACK_READ_TOKEN; scoped to this curl.
           FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p "$WORK"
-          if ! curl -sS --fail-with-body --max-time 30 \
-              -H "authorization: Bearer $FEEDBACK_READ_TOKEN" \
-              -H 'accept: application/json' \
-              "${RELAY_URL%/}/v1/feedback/$FEEDBACK_ID" \
-              -o "$WORK/feedback.json" 2> "$WORK/curl.err"; then
-            {
-              echo "## Could not read the feedback item"
-              echo
-              echo "\`GET <relay>/v1/feedback/$FEEDBACK_ID\` failed."
-              echo
-              echo "- **401** — \`WAFRA_FEEDBACK_READ_TOKEN\` does not match the Worker's \`FEEDBACK_READ_TOKEN\`."
-              echo "- **503** — the Worker has no \`FEEDBACK_READ_TOKEN\` set at all."
-              echo "- **404** — the item expired. Feedback is kept 14 days and then deleted, always."
-              echo
-              echo '```'
-              # curl's own diagnostics only. The response body is never printed:
-              # on a 200 that is the user's words, and this log is public.
-              tail -5 "$WORK/curl.err"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-      # A manual workflow_dispatch must not bypass the app's consent boundary.
-      # The prompt builder checks this again before it can write model input.
-      - name: Verify explicit third-party AI consent
-        run: |
-          set -euo pipefail
-          if ! node -e '
-            const fs = require("fs");
-            const item = JSON.parse(fs.readFileSync(process.env.WORK + "/feedback.json", "utf8"));
-            const disclosed = item.diagnostic?.delivery?.thirdPartyAi === true;
-            if (item.aiReviewConsent !== true || !disclosed) process.exit(1);
-          '; then
-            {
-              echo "## AI review not authorized"
-              echo
-              echo "This report did not explicitly consent to third-party AI review."
-              echo "It remains available to human Wafra maintainers until its retention period ends."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-      # ── The prompt ──
-      #
-      # Composed by a committed script rather than inline, so the instructions
-      # an agent actually acts on are reviewable as prose in a diff. It writes
-      # the prompt to $RUNNER_TEMP and prints only metadata.
-      - name: Compose the prompt
-        run: |
-          set -euo pipefail
+          node .github/scripts/feedback-input.mjs "$RUNNER_TEMP/feedback-item.json"
           node .github/scripts/feedback-prompt.mjs \
-            "$WORK/feedback.json" "$WORK/PROMPT.md" "$WORK"
-          # Only fields the relay validates against a fixed alphabet reach
-          # GITHUB_ENV, so none of them can carry a newline into it.
-          node -e '
-            const fs = require("fs");
-            const item = JSON.parse(fs.readFileSync(process.env.WORK + "/feedback.json", "utf8"));
-            fs.appendFileSync(process.env.GITHUB_ENV,
-              "FEEDBACK_PLATFORM=" + item.platform + "\n" +
-              "FEEDBACK_APP_VERSION=" + item.appVersion + "\n" +
-              "FEEDBACK_LOCALE=" + (item.locale || "unknown") + "\n");
-          '
+            "$RUNNER_TEMP/feedback-item.json" "$RUNNER_TEMP/feedback/PROMPT.md" /feedback
 
-      # ── The agent ──
-      #
-      # THIS STEP COULD NOT BE VERIFIED FROM THE MACHINE THAT WROTE IT.
-      #
-      # The headless invocation, checked against the docs rather than written
-      # from memory: prompt on stdin, `--print` for non-interactive output,
-      # `--permission-mode acceptEdits` so the agent may edit files without a
-      # prompt, and CLAUDE_CODE_OAUTH_TOKEN in the environment.
-      #   https://code.claude.com/docs/en/headless
-      #   https://code.claude.com/docs/en/cli-reference
-      #
-      # NOT `--dangerously-skip-permissions` (= `--permission-mode
-      # bypassPermissions`). It would also work, and it removes the one
-      # remaining boundary around an agent running unattended on a checkout
-      # with a token in its environment.
-      #
-      # `acceptEdits` ALONE did not work, and the way it failed is worth
-      # keeping. It grants unprompted file EDITS and nothing else — no Bash,
-      # and no access outside the checkout. But the prompt this workflow hands
-      # the agent requires both: step 3 says `npm test` must be green, and step
-      # 5 says write $WORK/SUMMARY.md, which is in $RUNNER_TEMP precisely so the
-      # report cannot be committed. In `--print` mode there is no human to
-      # approve either, so both were denied silently mid-turn. The agent found
-      # a real defect, wrote a real test, wrote a real fix — and the run died
-      # seven minutes later at the summary gate, having burned two full suite
-      # runs, with the only explanation buried in the agent's own prose:
-      # "sandbox restrictions in this session blocked me from ...".
-      #
-      # So the permissions now match what the prompt asks for, and no more:
-      # `--allowed-tools Bash Edit Write` (Read/Glob/Grep are not gated) plus
-      # `--add-dir "$WORK"` for the summary. Granting Bash is most of what
-      # bypassPermissions would grant anyway; the difference kept here is that
-      # anything NOT on that list is still refused, and adding to the list is a
-      # diff someone reviews.
-      #
-      # `anthropics/claude-code-action@v1` is the other documented route and
-      # would replace this step entirely; it takes `claude_code_oauth_token`
-      # as well as `anthropic_api_key`. The CLI is kept here because a wrong
-      # shell flag fails more obviously than a wrong marketplace input.
-      #
-      # Still unverified from the authoring environment: that this exact
-      # package/flag combination runs, since the CLI is not installed there. If
-      # it is wrong the step fails loudly, no branch is pushed, and the item is
-      # still in D1 to re-fire — a wasted run, not a bad pull request.
-      - name: Run the agent
+      - name: Run the agent inside its disposable container
         env:
-          # Generated with `claude setup-token`. The coding agent receives
-          # neither the relay read secret nor GitHub write credentials.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_ARGS: '--print --permission-mode acceptEdits --allowed-tools Bash Edit Write'
         run: |
           set -euo pipefail
-          npm install -g @anthropic-ai/claude-code
-          claude --version
-          # `>`, not `| tee`. The agent has just read the user's report and is
-          # writing prose about it; tee-ing that to stdout published it to the
-          # Actions log, which is as public as the repository — rule 1 of this
-          # file, broken by the file itself. Nothing downstream needed it: the
-          # only step that surfaces any of this scans it first.
-          claude $CLAUDE_ARGS --add-dir "$WORK" < "$WORK/PROMPT.md" > "$WORK/agent.log"
+          [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo '::error::Agent authentication is not configured.'; exit 1; }
+          # No runner environment, Docker socket, GitHub token, relay token,
+          # trusted checkout, or original feedback input is mounted here.
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g \
+            --env HOME=/tmp --env CLAUDE_CODE_OAUTH_TOKEN --env CLAUDE_ARGS \
+            --env WORK=/feedback --env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+            --mount "type=bind,src=$RUNNER_TEMP/candidate,dst=/workspace" \
+            --mount "type=bind,src=$RUNNER_TEMP/feedback,dst=/feedback" \
+            wafra-feedback bash -c '
+              CI=1 EXPO_OFFLINE=1 node node_modules/expo/bin/cli prebuild --platform ios --no-install --template ./node_modules/expo/template.tgz &&
+              claude $CLAUDE_ARGS --add-dir "$WORK" < "$WORK/PROMPT.md" > "$WORK/agent.log" 2>&1
+            ' > "$RUNNER_TEMP/container.log" 2>&1 || {
+              echo '::error::Agent execution failed. Diagnostic and agent output are withheld.'
+              exit 1
+            }
 
-      # ── Fail here, not seven minutes later ──
-      #
-      # SUMMARY.md is required by the verbatim gate two steps down, which is
-      # the right place to REFUSE and the wrong place to find out: by then the
-      # suite has run twice. A missing summary is nearly always a permission
-      # the step above did not grant, so it is diagnosed where it happened.
-      - name: The agent must have written its summary
+      - name: Package and scan with untouched host code before upload
+        env:
+          FEEDBACK_ITEM: ${{ runner.temp }}/feedback-item.json
+          FEEDBACK_SUMMARY: ${{ runner.temp }}/feedback/SUMMARY.md
         run: |
           set -euo pipefail
-          [ -s "$WORK/SUMMARY.md" ] && exit 0
-          echo "::error::the agent wrote no $WORK/SUMMARY.md."
-          {
-            echo "## The agent wrote no summary"
-            echo
-            echo "\`SUMMARY.md\` is step 5 of the prompt and the only text this workflow is"
-            echo "allowed to put in a pull request body — the report itself never leaves the"
-            echo "runner. Without it there is no run to continue."
-            echo
-            echo "Almost always a permission the agent did not have. Check \`CLAUDE_ARGS\` and"
-            echo "the \`--add-dir\` on the step above against what the prompt asks for:"
-            echo "\`.github/scripts/feedback-prompt.mjs\` tells the agent to run \`npm test\`"
-            echo "(needs \`Bash\`) and to write into \`\$RUNNER_TEMP\` (needs \`--add-dir\`)."
-            echo
-            echo "The agent's own last words usually name it:"
-            echo '```'
-            # Its last words are prose about the report, so they get the same
-            # gate the pull request body gets — the scanner, on the excerpt,
-            # before anything is published. Nothing is staged at this point, so
-            # the diff half of it is empty and this is a pure filter.
-            tail -20 "$WORK/agent.log" 2> /dev/null > "$WORK/agent-tail.txt" || true
-            if [ -s "$WORK/agent-tail.txt" ] && node .github/scripts/feedback-no-verbatim.mjs \
-                 "$WORK/feedback.json" "$WORK/agent-tail.txt" > /dev/null 2>&1; then
-              cat "$WORK/agent-tail.txt"
-            else
-              echo "(withheld: the agent produced no output, or its output quotes the report"
-              echo " and this summary is public. Read it with the relay read token instead.)"
-            fi
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          node .github/scripts/feedback-candidate.mjs collect \
+            "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/handoff/candidate.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, verified upstream 2026-09-12
+        with:
+          name: feedback-candidate
+          path: ${{ runner.temp }}/handoff/candidate.json
+          if-no-files-found: error
+          retention-days: 1
 
-      # ── Red, then green ──
-      #
-      # The claim "a failing-then-passing test" is checked, not trusted.
-      - name: Prove the test fails without the fix and passes with it
+  validate:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.candidate.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream 2026-09-12
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, verified upstream 2026-09-12
+        with:
+          node-version: 22.22.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, verified upstream 2026-09-12
+        with:
+          name: feedback-candidate
+          path: ${{ runner.temp }}/handoff
+      - name: Validate input and bind its digest before running candidate code
+        id: candidate
+        run: node .github/scripts/feedback-candidate.mjs digest "$RUNNER_TEMP/handoff/candidate.json"
+      - name: Prepare clean baseline and independent test trees
         run: |
           set -euo pipefail
-          git add -A
-          if git diff --cached --quiet; then
-            echo "::error::the agent changed nothing. There is nothing to open a pull request for."
-            echo "The agent produced no diff for this report." >> "$GITHUB_STEP_SUMMARY"
+          docker build --tag wafra-feedback-tests --file - . <<'DOCKERFILE'
+          FROM node:22.22.3-bookworm@sha256:2d178f2785b96dfbf62a416ca2e40f50e30150b4ff3320d706f0d96e90600eb3 AS node-runtime
+          FROM swift:6.2.4-bookworm@sha256:da5a812247285bddb8cf3a242f882a3affa156f34deb16df1b3267efe7129aff
+          COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+          COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+          RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+              ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+              test "$(node --version)" = "v22.22.3" && \
+              test "$(npm --version)" = "10.9.8" && swiftc --version
+          RUN apt-get update && apt-get install -y --no-install-recommends default-jdk-headless sqlite3 make python3 && rm -rf /var/lib/apt/lists/*
+          ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+          WORKDIR /opt/wafra
+          COPY package.json package-lock.json ./
+          COPY scripts/patch-react-native-screens.cjs ./scripts/
+          RUN npm ci
+          COPY server/package.json server/package-lock.json ./server/
+          RUN npm --prefix server ci
+          WORKDIR /workspace
+          DOCKERFILE
+          for tree in baseline red green; do
+            mkdir -p "$RUNNER_TEMP/$tree"
+            git archive HEAD | tar -x -C "$RUNNER_TEMP/$tree"
+            ln -s /opt/wafra/node_modules "$RUNNER_TEMP/$tree/node_modules"
+            ln -s /opt/wafra/server/node_modules "$RUNNER_TEMP/$tree/server/node_modules"
+          done
+          node .github/scripts/feedback-candidate.mjs tests "$RUNNER_TEMP/handoff/candidate.json" "$RUNNER_TEMP/red"
+          node .github/scripts/feedback-candidate.mjs apply "$RUNNER_TEMP/handoff/candidate.json" "$RUNNER_TEMP/green"
+      - name: Prove baseline green, reproduction red, and full change green offline
+        run: |
+          set -euo pipefail
+          run_suite() {
+            docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g \
+              --env HOME=/tmp --env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+              --mount "type=bind,src=$RUNNER_TEMP/$1,dst=/workspace" \
+              wafra-feedback-tests bash -c 'CI=1 EXPO_OFFLINE=1 node node_modules/expo/bin/cli prebuild --platform ios --no-install --template ./node_modules/expo/template.tgz && npm test && npm --prefix server run typecheck && bash scripts/test/worker-gate.sh' \
+              > "$RUNNER_TEMP/$1.log" 2>&1
+          }
+          # An existing broken baseline must not be counted as a reproduction.
+          run_suite baseline || { echo '::error::The trusted baseline suite failed; no reproduction claim is possible.'; exit 1; }
+          if run_suite red; then
+            echo '::error::The proposed test passed without the fix; refusing publication.'
             exit 1
+          else
+            red_status=$?
+            [ "$red_status" -eq 1 ] || { echo '::error::The reproduction failed abnormally; no test failure was established.'; exit 1; }
           fi
-          git diff --cached --binary > "$WORK/full.patch"
-          git diff --cached --binary -- scripts/test server/test > "$WORK/tests.patch"
-          if [ ! -s "$WORK/tests.patch" ]; then
-            echo "::error::no test was added or changed. A fix with no reproduction is not accepted."
-            exit 1
-          fi
+          run_suite green || { echo '::error::The proposed fix did not pass validation. Test output is withheld.'; exit 1; }
+          echo 'The baseline passed, the proposed regression failed without its fix, and the complete candidate passed.'
 
-          # A clean tree carrying the test change and nothing else. `git clean`
-          # without -x leaves gitignored paths alone, so node_modules survives.
-          git reset --quiet
-          git checkout -- .
-          git clean -fdq
-          git apply "$WORK/tests.patch"
-          echo "── the suite WITH the new test and WITHOUT the fix ──"
-          if npm test > "$WORK/red.log" 2>&1; then
-            echo "::error::the new test passes without the fix, so it does not reproduce the report."
-            tail -40 "$WORK/red.log"
-            exit 1
-          fi
-          echo "red, as it must be."
-
-          git checkout -- .
-          git clean -fdq
-          git apply "$WORK/full.patch"
-          echo "── the suite WITH the fix ──"
-          npm test 2>&1 | tail -40
-
-      - name: Check the relay too
-        run: |
-          set -euo pipefail
-          npm --prefix server run typecheck
-          npm --prefix server test | tail -5
-          bash scripts/test/worker-gate.sh | tail -3
-
-      # ── The gate that matters most ──
-      #
-      # See .github/scripts/feedback-no-verbatim.mjs for why this is a hard
-      # failure and why it must not be weakened when it trips.
-      - name: Refuse to publish anything quoted from the user
-        run: |
-          set -euo pipefail
-          git add -A
-          node .github/scripts/feedback-no-verbatim.mjs \
-            "$WORK/feedback.json" "$WORK/SUMMARY.md"
-
-      - name: Open a draft pull request
+  publish:
+    needs: [generate, validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream 2026-09-12
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, verified upstream 2026-09-12
+        with:
+          node-version: 22.22.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, verified upstream 2026-09-12
+        with:
+          name: feedback-candidate
+          path: ${{ runner.temp }}/handoff
+      - name: Revalidate original consent and diagnostic then create a draft through the API
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh auth setup-git
-          branch="feedback/$FEEDBACK_ID"
-          git config user.name  'wafra-feedback-agent'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git switch -c "$branch"
-          git add -A
-          # Written to a file rather than passed as a multi-line -m: a YAML
-          # block scalar ends at the first line indented less than the block,
-          # and a commit body's second line starts at column 0.
-          {
-            echo "fix: issue reported in feedback $FEEDBACK_ID"
-            echo
-            echo "Reported from ${FEEDBACK_PLATFORM} ${FEEDBACK_APP_VERSION} (locale ${FEEDBACK_LOCALE})."
-            echo "Opened by .github/workflows/feedback-agent.yml. Draft — needs human review."
-          } > "$WORK/commit-message.txt"
-          git commit --quiet -F "$WORK/commit-message.txt"
-          # A re-run of the same id is an update of the same branch, not a
-          # second one. Fetch first so --force-with-lease has something to
-          # lease against instead of refusing on stale info.
-          git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
-          git push --force-with-lease origin "$branch"
-
-          {
-            echo "Filed from **${FEEDBACK_PLATFORM}**, app **${FEEDBACK_APP_VERSION}**, locale \`${FEEDBACK_LOCALE}\`."
-            echo
-            echo "Relay feedback id \`${FEEDBACK_ID}\` — readable with the maintainer read token for"
-            echo "14 days from when it was filed, then deleted."
-            echo
-            echo "**The report itself is deliberately not reproduced here.** It is prose a user typed"
-            echo "and can contain a real bank alert; this pull request is public and permanent, and the"
-            echo "relay's copy is neither. What follows is the agent's own account of the problem."
-            echo
-            cat "$WORK/SUMMARY.md"
-            echo
-            echo "---"
-            echo
-            echo "### What this run already proved"
-            echo
-            echo "- The added test **fails** on a tree carrying the test change alone."
-            echo "- The whole change makes \`npm test\` **pass**."
-            echo "- \`npm --prefix server\` typecheck and tests, and the Worker gate, pass."
-            echo "- Nothing in the diff or in this description quotes the report verbatim."
-            echo
-            echo "### What a human still has to decide"
-            echo
-            echo "- Whether this is the *right* reproduction of what was actually reported."
-            echo "- Whether the fix belongs where it was put."
-            echo "- Whether it deserves a corpus case rather than a one-off test."
-            echo
-            echo "> Note: this pull request was created with \`GITHUB_TOKEN\`, so \`ci.yml\` will **not**"
-            echo "> start on it by itself. Close and reopen it, or push a commit, to get a CI run."
-            echo
-            echo "Draft on purpose. Nothing here is ready to merge unreviewed."
-          } > "$WORK/pr-body.md"
-
-          existing=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
-          set +e
-          if [ -n "$existing" ]; then
-            gh pr edit "$existing" --body-file "$WORK/pr-body.md" 2> "$WORK/gh.err"
-            created=$?
-            url=$(gh pr view "$existing" --json url --jq .url)
-          else
-            url=$(gh pr create --draft \
-              --title "Feedback: ${FEEDBACK_PLATFORM} ${FEEDBACK_APP_VERSION} — reported issue" \
-              --body-file "$WORK/pr-body.md" \
-              --head "$branch" 2> "$WORK/gh.err")
-            created=$?
-          fi
-          set -e
-
-          # ── The branch is already pushed. Do not throw the body away. ──
-          #
-          # A repository with "Allow GitHub Actions to create and approve pull
-          # requests" turned off answers the very last call of this run with
-          # `GitHub Actions is not permitted to create or approve pull requests`
-          # — after the agent turn, both suite runs and the verbatim gate have
-          # all passed. Everything of value exists at that point: the branch is
-          # on the remote and SUMMARY.md has been CLEARED by the verbatim gate
-          # two steps up, which is what makes it safe to print here and nowhere
-          # earlier. Losing it to a settings checkbox would mean re-running the
-          # whole job to recover a file that already exists.
-          if [ "$created" != "0" ]; then
-            {
-              echo "## The branch is pushed. The pull request was refused."
-              echo
-              echo '```'
-              tail -5 "$WORK/gh.err"
-              echo '```'
-              echo
-              echo "If that says **not permitted to create or approve pull requests**, it is a"
-              echo "repository setting and not a failure of this run: **Settings → Actions → General →"
-              echo "Workflow permissions** → tick _Allow GitHub Actions to create and approve pull"
-              echo "requests_. Nothing needs re-running once it is on — open this one by hand:"
-              echo
-              echo "<${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${branch}?expand=1>"
-              echo
-              echo "The body it would have used is below. It has already passed the verbatim gate,"
-              echo "so it quotes nothing from the report."
-              echo
-              echo "---"
-              echo
-              cat "$WORK/pr-body.md"
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::the branch was pushed but the pull request could not be created. The body is in the job summary."
-            exit 1
-          fi
-
-          {
-            echo "## Draft pull request opened"
-            echo
-            echo "$url"
-          } >> "$GITHUB_STEP_SUMMARY"
+          FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
+          VALIDATED_DIGEST: ${{ needs.validate.outputs.digest }}
+        run: node .github/scripts/feedback-publish.mjs "$RUNNER_TEMP/handoff/candidate.json"

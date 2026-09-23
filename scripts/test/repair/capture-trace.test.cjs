@@ -30,9 +30,21 @@ test('logging failures never change financial execution', () => {
   const h = harness('1', () => { throw new Error('sink unavailable'); });
   assert.doesNotThrow(() => h.captureTrace('save:done', 1, 20));
 });
+test('runtime capture-plan timing is independent of verbose capture tracing', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../../src/lib/capture-executor.ts'), 'utf8');
+  assert.match(source, /const planStarted = Date\.now\(\)/);
+  assert.doesNotMatch(source, /const planStarted = tracing \? Date\.now\(\) : 0/);
+});
 test('public APK builds default tracing off and Play bundles refuse it', () => {
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/build-apk.yml'), 'utf8');
   assert.match(workflow, /capture_trace:\n[\s\S]*?default: false/);
   assert.ok(workflow.includes("github.event.inputs.capture_trace == 'true' && '1' || '0'"));
   assert.ok(workflow.includes("github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'"));
+});
+test('manual APK builds compile the selected workflow ref instead of silently substituting main', () => {
+  const workflow = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/build-apk.yml'), 'utf8');
+  const checkout = workflow.match(/- uses: actions\/checkout@v4(?:\n\s+with:\n(?:\s+[^\n]+\n)*)?/m)?.[0] ?? '';
+  assert.ok(checkout, 'release workflow must check out source before building');
+  assert.doesNotMatch(checkout, /\bref:\s*main\b/,
+    'dispatching a review-branch APK must not compile main under the branch run');
 });

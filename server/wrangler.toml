@@ -12,6 +12,42 @@ compatibility_flags = ["nodejs_compat"]
 [build]
 command = ""
 
+# Free Workers already has a hard 10 ms CPU ceiling and Cloudflare rejects a
+# custom [limits] block on that plan (API error 100328). BEFORE changing this
+# account to Workers Paid, add the following active block here so the paid plan's
+# larger default CPU allowance cannot become an accidental cost surface:
+#
+# [limits]
+# cpu_ms = 10_000
+
+# Cloudflare-native limits execute before the D1-backed exact counters. They are
+# deliberately not treated as accounting (the API is eventually consistent),
+# but they prevent ordinary client loops from reaching D1 at all. namespace_id
+# values only need to be unique inside this Cloudflare account.
+[[ratelimits]]
+name = "PUBLIC_RATE_LIMITER"
+namespace_id = "26091701"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+[[ratelimits]]
+name = "AUTH_RATE_LIMITER"
+namespace_id = "26091702"
+
+  [ratelimits.simple]
+  limit = 120
+  period = 60
+
+[[ratelimits]]
+name = "IMPORT_RATE_LIMITER"
+namespace_id = "26091703"
+
+  [ratelimits.simple]
+  limit = 6
+  period = 60
+
 [[d1_databases]]
 binding = "DB"
 database_name = "wafra"
@@ -21,6 +57,10 @@ database_name = "wafra"
 # applies schema.sql. `npm run deploy` refuses to run while this is still the
 # placeholder, so the failure is a sentence rather than a Cloudflare API error.
 database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
+
+# Best-effort email copy of privacy-safe Android tester diagnostics.
+[[send_email]]
+name = "DIAGNOSTIC_EMAIL"
 
 # Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
@@ -84,12 +124,11 @@ head_sampling_rate = 0.1
 # agent read route is 503. All of these are deliberate degradations, not
 # failures. Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.
 #
-# ONE THING TO SET AT THE EDGE, not here. /v1/feedback is the only write path
-# with no bearer token in front of it. The Worker's own global fixed window is
-# a backstop, exactly as it is for /v1/pair; the production first line should
-# be a Cloudflare rate-limiting rule on `http.request.uri.path eq
-# "/v1/feedback"`, which is the only layer that can see a client IP without
-# this service ever storing one.
+# PUBLIC_RATE_LIMITER above now handles /v1/pair, /v1/join, /v1/feedback and
+# /v1/health before they touch D1; AUTH_RATE_LIMITER does the same for bearer
+# routes. Those bindings still run *inside* the Worker. If this service later
+# moves behind a custom Cloudflare zone, an edge/WAF rate-limit rule in front of
+# the Worker is an additional protection against raw request-billing floods.
 
 # Set, because feedback dispatch is configured. The Worker holds the token as a
 # secret; this says which repository to call. Not secret — it is the same
@@ -103,6 +142,10 @@ head_sampling_rate = 0.1
 # had nothing to point at.
 [vars]
 GITHUB_REPOSITORY = "khanjer496-alt/Wafra"
+# Emergency production circuit breakers. Flip either to "0" and deploy to stop
+# that cost surface without taking transaction capture/sync offline.
+IMPORTS_ENABLED = "1"
+FEEDBACK_AGENT_ENABLED = "1"
 # The EAS project the app is built against — the same UUID as
 # expo.extra.eas.projectId in app.json, and it must stay the same as it:
 # Expo's push service scopes a token to a project, so two values here and

@@ -93,8 +93,23 @@ ok('authenticated deletion retries retain only an expiring token digest',
     /PRIMARY KEY \(token_hash, route\)/.test(schema) &&
     /DELETE FROM admin_deletion_receipts WHERE expires_at <= unixepoch\(\)/.test(worker));
 ok('retained queue rows get scheduled wake retries',
-  /SELECT DISTINCT q\.device_id AS id[\s\S]*JOIN push_registrations/.test(worker) &&
-    /pending \?\? \[\][\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
+  /SELECT p\.device_id AS id[\s\S]*FROM push_registrations p[\s\S]*EXISTS \(SELECT 1 FROM queue q/.test(worker) &&
+    /LIMIT \?1/.test(worker) &&
+    /MAX_SCHEDULED_WAKE_DEVICES/.test(worker) &&
+    /pendingRows[\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
+ok('scheduled recovery is bounded and queue expiry has a supporting index',
+  /const MAX_SCHEDULED_WAKE_DEVICES = 250/.test(worker) &&
+    /const SCHEDULED_WAKE_CONCURRENCY = 20/.test(worker) &&
+    /CREATE INDEX IF NOT EXISTS queue_by_expiry ON queue \(created_at\)/.test(schema));
+const costLimitColumns = schema
+  .slice(schema.indexOf('CREATE TABLE IF NOT EXISTS cost_limits ('),
+    schema.indexOf('CREATE TABLE IF NOT EXISTS pair_limits ('))
+  .replace(/--[^\n]*/g, '');
+ok('supplemental cost budgets contain counters only and stop writing at the ceiling',
+  /CREATE TABLE IF NOT EXISTS cost_limits \(/.test(schema) &&
+    /PRIMARY KEY \(actor_id, scope\)/.test(schema) &&
+    /cost_limits\.usage_count \+ excluded\.usage_count <= \?5/.test(worker) &&
+    !/\b(?:ip|message|merchant|sender|body)\s+(?:TEXT|BLOB)\b/i.test(costLimitColumns));
 ok('server drops parser raw before sealing',
   /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(worker));
 ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports',
@@ -139,7 +154,8 @@ ok('email and PDF rows cross the same raw-discard boundary',
   /\.\.\.withoutRaw\(parsedRows\[index\]\)[\s\S]{0,160}captureSource: 'email'/.test(worker) &&
     /\.\.\.withoutRaw\(extracted\.rows\[index\]\)/.test(worker));
 ok('PDF endpoint never returns extracted rows or text',
-  /return json\(\{ acceptedRows: extracted\.rows\.length, pages: extracted\.pages \}, 202\)/.test(worker));
+  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*rejectedRows: extracted\.rejectedRows,\s*totalRows: extracted\.totalRows,\s*pages: extracted\.pages,[\s\S]{0,320}coverage: extracted\.completeRowAccounting/.test(worker) &&
+    !/return json\(\{[\s\S]{0,220}\brows\s*:/.test(worker.slice(worker.indexOf("url.pathname === '/v1/import/pdf'"))));
 ok('import module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(imports));
 ok('email HTTP ingestion requires the email-only bearer scope',
@@ -147,14 +163,33 @@ ok('email HTTP ingestion requires the email-only bearer scope',
 ok('PDF upload and capability discovery require admin scope',
   /url\.pathname === '\/v1\/import\/pdf'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
     /url\.pathname === '\/v1\/import\/capabilities'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker));
+ok('protected PDFs use a bounded one-request password without persistence',
+  /x-wafra-pdf-password/.test(worker) &&
+    /value\.length > 128/.test(worker) &&
+    /extractPdfStatementRows\([\s\S]{0,180}pdfPassword\(req\)/.test(worker) &&
+    /pdf_password_required/.test(worker) && /pdf_password_incorrect/.test(worker) &&
+    !/console\./.test(worker) && !/password[^\n]{0,80}(?:INSERT INTO|UPDATE |put\()/.test(worker));
 ok('direct PDF upload enforces media type, byte cap and PDF magic',
   /content-type[\s\S]{0,180}application\/pdf/.test(worker) &&
-    /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) && /!== '%PDF-'/.test(worker));
+    /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) &&
+    /pdfHeaderOffset\(incoming\.bytes\) < 0/.test(worker) &&
+    /MAX_PDF_HEADER_OFFSET = 1024/.test(worker));
 ok('direct CSV upload requires admin scope, an allowed media type, and a byte cap',
   /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
-    /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
-    /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
-    /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+  /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
+  /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
+  /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+ok('cloud imports have request, fan-out, and emergency-disable cost guards',
+  /const STATEMENT_IMPORTS_PER_HOUR = 12/.test(worker) &&
+    /GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000/.test(worker) &&
+    /SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR = 25_000/.test(worker) &&
+    /GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR = 100_000/.test(worker) &&
+    /IMPORTS_ENABLED/.test(worker) && /imports_disabled/.test(worker));
+ok('current statement uploads use explicit ISO ledger money instead of device country',
+  /x-wafra-ledger-currency/.test(worker) && /x-wafra-ledger-exponent/.test(worker) &&
+    /ledgerMoneySpec\(rawCurrency\)/.test(worker) && /spec\.exponent !== exponent/.test(worker) &&
+    /extractPdfStatementRows\([\s\S]{0,140}requestedMoney\.currency/.test(worker) &&
+    /parseStatementCsv\([\s\S]{0,140}requestedMoney\.currency/.test(worker));
 ok('forwarded attachments share aggregate attachment and row ceilings',
   /const MAX_EMAIL_ATTACHMENTS = 8/.test(worker) &&
     /let importedRows = 0/.test(worker) &&

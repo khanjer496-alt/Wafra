@@ -4,8 +4,11 @@ name: Build Android APK
 # and building on every push to the working branch burned the whole allowance
 # in a month — after which nothing builds at all until the reset.
 #
-# CI guards every main push. Full APK/AAB builds are explicit requests from
-# main, not a side effect of routine development or repository cleanup.
+# CI guards every main push. Full APK/AAB builds are explicit manual requests,
+# not a side effect of routine development or repository cleanup. The selected
+# workflow ref is also the source ref: dispatching from `main` builds `main`,
+# while an explicitly selected review branch can produce an isolated candidate
+# without silently substituting `main` underneath it.
 on:
   workflow_dispatch:
     inputs:
@@ -18,9 +21,9 @@ on:
         type: boolean
         default: false
       founder_unlock:
-        description: 'Internal test APK only: enable hidden Wafra logo Founder Pro unlock'
+        description: 'Hidden Wafra logo Founder Pro unlock (on by default; forced off for a Play bundle)'
         type: boolean
-        default: false
+        default: true
       architecture:
         description: 'ARM64 for modern Android phones; universal for all supported CPUs'
         type: choice
@@ -63,6 +66,7 @@ jobs:
       # fork or a renamed Worker overrides it without editing this file. Not a
       # secret: it is a public URL that ships inside the APK by definition.
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+      EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY: ${{ vars.EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY || 'pk_h206sECq-roxM9QdMvVBJ' }}
       # Both halves are required: Gradle compiles the raw native method closed,
       # while Expo inlines the public flag into the JavaScript bundle. A normal
       # push/manual build pins both off. Only an explicit manual corpus run can
@@ -70,7 +74,14 @@ jobs:
       EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
-      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ github.event.inputs.founder_unlock == 'true' && '1' || '0' }}
+      # The side-loaded APK this workflow exists to produce is an internal test
+      # build, and its tester is the founder: the five-tap Wafra logo in
+      # Settings is ON unless it is explicitly turned off, so a fresh APK never
+      # lands without a way to activate Founder Pro. A Play bundle is the one
+      # artifact that reaches strangers, so `bundle` forces the gesture closed
+      # regardless of the input — Metro inlines this value into whichever
+      # artifact the same job builds.
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ (github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +91,16 @@ jobs:
         run: |
           echo '::error::Capture tracing is for a local device test APK, not a Play bundle.'
           exit 1
+
+      - name: Record the Founder Pro gesture state
+        run: |
+          if [ "$EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK" = "1" ]; then
+            echo "### 🔓 Founder Pro gesture enabled" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tap the Wafra logo at the bottom of Settings five times to activate Founder Pro." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### 🔒 Founder Pro gesture disabled" >> "$GITHUB_STEP_SUMMARY"
+            echo "This artifact compiles the hidden logo unlock closed." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Require the approved Claude design baseline
         run: node scripts/check-design-baseline.mjs

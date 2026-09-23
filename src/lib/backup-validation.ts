@@ -1,5 +1,6 @@
 import type { AppState } from '@/lib/types';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -19,6 +20,8 @@ const nonnegative: Check = (value) => integer(value) && (value as number) >= 0;
 const positive: Check = (value) => integer(value) && (value as number) > 0;
 const finitePositive: Check = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
 const category: Check = (value) => typeof value === 'string' && categoryIds.has(value);
+const ledgerCurrency: Check = (value) => typeof value === 'string' &&
+  value === value.trim().toUpperCase() && ledgerMoneySpec(value) !== null;
 const oneOf = (...values: unknown[]): Check => (value) => values.includes(value);
 const optional = (row: RecordValue, checks: Record<string, Check>): boolean =>
   Object.entries(checks).every(([key, check]) => row[key] === undefined || check(row[key]));
@@ -88,15 +91,26 @@ const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
 }) && optional(value, { minDueEstimated: boolean, settledAt: isoDate });
+const statementCoverageEntry: Check = (value) => record(value) && required(value, {
+  id, sourceKey: id, label: text, startDate: isoDate, endDate: isoDate, importedAt: nonnegative,
+  format: oneOf('pdf', 'csv'),
+}) && (value.startDate as string) <= (value.endDate as string);
 const goal: Check = (value) => record(value) && required(value, {
   id, title: text, emoji: text, targetFils: positive, savedFils: nonnegative,
 });
 const onboardingProfile: Check = (value) => record(value) && required(value, {
   v: oneOf(1),
-  stage: oneOf('welcome', 'focus', 'tracking', 'preview', 'privacy', 'capture', 'complete'),
+  stage: oneOf('welcome', 'focus', 'tracking', 'alerts', 'intention', 'preview', 'privacy', 'capture', 'complete'),
   focus: oneOf(null, 'spending', 'bills', 'cashflow', 'overview'),
   tracking: oneOf(null, 'none', 'bank-apps', 'spreadsheet', 'finance-app'),
   startedAt: nonnegative,
+}) && optional(value, {
+  intention: oneOf(null, 'control', 'spend-intentionally', 'stay-ahead', 'build-buffer'),
+  alerts: oneOf(null, 'sms', 'notifications', 'neither', 'unsure'),
+  // Any well-formed region code, not just the ones this build can illustrate:
+  // a ledger written by a newer build that knows more countries must still
+  // restore, and an unknown code already falls back to neutral bank glyphs.
+  country: (value) => value === null || (typeof value === 'string' && /^[A-Z]{2}$/.test(value)),
 });
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>
@@ -118,13 +132,20 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
   }
   return optional(value, {
     merchantOverrides: dictionary(category), billAliases: dictionary(billAlias), accountHints: dictionary(id),
+    statementCoverage: arrayOf(statementCoverageEntry),
+    trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
+      /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
     notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,
+    hydrationFinalizeVersion: nonnegative,
+    transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
+    androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
     marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
+    knownBanks: arrayOf(text),
     themePreference: oneOf('system', 'light', 'dark'),
-    onboardingCurrencyEvidence: oneOf(null, 'AED', 'SAR'),
+    onboardingCurrencyEvidence: (v) => v === null || ledgerCurrency(v),
     onboardingProfile: (v) => v === null || onboardingProfile(v),
     onboardingPlan: (v) => v === null || (record(v) && required(v, {
       goalIds: arrayOf(oneOf('emergency', 'travel', 'home')),

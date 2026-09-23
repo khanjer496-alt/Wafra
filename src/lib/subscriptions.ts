@@ -1,4 +1,5 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { isSpending } from '@/lib/ledger';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 
@@ -249,16 +250,109 @@ function recurringProviderTitle(transaction: Transaction): string {
   return title;
 }
 
-export function detectSubscriptions(
+type SubscriptionDetectionKey = {
+  transactions: Transaction[];
+  notSubscriptions: string[];
+  todayKey: string;
+  liveAccounts?: Set<string>;
+  internalTransfers?: Set<string>;
+};
+
+type SubscriptionDetectionCacheEntry = SubscriptionDetectionKey & { value: Subscription[] };
+type SubscriptionDetectionInFlight = SubscriptionDetectionKey & { promise: Promise<Subscription[]> };
+
+// A single-entry cache let an unrelated caller evict Bills' projection, so
+// switching tabs could restart a 15k-row scan even though the ledger had not
+// changed. Keep a tiny identity-keyed LRU instead. Store snapshots are immutable,
+// so these references are an exact semantic key and need no O(n) fingerprint.
+const SUBSCRIPTION_CACHE_MAX = 4;
+let subscriptionDetectionCache: SubscriptionDetectionCacheEntry[] = [];
+let subscriptionDetectionInFlight: SubscriptionDetectionInFlight[] = [];
+
+function sameDetectionKey(
+  entry: SubscriptionDetectionKey,
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): boolean {
+  return entry.transactions === transactions &&
+    entry.notSubscriptions === notSubscriptions &&
+    entry.todayKey === todayKey &&
+    entry.liveAccounts === liveAccounts &&
+    entry.internalTransfers === internalTransfers;
+}
+
+function cachedSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] | null {
+  const index = subscriptionDetectionCache.findIndex((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  if (index < 0) return null;
+  const [entry] = subscriptionDetectionCache.splice(index, 1);
+  subscriptionDetectionCache.push(entry);
+  return entry.value;
+}
+
+function cacheSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[],
+  todayKey: string,
+  liveAccounts: Set<string> | undefined,
+  internalTransfers: Set<string> | undefined,
+  value: Subscription[],
+): Subscription[] {
+  subscriptionDetectionCache = subscriptionDetectionCache.filter((entry) =>
+    !sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  subscriptionDetectionCache.push({
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    value,
+  });
+  if (subscriptionDetectionCache.length > SUBSCRIPTION_CACHE_MAX) subscriptionDetectionCache.shift();
+  return value;
+}
+
+/**
+ * The recurrence projection is deliberately expressed as a cooperative worker.
+ * A 15k-row imported ledger is normal on Android, and running the complete scan
+ * in one React render can hold the JS thread long enough for the first Bills tap
+ * to look frozen. The synchronous public API drives this worker to completion
+ * for existing callers/tests; Android Bills drives the same worker in short
+ * slices so navigation and touch handling keep getting turns.
+ */
+function* subscriptionDetectionWorker(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
   today: Date = new Date(),
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-): Subscription[] {
+): Generator<void, Subscription[], void> {
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
-  for (const t of transactions) {
+  // Persisted/store transaction order is newest-first. Remember whether this
+  // input has that invariant so each merchant group can be reversed in O(n)
+  // rather than independently sorted. Callers with arbitrary arrays still get
+  // the old comparator path.
+  let newestFirst = true;
+  for (let index = 1; index < transactions.length; index += 1) {
+    if ((index & 127) === 0) yield;
+    if (transactions[index - 1].date < transactions[index].date) {
+      newestFirst = false;
+      break;
+    }
+  }
+  for (let index = 0; index < transactions.length; index += 1) {
+    if ((index & 127) === 0) yield;
+    const t = transactions[index];
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
     const k = providerTitle.toLowerCase();
@@ -275,7 +369,31 @@ export function detectSubscriptions(
 
   const subs: Subscription[] = [];
   for (const txs of groups.values()) {
-    txs.sort((a, b) => (a.date < b.date ? -1 : 1));
+    // A single observation can never satisfy the recurrence rules below, even
+    // for a known subscription provider. Skip it before yielding into the
+    // expensive per-merchant cadence path. Large imported ledgers contain
+    // thousands of one-off merchants; yielding once for every impossible group
+    // turns a bounded scan into seconds of timer churn on Android.
+    if (txs.length < 2) continue;
+
+    // Unknown ordinary merchants need two intervals (three charges). With only
+    // two observations the only groups that can possibly qualify are known
+    // subscription providers or bill-like categories, whose existing rule uses
+    // a single interval. This is a conservative prefilter: checking ANY row for
+    // a bill-like category cannot drop a group whose latest row would qualify.
+    if (txs.length === 2) {
+      const knownTwoChargeProvider = KNOWN_SUBSCRIPTION_MERCHANTS.test(txs[0].title);
+      const billLikeTwoChargeGroup = txs.some((transaction) =>
+        transaction.category === 'utilities' ||
+        transaction.category === 'telecom' ||
+        transaction.category === 'rent' ||
+        transaction.category === 'loan');
+      if (!knownTwoChargeProvider && !billLikeTwoChargeGroup) continue;
+    }
+
+    yield;
+    if (newestFirst) txs.reverse();
+    else txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const title = txs[txs.length - 1].title;
     const known = KNOWN_SUBSCRIPTION_MERCHANTS.test(title);
     // This evidence belongs to every source observation, not to the collapsed
@@ -286,7 +404,9 @@ export function detectSubscriptions(
 
     // Collapse same-day duplicates (split payments) into one charge.
     const charges: Transaction[] = [];
-    for (const t of txs) {
+    for (let index = 0; index < txs.length; index += 1) {
+      if (index > 0 && (index & 127) === 0) yield;
+      const t = txs[index];
       const prev = charges[charges.length - 1];
       if (prev && prev.date === t.date) prev.amountFils += t.amountFils;
       else charges.push({ ...t });
@@ -346,6 +466,7 @@ export function detectSubscriptions(
 
     const gaps: number[] = [];
     for (let i = 1; i < cadenceCharges.length; i++) {
+      if ((i & 127) === 0) yield;
       gaps.push(daysBetween(cadenceCharges[i - 1].date, cadenceCharges[i].date));
     }
 
@@ -463,6 +584,122 @@ export function detectSubscriptions(
 
   subs.sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
   return subs;
+}
+
+export function detectSubscriptions(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] {
+  const todayKey = toISODate(today);
+  const cached = cachedSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+  );
+  if (cached) return cached;
+
+  const worker = subscriptionDetectionWorker(
+    transactions,
+    notSubscriptions,
+    today,
+    liveAccounts,
+    internalTransfers,
+  );
+  let step = worker.next();
+  while (!step.done) step = worker.next();
+  return cacheSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    step.value,
+  );
+}
+
+// 120 Hz leaves ~8.3 ms for the entire frame. Keep recurrence maintenance to
+// roughly a quarter of that budget so rendering/input still have headroom on
+// large ledgers while the cooperative worker is active.
+const SUBSCRIPTION_DETECTION_SLICE_MS = 2;
+const SUBSCRIPTION_DETECTION_YIELD_MS = 16;
+
+/**
+ * Same answer as detectSubscriptions(), but never intentionally monopolises a
+ * foreground JS turn. Returning null means the caller invalidated this exact
+ * ledger snapshot while it was being analysed.
+ */
+export function detectSubscriptionsCooperatively(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+  cancelled: () => boolean = () => false,
+): Promise<Subscription[] | null> {
+  const todayKey = toISODate(today);
+  const cached = cachedSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+  );
+  if (cached) return Promise.resolve(cancelled() ? null : cached);
+
+  const existing = subscriptionDetectionInFlight.find((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+  if (existing) return existing.promise.then((value) => cancelled() ? null : value);
+
+  const worker = subscriptionDetectionWorker(
+    transactions,
+    notSubscriptions,
+    today,
+    liveAccounts,
+    internalTransfers,
+  );
+
+  // One shared projection per immutable ledger snapshot. A tab losing focus no
+  // longer aborts the underlying worker and makes the next visit start from row
+  // zero; callers simply ignore the eventual value when their own view is gone.
+  const promise = new Promise<Subscription[]>((resolve) => {
+    const runSlice = () => {
+      const startedAt = Date.now();
+      let step = worker.next();
+      while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
+        step = worker.next();
+      }
+      if (step.done) {
+        resolve(cacheSubscriptionDetection(
+          transactions,
+          notSubscriptions,
+          todayKey,
+          liveAccounts,
+          internalTransfers,
+          step.value,
+        ));
+        return;
+      }
+      void waitForForegroundHistoryIdle(SUBSCRIPTION_DETECTION_YIELD_MS).then(runSlice);
+    };
+    runSlice();
+  }).finally(() => {
+    subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry.promise !== promise);
+  });
+
+  subscriptionDetectionInFlight.push({
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    promise,
+  });
+  return promise.then((value) => cancelled() ? null : value);
 }
 
 /** Monthly-equivalent total of what is still charging (stopped ones cost nothing). */

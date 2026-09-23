@@ -25,8 +25,8 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { formatAED, shiftISO } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { daysUntilNext, detectSubscriptions } from '@/lib/subscriptions';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { daysUntilNext, detectSubscriptions, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 export type ReminderKind = 'bill' | 'card' | 'subscription';
@@ -46,6 +46,26 @@ export interface PaymentReminder {
 /** iOS caps pending local notifications at 64; this stays well inside it. */
 export const MAX_REMINDERS = 24;
 
+/**
+ * Whether rebuilding the native reminder schedule can produce a different
+ * result. Keep this source-free and reference-based so an empty capture refresh
+ * can skip dozens of Android cancel/schedule calls without rescanning the
+ * ledger just to prove nothing changed.
+ */
+export function reminderScheduleInputsChanged(before: AppState, after: AppState): boolean {
+  return before.transactions !== after.transactions ||
+    before.accounts !== after.accounts ||
+    before.bills !== after.bills ||
+    before.cardDues !== after.cardDues ||
+    before.budgets !== after.budgets ||
+    before.notSubscriptions !== after.notSubscriptions ||
+    before.dailySummary !== after.dailySummary ||
+    before.monthStartDay !== after.monthStartDay ||
+    before.language !== after.language ||
+    before.marketId !== after.marketId ||
+    before.ledgerMoney !== after.ledgerMoney;
+}
+
 /** The reminder day at 09:00 local. Nobody wants a bill at midnight. */
 function at9(dateISO: string): Date {
   return new Date(`${dateISO}T09:00:00`);
@@ -59,6 +79,7 @@ export function buildPaymentReminders(
   state: AppState,
   now: Date,
   limit = MAX_REMINDERS,
+  detectedSubscriptions?: readonly Subscription[],
 ): PaymentReminder[] {
   const pending: PaymentReminder[] = [];
   const add = (
@@ -83,7 +104,7 @@ export function buildPaymentReminders(
   // the same pair — a charge on an archived card would otherwise reconcile a
   // bill to "Paid" and silence its reminder while the money is still owed.
   const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
 
   // Bills: the day before, and the day itself.
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
@@ -144,13 +165,16 @@ export function buildPaymentReminders(
 
   // Subscriptions: the day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(
-    state.transactions,
-    state.notSubscriptions,
-    now,
-    liveAccounts,
-    internal,
-  )) {
+  const subscriptions = detectedSubscriptions
+    ? [...detectedSubscriptions]
+    : detectSubscriptions(
+        state.transactions,
+        state.notSubscriptions,
+        now,
+        liveAccounts,
+        internal,
+      );
+  for (const sub of subscriptions) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     // An on-demand top-up has no due date. It belongs in Fixed so the user can
     // see the recurring cash requirement, but predicting a day would create a

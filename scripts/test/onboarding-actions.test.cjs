@@ -13,7 +13,7 @@ const load = require(path.join(root, 'scripts/test/repair/load-typescript.cjs'))
 const sourcePath = process.env.WAFRA_ONBOARDING_SOURCE || path.join(root, 'src/components/onboarding-gate.tsx');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const ast = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const actionNames = ['startScan', 'beginCapture', 'continueManually', 'runSetupAction', 'openWafra'];
+const actionNames = ['startScan', 'connectAndroidNotifications', 'finishAndroidCapture', 'beginCapture', 'openStatementImport', 'continueManually', 'runSetupAction', 'openWafra'];
 const declarations = new Map();
 let overlayExpression;
 let backDisabledExpression;
@@ -59,9 +59,9 @@ function deferred() {
 
 function actions(options = {}) {
   const events = [];
-  const ui = { outcome: null, step: 'capture', denied: false, cleanup: null, result: null, busy: false,
+  const ui = { outcome: null, step: 'capture', denied: false, cleanup: null, result: null, busy: false, androidSmsReady: false, androidNotificationReady: false, awaitingNotificationAccess: false,
     finishing: false, finishSaveFailed: false };
-  const ledger = { hydrated: true, captureOptOut: options.optOut ?? false, onboarded: false, transactions: [], accounts: [] };
+  const ledger = { hydrated: true, captureOptOut: options.optOut ?? false, androidCaptureSources: options.androidCaptureSources, onboarded: false, transactions: [], accounts: [], pro: true, founderPro: false, trialStartTs: 1_800_000_000_000 };
   const record = (name, ...args) => events.push([name, ...clone(args)]);
   const service = (name, fallback) => async (...args) => {
     record(name, ...args);
@@ -69,26 +69,35 @@ function actions(options = {}) {
   };
   const context = {
     Platform: { OS: options.platform ?? 'android' },
+    Crypto: { randomUUID: () => 'test-statement-session' },
     focus: options.focus ?? null,
     tracking: options.tracking ?? null,
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
-    saveJourney() {},
+    saveJourney(stage) { record('journey', stage); },
+    beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
     stepTransitionTimer: { current: null },
     transitioning: false,
     requestedFirstEntry: { current: false },
     requestedDestination: { current: undefined },
+    statementImportSession: { current: null },
     setFinishing(value) { ui.finishing = value; record('finishing', value); },
     setFinishSaveFailed(value) { ui.finishSaveFailed = value; record('finish-save-failed', value); },
     get finishing() { return ui.finishing; },
     get finishSaveFailed() { return ui.finishSaveFailed; },
     state: ledger,
+    previewMode: false,
+    trackOnboardingEvent() {},
     showRecovery: false,
     isIosSetupRoute: false,
+    isOnboardingStatementRoute: options.statementRouteAuthorized ?? false,
     setSetupBusy(value) { ui.busy = value; record('busy', value); },
     setSmsDenied(value) { ui.denied = value; record('denied', value); },
+    setAndroidSmsReady(value) { ui.androidSmsReady = value; record('sms-ready', value); },
+    setAndroidNotificationReady(value) { ui.androidNotificationReady = value; record('notification-ready', value); },
+    setAwaitingNotificationAccess(value) { ui.awaitingNotificationAccess = value; record('notification-awaiting', value); },
     setResult(value) { ui.result = clone(value); record('result', value); },
     setCompletionOutcome(value) { ui.outcome = value; record('outcome', value); },
     setStep(value) { ui.step = value; record('step', value); },
@@ -99,7 +108,15 @@ function actions(options = {}) {
       ledger.captureOptOut = value;
       record('capture-write-durable', value);
     },
+    async setAndroidCaptureSources(value) {
+      record('source-write-start', value);
+      if (options.setAndroidCaptureSources) await options.setAndroidCaptureSources(value);
+      ledger.androidCaptureSources = clone(value);
+      record('source-write-durable', value);
+    },
     requestSmsPermission: service('requestSmsPermission', options.granted ?? true),
+    requestSmsDeliveryPermission: service('requestSmsDeliveryPermission', true),
+    requestVisibleNotificationPermission: service('requestVisibleNotificationPermission', true),
     beginHistoryImport: service('beginHistoryImport'),
     ensureDurable: service('ensureDurable'),
     getRelayConfigStrict: service('getRelayConfigStrict', options.relay ?? null),
@@ -107,6 +124,12 @@ function actions(options = {}) {
     disableRelayBackgroundSync: service('disableRelayBackgroundSync'),
     dispatchIosMessageSetup: service('dispatchIosMessageSetup'),
     isSmsScanningAvailable: () => options.scanAvailable ?? true,
+    hasSmsPermission: service('hasSmsPermission', false),
+    hasBankNotificationSystemAccess: () => options.notificationAccess ?? false,
+    openBankNotificationAccessSettings: service('openBankNotificationAccessSettings', true),
+    bankNotificationAdmissionExpiresAt: () => 1_900_000_000_000,
+    NotificationReader: { setCaptureEnabled: service('notificationSetCaptureEnabled', true) },
+    enableAndroidNotificationAdmission: service('enableAndroidNotificationAdmission', true),
     setOnboarded() { ledger.onboarded = true; record('setOnboarded'); },
     committed() { record('committed'); },
     router: {
@@ -122,6 +145,8 @@ function actions(options = {}) {
     t: key => key,
     goBack() { record('goBack'); },
     automaticCompletion: false,
+    // The post-setup notification offer is exercised by ios-journey/onboarding-notifications; here it stays closed.
+    pendingOpen: null,
     require(name) {
       assert.equal(name, 'react/jsx-runtime');
       const jsx = (type, props = {}) => ({ type, props });
@@ -132,6 +157,9 @@ function actions(options = {}) {
     setupBusy: { get: () => ui.busy },
     completionOutcome: { get: () => ui.outcome },
     smsDenied: { get: () => ui.denied },
+    androidSmsReady: { get: () => ui.androidSmsReady },
+    androidNotificationReady: { get: () => ui.androidNotificationReady },
+    awaitingNotificationAccess: { get: () => ui.awaitingNotificationAccess },
     failedCompletion: { get: () => ui.step === 'complete' && ui.outcome === 'failed' },
   });
   const isOverlayVisible = () => vm.runInNewContext(overlayExpression, context, { filename: sourcePath });
@@ -239,7 +267,7 @@ test('iOS return-marker persistence failure prevents manual success', async () =
   assert.equal(h.ledger.onboarded, false);
 });
 
-test('Android capture clears the manual choice durably before reading history', async () => {
+test('Android SMS source becomes ready durably, then the explicit Continue completes setup', async () => {
   const gate = deferred();
   const h = actions({ optOut: true, setCaptureOptOut: () => gate.promise });
   const pending = h.startScan();
@@ -249,19 +277,35 @@ test('Android capture clears the manual choice durably before reading history', 
   assert.equal(h.ui.outcome, null);
   gate.resolve(); await pending;
   assert.equal(h.ledger.captureOptOut, false);
-  assert.equal(h.ui.outcome, 'automatic');
+  assert.equal(h.ui.androidSmsReady, true);
+  assert.equal(h.ui.outcome, null, 'A source becoming ready does not skip the source-selection screen');
+  assert.equal(h.ui.step, 'capture');
+  assert.equal(calls(h, 'ensureDurable').length, 1, 'The configured source checkpoint is durable');
   before(h, 'requestSmsPermission', 'capture-write-start');
   before(h, 'capture-write-durable', 'beginHistoryImport');
-  before(h, 'beginHistoryImport', 'setOnboarded');
-  before(h, 'ensureDurable', 'committed');
+  before(h, 'beginHistoryImport', 'ensureDurable');
+
+  await h.finishAndroidCapture();
+  assert.equal(h.ui.outcome, 'automatic');
+  assert.equal(h.ui.step, 'complete');
+  assert.equal(h.ledger.onboarded, false, 'Completion reveal still precedes onboarded=true');
+  assert.equal(calls(h, 'ensureDurable').length, 2);
+
+  await h.runSetupAction(() => h.openWafra());
+  assert.equal(h.ledger.onboarded, true);
+  assert.equal(calls(h, 'ensureDurable').length, 3, 'Final completion persists onboarded=true separately');
+  assert.equal(calls(h, 'committed').length, 1);
+  assert.deepEqual(calls(h, 'replace'), [['replace', '/']]);
   remainsEmpty(h);
 });
 
-test('Android permission denial preserves the manual choice and offers a denied result', async () => {
+test('Android SMS denial stays on source selection so notifications or manual remain available', async () => {
   const h = actions({ optOut: true, granted: false });
   await h.startScan();
-  assert.equal(h.ui.outcome, 'denied');
+  assert.equal(h.ui.outcome, null);
+  assert.equal(h.ui.step, 'capture');
   assert.equal(h.ui.denied, true);
+  assert.equal(h.ui.androidSmsReady, false);
   assert.equal(h.ledger.captureOptOut, true);
   assert.equal(h.ledger.onboarded, false);
   assert.equal(calls(h, 'capture-write-start').length, 0);
@@ -269,26 +313,29 @@ test('Android permission denial preserves the manual choice and offers a denied 
 });
 
 for (const service of ['requestSmsPermission', 'setCaptureOptOut', 'beginHistoryImport', 'ensureDurable']) {
-  test(`Android capture shows failure without a committed success when ${service} fails`, async () => {
+  test(`Android SMS source failure stays recoverable on capture when ${service} fails`, async () => {
     const h = actions({ optOut: true, [service]: fails });
     await h.startScan();
-    assert.equal(h.ui.outcome, 'failed');
-    assert.equal(h.ui.step, 'complete');
+    assert.equal(h.ui.outcome, null);
+    assert.equal(h.ui.step, 'capture');
+    assert.equal(h.ui.denied, true);
+    assert.equal(h.ui.androidSmsReady, false);
     assert.equal(calls(h, 'committed').length, 0);
-    if (service !== 'ensureDurable') assert.equal(h.ledger.onboarded, false);
+    assert.equal(h.ledger.onboarded, false);
     if (service === 'requestSmsPermission' || service === 'setCaptureOptOut') {
       assert.equal(calls(h, 'beginHistoryImport').length, 0);
-      assert.equal(h.ledger.captureOptOut, true);
     }
     remainsEmpty(h);
   });
 }
 
-test('Android capture entry point delegates to the permission and history path', async () => {
+test('legacy Android capture entry point still delegates to SMS source setup without skipping selection', async () => {
   const h = actions({ granted: false });
   await h.beginCapture(); await flush();
   assert.equal(calls(h, 'requestSmsPermission').length, 1);
-  assert.equal(h.ui.outcome, 'denied');
+  assert.equal(h.ui.denied, true);
+  assert.equal(h.ui.outcome, null);
+  assert.equal(h.ui.step, 'capture');
   assert.equal(calls(h, 'route').length, 0);
 });
 
@@ -329,6 +376,34 @@ test('iOS automatic choice waits for its opt-in write before entering local setu
   assert.equal(calls(h, 'requestSmsPermission').length, 0);
   assert.equal(calls(h, 'beginHistoryImport').length, 0);
   assert.equal(calls(h, 'dispatchIosMessageSetup').length, 0, 'Do not manufacture Shortcut/history evidence');
+});
+
+for (const platform of ['ios', 'android']) {
+  test(platform + ' statement import opens from onboarding without changing capture consent', () => {
+    const h = actions({ platform, optOut: true });
+    h.openStatementImport();
+    assert.deepEqual(calls(h, 'route'), [[
+      'route',
+      '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
+    ]]);
+    assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
+    assert.equal(h.ledger.captureOptOut, true);
+    assert.equal(calls(h, 'capture-write-start').length, 0);
+    assert.equal(calls(h, 'requestSmsPermission').length, 0);
+    assert.equal(calls(h, 'beginHistoryImport').length, 0);
+  });
+}
+
+test('web never opens statement import from onboarding', () => {
+  const h = actions({ platform: 'web' });
+  h.openStatementImport();
+  assert.equal(calls(h, 'route').length, 0);
+  assert.equal(calls(h, 'journey').length, 0);
+});
+
+test('statement child route exemption is available only after the gate authorizes that route', () => {
+  assert.equal(actions({ statementRouteAuthorized: false }).isOverlayVisible(), true);
+  assert.equal(actions({ statementRouteAuthorized: true }).isOverlayVisible(), false);
 });
 
 test('failed iOS opt-in stays in onboarding and never opens setup', async () => {
@@ -450,18 +525,37 @@ test('the real overlay stays visible through a failed completion save and its re
 });
 
 test('automatic capture final-save failure retains the overlay and rendered Retry saves without another permission or history scan', async () => {
-  const firstSave = deferred();
+  const finalSave = deferred();
   const retrySave = deferred();
   let saves = 0;
-  const h = actions({ optOut: true, ensureDurable: () => ++saves === 1 ? firstSave.promise : retrySave.promise });
-  const pending = h.runSetupAction(h.beginCapture);
-  await flush();
+  const h = actions({
+    optOut: true,
+    ensureDurable: () => {
+      saves += 1;
+      if (saves <= 2) return Promise.resolve();
+      if (saves === 3) return finalSave.promise;
+      return retrySave.promise;
+    },
+  });
+  await h.runSetupAction(h.beginCapture);
   assert.equal(calls(h, 'requestSmsPermission').length, 1);
   assert.equal(calls(h, 'beginHistoryImport').length, 1);
+  assert.equal(h.ui.androidSmsReady, true);
   assert.equal(h.ledger.captureOptOut, false);
+  assert.equal(h.ledger.onboarded, false);
+  assert.equal(h.ui.outcome, null);
+  assert.equal(h.ui.step, 'capture');
+  assert.equal(saves, 1, 'SMS source readiness is saved first');
+  await h.finishAndroidCapture();
+  assert.equal(h.ui.outcome, 'automatic');
+  assert.equal(h.ui.step, 'complete');
+  assert.equal(saves, 2, 'Explicit Continue saves the configured capture sources');
+
+  const pending = h.runSetupAction(() => h.openWafra());
+  await flush();
   assert.equal(h.ledger.onboarded, true);
   assert.equal(h.isOverlayVisible(), true, 'Automatic completion stays covered until its final write is durable');
-  firstSave.reject(new Error('synthetic automatic completion save failure'));
+  finalSave.reject(new Error('synthetic automatic completion save failure'));
   await pending;
   assert.equal(h.isOverlayVisible(), true, 'The save failure stays visible after the onboarded dispatch');
   assert.equal(h.isBackDisabled(), true);
@@ -475,10 +569,10 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   assert.equal(buttons[0].props.disabled, false);
   buttons[0].props.onPress();
   await flush();
-  assert.equal(saves, 2, 'The real rendered action retries only persistence');
+  assert.equal(saves, 4, 'The real rendered action retries only the final persistence');
   assert.equal(calls(h, 'requestSmsPermission').length, 1);
   assert.equal(calls(h, 'beginHistoryImport').length, 1);
-  assert.deepEqual(calls(h, 'capture-write-start'), [['capture-write-start', false]]);
+  assert.deepEqual(calls(h, 'capture-write-start'), [['capture-write-start', false], ['capture-write-start', false]]);
   assert.equal(h.isOverlayVisible(), true);
   assert.equal(calls(h, 'committed').length, 0);
   retrySave.resolve(); await flush();

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "expo start",
+    "postinstall": "node scripts/patch-react-native-screens.cjs",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "ship:ios": "npm run update:check && npx --yes eas-cli@22.4.0 env:exec production \"node scripts/check-update-config.mjs --environment production\" --non-interactive && npx --yes eas-cli@22.4.0 build -p ios --profile production --auto-submit --non-interactive",
@@ -46,11 +47,17 @@
     "check:launch": "bash scripts/check-launch.sh",
     "benchmark:launch:fixtures": "bash scripts/generate-launch-benchmark-fixtures.sh",
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
+    "eval:parser:typesafe": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs",
+    "eval:parser:typesafe:all": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all",
+    "eval:parser:typesafe:risk": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all --fail-on-risk",
+    "analyze:parser:jev": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs",
+    "analyze:parser:jev:all": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs --all",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
   },
   "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
@@ -61,6 +68,7 @@
     "@react-navigation/native": "^7.1.33",
     "@scure/base": "^2.2.0",
     "expo": "~55.0.31",
+    "expo-build-properties": "~55.0.18",
     "expo-clipboard": "~55.0.17",
     "expo-constants": "~55.0.16",
     "expo-crypto": "~55.0.19",
@@ -84,16 +92,17 @@
     "expo-splash-screen": "~55.0.25",
     "expo-sqlite": "~55.0.20",
     "expo-status-bar": "~55.0.6",
+    "expo-superwall": "^1.4.0",
     "expo-symbols": "~55.0.9",
     "expo-system-ui": "~55.0.22",
     "expo-task-manager": "~55.0.20",
     "expo-updates": "~55.0.30",
     "expo-web-browser": "~55.0.20",
+    "onnxruntime-react-native": "1.24.3",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.10",
     "react-native-gesture-handler": "~2.30.0",
-    "react-native-purchases": "^10.4.4",
     "react-native-reanimated": "4.2.1",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
@@ -116,5 +125,6 @@
     "autolinking": {
       "nativeModulesDir": "./modules"
     }
-  }
+  },
+  "onnxruntimeExtensionsEnabled": "true"
 }

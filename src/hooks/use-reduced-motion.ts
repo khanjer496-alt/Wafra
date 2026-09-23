@@ -13,8 +13,16 @@
  *
  * Callers jump to the final value rather than dropping it. The information is
  * never the animation.
+ *
+ * The OS state is read ONCE for the whole app and shared through
+ * `useSyncExternalStore`. Before this it was a `useState`/`useEffect` pair per
+ * instance — every `SpringPressable`, `ProgressBar`, chart bar, sheet and
+ * `MotionReveal` fired its own two native queries and registered its own two
+ * listeners on mount, and each Home section stayed invisible until its OWN
+ * screen-reader promise resolved. One query per app answers everyone, and the
+ * answer is already known by the time the second screen mounts.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { AccessibilityInfo } from 'react-native';
 import { useReducedMotion as useReanimatedReducedMotion } from 'react-native-reanimated';
 
@@ -25,68 +33,86 @@ export interface MotionPreference {
   ready: boolean;
 }
 
-function useMotionState(trackReadiness: boolean): MotionPreference {
+interface MotionSnapshot {
+  reduced: boolean;
+  screenReader: boolean;
+  /** The screen-reader query has answered (or failed) or an event arrived. */
+  known: boolean;
+}
+
+let snapshot: MotionSnapshot = { reduced: false, screenReader: false, known: false };
+let started = false;
+let reduceMotionEventSeen = false;
+let screenReaderEventSeen = false;
+const listeners = new Set<() => void>();
+
+function update(patch: Partial<MotionSnapshot>): void {
+  const next = { ...snapshot, ...patch };
+  if (
+    next.reduced === snapshot.reduced &&
+    next.screenReader === snapshot.screenReader &&
+    next.known === snapshot.known
+  ) return;
+  snapshot = next;
+  for (const listener of listeners) listener();
+}
+
+/** Query the OS once and keep following it. Safe to call any number of times. */
+export function startMotionPreference(): void {
+  if (started) return;
+  started = true;
+  AccessibilityInfo.isReduceMotionEnabled()
+    .then((value) => {
+      if (!reduceMotionEventSeen) update({ reduced: value });
+    })
+    .catch(() => {});
+  AccessibilityInfo.isScreenReaderEnabled()
+    .then((value) => {
+      if (!screenReaderEventSeen) update({ screenReader: value, known: true });
+    })
+    // A failed native query must not leave every reveal hidden forever.
+    .catch(() => {
+      if (!screenReaderEventSeen) update({ known: true });
+    });
+  // Never removed: the preference outlives every component.
+  AccessibilityInfo.addEventListener('reduceMotionChanged', (value) => {
+    reduceMotionEventSeen = true;
+    update({ reduced: value });
+  });
+  AccessibilityInfo.addEventListener('screenReaderChanged', (value) => {
+    screenReaderEventSeen = true;
+    update({ screenReader: value, known: true });
+  });
+}
+
+function subscribe(listener: () => void): () => void {
+  startMotionPreference();
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+const getSnapshot = (): MotionSnapshot => snapshot;
+
+function useMotionState(): MotionPreference {
   // Reanimated exposes the launch-time value synchronously, so an entering
   // animation cannot race the async AccessibilityInfo query on first paint.
   const launchReduced = useReanimatedReducedMotion();
-  const [motionReduced, setMotionReduced] = useState(launchReduced);
-  const [screenReader, setScreenReader] = useState(false);
-  const [screenReaderKnown, setScreenReaderKnown] = useState(false);
-  const reduceMotionEventSeen = useRef(false);
-  const screenReaderEventSeen = useRef(false);
-
-  useEffect(() => {
-    let alive = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((value) => {
-        if (alive && !reduceMotionEventSeen.current) setMotionReduced(value);
-      })
-      .catch(() => {});
-    AccessibilityInfo.isScreenReaderEnabled()
-      .then((value) => {
-        if (alive && !screenReaderEventSeen.current) {
-          setScreenReader(value);
-          if (trackReadiness) setScreenReaderKnown(true);
-        }
-      })
-      // A failed native query must not leave every reveal hidden forever.
-      .catch(() => {
-        if (alive && trackReadiness && !screenReaderEventSeen.current) {
-          setScreenReaderKnown(true);
-        }
-      });
-
-    const subs = [
-      AccessibilityInfo.addEventListener('reduceMotionChanged', (value) => {
-        reduceMotionEventSeen.current = true;
-        setMotionReduced(value);
-      }),
-      AccessibilityInfo.addEventListener('screenReaderChanged', (value) => {
-        screenReaderEventSeen.current = true;
-        setScreenReader(value);
-        if (trackReadiness) setScreenReaderKnown(true);
-      }),
-    ];
-    return () => {
-      alive = false;
-      subs.forEach((s) => s.remove());
-    };
-  }, [trackReadiness]);
-
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const motionReduced = launchReduced || state.reduced;
   return {
-    reducedMotion: motionReduced || screenReader,
-    // Reanimated's synchronous positive value is already conclusive. When it
-    // is false, wait for the screen-reader query before starting motion.
-    ready: motionReduced || (trackReadiness && screenReaderKnown),
+    reducedMotion: motionReduced || state.screenReader,
+    // A positive Reduce Motion answer is already conclusive. When it is false,
+    // wait for the screen-reader query before starting motion.
+    ready: motionReduced || state.known,
   };
 }
 
 export function useMotionPreference(): MotionPreference {
-  return useMotionState(true);
+  return useMotionState();
 }
 
 export function useReducedMotion(): boolean {
-  // Existing consumers only need the policy boolean. Not tracking readiness
-  // avoids a no-op first-load render when the async query answers `false`.
-  return useMotionState(false).reducedMotion;
+  return useMotionState().reducedMotion;
 }

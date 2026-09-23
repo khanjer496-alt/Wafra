@@ -5,6 +5,9 @@
   <application>
     <service android:name="expo.modules.smsreader.SmsHistoryImportService"
       android:exported="false" android:foregroundServiceType="dataSync" />
+    <service
+      android:name="expo.modules.smsreader.LiveCaptureHeadlessService"
+      android:exported="false" />
     <!-- Fires on delivery, so a bank alert is captured as it lands rather than
          on the next app open. android:permission restricts the broadcast to
          the system, so no other app can inject fake transactions. -->

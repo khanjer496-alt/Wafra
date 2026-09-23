@@ -35,6 +35,8 @@ function harness(options = {}) {
   const state = {
     hydrated: options.hydrated ?? true, onboarded: true, language,
     captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
+    trialStartTs: options.trialStartTs ?? 0,
+    founderPro: options.founderPro ?? false,
     transactions: options.empty ? [] : transactions, accounts: [account], budgets: [], bills: [], cardDues: [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
@@ -42,13 +44,16 @@ function harness(options = {}) {
   const dashboard = {
     hero: { netFils: 941300, incomeFils: 1450000, expenseFils: 508700 }, live: true,
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
-    unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [] } },
+    unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
     upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
-    Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) } };
+    Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) },
+    // Home defers its insight projection until interactions settle. Run it
+    // inline: these tests assert the settled screen, not the scheduling.
+    InteractionManager: { runAfterInteractions: (task) => { task(); return { cancel() {} }; } } };
   const dependencies = {
     react, 'react/jsx-runtime': runtime, 'react-native': native,
     'expo-linear-gradient': { LinearGradient: (props) => jsx('Gradient', props) },
@@ -64,6 +69,7 @@ function harness(options = {}) {
     '@/components/ui/merchant-avatar': { MerchantAvatar: (props) => jsx('Avatar', props) },
     '@/components/ui/icon': { Icon: (props) => { if (!icons.has(props.name)) throw new Error(`Unknown icon ${props.name}`); return jsx('Icon', props); } },
     '@/components/ui/money': { Money: (props) => jsx('Money', props) },
+    '@/components/recap/recap-logo-trigger': { RecapLogoTrigger: (props) => jsx('RecapLogoTrigger', props) },
     '@/components/ui/screen-scaffold': { ScreenScaffold: (props) => jsx('Scaffold', props) },
     '@/components/ui/states': { EmptyMonth: (props) => jsx('EmptyMonth', props), SkeletonRows: (props) => jsx('SkeletonRows', props) },
     '@/components/ui/toast': { useToast: () => ({ show: (message) => events.push(['toast', message]) }) },
@@ -80,19 +86,21 @@ function harness(options = {}) {
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {
       if (request.surface === 'home' && request.includeInsights === false) return dashboard;
-      if (request.surface === 'dashboard' && request.includeInsights === true) return dashboard;
       throw new Error('Home requested an unexpected financial projection');
-    } },
+    }, projectHomeInsight: () => dashboard.insight ?? null },
     '@/lib/auto-import': { openSmsPermissionSettings: async () => events.push(['permissions']) },
     '@/lib/fx': { buildReferenceFxUpdates: async () => [] },
     '@/lib/leaving-soon': { daysPhrase: (days) => language === 'ar' ? `خلال ${days} أيام` : `In ${days} days` },
     '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/notifications': { syncPaymentReminders: async () => events.push(['reminders']) },
+    '@/lib/reminders': { reminderScheduleInputsChanged: (before, after) => before !== after },
     '@/lib/period': { periodLabel: () => language === 'ar' ? 'سبتمبر 2026' : 'September 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },
+    '@/lib/onboarding': { normalizePreferredName: (value) => typeof value === 'string' && value.trim() ? value.trim() : null },
     '@/lib/store': { useStore: () => ({ state, getStateSnapshot: () => state, applyFxUpdates() {},
-      setCaptureOptOut: async (value) => events.push(['optOut', value]), beginHistoryImport: async () => events.push(['resume']) }) },
+      setCaptureOptOut: async (value) => events.push(['optOut', value]), beginHistoryImport: async () => events.push(['resume']),
+      unlockFounderPro: async () => { state.founderPro = true; events.push(['founder']); } }) },
   };
   for (const [module, name] of [['period-sheet', 'PeriodSheet'], ['entry-detail-sheet', 'EntryDetailSheet'],
     ['card-payment-sheet', 'CardPaymentSheet'], ['bill-detail-sheet', 'BillDetailSheet']]) {
@@ -121,6 +129,8 @@ function harness(options = {}) {
   dependencies['@/components/wafra-logo'] = { WafraMark: () => null };
   dependencies['@/lib/ledger-light-copy'] = load(path.join(root, 'src/lib/ledger-light-copy.ts'), dependencies);
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
+  dependencies['@/lib/money-picture-progress'] = load(path.join(root, 'src/lib/money-picture-progress.ts'), dependencies);
+  dependencies['@/components/money-picture-progress'] = load(path.join(root, 'src/components/money-picture-progress.tsx'), dependencies);
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));
@@ -133,7 +143,11 @@ function harness(options = {}) {
   dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
-  const { default: Home } = load(path.join(root, 'src/screens/journal-home-screen.tsx'), dependencies);
+  const { default: Home } = load(
+    path.join(root, 'src/screens/journal-home-screen.tsx'),
+    dependencies,
+    { process: { env: { EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: options.founderUnlock ? '1' : '0' } } },
+  );
   let tabTree = null;
   if (options.render) {
     const interpolate = (v, a, b) => b[0] + (v-a[0])/(a[1]-a[0])*(b[1]-b[0]);

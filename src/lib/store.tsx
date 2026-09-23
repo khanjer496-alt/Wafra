@@ -19,8 +19,17 @@ import {
   repairDuplicateStatements,
 } from '@/lib/accounts';
 import { cleanupGeneratedExports } from '@/lib/share-text';
+import { cancelLocalSemanticBackgroundWork } from '@/lib/local-semantic-background-policy';
 import { isValidBackupState } from '@/lib/backup-validation';
-import { applyTransferDecision, normalizeTransferLinks, transferFingerprint } from '@/lib/transfer-reconciliation';
+import {
+  applyTransferDecision,
+  isTransferCandidate,
+  normalizeTransferLinks,
+  reconcileTransfers,
+  reconciliationInternalIds,
+  transferFingerprint,
+  TRANSFER_NORMALIZATION_VERSION,
+} from '@/lib/transfer-reconciliation';
 import type { TransferDecisionRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
@@ -51,10 +60,11 @@ import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
-  PARSER_VERSION,
+  PARSER_BACKFILL_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
-import { countsInTotals, internalTransferIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
+import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -88,11 +98,18 @@ import {
   type MaterializedImportBatch,
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
-import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
+import {
+  recordStorageFailure,
+  storageReadFailureMayRetry,
+  type StorageFailure,
+} from '@/lib/storage-diagnostics';
+import { waitForAndroidBackgroundCaptureIdle } from '@/lib/android-live-background';
+import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { applyBillAliasToTransactions, billAliasKey, validBillAlias } from '@/lib/bill-alias';
 import {
   createHistoryImportProgress,
+  historyImportIncomplete,
   requestHistoryImportRun,
   normalizeHistoryImportProgress,
   type HistoryImportProgress,
@@ -101,6 +118,7 @@ import type { FxUpdate } from '@/lib/fx';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
+  normalizePreferredName,
   onboardingIncomeBasis,
 } from '@/lib/onboarding';
 
@@ -111,6 +129,7 @@ import {
   normalizeIosCaptureWarningState,
   normalizeLocalCaptureQualifications,
   type Account,
+  type AndroidCaptureSources,
   type AppState,
   type Bill,
   type BillAlias,
@@ -128,6 +147,7 @@ import {
   type OnboardingProfile,
   type Transaction,
   type TransactionType,
+  type StatementCoverageEntry,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -165,6 +185,12 @@ export type StorageRecoveryState =
   | null;
 
 const STORAGE_KEY = 'wafra/state/v1';
+/**
+ * Version of launch-only persisted cleanup after parser/account migration.
+ * Bump when removeDeclinedTransactions, capture dedupe, or payment-flow
+ * reconciliation changes in a way that needs one full existing-ledger pass.
+ */
+export const HYDRATION_FINALIZE_VERSION = 1;
 
 const EMPTY_STATE: AppState = {
   hydrated: false,
@@ -177,6 +203,7 @@ const EMPTY_STATE: AppState = {
   budgets: [],
   bills: [],
   cardDues: [],
+  statementCoverage: [],
   goals: [],
   onboardingPlan: null,
   onboardingProfile: null,
@@ -184,6 +211,7 @@ const EMPTY_STATE: AppState = {
   merchantOverrides: {},
   billAliases: {},
   accountHints: {},
+  trustedNotificationPackages: [],
   notSubscriptions: [],
   lastScanTs: 0,
   historyImport: null,
@@ -196,11 +224,16 @@ const EMPTY_STATE: AppState = {
   founderPro: false,
   privateMode: false,
   captureOptOut: false,
-  dailySummary: true,
+  // iPhone notifications start off. Onboarding turns this on only after the
+  // user explicitly grants visible notification permission; Android keeps its
+  // existing default because this launch fix is specific to the iOS consent
+  // gap and should not silently change Android behaviour.
+  dailySummary: Platform.OS === 'ios' ? false : true,
   trialStartTs: 0,
   marketId: '',
   language: '',
   languagePreference: 'system',
+  knownBanks: [],
 };
 
 let idCounter = 0;
@@ -209,8 +242,43 @@ function makeId(prefix: string): string {
   return `${prefix}-${Date.now()}-${idCounter}-${Math.floor(Math.random() * 1e6)}`;
 }
 
+function mapTransactionsPreservingIdentity(
+  transactions: Transaction[],
+  mapper: (transaction: Transaction) => Transaction,
+): Transaction[] {
+  let changed = false;
+  const next = transactions.map((transaction) => {
+    const mapped = mapper(transaction);
+    if (mapped !== transaction) changed = true;
+    return mapped;
+  });
+  return changed ? next : transactions;
+}
+
 function sortTxs(transactions: Transaction[]): Transaction[] {
-  return [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  let alreadySorted = true;
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) {
+      alreadySorted = false;
+      break;
+    }
+  }
+  return alreadySorted
+    ? transactions
+    : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function applyTransactionEdit(transaction: Transaction, patch: Partial<Transaction>): Transaction {
+  // `titleEdited` is the narrow half of `userEdited`: the user replaced the
+  // parser's SHOP NAME, as opposed to correcting an amount, a date or an
+  // account. Parser-coverage measurement needs that distinction — a hand-typed
+  // name must never be scored as a parser naming success, and a row whose date
+  // was fixed must not be dropped from the measurement for it.
+  const renamed = patch.title !== undefined && patch.title !== transaction.title;
+  // userEdited pins the row: nothing re-parsed may overwrite it later.
+  return renamed || transaction.titleEdited
+    ? { ...transaction, ...patch, userEdited: true, titleEdited: true }
+    : { ...transaction, ...patch, userEdited: true };
 }
 
 /**
@@ -227,16 +295,23 @@ export function preserveUserEditedTransactions(
   if (pinned.size === 0) return migrated;
 
   const restoredIds = new Set<string>();
+  let changed = false;
   const restored = migrated.map((t) => {
     const exact = pinned.get(t.id);
     if (!exact) return t;
     restoredIds.add(t.id);
+    if (exact !== t) changed = true;
     return exact;
   });
   for (const [id, exact] of pinned) {
-    if (!restoredIds.has(id)) restored.push(exact);
+    if (restoredIds.has(id)) continue;
+    restored.push(exact);
+    changed = true;
   }
-  return restored;
+  // Persistence uses transaction-array identity as its cheap "did rows change?"
+  // signal. A ledger containing any user-edited row must not manufacture a new
+  // array on every hydrate when the exact edited objects are already present.
+  return changed ? restored : migrated;
 }
 
 /** Conservative persisted-capture cleanup shared by every hydration path. */
@@ -272,6 +347,10 @@ export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
   options?: PersistedMigrationOptions,
 ): Partial<Omit<AppState, 'hydrated'>> {
+  // Captured before any transform runs; see the transfer-receipt check by the
+  // return, which uses it to tell "these are still the stored rows" from
+  // "these have been rewritten under a receipt that predates them".
+  const loadedTransactions = parsed.transactions;
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
@@ -279,7 +358,30 @@ export function migratePersistedState(
     Date.now(),
   );
   parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
+  parsed.knownBanks = sanitizeKnownBanks(parsed.knownBanks);
+  parsed.trustedNotificationPackages = Array.isArray(parsed.trustedNotificationPackages)
+    ? [...new Set(parsed.trustedNotificationPackages.filter((value): value is string =>
+        typeof value === 'string' && value.length <= 255 &&
+        /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(value),
+      ))].slice(-64)
+    : [];
   markLaunchPhase('ledger-metadata-complete');
+  // `hydrationReparseKey` is the durable receipt that this exact parser/market
+  // already repaired the persisted rows. Build 261 still ran the row-local
+  // migration below on EVERY launch even when this receipt was current. On a
+  // real 14.7k-row ledger that single unnecessary pass cost ~1.1 seconds of
+  // foreground JS before Home could render.
+  //
+  // Trust only the exact revision-2 receipt here. The compatibility logic
+  // later in this function may accept an older revision-1 receipt for raw-SMS
+  // reparsing, but revision 1 never promised that all row-local transforms had
+  // completed. Backup restore also deliberately bypasses this shortcut: an
+  // imported file must be normalized by the receiving build even if it carries
+  // a receipt copied from another installation.
+  const grammarMarketId = parsed.marketId ?? getActiveMarket().id;
+  const reparseKey = JSON.stringify([2, PARSER_BACKFILL_VERSION, grammarMarketId]);
+  const persistedRowRepairsAreCurrent =
+    options?.reuseCompletedReparse === true && parsed.hydrationReparseKey === reparseKey;
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -439,116 +541,70 @@ export function migratePersistedState(
   }
 
   markLaunchPhase('ledger-overrides-complete');
-  if (parsed.transactions) {
-    parsed.transactions = parsed.transactions
-      .map((t) =>
-        t.userEdited
-          ? t
-          : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-            ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-            : t,
-      )
+  if (parsed.transactions && !persistedRowRepairsAreCurrent) {
+    // Hydration used to walk the complete ledger once for every historical
+    // repair below. On a real 15k-row phone that meant seven full JS passes
+    // before Home could render. Keep the exact same ordered semantics, but run
+    // all row-local transforms inside one identity-preserving pass.
+    parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (original) => {
+      if (original.userEdited || original.source !== 'sms') return original;
+      let t = original;
+
+      if (/^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)) {
+        t = { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const };
+      }
+
       // Income mis-filed into spending categories (a Talabat payout is
       // revenue, not dining): re-file as business/salary.
-      .map((t) =>
-        t.userEdited
-          ? t
-          : t.source === 'sms' &&
-              t.type === 'income' &&
-              !['salary', 'business', 'other'].includes(t.category)
-            ? { ...t, category: 'business' as const }
-            : t,
-      )
+      if (t.type === 'income' && !['salary', 'business', 'other'].includes(t.category)) {
+        t = { ...t, category: 'business' as const };
+      }
+
       // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
       // clearly and group as one subscription.
-      .map((t) => {
-        if (t.userEdited || t.source !== 'sms') return t;
-        const canonical = normalizeServiceName(t.title);
-        return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-      })
+      const canonical = normalizeServiceName(t.title);
+      if (canonical && canonical !== t.title) t = { ...t, title: canonical };
+
       // Parser versions before T215 filed anonymous incoming money as
-      // Business (or even retained a spending category). Structural titles
-      // mean no payer was identified. Refile only those exact SMS rows, while
-      // retaining salary/Other and raw messages carrying explicit originator
-      // or company evidence.
-      .map((t) => {
-        if (
-          t.userEdited ||
-          t.source !== 'sms' ||
-          t.type !== 'income' ||
-          (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
-          t.category === 'salary' ||
-          t.category === 'other' ||
-          (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
-        ) {
-          return t;
-        }
-        return { ...t, category: 'other' as const };
-      })
-      // Older imports marked every inward remittance as a transfer. An
-      // unpaired arrival is real income; only ledger pairing can prove it
-      // moved between the user's own accounts.
-      //
-      // This used to skip raw-bearing rows, on the reasoning that they could
-      // reparse their way out. They could not: healing only ever ADDS the
-      // transfer flag (`if (p.transferHint && !prior.isTransfer)`) and never
-      // clears it, so those rows stayed stranded no matter how often they were
-      // re-read. The parser no longer sets the flag at all, so every stored
-      // row of this exact shape is now safe to release.
-      .map((t) => {
-        if (
-          t.userEdited ||
-          t.source !== 'sms' ||
-          t.type !== 'income' ||
-          t.title !== 'Inward remittance' ||
-          t.isTransfer !== true
-        ) {
-          return t;
-        }
+      // Business (or even retained a spending category). Structural titles mean
+      // no payer was identified. Refile only those exact SMS rows.
+      if (
+        t.type === 'income' &&
+        (t.title === 'Incoming transfer' || t.title === 'Inward remittance') &&
+        t.category !== 'salary' &&
+        t.category !== 'other' &&
+        !(t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
+      ) {
+        t = { ...t, category: 'other' as const };
+      }
+
+      // Older imports marked every inward remittance as a transfer. An unpaired
+      // arrival is real income; only ledger pairing can prove own-account motion.
+      if (t.type === 'income' && t.title === 'Inward remittance' && t.isTransfer === true) {
         const { isTransfer: _stale, ...income } = t;
-        return income;
-      });
-
-    // ATM rows have always carried this exact structural title. Releases
-    // before parser v17 could file the machine's mall/street address under a
-    // merchant category, so repair every parser-owned expense rather than
-    // only rows currently in Other. Hand edits remain authoritative.
-    parsed.transactions = parsed.transactions.map((t) => {
-      if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.isTransfer ||
-        t.type !== 'expense' ||
-        t.title !== 'ATM withdrawal'
-      ) {
-        return t;
+        t = income;
       }
-      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
-      const category = guessCategory(
-        t.title,
-        t.type,
-        parsed.merchantOverrides,
-        t.title,
-      );
-      return category !== t.category ? { ...t, category } : t;
-    });
 
-    // Re-file rows stuck in Other: each parser release widens the merchant
-    // vocabulary, so imported-as-Other rows get another chance without
-    // needing a rescan. User overrides still win.
-    parsed.transactions = parsed.transactions.map((t) => {
-      if (
-        t.userEdited ||
-        t.source !== 'sms' ||
-        t.isTransfer ||
-        t.category !== 'other' ||
-        t.type !== 'expense'
-      ) {
-        return t;
+      // ATM rows have always carried this exact structural title. Releases
+      // before parser v17 could file the machine's mall/street address under a
+      // merchant category, so repair every parser-owned expense rather than
+      // only rows currently in Other. Hand edits remain authoritative.
+      if (!t.isTransfer && t.type === 'expense' && t.title === 'ATM withdrawal' &&
+          !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
+        const category = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+        if (category !== t.category) t = { ...t, category };
       }
-      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
-      const guessed = guessCategory(t.title, t.type, undefined, t.title);
-      return guessed !== 'other' ? { ...t, category: guessed } : t;
+
+      // Re-file rows stuck in Other: each parser release widens the merchant
+      // vocabulary, so imported-as-Other rows get another chance without
+      // needing a rescan. User overrides still win.
+      if (!t.isTransfer && t.category === 'other' && t.type === 'expense' &&
+          !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
+        const guessed = guessCategory(t.title, t.type, undefined, t.title);
+        if (guessed !== 'other') t = { ...t, category: guessed };
+      }
+
+      return t;
     });
 
     markLaunchPhase('ledger-row-transforms-complete');
@@ -560,16 +616,38 @@ export function migratePersistedState(
     // arriving, not of the one it replaces.
     setGlobalLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
-    // This receipt belongs to saved-row repair, never to the full-inbox scan
-    // represented by parserVersion. Only local hydration may reuse it;
-    // backup restore always repairs the incoming rows. Import paths already
-    // parse their new rows with this running grammar. Increment revision 1
-    // below when heal semantics change without a PARSER_VERSION change.
-    const reparseKey = JSON.stringify([
-      1, PARSER_VERSION, parsed.marketId ?? getActiveMarket().id,
-      Object.entries(parsed.merchantOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)),
-    ]);
-    if (!options?.reuseCompletedReparse || parsed.hydrationReparseKey !== reparseKey) {
+    // Saved-row healing and the full-inbox parser migration are two different
+    // maintenance jobs on Android. A parser-version bump already creates the
+    // resumable history import in `reduceState`; doing another raw-SMS pass here
+    // made launch pay for the same grammar twice before Home could render.
+    //
+    // Keep the exact grammar receipt for platforms that cannot reread an inbox.
+    // Android alone may defer a new grammar to its durable paged history job.
+    // Backup restore also repairs immediately because the backup cannot assume
+    // this installation still has the source inbox that produced it.
+    const healedUnderThisGrammar = (receipt: string | undefined): boolean => {
+      if (receipt === reparseKey) return true;
+      if (typeof receipt !== 'string') return false;
+      let prior: unknown;
+      try {
+        prior = JSON.parse(receipt);
+      } catch {
+        return false;
+      }
+      // Revision 1 stored the merchant-override entries too. They never changed
+      // existing-row healing, so a receipt for this exact parser + market is
+      // equivalent and can be restamped without another pass.
+      return Array.isArray(prior) && prior.length === 4 && prior[0] === 1 &&
+        Number.isSafeInteger(prior[1]) && Number(prior[1]) >= PARSER_BACKFILL_VERSION &&
+        prior[2] === grammarMarketId;
+    };
+    const completedRepair = healedUnderThisGrammar(parsed.hydrationReparseKey);
+    const parserUpgradeWillUseHistory = options?.reuseCompletedReparse === true &&
+      Platform.OS === 'android' && parsed.onboarded === true &&
+      (parsed.parserVersion ?? 0) < PARSER_BACKFILL_VERSION;
+    const mustRepairSynchronously = options?.reuseCompletedReparse !== true ||
+      (!completedRepair && !parserUpgradeWillUseHistory);
+    if (mustRepairSynchronously) {
       parsed.transactions = parsed.transactions.flatMap((t) => {
         if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
         const p = parseSms(t.raw, parsed.merchantOverrides);
@@ -581,17 +659,23 @@ export function migratePersistedState(
         if (p.kind === 'billDue' || p.kind === 'cardStatement') {
           // This migration can heal transactions but cannot materialize the
           // CardDue/Bill that now represents this message. Keep the legacy row
-          // until a rescan can atomically create that obligation; deleting it
-          // here loses the only record when lastScanTs prevents re-offering it.
+          // until a rescan can atomically create that obligation.
           return [t];
         }
         const patch = healPatch(t, p);
         return [patch ? applyHealPatch(t, patch) : t];
       });
-      // Assigned only after the entire pass succeeds. The existing atomic
-      // snapshot save persists repaired rows and their receipt together.
-      parsed.hydrationReparseKey = reparseKey;
     }
+    // Android stamps the grammar receipt when it hands the upgrade to durable
+    // history so a restart while that job is unfinished does not reintroduce
+    // the synchronous launch pass. `parserVersion` remains old until the final
+    // history page commits, so the migration itself is still visibly pending.
+    parsed.hydrationReparseKey = reparseKey;
+  } else if (parsed.transactions) {
+    // Keep launch diagnostics phase-complete even when the durable receipt lets
+    // us skip the expensive pass. The grammar receipt is already exact, so no
+    // parser/global-market mutation is needed on this path.
+    markLaunchPhase('ledger-row-transforms-complete');
   }
   markLaunchPhase('ledger-reparse-complete');
 
@@ -620,6 +704,18 @@ export function migratePersistedState(
         ...(account.snapshotKind === 'balance' ? { snapshotKind: 'limit' as const } : {}),
       };
     });
+  }
+
+  // The transfer receipt read off disk describes the rows that were on disk.
+  // Every transform above can rewrite or drop rows — the card-payment pass
+  // sets `isTransfer`, the inward-remittance pass clears it, and the heal can
+  // flip either — so once any of them has changed the array, the stored id set
+  // is a claim about a ledger that no longer exists. Drop it and let hydrate
+  // rebuild; the version alone cannot notice this, because none of these
+  // transforms is a change to link semantics.
+  if (loadedTransactions && parsed.transactions !== loadedTransactions) {
+    delete parsed.transferInternalIds;
+    delete parsed.hydrationFinalizeVersion;
   }
 
   return parsed;
@@ -676,6 +772,7 @@ type Action =
   | { type: 'deleteBudget'; category: Budget['category'] }
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
+  | { type: 'setKnownBanks'; names: string[] }
   | { type: 'deleteAccount'; id: string }
   | { type: 'mergeRenewedCard'; oldId: string; newId: string }
   | { type: 'markCardsDistinct'; id: string }
@@ -693,6 +790,7 @@ type Action =
   | { type: 'deleteGoal'; id: string }
   | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
   | { type: 'setOnboardingProfile'; profile: OnboardingProfile }
+  | { type: 'setUserName'; name: string }
   | {
       type: 'activateOnboardingPlan';
       budgets: Budget[];
@@ -701,9 +799,11 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
+  | { type: 'setAndroidCaptureSources'; sources: AndroidCaptureSources }
   | { type: 'recordIosCaptureWarning'; warning: IosCaptureWarningState }
   | { type: 'clearIosCaptureWarning'; expectedWarningId: string | null }
   | { type: 'setHistoryImport'; progress: HistoryImportProgress }
+  | { type: 'recordStatementCoverage'; entry: StatementCoverageEntry }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
@@ -719,6 +819,7 @@ type Action =
       reviewTray: AppState['reviewTray'];
       sourceKeyUpdates?: { id: string; smsKey: string }[];
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+      learnedNotificationPackage?: string;
     }
   | {
       type: 'promoteReviewAlert';
@@ -726,6 +827,7 @@ type Action =
       counterpartId?: string;
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
+      learnedNotificationPackage?: string;
     }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -779,18 +881,136 @@ function reducer(state: AppState, action: Action): AppState {
   try {
     const reduced = reduceState(state, action);
     if (action.type === 'hydrate') markLaunchPhase('ledger-reducer-normalize-start');
-    // Every path that changes identity or rows passes through the same atomic
-    // link cleanup, including restore, account remaps and deletion/undo.
-    const transactions = reduced.transactions !== state.transactions || reduced.accounts !== state.accounts
+    // Transfer reconciliation is synchronous ledger work. Avoid a complete
+    // transfer-graph walk when the action cannot change transfer identity.
+    const transactionsChanged = reduced.transactions !== state.transactions;
+    const accountsChanged = reduced.accounts !== state.accounts;
+    // A persisted ledger carrying the current receipt was already normalized
+    // before its encrypted write. Re-running the same graph walk on every
+    // launch dominated startup on real ledgers, so hydrate trusts that receipt
+    // and missing/older receipts fail safe by doing one full pass.
+    // ...and only while the rows still are the rows it was written for. The
+    // version constant tracks link SEMANTICS, so it says nothing about this
+    // launch's repairs: `removeDeclinedTransactions` re-reads stored SMS under
+    // the live market pack and can DELETE a row, and the account repairs above
+    // can move one, all under an unchanged version. Trusting the receipt
+    // through that left the surviving leg of a broken pair marked internal
+    // forever — invisible to every total, and self-perpetuating, because the
+    // next save wrote the same receipt back. Identity settles it: the hydrate
+    // reducer preserves the transactions array when no row changed, so an
+    // array that came through untouched is one the receipt still describes.
+    const persistedTransferGraphIsCurrent = action.type === 'hydrate' &&
+      Array.isArray(reduced.transferInternalIds) &&
+      reduced.transactions === action.state.transactions &&
+      (
+        reduced.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+        // Intermediate history pages intentionally persist no final transfer
+        // version, but they do persist the last safe provisional id set. A
+        // process restart converts `running` to `paused`; rebuilding the full
+        // transfer graph here can block Hermes for seconds and be killed before
+        // the exact same provisional receipt can ever be saved again. Trust it
+        // until the final history page performs canonical reconciliation once.
+        historyImportIncomplete(reduced.historyImport)
+      );
+    // Import owns both its account and transaction changes: intermediate
+    // history pages deliberately defer this work, and final/live pages already
+    // normalize in applyMaterializedImportBatch. An account snapshot must not
+    // bypass that policy. Other account actions still normalize immediately.
+    const needsTransferNormalization = action.type !== 'importBatch' &&
+      !persistedTransferGraphIsCurrent && (accountsChanged || (
+        transactionsChanged && actionMayChangeTransferLinks(state, reduced, action)
+      ));
+    const transactions = needsTransferNormalization
       ? normalizeTransferLinks(reduced.transactions, reduced.accounts)
       : reduced.transactions;
-    return syncLedgerCurrency(transactions === reduced.transactions ? reduced : { ...reduced, transactions });
+    // Reconcile the rows that are actually STORED, not the ones that went in.
+    // These two passes do not agree, by design: `transfer-reconciliation.ts`
+    // lets a row with explicit own-ownership seed the absorption step only
+    // while it has no written `transferMatch`, so a reciprocal pair can prove
+    // a third, unrelated row is internal on the way in and is correctly
+    // excluded from doing so once `normalizeTransferLinks` has written its
+    // match. Stamping the earlier answer persisted the wider set: an ordinary
+    // payment sharing an amount and a day with a genuine own-account pair was
+    // recorded as an internal transfer and dropped out of every total, and the
+    // receipt made that stick across relaunches. Reconciling the normalized
+    // array reproduces exactly what the screens computed for themselves before
+    // this receipt existed. The memo makes it free when nothing normalized.
+    const transferReconciliation = needsTransferNormalization
+      ? reconcileTransfers(transactions, reduced.accounts)
+      : null;
+    const normalized = transactions === reduced.transactions ? reduced : { ...reduced, transactions };
+    const stamped = needsTransferNormalization && transferReconciliation
+      ? {
+          ...normalized,
+          transferNormalizationVersion: TRANSFER_NORMALIZATION_VERSION,
+          transferInternalIds: [...reconciliationInternalIds(transferReconciliation)],
+        }
+      : normalized;
+    return syncLedgerCurrency(stamped);
   } catch (error) {
     restoreMarket();
     applyMonthStartDay(month);
     applyThemePreference(theme);
     setLanguage(language);
     throw error;
+  }
+}
+
+function transactionNeedsTransferNormalization(transaction: Transaction | undefined): boolean {
+  return Boolean(
+    transaction &&
+      (isTransferCandidate(transaction) ||
+        transaction.isTransfer ||
+        transaction.transferMatch ||
+        transaction.transferDecision ||
+        transaction.transferEvidence),
+  );
+}
+
+function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action: Action): boolean {
+  switch (action.type) {
+    case 'importBatch':
+      // applyMaterializedImportBatch already performs canonical normalization.
+      return false;
+    case 'addTransaction':
+    case 'markBillPaid':
+      return true;
+    case 'payCardDue':
+      return action.transaction !== null;
+    case 'editTransaction': {
+      const before = state.transactions.find((transaction) => transaction.id === action.id);
+      const after = before ? applyTransactionEdit(before, action.patch) : undefined;
+      return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
+    }
+    case 'deleteTransaction':
+      return true;
+    case 'setPrivateMode':
+    case 'setMonthStartDay':
+      return false;
+    default: {
+      // Every other action used to answer "yes", so renaming a merchant with
+      // "apply to existing", filing a bill alias or applying FX rates re-ran
+      // the full transfer graph — two whole-ledger walks — on every tap of
+      // the categorise screen. The same test `editTransaction` applies
+      // generalises: the graph can only change if a row was added or
+      // removed, or a row that was transfer-relevant before or after the
+      // change is not the same object. Store snapshots are immutable, so an
+      // untouched row is the same object.
+      if (reduced.transactions.length !== state.transactions.length) return true;
+      for (let index = 0; index < reduced.transactions.length; index += 1) {
+        const prior = state.transactions[index];
+        const after = reduced.transactions[index];
+        if (prior === after) continue;
+        // A row that moved, or one id replaced by another, is a reshaped
+        // ledger rather than an edited row. Say yes rather than reason about
+        // what pairing depends on order.
+        if (prior.id !== after.id) return true;
+        if (transactionNeedsTransferNormalization(prior) || transactionNeedsTransferNormalization(after)) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 }
 
@@ -804,6 +1024,16 @@ function reduceState(state: AppState, action: Action): AppState {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
       next.historyImport = normalizeHistoryImportProgress(next.historyImport);
+      // Parser migrations use the resumable paged history coordinator rather
+      // than monopolising the foreground JS thread with a whole-inbox reread.
+      if (
+        Platform.OS === 'android' &&
+        next.onboarded &&
+        (next.parserVersion ?? 0) < PARSER_BACKFILL_VERSION &&
+        (!next.historyImport || next.historyImport.status === 'complete')
+      ) {
+        next.historyImport = createHistoryImportProgress(Date.now());
+      }
       next.localCaptureQualifications = normalizeLocalCaptureQualifications(
         next.localCaptureQualifications,
         Date.now(),
@@ -834,6 +1064,23 @@ function reduceState(state: AppState, action: Action): AppState {
         repairCardPaymentAccounts(accountsMerged),
       );
       if (action.type === 'hydrate') markLaunchPhase('ledger-repairs-complete');
+      const exactReparseKey = JSON.stringify([2, PARSER_BACKFILL_VERSION, next.marketId]);
+      // Build 262 predates hydrationFinalizeVersion, but every state carrying
+      // BOTH of these exact receipts was already persisted after this same
+      // decline/dedupe/payment cleanup. Accept that one legacy shape so users do
+      // not pay another 700ms maintenance launch just to mint the new receipt.
+      // Restore/loadDemo never trust a receipt supplied by external state.
+      const legacyFinalizationReceipt = action.type === 'hydrate' &&
+        action.state.hydrationFinalizeVersion === undefined &&
+        action.state.hydrationReparseKey === exactReparseKey &&
+        action.state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+        Array.isArray(action.state.transferInternalIds);
+      const finalizationReceiptCurrent = action.type === 'hydrate' &&
+        (action.state.hydrationFinalizeVersion === HYDRATION_FINALIZE_VERSION ||
+          legacyFinalizationReceipt) &&
+        // Account/card repairs can rewrite transaction attribution. A receipt
+        // describes the rows that were persisted, so any rewrite invalidates it.
+        paymentsRepaired.transactions === next.transactions;
       // A declined transaction moved no money, and no rescan can take one
       // back: healing only ever adds information to a row, and a message the
       // parser now suppresses never reaches the import planner to be swept.
@@ -842,12 +1089,17 @@ function reduceState(state: AppState, action: Action): AppState {
       // so nothing downstream ever sees a row this proves never happened.
       // Requires the market pack to be live, which setActiveMarket did above:
       // it re-parses stored SMS text.
-      const declinesRemoved = removeDeclinedTransactions(paymentsRepaired);
+      const declinesRemoved = finalizationReceiptCurrent
+        ? paymentsRepaired
+        : removeDeclinedTransactions(paymentsRepaired);
       if (action.type === 'hydrate') markLaunchPhase('ledger-declines-complete');
       const finalized = {
         ...declinesRemoved,
-        transactions: finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
+        transactions: finalizationReceiptCurrent
+          ? declinesRemoved.transactions
+          : finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
         cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
+        hydrationFinalizeVersion: HYDRATION_FINALIZE_VERSION,
       };
       if (action.type === 'hydrate') markLaunchPhase('ledger-finalize-complete');
       return finalized;
@@ -879,18 +1131,29 @@ function reduceState(state: AppState, action: Action): AppState {
       if ((state.languagePreference ?? 'system') !== 'system') return state;
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
-    case 'setReviewTray':
+    case 'setReviewTray': {
+      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string }>();
+      for (const update of action.sourceKeyUpdates ?? []) {
+        // Match the former find(): the first update for an ID wins.
+        if (!sourceKeyUpdates.has(update.id)) sourceKeyUpdates.set(update.id, update);
+      }
+      const learned = action.learnedNotificationPackage &&
+        /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
+        ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
+        : state.trustedNotificationPackages;
       return {
         ...state,
         reviewTray: action.reviewTray,
+        trustedNotificationPackages: learned,
         ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
-          const update = action.sourceKeyUpdates!.find((candidate) => candidate.id === transaction.id);
+          const update = sourceKeyUpdates.get(transaction.id);
           return update ? { ...transaction, smsKey: update.smsKey } : transaction;
         }) } : {}),
         ...(action.localCaptureQualifications
           ? { localCaptureQualifications: action.localCaptureQualifications }
           : {}),
       };
+    }
     case 'recordIosCaptureWarning':
       return { ...state, iosCaptureWarning: action.warning };
     case 'clearIosCaptureWarning':
@@ -906,6 +1169,10 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
+        trustedNotificationPackages: action.learnedNotificationPackage &&
+          /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
+          ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
+          : state.trustedNotificationPackages,
         transactions: sortTxs([
           action.transaction,
           ...state.transactions.map((transaction) =>
@@ -960,25 +1227,20 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     }
     case 'editTransaction': {
-      const transactions = sortTxs(
-        state.transactions.map((t) => {
-          if (t.id !== action.id) return t;
-          // `titleEdited` is the narrow half of `userEdited`: the user
-          // replaced the parser's SHOP NAME, as opposed to correcting an
-          // amount, a date or an account. Parser-coverage measurement needs
-          // that distinction — a hand-typed name must never be scored as a
-          // parser naming success, and a row whose date was fixed must not be
-          // dropped from the measurement for it. So it is set only when the
-          // patch carries a title that actually differs from the one on the
-          // row, and once set it survives every later edit.
-          const renamed = action.patch.title !== undefined && action.patch.title !== t.title;
-          // userEdited pins the row: nothing re-parsed may overwrite it later.
-          return renamed || t.titleEdited
-            ? { ...t, ...action.patch, userEdited: true, titleEdited: true }
-            : { ...t, ...action.patch, userEdited: true };
-        }),
-      );
-      return { ...state, transactions };
+      const index = state.transactions.findIndex((transaction) => transaction.id === action.id);
+      if (index < 0) return state;
+      const previous = state.transactions[index];
+      const edited = applyTransactionEdit(previous, action.patch);
+      const transactions = state.transactions.slice();
+      transactions[index] = edited;
+      // The ledger is already newest-first. Replacing one row cannot disturb
+      // that order unless its posting date actually changed, so do not walk the
+      // complete 10k-20k array merely to prove it is still sorted after a title,
+      // category, amount, account or transfer edit.
+      return {
+        ...state,
+        transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
+      };
     }
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
@@ -1010,6 +1272,17 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'setKnownBanks': {
+      // The user's own answer to "Which banks text you?". One bank is an
+      // unambiguous label for every account nothing else could name; several
+      // are left for the per-account picker.
+      const knownBanks = sanitizeKnownBanks(action.names);
+      return {
+        ...state,
+        knownBanks,
+        accounts: accountsLabelledWithBank(state.accounts, singleKnownBank(knownBanks)),
+      };
+    }
     case 'mergeRenewedCard':
       // The bank reissued the card; the user confirmed the two rows are one.
       return mergeRenewedCard(state, action.oldId, action.newId);
@@ -1120,6 +1393,10 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, onboardingPlan: action.plan };
     case 'setOnboardingProfile':
       return { ...state, onboardingProfile: action.profile };
+    case 'setUserName': {
+      const userName = normalizePreferredName(action.name);
+      return userName && userName !== state.userName ? { ...state, userName } : state;
+    }
     case 'activateOnboardingPlan': {
       // React Strict Mode may replay an effect. Clearing the pending plan in
       // the same reducer action makes activation idempotent even then.
@@ -1157,6 +1434,19 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
+    case 'setAndroidCaptureSources':
+      return { ...state, androidCaptureSources: action.sources };
+    case 'recordStatementCoverage': {
+      const duplicate = state.statementCoverage.find((item) =>
+        item.sourceKey === action.entry.sourceKey && item.startDate === action.entry.startDate &&
+        item.endDate === action.entry.endDate && item.format === action.entry.format);
+      const nextEntry = duplicate ? { ...duplicate, importedAt: action.entry.importedAt } : action.entry;
+      const without = duplicate
+        ? state.statementCoverage.filter((item) => item.id !== duplicate.id)
+        : state.statementCoverage;
+      return { ...state, statementCoverage: [...without, nextEntry]
+        .sort((a, b) => b.importedAt - a.importedAt).slice(0, 80) };
+    }
     case 'setHistoryImport':
       return { ...state, historyImport: action.progress };
     case 'applyFxUpdates': {
@@ -1277,6 +1567,8 @@ interface StoreValue {
   deleteBudget: (category: Budget['category']) => void;
   addAccount: (a: Omit<Account, 'id'>) => void;
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
+  /** Store which banks text the user; one bank also labels every bank-less account. */
+  setKnownBanks: (names: string[]) => void;
   deleteAccount: (id: string) => void;
   /** Fold a reissued card's predecessor into it (user-confirmed). */
   mergeRenewedCard: (oldId: string, newId: string) => void;
@@ -1296,15 +1588,19 @@ interface StoreValue {
   deleteGoal: (id: string) => void;
   setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
   setOnboardingProfile: (profile: OnboardingProfile) => void;
+  setUserName: (name: string) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
+  setAndroidCaptureSources: (sources: AndroidCaptureSources) => Promise<void>;
   recordIosCaptureWarning: (input: IosCaptureWarningState) => { durable: Promise<void> };
   clearIosCaptureWarning: (
     expectedWarningId: string | null,
   ) => { cleared: boolean; durable: Promise<void> };
   setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
   beginHistoryImport: () => Promise<void>;
+  recordStatementCoverage: (entry: Omit<StatementCoverageEntry, 'id'>) => Promise<void>;
+  stageStatementCoverage: (entry: Omit<StatementCoverageEntry, 'id'>) => void;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -1323,6 +1619,7 @@ interface StoreValue {
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+const PrivateModeContext = createContext(false);
 
 export interface ImportReceipt {
   ids: string[];
@@ -1560,15 +1857,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const stateGeneration = useRef(0);
   const dispatch = useCallback((action: Action): AppState => {
     const next = reducer(authoritativeState.current, action);
-    if (
+    const replacesLedger = (
       action.type === 'hydrate' ||
       action.type === 'restore' ||
       action.type === 'loadDemo' ||
       action.type === 'clearAll'
-    ) {
+    );
+    if (replacesLedger) {
       stateGeneration.current += 1;
     }
+    if (replacesLedger ||
+        ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
+      cancelLocalSemanticBackgroundWork();
+    }
     authoritativeState.current = next;
+    if (Array.isArray(next.transferInternalIds) && (
+      next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
+      historyImportIncomplete(next.historyImport)
+    )) {
+      // During an unfinished first-history import the ids are a provisional UI
+      // snapshot only. The persisted normalization VERSION is intentionally
+      // absent. The final page still forces exact reconciliation; a restart
+      // does not, because hydration converts `running` to `paused` and the same
+      // provisional snapshot remains the safe cheap answer. Priming the cache
+      // here prevents Home/Flow/Bills/Wallet from rebuilding the entire graph.
+      primeInternalTransferIds(
+        next.transactions,
+        next.accounts,
+        next.transferInternalIds,
+        next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
+      );
+    }
     authoritativeRevision.current += 1;
     setState(next);
     return next;
@@ -1662,7 +1981,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         markLaunchPhase('ledger-load-complete');
         return true;
       }
-      const loaded = await persistence.load();
+      // A killed-process SMS/push wake can be finishing a short encrypted write
+      // at the exact moment the user opens Wafra. Join that event-driven tail
+      // before reading so hydration never presents the snapshot from one write
+      // behind. This is a no-op when no background capture is running.
+      if (Platform.OS === 'android') await waitForAndroidBackgroundCaptureIdle();
+      let loaded: Awaited<ReturnType<LedgerPersistence['load']>>;
+      try {
+        loaded = await persistence.load();
+      } catch (firstError) {
+        // The native adapter has already retired the failed shared SQLCipher
+        // handle before this throw reaches the store. A bounded subset of read
+        // failures is transient, so try exactly once on the fresh connection
+        // before replacing the app with the recovery takeover.
+        const firstFailure = recordStorageFailure('read', firstError);
+        if (!storageReadFailureMayRetry(firstFailure) || hydrationRun.current !== run) {
+          throw firstError;
+        }
+        // Give Android one event-loop turn after closeAsync. Persistence stays
+        // blocked throughout both reads, so a default/empty snapshot can never
+        // overwrite the ledger while recovery is in progress.
+        await new Promise<void>((resolve) => setTimeout(resolve, 32));
+        if (hydrationRun.current !== run) return false;
+        loaded = await persistence.load();
+      }
       if (hydrationRun.current !== run) return false;
       markLaunchPhase('ledger-read-complete');
       let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
@@ -1768,12 +2110,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, hydrate, persistence]);
 
+  /**
+   * The highest revision a save has DURABLY committed.
+   *
+   * Import, review and progress writers persist immediately for durability;
+   * the render their dispatch causes then reached the debounce below, which
+   * wrote the identical snapshot again 700ms later — an extra encrypted
+   * transaction per history page and per capture. The timer still arms, but
+   * it checks here before writing, so a redundant save is dropped while a
+   * FAILED explicit save still leaves this behind and gets its retry.
+   */
+  const persistedRevision = useRef(-1);
   /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Captured before the write: a dispatch can land while it is in flight,
+    // and that newer revision is not the one this call makes durable.
+    const revision = snapshot === authoritativeState.current
+      ? authoritativeRevision.current
+      : -1;
+    const commit = (ok: boolean): boolean => {
+      if (ok && revision >= 0) {
+        persistedRevision.current = Math.max(persistedRevision.current, revision);
+      }
+      return ok;
+    };
     // Screenmap state exists only for screenshots and is intentionally
     // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
+    // Left exactly as it was, and deliberately NOT marking the revision
+    // durable: `screenmap-demo-safety.test.cjs` pins this line as the promise
+    // that Screenmap never reaches encrypted persistence. The debounce may
+    // then call this again, which costs nothing — it returns here too.
     if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
-    return persistence.save(snapshot).catch((error) => {
+    return persistence.save(snapshot).then(commit).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
     });
@@ -1784,6 +2152,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      // An explicit writer already made this exact revision durable.
+      if (persistedRevision.current === authoritativeRevision.current) return;
       persist(authoritativeState.current);
     }, SAVE_DEBOUNCE_MS);
   }, [state, persist]);
@@ -1890,13 +2260,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ids: [], qualificationIds: [], durable: Promise.reject(error) };
     }
     const materialized = materializeImportBatch(input, base, makeId);
-    const postImportState = applyMaterializedImportBatch(base, materialized);
-    const qualificationCandidates = attestDeclineQualifications(
-      base,
-      materialized,
-      postImportState,
-      qualifications,
-    );
+    // Ordinary statement/SMS imports carry no decline qualifications. Avoid
+    // fully applying the batch once here and then a second time in dispatch.
+    const qualificationCandidates = qualifications.length > 0
+      ? attestDeclineQualifications(
+          base,
+          materialized,
+          applyMaterializedImportBatch(base, materialized),
+          qualifications,
+        )
+      : [];
     const localCaptureQualifications = qualificationCandidates.length > 0
       ? mergeLocalCaptureQualifications(
           base.localCaptureQualifications,
@@ -2032,13 +2405,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       saveTimer.current = null;
     }
     const next = plan.outcome === 'duplicate'
-      ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray })
+      ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray,
+          learnedNotificationPackage: plan.learnedNotificationPackage })
       : dispatch({
           type: 'promoteReviewAlert',
           transaction: plan.transaction,
           counterpartId: plan.counterpartId,
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
+          learnedNotificationPackage: plan.learnedNotificationPackage,
         });
     if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
     return plan.outcome;
@@ -2066,6 +2441,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAccount = useCallback((id: string) => {
     dispatch({ type: 'deleteAccount', id });
+  }, [dispatch]);
+
+  const setKnownBanks = useCallback((names: string[]) => {
+    dispatch({ type: 'setKnownBanks', names });
   }, [dispatch]);
 
   const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
@@ -2195,6 +2574,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Capture preference could not be saved');
   }, [dispatch, persist]);
 
+  const setAndroidCaptureSources = useCallback(async (sources: AndroidCaptureSources) => {
+    if (Platform.OS !== 'android') return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const { default: reader } = await import('../../modules/notification-reader');
+    if (reader?.isAvailable() === true) {
+      const anySource = sources.sms || sources.notifications;
+      const expiresAt = anySource
+        ? bankNotificationAdmissionExpiresAt(authoritativeState.current)
+        : 0;
+      const configured = reader.setSourceConfiguration
+        ? await reader.setSourceConfiguration(sources.notifications, expiresAt)
+        : await reader.setCaptureEnabled(sources.notifications, sources.notifications ? expiresAt : 0);
+      if (!configured) throw new Error('Android capture sources could not be configured');
+    }
+    const next = dispatch({ type: 'setAndroidCaptureSources', sources });
+    const written = await persist(next);
+    if (!written) throw new Error('Android capture sources could not be saved');
+  }, [dispatch, persist]);
+
   const recordIosCaptureWarning = useCallback((input: IosCaptureWarningState) => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -2248,12 +2649,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     requestHistoryImportRun();
   }, [setHistoryImportProgress]);
 
+  const stageStatementCoverage = useCallback((entry: Omit<StatementCoverageEntry, 'id'>) => {
+    dispatch({ type: 'recordStatementCoverage', entry: { ...entry, id: makeId('statement') } });
+  }, [dispatch]);
+
+  const recordStatementCoverage = useCallback(async (entry: Omit<StatementCoverageEntry, 'id'>) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'recordStatementCoverage', entry: { ...entry, id: makeId('statement') } });
+    const written = await persist(next);
+    if (!written) throw new Error('Statement coverage could not be saved');
+  }, [dispatch, persist]);
+
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
   }, [dispatch]);
 
   const setOnboarded = useCallback(() => {
     dispatch({ type: 'setOnboarded' });
+  }, [dispatch]);
+
+  const setUserName = useCallback((name: string) => {
+    dispatch({ type: 'setUserName', name });
   }, [dispatch]);
 
   const setThemePreference = useCallback((preference: string) => {
@@ -2314,25 +2733,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       trialStartTs: _trial,
       reviewTray: _reviewTray,
       hydrationReparseKey: _hydrationReparseKey,
+      hydrationFinalizeVersion: _hydrationFinalizeVersion,
       ...data
-    } = state;
+    } = authoritativeState.current;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });
-  }, [state]);
+  }, []);
 
   const restoreBackup = useCallback((json: string): boolean => {
     const restored = parseBackupForRestore(json);
     if (!restored) return false;
     // Older backups may still contain these fields. The current store answer
-    // wins regardless of what the file says.
+    // wins regardless of what the file says. Read from the authoritative
+    // snapshot: the rendered `state` is at most one batch behind it, and
+    // depending on it recreated this callback on every ledger change.
+    const current = authoritativeState.current;
     const safeState = {
       ...restored,
-      pro: state.pro,
-      founderPro: state.founderPro,
-      trialStartTs: state.trialStartTs,
-      reviewTray: state.reviewTray,
-      captureOptOut: state.captureOptOut,
-      localCaptureQualifications: state.localCaptureQualifications,
-      iosCaptureWarning: state.iosCaptureWarning,
+      pro: current.pro,
+      founderPro: current.founderPro,
+      trialStartTs: current.trialStartTs,
+      reviewTray: current.reviewTray,
+      captureOptOut: current.captureOptOut,
+      localCaptureQualifications: current.localCaptureQualifications,
+      iosCaptureWarning: current.iosCaptureWarning,
     };
     try {
       dispatch({ type: 'restore', state: safeState });
@@ -2341,16 +2764,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Rejected normalization leaves both the ledger and process preferences intact.
       return false;
     }
-  }, [
-    dispatch,
-    state.captureOptOut,
-    state.founderPro,
-    state.iosCaptureWarning,
-    state.localCaptureQualifications,
-    state.pro,
-    state.reviewTray,
-    state.trialStartTs,
-  ]);
+  }, [dispatch]);
 
   const loadDemoData = useCallback(() => {
     dispatch({
@@ -2474,6 +2888,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCard: mergeRenewedCardAction,
       markCardsDistinct: markCardsDistinctAction,
       addBill,
@@ -2490,14 +2905,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setOnboardingPlan,
       setOnboardingProfile,
+      setUserName,
       setAppLock,
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setAndroidCaptureSources,
       recordIosCaptureWarning,
       clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
+      recordStatementCoverage,
+      stageStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -2536,6 +2955,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      setKnownBanks,
       mergeRenewedCardAction,
       markCardsDistinctAction,
       addBill,
@@ -2552,14 +2972,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setOnboardingPlan,
       setOnboardingProfile,
+      setUserName,
       setAppLock,
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setAndroidCaptureSources,
       recordIosCaptureWarning,
       clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
+      recordStatementCoverage,
+      stageStatementCoverage,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -2576,7 +3000,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  return (
+    <PrivateModeContext.Provider value={state.privateMode}>
+      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+    </PrivateModeContext.Provider>
+  );
 }
 
 export function useStore(): StoreValue {
@@ -2584,6 +3012,12 @@ export function useStore(): StoreValue {
   if (!ctx) throw new Error('useStore must be used within StoreProvider');
   return ctx;
 }
+
+/** Narrow subscription for list-row artwork; unrelated ledger updates do not rerender every avatar. */
+export function usePrivateMode(): boolean {
+  return useContext(PrivateModeContext);
+}
+
 
 // Pure balance math lives in balances.ts so the unit-test harness can load
 // it without React; re-exported here so screens keep one import path.
@@ -2596,7 +3030,7 @@ export function netWorthAtDate(state: AppState, dateISO: string): number {
   // the arriving side, which the bank words like ordinary income and which
   // therefore carries no transfer flag of its own.
   const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
-  const internal = internalTransferIds(state.transactions, state.accounts);
+  const internal = internalTransferIdsForState(state);
   let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
     if (!countsInTotals(t, live, internal)) continue;

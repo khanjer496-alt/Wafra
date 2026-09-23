@@ -4,6 +4,8 @@ const onboarding = require('./build/onboarding');
 const i18n = require('./build/i18n');
 const growth = require('./build/growth-funnel');
 const backupValidation = require('./build/backup-validation');
+const bankExamples = require('./build/onboarding-bank-examples');
+const markets = require('./build/markets');
 
 let pass = 0;
 let fail = 0;
@@ -48,6 +50,14 @@ eq('spending focus opens Spending after setup', onboarding.onboardingLandingPath
 eq('bills focus opens Bills after setup', onboarding.onboardingLandingPath('bills'), '/bills');
 eq('cash-flow focus opens Home after setup', onboarding.onboardingLandingPath('cashflow'), '/');
 eq('overview focus opens Home after setup', onboarding.onboardingLandingPath('overview'), '/');
+eq('preferred name trims and collapses accidental whitespace',
+  onboarding.normalizePreferredName('  Naser   Khanjar  '), 'Naser Khanjar');
+eq('preferred name preserves Arabic and Unicode',
+  onboarding.normalizePreferredName('  ناصر  '), 'ناصر');
+eq('preferred name rejects an empty value', onboarding.normalizePreferredName('   \n\t '), null);
+eq('preferred name is bounded by Unicode code points',
+  Array.from(onboarding.normalizePreferredName('😀'.repeat(60))).length,
+  onboarding.MAX_PREFERRED_NAME_LENGTH);
 
 eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.GROWTH_PLACEMENTS, {
   onboarding: 'onboarding_main',
@@ -84,6 +94,186 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   eq('backup validation rejects negative onboarding clocks',
     backupValidation.isValidBackupState({ ...profileState,
       onboardingProfile: { ...profileState.onboardingProfile, startedAt: -1 } }), false);
+  for (const currency of ['USD', 'EUR', 'JPY', 'KWD']) {
+    eq(`backup validation preserves global onboarding currency evidence (${currency})`,
+      backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: currency }), true);
+  }
+  eq('backup validation rejects non-canonical currency evidence',
+    backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'usd' }), false);
+  eq('backup validation rejects ISO currencies whose exponent the ledger cannot represent',
+    backupValidation.isValidBackupState({ ...profileState, onboardingCurrencyEvidence: 'CLF' }), false);
+  // The alert-delivery answer is optional: every ledger onboarded before the
+  // step existed restores without it, and must keep restoring without it.
+  eq('backup validation still accepts a profile with no alert-delivery answer',
+    backupValidation.isValidBackupState(profileState), true);
+  for (const alerts of ['sms', 'notifications', 'neither', 'unsure', null]) {
+    eq(`backup validation accepts the alert-delivery answer (${alerts})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, alerts } }), true);
+  }
+  eq('backup validation rejects an unknown alert-delivery answer',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, alerts: 'whatsapp' } }), false);
+  eq('backup validation accepts the alert-delivery stage',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, stage: 'alerts' } }), true);
+  // The confirmed country is optional and tolerant: a ledger written by a build
+  // that illustrates more countries has to restore on this one too.
+  for (const country of ['AE', 'GB', 'ZZ', 'PK', null]) {
+    eq(`backup validation accepts a confirmed onboarding country (${country})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), true);
+  }
+  for (const country of ['gb', 'GBR', 'G1', '', 7]) {
+    eq(`backup validation rejects a malformed onboarding country (${JSON.stringify(country)})`,
+      backupValidation.isValidBackupState({ ...profileState,
+        onboardingProfile: { ...profileState.onboardingProfile, country } }), false);
+  }
+}
+
+/* The country a person confirms outranks the phone, and outranks it everywhere
+ * — the whole complaint was a UAE resident being shown British banks because
+ * his store account was British. It must also stay display-only: no country
+ * chosen here may select a parser market or pin a currency. */
+{
+  const region = bankExamples.onboardingBankRegion;
+  const gb = region('AE', 'GB');
+  const ae = region('AE', 'AE');
+  eq('a confirmed country wins over the launch market fallback', gb?.id, 'GB');
+  ok('and brings that country\'s own banks with it',
+    gb?.banks?.some((bank) => /HSBC/i.test(bank.name)) === true);
+  eq('confirming the market you are already in stays on it', ae?.id, 'AE');
+  eq('a country Wafra cannot illustrate stays neutral rather than guessing',
+    region('AE', 'ZZ'), null);
+  eq('and so does an explicit somewhere-else',
+    region('AE', bankExamples.ONBOARDING_REGION_ELSEWHERE), null);
+
+  // Display only: the parser's market pack is a closed set of two, and nothing
+  // the picker can return may widen it.
+  ok('no confirmable country can select a parser market beyond the two tested ones',
+    bankExamples.ONBOARDING_REGION_IDS
+      .filter((id) => markets.canSelectMarket(id))
+      .join(',') === 'AE,SA');
+  eq('and somewhere-else selects no market at all',
+    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE), false);
+
+  eq('a stored country is normalized to an ISO region code',
+    bankExamples.normalizeOnboardingCountry(' gb '), 'GB');
+  for (const bad of ['GBR', 'g', '', null, undefined, 12, {}]) {
+    eq(`a malformed stored country is dropped rather than drawn (${JSON.stringify(bad)})`,
+      bankExamples.normalizeOnboardingCountry(bad), null);
+  }
+
+  ok('every pickable country has a flag and a name in both languages',
+    [...bankExamples.ONBOARDING_REGION_IDS, bankExamples.ONBOARDING_REGION_ELSEWHERE]
+      .every((id) => {
+        const entry = bankExamples.ONBOARDING_REGION_LABELS[id];
+        return !!entry?.flag && ['en', 'ar'].every((lang) =>
+          i18n.t(entry.labelKey, lang) && i18n.t(entry.labelKey, lang) !== entry.labelKey);
+      }));
+  ok('every illustrable country can actually be picked',
+    ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO']
+      .every((id) => bankExamples.ONBOARDING_REGION_IDS.includes(id)));
+  ok('the country sheet says it only changes examples, not what Wafra can read',
+    /only picks the example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+      /come from your alerts/i.test(i18n.t('onboardCountrySheetBody', 'en')));
+}
+
+/* Which answers owe the user a statement.
+ *
+ * The rule exists because only an SMS inbox is an archive. A notification is
+ * gone the moment it is dismissed, so "notifications" means Wafra can follow
+ * the future and not the past — exactly the case this tester hit with a bank
+ * that never texted him. An ABSENT answer is not a gap: that is every ledger
+ * onboarded before the question existed, and those already have their history. */
+{
+  const gap = onboarding.onboardingHistoryGap;
+  eq('a texting bank needs no statement', gap('sms'), false);
+  eq('a notification-only bank cannot reach the past', gap('notifications'), true);
+  eq('a bank that does neither cannot either', gap('neither'), true);
+  eq('an unsure answer is offered the import rather than guessed at', gap('unsure'), true);
+  eq('an unanswered question is not a gap', gap(null), false);
+  eq('and neither is a profile saved before the step existed', gap(undefined), false);
+
+  /* The answer has to be giveable AFTER setup, because the person it was
+   * written for finished setup before the question existed. A ledger with no
+   * profile at all is the normal case there, not an edge one. */
+  const withAlerts = onboarding.onboardingProfileWithAlerts;
+  const fresh = withAlerts(null, 'notifications', 1234);
+  eq('a ledger that never had a profile still records the answer', fresh.alerts, 'notifications');
+  eq('and is stamped complete, never sent back through the questionnaire', fresh.stage, 'complete');
+  eq('with a clock rather than a missing one', fresh.startedAt, 1234);
+  ok('and stays a valid persisted profile',
+    backupValidation.isValidBackupState({ transactions: [], onboardingProfile: fresh }));
+
+  const existing = { v: 1, stage: 'complete', focus: 'bills', tracking: 'bank-apps',
+    intention: 'stay-ahead', country: 'AE', startedAt: 99 };
+  const updated = withAlerts(existing, 'neither', 5678);
+  eq('answering later changes the answer and nothing else',
+    updated, { ...existing, alerts: 'neither' });
+  eq('and never rewrites the original start clock', updated.startedAt, 99);
+  eq('re-answering replaces rather than stacks',
+    withAlerts(updated, 'sms').alerts, 'sms');
+
+  /* A bank that sends nothing is not covered "from now on" either. Drawing or
+   * promising future capture there is the same false reassurance this question
+   * exists to remove, and AGENTS.md forbids claiming coverage we do not have. */
+  const noCapture = onboarding.onboardingNoAutomaticCapture;
+  eq('a bank that sends nothing has no automatic input at all', noCapture('neither'), true);
+  for (const answer of ['sms', 'notifications', 'unsure', null, undefined]) {
+    eq(`every other answer names a channel Wafra can follow (${answer})`, noCapture(answer), false);
+  }
+  ok('and the copy for that case promises no automatic future capture',
+    !/catch everything from here|on its own/i.test(i18n.t('onboardHistoryGapManualBody', 'en')) &&
+      /sends nothing/i.test(i18n.t('onboardHistoryGapManualBody', 'en')));
+  ok('every string that case needs is translated in both languages',
+    ['onboardHistoryGapManualTitle', 'onboardHistoryGapManualBody', 'onboardAlertsReachManual',
+      'statementImportNoCaptureDetail']
+      .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)));
+
+  /* Rebuilding the profile field by field is what erased these answers the
+   * moment an iPhone finished setup, because the reducer replaces the whole
+   * object. The stage helper must carry through anything it does not name. */
+  const atStage = onboarding.onboardingProfileAtStage;
+  const full = { v: 1, stage: 'capture', focus: 'bills', tracking: 'bank-apps',
+    intention: 'stay-ahead', alerts: 'notifications', country: 'AE', startedAt: 7 };
+  eq('completing setup keeps every answer and only moves the stage',
+    atStage(full, 'complete', 99), { ...full, stage: 'complete' });
+  eq('including a field this build does not name',
+    atStage({ ...full, somethingNewer: 1 }, 'complete', 99).somethingNewer, 1);
+  eq('and a ledger with no profile still gets a usable one', atStage(null, 'complete', 42).startedAt, 42);
+  ok('which is still a valid persisted profile',
+    backupValidation.isValidBackupState({ transactions: [], onboardingProfile: atStage(full, 'complete', 99) }));
+
+  const prefersNotifications = onboarding.onboardingPrefersNotificationCapture;
+  eq('capture setup leads with notifications only when that is the answer',
+    prefersNotifications('notifications'), true);
+  eq('a texting bank keeps the SMS-first capture recommendation',
+    prefersNotifications('sms'), false);
+  eq('an unanswered question changes no capture default', prefersNotifications(null), false);
+
+  eq('every alert-delivery answer has exactly one preset',
+    onboarding.ALERT_DELIVERY_PRESETS.map((preset) => preset.id),
+    ['sms', 'notifications', 'neither', 'unsure']);
+  ok('every alert-delivery preset is translated in both languages',
+    onboarding.ALERT_DELIVERY_PRESETS.every((preset) =>
+      ['en', 'ar'].every((lang) =>
+        i18n.t(preset.titleKey, lang) && i18n.t(preset.detailKey, lang) &&
+        i18n.t(preset.titleKey, lang) !== preset.titleKey &&
+        i18n.t(preset.detailKey, lang) !== preset.detailKey)));
+}
+
+/* The question is about delivery, never about which bank. Onboarding copy that
+ * named a provider would be a partnership claim Wafra has not made. */
+{
+  const alertCopy = ['onboardAlertsTitle', 'onboardAlertsBody', 'onboardHistoryGapTitle',
+    'onboardHistoryGapBody', 'onboardHistoryGapAction']
+    .flatMap((key) => ['en', 'ar'].map((lang) => i18n.t(key, lang)));
+  ok('the alert question and statement offer name no bank',
+    alertCopy.every((line) => !/HSBC|Emirates NBD|FAB|ADCB|Liv|Barclays|Lloyds/i.test(line)));
+  ok('the statement offer promises future capture without promising past capture',
+    /catch everything from here/i.test(i18n.t('onboardHistoryGapBody', 'en')) &&
+      /import a statement/i.test(i18n.t('onboardHistoryGapBody', 'en')));
 }
 
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {
@@ -268,27 +458,167 @@ const gateSource = fs.readFileSync(
   'utf8',
 );
 const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const i18nSource = fs.readFileSync(path.join(__dirname, '../../src/lib/i18n.ts'), 'utf8');
 const iosSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
 const iosControllerSource = fs.readFileSync(
   path.join(__dirname, '../../src/lib/ios-capture-setup.ts'),
   'utf8',
 );
-const moneyPreviewSource = fs.readFileSync(
-  path.join(__dirname, '../../src/components/onboarding/money-preview.tsx'),
+const journalHomeSource = fs.readFileSync(
+  path.join(__dirname, '../../src/screens/journal-home-screen.tsx'),
+  'utf8',
+);
+const aliveScenesSource = fs.readFileSync(
+  path.join(__dirname, '../../src/components/onboarding/alive-scenes.tsx'),
+  'utf8',
+);
+const onboardingBankExamplesSource = fs.readFileSync(
+  path.join(__dirname, '../../src/lib/onboarding-bank-examples.ts'),
   'utf8',
 );
 
 ok(
-  'value-first onboarding precedes optional planning without forcing a country',
-  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'preview', 'privacy']") &&
-    gateSource.includes("const PLAN_STEPS: readonly Step[] = ['goals', 'budget']") &&
-    gateSource.includes('FOCUS_PRESETS.map') &&
-    gateSource.includes('TRACKING_PRESETS.map') &&
-    gateSource.includes('setOnboardingPlan(plan)') &&
-    !gateSource.includes('setMarket(plan.answers.marketId)') &&
-    !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
-    !gateSource.includes('plan.goals.forEach(addGoal)'),
+  'first-run personalization is one integrated journey without the optional goals/budget wizard',
+  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
+    gateSource.includes('<FocusChooser value={selectedFocus} onChange={chooseFocus}') &&
+    gateSource.includes('<TrackingChooser value={selectedTracking} onChange={chooseTracking}') &&
+    gateSource.includes('<AlertDeliveryChooser value={selectedAlerts} onChange={chooseAlerts}') &&
+    gateSource.includes('<IntentionChooser value={selectedIntention} onChange={chooseIntention}') &&
+    !gateSource.includes('PLAN_STEPS') &&
+    !gateSource.includes("activeStep === 'goals'") &&
+    !gateSource.includes("activeStep === 'budget'") &&
+    !gateSource.includes('onboardPersonalizeOptional'),
+);
+/* The statement offer has to follow the answer, and has to stay out of the way
+ * of the two screens that are already recovery surfaces. Stacking it on top of
+ * a failed setup or a refused SMS permission reads as the app giving up. */
+ok(
+  'the completion statement offer follows the alert answer and yields to recovery states',
+  /const showHistoryGapOffer = activeStep === 'complete' &&[\s\S]{0,400}onboardingHistoryGap\(selectedAlerts\)/.test(gateSource) &&
+    /onboardingHistoryGap\(selectedAlerts\) &&\s*!failedCompletion &&\s*!finishSaveFailed &&\s*!smsDenied/.test(gateSource) &&
+    /\{showHistoryGapOffer && \(/.test(gateSource) &&
+    /await openWafra\(false, '\/statement-import'\)/.test(gateSource),
+);
+ok(
+  'a back step from the intention question returns to the alert question',
+  /activeStep === 'intention'\) \{\s*setStep\('alerts'\);/.test(gateSource) &&
+    /activeStep === 'alerts'\) \{\s*setStep\('tracking'\);/.test(gateSource),
+);
+ok(
+  'the alert answer is durable, so an interrupted setup resumes with it',
+  /setAlerts\(state\.onboardingProfile\.alerts \?\? null\)/.test(gateSource) &&
+    /alerts: nextAlerts,/.test(gateSource) &&
+    /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
+);
+/* iOS has no completion screen in the gate — setup exits straight into the
+ * app — so the statement offer Android shows there had nowhere to appear, and
+ * the profile was being rebuilt without the new answers on the way out. */
+ok(
+  'finishing iPhone setup preserves the answers instead of rebuilding the profile',
+  /onboardingProfileAtStage\(state\.onboardingProfile, 'complete', Date\.now\(\)\)/.test(iosSource) &&
+    !/stage: 'complete',\s*\n\s*focus: onboardingFocus/.test(iosSource),
+);
+ok(
+  'and exits into the statement import when the bank leaves no history to read',
+  /const finishDestination = useCallback\([\s\S]{0,260}onboardingHistoryGap\(state\.onboardingProfile\?\.alerts\)/
+    .test(iosSource) &&
+    /\/statement-import' as const/.test(iosSource) &&
+    /exitToRoot\(finishDestination\(\)\)/.test(iosSource),
+);
+
+/* Settings is where an already-onboarded user finds this, so the question and
+ * the fix it points at have to sit together — and the statement row has to say
+ * WHY it is being suggested, or it reads as an unexplained upsell. */
+ok(
+  'Settings can answer the alert question after setup, beside the statement it points at',
+  /settingsAlertDeliveryTitle/.test(settingsSource) &&
+    /setPreferenceSheet\('alerts'\)/.test(settingsSource) &&
+    /onboardingProfileWithAlerts\(state\.onboardingProfile, next, Date\.now\(\)\)/.test(settingsSource) &&
+    /onboardingHistoryGap\(alertsAnswer\)\s*\?\s*t\('statementImportGapDetail'\)/.test(settingsSource),
+);
+ok(
+  'the after-setup sheet keeps the question out of the caps header',
+  /title=\{t\('settingsAlertDeliveryHeader'\)\}/.test(settingsSource) &&
+    /question=\{t\('onboardAlertsTitle'\)\}/.test(settingsSource),
+);
+ok(
+  'and every string it adds is translated in both languages',
+  ['settingsAlertDeliveryHeader', 'settingsAlertDeliveryTitle', 'settingsAlertDeliveryUnset',
+    'statementImportGapDetail']
+    .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)),
+);
+ok(
+  'the country stays out of Settings, where it would change nothing after setup',
+  !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
+);
+ok(
+  'the country a person confirms reaches every onboarding scene, not just the first',
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource) &&
+    /<FocusChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<TrackingChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<IntentionChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<PersonalizedProductPreview[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
+    /<CaptureMarketScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource),
+);
+ok(
+  'the scenes resolve one device Region, shared with the control that corrects it',
+  /export const onboardingDeviceRegion/.test(aliveScenesSource) &&
+    /const previewRegion = \(country\?: string \| null\): string \| null => country \?\? deviceRegion\(\)/
+      .test(aliveScenesSource) &&
+    aliveScenesSource.split('deviceRegion()').length - 1 === 1 &&
+    /onboardingDeviceRegion/.test(gateSource),
+);
+ok(
+  'the country control reports what is drawn and is durable without rewinding setup',
+  /const drawnRegionId = useMemo\([\s\S]{0,200}onboardingBankRegion\(state\.marketId, selectedCountry \?\? onboardingDeviceRegion\(\)\)/
+    .test(gateSource) &&
+    /resolved=\{drawnRegionId\}/.test(gateSource) &&
+    /saveJourney\(\s*state\.onboardingProfile\?\.stage \?\? 'welcome',/.test(gateSource) &&
+    /setCountry\(normalizeOnboardingCountry\(state\.onboardingProfile\.country\)\)/.test(gateSource) &&
+    /country: nextCountry,/.test(gateSource),
+);
+ok(
+  'the alert scene states what Wafra can reach rather than naming a bank',
+  /export function AlertDeliveryChooser/.test(aliveScenesSource) &&
+    /onboardAlertsReachPast/.test(aliveScenesSource) &&
+    /onboardAlertsReachFuture/.test(aliveScenesSource),
+);
+ok(
+  'Settings can replay the latest name-personalized onboarding without mutating app state',
+  /settingsViewOnboarding/.test(settingsSource) &&
+    /router\.setParams\(\{ onboarding: 'preview' \}\)/.test(settingsSource) &&
+    /const previewMode = state\.onboarded && params\.onboarding === 'preview'/.test(gateSource) &&
+    /if \(previewMode\) return;[\s\S]{0,120}setOnboardingProfile/.test(gateSource) &&
+    /if \(previewMode\) \{[\s\S]{0,160}setAndroidSmsReady\(true\)/.test(gateSource) &&
+    /const openWafra = async[\s\S]*?if \(previewMode\) \{[\s\S]{0,120}closePreview\(\);[\s\S]{0,80}return;/.test(gateSource) &&
+    /const openWafra = async[\s\S]*?setOnboarded\(\)/.test(gateSource) &&
+    /if \(!previewMode\) trackGrowthEvent\(\.\.\.args\)/.test(gateSource),
+);
+eq('Settings explains onboarding replay is read-only',
+  i18n.t('settingsViewOnboardingDetail', 'en'),
+  'Replay the welcome flow without changing your data or settings');
+ok(
+  'name personalization morphs inside Welcome instead of becoming a progress step of its own',
+  gateSource.includes('testID="onboarding-name-input"') &&
+    gateSource.includes('testID="onboarding-name-preview"') &&
+    /onboardChooseStart[\s\S]*?openNamePersonalization/.test(gateSource) &&
+    /onboardNameSkip/.test(gateSource) &&
+    /setUserName\(nextName\)[\s\S]*?saveJourney\('focus'\)[\s\S]*?ensureDurable\(\)/.test(gateSource) &&
+    gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
+    !/JOURNEY_STEPS[^\n]*name/.test(gateSource),
+);
+ok(
+  'Home greeting uses the durable onboarding name while preserving the skipped-name fallback',
+  /state\.userName === 'there' \? null : normalizePreferredName\(state\.userName\)/.test(journalHomeSource) &&
+    /const greeting = preferredName[\s\S]{0,180}greetingBase/.test(journalHomeSource),
+);
+ok(
+  'saved preferred name personalizes later onboarding without touching financial data',
+  /onboardFocusTitleNamed/.test(gateSource) &&
+    /onboardPersonalizedTitleNamed/.test(gateSource) &&
+    /case 'setUserName'[\s\S]{0,260}normalizePreferredName/.test(storeSource) &&
+    !/setUserName[\s\S]{0,120}(?:addTransaction|importBatch|upsertBudget|addGoal)/.test(gateSource),
 );
 ok(
   'starter-plan copy waits for real income instead of implying country support',
@@ -301,44 +631,72 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'welcome embeds an explicitly labeled interactive example without ledger or setup writes',
-  /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
-    /onboardSampleMessage/.test(moneyPreviewSource) &&
-    /onboardSampleNote/.test(moneyPreviewSource) &&
-    /setRevealed/.test(moneyPreviewSource) &&
-    /activeStep === 'welcome'[\s\S]*?<MoneyPreview reducedMotion=\{reducedMotion\}[\s\S]*?onboardChooseStart/.test(gateSource) &&
-    !/exampleVisible|SetupIllustration/.test(gateSource) &&
-    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(moneyPreviewSource) &&
-    !/function points\(/.test(gateSource),
+  'welcome uses real Wafra identity and market-aware bank examples without ledger writes',
+  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+    /WafraMark/.test(aliveScenesSource) &&
+    /onboardingBankRegion/.test(aliveScenesSource) &&
+    /verifiedLogoUrl/.test(aliveScenesSource) &&
+    /activeStep === 'welcome'[\s\S]*?<WelcomeMoneyScene[\s\S]*?onboardChooseStart/.test(gateSource) &&
+    /US:[\s\S]*GB:[\s\S]*FR:[\s\S]*DE:[\s\S]*IN:[\s\S]*QA:[\s\S]*KW:/.test(onboardingBankExamplesSource) &&
+    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(aliveScenesSource) &&
+    !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
 );
 ok(
-  'capture choice is presented as two explicit accessible start modes',
-  /<StartOption automatic disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
-    /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
-    /accessibilityRole="button"/.test(gateSource) &&
-    /onboardAutomaticChoice/.test(gateSource) &&
-    /onboardManualChoice/.test(gateSource),
+  'welcome money reveal uses real regional alerts with restrained product-like motion',
+  /function PosterAlertCard/.test(aliveScenesSource) &&
+    /card\.value = withDelay[\s\S]*?withTiming/.test(aliveScenesSource) &&
+    /translateY:[\s\S]*?\[18, 0\]/.test(aliveScenesSource) &&
+    !/POSTER_ROTATIONS|withSpring|rotate:/.test(aliveScenesSource) &&
+    /onboardingAlertExamples/.test(aliveScenesSource) &&
+    /onboardSceneAlertsToPicture/.test(aliveScenesSource) &&
+    !/function MessageParse|function Token/.test(aliveScenesSource),
+);
+ok(
+  'successful completion keeps Wafra identity and editorial result strips instead of a generic success card',
+  /failedCompletion \|\| smsDenied[\s\S]{0,220}<Icon name="alert"[\s\S]{0,220}<WafraMark size=\{42\}/.test(gateSource) &&
+    /resultCard:[\s\S]{0,420}borderTopWidth:[\s\S]{0,120}borderBottomWidth:/.test(gateSource) &&
+    !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
+);
+ok(
+  'Android capture exposes SMS, bank-app notifications, statement import, either automatic source, both, or manual',
+  /onPress=\{\(\) => void runSetupAction\(startScan\)\}/.test(gateSource) &&
+    /onPress=\{\(\) => void runSetupAction\(connectAndroidNotifications\)\}/.test(gateSource) &&
+    /onPress=\{openStatementImport\}/.test(gateSource) &&
+    /onboardStatementChoice/.test(gateSource) &&
+    /finishAndroidCapture/.test(gateSource) &&
+    /onboardCaptureContinueBoth/.test(gateSource) &&
+    /onboardCaptureContinueOne/.test(gateSource) &&
+    /onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource),
 );
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
-  /Platform\.OS !== 'web' && \([\s\S]{0,180}<StartOption automatic disabled=/.test(gateSource) &&
+  /Platform\.OS === 'android' \?/.test(gateSource) &&
+    /\) : Platform\.OS === 'ios' \? \(/.test(gateSource) &&
     /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
 );
 ok(
-  'capture options are equally weighted and notification beta setup remains outside first run',
+  'Android notification capture is a first-class source while neither automatic source is visually recommended',
   !/styles\.startOptionFeatured|recommendedPill|t\('recommended'\)/.test(gateSource) &&
-    !/NotificationReader|alsoReadNotifs|notifNoteOnboard/.test(gateSource),
+    /NotificationReader/.test(gateSource) &&
+    /androidNotificationReady/.test(gateSource) &&
+    /androidSmsReady/.test(gateSource),
 );
 ok(
-  'first-run gate exempts guided history routes only on iOS',
+  'first-run gate exempts iOS setup and only the in-memory-authorized statement route',
   /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
-    /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
+    /const statementImportSession = useRef<string \| null>\(null\)/.test(gateSource) &&
+    /const isOnboardingStatementRoute\s*=[\s\S]{0,160}pathname === '\/statement-import'[\s\S]{0,160}params\.statementSession === statementImportSession\.current/.test(gateSource) &&
+    /statementImportSession\.current = session[\s\S]{0,180}statementSession=\$\{session\}/.test(gateSource) &&
+    /const showOverlay\s*=[\s\S]{0,280}!isIosSetupRoute[\s\S]{0,80}!isOnboardingStatementRoute/.test(gateSource),
 );
-eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Start your way');
-eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Choose what works for you. You can change this later.');
+eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Choose how to add activity');
+eq('iOS onboarding explains that the capture choice can change', i18n.t('onboardCaptureBodyIos', 'en'), 'Connect supported bank alerts, or start manually. You can change this later.');
 eq('iOS automatic choice explains the Shortcut and keeps history optional', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Add one Wafra Shortcut, then turn on a Message automation. Past messages are optional.');
 eq('iOS automatic action names the bank-alert connection', i18n.t('onboardAutomaticChoiceIos', 'en'), 'Connect bank alerts');
+eq('statement import is a first-run choice on either phone', i18n.t('onboardStatementChoice', 'en'), 'Import bank statements');
+eq('statement import discloses its secure relay before file selection', i18n.t('onboardStatementChoiceBody', 'en'), 'Send PDF, CSV, or TSV through Wafra’s secure relay. Raw files are parsed in memory, then discarded.');
+eq('capture trust distinguishes local alerts from cloud statement import', i18n.t('onboardCaptureLocalAutomaticBody', 'en'), 'SMS/Message capture is local. Statement import uses the secure relay only when you choose it.');
 eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'Add entries yourself. No Messages access. Connect later.');
 eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
 eq(
@@ -358,6 +716,10 @@ const iosVisibleCopyKeys = [
   'onboardCaptureBodyIos',
   'onboardAutomaticChoiceIos',
   'onboardAutomaticChoiceIosBody',
+  'onboardStatementChoice',
+  'onboardStatementChoiceBody',
+  'onboardCaptureLocalAutomaticTitle',
+  'onboardCaptureLocalAutomaticBody',
   'onboardManualChoiceIos',
   'onboardManualChoiceIosBody',
   'onboardCapturePrivacyIos',
@@ -372,14 +734,15 @@ ok(
   ['en', 'ar'].every((language) =>
     i18n.t('onboardCaptureTitleIos', language).length <= 42 &&
       i18n.t('onboardAutomaticChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardStatementChoiceBody', language).length <= 112 &&
       i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
 ok(
-  'iOS onboarding has exactly two primary choices and puts full details behind Learn more',
-  (gateSource.match(/<StartOption/g) ?? []).length === 2 &&
-    /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
-    /<Pressable[\s\S]{0,420}onPress=\{\(\) => void runSetupAction\(continueManually\)\}[\s\S]{0,260}onboardManualChoiceIos/.test(gateSource) &&
+  'iOS onboarding keeps automatic, statement, and manual choices with full details behind Learn more',
+  /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
+    /label=\{t\('onboardStatementChoice'\)\}/.test(gateSource) &&
+    /onboardManualChoiceIos/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
     /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&
     !iosVisibleCopy.includes(universalSenderLabel) &&
@@ -404,14 +767,14 @@ ok(
   );
 }
 ok(
-  'onboarding uses real scan and import results rather than fake personalization delays',
-  /progress\.scanned/.test(gateSource) &&
-    /progress\.found/.test(gateSource) &&
-    /discoveredResult\.tx/.test(gateSource) &&
+  'onboarding never invents scan progress and only reveals real imported results',
+  /discoveredResult\.tx/.test(gateSource) &&
     /discoveredResult\.accounts/.test(gateSource) &&
     /discoveredResult\.bills/.test(gateSource) &&
     /state\.transactions\.length/.test(gateSource) &&
     /state\.bills\.length \+ state\.cardDues\.length/.test(gateSource) &&
+    !/const \[progress\] = useState\(\{ scanned: 0, found: 0 \}\)/.test(gateSource) &&
+    !/activeStep === 'scanning'/.test(gateSource) &&
     // The navigation guard only re-enables controls; it cannot manufacture
     // scan progress or import results. Any other timer still fails this gate.
     !/\bset(?:Timeout|Interval)\s*\(/.test(gateSource.replace(
@@ -420,32 +783,36 @@ ok(
     )),
 );
 ok(
-  'first run waits for encrypted hydration and separates value-funnel progress from optional planning',
+  'first run waits for encrypted hydration and exposes one integrated journey progress bar',
   /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
     /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
     /JOURNEY_STEPS\.includes\(activeStep\)/.test(gateSource) &&
-    /PLAN_STEPS\.includes\(activeStep\)/.test(gateSource) &&
-    /progressSteps=\{personalizing/.test(gateSource),
+    !/PLAN_STEPS|personalizing/.test(gateSource),
 );
 ok(
-  'value is shown before privacy and capture, and Pro appears only after real activity exists',
-  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'privacy'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
+  'value flows through personal intention into preview and contextual capture trust',
+  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'intention'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
+    /activeStep === 'preview'[\s\S]*?onPress=\{showCapture\}/.test(gateSource) &&
+    !/activeStep === 'privacy'/.test(gateSource) &&
+    /testID="onboarding-context-trust"/.test(gateSource) &&
     /discoveredResult && discoveredResult\.tx > 0[\s\S]*?onboardProPreviewAction/.test(gateSource) &&
     /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
 );
 ok(
-  'tracking choice changes the value explanation instead of collecting a dead survey answer',
-  /const trackingOutcomeKey: StringKey = tracking === 'none'/.test(gateSource) &&
-    /tracking === 'bank-apps'/.test(gateSource) &&
-    /tracking === 'spreadsheet'/.test(gateSource) &&
-    /tracking === 'finance-app'/.test(gateSource) &&
-    /\{t\(trackingOutcomeKey\)\}/.test(gateSource),
+  'tracking choice changes a real product scene instead of collecting a dead survey answer',
+  /<TrackingChooser value=\{selectedTracking\} onChange=\{chooseTracking\} marketId=\{state\.marketId\}/.test(gateSource) &&
+    /id: 'bank-apps'/.test(aliveScenesSource) &&
+    /id: 'spreadsheet'/.test(aliveScenesSource) &&
+    /id: 'finance-app'/.test(aliveScenesSource) &&
+    /id: 'none'/.test(aliveScenesSource) &&
+    /onboardTrackingOneView/.test(aliveScenesSource),
 );
 ok(
-  'Android automatic completion records the automatic outcome synchronously',
-  /await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
+  'Android source setup persists readiness before explicit final completion',
+  /await beginHistoryImport\(\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setAndroidSmsReady\(true\)/.test(gateSource) &&
+    /const finishAndroidCapture = async[\s\S]*?saveJourney\('complete'\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setCompletionOutcome\('automatic'\)/.test(gateSource) &&
     /outcome: outcomeOverride \?\? completionOutcome/.test(gateSource),
 );
 ok(
@@ -457,17 +824,18 @@ ok(
 );
 ok(
   'manual completion keeps the gate visible through a failed durable save',
-  /const showOverlay\s*=[\s\S]{0,220}\(!state\.onboarded \|\| finishing\)/.test(gateSource) &&
+  /const showOverlay\s*=[\s\S]{0,240}\(!state\.onboarded \|\| finishing \|\| previewMode\)/.test(gateSource) &&
     /const openWafra = async[\s\S]*?setFinishing\(true\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setFinishing\(false\)[\s\S]*?catch[\s\S]*?setFinishSaveFailed\(true\)/.test(gateSource) &&
     /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
 );
 ok(
-  'completion copy matches automatic, manual, denied, and failed outcomes',
+  'completion copy distinguishes automatic, manual and failed outcomes while SMS denial stays inline',
   /type CompletionOutcome = 'automatic' \| 'manual' \| 'denied' \| 'failed'/.test(gateSource) &&
-    /setCompletionOutcome\('denied'\)/.test(gateSource) &&
     /setCompletionOutcome\('failed'\)/.test(gateSource) &&
     /onboardCompleteManualBody/.test(gateSource) &&
-    /onboardCompleteNeedsAttentionBody/.test(gateSource),
+    /onboardCompleteNeedsAttentionBody/.test(gateSource) &&
+    /onboardSmsDeniedInline/.test(gateSource) &&
+    !/setCompletionOutcome\('denied'\)/.test(gateSource),
 );
 ok(
   'the no-SMS onboarding choice durably opts out before completion',
@@ -480,9 +848,18 @@ ok(
     /const beginCapture = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource),
 );
 ok(
-  'Android opens Home after durable setup instead of blocking on inbox parsing',
-  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?await openWafra\(false, undefined, 'automatic'\)/.test(gateSource) &&
-    !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource),
+  'Android stages history without inbox parsing and waits for explicit source-selection completion',
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setAndroidSmsReady\(true\)/.test(gateSource) &&
+    !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource) &&
+    /const finishAndroidCapture = async[\s\S]*?setStep\('complete'\)/.test(gateSource),
+);
+ok(
+  'Android resumes the configured automatic reveal after a restart instead of sending the user backward',
+  /pendingAutomaticReveal[\s\S]*?state\.onboardingProfile\?\.stage === 'complete'[\s\S]*?state\.historyImport !== null[\s\S]*?state\.captureOptOut === false[\s\S]*?setCompletionOutcome\('automatic'\)[\s\S]*?setStep\('complete'\)/.test(gateSource),
+);
+ok(
+  'iPhone onboarding shows a personalized completion reveal before leaving setup',
+  /fromOnboarding && setupComplete[\s\S]*?onboardCompleteAutomaticTitle[\s\S]*?onboardingInsight\.title[\s\S]*?onboardingInsight\.body/.test(iosSource),
 );
 ok(
   'denied SMS onboarding can retry or open the exact app settings',
@@ -501,24 +878,29 @@ ok(
 ok(
   'iOS checklist completion durably finishes onboarding before opening the selected first view',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
-    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?onboardingLandingPath\(onboardingFocus\)/.test(iosSource) &&
-    /setOnboardingProfile\(\{[\s\S]*?stage: 'complete'/.test(iosSource),
+    // The destination is resolved by finishDestination() now, so it can be the
+    // statement import for a bank that leaves no history; the ordering this
+    // assertion exists for — durable finish BEFORE the exit — is unchanged.
+    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?exitToRoot\(finishDestination\(\)\)/.test(iosSource) &&
+    /setOnboardingProfile\(\s*onboardingProfileAtStage\(state\.onboardingProfile, 'complete'/.test(iosSource),
 );
 ok(
-  'manual exit remains gate-owned while automated setup requires both outcomes',
+  'manual exit durably opts out while automated completion still requires both outcomes',
   /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    /const continueWithoutAutomaticCapture = useCallback/.test(iosSource) &&
+    /await setCaptureOptOut\(true\)[\s\S]*?type: 'manual-only'[\s\S]*?completeIosMessageOnboardingAttempt/.test(iosSource) &&
     /if \(!setupComplete\) return/.test(iosSource) &&
     /progress\.historyStatus === 'complete'/.test(iosSource) &&
-    !/skipIncomplete|const finishLater/.test(iosSource) &&
-    !iosSource.includes("type: 'manual-only'"),
+    !/skipIncomplete|const finishLater/.test(iosSource),
 );
 ok(
-  'iOS checklist embeds history handoff without opting out of capture',
+  'iOS checklist keeps automatic history handoff separate from the explicit manual opt-out',
   /const historyInstallUrl = historyShortcutInstallUrl\(\)/.test(iosSource) &&
     /await confirmIosHistoryShortcutInstalled\(\)/.test(iosSource) &&
     /await beginIosHistoryHandoffForOrigin\(historyReturnOrigin, startedAt\)/.test(iosSource) &&
-    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : 'shortcuts:\/\/'\)/.test(iosSource) &&
-    !iosSource.includes('setCaptureOptOut(true)'),
+    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : historyShortcutContinueUrl\(\)\)/.test(iosSource) &&
+    /const continueWithoutAutomaticCapture = useCallback/.test(iosSource) &&
+    /await setCaptureOptOut\(true\)[\s\S]*?type: 'manual-only'/.test(iosSource),
 );
 ok(
   'first run cannot silently pin a worldwide user to the AED sample ledger',
@@ -619,11 +1001,11 @@ eq('balance-coverage copy resolves every placeholder',
     /p\.knownBalanceCount > 0\s*\? formatAmount\(p\.balanceFils\) : '—'/.test(
       walletOverviewSource,
     ));
-  ok('Wallet replaces net worth with balances, card dues and paid-from-account facts',
+  ok('Wallet replaces net worth with a focused recorded-balances summary',
     /availableBalances/.test(walletPresentationSource) &&
       /balanceCoverage/.test(walletPresentationSource) &&
-      /paidFromAccounts/.test(walletPresentationSource) &&
-      /cashOutBreakdown/.test(walletPresentationSource) &&
+      !/paidFromAccounts/.test(walletPresentationSource) &&
+      !/cashOutBreakdown/.test(walletPresentationSource) &&
       !/estimatedNetWorth/.test(walletPresentationSource));
 }
 
@@ -680,6 +1062,62 @@ try {
   ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', true);
 } catch {
   ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', false);
+}
+
+{
+  // Known banks: the user's own answer to "Which banks text you?", the only
+  // bank identity an iOS history import has when neither the sender (absent
+  // on iOS 26) nor the body names the bank.
+  eq('backup validation accepts a known-banks list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: ['ADIB', 'FAB'] }), true);
+  eq('backup validation accepts an empty known-banks list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: [] }), true);
+  eq('backup validation rejects a known-banks value that is not a list',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: 'ADIB' }), false);
+  eq('backup validation rejects non-string known-bank entries',
+    backupValidation.isValidBackupState({ transactions: [], knownBanks: [7] }), false);
+  let known = null;
+  try { known = require('./build/known-banks'); } catch { known = null; }
+  ok('known-banks helpers exist', known !== null);
+  if (known) {
+    eq('sanitizeKnownBanks keeps only real bank names, once each',
+      JSON.stringify(known.sanitizeKnownBanks(['ADIB', 'Nope Bank', 'ADIB', 7, 'Al Rajhi'])), JSON.stringify(['ADIB', 'Al Rajhi']));
+    eq('sanitizeKnownBanks tolerates a missing value', JSON.stringify(known.sanitizeKnownBanks(undefined)), '[]');
+    eq('singleKnownBank resolves exactly one bank', known.singleKnownBank(['ADIB'])?.name, 'ADIB');
+    eq('singleKnownBank refuses to pick between two', known.singleKnownBank(['ADIB', 'FAB']), null);
+    eq('singleKnownBank is null when none is known', known.singleKnownBank([]), null);
+    const accounts = [
+      { id: 'a', name: 'Account •9957', kind: 'bank', openingFils: 0, color: '#FB923C', last4: '9957' },
+      { id: 'b', name: 'FAB Credit Card •1234', kind: 'card', cardType: 'credit', openingFils: 0, color: '#00A3E0', last4: '1234', bankName: 'FAB' },
+    ];
+    const labelled = known.accountsLabelledWithBank(accounts, known.singleKnownBank(['ADIB']));
+    ok('accountsLabelledWithBank labels only accounts that have no bank',
+      labelled[0].bankName === 'ADIB' && labelled[0].color === '#0E5AA7' && labelled[0].name === 'Account •9957' &&
+      labelled[1].bankName === 'FAB' && labelled[1].color === '#00A3E0', labelled);
+    const withCash = known.accountsLabelledWithBank([
+      { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#999' },
+      { id: 'c', name: 'Account •0315', kind: 'bank', openingFils: 0, color: '#FB923C', last4: '0315' },
+    ], known.singleKnownBank(['ADIB']));
+    ok('accountsLabelledWithBank leaves cash alone', withCash[0].bankName === undefined && withCash[1].bankName === 'ADIB', withCash);
+    const order = known.bankPickerOptions(['FAB', 'Nope'], 'AE').map((bank) => bank.name);
+    ok('bankPickerOptions lists known banks first, then the rest of the market once',
+      order[0] === 'FAB' && order.filter((name) => name === 'FAB').length === 1 && order.includes('ADIB') && !order.includes('Nope'), order);
+    ok('knownBankOptions lists the market pack banks',
+      known.knownBankOptions('AE').some((b) => b.name === 'ADIB') && !known.knownBankOptions('AE').some((b) => b.name === 'Al Rajhi') &&
+      known.knownBankOptions('SA').some((b) => b.name === 'Al Rajhi'));
+  }
+  const iosSetupSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
+  const cardsSource = fs.readFileSync(path.join(__dirname, '../../src/app/cards.tsx'), 'utf8');
+  const walletSource = fs.readFileSync(path.join(__dirname, '../../src/app/(tabs)/wallet.tsx'), 'utf8');
+  ok('the iOS setup screen asks which banks text the user and stores the answer',
+    iosSetupSource.includes("t('iosBanksTitle')") && iosSetupSource.includes("t('iosBanksSkip')") && iosSetupSource.includes('setKnownBanks('));
+  ok('the cards and wallet account sheets offer "Set bank"',
+    cardsSource.includes("t('accountSetBank')") && walletSource.includes("t('accountSetBank')") &&
+    cardsSource.includes("t('accountNoBank')") && walletSource.includes("t('accountNoBank')"));
+  for (const key of ['accountSetBank', 'accountNoBank', 'accountBankQuestion']) {
+    ok(`i18n has ${key} in both languages`,
+      typeof i18n.t(key, 'en') === 'string' && i18n.t(key, 'en') !== key && typeof i18n.t(key, 'ar') === 'string' && i18n.t(key, 'ar') !== key);
+  }
 }
 
 console.log(`\nonboarding: ${pass} passed, ${fail} failed`);

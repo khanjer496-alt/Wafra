@@ -15,7 +15,8 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleSms",
-      "sha256": "15ed4b3a8cda3004712ba0a2c32c1b6c501e45fba88d3920e021149b00c2285c"
+      "sha256": "fba6c834c40ede8216b3d32a4532eb04b07e6974acd3d3f078b45f3b1e673c09",
+      "reviewedChange": "2026-09-17: Android SMS is now an independently persisted capture source. Turning it off no longer disables bank-app notifications; turning it on records the SMS source before clearing the global opt-out. OS permission revocation guidance remains unchanged."
     },
     {
       "file": "src/app/settings.tsx",
@@ -30,12 +31,12 @@
     {
       "file": "src/app/settings.tsx",
       "name": "toggleInstantAlerts",
-      "sha256": "3178e8a203513b51aeab4e83d405698fce2af19becfa5d1df854b03fcd553efa"
+      "sha256": "4a437b22d37c257970234e7619e97d7ec29b2074886b7b9c613d86d5912cf53d"
     },
     {
       "file": "src/app/settings.tsx",
       "name": "toggleDailySummary",
-      "sha256": "059f9a966d21092bc7257a0df809eb495f11bb77023c2b6b2e2a0e97e3d36fa6"
+      "sha256": "11d3232fa9143d1fa14652eea203318ccd20592bcb1ce54d9d87ac39a9b5116d"
     },
     {
       "file": "src/app/settings.tsx",
@@ -116,7 +117,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "refreshSetup",
-      "sha256": "f08c77395f94446714851721bebcfa58d8b11fb06c209e62e6033d0399c2aaab"
+      "sha256": "747b9dae02a3fa5a3e1b1580c0303b6af57c9463f76a66c084190a95fe99e15d",
+      "reviewedChange": "2026-09-13: When the installed History record is paged, refresh also reads the source-free native paged status (checked/accepted/skipped counts) so the setup screen can show progress after the Shortcut pauses. Recovery, reconciliation and error handling are unchanged. Covered by ios-setup-ux.test.js and ios-journey tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -152,8 +154,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openHistoryRun",
-      "sha256": "2e4af6e5fae2b1f82cfb731229940df3d0da9a7e3a17d20d98ffa59c12b8c6b7",
-      "reviewedChange": "2026-09-12: Report Shortcut run failure with the run-specific message while preserving explicit confirmation, existing-handoff behavior and failed-handoff cleanup. Covered by onboarding-extreme-setup.test.cjs."
+      "sha256": "0f74d9a125c47051b967a4f0080984ba2ea408a7e8c1c914714aeab372cc60c6",
+      "reviewedChange": "2026-09-13: Continue on an already-running handoff opens historyShortcutContinueUrl() — the paged graph is re-run by its installed name because it resumes its saved cursor and fences the earlier runner; the legacy graph still only reopens Shortcuts. New handoffs, confirmation, and failed-handoff cleanup are unchanged. Covered by ios-setup-ux.test.js."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -164,13 +166,14 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "38859b1a6518a2b1f23bb7f9d68e1fd34c57615a24ccfcce674c6b5724aaa706",
-      "reviewedChange": "2026-09-10: Durable iOS onboarding completion now preserves the source-free onboarding focus, records the provider-neutral completion event, and opens the selected first view."
+      "sha256": "cc4314b3056c9683e7b92a85c0ca7266e804acdf45d201e93b7b4d253303e6db",
+      "reviewedChange": "2026-09-19: Stop rewriting the completion profile field by field. The prior note here was about preserving `intention` the same way, and the same omission then silently erased the alert-delivery and country answers, because the reducer replaces the whole profile — so a writer that forgets a field deletes it. onboardingProfileAtStage spreads what is already there, which makes every future field survive by default. The exit destination now resolves through finishDestination(), so a bank that leaves no history to read lands on /statement-import instead of Home; iPhone setup has no completion screen, so this exit is where that offer can exist. Durable completion order and the dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-setup, onboarding-extreme-navigation and the setup UX tests."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "leave",
-      "sha256": "fe52d456cdcfd8e2c728f8ae408b671f5509ee722fa321b12e6343870680d83c"
+      "sha256": "113e005b6ade8fdcac0abee61069f3b4f3f402e01ca1da4525cc25652cab5ad0",
+      "reviewedChange": "2026-09-13: Guided Back returns to the existing root with dismissAll + navigate instead of router.replace (same duplicate-tabs cause as finish). Return-marker clearing is unchanged. Covered by ios-setup-ux.test.js and onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/feedback.tsx",
@@ -179,18 +182,21 @@
     },
     {
       "file": "src/app/pro.tsx",
-      "name": "buy",
-      "sha256": "861faafd89a0fd6b16f7f9d1ff2f737d292103b8cd3e76fadf7e6754d2de54e3"
+      "name": "buySelectedPlan",
+      "sha256": "22bb868b4940d33a966d24b6b98093c9f6d11690226791cb4e91d967deaa4f44",
+      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a live store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro. A synchronous latch closes on the first tap so a second tap in the same frame cannot start an overlapping checkout, and it is released in a finally so a throwing store call cannot strand the screen."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "restore",
-      "sha256": "2b9be76d6bd074cdc60fac1fa60269ffbf58b717dc667b8bfc4316f229f32b7e"
+      "sha256": "26acea8a497bcc1699c11441a37a95983f5837fa83ba8d3eccfbf645eec83e4f",
+      "reviewedChange": "2026-09-19: Restore reads the same checkoutReady guard and the same single-flight latch as the purchase action, and retains its explicit no-purchase and unreachable-store states."
     },
     {
       "file": "src/app/pro.tsx",
       "name": "manage",
-      "sha256": "b1c05b539f86db1fa11d69873a0f49972229944b0a41bc70a1a412ee94a798d9"
+      "sha256": "37b175f86b616dcfdc73de2c6f141c7e0def8b596a31b4b72dd2186fd72a1176",
+      "reviewedChange": "2026-09-19: Subscription management remains an explicit external-link action with the same failure disclosure and loading boundary; it now shares the single-flight latch so it cannot run beside a purchase or restore."
     },
     {
       "file": "src/app/pro.tsx",
@@ -245,7 +251,7 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "switchType",
-      "sha256": "7073dff86bdcdf7459fd22a05b2ab857c12203d5205944991dbdafad1940a0b0"
+      "sha256": "b8f4555b2092898d8e0aa469375ada3bd21ae60a91976fe63f6f73e9949c2e86"
     },
     {
       "file": "src/app/add-transaction.tsx",
@@ -265,44 +271,45 @@
     },
     {
       "file": "src/components/onboarding-gate.tsx",
-      "name": "chooseGoal",
-      "sha256": "e0e3f6cffff976b2655ce07af82998778f6a7e483586a8f7027fb05dbcaa5738"
+      "name": "connectAndroidNotifications",
+      "sha256": "e21c59a212affa08ac488687faffbead4e683ddbaba83dd3b0fff650663f81e1",
+      "reviewedChange": "2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
-      "name": "finishPreferences",
-      "sha256": "ea1a194c8cf782d7a7e2bd8cf71eb325000146a2f7a51ac70fac4c1b3d4293d7",
-      "reviewedChange": "2026-09-12: Apply the short transition guard before saving the optional plan and capture resume stage. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
+      "name": "finishAndroidCapture",
+      "sha256": "25cdb9ce36795aa812497fb146570fbfc6c9ac6a6fe5f4eb421069daa26459da",
+      "reviewedChange": "2026-09-17: Replace the deleted optional goals/budget save with the explicit Android source-selection completion boundary. At least one source must be ready, exact SMS/notification choices are persisted, then the completion checkpoint is saved."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "f76f7be10d1acc32992ddec5c1aa72a7de733ece164e9222373020022eb23936",
-      "reviewedChange": "2026-09-10: Android automatic setup retains the guarded permission/import path, adds source-free funnel events, and persists completion as the resumable stage; save-only retry never re-scans."
+      "sha256": "9fc318b4f6664ab1fe53a4a7c8c32ed349346ebf269abdf15311a069c49a8160",
+      "reviewedChange": "2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "beginCapture",
-      "sha256": "abcc4f5115607c4f80a32967f60fb49a1104b2c78c7ddf81b9cd1a4aac231cf9",
+      "sha256": "dfc5779a1a5b70061f66f869892c15c81c210a3fcdba465b6f07256f8f81fabe",
       "reviewedChange": "2026-09-10: Capture setup keeps serialized native handoff behavior, records source-free funnel state, and still requires explicit manual choice when capture is unavailable."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "44fa1118fbe81ed3c0358bd7956f22a4a219906a3230f7b00fac23cd67367e90",
-      "reviewedChange": "2026-09-10: Manual setup still durably opts out and revokes iOS relay state, while recording only source-free funnel outcome/resume state."
+      "sha256": "d68aba11ab8331681c322450419aa59ed796645b6da1e30167bac5c70b07743a",
+      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "9db6cf1ceaf634d3a56dfef504a2d225a35398509f63be64150e3321a8bd2889",
-      "reviewedChange": "2026-09-12: Apply the short transition guard while preserving actual Back entry points, saved stages and completion callback cleanup. Allowed and blocked behavior is executed by workflow-source.test.cjs and onboarding-extreme navigation/double-tap tests."
+      "sha256": "63a06ae42c18c5d622ec15a89afb5c108eb348ae351b0d7d23cb9b64887f366f",
+      "reviewedChange": "2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey. The alert-delivery question is inserted between Tracking and Intention and steps back through both; returning from Focus still reopens the in-Welcome name personalization without adding a progress step, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "b0c863f785c12063a598cd0ca16b7cf9e042dd5770f9184809c56bcc7878d591",
-      "reviewedChange": "2026-09-12: Preserve the requested Pro destination along with first-entry intent for durable-save retry; completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
+      "sha256": "d5fd65446fe8a51dd42dc07102b6c5af02545cec556b9b09cd246291cb69b43b",
+      "reviewedChange": "2026-09-19: The completion destination widens from the Pro route alone to the OnboardingExit union, so a ledger whose bank does not text can be sent to /statement-import. Destination is still only ever carried, never chosen here, and completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
     },
     {
       "file": "src/app/review-alerts.tsx",
@@ -312,7 +319,7 @@
     {
       "file": "src/app/categorise.tsx",
       "name": "assign",
-      "sha256": "27854dc489fdd2c5bac062f90b4f385a64a2fd80a2442434a779dc4e1042b4b9"
+      "sha256": "e5905a46fcd6c68a95343efc8aa1eb8f7334db2a9a898a618435c0e84819410e"
     }
   ]
 }

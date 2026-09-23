@@ -168,7 +168,7 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
 const ALL_TABLES = [
   'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
-  'admin_deletion_receipts', 'feedback', 'feedback_limits',
+  'cost_limits', 'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
 /** Every byte the database holds, for the "nothing readable is stored" checks. */
@@ -217,7 +217,7 @@ function collector() {
  * real /v1/import/pdf route: unpdf extracts them and parseStatementText reads
  * them, so nothing about the import path is stubbed.
  */
-function tinyPdf(lines) {
+function tinyPdf(lines, prefix = '') {
   const escape = (line) => line.replace(/([()\\])/g, '\\$1');
   const stream = `BT /F1 12 Tf 50 750 Td ${
     lines.map((line, i) => `${i ? '0 -20 Td ' : ''}(${escape(line)}) Tj `).join('')
@@ -229,7 +229,7 @@ function tinyPdf(lines) {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
   ];
-  let pdf = '%PDF-1.4\n';
+  let pdf = `${prefix}%PDF-1.4\n`;
   const offsets = [0];
   for (let i = 0; i < objects.length; i++) {
     offsets.push(Buffer.byteLength(pdf));
@@ -589,6 +589,29 @@ const CARD_PAYMENT_DEBIT =
     ok('transport: plain http to a public host is refused', insecure.status === 400);
   }
 
+  {
+    const denied = { limit: async () => ({ success: false }) };
+    const env = { DB: makeDb(), PUBLIC_RATE_LIMITER: denied };
+    const keys = deviceKeypair(webcrypto.getRandomValues(new Uint8Array(32)));
+    const res = await call(env, 'POST', '/v1/pair', {
+      headers: { 'cf-connecting-ip': '203.0.113.10' },
+      body: { publicKey: encodeKey(keys.publicKey) },
+    });
+    ok('edge cost guard: a public-rate-limit refusal happens before any D1 pair write',
+      res.status === 429 && count(env.DB, 'pair_limits') === 0 && count(env.DB, 'devices') === 0,
+      JSON.stringify({ status: res.status, pairLimits: count(env.DB, 'pair_limits') }));
+
+    const broken = {
+      DB: makeDb(),
+      PUBLIC_RATE_LIMITER: { limit: async () => { throw new Error('provider fault'); } },
+    };
+    const failClosed = await call(broken, 'POST', '/v1/pair', {
+      body: { publicKey: encodeKey(keys.publicKey) },
+    });
+    ok('edge cost guard: a configured rate limiter fails closed instead of bypassing protection',
+      failClosed.status === 429 && count(broken.DB, 'pair_limits') === 0);
+  }
+
   /* ═════════════ Scopes: one credential is not the others ═════════════ */
 
   {
@@ -931,6 +954,21 @@ const CARD_PAYMENT_DEBIT =
         'device_id,window_start,request_count');
   }
 
+  {
+    const env = {
+      DB: makeDb(),
+      AUTH_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    };
+    const me = await pairDevice(env);
+    const blocked = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId: nextEvent() },
+    });
+    ok('edge cost guard: token-scoped throttling rejects before the D1 ingest counter',
+      blocked.status === 429 && count(env.DB, 'ingest_limits') === 0 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ status: blocked.status, limits: count(env.DB, 'ingest_limits') }));
+  }
+
   /* ═════════════ Scoped retirement of Shortcut capture ═════════════
    *
    * Retirement revokes only the ingest capability already copied into an
@@ -1090,15 +1128,26 @@ const CARD_PAYMENT_DEBIT =
     const exhaustedCount = env.DB.handle.prepare(
       'SELECT request_count FROM ingest_limits WHERE device_id = ?',
     ).get(me.deviceId)?.request_count;
+    const refusedAgain = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: {},
+    });
+    const afterRepeatedRefusal = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId)?.request_count;
     ok('shortcut traffic limit: authenticated invalid and ignored requests consume the fixed-hour budget',
       expectedStatuses && limit?.request_count === 300 && exhausted.status === 429 &&
-        (await exhausted.json()).error === 'rate_limited' && exhaustedCount === 301,
+        (await exhausted.json()).error === 'rate_limited' && exhaustedCount === 300 &&
+        refusedAgain.status === 429 && afterRepeatedRefusal === 300,
       JSON.stringify({
         expectedStatuses,
         requestCount: limit?.request_count ?? null,
         exhaustedStatus: exhausted.status,
         exhaustedCount,
+        afterRepeatedRefusal,
       }));
+    ok('shortcut traffic limit: rejected abuse causes no further D1 counter writes',
+      exhaustedCount === 300 && afterRepeatedRefusal === 300);
   }
 
   {
@@ -1662,6 +1711,91 @@ const CARD_PAYMENT_DEBIT =
   /* ═════════════════ Forwarded email and PDF supplements ═════════════════ */
 
   {
+    const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test', IMPORTS_ENABLED: '0' };
+    const me = await pairDevice(env);
+    const caps = await call(env, 'GET', '/v1/import/capabilities', { token: me.adminToken });
+    const body = await caps.json();
+    const blockedPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['2026-01-03 SALIK 4.00 DR']),
+    });
+    ok('import kill switch: capabilities truthfully disable every cloud import surface',
+      body.email.enabled === false && body.pdf.enabled === false && body.csv.enabled === false);
+    ok('import kill switch: heavy imports stop without taking pairing or sync offline',
+      blockedPdf.status === 503 && (await blockedPdf.json()).error === 'imports_disabled' &&
+        count(env.DB, 'cost_limits') === 0);
+    ok('import kill switch: no new forwarding credential is minted while imports are off',
+      (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).status === 503);
+    ok('import kill switch: core sync remains available',
+      (await call(env, 'GET', '/v1/sync', { token: me.syncToken })).status === 200);
+  }
+
+  {
+    const env = {
+      DB: makeDb(),
+      IMPORT_RATE_LIMITER: { limit: async () => ({ success: false }) },
+    };
+    const me = await pairDevice(env);
+    const blocked = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    ok('import cost guard: Cloudflare import throttling rejects before exact D1 budgets or parsing',
+      blocked.status === 429 && count(env.DB, 'cost_limits') === 0 && count(env.DB, 'queue') === 0);
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+    env.DB.handle.prepare(
+      `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+       VALUES (?, 'statement_requests', ?, 12)`,
+    ).run(me.deviceId, windowStart);
+    const first = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    const second = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n02/07/2026,Taxi,21.00,',
+    });
+    const usage = env.DB.handle.prepare(
+      `SELECT usage_count FROM cost_limits
+        WHERE actor_id = ? AND scope = 'statement_requests'`,
+    ).get(me.deviceId)?.usage_count;
+    ok('import cost guard: an exhausted exact budget rejects repeated uploads without more D1 writes',
+      first.status === 429 && second.status === 429 && usage === 12 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ first: first.status, second: second.status, usage }));
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+    env.DB.handle.prepare(
+      `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
+       VALUES (?, 'supplemental_deliveries', ?, 25000)`,
+    ).run(me.deviceId, windowStart);
+    const blocked = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+    });
+    const deliveryUsage = env.DB.handle.prepare(
+      `SELECT usage_count FROM cost_limits
+        WHERE actor_id = ? AND scope = 'supplemental_deliveries'`,
+    ).get(me.deviceId)?.usage_count;
+    ok('import cost guard: exhausted fan-out budget blocks queue writes and itself stops writing',
+      blocked.status === 429 && deliveryUsage === 25000 && count(env.DB, 'queue') === 0,
+      JSON.stringify({ status: blocked.status, deliveryUsage }));
+  }
+
+  {
     const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test' };
     const me = await pairDevice(env);
 
@@ -1799,6 +1933,13 @@ const CARD_PAYMENT_DEBIT =
       (await call(env, 'POST', '/v1/import/pdf', {
         token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: 'not a pdf',
       })).status === 400);
+    const prefixedPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['2026-09-10 HSBC TEST PURCHASE 12.00 DR'], '\r\n '),
+    });
+    ok('pdf: a real PDF with a short publisher preamble is accepted',
+      prefixedPdf.status === 202 && (await prefixedPdf.json()).acceptedRows === 1);
     ok('pdf: the ingest token cannot upload a statement',
       (await call(env, 'POST', '/v1/import/pdf', {
         token: me.ingestToken, headers: { 'content-type': 'application/pdf' }, body: '%PDF-1.4',
@@ -1832,9 +1973,12 @@ const CARD_PAYMENT_DEBIT =
         csvAccepted.rejectedRows === 1 && csvAccepted.totalRows === 3,
       JSON.stringify(csvAccepted));
     const csvRows = (await drainOpened(env, me)).filter((row) => row.captureSource === 'csv');
+    // Both rows are inserted in the same second and the queue orders by
+    // created_at, so their drain order is not part of the contract.
+    const carrefour = csvRows.find((row) => row.merchant === 'Carrefour, Market');
     ok('csv: structured rows reach the encrypted queue without raw statement text',
-      csvRows.length === 2 && csvRows[0].merchant === 'Carrefour, Market' &&
-        csvRows[0].amountFils === 4000 && csvRows.every((row) => row.raw === undefined),
+      csvRows.length === 2 && carrefour !== undefined &&
+        carrefour.amountFils === 4000 && csvRows.every((row) => row.raw === undefined),
       JSON.stringify(csvRows));
     ok('csv: unsigned amount-only exports are rejected rather than guessed',
       (await call(env, 'POST', '/v1/import/csv', {
@@ -1983,11 +2127,13 @@ const CARD_PAYMENT_DEBIT =
     ok('statement: a DIFFERENT statement is not suppressed by the first one\'s receipts',
       different.status === 202 && differentRows.length === 2,
       JSON.stringify(differentRows.map((row) => row.merchant)));
+    const spinneys = differentRows.find((row) => row.merchant === 'SPINNEYS MARINA');
+    const salary = differentRows.find((row) => row.merchant === 'SALARY CREDIT');
     ok('statement: structured rows carry the shared merchant categorizer',
-      differentRows[0]?.categoryGuess === 'groceries' &&
-        differentRows[0]?.categoryDeliberate === true &&
-        differentRows[1]?.categoryGuess === 'salary' &&
-        differentRows[1]?.categoryDeliberate === true,
+      spinneys?.categoryGuess === 'groceries' &&
+        spinneys?.categoryDeliberate === true &&
+        salary?.categoryGuess === 'salary' &&
+        salary?.categoryDeliberate === true,
       JSON.stringify(differentRows.map((row) => ({
         merchant: row.merchant,
         category: row.categoryGuess,
@@ -1995,6 +2141,34 @@ const CARD_PAYMENT_DEBIT =
       }))));
     ok('statement: and the phone imports both of those as well',
       importOnPhone(differentRows).batch.transactions.length === 2);
+
+    // Real-world credit-card PDFs often have no Debit/Credit columns at all:
+    // ordinary purchases are unlabelled and only refunds/payments carry CR,
+    // while Original Amount and Total Amount are both printed. Exercise that
+    // shape through the REAL PDF route so a parser-only green test cannot hide
+    // an extraction/queue regression.
+    const cardTablePdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'HSBC Live+ Credit Card Statement',
+        'Statement Period: From 01 August 26 to 31 August 26',
+        'Minimum Payment Due AED 50.00',
+        'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+        '01-Aug-26 02-Aug-26 TEST SHOP DUBAI AE 10.00 10.00',
+        '03-Aug-26 04-Aug-26 TEST REFUND DUBAI AE 7.25 CR 7.25 CR',
+      ]),
+    });
+    const cardTableAccepted = await cardTablePdf.json();
+    ok('statement: card Total Amount layout is accepted through the real PDF endpoint',
+      cardTablePdf.status === 202 && cardTableAccepted.acceptedRows === 2,
+      JSON.stringify(cardTableAccepted));
+    const cardTableRows = await drainOpened(env, me);
+    ok('statement: unlabelled card charge and explicit CR refund keep opposite directions',
+      cardTableRows.length === 2 &&
+        cardTableRows.some((row) => row.type === 'expense' && row.amountFils === 1000) &&
+        cardTableRows.some((row) => row.type === 'income' && row.amountFils === 725),
+      JSON.stringify(cardTableRows.map((row) => [row.date, row.type, row.amountFils, row.merchant])));
 
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.
@@ -2249,6 +2423,40 @@ const CARD_PAYMENT_DEBIT =
         expired.status === 404);
       await worker.scheduled({ scheduledTime: Date.now(), cron: '17 3 * * *' }, env);
       ok('feedback: and the cron actually deletes it', count(env.DB, 'feedback') === 0);
+    }
+
+    {
+      const env = {
+        DB: makeDb(),
+        GITHUB_REPOSITORY: 'wafra/wafra',
+        GITHUB_DISPATCH_TOKEN: 'ghp_dispatch',
+        FEEDBACK_AGENT_ENABLED: '0',
+      };
+      const github = stubFetch();
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', {
+        body: RESEARCH_REPORT,
+        ctx: wake.ctx,
+      });
+      const body = await res.json();
+      await wake.settled();
+      github.restore();
+      ok('feedback agent kill switch: research feedback is stored but no expensive dispatch runs',
+        res.status === 202 && body.dispatched === false && github.calls.length === 0 &&
+          feedbackRow(env, body.id).dispatch_status === 'skipped_disabled');
+    }
+
+    {
+      const env = {
+        DB: makeDb(),
+        PUBLIC_RATE_LIMITER: { limit: async () => ({ success: false }) },
+      };
+      const blocked = await call(env, 'POST', '/v1/feedback', {
+        headers: { 'cf-connecting-ip': '203.0.113.11' },
+        body: REPORT,
+      });
+      ok('feedback cost guard: edge refusal happens before the D1 feedback counter',
+        blocked.status === 429 && count(env.DB, 'feedback_limits') === 0 && count(env.DB, 'feedback') === 0);
     }
 
     /* ── Explicitly consented, client-redacted parser research ── */
@@ -2599,6 +2807,15 @@ const CARD_PAYMENT_DEBIT =
         firstRefusal > 0, `first refusal at ${firstRefusal}`);
       ok('feedback: the window bounds what a flood can put in the table',
         count(env.DB, 'feedback') === firstRefusal);
+      const refusedAgain = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'one more refusal' },
+      });
+      const limiter = env.DB.handle.prepare(
+        "SELECT request_count FROM feedback_limits WHERE id = 'feedback'",
+      ).get();
+      ok('feedback: once the window is full, rejected requests stop writing the D1 counter',
+        refusedAgain.status === 429 && limiter?.request_count === 60,
+        JSON.stringify({ status: refusedAgain.status, limiter }));
       ok('feedback: the limiter stores a counter, not an address or a fingerprint',
         !('device_id' in env.DB.handle.prepare('SELECT * FROM feedback_limits').get()));
     }
@@ -2696,6 +2913,20 @@ const CARD_PAYMENT_DEBIT =
         missingAutomationBody.ok === false &&
         missingAutomationBody.error === 'schema_drift',
       `${missingAutomationGenerations.status} ${JSON.stringify(missingAutomationBody)}`);
+    const withoutCostLimits = (sql) => sql.replace(
+      /CREATE TABLE IF NOT EXISTS cost_limits \([\s\S]*?\n\);\n/,
+      '',
+    );
+    const missingCostLimits = await call(
+      { DB: makeDb(withoutCostLimits) },
+      'GET',
+      '/v1/health',
+    );
+    const missingCostBody = await missingCostLimits.json();
+    ok('health: refuses when the exact cost-budget table is missing',
+      missingCostLimits.status === 503 && missingCostBody.ok === false &&
+        missingCostBody.error === 'schema_drift',
+      `${missingCostLimits.status} ${JSON.stringify(missingCostBody)}`);
     ok('routing: an unknown path is 404', (await call(env, 'GET', '/v1/nope')).status === 404);
     ok('routing: the right path with the wrong method is 404',
       (await call(env, 'GET', '/v1/pair')).status === 404);

@@ -32,6 +32,7 @@ function sessionHarness(options = {}) {
   const intervals = new Map();
   const nativeListeners = new Set();
   const calls = [];
+  const haptics = [];
   const cleanups = [];
   const getStateSnapshot = () => state;
   const getStateGeneration = () => generation;
@@ -79,8 +80,10 @@ function sessionHarness(options = {}) {
     });
   };
   h.deps['@/lib/store'] = { useStore: () => ({ state, getStateSnapshot, getStateGeneration }) };
+  h.deps['@/lib/haptics'] = { tapped: () => haptics.push('tap') };
   h.deps['@/lib/period-context'] = { usePeriod: () => ({ period }) };
   h.deps['@/lib/period'].periodRange = () => '';
+  h.deps['@/lib/period'].currentMonthPeriod = date => ({mode: 'month', key: date.toISOString().slice(0, 7)});
   h.deps['@/components/assistant-findings'] = {
     AssistantFindings: props => h.jsx('Findings', props), AssistantCoverage: props => h.jsx('Coverage', props),
   };
@@ -88,9 +91,9 @@ function sessionHarness(options = {}) {
   h.deps['expo-router'].useFocusEffect = callback => react.useEffect(() => focused ? callback() : undefined, [callback, focused]);
   h.deps['@react-navigation/elements'] = { useHeaderHeight: () => 90 };
   h.deps['@/hooks/use-keyboard-height'] = { useKeyboardHeight: () => 0 };
-  h.deps['react-native'].Platform.OS = 'ios';
+  h.deps['react-native'].Platform.OS = options.platform ?? 'ios';
   h.deps['react-native'].AccessibilityInfo = { announceForAccessibility() {} };
-  h.deps['react-native'].Keyboard = { dismiss() {} };
+  h.deps['react-native'].Keyboard = { dismiss() {}, isVisible: () => false };
   h.deps['react-native'].useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1 });
   h.deps['react-native'].AppState = { addEventListener: (_event, callback) => {
     nativeListeners.add(callback);
@@ -112,11 +115,20 @@ function sessionHarness(options = {}) {
       calls.push({ kind: 'ask', state: args[0], question: args[1], now: args[2], previous: args[3], period: args[4] });
       return engine.runWafraAssistant(...args);
     },
+    runWafraAssistantCooperatively: async (...args) => {
+      calls.push({ kind: 'ask-cooperative', state: args[0], question: args[1], now: args[2], previous: args[3], period: args[4] });
+      return engine.runWafraAssistantCooperatively(...args);
+    },
     executeAssistantTool: (...args) => {
       calls.push({ kind: 'refresh', state: args[0], request: args[1], now: args[2] });
       return engine.executeAssistantTool(...args);
     },
   };
+  h.deps['@/lib/local-assistant-grounding'] = load(path.join(root, 'src/lib/local-assistant-grounding.ts'), { '@/lib/wafra-assistant': engine });
+  if (options.improve) {
+    h.deps['@/lib/local-semantic-assistant'] = { improveAssistantRequestLocally: options.improve };
+    h.deps['@/lib/local-semantic-runtime'] = { localSemanticRuntimeStatus: () => ({ state: options.modelState ?? 'ready' }) };
+  }
   const globals = {
     Date: Clock,
     requestAnimationFrame: callback => { const id = ++nextFrame; frames.set(id, callback); return id; },
@@ -155,7 +167,7 @@ function sessionHarness(options = {}) {
   const button = label => find(node => node.type === 'Button' && node.props.label === label);
   const turns = () => walk(tree).filter(node => node.props?.testID === 'assistant-turn');
   return {
-    render, flushFrames, calls, turns, find, button,
+    render, flushFrames, calls, haptics, turns, find, button,
     get tree() { return tree; }, get state() { return state; }, get frameCount() { return frames.size; },
     patchState: patch => { state = { ...state, ...patch }; },
     setGeneration: value => { generation = value; },
@@ -169,6 +181,19 @@ function sessionHarness(options = {}) {
       render();
       find(node => node.props?.testID === 'assistant-send').props.onPress();
       return render();
+    },
+    submitAsync: async question => {
+      find(node => node.props?.testID === 'assistant-input').props.onChangeText(question);
+      render();
+      // Pressable intentionally returns void; wait for the screen's observable
+      // busy state, rather than mistaking await(undefined) for submission.
+      find(node => node.props?.testID === 'assistant-send').props.onPress();
+      for (let turn = 0; turn < 20; turn++) {
+        await new Promise(resolve => setImmediate(resolve));
+        render();
+        if (!find(node => node.props?.testID === 'assistant-send').props.accessibilityState.busy) return tree;
+      }
+      throw new Error('Assistant submission did not settle');
     },
     dispose: () => { for (const item of slots) item.cleanup?.(); for (const cleanup of cleanups) cleanup(); moneyFormat.setMonthStartDay(1); },
   };
@@ -191,6 +216,71 @@ function using(options, run) {
   const h = sessionHarness(options);
   try { return run(h); } finally { h.dispose(); }
 }
+async function usingAsync(options, run) {
+  const h = sessionHarness(options);
+  try { return await run(h); } finally { h.dispose(); }
+}
+
+test('unknown wording stays local and returns deterministic help', async () => usingAsync({
+  state: { ...fixture, privateMode: false },
+}, async h => {
+  h.render();
+  await h.submitAsync('gimme the money burn rn');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+  assert.match(text(h.tree), /didn.t quite understand/i);
+  assert.match(text(h.tree), /gimme the money burn rn/);
+}));
+
+test('Ask Wafra direct controls restore tap haptics', () => using({ state: fixture }, h => {
+  h.render();
+  const before = h.haptics.length;
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much did I spend?');
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-send').props.onPress();
+  assert.equal(h.haptics.length, before + 1, 'Send should register a tap');
+  h.render();
+  const period = h.find(node => node.props?.accessibilityLabel?.startsWith('Change reporting period:'));
+  period.props.onPress();
+  assert.equal(h.haptics.length, before + 2, 'period control should register a tap');
+}));
+
+test('Android Send paints the pending turn before ledger interpretation starts', async () => usingAsync({
+  state: fixture,
+  platform: 'android',
+}, async h => {
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('Check');
+  h.render();
+  h.find(node => node.props?.testID === 'assistant-send').props.onPress();
+  h.render();
+  assert.ok(h.find(node => node.props?.testID === 'assistant-pending-turn'), 'the tap must become visible immediately');
+  assert.equal(h.find(node => node.props?.testID === 'assistant-input').props.value, '');
+  assert.equal(h.calls.length, 0, 'no ledger interpretation may run in the press turn');
+  h.flushFrames();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  h.render();
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask-cooperative']);
+  assert.equal(h.find(node => node.props?.testID === 'assistant-pending-turn'), undefined);
+  assert.equal(h.turns().length, 1);
+}));
+
+test('known local questions execute once on-device', async () => usingAsync({
+  state: { ...fixture, privateMode: false },
+}, async h => {
+  h.render();
+  await h.submitAsync('How much did I spend?');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+}));
+
+test('Private Mode keeps unknown Ask Wafra language fully local', async () => usingAsync({
+  state: { ...fixture, privateMode: true },
+}, async h => {
+  h.render();
+  await h.submitAsync('gimme the money burn rn');
+  assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
+  const scaffold = h.find(node => node.type === 'Scaffold');
+  assert.match(text(scaffold.props.footer), /On-device/);
+}));
 
 test('finding proof and an older finding exploration retain that finding exact source and scope', () => using({ state: driverFixture }, h => {
   h.render(); h.submit('Why did my spending change from Emirates NBD account excluding rent?');
@@ -227,24 +317,29 @@ test('a queued finding action cannot read or announce a replacement or changed l
   });
 });
 
-test('queued send and refresh actions cannot cross ledger replacement', () => {
-  for (const action of ['send', 'refresh']) using({ state: fixture }, h => {
-    h.render(); h.submit('How much did I spend?');
-    let press;
-    if (action === 'send') {
-      h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much income did I receive?');
-      h.render();
-      press = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
-    } else {
-      h.patchState({ transactions: [transaction(7_000)] }); h.render();
-      press = h.button('Refresh answer').props.onPress;
-    }
-    const count = h.calls.length;
-    h.patchState({ transactions: [transaction(900_000)] }); h.setGeneration(2);
-    press();
-    assert.equal(h.calls.length, count, 'obsolete action must not read replacement ledger: ' + action);
-  });
-});
+test('a queued send after ledger replacement uses the authoritative new ledger without stale conversation scope', async () => usingAsync({ state: fixture }, async h => {
+  h.render(); h.submit('How much did I spend?');
+  h.find(node => node.props?.testID === 'assistant-input').props.onChangeText('How much income did I receive?');
+  h.render();
+  const press = h.find(node => node.props?.testID === 'assistant-send').props.onPress;
+  const count = h.calls.length;
+  h.patchState({ transactions: [{ ...transaction(900_000), type: 'income' }] }); h.setGeneration(2);
+  await press(); h.render();
+  assert.equal(h.calls.length, count + 1, 'the send is not silently dropped');
+  assert.equal(h.calls.at(-1).state, h.state, 'the new ledger snapshot is authoritative');
+  assert.equal(h.calls.at(-1).previous, null, 'stale conversation context is discarded');
+  assert.equal(h.turns().length, 1);
+}));
+
+test('a queued refresh still cannot cross ledger replacement', () => using({ state: fixture }, h => {
+  h.render(); h.submit('How much did I spend?');
+  h.patchState({ transactions: [transaction(7_000)] }); h.render();
+  const press = h.button('Refresh answer').props.onPress;
+  const count = h.calls.length;
+  h.patchState({ transactions: [transaction(900_000)] }); h.setGeneration(2);
+  press();
+  assert.equal(h.calls.length, count, 'an obsolete refresh must not read the replacement ledger');
+}));
 
 function coldHydrationScenario(sourceTransform) {
   return using({ sourceTransform, generation: 0, question: 'How much did I spend?',
@@ -359,10 +454,9 @@ test('regression proof: a cold-hydration route marked handled too early is caugh
     'if (hadHydratedLedger.current) routeQuestionHandled.current =', 'routeQuestionHandled.current =')),
   /route question executes exactly once/);
 });
-test('regression proof: removing both queued-frame and request generation checks is caught', () => {
-  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(replaceOnce(source,
-    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */'),
-  ' || generation !== getStateGeneration()', '')),
+test('regression proof: removing the queued-frame generation check is caught', () => {
+  assert.throws(() => eraseBeforeCleanupScenario(source => replaceOnce(source,
+    'if (getStateGeneration() !== generation) return;', '/* prior frame omitted the generation guard */')),
   /old route frame must check/);
 });
 test('regression proof: refreshing at the original answer date is caught', () => {
@@ -392,7 +486,80 @@ test('period picker cancel preserves context; explicit current-month apply reset
   assert.equal(h.turns().length, 0, 'an explicit apply resets even when the provider value is already this month');
   h.submit('How much did I spend?');
   assert.equal(h.calls.at(-1).period.key, '2026-09');
-  assert.equal(h.calls.at(-1).previous, undefined, 'the discarded August request must not override the selection');
+  assert.ok(h.calls.at(-1).previous == null, 'the discarded August request must not override the selection');
   h.button('View transactions').props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.evidence[0].totalFils, 6_000);
+}));
+
+
+test('an unavailable encoder can warm or retry when a new question needs interpretation', async () => {
+  const requests = [];
+  await usingAsync({ state: fixture, modelState: 'failed', improve: async input => {
+    requests.push(input); return input.deterministicRequest;
+  } }, async h => {
+    h.render();
+    await h.submitAsync('Give me a fiscal digest');
+    assert.equal(requests.length, 1, 'the native wrapper owns non-blocking warmup and retry backoff');
+    assert.equal(h.turns().length, 1, 'the deterministic answer remains available during warmup');
+  });
+});
+
+test('new independent question reaches local AI after an earlier answer', async () => {
+  const requests = [];
+  await usingAsync({ state: fixture, improve: async input => { requests.push(input); return input.deterministicRequest; } }, async h => {
+    h.render();
+    await h.submitAsync('How much did I spend?');
+    await h.submitAsync('Give me a fiscal digest');
+    await new Promise(resolve => setImmediate(resolve));
+    h.render();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].previousRequest, null);
+    assert.equal(typeof requests[0].groundRequest, 'function');
+  });
+});
+
+test('ledger replacement during inference never executes or appends an old-ledger answer', async () => {
+  let finish;
+  await usingAsync({ state: fixture, improve: input => new Promise(resolve => { finish = () => resolve({tool: 'spending-total', period: input.defaultPeriod}); }) }, async h => {
+    h.render();
+    h.submit('Give me a fiscal digest');
+    assert.equal(typeof finish, 'function');
+    h.setGeneration(2);
+    h.patchState({ transactions: [transaction(9000)] });
+    finish();
+    await new Promise(resolve => setImmediate(resolve));
+    h.render();
+    assert.equal(h.turns().length, 0);
+    assert.equal(h.calls.filter(call => call.kind === 'refresh').length, 0);
+  });
+});
+
+
+test('independent question after a filtered answer discards prior merchant and period', async () => usingAsync({ state: fixture }, async h => {
+  h.render();
+  await h.submitAsync('How much did I spend at Store last month?');
+  await h.submitAsync('How much did I spend?');
+  const requests = h.calls.filter(call => call.kind === 'ask');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].previous, null);
+  assert.equal(requests[1].period.key, '2026-09');
+}));
+
+
+test('card obligation payment and remaining follow-ups retain the selected card', async () => usingAsync({ state: {
+  ...fixture,
+  accounts: [{ id: 'card-a', name: 'Alpha Card', type: 'card', cardType: 'credit', last4: '1234' },
+    { id: 'card-b', name: 'Beta Card', type: 'card', cardType: 'credit', last4: '5678' }],
+} }, async h => {
+  h.render();
+  await h.submitAsync('Is Alpha Card settled?');
+  for (const question of ['How much did I pay?', 'How much is left?', 'What is remaining on this card?']) {
+    await h.submitAsync(question);
+    const call = h.calls.filter(call => call.kind === 'ask').at(-1);
+    assert.equal(call.previous?.tool, 'obligation-status', question);
+    assert.equal(call.previous?.accountId, 'card-a', question);
+    const result = engine.planAssistantQuestion(h.state, call.question, call.now, call.previous, call.period);
+    assert.equal(result.tool, 'obligation-status', question);
+    assert.equal(result.accountId, 'card-a', question);
+  }
 }));

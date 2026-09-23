@@ -38,6 +38,7 @@ export const APP_ROUTES = [
   '/merchants',
   '/merchant',
   '/cards',
+  '/currency',
   '/settings',
   '/accuracy',
   '/categorise',

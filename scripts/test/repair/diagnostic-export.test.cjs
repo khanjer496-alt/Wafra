@@ -76,6 +76,23 @@ test('optional bank diagnostic read is cursor-complete and excludes personal/sec
   assert.ok(!JSON.stringify(report).includes('984321'));
   assert.ok(!JSON.stringify(report).includes('+971500000000'));
 });
+test('one-tap support audits can bound inbox work without claiming complete history', async () => {
+  const rows = [
+    { id: 4, date: 400, address: 'Liv', body: 'AED 10.00 credited to your account.' },
+    { id: 3, date: 300, address: 'FAB', body: 'AED 20.00 purchase at TEST SHOP.' },
+  ];
+  let requested = 0;
+  const report = await collectDiagnosticBankMessages(async (_date, _row, max) => {
+    requested = max;
+    return rows.slice(0, max);
+  }, { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true, maxChecked: 2 });
+  assert.equal(requested, 2);
+  assert.equal(report.coverage.checked, 2);
+  assert.equal(report.coverage.checkedLimit, 2);
+  assert.equal(report.coverage.truncated, true);
+  assert.equal(report.coverage.nativeFilteredInboxReadComplete, false);
+});
+
 test('malformed/non-advancing pages fail instead of emitting a partial complete export', async () => {
   const opts = { currency: 'AED', market: 'AE', overrides: {}, shouldContinue: () => true };
   await assert.rejects(collectDiagnosticBankMessages(async () => [
@@ -89,4 +106,27 @@ test('bank-export admission never uses a bank-name substring as sender identity'
     assert.equal(isDiagnosticBankSender(sender), false, sender);
   }
   for (const sender of ['Liv', 'FAB', 'ENBD', 'ADCB', 'RAKBANK', 'Emirates NBD', 'AlRajhi']) assert.equal(isDiagnosticBankSender(sender), true, sender);
+});
+
+test('capture timings ride the export only in a trace build, and carry phases, counts and milliseconds only', async () => {
+  const trace = require('../build/capture-trace.js');
+  const previous = process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE;
+  try {
+    delete process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE;
+    trace.captureTrace('page:read', 500, 812, 3);
+    const off = await buildDiagnosticExport(state(), build, { includeRetainedMessages: false, logoFor: () => ({ id: null, reason: 'test' }) }, epoch);
+    assert.equal(off.timings, null);
+    process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE = '1';
+    trace.captureTrace('page:read', 500, 812, 3);
+    trace.captureTrace('page:done', 500, 1200, 3);
+    const on = await buildDiagnosticExport(state(), build, { includeRetainedMessages: false, logoFor: () => ({ id: null, reason: 'test' }) }, epoch);
+    assert.ok(Array.isArray(on.timings.launch) && Array.isArray(on.timings.capture));
+    assert.deepEqual(Object.keys(on.timings.capture[0]).sort(), ['at', 'count', 'ms', 'page', 'phase']);
+    assert.deepEqual(on.timings.capture.map(e => [e.phase, e.count, e.ms, e.page]), [['page:read', 500, 812, 3], ['page:done', 500, 1200, 3]]);
+    for (const metric of on.timings.launch) assert.deepEqual(Object.keys(metric).sort(), ['elapsedMs', 'phase']);
+    assert.ok(!JSON.stringify(on.timings).includes('NEVER_EXPORT'));
+  } finally {
+    if (previous === undefined) delete process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE;
+    else process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE = previous;
+  }
 });

@@ -37,7 +37,7 @@ import {
   isRelayRevokedError,
   syncRelay,
 } from '@/lib/relay';
-import { PARSER_VERSION } from '@/lib/sms-parser';
+import { PARSER_BACKFILL_VERSION } from '@/lib/sms-parser';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
 import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
@@ -172,7 +172,7 @@ export const setIosLocalCaptureEntitlementLease = async (
 };
 
 /**
- * Apply one RevenueCat answer with its request timestamp. Native storage owns
+ * Apply one verified store/Superwall answer with its request timestamp. Native storage owns
  * the monotonic compare, so a late async response cannot resurrect or shorten
  * a newer subscription lease.
  */
@@ -330,8 +330,14 @@ export async function collectNewMessages(
     // would stay filed as spending forever. When the parser has moved on,
     // re-read everything — existing rows are recognized by fingerprint and
     // healed in place, not duplicated.
-    const reread = !notificationOnly && state.parserVersion !== PARSER_VERSION;
-    const sinceMs = notificationOnly || reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
+    const reread = !notificationOnly && (state.parserVersion ?? 0) < PARSER_BACKFILL_VERSION;
+    // Parser-version migrations are handled by the resumable history job when
+    // one is present. Keep routine foreground capture incremental so it does
+    // not race the history coordinator through the same inbox.
+    const fullHistoricalReread = reread && state.historyImport == null;
+    const sinceMs = notificationOnly || fullHistoricalReread || state.lastScanTs <= 0
+      ? 0
+      : state.lastScanTs + 1;
     // `declined` is the other half of that re-read. A decline the old parser
     // booked as an expense cannot be healed into anything — the money never
     // moved — so the row has to be retired, and the proof is the message
@@ -356,22 +362,27 @@ export async function collectNewMessages(
       undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
-        maxInboxPages: reread ? 1 : undefined,
-        notificationOnly },
+        maxInboxPages: fullHistoricalReread ? 1 : undefined,
+        // 1,000-row routine pages were 300-900ms of JS on a 14k-row phone.
+        // Incremental capture still drains every message newer than lastScanTs;
+        // it just yields between 128-row provider reads.
+        pageSize: 128,
+        notificationOnly,
+        learnedNotificationPackages: state.trustedNotificationPackages },
     );
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep
     // READ_SMS looking granted but return an empty provider cursor. Calling
-    // that a successful zero-change scan stamps PARSER_VERSION and strands all
+    // that a successful zero-change scan stamps the backfill receipt and strands all
     // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
     // ledger proves that zero rows is not a credible full-history result.
     const hasStoredInboxHistory = state.transactions.some(
       (row) => row.source === 'sms' && row.viaPush !== true,
     );
-    if (reread && inboxScannedCount === 0 && hasStoredInboxHistory) {
+    if (fullHistoricalReread && inboxScannedCount === 0 && hasStoredInboxHistory) {
       throw new SmsHistoryUnavailableError();
     }
-    if (reread && !inboxHistoryComplete && !nextCursor) {
+    if (fullHistoricalReread && !inboxHistoryComplete && !nextCursor) {
       throw new SmsHistoryUnavailableError();
     }
     const migrationTime = Date.now();
@@ -393,8 +404,8 @@ export async function collectNewMessages(
       newestTs: notificationOnly || emptyScan ? state.lastScanTs : newestTs,
       inboxScannedCount,
       scannedCount,
-      historicalReread: reread && inboxHistoryComplete,
-      ...(reread && !inboxHistoryComplete && nextCursor ? { historyImport: {
+      historicalReread: fullHistoricalReread && inboxHistoryComplete,
+      ...(fullHistoricalReread && !inboxHistoryComplete && nextCursor ? { historyImport: {
         status: 'paused' as const, cursor: nextCursor, scanned: scannedCount,
         found: parsed.length + reviewCandidates.length, startedAt: migrationTime,
         updatedAt: migrationTime, error: null,

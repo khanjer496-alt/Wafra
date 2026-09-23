@@ -15,7 +15,11 @@ import { Platform } from 'react-native';
 import { buildDailySummary } from '@/lib/daily-summary';
 import { toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
+import { historyImportIncomplete } from '@/lib/history-import';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
+import { recordRuntimeOperation } from '@/lib/runtime-performance';
+import { detectSubscriptionsCooperatively, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 const CHANNEL_ID = 'payment-reminders';
@@ -34,7 +38,7 @@ function configureHandler() {
       shouldShowAlert: true,
       shouldShowBanner: true,
       shouldShowList: true,
-      shouldPlaySound: false,
+      shouldPlaySound: true,
       shouldSetBadge: false,
     }),
   });
@@ -72,6 +76,38 @@ export function notificationsAllowed(status: Notifications.NotificationPermissio
     status.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
     status.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
   );
+}
+
+/** Read the OS state without prompting. Used by UI that must never claim an
+ * alert is enabled when this phone cannot deliver it. */
+export async function notificationDeliveryAllowed(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  return notificationsAllowed(await Notifications.getPermissionsAsync());
+}
+
+/**
+ * Ask specifically for user-visible iPhone notifications.
+ *
+ * This is deliberately separate from the quiet/provisional authorization used
+ * by older background-delivery code. A user who explicitly taps "Enable
+ * notifications" after onboarding is asking for banners/sounds, so a
+ * provisional grant must be upgraded rather than silently treated as enough.
+ */
+export async function requestVisibleNotificationPermission(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  if (Platform.OS !== 'ios') return requestNotificationPermission();
+  configureHandler();
+  const current = await Notifications.getPermissionsAsync();
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED) return true;
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.DENIED) return false;
+  const asked = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: true,
+      allowBadge: false,
+      allowSound: true,
+    },
+  });
+  return asked.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED || asked.granted;
 }
 
 /**
@@ -126,6 +162,7 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
  */
 export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
+  const historyBusy = Platform.OS === 'android' && historyImportIncomplete(state.historyImport);
   configureHandler();
   // Not `perms.granted` — see notificationsAllowed. An iOS device that went
   // through setup is provisionally authorized, which reads as "undetermined"
@@ -142,9 +179,35 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
     });
   }
 
+  // Recurrence detection is a complete-ledger analysis. On a 10k-20k row
+  // Android ledger the synchronous detector can monopolise Hermes for seconds
+  // immediately after Home becomes visible, which looks exactly like a launch
+  // freeze. Bills already uses the cooperative detector; reminder setup must do
+  // the same because it runs automatically once per app launch.
+  let detectedSubscriptions: readonly Subscription[] | undefined;
+  if (Platform.OS === 'android') {
+    if (historyBusy) {
+      detectedSubscriptions = [];
+    } else {
+      const startedAt = Date.now();
+      const liveAccounts = liveAccountIds(state.accounts);
+      const internalTransfers = internalTransferIdsForState(state);
+      const detected = await detectSubscriptionsCooperatively(
+        state.transactions,
+        state.notSubscriptions,
+        now,
+        liveAccounts,
+        internalTransfers,
+      );
+      recordRuntimeOperation('reminder-projection', Date.now() - startedAt);
+      if (detected === null) return;
+      detectedSubscriptions = detected;
+    }
+  }
+
   await Notifications.cancelAllScheduledNotificationsAsync();
 
-  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS)) {
+  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS, detectedSubscriptions)) {
     await Notifications.scheduleNotificationAsync({
       content: { title: n.title, body: n.body },
       trigger: {
@@ -155,7 +218,7 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
     });
   }
 
-  await syncDailySummary(state, now);
+  if (!historyBusy) await syncDailySummary(state, now);
 }
 
 /** The hour the day's summary is posted. Late enough to be the whole day. */

@@ -74,7 +74,6 @@ export function createLedgerPersistence({
 
   let mode: Mode = 'blocked';
   let previousChunkCount = 0;
-  let previousChunks: string[] = [];
   let previousTransactions: Transaction[] | null = null;
   let storedChunkOrder: ChunkOrder = currentChunkOrder;
   let lifecycleGeneration = 0;
@@ -94,68 +93,117 @@ export function createLedgerPersistence({
   };
 
   const clearWriteCache = (): void => {
-    previousChunks = [];
     previousTransactions = null;
   };
 
   const resetWriteCache = (): void => {
     previousChunkCount = 0;
-    previousChunks = [];
     previousTransactions = null;
     storedChunkOrder = currentChunkOrder;
   };
 
-  const readSnapshot = async (): Promise<PersistedState | null> => {
-    let raw = await storage.getItem(prefix);
-    if (!raw && (await migrateLegacyState(prefix))) raw = await storage.getItem(prefix);
-    if (!raw) {
-      resetWriteCache();
-      return null;
-    }
+  // Native SQLCipher supplies a connection-wide snapshot lease. The fallback
+  // keeps in-memory/test and older browser adapters source-compatible.
+  const withSnapshotRead = <T>(task: () => Promise<T>): Promise<T> =>
+    storage.withSnapshotRead ? storage.withSnapshotRead(task) : task();
 
-    const parsed = JSON.parse(raw) as PersistedMeta;
-    const chunkBodies: string[] = [];
-    const chunkOrder: ChunkOrder =
-      parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
-    let corrupt = false;
+  const readExistingSnapshot = async (): Promise<PersistedState | null> =>
+    withSnapshotRead(async () => {
+      const raw = await storage.getItem(prefix);
+      if (!raw) {
+        resetWriteCache();
+        return null;
+      }
 
-    if (!Array.isArray(parsed.transactions)) {
-      const count = Number(parsed.txChunks) || 0;
-      const blocks: Transaction[][] = [];
-      if (count > 0) {
-        const pairs = await storage.multiGet(
-          Array.from({ length: count }, (_, index) => chunkKey(index)),
-        );
-        for (const [, value] of pairs) {
-          if (!value) {
-            corrupt = true;
-            continue;
-          }
-          try {
-            const rows = JSON.parse(value) as Transaction[];
-            if (Array.isArray(rows)) {
-              blocks.push(rows);
-              chunkBodies.push(value);
-            } else {
+      const parsed = JSON.parse(raw) as PersistedMeta;
+      const inlineTransactions = Array.isArray(parsed.transactions);
+      const chunkOrder: ChunkOrder =
+        parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
+      let corrupt = false;
+
+      if (!inlineTransactions) {
+        const count = Number(parsed.txChunks) || 0;
+        const blocks: Transaction[][] = [];
+        if (count > 0) {
+          const pairs = await storage.multiGet(
+            Array.from({ length: count }, (_, index) => chunkKey(index)),
+          );
+          for (const [, value] of pairs) {
+            if (!value) {
+              corrupt = true;
+              continue;
+            }
+            try {
+              const rows = JSON.parse(value) as Transaction[];
+              if (Array.isArray(rows)) {
+                blocks.push(rows);
+              } else {
+                corrupt = true;
+              }
+            } catch {
               corrupt = true;
             }
-          } catch {
-            corrupt = true;
           }
         }
+        if (chunkOrder === currentChunkOrder) blocks.reverse();
+        parsed.transactions = blocks.flat();
       }
-      if (chunkOrder === currentChunkOrder) blocks.reverse();
-      parsed.transactions = blocks.flat();
+
+      delete parsed.txChunks;
+      delete parsed.txChunkOrder;
+
+      previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
+      storedChunkOrder = chunkOrder;
+      // Inline rows have no durable chunk bodies to reuse. Like a partial or
+      // corrupt chunk read, they must force the first save to write every
+      // chunk before replacing the metadata that held the original rows.
+      previousTransactions = corrupt || inlineTransactions ? null : parsed.transactions ?? [];
+      return parsed;
+    });
+
+  const readSnapshot = async (): Promise<PersistedState | null> => {
+    const existing = await readExistingSnapshot();
+    if (existing) return existing;
+    // Legacy migration writes into the encrypted store, so it must run OUTSIDE
+    // the snapshot-read lock. Re-enter the lock only after that write settles.
+    if (await migrateLegacyState(prefix)) return readExistingSnapshot();
+    return null;
+  };
+
+  /** Logical row range for one persisted chunk in either supported layout. */
+  const chunkRange = (length: number, index: number, order: ChunkOrder): [number, number] => {
+    if (order === 'newest-first') {
+      const start = index * chunkSize;
+      return [start, Math.min(length, start + chunkSize)];
     }
+    const end = length - index * chunkSize;
+    return [Math.max(0, end - chunkSize), Math.max(0, end)];
+  };
 
-    delete parsed.txChunks;
-    delete parsed.txChunkOrder;
+  /**
+   * Store snapshots are immutable. Before serialising a chunk, compare the row
+   * objects that would occupy it with the previous durable snapshot. This is a
+   * cheap O(n) reference walk and avoids JSON.stringify over the entire ledger
+   * when a history page healed only a narrow date window.
+   */
+  const chunkRowsUnchanged = (
+    transactions: Transaction[],
+    index: number,
+    order: ChunkOrder,
+  ): boolean => {
+    if (!previousTransactions || storedChunkOrder !== order) return false;
+    const [start, end] = chunkRange(transactions.length, index, order);
+    const [priorStart, priorEnd] = chunkRange(previousTransactions.length, index, order);
+    if (end - start !== priorEnd - priorStart) return false;
+    for (let offset = 0; offset < end - start; offset += 1) {
+      if (transactions[start + offset] !== previousTransactions[priorStart + offset]) return false;
+    }
+    return true;
+  };
 
-    previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
-    previousChunks = corrupt ? [] : chunkBodies;
-    storedChunkOrder = chunkOrder;
-    previousTransactions = parsed.transactions ?? [];
-    return parsed;
+  const serializeChunk = (transactions: Transaction[], index: number, order: ChunkOrder): string => {
+    const [start, end] = chunkRange(transactions.length, index, order);
+    return JSON.stringify(transactions.slice(start, end));
   };
 
   /** Write one snapshot inside the module's already-serial operation. */
@@ -174,45 +222,49 @@ export function createLedgerPersistence({
       ? snapshot.historyImport.status === 'complete' ? currentChunkOrder : 'newest-first'
       : transactionsChanged ? currentChunkOrder : storedChunkOrder;
     const layoutChanged = targetOrder !== storedChunkOrder;
-    let chunks: [string, string][] | null = null;
-    if (transactionsChanged || layoutChanged) {
-      if (targetOrder === currentChunkOrder) {
-        chunks = chunkTransactions(transactions).map(
-          (body, index): [string, string] => [chunkKey(index), body],
-        );
+    const needsChunks = transactionsChanged || layoutChanged;
+    const chunkCount = needsChunks ? Math.ceil(transactions.length / chunkSize) : previousChunkCount;
+    const order = needsChunks ? targetOrder : storedChunkOrder;
+    let changed: [string, string][] = [];
+
+    if (needsChunks) {
+      // A layout conversion changes every key's meaning, so write every chunk
+      // once. Ordinary immutable updates stay on the fast identity-diff path.
+      //
+      // Do NOT retain the serialized chunk bodies after this write. On a large
+      // ledger that kept a second full JSON representation alive beside the
+      // parsed transaction objects for the whole app session, increasing steady
+      // memory and GC pressure. Row identity already tells us which ordinary
+      // chunks are unchanged; a rewritten chunk is cheap enough to write once.
+      if (layoutChanged || !previousTransactions) {
+        const bodies = order === currentChunkOrder
+          ? chunkTransactions(transactions)
+          : Array.from({ length: chunkCount }, (_, index) => serializeChunk(transactions, index, order));
+        changed = bodies.map((body, index) => [chunkKey(index), body]);
       } else {
-        chunks = [];
-        for (let start = 0; start < transactions.length; start += chunkSize) {
-          chunks.push([
-            chunkKey(chunks.length),
-            JSON.stringify(transactions.slice(start, start + chunkSize)),
-          ]);
+        for (let index = 0; index < chunkCount; index += 1) {
+          if (chunkRowsUnchanged(transactions, index, order)) continue;
+          const body = serializeChunk(transactions, index, order);
+          changed.push([chunkKey(index), body]);
         }
       }
     }
-    const chunkCount = chunks ? chunks.length : previousChunkCount;
-    let order = chunks ? currentChunkOrder : storedChunkOrder;
-    if (chunks && targetOrder === 'newest-first') order = 'newest-first';
 
     try {
-      const changed = chunks
-        ? chunks.filter(([, body], index) => previousChunks[index] !== body)
-        : [];
       await storage.multiSet([
         [prefix, JSON.stringify({ ...meta, txChunks: chunkCount, txChunkOrder: order })],
         ...changed,
       ]);
-      if (chunks && previousChunkCount > chunks.length) {
+      if (needsChunks && previousChunkCount > chunkCount) {
         await storage.multiRemove(
           Array.from(
-            { length: previousChunkCount - chunks.length },
-            (_, index) => chunkKey(chunks.length + index),
+            { length: previousChunkCount - chunkCount },
+            (_, index) => chunkKey(chunkCount + index),
           ),
         );
       }
-      if (chunks) {
-        previousChunkCount = chunks.length;
-        previousChunks = chunks.map(([, body]) => body);
+      if (needsChunks) {
+        previousChunkCount = chunkCount;
         storedChunkOrder = order;
       }
       previousTransactions = transactions;

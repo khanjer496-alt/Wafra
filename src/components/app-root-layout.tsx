@@ -3,138 +3,42 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
-import { OnboardingGate } from '@/components/onboarding-gate';
+import { SuperwallBillingProvider } from '@/components/superwall-billing-provider';
+import { SuperwallOnboarding } from '@/components/superwall-onboarding';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { LedgerMoneyProvider } from '@/hooks/use-ledger-money';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import {
-  observeEntitlement,
-  refreshEntitlement,
-  syncStoreCaptureEntitlement,
-  type EntitlementSnapshot,
-} from '@/lib/billing';
-import {
-  publishIosCaptureStatusRefresh,
-  setIosLocalCaptureEntitlementLease,
-  subscribeIosCaptureEntitlementReset,
-} from '@/lib/capture';
+import { startMotionPreference } from '@/hooks/use-reduced-motion';
 import { PeriodProvider } from '@/lib/period-context';
-import { localCaptureEntitlementLease } from '@/lib/purchases';
 import { StoreProvider, useStore } from '@/lib/store';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
+// Android SMS_RECEIVED / bank-app notification events can launch the JS bundle
+// without mounting a React tree. Register that short headless task at module
+// scope for the same reason the iOS relay handler above is registered here.
+import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { localSemanticBackgroundCancellation, setLocalSemanticAppActive } from '@/lib/local-semantic-background-policy';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
+import { getLocalSemanticEncoder } from '@/lib/local-semantic-runtime';
+import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
+import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
 // through a setter; this is the one call that fills it in.
 installFeedbackTransport();
-
-function BillingSync() {
-  const { state, setPro } = useStore();
-  const currentPro = useRef(state.pro);
-  currentPro.current = state.pro;
-
-  const syncLocalCaptureLease = useCallback(() => {
-    if (!state.hydrated || Platform.OS !== 'ios') return;
-    const lease = localCaptureEntitlementLease({
-      founderPro: state.founderPro,
-      trialStartTs: state.trialStartTs,
-    });
-    if (!lease) return;
-    void setIosLocalCaptureEntitlementLease(lease.expiresAtMs, lease.lifetime)
-      .then((applied) => {
-        if (applied) publishIosCaptureStatusRefresh();
-      })
-      .catch(() => {
-        // The optional native module failing closed must not crash the ledger.
-        // Setup will stay paused until a build containing the module is installed.
-      });
-  }, [state.founderPro, state.hydrated, state.trialStartTs]);
-
-  useEffect(() => {
-    syncLocalCaptureLease();
-  }, [syncLocalCaptureLease]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-    return subscribeIosCaptureEntitlementReset(syncLocalCaptureLease);
-  }, [syncLocalCaptureLease]);
-
-  useEffect(() => {
-    if (!state.hydrated) return;
-    let disposed = false;
-    let stopObserving = () => {};
-    let latestRequestDateMs = 0;
-    let latestSnapshot: EntitlementSnapshot | null = null;
-    let refreshGeneration = 0;
-    const apply = async (snapshot: EntitlementSnapshot, allowEqual = false) => {
-      if (
-        disposed ||
-        snapshot.requestDateMs < latestRequestDateMs ||
-        (!allowEqual && snapshot.requestDateMs === latestRequestDateMs)
-      ) return;
-      latestRequestDateMs = Math.max(latestRequestDateMs, snapshot.requestDateMs);
-      let nativeAccepted = true;
-      if (Platform.OS === 'ios') {
-        try {
-          nativeAccepted = await syncStoreCaptureEntitlement(snapshot);
-        } catch {
-          // Billing remains usable if a malformed/missing native build is
-          // installed; native admission itself still fails closed.
-        }
-      }
-      if (disposed || snapshot.requestDateMs !== latestRequestDateMs || !nativeAccepted) return;
-      latestSnapshot = snapshot;
-      if (snapshot.active === currentPro.current) return;
-      currentPro.current = snapshot.active;
-      setPro(snapshot.active);
-    };
-    void observeEntitlement((snapshot) => {
-      refreshGeneration += 1;
-      void apply(snapshot);
-    }).then((cleanup) => {
-      if (disposed) cleanup();
-      else stopObserving = cleanup;
-    });
-    const refreshStoreLease = (allowEqual = false) => {
-      const generation = ++refreshGeneration;
-      void refreshEntitlement().then((snapshot) => {
-        if (generation === refreshGeneration && snapshot) void apply(snapshot, allowEqual);
-      });
-    };
-    const entitlementReset = Platform.OS === 'ios'
-      ? subscribeIosCaptureEntitlementReset(() => {
-          // Replay the last confirmed answer without requiring connectivity;
-          // native accepts an identical revision and rejects equal conflicts.
-          if (latestSnapshot) void apply(latestSnapshot, true);
-          else refreshStoreLease(true);
-        })
-      : () => {};
-    const appState = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
-      refreshStoreLease();
-    });
-    return () => {
-      disposed = true;
-      appState.remove();
-      entitlementReset();
-      stopObserving();
-    };
-  }, [setPro, state.hydrated]);
-
-  return null;
-}
 
 /**
  * Mirrors the whole app left-to-right or right-to-left, live.
@@ -157,6 +61,41 @@ function BillingSync() {
  */
 function Direction({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let disposed = false;
+    let warmStarted = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onState = (next: string) => {
+      const active = next === 'active';
+      setLocalSemanticAppActive(active);
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+      if (!active || !state.hydrated || warmStarted) return;
+      const cancelled = localSemanticBackgroundCancellation();
+      // Fonts and ledger hydration have completed; give the first screen a
+      // quiet turn before parsing the tokenizer or creating the native session.
+      timer = setTimeout(() => {
+        timer = null;
+        void waitForForegroundHistoryIdle().then(() => {
+          if (disposed || cancelled()) return;
+          warmStarted = true;
+          return getLocalSemanticEncoder({ background: true });
+        }).catch(() => {
+          if (!cancelled()) return;
+          warmStarted = false;
+          if (!disposed && AppState.currentState === 'active') onState('active');
+        });
+      }, 1500);
+    };
+    onState(AppState.currentState);
+    const listener = AppState.addEventListener('change', onState);
+    return () => {
+      disposed = true;
+      setLocalSemanticAppActive(false);
+      if (timer !== null) clearTimeout(timer);
+      listener.remove();
+    };
+  }, [state.hydrated]);
   const language = state.language === 'ar' ? 'ar' : 'en';
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
@@ -208,14 +147,29 @@ export default function RootLayout() {
   // returned null and shipped an empty HTML body to crawlers.
   const ready = Platform.OS === 'web' || fontsLoaded || !!fontError;
 
+  useEffect(() => startRuntimePerformanceMonitor(), []);
+
+  // Restore lightweight counters at launch. Optional native model preparation
+  // waits for fonts, ledger hydration and an idle navigation window in Direction.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    void hydrateLocalSemanticShadow().catch(() => undefined);
+    void hydrateLocalSemanticInboxShadow().catch(() => undefined);
+  }, []);
+
+  // Ask the OS about Reduce Motion and the screen reader once, here, while
+  // the fonts are still loading. Both answers are app-wide and asynchronous,
+  // and every entrance animation holds its content still until the
+  // screen-reader one arrives — so resolving it before any screen mounts is
+  // the difference between Home appearing and Home appearing after a beat.
+  useEffect(() => startMotionPreference(), []);
+
   useEffect(() => {
     if (ready) {
       markLaunchPhase('fonts-ready');
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [ready]);
-
-  if (!ready) return null;
 
   const navTheme = {
     ...(dark ? DarkTheme : DefaultTheme),
@@ -229,15 +183,31 @@ export default function RootLayout() {
     },
   };
 
+  /*
+    `StoreProvider` mounts BEFORE the fonts are in memory, and only the UI
+    below waits for them.
+
+    It used to sit under an `if (!ready) return null`, which made the launch
+    strictly serial: eight typefaces had to decode before the provider existed,
+    and only then did the SecureStore key read, the SQLCipher open, the chunk
+    reads, the JSON parse and the migrations begin. Those are the slow half,
+    and they need no font. Starting them here overlaps them with the font load
+    instead, so the ledger is often ready by the first painted frame.
+
+    Nothing renders early: with `ready` false the provider's children are
+    null, so no screen can paint against a half-hydrated ledger, and the
+    splash still hides on `fonts-ready` exactly as before.
+  */
   return (
     <StoreProvider>
-      <BillingSync />
+      <SuperwallBillingProvider>
+      {!ready ? null : (
       <Direction>
       <PeriodProvider>
       <ThemeProvider value={navTheme}>
         <StatusBar style={dark ? 'light' : 'dark'} />
         <LockGate>
-          <OnboardingGate>
+          <SuperwallOnboarding>
           <ToastProvider>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
@@ -247,6 +217,7 @@ export default function RootLayout() {
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="recap" options={{ animation: 'fade' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
             {/* Every name below has a file behind it in src/app, and nothing that
                 lacks one is declared. That is the whole rule for this block: a
@@ -276,11 +247,13 @@ export default function RootLayout() {
             <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
           </Stack>
           </ToastProvider>
-          </OnboardingGate>
+          </SuperwallOnboarding>
         </LockGate>
       </ThemeProvider>
       </PeriodProvider>
       </Direction>
+      )}
+      </SuperwallBillingProvider>
     </StoreProvider>
   );
 }

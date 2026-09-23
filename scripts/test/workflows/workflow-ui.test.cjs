@@ -33,6 +33,33 @@ test('privacy details open explicitly without changing saved preferences',()=>{
  assert.equal(h.events[0][0],'state');
  assert.equal(h.events[0][2],true);
 });
+/* The tester whose bank never texted him was already onboarded, so the answer
+ * and the statement it points at have to be reachable from Settings. Render it
+ * for real: the row exists, it is honest about being unanswered, and answering
+ * writes the profile rather than a questionnaire stage. */
+test('Settings asks how the bank reaches you and says a statement fills the gap',()=>{
+ const t=createWorkflowHarness().deps['@/lib/i18n'].t;
+ const unset=createWorkflowHarness(),unsetTree=unset.renderScreen('settings');
+ const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('settingsAlertDeliveryTitle'));
+ assert.ok(row,'the alert-delivery row is on the Settings screen');
+ assert.ok(text(unsetTree).includes(t('settingsAlertDeliveryUnset')),'an unanswered question says so');
+ assert.ok(text(unsetTree).includes(t('statementImportSettingsDetail')));
+ assert.ok(!text(unsetTree).includes(t('statementImportGapDetail')),
+  'no gap is claimed before the person has said anything');
+ // Opening a sheet moves local UI state, which the harness records like any
+ // other setter. What must not happen is a ledger write before a choice.
+ row.props.onPress();
+ assert.deepEqual(unset.events.filter(e=>e[0]!=='state'),[],'opening the sheet writes nothing durable');
+ assert.ok(!unset.events.some(e=>e[0]==='setOnboardingProfile'),'and saves no answer nobody gave');
+
+ const answered=createWorkflowHarness({state:{onboardingProfile:{v:1,stage:'complete',focus:null,
+  tracking:null,alerts:'notifications',startedAt:1}}});
+ const answeredTree=answered.renderScreen('settings');
+ assert.ok(text(answeredTree).includes(t('onboardAlertsNotifications')),'the saved answer is shown back');
+ assert.ok(text(answeredTree).includes(t('statementImportGapDetail')),
+  'and the statement row explains why it is being suggested');
+ assert.ok(!text(answeredTree).includes(t('statementImportSettingsDetail')));
+});
 test('unknown settings deep-links retain the complete screen without acting on the value',()=>{
  const h=createWorkflowHarness({params:{section:'erase-now'}}),tree=h.renderScreen('settings');
  assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
@@ -66,23 +93,36 @@ test('review renders currency minor-unit exponents without truncating cents',()=
 });
 test('categorisation displays affected count and applies merchant rule only after selection',()=>{
  const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],rowCount:7},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
  assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(h.events,[]);
  const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('dining').label);
  assert.ok(picker,'category choice exists');picker.props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
 });
+test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
+ const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
+ const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:purpose.key}}),tree=h.renderScreen('categorise');
+ assert.ok(text(tree).includes('Fishbasket'));
+ assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('utilities').label);
+ assert.ok(picker,'purpose category choice exists');picker.props.onPress();
+ assert.ok(h.events.some(e=>e[0]==='setBillAlias'&&e[1]==='Fishbasket'&&e[2]==='consumer:4036'&&e[3]==='Fishbasket'&&e[4]==='utilities'&&e[5]===true));
+ assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
+});
 for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{4:true}}),tree=h.renderScreen('onboarding');
+ // states[10] is the gate's `resumeReady`, by hook order. Inserting a useState
+ // above it in onboarding-gate.tsx moves this index; the screen renders its
+ // loading branch instead of Welcome when it is wrong.
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{10:true}}),tree=h.renderScreen('onboarding');
  const t=h.deps['@/lib/i18n'].t;
- assert.ok(text(tree).includes(t('onboardHeadline')));assert.ok(!text(tree).includes('42,500'));
- const example=walk(tree).find(n=>n.props?.testID==='onboarding-example');
- assert.ok(example,'the actual local sample is embedded on welcome');
- assert.ok(text(example).includes(t('onboardSampleLabel')));
- assert.ok(text(example).includes(t('onboardSampleNote')));
- assert.ok(text(example).includes('AED 24.50'));
- assert.ok(byLabel(example,t('onboardSampleAction')),'the sample offers its real reveal action');
- assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available before trying the example');
+ assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
+ const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');
+ assert.ok(example,'the real regional money scene is embedded on welcome');
+ for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(example).includes(bank),bank);
+ assert.ok(text(example).includes('AED 120.00'));
+ assert.ok(text(example).includes(t('onboardSceneAlertsToPicture')));
+ assert.ok(!walk(example).some(n=>n.props?.onPress),'the poster scene is display-only');
+ assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available beside the visual story');
  assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));
  assert.equal(h.state.transactions.length,0);assert.equal(h.state.accounts.length,0);
  assert.deepEqual(h.events,[],'rendering sample and setup controls performs no writes or setup actions');
@@ -116,7 +156,7 @@ test('feedback submission is reachable only through the confirmation callback',a
 for(const platform of ['android','ios'])test(`paywall does not manufacture a storefront price: ${platform}`,()=>{
  const h=createWorkflowHarness({platform,state:{pro:false,founderPro:false}}),tree=h.renderScreen('pro');
  const content=text(tree);assert.ok(!content.includes('US$9.99'));assert.ok(!content.includes('US$74.99'));
- assert.ok(content.includes(h.deps['@/lib/i18n'].t('priceUnavailable')));assert.deepEqual(h.events,[]);
+ assert.ok(content.includes(h.deps['@/lib/i18n'].t('getPro')));assert.ok(content.includes(h.deps['@/lib/i18n'].t('restorePurchase')));assert.deepEqual(h.events,[]);
 });
 test('unpaired trusted devices preserves privacy disclosure and makes no connection on render',()=>{
  const h=createWorkflowHarness({state:{privateMode:true},states:{2:false}}),tree=h.renderScreen('trusted-devices');

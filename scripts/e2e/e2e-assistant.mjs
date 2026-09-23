@@ -152,7 +152,7 @@ try {
   assert.ok(meta.accounts.length > 1, 'run against an explicitly seeded E2E demo export');
   await bootstrap.close();
 
-  async function contextFor(name, width = 390, mode = 'light', monthStartDay = 1) {
+  async function contextFor(name, width = 390, mode = 'light', monthStartDay = 1, overrides = {}) {
     const context = await browser.newContext({ viewport: { width, height: 844 }, locale: 'en-US',
       colorScheme: mode, reducedMotion: 'reduce' });
     await intercept(context, name);
@@ -161,12 +161,13 @@ try {
       localStorage.setItem(key, JSON.stringify(state));
       localStorage.setItem(key + ':tx:0', JSON.stringify(rows));
       localStorage.setItem('wafra/assistant-e2e-seeded', '1');
-    }, { key: STATE, rows: transactions, state: {
+    }, { key: STATE, rows: overrides.rows ?? transactions, state: {
       ...meta, language: 'en', languagePreference: 'en', themePreference: mode, captureOptOut: true,
       privateMode: true, dailySummary: false, monthStartDay, ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
       accounts: [{ id: 'ask-bank', name: 'Everyday account', kind: 'bank', openingFils: 0, color: '#166CA2' }],
       txChunks: 1, txChunkOrder: 'oldest-first', bills: [], cardDues: [], budgets: [], goals: [],
       notSubscriptions: [], merchantOverrides: {}, billAliases: {}, historyImport: null,
+      ...(overrides.state ?? {}),
     } });
     const page = await context.newPage(); page.setDefaultTimeout(12000);
     await page.clock.setFixedTime(new Date(NOW));
@@ -310,6 +311,224 @@ try {
     } finally { await context.close(); }
   }
 
+  if (!FILTER || FILTER.test('conversation-context-followups')) {
+    const name = 'conversation-context-followups';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const merchant = await ask(page, merchantQuestion);
+        assert.ok((await merchant.innerText()).includes(money(777)));
+
+        const narrow = await ask(page, 'How much did I spend on coffee this month?');
+        assert.match(await narrow.innerText(), /without guessing|broader dining/i);
+
+        const why = await ask(page, 'Why did it change?');
+        const whyText = await why.innerText();
+        assert.ok(whyText.includes(money(777)), whyText);
+        assert.ok(whyText.includes(money(333)), 'clarification must not erase the merchant scope: ' + whyText);
+
+        await newChat(page);
+        await ask(page, merchantQuestion);
+        const groceries = await ask(page, 'What about groceries?');
+        const groceryText = await groceries.innerText();
+        assert.ok(groceryText.includes(money(GROCERY_TOTAL)), groceryText);
+        assert.ok(!groceryText.includes(money(777)), 'new category subject must replace the merchant scope');
+
+        const merchantAgain = await ask(page, `And ${JSON.stringify(MERCHANT)}?`);
+        const merchantAgainText = await merchantAgain.innerText();
+        assert.ok(merchantAgainText.includes(money(777)), merchantAgainText);
+        assert.ok(!merchantAgainText.includes(money(GROCERY_TOTAL)), 'new merchant subject must replace the category scope');
+        await shot(page, name);
+        return { why: whyText, category: groceryText, merchant: merchantAgainText };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('smooth-zero-period-progression')) {
+    const name = 'smooth-zero-period-progression';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const current = await ask(page, merchantQuestion);
+        const currentText = await current.innerText();
+        assert.ok(currentText.includes(money(777)), currentText);
+        assert.ok(!/Period:|Based on recorded transactions/i.test(currentText),
+          'ordinary answer card should not repeat period/warning boilerplate');
+
+        const august = await ask(page, 'What about last month?');
+        const augustText = await august.innerText();
+        assert.ok(augustText.includes(money(333)), augustText);
+
+        const july = await ask(page, 'What about last month?');
+        const julyText = await july.innerText();
+        assert.match(julyText, /No recorded transactions|0 transactions/i);
+        assert.equal(await july.getByRole('button', { name: 'View transactions', exact: true }).count(), 0,
+          'zero-result answer must not offer an empty evidence sheet');
+        const quick = screen(page).getByTestId('assistant-followups');
+        const quickText = await quick.innerText();
+        assert.ok(!quickText.includes('What about last month?'),
+          'quick replies should progress to an explicit earlier month instead of looping');
+        await composerLayout(page, name + '-layout');
+        await shot(page, name);
+        return { current: currentText, august: augustText, july: julyText, quick: quickText };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('conversation-correction')) {
+    const name = 'conversation-correction';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const before = await ask(page, 'How much did I spend on groceries this month?');
+        assert.ok((await before.innerText()).includes(money(GROCERY_TOTAL)));
+
+        const corrected = await ask(page, `${JSON.stringify(MERCHANT)} should be groceries`);
+        const correctedText = await corrected.innerText();
+        assert.match(correctedText, /Updated/i);
+        assert.ok(correctedText.includes(money(GROCERY_TOTAL + 777)), correctedText);
+        assert.equal(await turns(page).count(), 2, 'assistant-led ledger edit should preserve the visible conversation');
+        assert.match(await turns(page).first().innerText(), /ledger has changed/i,
+          'the pre-correction answer must be visibly stale rather than silently rewritten');
+
+        const after = await ask(page, 'How much did I spend on groceries this month?');
+        assert.ok((await after.innerText()).includes(money(GROCERY_TOTAL + 777)));
+        await shot(page, name);
+        return { corrected: correctedText, totalMinor: GROCERY_TOTAL + 777 };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('history-date-account-questions')) {
+    const name = 'history-date-account-questions';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const highest = await ask(page, 'Is this my highest month?');
+        assert.match(await highest.innerText(), /highest recorded month/i);
+        assert.ok((await highest.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const recent = await ask(page, 'How much did I spend in the last 2 weeks?');
+        assert.ok((await recent.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const payday = await ask(page, 'How much did I spend since payday?');
+        assert.ok((await payday.innerText()).includes(money(CURRENT_TOTAL)));
+
+        const account = await ask(page, 'Which account did I use most?');
+        const accountText = await account.innerText();
+        assert.match(accountText, /Everyday account/);
+        assert.ok(accountText.includes(money(CURRENT_TOTAL)));
+        await shot(page, name);
+        return { highest: await highest.innerText(), recent: await recent.innerText(), account: accountText };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('remaining-conversation-edge-cases')) {
+    const name = 'remaining-conversation-edge-cases';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const merchantQuestion = `How much did I spend at ${JSON.stringify(MERCHANT)}?`;
+        const merchant = await ask(page, merchantQuestion);
+        assert.ok((await merchant.innerText()).includes(money(777)));
+
+        const lastYear = await ask(page, 'Same month last year');
+        assert.match(await lastYear.innerText(), /No recorded|transactions/i);
+        const twoMonths = await ask(page, 'Two months ago');
+        assert.match(await twoMonths.innerText(), /No recorded|transactions/i);
+
+        await newChat(page);
+        await ask(page, merchantQuestion);
+        const notSub = await ask(page, 'That is not a subscription');
+        assert.match(await notSub.innerText(), /Marked .* not a subscription|Updated/i);
+
+        await newChat(page);
+        await ask(page, 'How much did I spend this month?');
+        const ambiguous = await ask(page, 'That was dining');
+        assert.match(await ambiguous.innerText(), /choose one transaction|more than one .* transaction/i);
+        const choose = screen(page).getByRole('button', { name: 'Choose one transaction', exact: true });
+        assert.equal(await choose.count(), 1, 'ambiguous correction should offer a direct transaction-choice action');
+        await choose.click();
+        await evidence(page).waitFor({ state: 'visible' });
+        assert.ok(await evidence(page).getByTestId('assistant-evidence-row').count() > 1);
+        await shot(page, name);
+        return { lastYear: await lastYear.innerText(), twoMonths: await twoMonths.innerText() };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('launch-language-shorthand')) {
+    const name = 'launch-language-shorthand';
+    const { context, page } = await contextFor(name);
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+
+        const subs = await ask(page, 'What subs do I have?');
+        const subsText = await subs.innerText();
+        assert.match(subsText, /subscriptions?|active subscription/i);
+        assert.doesNotMatch(subsText, /clarify that|didn.t quite understand|not enough to answer safely/i);
+
+        const due = await ask(page, 'Anything due?');
+        const dueText = await due.innerText();
+        assert.match(dueText, /upcoming payments|payments? due|do not see any payments due/i);
+
+        const mtd = await ask(page, 'How much did I spend MTD?');
+        const mtdText = await mtd.innerText();
+        assert.ok(mtdText.includes(money(CURRENT_TOTAL)), mtdText);
+
+        await newChat(page);
+        const casualSubs = await ask(page, 'Can u show my subs?');
+        assert.match(await casualSubs.innerText(), /subscriptions?|active subscription/i);
+        await shot(page, name);
+        return { subs: subsText, due: dueText, mtd: mtdText };
+      });
+    } finally { await context.close(); }
+  }
+
+  if (!FILTER || FILTER.test('obligation-settlement-language')) {
+    const name = 'obligation-settlement-language';
+    const card = { id: 'ask-enbd', name: 'ENBD Credit Card', kind: 'card', cardType: 'credit', openingFils: 0,
+      color: '#166CA2', bankName: 'Emirates NBD', last4: '4110' };
+    const payment = tx('ask-enbd-payment', 'Card payment', 50000, 'other', '2026-09-10', {
+      type: 'income', accountId: card.id, isTransfer: true, cardPaymentSide: 'receipt',
+    });
+    const due = { id: 'ask-enbd-due', accountId: card.id, totalDueFils: 50000, minDueFils: 2500,
+      dueDate: '2026-09-25', paidFils: 0 };
+    const { context, page } = await contextFor(name, 390, 'light', 1, {
+      rows: [...transactions, payment],
+      state: { accounts: [{ id: 'ask-bank', name: 'Everyday account', kind: 'bank', openingFils: 0, color: '#166CA2' }, card],
+        cardDues: [due] },
+    });
+    try {
+      await check(name, page, async () => {
+        await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
+        const settled = await ask(page, 'Did I settle enbd credit card ?');
+        const settledText = await settled.innerText();
+        assert.match(settledText, /settled/i);
+        assert.doesNotMatch(settledText, /clarify that|didn.t quite understand|not enough to answer safely/i);
+
+        const remaining = await ask(page, 'How much is left?');
+        const remainingText = await remaining.innerText();
+        assert.match(remainingText, /USD\s+0(?:\.00)?\b/);
+
+        await ask(page, 'Show the payments');
+        await evidence(page).waitFor({ state: 'visible' });
+        assert.match(await evidence(page).innerText(), /Card payment/i);
+        await shot(page, name);
+        return { settled: settledText, remaining: remainingText };
+      });
+    } finally { await context.close(); }
+  }
+
   for (const monthStartDay of [1, 25]) {
     const name = 'direct-route-start-day-' + monthStartDay;
     if (FILTER && !FILTER.test(name)) continue;
@@ -350,7 +569,7 @@ try {
         await turns(page).first().waitFor({ state: 'visible' });
         await latestVisible(page);
         const answer = await turns(page).first().innerText();
-        assert.match(answer, /Aug(?:ust)? 2026|2026-08/);
+        assert.match(answer, /1 Aug(?:ust)?\s*[–-]\s*31 Aug(?:ust)?|Aug(?:ust)? 2026|2026-08/);
         if (source === 'home' || source === 'flow') assert.ok(answer.includes(money(PREVIOUS_TOTAL)), answer);
         else {
           assert.ok(answer.includes(JSON.stringify(MERCHANT)), 'context prompt preserves the complete quoted name');

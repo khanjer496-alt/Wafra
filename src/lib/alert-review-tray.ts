@@ -45,6 +45,9 @@ export interface ReviewAlert {
   family: ReviewableFamily;
   rail: string | null;
   instrument: { kind: 'card' | 'account' | 'wallet'; last4: string | null } | null;
+  /** Android app provenance only; never notification text. */
+  sourcePackage?: string;
+  sourceClass?: 'trusted-bank' | 'play-finance' | 'financial-candidate';
 }
 
 export interface UniversalReviewAlert {
@@ -56,6 +59,9 @@ export interface UniversalReviewAlert {
   channel: ReviewAlert['channel'] | 'paste';
   parserVersion: number;
   event: UniversalBankEvent;
+  /** Android app provenance only; never notification text. */
+  sourcePackage?: string;
+  sourceClass?: 'trusted-bank' | 'play-finance' | 'financial-candidate';
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
@@ -159,6 +165,11 @@ const reviewSourceKey = (value: unknown): value is string => {
 const validTimestamp = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 &&
   Number.isFinite(new Date(value).getTime());
+const androidPackage = (value: unknown): value is string =>
+  typeof value === 'string' && value.length >= 3 && value.length <= 255 &&
+  /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(value);
+const notificationSourceClass = (value: unknown): value is NonNullable<ReviewEntry['sourceClass']> =>
+  value === 'trusted-bank' || value === 'play-finance' || value === 'financial-candidate';
 const UNIVERSAL_REVIEW_CHANNELS: readonly UniversalReviewAlert['channel'][] = [
   'inbox', 'delivery', 'push', 'shortcut', 'email', 'pdf', 'paste',
 ];
@@ -352,7 +363,12 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
   common.expiresAt <= common.observedAt || common.expiresAt > now + REVIEW_ALERT_TTL_MS) return null;
   if (common.kind === 'universal') {
   const item = prepareUniversalReviewAlert(common);
-  return item ? { ...item, expiresAt: common.expiresAt } : null;
+  if (!item) return null;
+  const sourceMeta = common.channel === 'push' && androidPackage(common.sourcePackage) &&
+    notificationSourceClass(common.sourceClass)
+    ? { sourcePackage: common.sourcePackage, sourceClass: common.sourceClass }
+    : {};
+  return { ...item, ...sourceMeta, expiresAt: common.expiresAt };
   }
   const item = value as ReviewAlert;
   const instrument = item?.instrument;
@@ -383,6 +399,10 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
     (instrument.last4 === null || (typeof instrument.last4 === 'string' && /^\d{4}$/.test(instrument.last4)))));
 
   if (!valid) return null;
+  const sourceMeta = item.channel === 'push' && androidPackage(item.sourcePackage) &&
+    notificationSourceClass(item.sourceClass)
+    ? { sourcePackage: item.sourcePackage, sourceClass: item.sourceClass }
+    : {};
   return {
     ...(item.kind === 'registered' ? { kind: 'registered' as const } : {}),
     id: item.id, sourceKey: item.sourceKey,
@@ -395,6 +415,7 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
       exponent: item.amount.exponent },
     direction: item.direction, family: item.family, rail: item.rail,
     instrument: instrument ? { kind: instrument.kind, last4: instrument.last4 } : null,
+    ...sourceMeta,
   };
 };
 

@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.UUID
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
@@ -34,22 +35,37 @@ object NotificationCaptureStore {
   private const val PREFS = "wafra_notification_capture_v2"
   private const val QUEUE = "encrypted_queue"
   private const val CLEARED_THROUGH = "cleared_through_ms"
+  private const val ACKED = "acked_fingerprints"
   private const val LEGACY_PREFS = "wafra_notification_capture"
   private const val KEY_ALIAS = "wafra.notification.capture.v1"
   private const val MAX_ROWS = 500
+  private const val MAX_ACKED_FINGERPRINTS = 2_000
   private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
   private const val VERSION = 1
 
   @Synchronized
-  fun append(context: Context, pkg: String, title: String, text: String, ts: Long) {
+  fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
     // Recheck while holding the queue lock: an opt-out racing a callback must
     // never leave a candidate behind after the opt-out's clear completes.
-    if (!NotificationCapturePolicy.isEnabled(context)) return
+    if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
     purgeLegacyPlaintext(context)
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return
+    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
-    if (current.any { it.pkg == pkg && it.text == text && it.ts == ts }) return
+    val samePostedNotification = current.indexOfFirst { it.pkg == pkg && it.ts == ts }
+    if (samePostedNotification >= 0) {
+      val prior = current[samePostedNotification]
+      if (prior.title == title && prior.text == text) return "duplicate"
+      // A newer app version may learn how an OEM actually exposes the visible
+      // body (for example ColorOS moved ADCB's amount out of EXTRA_TEXT). A
+      // shade re-sweep must HEAL the retained encrypted row rather than append
+      // a second copy while the broken one remains stuck for seven days.
+      val repaired = current.toMutableList()
+      repaired[samePostedNotification] = prior.copy(title = title, text = text)
+      writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
+      return "repaired"
+    }
     val next = (current + CapturedBankNotification(
       id = UUID.randomUUID().toString(),
       pkg = pkg,
@@ -58,6 +74,21 @@ object NotificationCaptureStore {
       ts = ts,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
+    return "appended"
+  }
+
+  /** Source-free reason helper for admission diagnostics; never returns queue text. */
+  @Synchronized
+  fun admissionBlockReason(context: Context, pkg: String, text: String, ts: Long): String? {
+    if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
+    return try {
+      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) "duplicate" else null
+    } catch (_: Exception) {
+      "store-error"
+    }
   }
 
   @Synchronized
@@ -72,12 +103,52 @@ object NotificationCaptureStore {
     return retained.filter { it.ts >= cutoff }.sortedBy { it.ts }
   }
 
+  /**
+   * Cheap source-free recovery hint. This deliberately does not open
+   * AndroidKeyStore or decrypt queue rows; foreground startup only needs to
+   * know whether an expensive drain might be necessary.
+   */
+  @Synchronized
+  fun pendingCount(context: Context): Int {
+    purgeLegacyPlaintext(context)
+    val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getString(QUEUE, null) ?: return 0
+    return try {
+      JSONArray(raw).length()
+    } catch (_: Exception) {
+      0
+    }
+  }
+
+  /**
+   * Source-free identities for targeted OEM re-extraction.
+   *
+   * Package + Android post time are the same immutable pair used to heal one
+   * retained notification in append(). Exposing only that pair lets the
+   * listener revisit a handful of still-visible queued rows after an extractor
+   * upgrade without walking every visible notification through the full
+   * capture/encryption path again.
+   */
+  @Synchronized
+  fun retainedIdentities(context: Context): Set<Pair<String, Long>> =
+    read(context, 0L).mapTo(mutableSetOf()) { row -> row.pkg to row.ts }
+
   @Synchronized
   fun acknowledge(context: Context, ids: Set<String>) {
     if (ids.isEmpty()) return
     purgeLegacyPlaintext(context)
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val current = readAll(context)
-    writeAll(context, current.filterNot { ids.contains(it.id) })
+    val acknowledgedRows = current.filter { ids.contains(it.id) }
+    if (acknowledgedRows.isEmpty()) return
+    val remaining = current.filterNot { ids.contains(it.id) }
+    val acked = (readAcked(prefs) + acknowledgedRows.map { notificationFingerprint(it.pkg, it.ts) })
+      .distinct().takeLast(MAX_ACKED_FINGERPRINTS)
+    val ok = prefs.edit()
+      .putString(QUEUE, encodeRows(remaining))
+      .putString(ACKED, JSONArray(acked).toString())
+      .commit()
+    if (!ok) throw IllegalStateException("Notification capture acknowledgement could not be persisted")
   }
 
   @Synchronized
@@ -89,6 +160,7 @@ object NotificationCaptureStore {
     // An append before this lock is removed; one after sees the watermark.
     val ok = prefs.edit()
       .remove(QUEUE)
+      .remove(ACKED)
       .putLong(CLEARED_THROUGH, clearedThrough)
       .commit()
     if (!ok) throw IllegalStateException("Notification queue could not be cleared")
@@ -134,13 +206,38 @@ object NotificationCaptureStore {
     return out
   }
 
-  private fun writeAll(context: Context, rows: List<CapturedBankNotification>) {
+  private fun encodeRows(rows: List<CapturedBankNotification>): String {
     val encrypted = JSONArray()
     val secretKey = if (rows.isEmpty()) null else key()
     rows.forEach { encrypted.put(encrypt(it, requireNotNull(secretKey))) }
+    return encrypted.toString()
+  }
+
+  private fun writeAll(context: Context, rows: List<CapturedBankNotification>) {
     val ok = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      .edit().putString(QUEUE, encrypted.toString()).commit()
+      .edit().putString(QUEUE, encodeRows(rows)).commit()
     if (!ok) throw IllegalStateException("Notification queue could not be persisted")
+  }
+
+  private fun readAcked(prefs: android.content.SharedPreferences): List<String> {
+    val raw = prefs.getString(ACKED, null) ?: return emptyList()
+    return try {
+      val array = JSONArray(raw)
+      buildList {
+        for (index in 0 until array.length()) {
+          val value = array.optString(index)
+          if (value.isNotBlank()) add(value)
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  private fun notificationFingerprint(pkg: String, ts: Long): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+      .digest("$pkg\u0000$ts".toByteArray(Charsets.UTF_8))
+    return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
   }
 
   private fun encrypt(row: CapturedBankNotification, secretKey: SecretKey): JSONObject {

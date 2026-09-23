@@ -22,6 +22,14 @@ test('provider plans cannot silently drop a filter or accept malformed account s
     { tool: 'cash-outflow', period, merchant: 'Coffee' },
     { tool: 'subscriptions', period },
     { tool: 'upcoming-payments', accountIds: ['checking'] },
+    { tool: 'historical-baseline', period, baseline: 'average-ever' },
+    { tool: 'top-accounts', period, accountKind: 'wallet' },
+    { tool: 'top-accounts', period, accountKind: 'card', metric: 'frequency-ish' },
+    { tool: 'obligation-status', obligation: 'card', query: 'summary' },
+    { tool: 'obligation-status', obligation: 'card', accountId: 'card', billId: 'bill', query: 'summary' },
+    { tool: 'obligation-status', obligation: 'bill', billId: 'bill', query: 'maybe-paid' },
+    { tool: 'credit-card-settlement-summary', monthKey: 'September' },
+    { tool: 'credit-card-settlement-summary', monthKey: '2026-09', extra: true },
     { tool: 'help', clarification: 'A provider must not supply local clarification copy.' },
   ]) assert.equal(boundary.isAssistantToolRequest(request), false, JSON.stringify(request));
 });
@@ -41,6 +49,13 @@ test('valid combined filters and income categories survive the boundary', () => 
     { tool: 'income-total', period, accountIds: ['checking'], category: 'salary' },
     { tool: 'compare-periods', period, category: 'groceries', comparisonPeriod: { mode: 'month', key: '2026-08' } },
     { tool: 'cash-outflow', period, accountIds: ['checking'] },
+    { tool: 'historical-baseline', period, baseline: 'typical-month' },
+    { tool: 'historical-baseline', period, baseline: 'last-similar-month' },
+    { tool: 'top-accounts', period, accountKind: 'card', category: 'dining', metric: 'count', limit: 3 },
+    { tool: 'obligation-status', obligation: 'card', accountId: 'credit-card', query: 'remaining' },
+    { tool: 'obligation-status', obligation: 'bill', billId: 'utility-bill', query: 'paid-date' },
+    { tool: 'credit-card-settlement-summary' },
+    { tool: 'credit-card-settlement-summary', monthKey: '2026-09' },
   ]) assert.equal(boundary.isAssistantToolRequest(request), true, JSON.stringify(request));
 });
 
@@ -56,7 +71,7 @@ test('explanation envelopes keep local evidence and structured identifiers local
 });
 
 test('local-analysis scopes validate arrays and retain explicit exclusions', () => {
-  for (const tool of ['spending-total', 'compare-periods', 'recurring-changes', 'unusual-charges', 'possible-duplicates', 'data-coverage']) {
+  for (const tool of ['spending-total', 'compare-periods', 'recurring-changes', 'unusual-charges', 'possible-duplicates', 'money-review', 'data-coverage']) {
     assert.equal(boundary.isAssistantToolRequest({ tool, period,
       categories: ['dining', 'groceries'], excludedCategories: ['groceries'],
       merchants: ['Cedar', 'Coffee'], excludedMerchants: ['Coffee'],

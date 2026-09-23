@@ -1,0 +1,119 @@
+name: Publish an iOS build to public TestFlight
+
+# The build-specific finish-public workflows (120, 121) each hardcoded one
+# Apple build UUID, so every release needed a new committed workflow. This one
+# takes the build number as an input and resolves the UUID through the App
+# Store Connect API, refusing anything ambiguous. It never creates a group,
+# never submits an App Store version, and never touches a build other than the
+# exact version/number pair it was asked for.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Apple build number already uploaded to App Store Connect (e.g. 127)'
+        type: string
+        required: true
+      source_sha:
+        description: 'Full 40-character commit the build was made from; recorded in the evidence artifact'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-public-testflight
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: ${{ inputs.build_number }}
+      WAFRA_BETA_SOURCE_SHA: ${{ inputs.source_sha }}
+      EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+      EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+      EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+
+      - name: Check the publisher parses before any Apple call
+        run: node --check scripts/release/ios-public-beta-publish.mjs
+
+      - name: Declare export compliance for this exact build
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          const APP = '6799171482';
+          const version = process.env.WAFRA_BETA_VERSION;
+          const buildNumber = process.env.WAFRA_BETA_BUILD_NUMBER ?? '';
+          // Same floor as the publisher: an explicitly identified new beta
+          // build, never "latest" and never one of the retired early betas.
+          if (!/^\d+$/.test(buildNumber) || Number(buildNumber) <= 51) {
+            throw new Error('Expected an explicit new Wafra beta build number');
+          }
+          const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
+          const pem = raw.includes('BEGIN PRIVATE KEY') ? raw : Buffer.from(raw.replace(/\s/g, ''), 'base64').toString('utf8');
+          const key = createPrivateKey(pem), kid = process.env.EXPO_ASC_KEY_ID, iss = process.env.EXPO_ASC_ISSUER_ID;
+          if (!raw || !kid || !iss) throw new Error('App Store Connect credentials are missing');
+          const b64 = (d) => Buffer.from(JSON.stringify(d)).toString('base64url');
+          const token = () => {
+            const now = Math.floor(Date.now() / 1000);
+            const signed = `${b64({ alg: 'ES256', kid, typ: 'JWT' })}.${b64({ iss, iat: now, exp: now + 600, aud: 'appstoreconnect-v1' })}`;
+            return `${signed}.${sign('sha256', Buffer.from(signed), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+          };
+          async function api(path, { method = 'GET', body } = {}) {
+            const response = await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`, {
+              method, headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+              body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
+            });
+            const text = await response.text();
+            if (!response.ok) throw new Error(`${method} ${path.split('?')[0]}: ${response.status} ${text}`);
+            return text ? JSON.parse(text) : null;
+          }
+          // Resolve the UUID from the version/number pair rather than trusting
+          // a pasted id: a wrong id here would declare compliance for someone
+          // else's build.
+          const found = await api(`builds?filter[app]=${APP}&filter[version]=${encodeURIComponent(buildNumber)}&include=preReleaseVersion&limit=100`);
+          const included = new Map((found.included ?? []).map((entry) => [`${entry.type}:${entry.id}`, entry]));
+          const matches = found.data.filter((entry) => {
+            const ref = entry.relationships?.preReleaseVersion?.data;
+            return ref && included.get(`${ref.type}:${ref.id}`)?.attributes.version === version;
+          });
+          if (matches.length !== 1) throw new Error(`Expected exactly one ${version} (${buildNumber}) build, found ${matches.length}`);
+          const build = matches[0];
+          if (build.attributes.version !== buildNumber) throw new Error('Apple returned a different build number');
+          if (build.attributes.expired) throw new Error('Refusing an expired build');
+          if (build.attributes.usesNonExemptEncryption === null) {
+            // Wafra encrypts only with the platform's own facilities, which is
+            // the exemption Apple asks about here.
+            await api(`builds/${build.id}`, { method: 'PATCH', body: { data: { type: 'builds', id: build.id,
+              attributes: { usesNonExemptEncryption: false } } } });
+          } else if (build.attributes.usesNonExemptEncryption !== false) {
+            throw new Error('Build already carries a conflicting export-compliance declaration');
+          }
+          const after = await api(`builds/${build.id}`);
+          console.log(JSON.stringify({ build: after.data.attributes.version, id: after.data.id,
+            usesNonExemptEncryption: after.data.attributes.usesNonExemptEncryption,
+            processingState: after.data.attributes.processingState }, null, 2));
+          if (after.data.attributes.usesNonExemptEncryption !== false) throw new Error('Export-compliance declaration was not accepted');
+          NODE
+
+      - name: Add the build to the existing public group and submit Beta App Review if needed
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+
+      - name: Preserve publication evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-public-testflight-${{ inputs.build_number }}-${{ github.run_id }}
+          path: ios-release-evidence/public-beta.json
+          if-no-files-found: ignore
+          retention-days: 14

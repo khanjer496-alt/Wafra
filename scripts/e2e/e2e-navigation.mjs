@@ -228,6 +228,10 @@ async function clippedText(page, screen) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      const cx = Math.min(Math.max(r.x + r.width / 2, 1), width - 2);
+      const cy = Math.min(Math.max(r.y + r.height / 2, 1), window.innerHeight - 2);
+      const top = document.elementFromPoint(cx, cy);
+      if (!(top && (el.contains(top) || top.contains(el)))) continue;
       if (r.right > width + 2) out.push(`${label}: "${text.slice(0, 30)}" ends ${Math.round(r.right - width)}px past the edge`);
     }
     return out;
@@ -403,14 +407,14 @@ await pressEverything('transactions', async () => { await home(); await tapKey(p
 // capability is present, then sweep the complete scroll range; the former
 // 2400 px limit stopped before Data and Support on this longer screen.
 await settings();
-for (const section of ['Money', 'Imports', 'Notifications', 'Appearance & language', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
+for (const section of ['Imports', 'Notifications', 'Preferences', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
   ok(`settings: ${section} section is reachable`, !!(await locate(page, section)));
 }
 const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
-  'Wafra Pro', 'Bank-message region', 'Daily spend summary', 'System', 'Light', 'Dark',
-  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Sort your shops',
+  'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
 ]) {
@@ -477,7 +481,7 @@ await resetPreferences();
   await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
   ok('Home income opens the income-filtered ledger', /\/transactions\?type=income/.test(await url(page)));
   await flow(); await categoryDetails('Rent');
-  if (!(await tapKey(page, 'View activity'))) throw new Error('Category activity action is unreachable');
+  if (!(await tapKey(page, 'View transactions'))) throw new Error('Category transaction action is unreachable');
   await page.waitForURL(/category=rent/);
   ok('category detail opens only its own expenses', new URL(page.url()).searchParams.get('type') === 'expense');
 }
@@ -587,7 +591,7 @@ for (const [name, enter] of [
 {
   await flow();
   await categoryDetails('Transport');
-  ok('flow: category detail opens its existing limit editor', await tapKey(page, 'Edit limits', 5000) === true);
+  ok('flow: category detail opens its existing limit editor', await tapKey(page, 'Edit monthly limit', 5000) === true);
   await page.waitForTimeout(1200);
   /**
    * Read off the row, not off `paintedText`.

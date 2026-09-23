@@ -68,4 +68,6 @@ export interface InterpretBankAlertInput {
   sender: string;
   market: 'AE' | 'SA';
   overrides?: Record<string, CategoryId>;
+  /** Original message timestamp, never the time of a later history import. */
+  observedAt?: number;
 }

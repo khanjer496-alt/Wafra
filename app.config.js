@@ -12,6 +12,18 @@ module.exports = ({ config }) => {
     ? config
     : { ...config, plugins: [...plugins, pagedPlugin] };
 
+  // High-refresh capability must live in Expo config rather than only in the
+  // generated native projects. Otherwise a clean EAS/prebuild can silently
+  // restore the 60 Hz ceiling on iOS and drop Android's refresh preference.
+  const highRefreshPlugin = './modules/wafra-high-refresh/plugin';
+  const withPagedPlugins = withPagedHistory.plugins || [];
+  const hasHighRefreshPlugin = withPagedPlugins.some((plugin) =>
+    (Array.isArray(plugin) ? plugin[0] : plugin) === highRefreshPlugin,
+  );
+  const withNativePerformance = hasHighRefreshPlugin
+    ? withPagedHistory
+    : { ...withPagedHistory, plugins: [...withPagedPlugins, highRefreshPlugin] };
+
   // Screenmap runs an iOS development client against a Metro server that it
   // starts inside the GitHub runner. Fingerprint runtime matching is useful for
   // real OTA builds, but it adds an unrelated compatibility gate to this
@@ -23,13 +35,13 @@ module.exports = ({ config }) => {
     process.env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO === '1' &&
     process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
 
-  if (!screenmapDemo) return withPagedHistory;
+  if (!screenmapDemo) return withNativePerformance;
 
   return {
-    ...withPagedHistory,
+    ...withNativePerformance,
     runtimeVersion: undefined,
     updates: {
-      ...(withPagedHistory.updates || {}),
+      ...(withNativePerformance.updates || {}),
       enabled: false,
     },
   };

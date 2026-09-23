@@ -84,7 +84,7 @@ test('Home keeps transfer uncertainty and raw cash movement out of the primary d
     'Home does not dump transfer diagnostics into the primary money summary');
 });
 
-test('Home refreshes its conditional prompt after the final review is dismissed without a ledger change', () => {
+test('Home ignores parser-review churn and keeps useful cleanup prompts visible', () => {
   const h = createHarness({ state: { reviewTray: { pending: [{ expiresAt: Date.now() + 864000000 }] } } });
   const project = h.deps['@/lib/dashboard-projection'].projectDashboard;
   let projections = 0;
@@ -93,10 +93,32 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
   let memoCursor = 0;
   const stateSlots = [];
   let stateCursor = 0;
-  const readStateSlot = h.deps.react.useState;
+  // Real useState and useEffect, because Home now defers the insight
+  // projection off first paint: the card is what the deferral is for, so a
+  // harness that cannot carry state across renders or run an effect would
+  // report the projection as never happening rather than as happening once.
+  const effectSlots = [];
+  let effectCursor = 0;
+  const pendingEffects = [];
   h.deps.react.useState = initial => {
     const index = stateCursor++;
-    return stateSlots[index] ?? (stateSlots[index] = readStateSlot(initial));
+    if (!Object.hasOwn(stateSlots, index)) {
+      stateSlots[index] = typeof initial === 'function' ? initial() : initial;
+    }
+    return [stateSlots[index], next => {
+      stateSlots[index] = typeof next === 'function' ? next(stateSlots[index]) : next;
+    }];
+  };
+  h.deps.react.useEffect = (effect, dependencies) => {
+    const index = effectCursor++;
+    const previous = effectSlots[index];
+    if (previous && dependencies && previous.dependencies &&
+      dependencies.length === previous.dependencies.length &&
+      dependencies.every((value, i) => Object.is(value, previous.dependencies[i]))) {
+      return;
+    }
+    effectSlots[index] = { dependencies };
+    pendingEffects.push(() => effect());
   };
   h.deps.react.useMemo = (factory, deps) => {
     const index = memoCursor++;
@@ -104,25 +126,31 @@ test('Home refreshes its conditional prompt after the final review is dismissed 
     if (previous && deps?.length === previous.deps.length && deps.every((value, i) => Object.is(value, previous.deps[i]))) return previous.value;
     const value = factory(); memoSlots[index] = { value, deps }; return value;
   };
+  h.deps['@/lib/dashboard-projection'].projectHomeInsight = () => {
+    insightProjections++;
+    return project().insight ?? null;
+  };
   h.deps['@/lib/dashboard-projection'].projectDashboard = request => {
-    if (request.surface === 'dashboard') {
-      assert.equal(request.includeInsights, true);
-      insightProjections++;
-      return project();
-    }
     projections++;
     assert.equal(request.surface, 'home');
     assert.equal(request.includeInsights, false);
     const projected = project();
-    return { ...projected, unreadFormats: request.state.reviewTray.pending.length ? null : { count: 3, shouldPrompt: true } };
+    return { ...projected, unreadFormats: { count: 3, shouldPrompt: true } };
   };
-  const render = () => { memoCursor = 0; stateCursor = 0; return h.render('home'); };
+  const render = () => {
+    memoCursor = 0; stateCursor = 0; effectCursor = 0;
+    const tree = h.render('home');
+    while (pendingEffects.length) pendingEffects.shift()();
+    return tree;
+  };
   render();
   const sameTransactions = h.state.transactions;
+  const insightBeforeReviewChange = insightProjections;
   h.state.reviewTray = { pending: [] };
   const tree = render();
   assert.equal(h.state.transactions, sameTransactions);
-  assert.equal(projections, 2, 'the changed prompt priority invalidates only the existing Home projection memo');
-  assert.equal(insightProjections, 1, 'dismissing a review does not recompute historical insight analysis');
+  assert.equal(projections, 1, 'parser-review status is no longer a Home projection dependency');
+  assert.equal(insightProjections, insightBeforeReviewChange,
+    'parser-review churn does not recompute historical insight analysis');
   assert.ok(text(tree).includes(h.deps['@/lib/i18n'].tf('unreadFormatCount', { count: 3, s: 's' })));
 });

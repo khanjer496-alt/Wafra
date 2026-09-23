@@ -49,7 +49,7 @@ function captureProbe(page) {
     '@/lib/auto-import': { isSmsScanningAvailable: () => true, scanInbox: async (...values) => { args = values; return page; } },
     '@/lib/background-relay-storage': {},
     '@/lib/relay': { isRelayPlatform: () => false },
-    '@/lib/sms-parser': { PARSER_VERSION: 40 },
+    '@/lib/sms-parser': { PARSER_VERSION: 40, PARSER_BACKFILL_VERSION: 40 },
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
   });
   return { collect: module.collectNewMessages, args: () => args };
@@ -118,11 +118,12 @@ test('native change events carry no bank data and release their observer on shut
   assert.match(native, /registerContentObserver\(Telephony.Sms.CONTENT_URI, true, observer\)/);
 });
 
-test('transfer history belongs to Accounts; Settings does not require classifying ordinary transfers', () => {
+test('transfer reconciliation stays contextual instead of becoming Accounts or Settings navigation', () => {
   const { createHarness, walk } = require('./reference-harness.cjs');
   const h = createHarness();
   const wallet = h.render('wallet');
   const action = walk(wallet).find(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('accountTransferHistory') && n.props?.onPress);
-  assert.ok(action); action.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/review-transfers']);
+  assert.equal(action, undefined);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
 });

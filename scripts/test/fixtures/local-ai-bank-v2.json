@@ -1,0 +1,674 @@
+[
+  {
+    "id": "bank-v2-001",
+    "language": "en",
+    "text": "Posted purchase: AED 84.60 at Cedar Lantern Books. Available balance: AED 2,430.15.",
+    "expected": {
+      "decision": "candidate",
+      "family": "purchase",
+      "direction": "debit",
+      "amount_text": "84.60",
+      "currency_text": "AED",
+      "merchant_text": "Cedar Lantern Books"
+    },
+    "rationale": "Synthetic authored case. One posted purchase; the separately labeled balance is not another movement."
+  },
+  {
+    "id": "bank-v2-002",
+    "language": "en",
+    "text": "A refund of EUR 29.95 from Velvet Finch Store has been credited to your account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "refund",
+      "direction": "credit",
+      "amount_text": "29.95",
+      "currency_text": "EUR",
+      "merchant_text": "Velvet Finch Store"
+    },
+    "rationale": "Synthetic authored case. Completed refund explicitly credits the account."
+  },
+  {
+    "id": "bank-v2-003",
+    "language": "en",
+    "text": "Outgoing transfer completed. USD 175.00 was debited from your account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "debit",
+      "amount_text": "175.00",
+      "currency_text": "USD",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed outgoing transfer; no merchant is named."
+  },
+  {
+    "id": "bank-v2-004",
+    "language": "en",
+    "text": "Incoming transfer completed: GBP 640.25 credited to your account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "credit",
+      "amount_text": "640.25",
+      "currency_text": "GBP",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed incoming transfer; no counterparty or merchant is invented."
+  },
+  {
+    "id": "bank-v2-005",
+    "language": "en",
+    "text": "Cash withdrawal completed: AED 300.00 debited. Remaining balance AED 1,220.40.",
+    "expected": {
+      "decision": "candidate",
+      "family": "cash-withdrawal",
+      "direction": "debit",
+      "amount_text": "300.00",
+      "currency_text": "AED",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed cash withdrawal and a separately labeled balance."
+  },
+  {
+    "id": "bank-v2-006",
+    "language": "en",
+    "text": "Monthly service fee of USD 4.50 has been debited from your account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "fee",
+      "direction": "debit",
+      "amount_text": "4.50",
+      "currency_text": "USD",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. An actual debited fee, not a fee schedule."
+  },
+  {
+    "id": "bank-v2-007",
+    "language": "en",
+    "text": "Credit-card repayment completed: AED 950.00 debited from your bank account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "card-payment",
+      "direction": "debit",
+      "amount_text": "950.00",
+      "currency_text": "AED",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Funding bank explicitly reports the completed repayment debit."
+  },
+  {
+    "id": "bank-v2-008",
+    "language": "en",
+    "text": "Your credit card has received a payment of AED 950.00. The payment is posted as a credit to the card account.",
+    "expected": {
+      "decision": "candidate",
+      "family": "card-payment",
+      "direction": "credit",
+      "amount_text": "950.00",
+      "currency_text": "AED",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Card issuer explicitly reports a posted payment credit, not a purchase refund."
+  },
+  {
+    "id": "bank-v2-009",
+    "language": "ar",
+    "text": "تم خصم AED ٨٤٫٦٠ مقابل شراء لدى مكتبة القنديل. الرصيد المتاح AED ٢٬٤٣٠٫١٥.",
+    "expected": {
+      "decision": "candidate",
+      "family": "purchase",
+      "direction": "debit",
+      "amount_text": "٨٤٫٦٠",
+      "currency_text": "AED",
+      "merchant_text": "مكتبة القنديل"
+    },
+    "rationale": "Synthetic authored case. Completed purchase with Arabic digits; copy the principal span unchanged and exclude the balance."
+  },
+  {
+    "id": "bank-v2-010",
+    "language": "ar",
+    "text": "تم إيداع مبلغ استرداد SAR ١٢٥٫٧٥ من متجر السحابة في حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "refund",
+      "direction": "credit",
+      "amount_text": "١٢٥٫٧٥",
+      "currency_text": "SAR",
+      "merchant_text": "متجر السحابة"
+    },
+    "rationale": "Synthetic authored case. Explicit credited refund; preserve Arabic amount and merchant text."
+  },
+  {
+    "id": "bank-v2-011",
+    "language": "ar",
+    "text": "تم تنفيذ التحويل الصادر وخصم KWD ١٢٫٣٤٥ من حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "debit",
+      "amount_text": "١٢٫٣٤٥",
+      "currency_text": "KWD",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed outgoing transfer with three decimal places; no conversion."
+  },
+  {
+    "id": "bank-v2-012",
+    "language": "ar",
+    "text": "تم استلام حوالة واردة وإضافة AED 2,100.00 إلى حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "credit",
+      "amount_text": "2,100.00",
+      "currency_text": "AED",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Explicit incoming transfer with Latin digits embedded in Arabic."
+  },
+  {
+    "id": "bank-v2-013",
+    "language": "ar",
+    "text": "تم السحب النقدي بنجاح وخصم SAR ٥٠٠ من الحساب.",
+    "expected": {
+      "decision": "candidate",
+      "family": "cash-withdrawal",
+      "direction": "debit",
+      "amount_text": "٥٠٠",
+      "currency_text": "SAR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed cash withdrawal without any merchant field."
+  },
+  {
+    "id": "bank-v2-014",
+    "language": "ar",
+    "text": "تم خصم رسوم خدمة شهرية بقيمة BHD ٠٫٧٥٠ من حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "fee",
+      "direction": "debit",
+      "amount_text": "٠٫٧٥٠",
+      "currency_text": "BHD",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Posted service fee with Arabic zero and three fractional digits."
+  },
+  {
+    "id": "bank-v2-015",
+    "language": "ar",
+    "text": "تم سداد البطاقة الائتمانية وخصم AED ٧٢٠٫٠٠ من حسابك البنكي.",
+    "expected": {
+      "decision": "candidate",
+      "family": "card-payment",
+      "direction": "debit",
+      "amount_text": "٧٢٠٫٠٠",
+      "currency_text": "AED",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Completed repayment debited from the funding bank account."
+  },
+  {
+    "id": "bank-v2-016",
+    "language": "ar",
+    "text": "تم قيد دفعة سداد بقيمة SAR ٣٢٠٫٠٠ كإضافة إلى حساب بطاقتك الائتمانية.",
+    "expected": {
+      "decision": "candidate",
+      "family": "card-payment",
+      "direction": "credit",
+      "amount_text": "٣٢٠٫٠٠",
+      "currency_text": "SAR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Explicit card-account repayment credit, not income inferred from ownership."
+  },
+  {
+    "id": "bank-v2-017",
+    "language": "mixed",
+    "text": "تم الشراء بنجاح: AED ١٢٩٫٩٠ at Copper Kite Cafe. تم خصم المبلغ من حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "purchase",
+      "direction": "debit",
+      "amount_text": "١٢٩٫٩٠",
+      "currency_text": "AED",
+      "merchant_text": "Copper Kite Cafe"
+    },
+    "rationale": "Synthetic authored case. Mixed-language completed purchase; Arabic number and English merchant are copied exactly."
+  },
+  {
+    "id": "bank-v2-018",
+    "language": "mixed",
+    "text": "Refund posted from متجر النورس: USD 18.40. تمت إضافة المبلغ إلى حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "refund",
+      "direction": "credit",
+      "amount_text": "18.40",
+      "currency_text": "USD",
+      "merchant_text": "متجر النورس"
+    },
+    "rationale": "Synthetic authored case. Mixed-language refund explicitly posted as an account credit."
+  },
+  {
+    "id": "bank-v2-019",
+    "language": "mixed",
+    "text": "Outgoing transfer completed: EUR 1.250,50. تم خصم المبلغ من حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "debit",
+      "amount_text": "1.250,50",
+      "currency_text": "EUR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Single completed outgoing transfer; localized number remains literal."
+  },
+  {
+    "id": "bank-v2-020",
+    "language": "mixed",
+    "text": "تم تنفيذ Cash withdrawal وخصم OMR ٢٠٫٠٠٠ من حسابك.",
+    "expected": {
+      "decision": "candidate",
+      "family": "cash-withdrawal",
+      "direction": "debit",
+      "amount_text": "٢٠٫٠٠٠",
+      "currency_text": "OMR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Mixed-language cash withdrawal with explicit ISO currency and Arabic digits."
+  },
+  {
+    "id": "bank-v2-021",
+    "language": "fr",
+    "text": "Achat comptabilisé : EUR 1 234,56 chez Atelier Lune Bleue. Montant débité de votre compte. Solde disponible : EUR 2 000,00.",
+    "expected": {
+      "decision": "candidate",
+      "family": "purchase",
+      "direction": "debit",
+      "amount_text": "1 234,56",
+      "currency_text": "EUR",
+      "merchant_text": "Atelier Lune Bleue"
+    },
+    "rationale": "Synthetic authored case. Completed French purchase; space grouping is retained and the labeled balance is excluded."
+  },
+  {
+    "id": "bank-v2-022",
+    "language": "fr",
+    "text": "Virement entrant exécuté : EUR 245,80 crédités sur votre compte.",
+    "expected": {
+      "decision": "candidate",
+      "family": "transfer",
+      "direction": "credit",
+      "amount_text": "245,80",
+      "currency_text": "EUR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. French completed incoming transfer with decimal comma."
+  },
+  {
+    "id": "bank-v2-023",
+    "language": "es",
+    "text": "Compra contabilizada de EUR 67,30 en Librería Faro de Papel. Importe cargado en su cuenta.",
+    "expected": {
+      "decision": "candidate",
+      "family": "purchase",
+      "direction": "debit",
+      "amount_text": "67,30",
+      "currency_text": "EUR",
+      "merchant_text": "Librería Faro de Papel"
+    },
+    "rationale": "Synthetic authored case. Spanish posted purchase explicitly debited; merchant accents are retained."
+  },
+  {
+    "id": "bank-v2-024",
+    "language": "es",
+    "text": "Reembolso de EUR 42,10 de Tienda Nube Clara abonado en su cuenta.",
+    "expected": {
+      "decision": "candidate",
+      "family": "refund",
+      "direction": "credit",
+      "amount_text": "42,10",
+      "currency_text": "EUR",
+      "merchant_text": "Tienda Nube Clara"
+    },
+    "rationale": "Synthetic authored case. Spanish refund explicitly credited, with exact merchant span."
+  },
+  {
+    "id": "bank-v2-025",
+    "language": "de",
+    "text": "Bargeldabhebung abgeschlossen: EUR 120,00 wurden Ihrem Konto belastet.",
+    "expected": {
+      "decision": "candidate",
+      "family": "cash-withdrawal",
+      "direction": "debit",
+      "amount_text": "120,00",
+      "currency_text": "EUR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. German completed cash withdrawal explicitly debited."
+  },
+  {
+    "id": "bank-v2-026",
+    "language": "de",
+    "text": "Die monatliche Kontoführungsgebühr von EUR 3,90 wurde Ihrem Konto belastet.",
+    "expected": {
+      "decision": "candidate",
+      "family": "fee",
+      "direction": "debit",
+      "amount_text": "3,90",
+      "currency_text": "EUR",
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. German account-service fee has actually been debited."
+  },
+  {
+    "id": "bank-v2-027",
+    "language": "en",
+    "text": "Your one-time code is 481629 to approve a purchase of AED 84.60 at Cedar Lantern Books. Do not share this code.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. OTP authorizes a possible purchase; it does not establish a posted movement."
+  },
+  {
+    "id": "bank-v2-028",
+    "language": "en",
+    "text": "Pending purchase authorization: USD 58.20 at Copper Kite Cafe. The final charge has not posted.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Explicitly pending authorization, not a completed debit."
+  },
+  {
+    "id": "bank-v2-029",
+    "language": "en",
+    "text": "Declined: your purchase of GBP 31.00 at Velvet Finch Store was not processed.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Declined purchase; no posted debit."
+  },
+  {
+    "id": "bank-v2-030",
+    "language": "en",
+    "text": "This weekend only: spend AED 200.00 and earn AED 20.00 cashback at Cedar Lantern Books.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Promotional conditional amounts are not posted transactions."
+  },
+  {
+    "id": "bank-v2-031",
+    "language": "en",
+    "text": "Purchase posted: AED 40.00 at Copper Kite Cafe. A separate refund of AED 15.00 from Velvet Finch Store was also credited today.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Two independent posted movements cannot be represented by one candidate."
+  },
+  {
+    "id": "bank-v2-032",
+    "language": "en",
+    "text": "Your monthly credit-card statement is ready. Total amount due AED 1,800.00; minimum payment AED 90.00.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Statement liabilities and minimum due are not payment transactions."
+  },
+  {
+    "id": "bank-v2-033",
+    "language": "ar",
+    "text": "رمز التحقق ٧٢١٤٣٨ لتأكيد تحويل SAR ٥٠٠. لا تشارك الرمز مع أحد.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Verification code for a proposed transfer; execution is not confirmed."
+  },
+  {
+    "id": "bank-v2-034",
+    "language": "ar",
+    "text": "عملية شراء بمبلغ AED ١٨٠٫٠٠ قيد الانتظار لدى متجر السحابة ولم يتم قيد الخصم بعد.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Purchase remains pending and the debit has not posted."
+  },
+  {
+    "id": "bank-v2-035",
+    "language": "ar",
+    "text": "تم رفض السحب النقدي بمبلغ SAR ٢٠٠ ولم يتم خصم أي مبلغ من حسابك.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Cash withdrawal declined with explicit absence of debit."
+  },
+  {
+    "id": "bank-v2-036",
+    "language": "ar",
+    "text": "رصيد حسابك الحالي KWD ٣٤٥٫٦٧٨. لا توجد عمليات جديدة.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Only an account-balance fact; explicitly no new movements."
+  },
+  {
+    "id": "bank-v2-037",
+    "language": "ar",
+    "text": "تم خصم AED ١٠٠ لعملية شراء لدى مكتبة القنديل، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٢٥٠.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Two completed principal movements; no single-event label is valid."
+  },
+  {
+    "id": "bank-v2-038",
+    "language": "mixed",
+    "text": "OTP 583920 لتأكيد Card payment بقيمة AED 750.00. لم يتم تنفيذ السداد بعد.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. OTP for a repayment not yet executed."
+  },
+  {
+    "id": "bank-v2-039",
+    "language": "mixed",
+    "text": "Refund pending: EUR 45,00 من متجر النورس. سيتم القيد بعد الموافقة.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Refund credit is pending future approval."
+  },
+  {
+    "id": "bank-v2-040",
+    "language": "mixed",
+    "text": "تم تسجيل عملية شراء لدى Copper Kite Cafe. Amount: AED 70.00 or AED 170.00; corrected amount not confirmed.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Two possible principal amounts for one purchase; text does not establish which is correct."
+  },
+  {
+    "id": "bank-v2-041",
+    "language": "mixed",
+    "text": "Available balance AED 1,000.00. حد البطاقة الائتمانية AED 5,000.00.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Balance and credit limit are account facts, not posted movements."
+  },
+  {
+    "id": "bank-v2-042",
+    "language": "fr",
+    "text": "Votre code de validation est 836251 pour un achat de EUR 95,00 chez Atelier Lune Bleue.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. French verification code does not prove a posted purchase."
+  },
+  {
+    "id": "bank-v2-043",
+    "language": "fr",
+    "text": "Virement sortant de EUR 210,00 en attente de validation. Aucun débit effectué.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Outgoing transfer awaits validation; text explicitly says no debit."
+  },
+  {
+    "id": "bank-v2-044",
+    "language": "fr",
+    "text": "Deux achats comptabilisés : EUR 12,40 chez Atelier Lune Bleue et EUR 18,60 chez Boutique Plume Dorée.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Two independent posted purchases require abstention under the single-event contract."
+  },
+  {
+    "id": "bank-v2-045",
+    "language": "es",
+    "text": "Compra rechazada de EUR 39,50 en Tienda Nube Clara. No se ha cargado ningún importe.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Spanish declined purchase explicitly has no debit."
+  },
+  {
+    "id": "bank-v2-046",
+    "language": "es",
+    "text": "Oferta: recibe EUR 10,00 de descuento si gastas EUR 100,00 en Librería Faro de Papel.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. Spanish marketing offer contains conditional monetary amounts only."
+  },
+  {
+    "id": "bank-v2-047",
+    "language": "de",
+    "text": "Ihr aktueller Kontostand beträgt EUR 2.345,67. Es wurden keine neuen Buchungen vorgenommen.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. German balance-only notification explicitly reports no new postings."
+  },
+  {
+    "id": "bank-v2-048",
+    "language": "de",
+    "text": "Kreditkartenabrechnung: Gesamtbetrag fällig EUR 820,00, Mindestzahlung EUR 41,00.",
+    "expected": {
+      "decision": "abstain",
+      "family": "unknown",
+      "direction": "unknown",
+      "amount_text": null,
+      "currency_text": null,
+      "merchant_text": null
+    },
+    "rationale": "Synthetic authored case. German statement due and minimum payment are obligations, not posted repayments."
+  }
+]

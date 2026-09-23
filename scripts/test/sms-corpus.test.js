@@ -252,7 +252,7 @@ const rejects = async (name, run, code) => {
   ok('the corpus query uses a lossless date and row-id cursor',
     /Telephony\.Sms\._ID/.test(native) &&
       /DATE} = \? AND \$\{Telephony\.Sms\._ID} < \?/.test(native) &&
-      /DATE} DESC, \$\{Telephony\.Sms\._ID} DESC/.test(native));
+      /DATE} DESC, \$\{Telephony\.Sms\._ID} DESC LIMIT \$limit/.test(native));
   ok('the temporary raw path does not reuse the normal sensitive-message filter',
     !/getInboxCorpusPage[\s\S]{0,3000}SensitiveMessageFilter\.shouldReject/.test(native));
   ok('permission loss fails the export instead of sharing a partial corpus',

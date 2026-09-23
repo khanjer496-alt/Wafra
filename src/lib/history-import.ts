@@ -28,6 +28,19 @@ export interface HistoryImportProgress {
   error: HistoryImportError | null;
 }
 
+/**
+ * True while the durable first-history job is not final. Intermediate pages
+ * carry a provisional transfer receipt that is safe for launch/UI exclusion
+ * decisions even though it is not stamped as the final normalization version.
+ * Hydration converts persisted `running` to `paused`, so callers must not key
+ * provisional-receipt usability on the literal running state.
+ */
+export function historyImportIncomplete(
+  progress: Pick<HistoryImportProgress, 'status'> | null | undefined,
+): boolean {
+  return !!progress && progress.status !== 'complete';
+}
+
 export interface HistoryImportPage {
   scanned: number;
   found: number;

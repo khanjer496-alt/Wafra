@@ -95,13 +95,14 @@ for (const screen of ['wallet', 'bills']) {
   });
 }
 
-test('Wallet recomputes cash outflow when the salary-month boundary changes', () => {
+test('Wallet does not compute the removed cash-outflow summary', () => {
   const p = screenProbe('wallet');
   p.render();
-  const before = p.counts.summarizeCashOutflow;
+  assert.equal(p.counts.summarizeCashOutflow, 0);
   p.state = { ...p.state, monthStartDay: 25 };
   p.render();
-  assert.equal(p.counts.summarizeCashOutflow, before + 1);
+  assert.equal(p.counts.summarizeCashOutflow, 0,
+    'Accounts should not rescan the ledger for a cash-out figure it no longer renders');
 });
 
 test('Wallet uses fresh balances after an account snapshot changes', () => {
@@ -152,7 +153,7 @@ test('Theme identity remains stable, but palette and contrast changes remain rea
   const Colors = { light: { text: 'ink', controlBorder: 'normal', controlBorderHigh: 'strong' },
     dark: { text: 'paper', controlBorder: 'dark-normal', controlBorderHigh: 'dark-strong' } };
   const { useTheme: renderThemeHook } = load(path.join(root, 'src/hooks/use-theme.ts'), {
-    react: hooks, '@/constants/theme': { Colors },
+    react: { ...hooks, createContext: value => ({ value }), useContext: context => context.value }, '@/constants/theme': { Colors },
     '@/hooks/use-color-scheme': { useColorScheme: () => scheme },
     '@/hooks/use-increased-contrast': { useIncreasedContrast: () => increasedContrast },
   });

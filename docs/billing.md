@@ -1,100 +1,114 @@
-# Turning on billing
+# Wafra billing and Superwall setup
 
-The code is done. What is left is account setup, none of which can be done
-from the repository — and until the last step the app behaves exactly as it
-does today: `isBillingAvailable()` is false and the paywall explains itself.
+Wafra uses Apple/Google for payment and **Superwall** as the storefront seam:
+it supplies the localized products, runs the platform checkout sheet, restores
+purchases, answers for the `pro` entitlement, and hosts the remote
+onboarding/value flow.
 
-## Why RevenueCat
+**The Pro purchase screen is Wafra's own native `/pro` screen.** It reads the
+plan prices from the device's storefront through Superwall's `products()` and
+buys through `purchase(productId)`; it never presents the remote `pro_upgrade`
+paywall. A plan the store does not return is shown as unavailable with a retry,
+never advertised at a price from this repository.
 
-iOS and Android feed the same named entitlement, which keeps each platform's
-purchase logic consistent. That does **not** by itself transfer a subscription
-between a person's Android phone and iPhone: Wafra currently has no account or
-cross-platform identity, so RevenueCat's anonymous customer IDs are normally
-different on the two installs. Do not market cross-platform entitlement
-continuity unless a safe linking design is implemented and tested.
+## Product contract
 
-It costs 1% of tracked revenue above roughly $2.5k/month.
+Create these subscriptions in both stores:
 
-**What it sees:** a purchase and an anonymous customer id. It never sees a
-transaction, a balance, an account number or an SMS — those never leave the
-phone, and no code path sends them anywhere. Worth stating plainly, because
-onboarding promises there is no server.
+| plan | product id | reference price |
+| --- | --- | --- |
+| monthly | `wafra_pro_monthly` | US$9.99 |
+| yearly | `wafra_pro_yearly` | US$74.99 |
 
-## Setup
+The reference prices are documentation only. The shipped paywall must use the
+storefront-formatted prices supplied by Apple/Google through Superwall.
 
-1. **RevenueCat project.** Create one, add both the Android and iOS apps, then
-   connect Google Play with a service-account JSON and App Store Connect with
-   an in-app-purchase key. RevenueCat's dashboard walks through both.
+Wafra currently grants its own local three-day Pro access period. **Do not add a
+store introductory trial while that local clock ships**, or the two trials will
+stack. Move the trial to the stores only in a release that removes the local
+clock and updates every paywall/listing claim together.
 
-2. **Play Console → Monetize → Subscriptions.** Create two, with exactly these
-   product ids — they are what the app asks for:
+## Superwall dashboard
 
-   | plan | product id | reference price |
-   | --- | --- | --- |
-   | monthly | `wafra_pro_monthly` | US$9.99 |
-   | yearly | `wafra_pro_yearly` | US$74.99 |
+1. Add the Wafra iOS and Android apps and connect their store products.
+2. Use the entitlement named exactly `pro`.
+3. Attach both monthly and yearly products to `pro` on both platforms.
+4. Create placement `onboarding` using `docs/superwall-flow-spec.md`.
+5. Keep `pro_upgrade` and `post_import_pro` reserved: the app does not register
+   either one, so publishing a campaign on them changes nothing a user sees.
 
-   Do **not** add a storefront introductory trial while Wafra's three-day local
-   trial remains enabled. A store trial starts when the user subscribes, so the
-   two trials would stack and turn an advertised three days into as many as six.
+Both plan products must be fetchable by the SKUs above. On Play the SDK may
+return `wafra_pro_monthly:<base plan id>`; Wafra matches on the first segment,
+so either identifier works — but a product that is not connected to the app in
+Superwall returns nothing, and `/pro` then reports the price as unavailable.
 
-   Enable every territory where Wafra will be distributed and use each store's
-   local price tiers instead of converting one AED amount yourself. The native
-   paywall reads the signed-in storefront's localized `priceString` directly;
-   the user's ledger currency is never used as a billing price. The USD values
-   above are references for web previews only; an unconfigured native build
-   says the price is unavailable instead of pretending the reference is live.
+A product purchase that is not attached to `pro` is misconfigured: the store
+may charge successfully while Wafra correctly remains non-Pro.
 
-3. **App Store Connect → Subscriptions.** Create the same two product ids in a
-   subscription group, enable the intended territories, and set localized price
-   tiers. Do not add an introductory trial unless the local trial is removed in
-   the same release. Product ids are shared for operational simplicity; Apple
-   and Google still sell separate purchases.
+## Public SDK keys
 
-4. **RevenueCat → Entitlements.** Create one called exactly `pro` and attach
-   all four store products. That string is `ENTITLEMENT_ID`; if you name it
-   something else, change it there too.
+Wafra reads Superwall's public client keys from the EAS production environment:
 
-5. **The keys.** RevenueCat → API keys → copy the **public** SDK keys. Put them
-   in `app.json`:
+```text
+EXPO_PUBLIC_SUPERWALL_IOS_API_KEY
+EXPO_PUBLIC_SUPERWALL_ANDROID_API_KEY
+```
 
-   ```json
-   "extra": {
-     "revenueCatAndroidKey": "goog_xxxxxxxx",
-     "revenueCatIosKey": "appl_xxxxxxxx"
-   }
-   ```
+They are public SDK keys intended to ship in the app. Never place Superwall
+secret/server credentials in an `EXPO_PUBLIC_*` value. The production release
+gate blocks either platform when its public key is missing or placeholder-like.
 
-   Public SDK keys are meant to ship in the client. Do not put a *secret* key
-   here.
+Because `expo-superwall` contains native code, a new native build is required;
+an OTA update cannot add the SDK to an older binary.
 
-6. **Rebuild.** This adds a native module, so new AAB and iOS archive builds are
-   required — an OTA update cannot pick it up.
+## Localization and privacy
 
-## Testing it
+Publish English and Arabic variants in Superwall. Wafra passes its saved app
+language and market to each placement so the campaign can deterministically
+select EN/AR even after an in-session language change. Manually QA Arabic RTL.
 
-Do not use a side-loaded APK as billing evidence. A keyed build can initialize
-RevenueCat there, but Play may still refuse the purchase because the install did
-not come from Play. Upload to an internal testing track and install from there.
-Add your account under Play Console → Setup → License testing to buy without
-being charged. On iOS, install through TestFlight and test with an App Store
-sandbox account.
+Wafra supplies only product/onboarding metadata: language, market, onboarding
+focus/tracking/intention, capture choice and local trial days remaining. It does
+**not** send ledger rows, balances, transaction amounts, SMS bodies, card/account
+identifiers or the locally stored first name to Superwall.
 
-Before release, switch the device storefront through at least one 0-decimal,
-one 2-decimal and one 3-decimal currency territory and verify that the exact
-store-formatted price appears unchanged on Wafra's paywall.
+When Wafra's saved local-only preference is active, optional Superwall event
+tracking is set to `none` and Wafra-supplied targeting attributes are withheld.
+Store purchase/restore remains usable.
 
-## How entitlement is decided
+## Entitlement behavior
 
-RevenueCat is the only source of truth. It is asked once per launch, and
-`state.pro` is a cache of that answer.
+`state.pro` is a local cache of the most recent confirmed store-backed Superwall
+answer. Superwall's `UNKNOWN` status is intentionally **not** treated as inactive:
+offline or temporarily unresolved billing must not revoke a previously confirmed
+subscriber. Confirmed `INACTIVE` revokes Pro; confirmed `ACTIVE` grants it.
 
-That matters because before this, `pro` was a local boolean nothing ever
-re-checked: once true it stayed true through a lapsed subscription, a refund
-or a cancellation, and a reinstall left a paying customer to find the Restore
-button by themselves.
+For iPhone automatic capture, a confirmed active subscription is mirrored into
+the native App Intent gate. When exact transaction expiration is not yet
+available, Wafra uses only a short bounded lease and replaces it when customer
+information arrives.
 
-One rule in that path is deliberate and easy to get wrong later:
-`refreshEntitlement()` returns `true`, `false`, or **`null` meaning the store
-could not be reached** — and null is not false. Losing signal on a flight is
-not the same as never having paid. On null the cached flag stands.
+## Existing RevenueCat subscribers
+
+RevenueCat is no longer required in the Wafra binary. Existing subscriptions are
+owned by Apple/Google, not by RevenueCat. On the Superwall build, verify old test
+subscriptions using **Restore purchase** and confirm entitlement `pro` becomes
+active. Keep the old RevenueCat dashboard only as long as needed for historical
+reporting/audit; it is not the new runtime source.
+
+## Physical-store QA
+
+- Test monthly and yearly purchase on TestFlight and a Play-installed internal build.
+- Test Restore for subscriptions created before the Superwall migration.
+- Test cancel/refund/expiry and verify revocation occurs only on confirmed inactive state.
+- Launch offline after a confirmed subscription and verify cached access is preserved.
+- Verify `/pro` lists both plans at storefront prices, and that pulling a product
+  out of the Superwall app config makes it read "Price unavailable" with a retry
+  rather than a guessed figure.
+- Verify a cancelled checkout leaves no error, and that a completed purchase whose
+  `pro` entitlement is not attached reports "Purchase not confirmed".
+- Check EN/AR and RTL on onboarding and on `/pro`.
+- Verify Privacy, Terms, Restore and renewal wording on `/pro` and on the published
+  onboarding flow.
+- Verify iOS native capture entitlement stops after the real subscription expires.
+- Never use a side-loaded Android APK as final Play Billing evidence.

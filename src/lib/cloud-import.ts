@@ -15,6 +15,7 @@ import {
   type EmailForwardingCredential,
 } from '@/lib/cloud-import-contract';
 import type { RelayConfig } from '@/lib/relay';
+import type { LedgerMoneySpec } from '@/lib/ledger-money';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -35,33 +36,53 @@ async function safeJson(response: Response): Promise<unknown> {
   }
 }
 
-async function relayFetch(url: string, token: string, init: RequestInit): Promise<Response> {
+async function relayFetch(
+  url: string,
+  token: string,
+  init: RequestInit,
+): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      // Settle the caller even if a native stream ignores cancellation. Abort
+      // still releases the underlying request where the transport supports it.
+      reject(new CloudImportError('network'));
+      try { controller.abort(); } catch { /* The deadline already rejected. */ }
+    }, REQUEST_TIMEOUT_MS);
+  });
   try {
-    return await expoFetch(url, {
-      ...init,
-      signal: controller.signal,
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/json',
-        ...(init.headers ?? {}),
-      },
-    });
+    return await Promise.race([
+      (async () => {
+        const response = await expoFetch(url, {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: 'application/json',
+            ...(init.headers ?? {}),
+          },
+        });
+        // Fetch resolves at headers; body streaming remains part of the same
+        // deadline. A successful revocation deliberately has no body to read.
+        const body = response.status === 204 ? null : await safeJson(response);
+        return { response, body };
+      })(),
+      deadline,
+    ]);
   } catch {
     throw new CloudImportError('network');
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
 export async function getImportCapabilities(cfg: RelayConfig): Promise<ImportCapabilities> {
-  const response = await relayFetch(
+  const { response, body } = await relayFetch(
     `${cfg.baseUrl}/v1/import/capabilities`,
     cfg.adminToken,
     { method: 'GET' },
   );
-  const body = await safeJson(response);
   if (!response.ok) throw pdfImportError(response.status, body);
   const capabilities = parseImportCapabilities(body);
   if (!capabilities) throw new CloudImportError('unexpected', response.status);
@@ -71,10 +92,9 @@ export async function getImportCapabilities(cfg: RelayConfig): Promise<ImportCap
 export async function createEmailForwardingAddress(
   cfg: RelayConfig,
 ): Promise<EmailForwardingCredential> {
-  const response = await relayFetch(`${cfg.baseUrl}/v1/email-token`, cfg.adminToken, {
+  const { response, body } = await relayFetch(`${cfg.baseUrl}/v1/email-token`, cfg.adminToken, {
     method: 'POST',
   });
-  const body = await safeJson(response);
   if (!response.ok) throw pdfImportError(response.status, body);
   const credential = parseEmailForwardingCredential(body);
   if (!credential || response.status !== 201) {
@@ -84,11 +104,11 @@ export async function createEmailForwardingAddress(
 }
 
 export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<void> {
-  const response = await relayFetch(`${cfg.baseUrl}/v1/email-token`, cfg.adminToken, {
+  const { response, body } = await relayFetch(`${cfg.baseUrl}/v1/email-token`, cfg.adminToken, {
     method: 'DELETE',
   });
   if (response.status === 204) return;
-  throw pdfImportError(response.status, await safeJson(response));
+  throw pdfImportError(response.status, body);
 }
 
 /**
@@ -100,6 +120,8 @@ export async function uploadPdfStatement(
   cfg: RelayConfig,
   picked: PickedStatement,
   capabilities: ImportCapabilities,
+  ledgerMoney: LedgerMoneySpec,
+  password?: string,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
     throw new CloudImportError('service');
@@ -110,12 +132,16 @@ export async function uploadPdfStatement(
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_pdf');
   if (size > capabilities.pdf.maxBytes) throw new CloudImportError('too_large', 413);
 
-  const response = await relayFetch(`${cfg.baseUrl}/v1/import/pdf`, cfg.adminToken, {
+  const { response, body } = await relayFetch(`${cfg.baseUrl}/v1/import/pdf`, cfg.adminToken, {
     method: 'POST',
-    headers: { 'content-type': 'application/pdf' },
+    headers: {
+      'content-type': 'application/pdf',
+      'x-wafra-ledger-currency': ledgerMoney.currency,
+      'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
+      ...(password ? { 'x-wafra-pdf-password': password } : {}),
+    },
     body: file,
   });
-  const body = await safeJson(response);
   if (!response.ok) throw pdfImportError(response.status, body);
   const accepted = parsePdfImportAccepted(body);
   if (!accepted) throw new CloudImportError('unexpected', response.status);
@@ -127,6 +153,7 @@ export async function uploadCsvStatement(
   cfg: RelayConfig,
   picked: PickedStatement,
   capabilities: ImportCapabilities,
+  ledgerMoney: LedgerMoneySpec,
 ): Promise<CsvImportAccepted> {
   if (!capabilities.csv.enabled) throw new CloudImportError('service');
   const file = new File(picked.uri);
@@ -144,12 +171,15 @@ export async function uploadCsvStatement(
     : extensionType;
   if (!capabilities.csv.accepts.includes(contentType)) throw new CloudImportError('service');
 
-  const response = await relayFetch(`${cfg.baseUrl}/v1/import/csv`, cfg.adminToken, {
+  const { response, body } = await relayFetch(`${cfg.baseUrl}/v1/import/csv`, cfg.adminToken, {
     method: 'POST',
-    headers: { 'content-type': contentType },
+    headers: {
+      'content-type': contentType,
+      'x-wafra-ledger-currency': ledgerMoney.currency,
+      'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
+    },
     body: file,
   });
-  const body = await safeJson(response);
   if (!response.ok) throw pdfImportError(response.status, body);
   const accepted = parseCsvImportAccepted(body);
   if (!accepted) throw new CloudImportError('unexpected', response.status);

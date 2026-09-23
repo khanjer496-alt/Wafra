@@ -15,7 +15,7 @@ const bills = source('src/app/(tabs)/bills.tsx');
 const wallet = source('src/app/(tabs)/wallet.tsx');
 const settings = source('src/app/settings.tsx');
 const tabBar = source('src/components/tab-bar.tsx');
-const billsSegments=source('src/components/ui/segmented-control.tsx');
+const billsSegments=source('src/components/bills/bills-segment-control.tsx');
 const spendingOverview=source('src/components/spending/spending-overview.tsx');
 const spendingTrends=source('src/components/spending/spending-trends.tsx');
 const paymentAgenda=source('src/components/bills/payment-agenda.tsx');
@@ -62,9 +62,10 @@ for (const [name, code] of Object.entries({ Home: home, Flow: spendingOverview, 
 ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitLarge/.test(home));
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
-  /<SegmentedControl/.test(bills) && /large && styles\.stack/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
-ok('Wallet collapses overview facts to a vertical list',
-  /p\.largeText && styles\.stack/.test(walletOverview) && /detailRow, p\.largeText && styles\.stack/.test(walletOverview));
+  /<BillsSegmentControl/.test(bills) && /<ScrollView[\s\S]*?horizontal/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
+ok('Wallet stacks its recorded-balance headline at accessibility text sizes',
+  /styles\.money, p\.largeText && styles\.stack/.test(walletOverview) &&
+    /stack: \{ flexDirection: 'column', alignItems: 'flex-start' \}/.test(walletOverview));
 ok('Bills uses the shared accessible sheet contract',
   /<BottomSheet/.test(bills) && !/<Modal/.test(bills) && /accessibilityLabel=\{t\('reminderName/.test(bills));
 ok('Wallet uses shared sheets and selected choice semantics',
@@ -95,14 +96,16 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-// Font metrics, wrapping, locale and safe areas determine actual screen height.
-// The browser onboarding suite measures viewport overflow; these source checks
-// preserve the structural accessibility guarantees without inventing a height.
-ok('onboarding keeps welcome and every setup step scrollable at larger text sizes',
+// Normal onboarding is a fixed one-screen composition. Accessibility text sizes
+// keep the ScrollView escape hatch so content can grow without being clipped.
+ok('onboarding stays on one screen normally and only enables scrolling for accessibility text sizes',
+  /useLargeTextLayout/.test(onboardingGate) &&
   /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
     /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
+    (onboardingGate.match(/scrollEnabled=\{largeText\}/g) ?? []).length === 2 &&
     /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
     /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
+    /questionActions: \{ marginTop: 'auto'/.test(onboardingGate) &&
     /<BottomSheet/.test(onboardingGate));
 ok('onboarding text and its sample can grow without truncation or a scale ceiling',
   [onboardingGate, onboardingExample].every((code) =>
@@ -112,16 +115,20 @@ ok('every shared onboarding button permits its localized label to wrap',
   onboardingButtons.length > 0 && onboardingButtons.every((button) => /\bwrapLabel\b/.test(button)));
 ok('onboarding action targets retain native accessibility size floors',
   declaredStyleValue(onboardingGate, 'startOption', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'personalizeRow', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'nameBack', 'minHeight') >= 44 &&
+    declaredStyleValue(onboardingGate, 'nameInput', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingGate, 'nameSkip', 'minHeight') >= 48 &&
     declaredStyleValue(onboardingGate, 'back', 'minHeight') >= 44 &&
     declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
-ok('optional-plan choices expose the explanation to assistive technology',
-  /accessibilityLabel=\{t\(state\.onboardingPlan \? 'onboardEditPlan' : 'onboardPersonalizeOptional'\)\}[\s\S]{0,200}accessibilityHint=\{t\(state\.onboardingPlan \? 'onboardSavedPlanNote' : 'onboardOptionalPlanNote'\)\}/.test(onboardingGate));
+ok('name personalization exposes a labelled optional input and skip action to assistive technology',
+  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{t\('onboardNamePlaceholder'\)\}/.test(onboardingGate) &&
+    /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{t\('onboardNameSkip'\)\}/.test(onboardingGate) &&
+    /onboardNamePrivacy/.test(onboardingGate));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
   /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&
-  /onPress=\{p\.onOpenBills\}/.test(walletOverview) && /onPress=\{p\.onOpenCurrency\}/.test(walletOverview) &&
+  /const borderColor = accountInvalid \? theme\.expense : selected \? selected\.color : theme\.controlBorder/.test(addTransaction) &&
   /transferChoice[\s\S]{0,100}theme\.controlBorder/.test(addTransaction));
 
 const themedText = source('src/components/themed-text.tsx');
@@ -205,8 +212,10 @@ ok('Add invalid groups and fields announce adjacent localized errors politely',
     /accountInvalid && \([\s\S]*?accessibilityLiveRegion="polite"/.test(addTransaction) &&
     /invalid=\{amountInvalid\}/.test(addTransaction) &&
     /errorText=\{amountInvalid \?/.test(addTransaction) &&
-    /invalid=\{reviewDateInvalid\}/.test(addTransaction) &&
-    /errorText=\{reviewDateInvalid \?/.test(addTransaction));
+    /reviewItem \? validReviewDate\(reviewDate\)/.test(addTransaction) &&
+    /event\.transactionDate\.evidence !== 'explicit' && hasRealDateChoice/.test(
+      source('src/components/universal-review-fields.tsx'),
+    ));
 
 ok('Spending categories provide localized spending and limit equivalents',
  /accessibilityLabel=\{`\$\{categoryLabel\(row\.category, language\)\}[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/.test(spendingOverview));
@@ -226,17 +235,17 @@ ok('Bills uses one scaffold scroller with an inline typed header',
     (bills.match(/<ScrollView/g) ?? []).length === 1 &&
     /testID="subscription-history-scroll"/.test(bills));
 ok('Bills uses canonical labelled control and selection semantics',
- /<SegmentedControl/.test(bills) && /label=\{t\('billsTitle'\)\}/.test(bills) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
-ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+ /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
+ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 ok('Bills reminder entry exposes three labelled shared fields and a disabled Save footer',
   (bills.match(/<TextField/g) ?? []).length === 3 &&
     !/<TextInput/.test(bills) &&
     /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/.test(bills));
 
-ok('Wallet uses the typed inline scaffold header and labels both disclosures',
+ok('Wallet uses the typed inline scaffold header and labels its remaining disclosure',
   /const walletHeader: ScreenHeaderProps = \{/.test(wallet) &&
     /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/.test(wallet) &&
-    /accessibilityLabel=\{detailsLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: details \}\}/.test(walletOverview) &&
+    !/detailsLabel|expanded: details/.test(walletOverview) &&
     /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
 ok('Wallet starts its iOS inset scroller at the visible content origin',
   /const walletInsets = useScreenContentInsets\(\{ tabbed: true \}\)/.test(wallet) &&

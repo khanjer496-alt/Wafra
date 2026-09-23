@@ -17,14 +17,15 @@ import { AutomationGuide } from '@/components/ios-message-setup/automation-guide
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button } from '@/components/ui/controls';
+import { Button, Chip } from '@/components/ui/controls';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Block } from '@/components/ui/layout';
-import { ScreenHeader } from '@/components/ui/screen-header';
+import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { knownBankOptions } from '@/lib/known-banks';
 import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
@@ -39,11 +40,13 @@ import {
   clearIosHistoryHandoff,
   clearIosHistoryReturnOrigin,
   confirmIosHistoryShortcutInstalled,
+  historyShortcutContinueUrl,
   historyShortcutInstallUrl,
   historyShortcutRunUrl,
   iosSupportsMessageHistory,
   iosHistorySetupStorageCoordinator,
   IOS_HISTORY_HANDOFF_MARKER,
+  IOS_HISTORY_SHORTCUT_NAME,
   IOS_HISTORY_HANDOFF_TTL_MS,
   loadIosHistorySetup,
   reconcileIosHistorySetup,
@@ -56,11 +59,21 @@ import {
   type IosMessageSetupProgress,
 } from '@/lib/ios-message-onboarding';
 import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
-import { onboardingLandingPath } from '@/lib/onboarding';
+import {
+  onboardingHistoryGap,
+  onboardingInsightKeys,
+  onboardingLandingPath,
+  onboardingProfileAtStage,
+} from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { useLanguage } from '@/hooks/use-language';
 import { canFinishIosMessageSetup, futureSetupConfigured, iosSetupJourneyCopy } from '@/lib/ios-setup-journey';
-import { pagedHistoryEnabled, pagedHistoryCopy } from '@/lib/ios-paged-setup';
+import {
+  pagedHistoryEnabled,
+  pagedHistoryCopy,
+  parsePagedHistoryProgress,
+  type PagedHistoryProgress,
+} from '@/lib/ios-paged-setup';
 
 const INITIAL_PROGRESS: IosMessageSetupProgress = {
   version: 1,
@@ -98,10 +111,20 @@ export default function IosSetupScreen() {
     shortcutResult?: string;
     section?: string;
   }>();
-  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
+  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut, setKnownBanks } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
-  const fromOnboarding = params.fromOnboarding === '1';
+  const onboardingInsight = onboardingInsightKeys(state.onboardingProfile?.focus ?? null);
+  // The History Shortcut returns through `wafra://ios-setup?section=history`,
+  // which cannot carry the onboarding query, and a deep link into the mounted
+  // route replaces its params. First-run state is durable in the store, so
+  // latch onboarding mode from it: losing the flag used to hide the manual
+  // exit and turn Back into a loop through the onboarding gate's redirect.
+  const onboardingLatch = useRef(false);
+  if (params.fromOnboarding === '1' || (state.hydrated === true && state.onboarded === false)) {
+    onboardingLatch.current = true;
+  }
+  const fromOnboarding = onboardingLatch.current;
   const requestedSection = params.section === 'history' || params.section === 'future'
     ? params.section : null;
   const historyReturnOrigin = fromOnboarding ? 'onboarding' : 'ios-setup';
@@ -124,6 +147,7 @@ export default function IosSetupScreen() {
     installed: false,
     handoffStartedAt: null as number | null,
   });
+  const [pagedProgress, setPagedProgress] = useState<PagedHistoryProgress | null>(null);
   const [busy, setBusy] = useState(false);
   const [finishRetryRequired, setFinishRetryRequired] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -134,6 +158,16 @@ export default function IosSetupScreen() {
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
   const resetHistoryAttempt = useRef<number | null>(null);
   const [skipHistoryVisible, setSkipHistoryVisible] = useState(false);
+  // "Which banks text you?": asked once before either section can start, because
+  // iOS 26's Find Messages gives Wafra no sender and some banks never name
+  // themselves in an alert, so this answer is what labels those accounts.
+  // Skip hides it for this visit only; the answer itself persists in the ledger.
+  const [banksSkipped, setBanksSkipped] = useState(false);
+  const [bankPicks, setBankPicks] = useState<string[]>([]);
+  const banksStep = (state.knownBanks ?? []).length === 0 && !banksSkipped;
+  const toggleBankPick = (name: string) => setBankPicks((picks) =>
+    picks.includes(name) ? picks.filter((pick) => pick !== name) : [...picks, name]);
+  const saveKnownBanks = () => { setKnownBanks(bankPicks); };
   const skipHistoryAttempt = useRef<number | null | undefined>(undefined);
   const setupInitialized = useRef(false);
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
@@ -202,6 +236,7 @@ export default function IosSetupScreen() {
     try {
       let nextHistory: Awaited<ReturnType<typeof loadIosHistorySetup>>;
       let recoveredSessionId: string | null = null;
+      let nextPagedProgress: PagedHistoryProgress | null = null;
       if (historySupported) {
         const native = await historyNativeModule();
         if (!native || typeof native.getCompletedSession !== 'function' ||
@@ -214,6 +249,15 @@ export default function IosSetupScreen() {
         );
         nextHistory = reconciliation.snapshot;
         recoveredSessionId = reconciliation.recoveredSessionId;
+        if (pagedEnabled && typeof native.getPagedStatus === 'function') {
+          // The paged Shortcut says "open Wafra to check progress" when it
+          // pauses. Source-free counts only; a malformed status reads as none.
+          try {
+            nextPagedProgress = parsePagedHistoryProgress(await native.getPagedStatus());
+          } catch {
+            nextPagedProgress = null;
+          }
+        }
       } else {
         nextHistory = await iosHistorySetupStorageCoordinator.run(() => loadIosHistorySetup());
       }
@@ -223,6 +267,7 @@ export default function IosSetupScreen() {
         installed: nextHistory.installed,
         handoffStartedAt: nextHistory.handoffStartedAt,
       });
+      setPagedProgress(nextPagedProgress);
       if (recoveredSessionId) {
         router.replace({
           pathname: '/import-sms',
@@ -234,7 +279,37 @@ export default function IosSetupScreen() {
       setHistoryReady(false);
       setLocalError(t('historySetupStateFailed'));
     }
-  }, [historySupported, router]);
+  }, [historySupported, pagedEnabled, router]);
+
+  // `router.replace` from this pushed screen swaps it for a NEW tabs route
+  // while the original tabs route stays at the stack root, so two tab
+  // navigators end up mounted: two Home screens, doubled scans and a first
+  // screen that flickers. Pop to the existing root and switch tabs there. A
+  // cold deep-link launch with nothing beneath this screen keeps the replace.
+  /**
+   * Where setup lets go of the user.
+   *
+   * Normally the view they chose. But an iPhone has no completion screen in
+   * the gate — setup exits straight into the app — so the statement offer that
+   * Android shows there has nowhere to appear. For a bank that leaves no
+   * history to read, this exit IS the offer: it finishes the sentence the
+   * alert question started rather than dropping them on Home having been told
+   * their past is missing and then shown nothing about it. One tap backs out.
+   */
+  const finishDestination = useCallback(() => (
+    onboardingHistoryGap(state.onboardingProfile?.alerts)
+      ? '/statement-import' as const
+      : onboardingLandingPath(state.onboardingProfile?.focus ?? null)
+  ), [state.onboardingProfile?.alerts, state.onboardingProfile?.focus]);
+
+  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath> | '/statement-import') => {
+    if (router.canGoBack()) {
+      router.dismissAll();
+      router.navigate(href);
+      return;
+    }
+    router.replace(href);
+  }, [router]);
 
   useEffect(() => {
     let active = true;
@@ -427,7 +502,7 @@ export default function IosSetupScreen() {
       try {
         // A handoff already in progress owns its native session and timestamp.
         // Reopening its run URL would start a second import, not resume Apple.
-        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : 'shortcuts://');
+        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : historyShortcutContinueUrl());
         if (newHandoff && screenActive.current) {
           setHistorySetup((current) => ({
             ...current,
@@ -583,13 +658,11 @@ export default function IosSetupScreen() {
       if (fromOnboarding) {
         const onboardingFocus = state.onboardingProfile?.focus ?? null;
         const onboardingTracking = state.onboardingProfile?.tracking ?? null;
-        setOnboardingProfile({
-          v: 1,
-          stage: 'complete',
-          focus: onboardingFocus,
-          tracking: onboardingTracking,
-          startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
-        });
+        // Keep every answer the profile already holds. Rebuilding it here is
+        // what erased the alert-delivery and country answers on completion.
+        setOnboardingProfile(
+          onboardingProfileAtStage(state.onboardingProfile, 'complete', Date.now()),
+        );
         const outcome = await completeIosMessageOnboardingAttempt({
           retryRequired: finishRetryRequired,
           ensureDurable,
@@ -612,7 +685,7 @@ export default function IosSetupScreen() {
           outcome: 'automatic',
           placement: GROWTH_PLACEMENTS.onboarding,
         });
-        router.replace(onboardingLandingPath(onboardingFocus));
+        exitToRoot(finishDestination());
         return;
       }
       if (router.canGoBack()) {
@@ -623,6 +696,8 @@ export default function IosSetupScreen() {
     }, t('iosMessageFinishFailed'));
   }, [
     ensureDurable,
+    exitToRoot,
+    finishDestination,
     finishRetryRequired,
     fromOnboarding,
     setupComplete,
@@ -635,11 +710,78 @@ export default function IosSetupScreen() {
     updateProgress,
   ]);
 
+  const continueWithoutAutomaticCapture = useCallback(() => {
+    if (!fromOnboarding || busy || finishRetryRequired) return;
+    void runOperation(async () => {
+      // Manual entry is a valid product path, not a failure/recovery path.
+      // Persist the opt-out first so no mounted capture worker can race the
+      // navigation. Native disable is best-effort; the durable store flag is
+      // the authority used by the app after this point.
+      await setCaptureOptOut(true);
+      try { await send({ type: 'manual-only' }); } catch { /* durable opt-out already wins */ }
+      await iosHistorySetupStorageCoordinator.run(async () => {
+        // Do not delete a partially staged history import here. Just stop the
+        // onboarding redirect from owning it; the 24h native staging expiry or
+        // an explicit later review/discard will clean it up safely.
+        await Promise.all([clearIosHistoryHandoff(), clearIosHistoryReturnOrigin()]);
+      });
+
+      const onboardingFocus = state.onboardingProfile?.focus ?? null;
+      const onboardingTracking = state.onboardingProfile?.tracking ?? null;
+      // Same here: preserve the answers rather than reconstructing the profile.
+      setOnboardingProfile(
+        onboardingProfileAtStage(state.onboardingProfile, 'complete', Date.now()),
+      );
+      const outcome = await completeIosMessageOnboardingAttempt({
+        retryRequired: finishRetryRequired,
+        ensureDurable,
+        markFinished: async () => {
+          await updateProgress({ type: 'onboarding-finished' });
+        },
+        markStarted: async () => {
+          await updateProgress({ type: 'onboarding-started' });
+        },
+        setOnboarded,
+      });
+      if (outcome === 'retry-required') {
+        if (screenActive.current) setFinishRetryRequired(true);
+        throw new Error('ios_message_onboarding_manual_finish_failed');
+      }
+      if (screenActive.current) setFinishRetryRequired(false);
+      trackGrowthEvent('onboarding_completed', {
+        focus: onboardingFocus,
+        tracking: onboardingTracking,
+        outcome: 'manual',
+        placement: GROWTH_PLACEMENTS.onboarding,
+      });
+      exitToRoot(finishDestination());
+    }, t('iosMessageFinishFailed'));
+  }, [
+    busy,
+    ensureDurable,
+    exitToRoot,
+    finishDestination,
+    finishRetryRequired,
+    fromOnboarding,
+    runOperation,
+    send,
+    setCaptureOptOut,
+    setOnboarded,
+    setOnboardingProfile,
+    state.onboardingProfile,
+    updateProgress,
+  ]);
+
   const leave = useCallback(async () => {
     if (busy || finishRetryRequired) return;
     await runOperation(async () => {
       if (fromOnboarding) {
         await updateProgress({ type: 'onboarding-return-cleared' });
+        // Do not walk back through every Shortcut/iCloud handoff that happened
+        // during setup. Return to the root once and let the onboarding gate
+        // show the previous product step exactly once.
+        exitToRoot('/');
+        return;
       }
       if (router.canGoBack()) {
         router.back();
@@ -647,7 +789,7 @@ export default function IosSetupScreen() {
       }
       router.replace('/');
     });
-  }, [busy, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
+  }, [busy, exitToRoot, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
 
   const futureStep = setup.failure === 'shortcut-install' &&
     !progress.futureShortcutConfirmed
@@ -701,7 +843,7 @@ export default function IosSetupScreen() {
     };
   };
   const action = primaryAction();
-  const showFooterAction = !showAutomationGuide && (
+  const showFooterAction = !showAutomationGuide && !banksStep && (
     setupComplete ||
     (futureConfigured && !historyComplete && !historyDeferred && progress.activeSection === 'future')
   );
@@ -730,8 +872,10 @@ export default function IosSetupScreen() {
     }
   }
 
+  const onboardingPresentation = fromOnboarding || progress.returnToOnboarding;
   return (
-    <ThemedView style={styles.root}>
+    <SetupShell onboarding={onboardingPresentation}>
+    <ThemedView style={[styles.root, onboardingPresentation && { backgroundColor: 'transparent' }]}>
       <Stack.Screen options={{ gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScrollView
@@ -739,8 +883,8 @@ export default function IosSetupScreen() {
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
-          <ScreenHeader
-            mode="inline"
+          <SetupHeader
+            onboarding={onboardingPresentation}
             title={t('iosMessageSetupHeading')}
             subtitle={t('iosMessageSetupSubtitle')}
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
@@ -748,6 +892,26 @@ export default function IosSetupScreen() {
           />
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
+          ) : banksStep ? (
+            <View testID="ios-message-setup-banks" style={styles.checklist}>
+              <Block>
+                <ThemedText type="subtitle">{t('iosBanksTitle')}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">{t('iosBanksBody')}</ThemedText>
+                <View style={styles.bankChips} accessibilityRole="list">
+                  {knownBankOptions(state.marketId).map((bank) => (
+                    <Chip
+                      key={bank.name}
+                      label={bank.name}
+                      active={bankPicks.includes(bank.name)}
+                      onPress={() => toggleBankPick(bank.name)}
+                    />
+                  ))}
+                </View>
+                <ThemedText type="meta" themeColor="textSecondary">{tf('iosBanksSelected', { n: bankPicks.length })}</ThemedText>
+                <Button label={t('iosBanksNext')} onPress={saveKnownBanks} disabled={busy || bankPicks.length === 0} wrapLabel />
+                <Button label={t('iosBanksSkip')} variant="ghost" onPress={() => setBanksSkipped(true)} disabled={busy} wrapLabel />
+              </Block>
+            </View>
           ) : (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
               <ChecklistRow
@@ -815,8 +979,37 @@ export default function IosSetupScreen() {
                 ) : pagedEnabled ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{pagingCopy.intro}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">{pagingCopy.runningHelp}</ThemedText>
-                    <Button label={pagingCopy.start} variant="ghost" onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } })} disabled={busy} wrapLabel />
+                    {pagedProgress ? (
+                      <View testID="ios-setup-paged-progress" accessibilityLiveRegion="polite" style={styles.progress}>
+                        <ThemedText type="smallBold">
+                          {`${pagedProgress.checked.toLocaleString()} · ${pagingCopy.counts}`}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {`${pagedProgress.accepted.toLocaleString()} ${pagingCopy.accepted} · ${pagedProgress.skipped.toLocaleString()} ${pagingCopy.skipped}`}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {pagedProgress.status === 'complete' ? pagingCopy.completed : pagingCopy.paused}
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      <ThemedText type="meta" themeColor="textSecondary">
+                        {historyRunning ? pagingCopy.paused : pagingCopy.runningHelp}
+                      </ThemedText>
+                    )}
+                    <Button
+                      label={pagedProgress?.status === 'complete' ? pagingCopy.review
+                        : pagedProgress || historyRunning ? pagingCopy.resume : pagingCopy.start}
+                      variant="ghost"
+                      onPress={() => {
+                        if (pagedProgress?.status === 'complete') {
+                          router.push({ pathname: '/import-sms', params: { history: pagedProgress.sessionId } });
+                          return;
+                        }
+                        router.push({ pathname: '/ios-paging-beta', params: { origin: historyReturnOrigin } });
+                      }}
+                      disabled={busy}
+                      wrapLabel
+                    />
                   </>
                 ) : !historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">
@@ -826,19 +1019,21 @@ export default function IosSetupScreen() {
                 ) : !historyComplete ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {t(historyRunning ? 'iosMessageHistoryRunningHelp'
+                      {tf(historyRunning ? 'iosMessageHistoryRunningHelp'
                         : historyConfirmed ? 'iosMessageHistoryStartHelp'
-                          : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp')}
+                          : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp',
+                      { shortcut: IOS_HISTORY_SHORTCUT_NAME })}
                     </ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary">
                       {!historyRunning && !historyConfirmed
                         ? t('iosMessageHistoryStartHelp') : journeyCopy.historyRequest}
                     </ThemedText>
                     {!historyRunning && (
-                      <View style={styles.hints}>
-                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
-                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryKeepOpen')}</ThemedText>
-                      </View>
+                      // One hint line, not a third and fourth grey paragraph
+                      // above the button; both facts read as one instruction.
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.hints}>
+                        {`${t('iosMessageHistoryKeepOpen')} · ${t('iosMessagePastTiming')}`}
+                      </ThemedText>
                     )}
                     <Button
                       label={t(historyRunning ? 'historyContinueAction'
@@ -864,6 +1059,15 @@ export default function IosSetupScreen() {
                 )}
               </ChecklistRow>
             </View>
+          )}
+          {fromOnboarding && setupComplete && (
+            <Block style={styles.completionReveal}>
+              <ThemedText type="smallBold">{t('onboardCompleteAutomaticTitle')}</ThemedText>
+              <ThemedText type="small">{t(onboardingInsight.title)}</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">
+                {t(onboardingInsight.body)}
+              </ThemedText>
+            </Block>
           )}
           {error && (
             <View accessibilityLiveRegion="polite">
@@ -908,6 +1112,26 @@ export default function IosSetupScreen() {
         {showFooterAction && (
           <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
             <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
+            {fromOnboarding && !setupComplete && (
+              <Button
+                label={t('iosMessageContinueManual')}
+                variant="ghost"
+                onPress={continueWithoutAutomaticCapture}
+                disabled={busy || !progressLoaded}
+                wrapLabel
+              />
+            )}
+          </View>
+        )}
+        {fromOnboarding && !showFooterAction && progressLoaded && (
+          <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
+            <Button
+              label={t('iosMessageContinueManual')}
+              variant="ghost"
+              onPress={continueWithoutAutomaticCapture}
+              disabled={busy}
+              wrapLabel
+            />
           </View>
         )}
         <ConfirmSheet
@@ -937,6 +1161,7 @@ export default function IosSetupScreen() {
         />
       </SafeAreaView>
     </ThemedView>
+    </SetupShell>
   );
 }
 
@@ -949,7 +1174,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
-  hints: { gap: Spacing.one },
+  bankChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
+  hints: { marginTop: Spacing.one },
+  progress: { gap: Spacing.one },
+  completionReveal: { gap: Spacing.one },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
     paddingHorizontal: ScreenPadding, paddingVertical: 12,

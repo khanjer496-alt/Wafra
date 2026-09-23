@@ -29,11 +29,22 @@ import { DEFAULT_RELAY_URL } from '@/lib/relay';
 
 /** Matches the Worker's cap; rejected there too, but a 32 KB round trip to be told so is waste. */
 const MAX_BODY_BYTES = 32768;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** What the Worker answers with on success. */
 interface FeedbackResponse {
   id?: unknown;
   dispatched?: unknown;
+}
+
+export interface TesterDiagnosticWirePayload {
+  schema: 1;
+  text: 'Android tester diagnostics.';
+  appVersion: string;
+  platform: 'android';
+  locale: string;
+  aiReviewConsent: false;
+  diagnostic: Record<string, unknown>;
 }
 
 const wireEncoder = new TextEncoder();
@@ -55,6 +66,72 @@ export class FeedbackSendError extends Error {
     this.name = 'FeedbackSendError';
     this.code = code;
     this.status = status;
+  }
+}
+
+/** One deadline covers both response headers and body consumption. */
+async function postFeedbackBody(
+  body: string,
+  noun: 'report' | 'diagnostic' = 'report',
+): Promise<FeedbackReceipt> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let knownRefusal: FeedbackSendError | null = null;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      // Settle even if the platform fails to reject its fetch/body promise on
+      // abort. A timeout means delivery is unconfirmed, not proven absent.
+      reject(knownRefusal ?? new FeedbackSendError('Could not reach the server.', 'network'));
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+  });
+  const request = async (): Promise<FeedbackReceipt> => {
+    let response: Response;
+    try {
+      response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: controller.signal,
+      });
+    } catch {
+      throw new FeedbackSendError('Could not reach the server.', 'network');
+    }
+    if (!response.ok) {
+      // Error details are optional. Preserve an already received refusal even
+      // when its body stalls until the deadline or contains malformed JSON.
+      knownRefusal = new FeedbackSendError(
+        `The server refused the ${noun} (${response.status}).`, null, response.status,
+      );
+      let code: string | null = null;
+      try {
+        const parsed: unknown = await response.json();
+        if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+          code = (parsed as { error: string }).error;
+        }
+      } catch {
+        code = null;
+      }
+      throw new FeedbackSendError(
+        `The server refused the ${noun} (${response.status}).`, code, response.status,
+      );
+    }
+    let parsed: FeedbackResponse | null;
+    try {
+      parsed = (await response.json()) as FeedbackResponse | null;
+    } catch {
+      throw new FeedbackSendError('The server answered with something unreadable.', 'bad_response');
+    }
+    // A response without an id cannot confirm delivery to the user.
+    if (!parsed || typeof parsed.id !== 'string' || parsed.id === '') {
+      throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
+    }
+    return { id: parsed.id, dispatched: parsed.dispatched === true };
+  };
+  try {
+    return await Promise.race([deadline, request()]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -80,51 +157,7 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
     throw new FeedbackSendError('This report is too large to send.', 'too_large');
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: serialized.body,
-    });
-  } catch {
-    // Offline, DNS, TLS. Nothing here is worth showing a user verbatim, and
-    // the message is deliberately about what to do rather than what broke.
-    throw new FeedbackSendError('Could not reach the server.', 'network');
-  }
-
-  if (!response.ok) {
-    // The Worker answers `{ "error": "rate_limited" }` and similar. Read it if
-    // it is there, but never let a malformed error body mask the status.
-    let code: string | null = null;
-    try {
-      const parsed: unknown = await response.json();
-      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
-        code = (parsed as { error: string }).error;
-      }
-    } catch {
-      code = null;
-    }
-    throw new FeedbackSendError(
-      `The server refused the report (${response.status}).`,
-      code,
-      response.status,
-    );
-  }
-
-  let parsed: FeedbackResponse;
-  try {
-    parsed = (await response.json()) as FeedbackResponse;
-  } catch {
-    throw new FeedbackSendError('The server answered with something unreadable.', 'bad_response');
-  }
-  // A 202 with no id is not a success this app can report: the id is the only
-  // thing the user could quote back, and inventing one would make a lost
-  // report look filed.
-  if (typeof parsed.id !== 'string' || parsed.id === '') {
-    throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
-  }
-  return { id: parsed.id, dispatched: parsed.dispatched === true };
+  return postFeedbackBody(serialized.body);
 }
 
 /**
@@ -147,42 +180,33 @@ export async function submitParserResearchFeedback(
     throw new FeedbackSendError('This report is too large to send.', 'too_large');
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
-  } catch {
-    throw new FeedbackSendError('Could not reach the server.', 'network');
+  return postFeedbackBody(body);
+}
+
+/**
+ * Explicit final-test support upload. It deliberately reuses the already
+ * deployed, short-retention Cloudflare feedback store instead of adding a
+ * second unauthenticated upload surface. The report builder owns redaction;
+ * this transport only enforces the same byte ceilings as every other feedback
+ * attachment and returns the Cloudflare report id.
+ */
+export async function submitTesterDiagnostics(
+  wire: TesterDiagnosticWirePayload,
+): Promise<FeedbackReceipt> {
+  if (!DEFAULT_RELAY_URL) {
+    throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
   }
-  if (!response.ok) {
-    let code: string | null = null;
-    try {
-      const parsed: unknown = await response.json();
-      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
-        code = (parsed as { error: string }).error;
-      }
-    } catch {
-      code = null;
-    }
-    throw new FeedbackSendError(
-      `The server refused the report (${response.status}).`,
-      code,
-      response.status,
-    );
+  const diagnosticBytes = wireEncoder.encode(JSON.stringify(wire.diagnostic)).byteLength;
+  if (diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES) {
+    throw new FeedbackSendError('This diagnostic is too large to send.', 'diagnostic_too_large');
   }
-  let parsed: FeedbackResponse;
-  try {
-    parsed = (await response.json()) as FeedbackResponse;
-  } catch {
-    throw new FeedbackSendError('The server answered with something unreadable.', 'bad_response');
+  const body = JSON.stringify(wire);
+  if (wireEncoder.encode(body).byteLength > MAX_BODY_BYTES) {
+    throw new FeedbackSendError('This diagnostic is too large to send.', 'too_large');
   }
-  if (typeof parsed.id !== 'string' || parsed.id === '') {
-    throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
-  }
-  return { id: parsed.id, dispatched: parsed.dispatched === true };
+
+  const receipt = await postFeedbackBody(body, 'diagnostic');
+  return { ...receipt, dispatched: false };
 }
 
 /**

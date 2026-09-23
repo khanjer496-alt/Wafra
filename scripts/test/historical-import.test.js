@@ -1113,6 +1113,10 @@ async function importHistoryHandoffTests() {
       setHistorySetup: (update) => { progress = update(progress); },
       setHistoryHandoffExpired: () => {},
       historyShortcutRunUrl: () => runShortcutUrl,
+      // The legacy two-ended graph would start a second import if re-run, so
+      // Continue only reopens Shortcuts for it; a paged record resolves to the
+      // run URL instead (pinned in ios-setup-ux.test.js).
+      historyShortcutContinueUrl: () => 'shortcuts://',
       clearIosHistoryHandoff: async () => { events.push(['clear-handoff']); },
       clearIosHistoryReturnOrigin: async () => { events.push(['clear-origin']); },
       Linking: { openURL: async (url) => {
@@ -1164,10 +1168,207 @@ function universalHistoryReviewTests() {
       !JSON.stringify(item).includes(text));
 }
 
+function importPreviewTests() {
+  // Render the actual plan-review fragment and its derived declarations. The
+  // store, import actions and native history lifecycle are outside this test.
+  const ts = require('typescript');
+  const vm = require('node:vm');
+  const load = require('./repair/load-typescript.cjs');
+  const i18n = load(path.join(__dirname, '../../src/lib/i18n.ts'));
+  const { isDeliberateOtherTitle } = require('./build/sms-parser.js');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/app/import-sms.tsx'), 'utf8');
+  const ast = ts.createSourceFile('import-sms.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const component = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'ImportSmsScreen');
+  const declarations = new Map();
+  for (const statement of component.body.statements) {
+    if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name)) declarations.set(declaration.name.text, declaration);
+    }
+  }
+  let fragment;
+  function find(n) {
+    if (ts.isBinaryExpression(n) && n.left.getText(ast) === 'plan !== null && !scanning' &&
+      ts.isParenthesizedExpression(n.right) && ts.isJsxFragment(n.right.expression)) fragment = n.right;
+    ts.forEachChild(n, find);
+  }
+  find(component);
+  if (!fragment) throw new Error('Shipping import preview is missing');
+  const jsx = (type, props) => ({ type, props });
+  const walk = n => !n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(walk)
+    : [n, ...walk(n.props?.children)];
+  const strings = value => Array.isArray(value) ? value.flatMap(strings) : typeof value === 'string' ? [value] : [];
+  const texts = tree => walk(tree).flatMap(n => [...strings(n.props?.title), ...strings(n.props?.children)]);
+  const tx = extra => ({ type: 'expense', amountFils: 99, category: 'other', title: 'Test Merchant',
+    date: '2026-09-19', accountId: '0', raw: 'synthetic source', ...extra });
+  function render({ rows = [], dues = [], language = 'en', history = null, unread = 0,
+    moneySpec = { schemaVersion: 2, currency: 'AED', exponent: 2 } } = {}) {
+    i18n.setLanguage(language);
+    const plan = { txCount: rows.length, newAccountCount: 1, dueCount: dues.length, healedCount: 0,
+      batch: { transactions: rows, newDues: dues, newAccounts: [{ name: 'Synthetic card' }],
+        importMoney: moneySpec } };
+    const input = { plan, history, historyResult: history ? {} : null, historySourceSummary: { unread },
+      state: { accounts: [{ id: 'existing-card', name: 'Existing synthetic card' }] },
+      newBills: [], skippedCount: 0, trackedBills: new Set(), reducedMotion: true, applying: false,
+      trackReminder() { throw new Error('Preview must not save reminders'); },
+      PREVIEW_LIMIT: 60, theme: {}, styles: {}, isDeliberateOtherTitle,
+      useMemo: fn => fn(), ...i18n, categoryLabel: category => category,
+      shortDate: date => date.slice(5), router: { push() { throw new Error('Preview must not navigate'); } },
+      Animated: { View: 'Animated.View' },
+      Section: 'Section', View: 'View', ThemedText: 'ThemedText', SectionHeader: 'SectionHeader',
+      Row: 'Row', CategoryTile: 'CategoryTile', Money: 'Money', Button: 'Button', Block: 'Block', Icon: 'Icon' };
+    const selected = new Set();
+    function collect(n) {
+      if (ts.isIdentifier(n) && !Object.hasOwn(input, n.text)) {
+        const declaration = declarations.get(n.text);
+        if (declaration && !selected.has(declaration)) { selected.add(declaration); collect(declaration.initializer); }
+      }
+      ts.forEachChild(n, collect);
+    }
+    collect(fragment);
+    const body = [...declarations.values()].filter(n => selected.has(n)).map(n => `const ${n.getText(ast)};`).join('\n');
+    const program = ts.transpileModule(`(() => { ${body} return ${fragment.getText(ast)}; })()`, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    return vm.runInNewContext(program, { ...input, exports: {}, require: name => {
+      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' };
+      throw new Error('Unexpected preview dependency');
+    } });
+  }
+  for (const language of ['en', 'ar']) {
+    let tree = render({ rows: [tx({})], language });
+    let text = texts(tree).join('\n');
+    ok(`${language}: named uncategorized preview says read without claiming an unknown format`,
+      text.includes(i18n.t('noCategoryYet')) && !text.includes(i18n.t('unreadLabel')) &&
+      !text.includes(i18n.tf('unknownMessageFormats', { count: 1, s: '' })));
+    ok(`${language}: unsaved preview says ready to file`, text.includes(i18n.t('readyToFile')) && !text.includes(i18n.t('justFiled')));
+    tree = render({ rows: [tx({ title: 'Card purchase' })], language });
+    ok(`${language}: missing merchant retains the unknown-format warning`,
+      texts(tree).includes(i18n.tf('unknownMessageFormats', { count: 1, s: '' })));
+    tree = render({ rows: [tx({}), tx({ title: 'Card purchase' })], language });
+    text = texts(tree).join('\n');
+    ok(`${language}: mixed attention keeps category-only and unknown-format counts separate`,
+      text.includes(i18n.t('noCategoryYet')) &&
+      text.includes(i18n.tf('unknownMessageFormats', { count: 1, s: '' })) &&
+      !text.includes(i18n.tf('unknownMessageFormats', { count: 2, s: 's' })));
+    tree = render({ rows: [tx({})], language, history: 'synthetic-history', unread: 3 });
+    text = texts(tree).join('\n');
+    ok(`${language}: history keeps its source-level skipped count`,
+      text.includes(i18n.t('skippedLabel')) &&
+      text.includes(i18n.tf('unknownMessageFormats', { count: 3, s: 's' })));
+    tree = render({ rows: [tx({ category: 'groceries' }), tx({ title: 'ATM withdrawal' })], language });
+    ok(`${language}: retained raw on categorized and deliberate structural rows is not a new category warning`,
+      !texts(tree).join('\n').includes(i18n.t('noCategoryYet')));
+    tree = render({ rows: Array.from({ length: 61 }, () => tx({ category: 'groceries' })), language });
+    const heading = walk(tree).find(n => n.type === 'SectionHeader')?.props.title;
+    ok(`${language}: bounded preview names readiness and its shown/total counts`,
+      heading?.includes(i18n.t('readyToFile')) && heading.includes('60') && heading.includes('61') &&
+      !heading.includes(i18n.t('justFiled')));
+    const due = { accountId: '0', totalDueFils: 123456, minDueFils: 4210, dueDate: '2026-09-25', paidFils: 0 };
+    tree = render({ dues: [due, { ...due, accountId: 'existing-card', minDueFils: 6173, minDueEstimated: true }], language });
+    text = texts(tree).join('\n');
+    const amounts = walk(tree).filter(n => n.type === 'Money').map(n => n.props);
+    ok(`${language}: card-only plan displays staged and existing card names, statement totals and year`,
+      text.includes('Synthetic card') && text.includes('Existing synthetic card') && text.includes('2026') &&
+      text.includes(i18n.t('genericStatementTotal')) && amounts.filter(p => p.fils === 123456).length === 2);
+    ok(`${language}: only a stated minimum is numeric; unknown is disclosed and amounts carry exact currency`,
+      amounts.some(p => p.fils === 4210) && !amounts.some(p => p.fils === 6173) &&
+      text.includes(i18n.t('statementMinimumUnconfirmed')) &&
+      amounts.every(p => p.moneySpec?.currency === 'AED' && p.decimals === true && p.prefix !== false && p.sign !== 'minus'));
+    tree = render({ dues: Array.from({ length: 61 }, () => due), language });
+    const dueHeading = walk(tree).find(n => n.type === 'SectionHeader')?.props.title;
+    ok(`${language}: statement preview caps rendered rows and discloses the full count`,
+      walk(tree).filter(n => n.type === 'Money' && n.props.fils === 123456).length === 60 &&
+      dueHeading.includes(i18n.t('statements')) && dueHeading.includes('60/61'));
+    tree = render({ dues: [{ ...due, minDueFils: 0 }, { ...due, minDueFils: 0, minDueEstimated: true }],
+      language, moneySpec: { schemaVersion: 2, currency: 'SAR', exponent: 2 } });
+    const zeroMinimumAmounts = walk(tree).filter(n => n.type === 'Money').map(n => n.props);
+    ok(`${language}: confirmed zero is visible, unconfirmed zero is withheld, and SAR is preserved`,
+      zeroMinimumAmounts.filter(p => p.fils === 0).length === 1 &&
+      zeroMinimumAmounts.every(p => p.moneySpec.currency === 'SAR') &&
+      texts(tree).includes(i18n.t('statementMinimumUnconfirmed')));
+  }
+}
+
 async function main() {
+  importPreviewTests();
   universalHistoryReviewTests();
   await coordinatorTests();
   await importHistoryHandoffTests();
+  {
+    // iOS 26's Find Messages entity exposes Body, GUID and Date but no sender
+    // (device probes, 2026-09-20), so a history record can arrive without one.
+    // The bank must then come from the body: only a bank the body claims as
+    // the reader's own ("your ADIB … card/account", or a leading "ADCB:"),
+    // only when exactly one bank is claimed, and never from another bank's
+    // ATM, a remitter, or a merchant name. A sender that resolves still wins.
+    const adib = 'Dear Customer, your ADIB Covered Card ending with 4417 has been used for AED 250.00 at CARREFOUR MALL OF THE EMIRATES, DUBAI on 12/07/2026. Your available limit is AED 8,240.00.';
+    const named = (text) => markets.soleBankNamedInText(text)?.name ?? null;
+    ok('markets: the bank a body claims as yours resolves',
+      named(adib) === 'ADIB' && named('Your ADIB Account XXXX1234 has been credited with AED 18,500.00') === 'ADIB' &&
+      named('AED 500.00 spent on your Emirates NBD Credit Card ending 1234') === 'Emirates NBD');
+    ok('markets: a leading bank header resolves',
+      named('ADCB: Your account XXX1234 has been debited with AED 50.00') === 'ADCB');
+    ok("markets: another bank's ATM, a remitter or a merchant name does not resolve",
+      named('Your Card ending 1234 was used for AED 500.00 cash withdrawal at FAB ATM DUBAI MALL') === null &&
+      named('AED 3,000.00 credited to your account XXXX4417 via funds transfer from EMIRATES NBD') === null &&
+      named('AED 120.00 spent on your Card ending 1234 at AL MASHREQ AL ARABI RESTAURANT') === null &&
+      named('AED 80.00 spent on your Card ending 1234 at ADIBA FLOWERS TR LLC') === null &&
+      named('AED 40.00 spent on your Card ending 1234 at LIV GOLF STORE') === null);
+    ok("markets: a transfer's destination account is not a claim",
+      named('AED 2,500.00 has been transferred from your Account XXX1234 to your FAB Account ending 9876. Ref 88123') === null &&
+      named('Your card ending 1234 at HSBC ATM; transfer to your FAB account 9876 completed') === null &&
+      named('AED 2,500.00 transferred from your account XXX1234 into your FAB Account 9876') === null &&
+      named('AED 2,500.00 has been transferred from your ADIB Account XXX1234 to your FAB Account ending 9876') === 'ADIB');
+    ok('markets: a card payment addressed "to your" card is a safe miss, not a wrong bank',
+      named('Payment of AED 1,000.00 to your ADCB Credit Card has been received from your account 1234') === null);
+    ok('markets: a trailing brand period, "Acc", "wallet" and a header line still resolve',
+      named('AED 50.00 spent from your Liv. account ending 1234 at NOON') === 'Liv' &&
+      named('AED 500.00 withdrawn from your ADIB Acc XXX1234 at ATM') === 'ADIB' &&
+      markets.withMarketPackForParsing('SA', () => named('SAR 30.00 paid from your stc pay wallet at JARIR')) === 'stc pay' &&
+      named('RAKBANK\nYour Card ending 1234 was used for AED 90.00 at LULU') === 'RAKBANK' &&
+      named('ADCB Alert Your account XXX1234 has been debited with AED 50.00') === 'ADCB');
+    ok('markets: a "From HSBC:" header resolves',
+      named('From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending 1234') === 'HSBC');
+    ok('markets: an inward credit "to your <bank> account" with no transfer wording resolves',
+      named('Your salary of AED 18,500.00 has been credited to your RAKBANK Account XXXX1234. Available Balance AED 21,400.00') === 'RAKBANK' &&
+      named('Profit of AED 34.22 has been credited to your ADIB Savings Account XXXX1234. Available Balance AED 5,000.00') === 'ADIB' &&
+      named('AED 2,500.00 has been credited to your Wio Personal account from ACME TRADING LLC. Balance AED 5,000.00') === 'Wio');
+    ok('markets: "to your <bank>" next to transfer, payment or debit wording is still not a claim',
+      named('AED 500.00 debited from your account XXX1234 and credited to your FAB account 9876') === null &&
+      named('AED 900.00 sent to your FAB account 9876 from your account XXX1234') === null &&
+      named('Trf of AED 500.00 to your FAB account 9876 from a/c XXX1234. Bal AED 2,100.00') === null &&
+      named('AED 300.00 to your FAB Account 9876 has been processed. Ref TT12345.') === null &&
+      named('AED 1,200.00 moved to your ADCB account 4455 via wire') === null);
+    ok('markets: two banks claimed as yours resolve none',
+      named('Your ADIB Account XXX1234 and your FAB Account ending 9876 were both debited AED 100.00') === null);
+    ok('markets: a body naming no bank resolves none',
+      named('Purchase of AED 120.00 with Debit Card ending 1234') === null && named('') === null);
+    ok('markets: the Saudi pack resolves its own banks',
+      markets.withMarketPackForParsing('SA', () => named('SAR 250.00 spent on your Al Rajhi card ending 1234 at PANDA')) === 'Al Rajhi' &&
+      named('SAR 250.00 spent on your Al Rajhi card ending 1234 at PANDA') === null);
+    const senderless = parseHistoricalMessageRecords([record({ id: id('o'), text: adib, sender: undefined })], {}, NOW);
+    ok('a senderless history record takes its bank from the one the body claims',
+      senderless.parsed.length === 1 && senderless.parsed[0].bankHint === 'ADIB', senderless.parsed[0]);
+    const plan = buildImportPlan(senderless.parsed, BASE, 0, NOW, senderless.declined);
+    ok('the account minted for a senderless record carries that bank name',
+      plan.batch.newAccounts.length === 1 && plan.batch.newAccounts[0].bankName === 'ADIB' &&
+      plan.batch.newAccounts[0].last4 === '4417', plan.batch.newAccounts);
+    const atm = 'AED 250.00 was spent on your ADIB Card ending 4417 at FAB ATM AL WAHDA MALL on 12/07/26. Available Balance: AED 8,240.00';
+    const atmParsed = parseHistoricalMessageRecords([record({ id: id('p'), text: atm, sender: undefined })], {}, NOW);
+    ok("another bank's ATM in the body does not displace the claimed bank",
+      atmParsed.parsed.length === 1 && atmParsed.parsed[0].bankHint === 'ADIB', atmParsed.parsed);
+    const noIssuer = 'AED 500.00 has been withdrawn from your Account XXX1234 at FAB ATM AL WAHDA MALL on 12/07/2026. Available Balance AED 2,900.00';
+    const noIssuerParsed = parseHistoricalMessageRecords([record({ id: id('z'), text: noIssuer, sender: undefined })], {}, NOW);
+    ok('a senderless record that names only another bank keeps no bank hint',
+      noIssuerParsed.parsed.length === 1 && noIssuerParsed.parsed[0].bankHint === undefined, noIssuerParsed.parsed);
+    const transfer = 'AED 2,500.00 has been transferred from your Account XXX1234 to your FAB Account ending 9876 on 12/07/2026. Available Balance AED 2,900.00';
+    const transferParsed = parseHistoricalMessageRecords([record({ id: id('b'), text: transfer, sender: undefined })], {}, NOW);
+    ok("a senderless transfer alert does not adopt the destination bank",
+      transferParsed.parsed.length === 1 && transferParsed.parsed[0].bankHint === undefined, transferParsed.parsed);
+    const withSender = parseHistoricalMessageRecords([record({ id: id('s'), text: adib, sender: 'ENBD' })], {}, NOW);
+    ok('a recognised sender still outranks the bank claimed in the body',
+      withSender.parsed.length === 1 && withSender.parsed[0].bankHint === 'Emirates NBD', withSender.parsed[0]);
+  }
   if (fail > 0) {
     console.error(`\nhistorical-import: ${pass} passed, ${fail} failed`);
     process.exit(1);

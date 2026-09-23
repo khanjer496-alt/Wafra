@@ -117,13 +117,22 @@ function harness(overrides = {}, options = {}) {
       subscribeInboxChanges: listener => { inboxListeners.add(listener); return () => inboxListeners.delete(listener); },
       isSmsScanningAvailable: () => true,
       hasSmsPermission: async () => { calls.permission += 1; return options.permission !== false; },
+      hasSmsDeliveryPermission: async () => true,
       requestSmsPermission: async () => options.permission !== false,
+      requestSmsDeliveryPermission: async () => true,
       isSmsInboxAccessError: error => error?.code === 'ERR_SMS_INBOX_ACCESS',
       openSmsPermissionSettings: async () => {},
     },
+    '@/lib/android-capture-sources': {
+      androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
+      androidNotificationCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.notifications ?? true),
+    },
     '../../modules/notification-reader': { __esModule: true, default: {
       setCaptureEnabled: async enabled => { notificationPolicy = enabled; calls.policy.push(enabled); return true; },
+      addListener: () => ({ remove() {} }),
+      postImportNotice: () => {},
     } },
+    '../../modules/sms-reader': { __esModule: true, default: { getInstantAlerts: () => true } },
     '@/lib/background-relay': {
       enableRelayBackgroundSync: async () => { calls.setup += 1; },
       setChargeAlertsEnabled: async () => {},
@@ -143,9 +152,15 @@ function harness(overrides = {}, options = {}) {
       return { kind: 'up-to-date', source: intent === 'notification-only' ? 'push' : 'sms', transactions: 0, dues: 0,
         bills: 0, healed: 0, newAccounts: 0, transactionIds: [], reviewAlerts: 0 };
     } }) },
+    '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
     '@/lib/haptics': { committed: () => {} },
     '@/lib/i18n': { t: key => key, tf: key => key },
-    '@/lib/notifications': { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} },
+    '@/lib/notifications': {
+      notificationDeliveryAllowed: async () => true,
+      requestNotificationPermission: async () => true,
+      syncDailySummary: async () => {},
+      syncPaymentReminders: async () => {},
+    },
     '@/lib/purchases': purchases,
     '@/lib/relay': { getRelayConfig: async () => null,
       isLegacyShortcutCaptureActive: () => false, retireRelayShortcutCapture: async () => {} },
@@ -153,7 +168,15 @@ function harness(overrides = {}, options = {}) {
     '@/lib/store': { useStore: () => ({ ...store, state }) },
     '@/lib/ios-capture-health': { isCaptureTimestamp: value => Number.isFinite(value) && value > 0 },
     '@/lib/ios-message-onboarding': { loadIosMessageSetupProgress: async () => null },
-  }, { Date: Clock });
+  }, {
+    Date: Clock,
+    // Production intentionally leaves several seconds of quiet foreground time
+    // before maintenance. These tests assert the resulting behavior, not wall
+    // clock latency, so collapse only the hook-owned grace timers to the next
+    // task while preserving the scheduler's own coalescing timers.
+    setTimeout: (callback, _delay, ...args) => setTimeout(callback, 0, ...args),
+    clearTimeout,
+  });
   let model;
   function render() {
     model = runtime.render(() => {
@@ -164,8 +187,9 @@ function harness(overrides = {}, options = {}) {
     runtime.flush();
   }
   async function settle() {
-    // Drain asynchronous boundary completions, then reflect hook state updates.
-    await new Promise(resolve => setImmediate(resolve));
+    // Drain hook-owned next-task grace timers and asynchronous boundary
+    // completions, then reflect hook state updates.
+    await new Promise(resolve => setTimeout(resolve, 10));
     render();
     await new Promise(resolve => setImmediate(resolve));
   }
@@ -175,7 +199,9 @@ function harness(overrides = {}, options = {}) {
     update: async patch => { state = { ...state, ...patch }; render(); await settle(); },
     advance: ms => { now += ms; },
     background: () => { native.AppState.currentState = 'background'; for (const listener of appListeners) listener('background'); },
-    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 280)); await settle(); },
+    // Shipping Android defers source-free resume scans; the hook's grace timer
+    // is collapsed above, so this only needs to let the next task run.
+    resume: async () => { native.AppState.currentState = 'active'; for (const listener of appListeners) listener('active'); await new Promise(r => setTimeout(r, 320)); await settle(); },
     emitInboxChange: () => { for (const listener of inboxListeners) listener(); },
     inboxChanged: async () => { for (const listener of inboxListeners) listener(); await new Promise(r => setTimeout(r, 280)); await settle(); },
     observerCount: () => inboxListeners.size,
@@ -192,13 +218,13 @@ test('a foreground inactive-to-Pro transition scans once without a navigation or
   assert.equal(h.calls.scans, 1, 'Pro activation must retry the previously ineligible scan');
   assert.equal(h.calls.permission, 1);
   assert.deepEqual(h.calls.routes, [], 'the retry is silent, not a paywall interaction');
-  assert.deepEqual(h.calls.toasts, []);
+  assert.deepEqual(h.calls.toasts, ['notifAccessAutoPrompt']);
   for (let index = 0; index < 5; index += 1) await h.update({ transactions: [], entitlementRefresh: index });
   assert.equal(h.calls.scans, 1, 'unchanged eligibility and ledger rerenders cannot make a refresh loop');
   assert.equal(h.calls.setup, 1);
 });
 
-test('reactivation bypasses recent scan freshness, while revocation never reads the inbox', async t => {
+test('reactivation bypasses recent scan freshness while an immediately fresh resume stays quiet', async t => {
   const h = harness({ pro: true }); t.after(h.runtime.cleanup);
   h.render(); await h.settle();
   assert.equal(h.calls.scans, 1);
@@ -209,7 +235,7 @@ test('reactivation bypasses recent scan freshness, while revocation never reads 
   await h.update({ pro: true });
   assert.equal(h.calls.scans, 2, 'the earlier successful scan must not suppress renewed eligibility');
   await h.resume();
-  assert.equal(h.calls.scans, 3, 'Android resume checks new messages even within 30 seconds of the previous read');
+  assert.equal(h.calls.scans, 2, 'a source-free resume inside the freshness window must not repeat the same read');
 });
 
 test('history ownership defers an activation retry without consuming its freshness bypass', async t => {
@@ -406,7 +432,7 @@ test('revocation cancels a queued Android hint and denied permission still preve
   assert.equal(denied.calls.scans, 0);
   assert.equal(denied.model.needsPermission, true);
   assert.deepEqual(denied.calls.routes, []);
-  assert.deepEqual(denied.calls.toasts, []);
+  assert.deepEqual(denied.calls.toasts, ['notifAccessAutoPrompt']);
 });
 
 test('two mounted foreground owners and effect replay join one activation scan', async t => {

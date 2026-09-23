@@ -19,9 +19,9 @@ function harness(rows = [], options = {}) {
       buildInsights: () => { insightCalls += 1; return [{ id: 'one' }, { id: 'two' }]; } },
     '@/lib/leaving-soon': { leavingSoon: (_state, _now, opts) => { calls.upcomingKinds.push(opts.kinds);
       return ['card', 'bill', 'subscription'].filter(kind => !opts.kinds || opts.kinds.includes(kind)).map(kind => ({ kind })); } },
-    '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']) },
+    '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']), internalTransferIdsForState: () => new Set(['internal']) },
     '@/lib/period': { inPeriod: (date) => { periodChecks += 1; return date === '2026-09-06'; }, isCurrentMonth: () => true },
-    '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [] }), worthPrompting: () => !!options.needsCategory },
+    '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }), worthPrompting: () => !!options.needsCategory },
   });
   return { project: (extra = {}) => projectDashboard({ state, period: {}, now: new Date(), ...extra }),
     counts: () => ({ insightCalls, periodChecks, ...calls }) };
@@ -70,19 +70,17 @@ test('Home requests cards and bills without evaluating discarded financial secti
   for (const key of ['comparison', 'foreignActivity', 'insight']) assert.equal(Object.hasOwn(lean, key), false);
 });
 
-test('Home does not scan retained SMS when a review or category prompt already takes priority', () => {
-  for (const options of [{ pending: [{ expiresAt: Date.now() + 60000 }] }, { needsCategory: true }]) {
-    const h = harness([], { ...options, unread: 8 });
-    assert.equal(h.project({ surface: 'home' }).unreadFormats, null, 'null means not computed, not zero formats');
-    assert.equal(h.counts().unread, 0);
-    const full = h.project();
-    assert.equal(full.unreadFormats.count, 8, 'existing full projection still includes every section');
-    assert.equal(h.counts().unread, 1);
-  }
+test('Home does not scan retained SMS when a category prompt already takes priority', () => {
+  const h = harness([], { needsCategory: true, unread: 8 });
+  assert.equal(h.project({ surface: 'home' }).unreadFormats, null, 'null means not computed, not zero formats');
+  assert.equal(h.counts().unread, 0);
+  const full = h.project();
+  assert.equal(full.unreadFormats.count, 8, 'existing full projection still includes every section');
+  assert.equal(h.counts().unread, 1);
 });
 
-test('Home restores exact unread prompt count when reviews expire and no category prompt remains', () => {
-  const h = harness([], { pending: [{ expiresAt: 0 }], unread: 8 });
+test('parser review state no longer hides Home unread-format work', () => {
+  const h = harness([], { pending: [{ expiresAt: Date.now() + 60000 }], unread: 8 });
   const projected = h.project({ surface: 'home' });
   assert.equal(projected.unreadFormats.count, 8);
   assert.equal(projected.unreadFormats.shouldPrompt, true);

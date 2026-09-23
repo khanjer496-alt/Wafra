@@ -25,10 +25,11 @@ import * as Sharing from 'expo-sharing';
 
 import { buildLedgerCsv } from '@/lib/ledger-export';
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
+import { TesterDiagnosticsControl } from '@/components/tester-diagnostics-control';
 import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { isSmsCorpusExportAvailable, sharePersonalDataForReview } from '@/lib/sms-corpus-export';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState as RNAppState,
@@ -52,14 +53,11 @@ import { Block, Row, Section } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { SectionHeader } from '@/components/ui/section-header';
-import { SegmentedControl } from '@/components/ui/segmented-control';
 import { WafraMark } from '@/components/wafra-logo';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useAutoImport } from '@/hooks/use-auto-import';
-import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
-import { uncategorisedMerchants } from '@/lib/uncategorised';
 import {
   clearBackgroundRelayRows,
   getChargeAlertPreference,
@@ -67,6 +65,7 @@ import {
 } from '@/lib/background-relay';
 import {
   cancelDailySummary,
+  notificationDeliveryAllowed,
   requestNotificationPermission,
   syncDailySummary,
 } from '@/lib/notifications';
@@ -84,8 +83,9 @@ import {
   recordFounderTap,
 } from '@/lib/founder-pro';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
-import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
+import { ledgerCurrencyDisplay, marketCurrencyCode } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { configuredPublicUrl } from '@/lib/public-links';
 // Deliberately this branch's relay client, not the other one's isRelaySupported/
@@ -116,6 +116,13 @@ import {
   buildExpenseReportHtml,
   reportExpenses,
 } from '@/lib/reimbursement-report';
+import type { OnboardingAlertDelivery } from '@/lib/types';
+import {
+  ALERT_DELIVERY_PRESETS,
+  onboardingHistoryGap,
+  onboardingNoAutomaticCapture,
+  onboardingProfileWithAlerts,
+} from '@/lib/onboarding';
 import { ClearAllError, useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
@@ -150,9 +157,9 @@ export default function SettingsScreen() {
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
+    setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
-    setMarket,
     setUiLanguage,
     exportBackup,
     getStateSnapshot,
@@ -161,6 +168,7 @@ export default function SettingsScreen() {
     clearAll,
     setThemePreference,
     unlockFounderPro,
+    setOnboardingProfile,
   } = useStore();
 
   const themeChoice: ThemePreference =
@@ -168,9 +176,6 @@ export default function SettingsScreen() {
       ? state.themePreference
       : 'system';
 
-  const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
-  const hasGlobalLedger = state.ledgerMoney != null &&
-    state.ledgerMoney.currency !== 'AED' && state.ledgerMoney.currency !== 'SAR';
   const language: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
   const reviewAlertCount = state.reviewTray.pending.filter(
     (item) => item.expiresAt > Date.now(),
@@ -189,18 +194,6 @@ export default function SettingsScreen() {
     recoverIosCaptureQueue,
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
-  const formats = useMemo(() => unreadFormatCount(state), [state]);
-  // Home only offers the categorise prompt above a floor, so a user who sorts
-  // their way down to two merchants loses the only route to the screen with
-  // the job half done. This row is the permanent way in, and it stays visible
-  // at zero to say so.
-  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
-  // A count of 0 is not a verdict on every device — see noFormatsReason().
-  const noFormats = noFormatsReason({
-    relayPlatform: isRelayPlatform(),
-    localCaptureAvailable: isCaptureAvailable(),
-    privateMode: state.privateMode,
-  });
   const version = Constants.expoConfig?.version ?? '1.0.0';
   const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
@@ -209,7 +202,7 @@ export default function SettingsScreen() {
     Platform.OS !== 'web' && isFounderUnlockBuild();
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
-  const { section } = useLocalSearchParams<{ section?: string }>();
+  const { section } = useLocalSearchParams<{ section?: string; onboarding?: string }>();
   const scrollRef = useRef<ScrollView>(null);
   const importsOffset = useRef<number | null>(null);
   const contentHeight = useRef(0);
@@ -252,13 +245,16 @@ export default function SettingsScreen() {
   }, []);
 
   const [instantAlerts, setInstantAlerts] = useState(false);
+  const [notificationDeliveryEnabled, setNotificationDeliveryEnabled] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
   const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
+  const notifAvailable = Platform.OS === 'android' &&
+    isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   // The per-charge alert exists on both platforms by two different mechanisms
   // and on the web by neither, so the notification group's closing hairline
   // has to be drawn under whichever row is actually last.
   const legacyChargeAlertsAvailable = isLegacyShortcutCaptureActive(relay);
-  const chargeAlertsAvailable = instantAvailable || legacyChargeAlertsAvailable;
+  const chargeAlertsAvailable = instantAvailable || notifAvailable || legacyChargeAlertsAvailable;
 
   const refreshRelayStatus = useCallback(async (): Promise<void> => {
     const generation = ++relayStatusRefreshGeneration.current;
@@ -382,10 +378,12 @@ export default function SettingsScreen() {
   const toggleSms = async (enabled: boolean) => {
     if (!enabled) {
       try {
-        // This is the immediate in-app off switch. Android cannot revoke its
-        // own runtime permission, so the durable preference is the barrier;
-        // system settings are offered as the optional second layer.
-        await setCaptureOptOut(true);
+        // Android cannot revoke READ_SMS itself, so the durable source choice
+        // is the real in-app barrier. Keep bank-app notifications alive when
+        // the user selected that independent source.
+        const currentSources = resolvedAndroidCaptureSources(getStateSnapshot());
+        await setAndroidCaptureSources({ ...currentSources, sms: false });
+        if (!currentSources.notifications) await setCaptureOptOut(true);
       } catch {
         Alert.alert(t('capturePreferenceFailed'));
         return;
@@ -409,6 +407,8 @@ export default function SettingsScreen() {
     setSmsGranted(granted);
     if (granted) {
       try {
+        const currentSources = resolvedAndroidCaptureSources(getStateSnapshot());
+        await setAndroidCaptureSources({ ...currentSources, sms: true });
         await setCaptureOptOut(false);
       } catch {
         Alert.alert(t('capturePreferenceFailed'));
@@ -468,10 +468,15 @@ export default function SettingsScreen() {
 
   const toggleInstantAlerts = async (enabled: boolean) => {
     if (enabled) {
-      const receivesSms = await requestSmsDeliveryPermission();
-      if (!receivesSms) {
-        Alert.alert(t('instantAlertsSmsPermissionTitle'), t('instantAlertsSmsPermissionBody'));
-        return;
+      // Notification-only bank capture should not force RECEIVE_SMS just to
+      // let Wafra confirm an imported transaction. Ask for SMS delivery only
+      // when this device is actually using the SMS path.
+      if (smsGranted) {
+        const receivesSms = await requestSmsDeliveryPermission();
+        if (!receivesSms) {
+          Alert.alert(t('instantAlertsSmsPermissionTitle'), t('instantAlertsSmsPermissionBody'));
+          return;
+        }
       }
       // Android 13 needs the notification permission before anything can be
       // posted. Asking here rather than at delivery time means the failure is
@@ -523,9 +528,12 @@ export default function SettingsScreen() {
     }
     const granted = await requestNotificationPermission();
     if (!granted) {
+      setNotificationDeliveryEnabled(false);
+      setDailySummary(false);
       Alert.alert(t('notificationsOff'), t('notificationsOffBody'));
       return;
     }
+    setNotificationDeliveryEnabled(true);
     setDailySummary(true);
     // Schedule from the state we are about to have, not the one in this
     // closure: the dispatch above has not re-rendered yet, and syncDailySummary
@@ -533,17 +541,28 @@ export default function SettingsScreen() {
     await syncDailySummary({ ...state, dailySummary: true });
   };
 
-  /**
-   * Defaults ON, unlike Android's per-charge banner, and the asymmetry is
-   * deliberate: Android's is a heads-up over whatever is on screen, while this
-   * one is posted passively on a device that iOS setup only asked provisional
-   * authorization for — it lands quietly in Notification Center. Only an
-   * explicit stored `false` turns it off, so a user who never opens this screen
-   * still gets the alerts the relay was set up to deliver.
-   */
+  // A stored preference is not an OS grant. In particular, older builds
+  // defaulted Daily Summary to true before iOS had ever shown its permission
+  // sheet. Reconcile whenever Settings is focused so the switch can never claim
+  // ON while the phone will deliver nothing.
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void notificationDeliveryAllowed()
+      .then((allowed) => {
+        if (!active) return;
+        setNotificationDeliveryEnabled(allowed);
+        if (!allowed && getStateSnapshot().dailySummary) setDailySummary(false);
+      })
+      .catch(() => {
+        if (active) setNotificationDeliveryEnabled(false);
+      });
+    return () => { active = false; };
+  }, [getStateSnapshot, setDailySummary]));
+
+  /** Per-charge Wafra alerts default on; the OS remains the final sound/banner control. */
   const [chargeAlerts, setChargeAlerts] = useState(true);
-  /** Which region picker is open, if any. Only one can be. */
-  const [regionSheet, setRegionSheet] = useState<'country' | 'language' | null>(null);
+  /** Which compact preference picker is open, if any. Only one can be. */
+  const [preferenceSheet, setPreferenceSheet] = useState<'appearance' | 'language' | 'alerts' | null>(null);
   /**
    * The one confirmation on this screen, whichever is currently being asked.
    *
@@ -602,19 +621,29 @@ export default function SettingsScreen() {
     }
   };
 
-  const notifAvailable = Platform.OS === 'android' &&
-    isBankNotificationCaptureAvailable(NotificationReader?.isAvailable?.() === true);
   const [notifEnabled, setNotifEnabled] = useState(false);
+  const selectedAndroidSources = resolvedAndroidCaptureSources(state);
+  const smsSourceReady = smsGranted && selectedAndroidSources.sms;
+  const instantAlertSourceReady = smsSourceReady || notifEnabled;
   const pendingNotificationConsent = useRef(false);
   useEffect(() => {
     const refresh = () => {
-      try { setNotifEnabled(notifAvailable && NotificationReader?.isEnabled() === true); }
+      try {
+        const selected = resolvedAndroidCaptureSources(getStateSnapshot());
+        setNotifEnabled(notifAvailable && selected.notifications &&
+          NotificationReader?.isEnabled() === true &&
+          NotificationReader?.hasSystemAccess?.() === true);
+      }
       catch { setNotifEnabled(false); }
     };
     refresh();
-    if (notifAvailable && !state.captureOptOut && proActive) {
-      void NotificationReader?.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state))
-        .then(refresh).catch(() => {});
+    if (notifAvailable && selectedAndroidSources.notifications && !state.captureOptOut && proActive) {
+      const reader = NotificationReader;
+      const expiresAt = bankNotificationAdmissionExpiresAt(getStateSnapshot());
+      const configure = reader?.setSourceConfiguration
+        ? reader.setSourceConfiguration(true, expiresAt)
+        : reader?.setCaptureEnabled(true, expiresAt);
+      void configure?.then(refresh).catch(() => {});
     }
     const subscription = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
@@ -625,14 +654,21 @@ export default function SettingsScreen() {
       try { granted = reader.hasSystemAccess(); } catch { /* Treat an unreadable OS grant as absent. */ }
       if (!granted || !proActive) { refresh(); return; }
       void (async () => {
-        const wasOptedOut = state.captureOptOut;
+        // The listener outlives the render that registered it; read the live
+        // store rather than a snapshot captured when the effect last ran.
+        const current = getStateSnapshot();
+        const wasOptedOut = current.captureOptOut;
         try {
           // A canceled system permission flow must leave a prior global
           // opt-out intact. Resume only after the OS confirms this grant.
+          const sources = resolvedAndroidCaptureSources(current);
+          await setAndroidCaptureSources({ ...sources, notifications: true });
           if (wasOptedOut) await setCaptureOptOut(false);
-          if (!(await reader.setCaptureEnabled(true, bankNotificationAdmissionExpiresAt(state)))) {
-            throw new Error('notification_capture_unavailable');
-          }
+          // The bank-listener grant lets Wafra READ bank-app notifications.
+          // A separate Android permission controls whether Wafra can show its
+          // own visible confirmation. Ask here, after the user explicitly
+          // enabled bank notifications — never on app launch.
+          await requestNotificationPermission().catch(() => false);
           refresh();
         } catch {
           if (wasOptedOut) await setCaptureOptOut(true).catch(() => {});
@@ -642,7 +678,8 @@ export default function SettingsScreen() {
       })();
     });
     return () => subscription.remove();
-  }, [notifAvailable, proActive, setCaptureOptOut, state.captureOptOut]);
+  }, [getStateSnapshot, notifAvailable, proActive, setAndroidCaptureSources,
+    setCaptureOptOut, state.androidCaptureSources?.notifications, state.captureOptOut]);
   const onNotificationAccess = () => {
     const reader = NotificationReader;
     if (!notifAvailable || !reader) {
@@ -665,57 +702,6 @@ export default function SettingsScreen() {
       },
     });
   };
-
-  /* ── Region ─────────────────────────────────────────────────────────── */
-
-  const marketName = (id: string) => t(id === 'SA' ? 'saudiName' : 'uaeName');
-
-  /**
-   * The country pack is a choice, not a cycle.
-   *
-   * It used to be one tap on a chevron row, advancing to the next pack in the
-   * list modulo its length: no picker, no confirmation, no undo. Nothing
-   * converts the ledger when it moves, so the same stored 125050 fils printed
-   * "AED 1,250.50" before the tap and "SAR 1,250.50" after it — every figure
-   * in the app relabelled in a currency the money was never in. It also swaps
-   * the bank and merchant registry the parser matches senders against. A
-   * thumb landing short of Language was enough to do all of that, and nothing
-   * on screen said so.
-   *
-   * Now the row opens the list and the user names the country they mean.
-   *
-   * The list is a ChoiceSheet rather than an alert. `Alert.alert` cannot be
-   * the control here on either platform this app actually ships to plus the
-   * one it exports to: Android draws at most three alert buttons — the two
-   * packs plus Cancel, already at the ceiling — and on react-native-web
-   * `Alert.alert` is an empty method, so the row did nothing at all.
-   */
-  /**
-   * A pack denominated differently from money already recorded is SHOWN and
-   * refused, with the reason on the row.
-   *
-   * `setMarket` answers such a request by changing nothing at all — the right
-   * answer, because there is no rate that could convert a ledger of
-   * hand-entered amounts, bill totals and statement balances, and a plausible
-   * wrong number is worse than an honest label. But a silent no-op is the
-   * same class of defect as the alert that never opened: the user taps, the
-   * app does nothing, and nothing says why. So the constraint is stated
-   * before the tap rather than swallowed after it.
-   *
-   * Shown rather than omitted: a user hunting for Saudi Arabia in a list that
-   * does not contain it concludes the app cannot do Saudi Arabia at all.
-   */
-  const marketChoices = MARKETS.map((m) => {
-    const allowed = canSelectMarket(m.id);
-    return {
-      value: m.id,
-      label: marketName(m.id),
-      detail: allowed
-        ? m.currency.display
-        : tf('marketPinned', { currency: ledgerCurrencyDisplay() }),
-      disabled: !allowed,
-    };
-  });
 
   const languagePreference = state.languagePreference ?? 'system';
   const ledgerCurrencyLocked = ledgerStateHasMoney(state);
@@ -750,6 +736,30 @@ export default function SettingsScreen() {
       value: code,
       label: LANGUAGE_NAMES[code],
     })),
+  ];
+  /**
+   * The alert-delivery answer, after setup.
+   *
+   * Onboarding asks it, but the people it was written for are already
+   * onboarded — the tester whose bank never texted him had finished setup
+   * months before the question existed. Leaving it in the first run only
+   * would have answered nobody's actual problem, so it lives here too, in the
+   * section that holds the fix it points at.
+   */
+  const alertsAnswer = state.onboardingProfile?.alerts ?? null;
+  const alertDeliveryChoices = ALERT_DELIVERY_PRESETS.map((preset) => ({
+    value: preset.id,
+    label: t(preset.titleKey),
+    detail: t(preset.detailKey),
+  }));
+  const chooseAlertDelivery = (next: OnboardingAlertDelivery) => {
+    setOnboardingProfile(onboardingProfileWithAlerts(state.onboardingProfile, next, Date.now()));
+  };
+
+  const appearanceChoices: { value: ThemePreference; label: string; detail?: string }[] = [
+    { value: 'system', label: t('themeSystem'), detail: t('themeSystemDetail') },
+    { value: 'light', label: t('themeLight') },
+    { value: 'dark', label: t('themeDark') },
   ];
 
   /* ── Data ───────────────────────────────────────────────────────────── */
@@ -826,7 +836,7 @@ export default function SettingsScreen() {
     // stretch an "all time" report back to its date and print on it as a
     // reimbursable expense.
     const liveAccounts = liveAccountIds(state.accounts);
-    const internal = internalTransferIds(state.transactions, state.accounts);
+    const internal = internalTransferIdsForState(state);
     const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
     const currentMonth = monthKey(new Date());
     const from =
@@ -847,7 +857,7 @@ export default function SettingsScreen() {
       const html = buildExpenseReportHtml({
         transactions: state.transactions,
         accounts: state.accounts,
-        currency: state.ledgerMoney?.currency ?? market.currency.code,
+        currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),
         currencyExponent: state.ledgerMoney?.exponent ?? 2,
         language: state.language === 'ar' ? 'ar' : 'en',
         from,
@@ -1268,33 +1278,30 @@ export default function SettingsScreen() {
           </Block>
         </Section>
 
-        <Section index={1} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
-          <SectionHeader title={t('settingsMoneyHeader')} />
-          {hasGlobalLedger ? (
-            <Row last>
-              <View style={styles.rowText}>
-                <ThemedText type="small">{t('parserPack')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {tf('globalParserPackDetail', { currency: state.ledgerMoney!.currency })}
-                </ThemedText>
-              </View>
-            </Row>
-          ) : linkRow(
-            t('parserPack'),
-            tf('parserPackDetail', {
-              country: marketName(market.id),
-              currency: market.currency.display,
-            }),
-            () => setRegionSheet('country'),
-            { last: true },
-          )}
-        </Section>
-
-        <Section index={2} testID="settings-imports" onLayout={({ nativeEvent }) => {
+        <Section index={1} testID="settings-imports" onLayout={({ nativeEvent }) => {
           importsOffset.current = nativeEvent.layout.y;
           scrollToRequestedSection();
         }} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
+          {linkRow(
+            t('settingsAlertDeliveryTitle'),
+            alertsAnswer
+              ? t(ALERT_DELIVERY_PRESETS.find((preset) => preset.id === alertsAnswer)!.titleKey)
+              : t('settingsAlertDeliveryUnset'),
+            () => setPreferenceSheet('alerts'),
+          )}
+          {linkRow(
+            t('statementImportTitle'),
+            // The answer above decides which of these two sentences is true,
+            // so the fix reads as the consequence of what the person just
+            // told us rather than as an unexplained suggestion.
+            onboardingNoAutomaticCapture(alertsAnswer)
+              ? t('statementImportNoCaptureDetail')
+              : onboardingHistoryGap(alertsAnswer)
+                ? t('statementImportGapDetail')
+                : t('statementImportSettingsDetail'),
+            () => router.push('/statement-import'),
+          )}
           {Platform.OS === 'ios' && linkRow(
             t('iosSetupTitle'),
             t('iosMessageSettingsDetail'),
@@ -1303,8 +1310,8 @@ export default function SettingsScreen() {
           {isSmsScanningAvailable() &&
             switchRow(
               t('readBankSms'),
-              t(smsGranted && !state.captureOptOut ? 'smsGrantedLocal' : 'smsOffNoImport'),
-              smsGranted && !state.captureOptOut,
+              t(smsSourceReady ? 'smsGrantedLocal' : 'smsOffNoImport'),
+              smsSourceReady,
               toggleSms,
             )}
           {state.historyImport && state.historyImport.status !== 'complete' ? (
@@ -1389,31 +1396,31 @@ export default function SettingsScreen() {
               t('bankAppNotifsTitle'),
               t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
               gated(onNotificationAccess),
-              { last: true, pro: true },
+              { pro: true },
             )}
         </Section>
 
-        <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsNotificationsHeader')} />
           {switchRow(
             t('dailySummarySetting'),
-            state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
-            state.dailySummary,
+            state.dailySummary && notificationDeliveryEnabled ? t('dailySummaryOn') : t('dailySummaryOff'),
+            state.dailySummary && notificationDeliveryEnabled,
             (next) => void toggleDailySummary(next),
             !chargeAlertsAvailable,
           )}
-          {instantAvailable &&
+          {(instantAvailable || notifAvailable) &&
             switchRow(
               t('alertEveryCharge'),
-              smsGranted
+              instantAlertSourceReady
                 ? instantAlerts
                   ? t('instantAlertsOn')
                   : t('instantAlertsOff')
-                : t('instantAlertsNeedSms'),
-              instantAlerts && smsGranted,
+                : t('instantAlertsNeedBankSource'),
+              instantAlerts && instantAlertSourceReady,
               (next) => {
-                if (!smsGranted) {
-                  Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
+                if (!instantAlertSourceReady) {
+                  Alert.alert(t('turnOnBankCaptureFirst'), t('turnOnBankCaptureFirstBody'));
                   return;
                 }
                 requestInstantAlertsChange(next);
@@ -1430,34 +1437,27 @@ export default function SettingsScreen() {
             )}
         </Section>
 
-        <Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
-          <SectionHeader title={t('settingsAppearanceLanguageHeader')} />
-          <Block>
-            <SegmentedControl
-              label={t('appearanceHeader')}
-              segments={[
-                { value: 'system', label: t('themeSystem') },
-                { value: 'light', label: t('themeLight') },
-                { value: 'dark', label: t('themeDark') },
-              ]}
-              value={themeChoice}
-              onChange={setThemePreference}
-            />
-            <ThemedText type="meta" themeColor="textTertiary">
-              {themeChoice === 'system'
-                ? t('followingPhone')
-                : tf('pinnedTheme', {
-                    theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
-                  })}
-            </ThemedText>
-          </Block>
+        <Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+          <SectionHeader title={t('settingsPreferencesHeader')} />
+          {linkRow(
+            t('appearanceHeader'),
+            themeChoice === 'system'
+              ? t('themeSystemDetail')
+              : t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
+            () => setPreferenceSheet('appearance'),
+          )}
           {linkRow(t('language'), languagePreference === 'system'
             ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
-            : LANGUAGE_NAMES[language], () => setRegionSheet('language'))}
+            : LANGUAGE_NAMES[language], () => setPreferenceSheet('language'))}
           {linkRow(
             t('homeCustomizeTitle'),
             t('homeCustomizeDetail'),
             () => router.push('/home-customize'),
+          )}
+          {Platform.OS !== 'web' && linkRow(
+            t('settingsViewOnboarding'),
+            t('settingsViewOnboardingDetail'),
+            () => router.setParams({ onboarding: 'preview' }),
           )}
           {ledgerCurrencyLocked ? (
             <Row
@@ -1479,7 +1479,7 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('privacyHeader')} />
           {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
           {linkRow(t('messagesPrivacy'), t('privacyBuiltInDetail'), () => setPrivacyDetailsVisible(true), { last: true })}
@@ -1493,33 +1493,21 @@ export default function SettingsScreen() {
           )}
         </Section>
 
-        <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={words.needsReview} />
           {reviewAlertCount > 0 && linkRow(
-            t('reviewAlertsTitle'),
+            words.reviewTitle,
             tf('reviewAlertsSettingsCount', { count: reviewAlertCount }),
             () => router.push('/review-alerts'),
           )}
           {linkRow(
             t('sortShops'),
-            unsorted.merchants.length > 0
-              ? tf('sortShopsCount', {
-                  count: unsorted.merchants.length,
-                  s: unsorted.merchants.length === 1 ? '' : 's',
-                })
-              : t('sortShopsNone'),
+            t('sortShopsSettingsDetail'),
             () => router.push('/categorise'),
           )}
           {linkRow(
             t('improveAccuracy'),
-            formats > 0
-              ? tf('unreadFormatsCount', {
-                  count: formats,
-                  s: formats === 1 ? '' : 's',
-                })
-              : noFormats === 'none-found'
-                ? t('noUnrecognized')
-                : t('formatsNotKeptRow'),
+            t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
           )}
           <SectionHeader title={t('dataHeader')} />
@@ -1554,7 +1542,7 @@ export default function SettingsScreen() {
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
         </Section>
 
-        <Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
+        <Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('supportHeader')} />
           {linkRow(
             t('sendFeedback'),
@@ -1599,9 +1587,10 @@ export default function SettingsScreen() {
               Wafra {version}
             </ThemedText>
           </View>
+          <TesterDiagnosticsControl />
         </Section>
 
-        <Section index={8} style={styles.danger}>
+        <Section index={7} style={styles.danger}>
           <SectionHeader title={t('settingsDangerHeader')} />
           <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
         </Section>
@@ -1623,17 +1612,28 @@ export default function SettingsScreen() {
       </BottomSheet>
 
       <ChoiceSheet
-        visible={regionSheet === 'country'}
-        onClose={() => setRegionSheet(null)}
-        title={t('parserPack')}
-        body={t('parserPackPickerBody')}
-        options={marketChoices}
-        value={market.id}
-        onSelect={setMarket}
+        visible={preferenceSheet === 'alerts'}
+        onClose={() => setPreferenceSheet(null)}
+        // The caps header takes the noun; the question and its reason go in
+        // the slots written for a sentence, or the sheet shouts the question.
+        title={t('settingsAlertDeliveryHeader')}
+        question={t('onboardAlertsTitle')}
+        body={t('onboardAlertsBody')}
+        options={alertDeliveryChoices}
+        value={alertsAnswer ?? undefined}
+        onSelect={chooseAlertDelivery}
       />
       <ChoiceSheet
-        visible={regionSheet === 'language'}
-        onClose={() => setRegionSheet(null)}
+        visible={preferenceSheet === 'appearance'}
+        onClose={() => setPreferenceSheet(null)}
+        title={t('appearanceHeader')}
+        options={appearanceChoices}
+        value={themeChoice}
+        onSelect={setThemePreference}
+      />
+      <ChoiceSheet
+        visible={preferenceSheet === 'language'}
+        onClose={() => setPreferenceSheet(null)}
         title={t('language')}
         options={languageChoices}
         value={languagePreference}

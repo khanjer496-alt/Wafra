@@ -30,15 +30,28 @@ export interface ImportCapabilities {
   };
 }
 
+export interface StatementImportCoverage {
+  sourceKey: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface PdfImportAccepted {
   acceptedRows: number;
+  /** Date-led money lines the relay would not read; 0 from a relay that predates the field. */
+  rejectedRows: number;
+  /** Accepted + rejected rows; synthesized for an older relay response. */
+  totalRows: number;
   pages: number;
+  coverage: StatementImportCoverage | null;
 }
 
 export interface CsvImportAccepted {
   acceptedRows: number;
   rejectedRows: number;
   totalRows: number;
+  coverage: StatementImportCoverage | null;
 }
 
 export interface EmailForwardingCredential {
@@ -56,7 +69,10 @@ export type CloudImportErrorCode =
   | 'too_large'
   | 'too_many_pages'
   | 'too_many_rows'
+  | 'pdf_too_long'
   | 'unreadable_pdf'
+  | 'pdf_password_required'
+  | 'pdf_password_incorrect'
   | 'unsupported_statement_format'
   | 'rate_limited'
   | 'queue_full'
@@ -156,10 +172,34 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
   };
 }
 
+function parseStatementCoverage(value: unknown): StatementImportCoverage | null {
+  if (value === null || value === undefined) return null;
+  const row = object(value);
+  if (!row || typeof row.sourceKey !== 'string' || row.sourceKey.length < 1 || row.sourceKey.length > 80 ||
+      typeof row.label !== 'string' || row.label.length < 1 || row.label.length > 80 ||
+      typeof row.startDate !== 'string' || typeof row.endDate !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(row.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(row.endDate) ||
+      row.startDate > row.endDate) return null;
+  return { sourceKey: row.sourceKey, label: row.label, startDate: row.startDate, endDate: row.endDate };
+}
+
 export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null {
   const body = object(value);
   if (!positiveInt(body?.acceptedRows) || !positiveInt(body.pages)) return null;
-  return { acceptedRows: body.acceptedRows, pages: body.pages };
+  // Optional so an older relay's response still parses; present but malformed
+  // is a different relay contract and is refused like any other field.
+  const rejectedRows = body.rejectedRows === undefined ? 0 : body.rejectedRows;
+  if (!nonNegativeInt(rejectedRows)) return null;
+  const totalRows = body.totalRows === undefined
+    ? body.acceptedRows + rejectedRows
+    : body.totalRows;
+  if (!positiveInt(totalRows) || body.acceptedRows + rejectedRows !== totalRows) return null;
+  const parsedCoverage = parseStatementCoverage(body.coverage);
+  if (body.coverage !== null && body.coverage !== undefined && !parsedCoverage) return null;
+  // Defensive compatibility: an older relay may send a min/max range even when
+  // it also admits skipped rows. Do not persist that range as complete locally.
+  const coverage = rejectedRows === 0 ? parsedCoverage : null;
+  return { acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage };
 }
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
@@ -170,10 +210,13 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
     !positiveInt(body.totalRows) ||
     body.acceptedRows + body.rejectedRows !== body.totalRows
   ) return null;
+  const coverage = parseStatementCoverage(body.coverage);
+  if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
   return {
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
+    coverage,
   };
 }
 
@@ -201,7 +244,10 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'too_large',
   'too_many_pages',
   'too_many_rows',
+  'pdf_too_long',
   'unreadable_pdf',
+  'pdf_password_required',
+  'pdf_password_incorrect',
   'unsupported_statement_format',
   'rate_limited',
   'queue_full',

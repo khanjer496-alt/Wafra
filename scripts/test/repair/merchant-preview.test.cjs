@@ -146,7 +146,7 @@ test('mixed source income preview, count, average and footer all use exact name,
     accounts: [{ id: 'bank' }, { id: 'hidden', archived: true }] });
   assert.equal(walk(byId(h.tree, 'merchant-total-received')).find(n => n.type === 'Money').props.fils, 808);
   assert.equal(byId(h.tree, 'merchant-income-count').props.children, 8);
-  assert.ok(walk(h.tree).some(n => n.type === 'Money' && n.props.type === 'smallBold' && n.props.fils === 101));
+  assert.ok(walk(h.tree).some(n => n.type === 'Money' && n.props.type === 'subtitle' && n.props.fils === 101));
   assert.deepEqual(Array.from(listIn(h.tree).props.data, tx => tx.id), ['receipt-7', 'receipt-6', 'receipt-5', 'receipt-4', 'receipt-3', 'receipt-2']);
   assert.equal(walk(h.tree).find(n => n.props?.accessibilityLiveRegion === 'polite').props.children.join(''), '6 / 8',
     'the preview states how many of the eight counted payments are actually shown');

@@ -1,19 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
-import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
+import { accountDisplayName, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Chip, Toggle } from '@/components/ui/controls';
-import { Block, LabelTable } from '@/components/ui/layout';
+import { Icon } from '@/components/ui/icon';
+import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
+import { TextField } from '@/components/ui/text-field';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
@@ -57,6 +59,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [accountSearch, setAccountSearch] = useState('');
   /**
    * The merchant-rule question, frozen at the moment Save was pressed.
    *
@@ -97,7 +101,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
     setIsTransfer(isLedgerTransfer(transaction));
-  }, [transaction]);
+    // Keyed on the entry's id, not the object. Callers that hold the row in
+    // their own state pass a stable reference, but the assistant's evidence
+    // sheet derives it from a map rebuilt out of the store — so a background
+    // import tick handed this a new object for the SAME entry and wiped the
+    // fields the user was part-way through typing, flipping `editing` off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transaction?.id]);
 
   /**
    * How many OTHER entries "yes, update all" would move.
@@ -128,35 +138,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     ).length;
   };
 
-  // Read-only hint can scan once per selected transaction/store snapshot. Do
-  // not tie this to the editable title: that caused a full-ledger scan on
-  // every keystroke while the user was typing in the description field.
-  const sameMerchantCount = useMemo(
-    () => transaction ? countMerchantMatches(transaction.title, transaction.category) : 0,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [transaction, state.transactions],
-  );
-
-  const sameBillCount = useMemo(() => {
-    if (!transaction?.billIdentity || transaction.paymentFlowSide !== 'receipt') return 0;
-    return state.transactions.filter((candidate) =>
-      candidate.id !== transaction.id &&
-      billAliasAppliesTo(candidate, transaction.title, transaction.billIdentity!)).length;
-  }, [transaction, state.transactions]);
-
-  const hasTransaction = transaction !== null;
-  const transferState = useMemo(
-    () => hasTransaction ? reconcileTransfers(state.transactions, state.accounts) : null,
-    [hasTransaction, state.transactions, state.accounts],
-  );
-
-  if (!transaction || !transferState) return null;
+  if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
   const transferReview = isTransferCandidate(transaction);
   const transferWords = transferReviewCopy();
-  const confirmedTransfer = isLedgerTransfer(transaction) || transferState.internalIds.has(transaction.id);
-  const pendingTransfer = transferState.pendingIds.has(transaction.id);
+  const ownership = transferOwnership(transaction);
+  const confirmedTransfer = isLedgerTransfer(transaction);
+  const confirmedOwnTransfer = ownership === 'own';
+  const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
   const categories = income ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
@@ -189,7 +179,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         billIdentity: transaction.billIdentity!,
         title: merchant,
         category,
-        count: sameBillCount,
+        count: state.transactions.filter((candidate) =>
+          candidate.id !== transaction.id &&
+          billAliasAppliesTo(candidate, transaction.title, transaction.billIdentity!)).length,
       });
       return;
     }
@@ -253,16 +245,14 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             />
           </View>
       )}>
-      <View style={styles.head}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
-        <View style={styles.headText}>
-          <ThemedText type="heading" style={{ textAlign: 'center' }}>
-            {transaction.title}
-          </ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">
-            {friendlyDate(transaction.date, toISODate(new Date()))}
-          </ThemedText>
-        </View>
+      <View style={[styles.head, { borderColor: theme.cardBorder }]}>
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />
+        <ThemedText type="heading" style={styles.headTitle} numberOfLines={2}>
+          {transaction.title}
+        </ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
+          {friendlyDate(transaction.date, toISODate(new Date()))}
+        </ThemedText>
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
             −73. Lists round; the place you go to check does not. */}
@@ -277,6 +267,19 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         />
       </View>
 
+      {(confirmedOwnTransfer || pendingTransfer) && (
+        <View
+          testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
+          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="smallBold">
+            {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
+          </ThemedText>
+        </View>
+      )}
+
       {transferReview && <View style={styles.field} testID="entry-transfer-review">
         {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
         <Button variant="outline" wrapLabel label={transferWords.title} onPress={() => {
@@ -288,15 +291,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
-      {!editing && transaction.paymentFlowSide === 'receipt' && transaction.billIdentity &&
-        transaction.category === 'other' && sameBillCount > 0 && (
-          <Block>
-            <ThemedText type="smallBold">{t('registeredBillPayment')}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {tf('billPatternHint', { count: sameBillCount + 1 })}
-            </ThemedText>
-          </Block>
-        )}
 
       {editing ? (
         <>
@@ -384,16 +378,30 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             <ThemedText type="meta" themeColor="textTertiary">
               {t('account')}
             </ThemedText>
-            <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {state.accounts.map((a) => (
-                <Chip
-                  key={a.id}
-                  label={a.name}
-                  active={accountId === a.id}
-                  onPress={() => setAccountId(a.id)}
-                />
-              ))}
-            </ScrollView>
+            {(() => {
+              const selected = state.accounts.find((a) => a.id === accountId) ?? null;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={selected ? `${t('account')}: ${accountDisplayName(selected)}` : t('account')}
+                  onPress={() => setAccountPickerOpen(true)}
+                  style={({ pressed }) => [
+                    styles.accountTrigger,
+                    {
+                      borderColor: selected ? selected.color : theme.controlBorder,
+                      backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                    },
+                  ]}>
+                  {selected ? <>
+                    <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
+                    <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
+                  </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
+                    {t('account')}
+                  </ThemedText>}
+                  <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+                </Pressable>
+              );
+            })()}
           </View>
 
           <View style={styles.transferRow}>
@@ -419,7 +427,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               {
                 label: t('category'),
                 value: confirmedTransfer || pendingTransfer ? (
-                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown : t('transferLabel')}</ThemedText>
+                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown
+                    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
                 ) : (
                   <ThemedText
                     type="small"
@@ -432,7 +441,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               },
               {
                 label: t('account'),
-                value: <ThemedText type="small">{account?.name ?? t('unassigned')}</ThemedText>,
+                value: <ThemedText type="small">{account ? accountDisplayName(account) : t('unassigned')}</ThemedText>,
               },
               {
                 label: t('source'),
@@ -488,20 +497,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             ]}
           />
 
-          {/* The merchant override already exists in the store; this is the
-              one place the user can see what it will do before using it. */}
-          {!confirmedTransfer && !pendingTransfer && sameMerchantCount > 0 && (
-            <Block>
-              <ThemedText type="default" themeColor="textSecondary">
-                {tf('merchantCategoryRule', {
-                  category: categoryLabel(meta),
-                  count: sameMerchantCount,
-                  merchant: transaction.title,
-                  s: sameMerchantCount === 1 ? '' : 's',
-                })}
-              </ThemedText>
-            </Block>
-          )}
+
 
 
         </>
@@ -603,6 +599,50 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           )}
         />
       )}
+      <BottomSheet
+        visible={accountPickerOpen}
+        onClose={() => { setAccountPickerOpen(false); setAccountSearch(''); }}
+        title={t('account')}
+        testID="entry-detail-account-picker">
+        <View style={styles.pickerContent}>
+          <TextField
+            label={t('searchLabel')}
+            value={accountSearch}
+            onChangeText={setAccountSearch}
+            placeholder={t('searchAccounts')}
+            autoCorrect={false}
+          />
+          <View style={styles.pickerList}>
+            {state.accounts
+              .filter((a) => {
+                const needle = accountSearch.trim().toLocaleLowerCase();
+                return !needle || accountDisplayName(a).toLocaleLowerCase().includes(needle);
+              })
+              .map((a) => {
+                const active = accountId === a.id;
+                return (
+                  <Pressable
+                    key={a.id}
+                    accessibilityRole="radio"
+                    accessibilityLabel={accountDisplayName(a)}
+                    accessibilityState={{ checked: active }}
+                    onPress={() => { setAccountId(a.id); setAccountPickerOpen(false); setAccountSearch(''); }}
+                    style={({ pressed }) => [
+                      styles.pickerRow,
+                      {
+                        borderColor: theme.cardBorder,
+                        backgroundColor: active ? `${a.color}22` : pressed ? theme.backgroundSelected : 'transparent',
+                      },
+                    ]}>
+                    <View style={[styles.accountDot, { backgroundColor: a.color }]} />
+                    <ThemedText type="small" style={styles.pickerRowName} numberOfLines={2}>{accountDisplayName(a)}</ThemedText>
+                    {active && <Icon name="check" size={18} color={theme.primary} strokeWidth={2.4} />}
+                  </Pressable>
+                );
+              })}
+          </View>
+        </View>
+      </BottomSheet>
     </BottomSheet>
   );
 }
@@ -611,15 +651,23 @@ const styles = StyleSheet.create({
   head: {
     flexDirection: 'column',
     paddingVertical: 16,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    gap: Spacing.three - 2,
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
   },
-  headText: {
-    alignItems: 'center',
-    gap: Spacing.half,
+  headTitle: {
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: '90%',
+  },
+  headDate: {
+    textAlign: 'center',
   },
   headAmount: {
     alignSelf: 'center',
+    marginTop: 8,
   },
   field: {
     gap: Spacing.two,
@@ -652,6 +700,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
   },
+  transferMeaning: {
+    gap: Spacing.one,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two + 2,
+  },
   actionsLarge: { flexDirection: 'column' },
   actions: {
     flexShrink: 0,
@@ -662,4 +717,28 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
   },
+  accountTrigger: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three - 2,
+    paddingVertical: Spacing.two,
+    borderRadius: Radius.control,
+    borderWidth: 1.5,
+  },
+  accountTriggerName: { flex: 1, minWidth: 0 },
+  accountDot: { width: 10, height: 10, borderRadius: 5 },
+  pickerContent: { gap: Spacing.three - 2, maxHeight: 480 },
+  pickerList: { gap: 0 },
+  pickerRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three - 4,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pickerRowName: { flex: 1, minWidth: 0 },
 });
