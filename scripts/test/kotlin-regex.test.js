@@ -19,7 +19,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { constant, patternSource } = require('./kotlin-source');
+const { constant, patternSource, rawPatternSource } = require('./kotlin-source');
 
 let pass = 0;
 let fail = 0;
@@ -70,6 +70,7 @@ const PATTERNS = [
   ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
   ['SMS_CREDENTIAL_RE', patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE')],
   ['NOTIFICATION_CREDENTIAL_RE', patternSource('SensitiveNotificationFilter', 'CREDENTIAL_RE')],
+  ['CLOCK_RE', rawPatternSource('NotificationCaptureStore', 'TRANSACTION_DATETIME_RE')],
 ];
 
 // Two gates decide whether a message is about money at all — one for SMS at
@@ -104,6 +105,34 @@ const AMOUNT_CASES = [
   ['Using your card for GHS 120.00 at SHOP. Avl Limit AED 5,000.00', '120.00'],
 ];
 
+/**
+ * The repost gate's clock, on the engine Android actually runs.
+ *
+ * This pattern decides whether a bank alert may be DISCARDED as a
+ * redelivery, so both directions are load-bearing and neither is a
+ * formatting preference:
+ *
+ *   accepted — every second-precision shape the corpus really contains.
+ *     ADCB alone sends two of them, and a slash-only pattern skipped the
+ *     guard for its own dash-separated alerts.
+ *   refused — minute precision. Two genuine charges at one terminal inside
+ *     one minute carry identical text, and suppressing the second would
+ *     delete a real charge. Seconds are the discriminator.
+ */
+const CLOCK_CASES = [
+  // Verbatim shapes from the corpus (parser.test.js:816 is the ADCB dash one).
+  ['AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.', true],
+  ['Purchase of AED 110.00 at TABBY with Credit Card 2518 on 11/09/2026 23:53:12.', true],
+  ['Purchase of AED 110.00 at TABBY on 03/07/26 05:53:12.', true],
+  ['Purchase of AED 110.00 at TABBY on 11.09.2026 17:10:20.', true],
+  ['Purchase of AED 110.00 at TABBY on 1/9/2026 7:10:20.', true],
+  // Minute precision is refused ON PURPOSE — see above.
+  ['Purchase of AED 110.00 at TABBY on 03/07/26 05:53.', false],
+  ['Purchase of AED 110.00 at TABBY on 11/09/2026 17:10.', false],
+  // No clause resembling a clock at all.
+  ['Purchase of AED 110.00 at TABBY with Credit Card 2518.', false],
+];
+
 const CREDENTIAL_CASES = [
   ['Use 458213 to authenticate your purchase of AED 500.00 at NOON.', true],
   ['Enter 458213 to confirm the payment of SAR 250.00.', true],
@@ -127,13 +156,22 @@ public class WafraRegexCheck {
     int bad = 0;
     Pattern amount = null;
     Pattern credential = null;
+    Pattern clock = null;
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
       if ("SMS_CREDENTIAL_RE".equals(${javaString(name)})) credential = p;
+      if ("CLOCK_RE".equals(${javaString(name)})) clock = p;
       System.out.println("COMPILES ${name}");
     } catch (Exception e) { bad++; System.out.println("BROKEN ${name} " + e.getMessage()); }`,
+).join('\n')}
+${CLOCK_CASES.map(
+  ([body, want], index) => `    {
+      boolean got = clock.matcher(${javaString(body)}).find();
+      if (got != ${want}) { bad++; System.out.println("CLOCK wrong ${index} " + got); }
+      else System.out.println("CLOCK ok ${index}");
+    }`,
 ).join('\n')}
 ${CREDENTIAL_CASES.map(
   ([body, want], index) => `    {
@@ -182,6 +220,13 @@ for (const [name] of PATTERNS) {
 for (const [, want] of AMOUNT_CASES) {
   ok(`Java reads the amount as ${want}`, out.includes(`AMOUNT ok ${want}`),
     out.split('\n').filter((l) => l.startsWith('WRONG')));
+}
+
+for (let index = 0; index < CLOCK_CASES.length; index++) {
+  const [body, want] = CLOCK_CASES[index];
+  ok(`Java repost clock ${want ? 'accepts' : 'refuses'}: ${body.slice(-28)}`,
+    out.includes(`CLOCK ok ${index}`),
+    out.split('\n').filter((line) => line.startsWith(`CLOCK wrong ${index} `)));
 }
 
 for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
