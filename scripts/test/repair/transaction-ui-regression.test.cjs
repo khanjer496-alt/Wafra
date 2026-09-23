@@ -188,7 +188,8 @@ test('an unresolved transfer moves to its own view without contributing to regul
   const notice = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
   assert.match(text(notice), /1 transfer record/);
-  assert.match(text(notice), /Needs review/);
+  assert.doesNotMatch(text(notice), /ownership review|Needs review/,
+    'a generic unknown transfer is not announced as a review chore');
   const link = walk(h.tree).find(n => n.props?.testID === 'transactions-transfers-link');
   assert.ok(link); link.props.onPress();
   assert.ok(h.events.some(event => event[0] === 'route' && event[1] === '/transfers'));

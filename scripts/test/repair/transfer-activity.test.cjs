@@ -12,7 +12,7 @@ const core = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), {
   '@noble/hashes/sha2.js': require('@noble/hashes/sha2.js'),
   '@noble/hashes/utils.js': require('@noble/hashes/utils.js'),
 });
-const { confirmedTransferIds, getTransferActivity } = load(path.join(root, 'src/lib/transfer-activity.ts'), {
+const { confirmedTransferIds, duplicateTransactionIds, getTransferActivity, isListedExternalTransfer } = load(path.join(root, 'src/lib/transfer-activity.ts'), {
   '@/lib/transfer-reconciliation': core,
 });
 const NOW = Date.parse('2026-09-08T10:00:00Z');
@@ -70,7 +70,8 @@ test('unknown transfers stay available without being promoted into confirmed mem
   assert.equal(confirmedTransferIds(rows, reconciliation).size, 0);
   const [activity] = getTransferActivity(rows, accounts, reconciliation);
   assert.equal(activity.ownership, 'unknown');
-  assert.equal(activity.needsReview, true);
+  assert.equal(activity.confirmed, false);
+  assert.equal(activity.needsReview, false, 'listed neutrally, without a review chore');
 });
 
 test('likely and ambiguous candidates do not gain ownership or new pairing in the activity projection', () => {
@@ -79,9 +80,14 @@ test('likely and ambiguous candidates do not gain ownership or new pairing in th
   for (const [id, status] of [['likely', 'likely-own'], ['ambiguous', 'ambiguous'], ['missing-unknown', 'counterpart-missing']]) {
     reconciliation.byId.set(id, { id, status, reason: 'multiple-candidates', candidateIds: ['candidate-a', 'candidate-b'] });
   }
+  // The reconciler queues likely and ambiguous rows; an unknown-ownership
+  // missing counterpart is not in its queue.
+  reconciliation.pendingIds.add('likely');
+  reconciliation.pendingIds.add('ambiguous');
   const activity = getTransferActivity(rows, accounts, reconciliation);
   assert.equal(activity.length, 3);
-  assert.ok(activity.every(r => r.ownership === 'unknown' && r.needsReview && !r.assessment.counterpartId));
+  assert.ok(activity.every(r => r.ownership === 'unknown' && !r.confirmed && !r.assessment.counterpartId));
+  assert.deepEqual(activity.filter(r => r.needsReview).map(r => r.transaction.id).join(), 'likely,ambiguous');
   assert.equal(confirmedTransferIds(rows, reconciliation).size, 0);
 });
 
@@ -97,7 +103,8 @@ test('real cross-bank suggestions retain their proposed counterpart without clai
   assert.equal(reconciliation.byId.get('wio-out').status, 'likely-own');
   const activity = getTransferActivity(rows, [], reconciliation);
   assert.equal(activity.length, 2);
-  assert.ok(activity.every(r => r.needsReview && r.ownership === 'unknown'));
+  assert.ok(activity.every(r => !r.confirmed && r.ownership === 'unknown'));
+  assert.equal(activity[0].needsReview, true, 'a credible own-account suggestion is a review item');
   assert.equal(activity[0].assessment.counterpartId, 'fab-in');
   assert.equal(confirmedTransferIds(rows, reconciliation).size, 0);
 });
@@ -126,4 +133,52 @@ test('card repayments, likely repayments and corroborating observations stay out
   }
   assert.equal(confirmedTransferIds(rows, reconciliation).size, 0);
   assert.equal(getTransferActivity(rows, accounts, reconciliation).length, 0);
+});
+
+test('duplicate-id observations are left to the review queue and never produce duplicate record keys', () => {
+  const rows = [row('twice'), row('twice', { amountFils: 20000 }), row('once', { amountFils: 30000 }),
+    row('sent-twice', { transferDecision: { version: 1, ownership: 'external', decidedAt: NOW } }),
+    row('sent-twice', { amountFils: 40000, transferDecision: { version: 1, ownership: 'external', decidedAt: NOW } })];
+  const reconciliation = core.reconcileTransfers(rows, accounts);
+  assert.equal(reconciliation.byId.get('twice').status, 'ambiguous');
+  assert.equal(reconciliation.pendingIds.has('twice'), true, 'the reconciler still queues the duplicate');
+  const activity = getTransferActivity(rows, accounts, reconciliation);
+  assert.deepEqual(activity.map(r => r.transaction.id).join(), 'once');
+  const keys = activity.map(r => r.transaction.id);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.deepEqual(Array.from(duplicateTransactionIds(rows)).sort().join(), 'sent-twice,twice');
+  assert.equal(duplicateTransactionIds(rows), duplicateTransactionIds(rows), 'cached per ledger array');
+});
+
+test('transfers on archived accounts are not listed', () => {
+  const archived = [accounts[0], { ...accounts[1], archived: true }];
+  const rows = [row('live', { transferDecision: { version: 1, ownership: 'external', decidedAt: NOW } }),
+    row('archived-external', { accountId: accounts[1].id, amountFils: 20000,
+      captureInstrument: { last4: '2222', kind: 'account', bankIdentity: 'adcb' },
+      transferDecision: { version: 1, ownership: 'external', decidedAt: NOW } }),
+    row('archived-unknown', { accountId: accounts[1].id, amountFils: 30000,
+      captureInstrument: { last4: '2222', kind: 'account', bankIdentity: 'adcb' } })];
+  const activity = getTransferActivity(rows, archived, core.reconcileTransfers(rows, archived));
+  assert.deepEqual(activity.map(r => r.transaction.id).join(), 'live');
+});
+
+test('the row-local activity test never hides a row that the Transfers screen does not list', () => {
+  // Primary tabs cannot rebuild the transfer graph, so they may leave out only
+  // rows whose own evidence guarantees a Transfers listing. A likely card
+  // repayment (unknown ownership) must stay in activity even though its
+  // status is not visible row-locally.
+  const external = { version: 1, ownership: 'external', decidedAt: NOW };
+  const rows = [row('sent', { transferDecision: external }), row('generic'),
+    row('likely-card', { amountFils: 20000 }), row('dup-sent', { transferDecision: external }),
+    row('dup-sent', { amountFils: 30000, transferDecision: external }),
+    row('coffee', { title: 'Coffee', category: 'dining', transferEvidence: undefined, amountFils: 1500 })];
+  const reconciliation = core.reconcileTransfers(rows, accounts);
+  reconciliation.byId.set('likely-card', { id: 'likely-card', status: 'likely-card-repayment', reason: 'amount-time', candidateIds: [] });
+  reconciliation.pendingIds.add('likely-card');
+  const listed = new Set(getTransferActivity(rows, accounts, reconciliation).map(r => r.transaction.id));
+  assert.equal(listed.has('likely-card'), false, 'Transfers leaves likely card repayments to their own review');
+  const duplicates = duplicateTransactionIds(rows);
+  const skipped = rows.filter(tx => isListedExternalTransfer(tx, duplicates)).map(tx => tx.id);
+  assert.deepEqual(skipped.join(), 'sent');
+  for (const id of skipped) assert.ok(listed.has(id), `${id} is listed on Transfers`);
 });

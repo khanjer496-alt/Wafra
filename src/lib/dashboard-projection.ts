@@ -7,6 +7,8 @@ import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { countsInCashflowTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
+import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
 
@@ -44,6 +46,11 @@ export interface DashboardProjection {
 export interface HomeDashboardProjection extends Pick<DashboardProjection,
   'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
   hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
+  /**
+   * The period has transfer records on live accounts. Home links to Transfers
+   * and does not call a period "empty" when its only records are transfers.
+   */
+  hasPeriodTransfers: boolean;
   /** Null when a higher-priority prompt hides this calculation. */
   unreadFormats: DashboardProjection['unreadFormats'] | null;
 }
@@ -110,9 +117,18 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
 
   // The store already provides display order. Stop at the six visible rows
   // rather than allocating a filtered copy of the entire transaction history.
+  // Home leaves out transfers that the Transfers screen is guaranteed to list.
+  // It must not rebuild the transfer graph here, so the test is row-local:
+  // unconfirmed transfers (whose listing depends on the whole ledger, e.g. a
+  // likely card repayment) stay in recent activity rather than disappear.
   const activityRows: Transaction[] = [];
+  let duplicates: ReadonlySet<string> | undefined;
   for (const transaction of state.transactions) {
     if (countsInCashflowTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
+      if (homeOnly && isTransferCandidate(transaction)) {
+        if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
+        if (isListedExternalTransfer(transaction, duplicates)) continue;
+      }
       activityRows.push(transaction);
       if (activityRows.length === 6) break;
     }
@@ -129,6 +145,8 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
       // deposits, investments and unresolved transfers remain visible as
       // account activity, but do not distort Income / Spending / Net.
       hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
+      hasPeriodTransfers: state.transactions.some(transaction => liveAccounts.has(transaction.accountId) &&
+        inPeriod(transaction.date, period) && isTransferCandidate(transaction)),
       upcoming, activityRows, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };

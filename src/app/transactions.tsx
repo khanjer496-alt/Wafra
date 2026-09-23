@@ -30,15 +30,17 @@ import {
   corroboratingTransferIdsForState,
   internalTransferIdsForState,
   liveAccountIds,
+  transferReconciliationForState,
   UNASSIGNED_INCOME_ACCOUNT_ID,
 } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 const DEFAULT_FILTERS: Filters = {
   type: null,
@@ -186,8 +188,19 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
-  const separateTransferIds = useMemo(() => new Set(getTransferActivity(state.transactions, state.accounts,
-    reconcileTransfers(state.transactions, state.accounts)).map(item => item.transaction.id)), [state.transactions, state.accounts]);
+  // Separation must describe the same snapshot as `internal`. The helper
+  // reconciles once per stored transfer receipt (not per ledger edit) and
+  // returns null while a history import only has a provisional receipt, in
+  // which case every row stays in this list until the final page reconciles.
+  const transferReconciliation = transferReconciliationForState(state);
+  const { separateTransferIds, reviewTransferIds } = useMemo(() => {
+    if (!transferReconciliation) return { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS };
+    const records = getTransferActivity(state.transactions, state.accounts, transferReconciliation);
+    return {
+      separateTransferIds: new Set(records.map(item => item.transaction.id)),
+      reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
+    };
+  }, [state.transactions, state.accounts, transferReconciliation]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -216,8 +229,9 @@ export default function TransactionsScreen() {
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal, corroborating, separateTransferIds }),
-  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
+    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds }),
+  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating,
+    separateTransferIds, reviewTransferIds]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
@@ -352,7 +366,8 @@ export default function TransactionsScreen() {
             </View>}
               {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
                 <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>
+                {separatedTransfers.reviewCount > 0 &&
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>}
                 {transferContributes && <>
                   <View style={styles.summaryValue}>
                     <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferIncome}</ThemedText>
