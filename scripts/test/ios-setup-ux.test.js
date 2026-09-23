@@ -137,7 +137,7 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
   futureGuideKeys.map((key) => translated(key, 'en')), [
     'Message',
     'Sender: leave empty · Message Contains: one space',
-    'Choose Run Immediately, turn off Notify When Run, tap Next',
+    'Choose Run Immediately, turn off Notify When Run if shown, then Next',
     'Pick {shortcut} from the list (not New Blank Automation), then Done',
   ]);
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
@@ -279,7 +279,8 @@ ok('iOS local setup: obsolete relay and sender-picker work is absent',
   forbiddenScreenPatterns.every((pattern) => !pattern.test(screen)),
   forbiddenScreenPatterns.filter((pattern) => pattern.test(screen)).map(String).join(', '));
 ok('iOS local setup: controller has only local native and Linking dependencies',
-  !/relay|clipboard|notification|background|CaptureExecutor|ledger|leavePrivateMode/i.test(controller) &&
+  !/relay|clipboard|notification|background|CaptureExecutor|ledger|leavePrivateMode/i.test(
+    (controller.match(/\bimport[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []).join('\n')) &&
     /getNativeModule/.test(controller) &&
     /getCaptureStatus/.test(controller) &&
     /setCaptureEnabled/.test(controller));
@@ -314,8 +315,9 @@ ok('iOS local setup: callbacks and foreground transitions refresh native and sav
   /send\(\{ type: 'shortcut-callback', result \}\)/.test(screen) &&
     /RNAppState\.addEventListener\('change'/.test(screen) &&
     /next !== 'active'[\s\S]{0,300}refreshSetup/.test(screen));
-ok('iOS local setup: explicit automation confirmation is the only visible enable path',
+ok('iOS local setup: permission check and automation confirmation use the controller enable paths',
   /send\(\{ type: 'automation-added' \}\)/.test(screen) &&
+    /send\(\{ type: 'check-shortcut' \}\)/.test(screen) &&
     !/setIosCaptureEnabled\(true\)/.test(screen));
 
 eq('iOS local setup: first qualifying alert has a local-only success state',

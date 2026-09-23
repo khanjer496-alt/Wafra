@@ -198,7 +198,7 @@ done
 # Use two test-file workers on both developer and CI hosts. One worker per
 # available host CPU makes unrelated suites contend with bounded parser and
 # transfer benchmarks; their existing timing limits must remain unchanged.
-node --test --test-concurrency=2 repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs
+node --test --test-concurrency=2 repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs ios-notification-shortcut.test.mjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

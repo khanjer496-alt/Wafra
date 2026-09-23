@@ -86,6 +86,8 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
    * repeated history import exactly idempotent without persisting the body.
    */
   sourceEventId?: string;
+  /** iOS queue observation receipt; independent of exact bank-event identity. */
+  notificationObservationId?: string;
 };
 
 /**
@@ -1519,6 +1521,10 @@ function buildImportPlanInMarket(
       captureInstrument: captureInstrumentOf(p),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      ...(p.channel === 'push' && p.captureSource === undefined && p.sourceEventId === undefined &&
+        typeof p.notificationObservationId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)
+        ? { notificationObservationId: p.notificationObservationId } : {}),
       captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),

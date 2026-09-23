@@ -23,6 +23,8 @@ export interface IosMessageSetupProgress {
   futureShortcutConfirmed: boolean;
   futureAutomationConfirmed: boolean;
   futureStatus: IosMessageSetupStatus;
+  /** Missing in legacy progress means Message automation. */
+  futureCaptureSource?: 'message' | 'notification';
   historyShortcutConfirmed: boolean;
   historyStatus: IosMessageSetupStatus;
   /** Explicit future-only choice. Absent on older progress and declined reviews. */
@@ -35,6 +37,7 @@ export type IosMessageSetupEvent =
   | { type: 'future-shortcut-confirmed' }
   | { type: 'future-automation-confirmed' }
   | { type: 'future-status-changed'; status: IosMessageSetupStatus }
+  | { type: 'future-source-changed'; source: 'message' | 'notification' }
   | { type: 'history-shortcut-confirmed' }
   | { type: 'history-status-changed'; status: IosMessageSetupStatus }
   | { type: 'history-skipped-for-now'; readiness: IosSetupReadiness }
@@ -79,7 +82,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       return null;
     }
     const candidate = value as Record<string, unknown>;
-    const keys = Object.keys(candidate).filter((key) => key !== 'historySkippedForNow').sort();
+    const keys = Object.keys(candidate).filter((key) => key !== 'historySkippedForNow' && key !== 'futureCaptureSource').sort();
     if (
       keys.length !== PROGRESS_KEYS.length ||
       keys.some((key, index) => key !== PROGRESS_KEYS[index]) ||
@@ -88,6 +91,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       typeof candidate.futureShortcutConfirmed !== 'boolean' ||
       typeof candidate.futureAutomationConfirmed !== 'boolean' ||
       !isStatus(candidate.futureStatus) ||
+      ('futureCaptureSource' in candidate && candidate.futureCaptureSource !== 'message' && candidate.futureCaptureSource !== 'notification') ||
       typeof candidate.historyShortcutConfirmed !== 'boolean' ||
       !isStatus(candidate.historyStatus) ||
       ('historySkippedForNow' in candidate && typeof candidate.historySkippedForNow !== 'boolean') ||
@@ -99,6 +103,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       futureShortcutConfirmed: candidate.futureShortcutConfirmed,
       futureAutomationConfirmed: candidate.futureAutomationConfirmed,
       futureStatus: candidate.futureStatus,
+      ...(candidate.futureCaptureSource ? { futureCaptureSource: candidate.futureCaptureSource as 'message' | 'notification' } : {}),
       historyShortcutConfirmed: candidate.historyShortcutConfirmed,
       historyStatus: candidate.historyStatus,
       returnToOnboarding: candidate.returnToOnboarding,
@@ -118,6 +123,9 @@ export function reduceIosMessageSetup(
   event: IosMessageSetupEvent,
 ): IosMessageSetupProgress {
   switch (event.type) {
+    case 'future-source-changed':
+      if ((current.futureCaptureSource ?? 'message') === event.source) return current;
+      return { ...current, futureCaptureSource: event.source, futureAutomationConfirmed: false, futureStatus: 'in-progress' };
     case 'active-section-changed':
       return { ...current, activeSection: event.section };
     case 'future-shortcut-confirmed':

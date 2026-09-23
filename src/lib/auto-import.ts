@@ -520,8 +520,8 @@ const KNOWN_BANK_UNIVERSAL_INFO_HINT =
  * money automatically. Reconstruct only structured parser facts; no raw source
  * text or sender survives this boundary.
  */
-function parsedFinancialCandidateReview(
-  parsed: ParsedSms,
+export function parsedFinancialCandidateReview(
+  parsed: Omit<ParsedSms, 'raw'>,
   observedAt: number,
 ): SourceFreeReviewCandidate | null {
   if (parsed.kind !== 'transaction' || !Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0) {

@@ -42,22 +42,40 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     WafraLiveCaptureStore.shared.reset()
     WafraLiveCaptureModule().definition()
 
+    check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the eleven public functions",
+    check("bridge registers exactly the thirteen public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
         "eraseAll",
         "getAutomationInputProbeAt",
         "getCaptureStatus",
+        "getNotificationShortcutURL",
         "listPendingRecords",
+        "listPendingRecordsIncludingNotifications",
         "purgeExpired",
         "recordFirstCapturedAt",
         "setCaptureEnabled",
         "setLocalCaptureEntitlementLease",
         "setStoreCaptureEntitlementLease",
       ])
+
+    let shortcutURL = try invoke("getNotificationShortcutURL", as: String.self)
+    check("notification shortcut bridge returns the fixed bundled local URI",
+      shortcutURL == WafraLiveCaptureResources.shortcutURL.absoluteString
+        && URL(string: shortcutURL)?.isFileURL == true)
+    check("notification shortcut lookup uses only the versioned filename and extension",
+      WafraLiveCaptureResources.requestedName == "Wafra Notifications v1"
+        && WafraLiveCaptureResources.requestedExtension == "shortcut")
+    let storeCallsBeforeMissingAsset = WafraLiveCaptureStore.shared.calls
+    WafraLiveCaptureResources.shortcutAvailable = false
+    check("missing bundled notification shortcut rejects instead of fabricating a URI",
+      rejects("getNotificationShortcutURL", []))
+    check("asset lookup never touches the protected financial queue",
+      WafraLiveCaptureStore.shared.calls == storeCallsBeforeMissingAsset)
+    WafraLiveCaptureResources.shortcutAvailable = true
 
     let localLeaseApplied = try invoke(
       "setLocalCaptureEntitlementLease",
@@ -107,6 +125,9 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("listPendingRecords reaches the store with the exact integer limit",
       WafraLiveCaptureStore.shared.listLimits == [7])
 
+    check("legacy listPendingRecords explicitly excludes notification records",
+      WafraLiveCaptureStore.shared.listIncludesNotifications == [false])
+
     let ids = [
       "00000000-0000-0000-0000-000000000001",
       "00000000-0000-0000-0000-000000000002",
@@ -143,6 +164,13 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
       recordField(status, "lastReceivedAt", as: Double.self) == 1_234_500)
     check("status converts last handled receipt from seconds to milliseconds",
       recordField(status, "lastHandledAt", as: Double.self) == 1_244_750)
+
+    check("status converts notification setup proof seconds to milliseconds",
+      recordField(status, "notificationSetupProofAt", as: Double.self) == 1_245_125)
+    check("status converts first notification receipt seconds to milliseconds",
+      recordField(status, "firstNotificationReceivedAt", as: Double.self) == 1_250_250)
+    check("status converts last notification receipt seconds to milliseconds",
+      recordField(status, "lastNotificationReceivedAt", as: Double.self) == 1_300_500)
 
     let automationInputProbeAt = try invoke("getAutomationInputProbeAt", as: Double.self)
     check("automation-input probe time converts seconds to milliseconds exactly",
@@ -186,6 +214,21 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     }
     check("invalid list limits never call the store",
       WafraLiveCaptureStore.shared.listLimits.count == limitCallsBeforeInvalidInput)
+
+    let notificationRows = try invoke("listPendingRecordsIncludingNotifications", [7.0], as: [String].self)
+    check("notification-aware reader returns store rows and explicitly includes notifications",
+      notificationRows == ["pending:7"] && WafraLiveCaptureStore.shared.listIncludesNotifications.last == true)
+    _ = try TestAsyncFunctionRegistry.invoke("listPendingRecordsIncludingNotifications", [0.0])
+    _ = try TestAsyncFunctionRegistry.invoke("listPendingRecordsIncludingNotifications", [50.0])
+    check("notification-aware reader accepts both validated boundaries",
+      Array(WafraLiveCaptureStore.shared.listLimits.suffix(3)) == [7, 0, 50])
+    let notificationCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.listLimits.count
+    for (index, limit) in invalidLimits.enumerated() {
+      check("notification-aware reader rejects invalid limit case \(index + 1) before the store",
+        rejects("listPendingRecordsIncludingNotifications", [limit]))
+    }
+    check("invalid notification limits never reach the store",
+      WafraLiveCaptureStore.shared.listLimits.count == notificationCallsBeforeInvalidInput)
 
     let timestampCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.firstCapturedDates.count
     let invalidTimestamps = [Double.nan, Double.infinity, -Double.infinity]

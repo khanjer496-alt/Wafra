@@ -76,6 +76,8 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
   case captureDisabled
   case invalidMessage
   case captureCapacityReached
+  case invalidNotification
+  case notificationFailed
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
@@ -91,6 +93,10 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
       return WafraLiveCaptureResources.localized("live.stage.invalid")
     case .captureCapacityReached:
       return WafraLiveCaptureResources.localized("live.stage.capacity")
+    case .invalidNotification:
+      return WafraLiveCaptureResources.localized("live.notification.invalid")
+    case .notificationFailed:
+      return WafraLiveCaptureResources.localized("live.notification.error")
     }
   }
 }
@@ -280,6 +286,58 @@ struct StageWafraLiveTextIntent: AppIntent {
 extension StageWafraLiveTextIntent {
   static var supportedModes: IntentModes { .background }
 }
+/// Accepts only text explicitly supplied by the user's Shortcuts automation.
+/// The app cannot observe other apps' notifications or configure their triggers.
+@available(iOS 16.0, *)
+struct CaptureWafraNotificationIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.notification.title", table: "WafraIntents", bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(
+    title: LocalizedStringResource(
+      "live.notification.text.parameter", table: "WafraIntents", bundle: .main
+    ),
+    inputConnectionBehavior: .connectToPreviousIntentResult
+  )
+  var text: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    do {
+      if text.trimmingCharacters(in: .whitespacesAndNewlines) == WafraLiveCaptureStore.notificationSetupProbeText {
+        try WafraLiveCaptureStore.shared.recordNotificationSetupProof(at: Date())
+        return .result(value: "setup-checked")
+      }
+      let result = try WafraLiveCaptureStore.shared.stageNotification(
+        text: text, eventId: UUID().uuidString, observedAt: Date()
+      )
+      switch result {
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid:
+        throw WafraLiveCaptureIntentError.invalidNotification
+      case .capacityReached:
+        throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
+    } catch WafraLiveCaptureStore.StoreError.entitlementRequired {
+      throw WafraLiveCaptureIntentError.captureDisabled
+    } catch {
+      throw WafraLiveCaptureIntentError.notificationFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension CaptureWafraNotificationIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
 `;
 
 function withWafraIntentResources(config) {

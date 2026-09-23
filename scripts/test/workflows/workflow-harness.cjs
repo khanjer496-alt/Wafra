@@ -57,7 +57,8 @@ function createWorkflowHarness(options={}) {
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
- d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
+ d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal',
+  isIosNotificationReview:require('../build/alert-review-tray.js').isIosNotificationReview};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
@@ -126,6 +127,7 @@ function createWorkflowHarness(options={}) {
    for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
   }
 
+  if(screen==='onboarding')h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;
   const module=load(path.join(root,file),d,{process:{env:{EXPO_PUBLIC_WAFRA_E2E_DEMO:'1'}},__DEV__:false});
   return screen==='onboarding'?module.OnboardingGate({children:null,...props}):module.default(props);

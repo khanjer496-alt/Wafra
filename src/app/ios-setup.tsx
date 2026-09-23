@@ -30,6 +30,8 @@ import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
   INITIAL_IOS_SETUP_MODEL,
+  iosSupportsNotificationAutomation,
+  resolveIosSelectedReadiness,
   resolveIosFutureSetupStep,
   type IosSetupFailure,
   type IosSetupIntent,
@@ -109,6 +111,7 @@ export default function IosSetupScreen() {
   const params = useLocalSearchParams<{
     fromOnboarding?: string;
     shortcutResult?: string;
+    notificationReturn?: string;
     section?: string;
   }>();
   const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut, setKnownBanks } = useStore();
@@ -139,8 +142,11 @@ export default function IosSetupScreen() {
   const refreshGeneration = useRef(0);
   const consumedShortcutCallback = useRef<string | null>(null);
   const previousReadiness = useRef(INITIAL_IOS_SETUP_MODEL.readiness);
-  const [setup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
+  const [rawSetup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
   const [progress, setProgress] = useState(INITIAL_PROGRESS);
+  const notificationMode = progress.futureCaptureSource === 'notification';
+  const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(progress.futureCaptureSource, rawSetup) };
+  const offersNotifications = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version);
   const [progressLoaded, setProgressLoaded] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
   const [historySetup, setHistorySetup] = useState({
@@ -164,7 +170,7 @@ export default function IosSetupScreen() {
   // Skip hides it for this visit only; the answer itself persists in the ledger.
   const [banksSkipped, setBanksSkipped] = useState(false);
   const [bankPicks, setBankPicks] = useState<string[]>([]);
-  const banksStep = (state.knownBanks ?? []).length === 0 && !banksSkipped;
+  const banksStep = !notificationMode && (state.knownBanks ?? []).length === 0 && !banksSkipped;
   const toggleBankPick = (name: string) => setBankPicks((picks) =>
     picks.includes(name) ? picks.filter((pick) => pick !== name) : [...picks, name]);
   const saveKnownBanks = () => { setKnownBanks(bankPicks); };
@@ -280,6 +286,12 @@ export default function IosSetupScreen() {
       setLocalError(t('historySetupStateFailed'));
     }
   }, [historySupported, pagedEnabled, router]);
+
+  // A navigation hint only: returning to the existing screen refreshes native
+  // proof and saved progress. The URL itself cannot enable or confirm capture.
+  useEffect(() => {
+    if (params.notificationReturn) void refreshSetup();
+  }, [params.notificationReturn, refreshSetup]);
 
   // `router.replace` from this pushed screen swaps it for a NEW tabs route
   // while the original tabs route stays at the stack root, so two tab
@@ -443,12 +455,33 @@ export default function IosSetupScreen() {
     });
   }, [runOperation, send, updateProgress]);
 
+  const checkFutureShortcut = useCallback(() => {
+    void runOperation(async () => {
+      await setCaptureOptOut(false);
+      await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      await send({ type: 'check-shortcut' });
+    }, t('capturePreferenceFailed'));
+  }, [runOperation, send, setCaptureOptOut, updateProgress]);
+
   const openAutomation = useCallback(() => {
     void runOperation(async () => {
       await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
       await send({ type: 'open-automation' });
     });
   }, [runOperation, send, updateProgress]);
+
+  const openNotificationSetup = () => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-source-changed', source: 'notification' });
+      setShowAutomationGuide(false);
+      router.push({ pathname: '/ios-notification-setup', params: { fromOnboarding: fromOnboarding ? '1' : undefined } });
+    });
+  };
+  const chooseMessageCapture = () => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-source-changed', source: 'message' });
+    });
+  };
 
   const confirmAutomation = useCallback(() => {
     void runOperation(async () => {
@@ -563,7 +596,7 @@ export default function IosSetupScreen() {
       // cannot enable capture or replace the owner's automation confirmation.
       await send({ type: 'refresh-status' });
       const current = await loadIosMessageSetupProgress();
-      const readiness = controllerRef.current?.getModel().readiness ?? 'not-added';
+      const readiness = resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel());
       if (!futureSetupConfigured(readiness, current.futureAutomationConfirmed)) {
         if (screenActive.current) setLocalError(t('iosMessageFutureBeforeSkip'));
         return;
@@ -654,7 +687,7 @@ export default function IosSetupScreen() {
       const current = await loadIosMessageSetupProgress();
       if (screenActive.current) setProgress(current);
       if (!canFinishIosMessageSetup(current,
-        controllerRef.current?.getModel().readiness ?? 'not-added')) return;
+        resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel()))) return;
       if (fromOnboarding) {
         const onboardingFocus = state.onboardingProfile?.focus ?? null;
         const onboardingTracking = state.onboardingProfile?.tracking ?? null;
@@ -802,8 +835,7 @@ export default function IosSetupScreen() {
   const historyRunning = historySetup.handoffStartedAt !== null;
   const historyComplete = progress.historyStatus === 'complete';
   const historyDeferred = progress.historyStatus === 'skipped' && progress.historySkippedForNow === true;
-  const showingAutomation = futureStep === 'create-automation' ||
-    futureStep === 'prove-shortcut' || showAutomationGuide;
+  const showingAutomation = futureStep === 'create-automation' || showAutomationGuide;
 
   const openHelp = () => {
     setPrivacyExpanded(false);
@@ -830,10 +862,12 @@ export default function IosSetupScreen() {
     if (!setup.supported || setup.failure === 'load') {
       return { label: 'iosMessageLearnMore', onPress: openHelp };
     }
+    if (notificationMode && !futureConfigured) return { label: 'iosNotificationSetupAction', onPress: openNotificationSetup };
     if (futureStep === 'add-shortcut') {
       return { label: 'iosLocalInstallShortcut', onPress: installFutureShortcut, disabled: !setup.shortcutAvailable };
     }
     if (futureStep === 'confirm-shortcut') return { label: 'iosLocalAlreadyAdded', onPress: confirmFutureShortcut };
+    if (futureStep === 'prove-shortcut') return { label: 'iosMessageRunPermissionCheck', onPress: checkFutureShortcut };
     if (futureStep === 'ready' && !showAutomationGuide) {
       return { label: 'iosMessageSkipHistory', onPress: confirmSkipHistory };
     }
@@ -849,10 +883,13 @@ export default function IosSetupScreen() {
   );
   const helpActions: { label: string; onPress(): void }[] = [];
   if (progress.activeSection === 'future') {
-    if (setup.supported && setup.shortcutAvailable) {
+    if (notificationMode) {
+      helpActions.push({ label: t('iosNotificationSetupAction'), onPress: openNotificationSetup });
+    } else if (setup.supported && setup.shortcutAvailable) {
       helpActions.push({ label: t('iosMessageAddAgain'), onPress: installFutureShortcut });
+      helpActions.push({ label: t('iosMessageRunPermissionCheck'), onPress: checkFutureShortcut });
     }
-    if (futureStep === 'ready') {
+    if (!notificationMode && futureStep === 'ready') {
       helpActions.push({ label: t('iosMessageReviewAutomation'), onPress: () => setShowAutomationGuide(true) });
     }
   } else if (pagedEnabled) {
@@ -890,6 +927,10 @@ export default function IosSetupScreen() {
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
             actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
           />
+          {offersNotifications && !notificationMode && (
+            <Button label={t('iosNotificationSetupAction')} variant="outline" onPress={openNotificationSetup}
+              disabled={busy || !progressLoaded || setup.loading} wrapLabel />
+          )}
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
           ) : banksStep ? (
@@ -922,15 +963,27 @@ export default function IosSetupScreen() {
                 status={futureStatus}
                 expanded={progress.activeSection === 'future'}
                 onPress={() => selectSection('future')}>
-                {!setup.supported ? (
+                {notificationMode ? (
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosNotificationSetupSummary')}</ThemedText>
+                    <Button label={t('iosNotificationSetupAction')} onPress={openNotificationSetup} disabled={busy} wrapLabel />
+                    <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
+                  </>
+                ) : !setup.supported ? (
                   <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUnsupported')}</ThemedText>
                 ) : setup.failure === 'load' ? (
                   <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
                 ) : showingAutomation ? (
                   <>
                     <AutomationGuide />
-                    <ThemedText type="meta" themeColor="textSecondary">{journeyCopy.senderHelp}</ThemedText>
                     <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
+                  </>
+                ) : futureStep === 'prove-shortcut' ? (
+                  <>
+                    <ThemedText type="smallBold">{t('iosMessagePermissionTitle')}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionBody')}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionLocked')}</ThemedText>
+                    <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />
                   </>
                 ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
                   <>
@@ -947,7 +1000,7 @@ export default function IosSetupScreen() {
                     />
                   </>
                 ) : null}
-                {showingAutomation && (
+                {!notificationMode && showingAutomation && (
                   <Button
                     label={t(progress.futureAutomationConfirmed ? 'iosMessageRetryCheck' : 'iosLocalAutomationAdded')}
                     onPress={confirmAutomation}
@@ -1151,6 +1204,7 @@ export default function IosSetupScreen() {
           onConfirm={resetStoppedHistory}
         />
         <DetailsSheet
+          source={notificationMode ? 'notification' : 'message'}
           visible={detailsVisible}
           onClose={() => setDetailsVisible(false)}
           section={progress.activeSection}
