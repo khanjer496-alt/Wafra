@@ -49,7 +49,7 @@ const CLOSE_DURATION = 240;
 type BottomSheetCommonProps = {
   visible: boolean;
   onClose: () => void;
-  /** Caps label in the sheet header. */
+  /** Sentence-case title in the sheet header. */
   title: string;
   /** Optional secondary line directly beneath the sheet title. */
   subtitle?: string;
@@ -78,7 +78,7 @@ export function BottomSheet({
   title,
   subtitle,
   headerLeading,
-  closeVariant = 'outline',
+  closeVariant = 'plain',
   children,
   dismissible = true,
   footer,
@@ -298,11 +298,11 @@ export function BottomSheet({
                   <View style={styles.header}>
                     {headerLeading}
                     <View style={styles.headerCopy}>
-                      <ThemedText type="smallBold" accessibilityRole="header" style={styles.title}>
+                      <ThemedText type="subtitle" accessibilityRole="header" style={styles.title}>
                         {title}
                       </ThemedText>
                       {subtitle ? (
-                        <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                        <ThemedText type="meta" themeColor="textSecondary">
                           {subtitle}
                         </ThemedText>
                       ) : null}
@@ -313,11 +313,13 @@ export function BottomSheet({
                         accessibilityLabel={t('close', language)}
                         hitSlop={8}
                         onPress={requestDismiss}
-                        style={[
+                        style={({ pressed }) => [
                           styles.close,
                           Platform.OS === 'android' && styles.androidClose,
                           closeVariant === 'plain' && styles.closePlain,
-                          { borderColor: theme.controlBorder },
+                          { borderColor: theme.controlBorder,
+                            backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+                            opacity: pressed ? 0.7 : 1 },
                         ]}>
                         <Icon name="close" size={20} color={theme.textSecondary} />
                       </Pressable>
@@ -359,7 +361,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   sheetBody: { flexShrink: 1, minHeight: 0 },
-  headerCopy: { flex: 1, minWidth: 0, gap: 1 },
+  headerCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
   title: { minWidth: 0 },
   dragRegion: {
     flexShrink: 0,
@@ -378,7 +380,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: Spacing.two,
+    paddingBottom: Spacing.three,
   },
   close: {
     flexShrink: 0,
@@ -393,14 +395,14 @@ const styles = StyleSheet.create({
   closePlain: { borderWidth: 0 },
   scroll: { flexShrink: 1, minHeight: 0 },
   content: {
-    gap: Spacing.four - 4,
+    gap: Spacing.three,
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.two,
   },
   footer: {
     flexShrink: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.four - 4,
+    paddingTop: Spacing.three,
     paddingHorizontal: ScreenPadding,
   },
 });

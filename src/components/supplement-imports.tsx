@@ -8,7 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, SectionHeader } from '@/components/ui/layout';
+import { Block } from '@/components/ui/layout';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -531,7 +531,6 @@ export function SupplementImports() {
 
   return (
     <View style={styles.root}>
-      <SectionHeader title={copy.header} />
       <View style={styles.hero}>
         <ThemedText type="heading">{copy.title}</ThemedText>
         <ThemedText type="default" themeColor="textSecondary">

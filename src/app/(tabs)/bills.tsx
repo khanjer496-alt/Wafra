@@ -5,12 +5,12 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BillsSegmentControl, type BillsSegment } from '@/components/bills/bills-segment-control';
@@ -724,12 +724,12 @@ export default function BillsScreen() {
           onClose={() => setDetail(null)}
           title={detail.title}
           footer={(
-            <View style={styles.detailActions}>
+            <View style={[styles.detailActions, largeText && styles.detailStack]}>
               {!trackedTitles.has(detail.title.toLowerCase()) &&
                 detail.status !== 'stopped' &&
                 remindable(detail) && (
                   <Button
-                    inline
+                    inline={!largeText}
                     label={t('remindMe')}
                     onPress={() => {
                       addBill(billFromSubscription(detail));
@@ -738,8 +738,9 @@ export default function BillsScreen() {
                   />
                 )}
               <Button
-                inline
-                variant="danger"
+                inline={!largeText}
+                variant="ghost"
+                labelColor={theme.expense}
                 label={t('notASubscription')}
                 onPress={() => {
                   const sub = detail;
@@ -754,8 +755,8 @@ export default function BillsScreen() {
                 <View style={styles.sheetHeader}>
                   <View style={styles.detailTitleRow}>
                     <MerchantAvatar title={detail.title} category={detail.category} size={42} />
-                    <View style={{ flexShrink: 1 }}>
-                      <ThemedText type="heading" numberOfLines={1}>
+                    <View style={styles.detailIdentity}>
+                      <ThemedText type="heading">
                         {detail.title}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
@@ -771,7 +772,7 @@ export default function BillsScreen() {
                 </View>
 
                 {/* Lifetime facts */}
-                <View style={styles.factRow}>
+                <View style={[styles.factRow, largeText && styles.detailStack]}>
                   <View style={styles.fact}>
                     <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
                       {detail.category === 'loan'
@@ -808,7 +809,7 @@ export default function BillsScreen() {
                   <ThemedText type="micro" themeColor="textSecondary">
                     {t('paidWith')}
                   </ThemedText>
-                  <ThemedText type="small" numberOfLines={2}>
+                  <ThemedText type="small">
                     {[
                       detailData.accounts.map((account) => account.name).join(', '),
                       detailData.unknownInstrumentCount > 0
@@ -826,11 +827,7 @@ export default function BillsScreen() {
                   <ThemedText type="micro" themeColor="textSecondary">
                     {detail.group === 'subscription' ? t('history') : t('paymentHistory')}
                   </ThemedText>
-                  <ScrollView
-                    testID="subscription-history-scroll"
-                    nestedScrollEnabled
-                    style={styles.historyScroll}
-                    showsVerticalScrollIndicator={false}>
+                  <View testID="subscription-history-scroll">
                     {detailData.txs.slice(0, 36).map((transaction, i) => {
                       const acc = recurringPaymentAccount(transaction, state.accounts);
                       const offMedian =
@@ -841,6 +838,7 @@ export default function BillsScreen() {
                           key={transaction.id}
                           style={[
                             styles.historyRow,
+                            largeText && styles.detailStack,
                             i > 0 && {
                               borderTopWidth: StyleSheet.hairlineWidth,
                               borderTopColor: theme.cardBorder,
@@ -866,7 +864,8 @@ export default function BillsScreen() {
                         {tf('olderCharges', { count: detailData.txs.length - 36 })}
                       </ThemedText>
                     )}
-                  </ScrollView>
+                  </View>
+                  <MerchantSpendingLink merchant={detail.title} onClose={() => setDetail(null)} />
                 </View>
 
               </>
@@ -881,10 +880,10 @@ export default function BillsScreen() {
           onClose={() => setSelectedReminderId(null)}
           title={selectedReminder.bill.title}
           footer={(
-            <View style={styles.detailActions}>
+            <View style={[styles.detailActions, largeText && styles.detailStack]}>
               {selectedReminder.status !== 'paid' && (
                 <Button
-                  inline
+                  inline={!largeText}
                   label={t('markPaid')}
                   onPress={() => {
                     const reminder = selectedReminder;
@@ -894,8 +893,9 @@ export default function BillsScreen() {
                 />
               )}
               <Button
-                inline
-                variant="danger"
+                inline={!largeText}
+                variant="ghost"
+                labelColor={theme.expense}
                 label={t('delete')}
                 onPress={() => {
                   const reminder = selectedReminder;
@@ -1225,11 +1225,13 @@ const styles = StyleSheet.create({
   },
   detailTitleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.two + 2,
     flexShrink: 1,
     paddingEnd: Spacing.two,
   },
+  detailIdentity: { flex: 1, minWidth: 0, gap: Spacing.one },
+  detailStack: { flexDirection: 'column', alignItems: 'stretch' },
   factRow: {
     flexDirection: 'row',
     gap: Spacing.three,
@@ -1251,9 +1253,6 @@ const styles = StyleSheet.create({
   },
   historyBlock: {
     gap: Spacing.one,
-  },
-  historyScroll: {
-    maxHeight: 260,
   },
   historyRow: {
     flexDirection: 'row',

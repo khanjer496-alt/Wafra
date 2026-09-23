@@ -60,7 +60,6 @@ export default function HomeCustomizeScreen() {
       header={{ title: t('homeCustomizeTitle'), back: { label: t('back'), onPress: router.back } }}
       contentStyle={styles.content}>
       <View style={styles.intro}>
-        <ThemedText type="heading">{t('homeCustomizeTitle')}</ThemedText>
         <ThemedText type="default" themeColor="textSecondary">{t('homeCustomizeBody')}</ThemedText>
       </View>
 
@@ -71,7 +70,7 @@ export default function HomeCustomizeScreen() {
           const title = t(meta.titleKey);
           const detail = t(meta.detailKey);
           return (
-            <Row key={id} last={index === preferences.order.length - 1}>
+            <Row key={id} last={index === preferences.order.length - 1} style={largeText && styles.rowLarge}>
               <View style={styles.copy}>
                 <ThemedText type="smallBold">{title}</ThemedText>
                 <ThemedText type="meta" themeColor="textSecondary">{detail}</ThemedText>
@@ -112,6 +111,7 @@ const styles = StyleSheet.create({
   list: { gap: 0 },
   copy: { flex: 1, minWidth: 0, gap: 2 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  rowLarge: { flexDirection: 'column', alignItems: 'stretch' },
   actionsLarge: { flexWrap: 'wrap', justifyContent: 'flex-end' },
   iconButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.25 },

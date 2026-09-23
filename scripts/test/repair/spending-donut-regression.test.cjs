@@ -39,7 +39,8 @@ test('Spending donut keeps large totals readable and distinguishes the aggregate
   assert.equal(JSON.stringify(Array.from(donut.props.slices, (slice) => slice.label)), JSON.stringify([
     'Utilities', 'Dining', 'Loan', 'Shopping', 'Other', 'Other categories',
   ]));
-  assert.equal(text(donut.props.centerValue), 'AED 1.94M');
+  assert.equal(donut.props.centerValue, undefined, 'Wide totals use the full summary width');
+  assert.match(text(tree), /1,939,994\.65/, 'The exact total, including cents, remains visible');
 
   donut.props.onPressSlice('utilities');
   const selection = h.events.at(-1);

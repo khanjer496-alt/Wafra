@@ -20,8 +20,7 @@
  * `requiresPro` in lib/purchases.ts. The full inbox scan is still Pro, on the
  * platform that has one.
  */
-import { WorkflowHero, ImportSteps } from '@/components/workflows/workflow-surfaces';
-import { workflowCopy } from '@/components/workflows/workflow-copy';
+import { ImportSteps } from '@/components/workflows/workflow-surfaces';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1183,8 +1182,6 @@ export default function ImportSmsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, historyAttempt, state.hydrated, state.merchantOverrides]);
 
-  const words = workflowCopy(state.language);
-
   const previewRows = useMemo(
     () => (plan?.batch.transactions ?? []).slice(0, PREVIEW_LIMIT),
     [plan],
@@ -1247,7 +1244,6 @@ export default function ImportSmsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {!history && <>
-            {!scanning && <WorkflowHero title={words.importTitle} body={words.importBody} icon="download" />}
             <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
           </>}
           {Platform.OS === 'ios' && (
