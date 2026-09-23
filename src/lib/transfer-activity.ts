@@ -65,8 +65,11 @@ export function confirmedTransferIds(
  * cash flow. Keep both legs visible, including confirmed own transfers whose
  * other posting has not been imported. Uncertain ownership stays uncertain.
  *
- * Rows on archived accounts stay hidden here exactly as they are hidden from
- * every total, and duplicate-id observations are left to the review queue.
+ * Rows on archived accounts are left out, as they are hidden from every total.
+ * Rows whose account is not a known account (an unresolved or holding source)
+ * are still listed, labelled "Account not identified"; Transactions keeps such
+ * a row in its own list and hidden count too unless it counts in totals.
+ * Duplicate-id observations are left to the review queue.
  */
 export function getTransferActivity(
   transactions: Transaction[], accounts: Account[],

@@ -239,6 +239,9 @@ export default function JournalHomeScreen() {
   // Recent activity, and which transfers it leaves to the Transfers screen,
   // come from the one dashboard projection rather than a second ledger walk.
   const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
+  // "Empty month" means no live record at all, not merely no recent cash-flow
+  // row: card-payment settlements and internal movements are records too.
+  const hasPeriodRecords = dashboard.hasPeriodRecords === true || hasPeriodTransfers;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   useEffect(() => {
@@ -456,7 +459,7 @@ export default function JournalHomeScreen() {
           <ThemedText type="meta" themeColor="primary">{transferWords.viewAll}</ThemedText>
         </Pressable>
       </View>}
-      {dashboard.activityRows.length === 0 && !hasPeriodTransfers && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
+      {dashboard.activityRows.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
     </View>;
   };
 

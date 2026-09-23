@@ -46,11 +46,14 @@ export interface DashboardProjection {
 export interface HomeDashboardProjection extends Pick<DashboardProjection,
   'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
   hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
-  /**
-   * The period has transfer records on live accounts. Home links to Transfers
-   * and does not call a period "empty" when its only records are transfers.
-   */
+  /** The period has transfer records on live accounts; Home links to Transfers. */
   hasPeriodTransfers: boolean;
+  /**
+   * The period has any record on a live account. Recent activity lists only
+   * cash-flow rows, so a month holding only card-payment settlements, internal
+   * movements or transfers is still not an "empty month".
+   */
+  hasPeriodRecords: boolean;
   /** Null when a higher-priority prompt hides this calculation. */
   unreadFormats: DashboardProjection['unreadFormats'] | null;
 }
@@ -147,6 +150,8 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
       hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
       hasPeriodTransfers: state.transactions.some(transaction => liveAccounts.has(transaction.accountId) &&
         inPeriod(transaction.date, period) && isTransferCandidate(transaction)),
+      hasPeriodRecords: activityRows.length > 0 || state.transactions.some(transaction =>
+        liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
       upcoming, activityRows, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };

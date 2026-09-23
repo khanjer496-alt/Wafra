@@ -128,12 +128,10 @@ test('transfer reconciliation stays contextual instead of becoming Accounts or S
   const wallet = h.render('wallet');
   const label = h.deps['@/lib/i18n'].t('accountTransferHistory');
   const actions = walk(wallet).filter(n => n.props?.accessibilityLabel === label && n.props?.onPress);
-  assert.ok(actions.length <= 1, 'at most one Transfers entry on Accounts');
-  for (const action of actions) {
-    const before = h.events.length;
-    action.props.onPress();
-    assert.deepEqual(h.events.slice(before), [['route', '/transfers']], 'the Accounts entry opens transfer history, not review');
-  }
+  assert.equal(actions.length, 1, 'exactly one Transfers entry on Accounts');
+  const before = h.events.length;
+  actions[0].props.onPress();
+  assert.deepEqual(h.events.slice(before), [['route', '/transfers']], 'the Accounts entry opens transfer history, not review');
   const reviewRoute = /['"]\/review-transfers['"]/;
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), reviewRoute);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), reviewRoute);

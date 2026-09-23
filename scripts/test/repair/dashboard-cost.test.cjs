@@ -108,6 +108,7 @@ test('Home leaves only row-locally settled external transfers to the Transfers s
   // list; duplicate ids are left to review. Both stay visible here.
   assert.deepEqual(Array.from(home.activityRows, r => r.id), ['unknown', 'dup', 'dup', 'coffee']);
   assert.equal(home.hasPeriodTransfers, true);
+  assert.equal(home.hasPeriodRecords, true);
   assert.deepEqual(Array.from(harness(rows).project().activityRows, r => r.id), ['sent', 'unknown', 'dup', 'dup', 'coffee'],
     'the full dashboard surface keeps its existing activity rows');
   assert.equal(harness([{ id: 'coffee', date: '2026-09-06', accountId: 'bank' },

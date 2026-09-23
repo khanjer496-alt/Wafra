@@ -197,6 +197,35 @@ test('an unresolved transfer moves to its own view without contributing to regul
     'transfer review belongs under Accounts rather than the transaction summary');
 });
 
+for (const language of ['en', 'ar']) test(`${language}: the review note appears when a separated transfer is in the reconciler's review queue`, () => {
+  const rows = [
+    fixtureRow('purchase', { amountFils: 12500 }),
+    fixtureRow('generic', { title: 'Incoming transfer', type: 'income', category: 'other', amountFils: 25000 }),
+    fixtureRow('queued', { title: 'Outgoing transfer', category: 'other', amountFils: 40000 }),
+  ];
+  const h = createHarness({ language, state: { transactions: rows }, period: { mode: 'all' } });
+  h.deps['react-native'].Keyboard = { dismiss() {} };
+  h.deps['react-native'].SectionList = p => h.jsx('SectionList', { ...p, children: p.ListHeaderComponent });
+  h.deps['@react-native-community/datetimepicker'] = { __esModule: true, default: 'DateTimePicker' };
+  h.deps['@/lib/period'].periodRange = () => '';
+  // The reconciler queues only a credible own-account match. Mark one row as
+  // such a suggestion; the generic unknown stays out of the queue.
+  const ledger = h.deps['@/lib/ledger'];
+  const real = ledger.transferReconciliationForState;
+  ledger.transferReconciliationForState = state => {
+    const result = real(state);
+    result.byId.set('queued', { id: 'queued', status: 'likely-own', reason: 'amount-time', candidateIds: ['elsewhere'] });
+    result.pendingIds.add('queued');
+    return result;
+  };
+  const tree = h.local('@/app/transactions').default();
+  const notice = walk(tree).find(n => n.props?.testID === 'transactions-separated-transfers');
+  assert.ok(notice);
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
+  assert.ok(text(notice).includes(words.separated(2)));
+  assert.ok(text(notice).includes(words.reviewNote), 'one queued record in view shows the review note');
+});
+
 const fixtureRow = (id, overrides = {}) => ({
   id, title: 'Fixture shop', date: '2026-09-02', amountFils: 12500,
   type: 'expense', category: 'dining', accountId: 'enbd', source: 'sms', ...overrides,
