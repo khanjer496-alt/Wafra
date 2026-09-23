@@ -9,6 +9,7 @@ import {
 } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -384,8 +385,15 @@ export interface ParsedCard {
  * that date. Expose the previous interpretation for exact-source repair during
  * re-import; retain generic DD/MM and all obligation deadlines. No automatic
  * Android history reread is requested; PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 52: a message whose sender is a BNPL provider (Tabby, Tamara, Postpay,
+ * Cashew — isBnplProviderSource) never parses: the bank's card charge to the
+ * provider is the one real transaction, and the provider's restatement under
+ * the shop's name double-counted it. Future captures only; rows an older
+ * version already posted from a provider source are not deleted by a reread,
+ * so PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 51;
+export const PARSER_VERSION = 52;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -576,12 +584,17 @@ export function bankProfileForSender(sender?: string): BankProfile | null {
   return { name: bank.name, ...(BANK_PROFILES[bank.name] ?? { brand: /x^/ }) };
 }
 
+// BNPL provider identity lives in its own pure registry; re-exported so the
+// parser's callers and tests reach it from here too.
+export { isBnplProviderSource };
+
 /** Optional, per-call context. Everything here is additive: omit it and nothing changes. */
 export interface ParseOptions {
   /**
    * SMS sender ID ("ADIB", "RAKBANK", "Mashreq") or the notification package
-   * name a bank app posted under ("ae.wio.personal"). Used only to
-   * disambiguate — never to decide that a message is or is not a transaction.
+   * name a bank app posted under ("ae.wio.personal"). Used to disambiguate,
+   * with ONE exception that decides: a BNPL provider source
+   * (`isBnplProviderSource`) is never a transaction — its bank's card alert is.
    */
   sender?: string;
   /** Original source received timestamp in milliseconds, never the import time. */
@@ -6503,6 +6516,10 @@ export function parseSms(
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
 ): ParsedSms | null {
+  // A BNPL provider restating an instalment its bank already alerted on; see
+  // bnpl-providers.ts. Every kind, both directions: the provider's refund
+  // notice duplicates the bank's refund credit exactly as its charge does.
+  if (isBnplProviderSource(options?.sender)) return null;
   const parsed = parseSmsInner(message, overrides, options);
   if (!parsed) return null;
   // The same obligation is named on both sides of its lifecycle: a provider

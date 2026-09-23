@@ -1256,6 +1256,114 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     pastedRows.length === 1 && pastedRows[0].currency === 'AED' &&
       refusedPasteBlocks.length === 1 && refusedPasteBlocks[0] === 'Card purchase CAD 24.90 at LOCAL CAFE.');
 
+  // BNPL PROVIDER SOURCES. The bank's card charge to Tabby/Tamara is the one
+  // real outflow; the provider's own SMS or app notification restates it
+  // under the SHOP's name, which dedupe can never pair with "Tabby". Such a
+  // source must neither post nor raise a Review card inviting the user to add
+  // it — and a learned (previously approved) provider package must not start
+  // auto-posting either. Bodies are illustrative, not verified provider copy:
+  // the gate is the sender/package identity.
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+  notificationsEnabled = true;
+  const bankChargeToTabby = 'Purchase of AED 49.75 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00';
+  inboxRows = [
+    { id: 9401, address: 'Tabby', date: NOW + 40_000,
+      body: 'AED 49.75 charged to your card ending 1234 for your Noon order. Remaining: 2 payments.' },
+    { id: 9402, address: 'Tamara', date: NOW + 40_100,
+      body: 'We have received your payment of AED 120.00 for your order from Namshi.' },
+    { id: 9403, address: 'AD-Tabby', date: NOW + 40_200,
+      body: 'تم خصم 49.75 درهم من بطاقتك المنتهية بـ 1234 لطلبك من نون' },
+    { id: 9404, address: 'ADCB', date: NOW + 40_300, body: bankChargeToTabby },
+  ];
+  receivedRows = [{ address: 'TABBY', date: NOW + 40_400,
+    body: 'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 paid.' }];
+  notificationRows = [
+    { id: 'tabby-app-push-000001', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Payment received',
+      text: 'Your payment of AED 49.75 for your Noon order has been received.', ts: NOW + 40_500 },
+    { id: 'tamara-app-push-00001', pkg: 'co.tamara.user', appLabel: 'Tamara', title: 'Tamara',
+      text: 'AED 49.75 charged to your card ending 1234 for your Namshi order.', ts: NOW + 40_600 },
+  ];
+  const ackBeforeBnpl = acknowledgedNotifications.length;
+  const bnpl = await scanInbox(0, {}, undefined, 'en-AE');
+  const bnplDiagnostics = getAndroidNotificationImportDiagnostics();
+  ok('BNPL provider SMS and app pushes neither post nor raise Review; the bank charge to Tabby still posts once',
+    bnpl.parsed.length === 1 && bnpl.parsed[0]?.merchant === 'Tabby' &&
+      bnpl.parsed[0]?.amountFils === 4975 && bnpl.parsed[0]?.type === 'expense' &&
+      bnpl.parsed[0]?.categoryGuess === 'loan' && bnpl.parsed[0]?.channel === 'inbox' &&
+      bnpl.reviewCandidates.length === 0 &&
+      bnpl.declined.every((row) => row.smsTs !== NOW + 40_000 && row.smsTs !== NOW + 40_500),
+    JSON.stringify({ parsed: bnpl.parsed, reviews: bnpl.reviewCandidates, declined: bnpl.declined }));
+  ok('BNPL provider app pushes are settled as ignored, not left to retry as parser misses',
+    bnplDiagnostics?.ignored === 2 && bnplDiagnostics?.review === 0 &&
+      bnplDiagnostics?.autoParsed === 0 && bnplDiagnostics?.unresolved === 0,
+    JSON.stringify(bnplDiagnostics));
+  await bnpl.commit();
+  ok('BNPL provider app pushes are acknowledged after the commit boundary',
+    acknowledgedNotifications.length === ackBeforeBnpl + 2 &&
+      acknowledgedNotifications.includes('tabby-app-push-000001') &&
+      acknowledgedNotifications.includes('tamara-app-push-00001'),
+    JSON.stringify(acknowledgedNotifications));
+
+  // A user who approved one provider push before this fix has the package in
+  // the learned set, which otherwise authorizes automatic posting.
+  inboxRows = [];
+  receivedRows = [];
+  notificationRows = [
+    { id: 'tabby-app-push-000002', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby',
+      text: 'AED 49.75 charged to your card ending 1234 for your Noon order.', ts: NOW + 41_000 },
+  ];
+  const learnedBnpl = await scanInbox(0, {}, undefined, 'en-AE', {
+    notificationOnly: true, learnedNotificationPackages: ['app.tabby.client', 'co.tamara.user'],
+  });
+  ok('a previously learned BNPL provider package cannot auto-post its restatement',
+    learnedBnpl.parsed.length === 0 && learnedBnpl.reviewCandidates.length === 0,
+    JSON.stringify(learnedBnpl));
+  await learnedBnpl.commit();
+
+  // Same notification text from an ordinary unknown Play app is unaffected:
+  // still Review-first, exactly as the hostile-app case above.
+  notificationRows = [
+    { id: 'tabby-lookalike-app-01', pkg: 'com.example.tabbytailoring', appLabel: 'Tabby Tailoring', title: 'Tabby Tailoring',
+      text: 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234', ts: NOW + 41_500 },
+  ];
+  const lookalike = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+  ok('a non-provider app whose label contains Tabby keeps the ordinary Review path',
+    lookalike.parsed.length === 0 && lookalike.reviewCandidates.length === 1 &&
+      lookalike.reviewCandidates[0]?.sourcePackage === 'com.example.tabbytailoring',
+    JSON.stringify(lookalike));
+  await lookalike.commit();
+  notificationRows = [];
+  notificationsEnabled = false;
+
+  // History import, iOS local capture and diagnostics parse through the launch
+  // session with the record's own sender. On a ledger with no pinned currency
+  // the worldwide fallback used to post the provider's "split into 4" notice
+  // as a AED 49.75 Noon expense and its refund notice as income.
+  {
+    const { createLaunchAlertSession } = require('./build/launch-alert-parser.js');
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('AE');
+    const providerBodies = [
+      'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 paid.',
+      'Refund of AED 49.75 for your Noon order has been processed to your card ending 1234.',
+      bankChargeToTabby,
+    ];
+    const leaked = [];
+    for (const sender of ['Tabby', 'Tamara', 'app.tabby.client Tabby']) {
+      const session = createLaunchAlertSession({ overrides: {} });
+      for (const body of providerBodies) {
+        const row = session.parse(body, sender, session.inspect(body, sender), undefined, NOW);
+        if (row) leaked.push({ sender, body, merchant: row.merchant, amountFils: row.amountFils });
+      }
+    }
+    const bankSession = createLaunchAlertSession({ overrides: {} });
+    const bankRow = bankSession.parse(bankChargeToTabby, 'ADCB', bankSession.inspect(bankChargeToTabby, 'ADCB'), undefined, NOW);
+    ok('the launch session never posts a BNPL provider source, on either parser path',
+      leaked.length === 0 && bankRow?.merchant === 'Tabby' && bankRow?.amountFils === 4975,
+      JSON.stringify({ leaked, bankRow }));
+  }
+
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');
   ok('the review-candidate scanner remains Android-only',

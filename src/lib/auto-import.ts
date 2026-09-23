@@ -17,6 +17,7 @@ import {
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
   PARSER_VERSION,
@@ -774,6 +775,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
+  // BNPL provider restatement (see bnpl-providers.ts): the bank's
+  // card alert is the transaction, so this source never earns a Review card.
+  if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
@@ -1396,7 +1400,9 @@ export async function scanInbox(
           (sourceClass === 'play-finance' && !!verifiedSender && hasUniversalInstitutionSender(verifiedSender));
         const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
           (learned ? `${n.pkg} ${n.title}` : '');
-        if (isPromotionalBankPush(source)) {
+        // A BNPL provider app is gated on its PACKAGE: an unlearned candidate
+        // is parsed with no sender at all, so the parser cannot see it.
+        if (isPromotionalBankPush(source) || isBnplProviderSource(n.pkg)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
