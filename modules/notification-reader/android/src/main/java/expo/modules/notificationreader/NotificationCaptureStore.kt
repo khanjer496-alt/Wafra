@@ -68,7 +68,26 @@ object NotificationCaptureStore {
   private const val REPOST_WINDOW_MS = 30L * 60 * 1000
   private const val RECENT_CONTENT = "recent_content"
   private const val MAX_RECENT_CONTENT = 200
-  private val TRANSACTION_DATETIME_RE = Regex("""\b\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}\b""")
+  /**
+   * An explicit transaction clock, at SECOND precision.
+   *
+   * Separator, component width and year width are all cosmetic — ADCB alone
+   * sends both `11/09/2026 23:53:12` and `11-02-2025 09:03:37`, and a
+   * slash-only pattern silently skipped the guard for half its own corpus,
+   * which is the whole bug this gate exists to close. So the date shape
+   * follows sms-parser's DATETIME_RE: `[/.-]`, one or two digit day and
+   * month, two or four digit year.
+   *
+   * THE SECONDS ARE NOT COSMETIC and deliberately diverge from that parser.
+   * DATETIME_RE only has to READ a transaction's date, where minutes are
+   * plenty. This gate decides whether to DISCARD money, and the terminal
+   * double-tap — one card, one merchant, one amount, twice inside a minute —
+   * is a real duplicate charge the user must see. At minute precision both
+   * alerts carry identical text and the second would be dropped as a repost.
+   * Seconds are what separate a redelivery of one alert from two real ones.
+   */
+  private val TRANSACTION_DATETIME_RE =
+    Regex("""\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b""")
 
   @Synchronized
   fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
