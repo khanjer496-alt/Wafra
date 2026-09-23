@@ -1,0 +1,61 @@
+# Fallback seeding through the Messages UI: compose a new message to a fixed
+# recipient and send it. Run 3 showed the iOS 26.2 simulator's Messages list
+# is empty (no stub conversations), so a conversation is created by the
+# first send and later sends land in it. A message sent from the device is
+# still a row for Find Messages; on iOS 26 the sender is empty either way
+# (docs/test-evidence/ios-sender-field-2026-09-20.md), so the direction does
+# not change what the history graph can read. One flow run sends one body.
+appId: com.apple.MobileSMS
+---
+- launchApp:
+    appId: com.apple.MobileSMS
+- runFlow:
+    when:
+      visible: "OK"
+    commands:
+      - tapOn: "OK"
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible:
+        text: ${RECIPIENT}
+    commands:
+      - tapOn:
+          text: ${RECIPIENT}
+- runFlow:
+    when:
+      notVisible:
+        text: ${RECIPIENT}
+    commands:
+      - tapOn:
+          id: "Compose"
+          optional: true
+      - tapOn:
+          text: "New Message"
+          optional: true
+      - inputText: ${RECIPIENT}
+      - pressKey: Enter
+- tapOn:
+    id: "Message"
+    optional: true
+- tapOn:
+    text: "Text Message"
+    optional: true
+- tapOn:
+    text: "iMessage"
+    optional: true
+- inputText: ${BODY}
+- takeScreenshot: compose-${SEQ}
+- tapOn:
+    id: "Send"
+    optional: true
+- tapOn:
+    text: "Send"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: sent-${SEQ}

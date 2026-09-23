@@ -1,0 +1,527 @@
+name: iOS simulator history probe
+
+# Seeds an iOS Simulator's Messages store with the repository's public,
+# redacted bank-alert corpus, installs the Apple-signed History shortcut the
+# app ships, runs it, and records what Wafra imported. Every stage keeps
+# going after a failure and leaves screenshots, so one run answers, stage by
+# stage, what the simulator can and cannot do for the Shortcuts route.
+#
+# What a green run does NOT prove: anything about a physical iPhone. The
+# Message automation trigger, the sender field, locked-phone delivery and
+# reboot recovery stay physical-device gates (docs/ios-beta-readiness.md).
+# The seeded rows are fixtures, not a person's messages, and the store they
+# go into is a throwaway simulator device on a throwaway runner.
+#
+# Runs on request, plus on pushes to the probe branch that touch its own
+# files (see `on`): a macOS runner is billed at 10x Linux and the build takes
+# 20-40 minutes when the native fingerprint cache misses.
+
+on:
+  # workflow_dispatch is only listed by GitHub once the file exists on the
+  # default branch. Until this merges, a push to the probe branch that touches
+  # the probe's own files runs it with the defaults below (same precedent as
+  # ios-shortcuts-release-review.yml). The branch filter never matches main.
+  push:
+    branches: [claude/ios-testing-shortcuts-ch57wi]
+    paths:
+      - '.github/workflows/ios-sim-history-probe.yml'
+      - 'scripts/ios-sim/**'
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Simulator device name
+        default: iPhone 17 Pro
+      shortcut_url:
+        description: Apple-signed .shortcut to install (a release asset URL). Must match EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL for the app to treat it as verified.
+        default: https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut
+      shortcut_name:
+        description: Name Shortcuts installs the file under (its basename without .shortcut)
+        default: Wafra-History-v6.signed
+      icloud_fallback_url:
+        description: iCloud share link of a verified History record to install when neither file route works (empty disables). Its graph is older than the release asset; it only shows whether Shortcuts on the simulator can import and run a Wafra history graph at all.
+        default: https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d
+      icloud_fallback_name:
+        description: Name Shortcuts installs that iCloud record under
+        default: Wafra-History-v2-typed-date.signed
+      seed_days:
+        description: Spread the seeded messages over this many days before now
+        default: "80"
+      rounds:
+        description: How many 5-second rounds to keep answering the shortcut's prompts
+        default: "60"
+      cache:
+        description: Reuse a fingerprint-matched native .app from a previous probe run
+        default: "true"
+      xcode:
+        description: Xcode version to select (its bundled simulator runtime must be older than iOS 26.5; see the step comment)
+        default: "26.3"
+      runtime:
+        description: iOS simulator runtime to create the device on (simctl runtime identifier suffix, e.g. 26-2)
+        default: "26-2"
+      ui_fallback_rows:
+        description: If the seeded store is not visible in Messages, send this many seed rows through the Messages UI instead (0 disables)
+        default: "40"
+      runner:
+        description: Runner label (arm64 macOS with Xcode 26.2+)
+        default: macos-26
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-sim-history-probe-${{ github.ref }}
+  # Queue rather than cancel: an in-flight run is 20-40 minutes of native
+  # build whose fingerprint cache the next run wants.
+  cancel-in-progress: false
+
+env:
+  # Every input resolved once, with the push-trigger defaults.
+  IN_DEVICE: ${{ github.event.inputs.device || 'iPhone 17 Pro' }}
+  IN_SHORTCUT_URL: ${{ github.event.inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
+  IN_SHORTCUT_NAME: ${{ github.event.inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+  IN_ICLOUD_FALLBACK_URL: ${{ github.event.inputs.icloud_fallback_url || 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0aea1a666d72d' }}
+  IN_ICLOUD_FALLBACK_NAME: ${{ github.event.inputs.icloud_fallback_name || 'Wafra-History-v2-typed-date.signed' }}
+  IN_SEED_DAYS: ${{ github.event.inputs.seed_days || '80' }}
+  IN_ROUNDS: ${{ github.event.inputs.rounds || '60' }}
+  IN_CACHE: ${{ github.event.inputs.cache || 'true' }}
+  IN_XCODE: ${{ github.event.inputs.xcode || '26.3' }}
+  IN_RUNTIME: ${{ github.event.inputs.runtime || '26-2' }}
+  IN_UI_FALLBACK_ROWS: ${{ github.event.inputs.ui_fallback_rows || '40' }}
+  IN_RUNNER: ${{ github.event.inputs.runner || 'macos-26' }}
+  # Same JS-time configuration as the eas.json profiles that install the v6
+  # record: without EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL the app treats the
+  # paged history surfaces as unverified and hides them.
+  EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+  EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: "1"
+  EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: "1"
+  EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: ${{ github.event.inputs.shortcut_url || 'https://github.com/khanjer496-alt/Wafra/releases/download/ios-history-v6-20260919/Wafra-History-v6.signed.shortcut' }}
+  EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: "0"
+  WAFRA_SMS_CORPUS_EXPORT: "0"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  EVIDENCE: ${{ github.workspace }}/ios-sim-evidence
+  SHORTCUT_NAME: ${{ github.event.inputs.shortcut_name || 'Wafra-History-v6.signed' }}
+
+jobs:
+  probe:
+    runs-on: ${{ github.event.inputs.runner || 'macos-26' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode for an iOS 26.2 simulator
+        run: |
+          set -euo pipefail
+          # Expo SDK 55 needs Xcode 26.2+. Shortcuts on the iOS 26.5+ simulator
+          # cannot run any app's App Intents ("Unable to run App Shortcut",
+          # FB23342158 / developer.apple.com/forums/thread/836585), and the
+          # macos-26 image pairs Xcode 26.5 and 26.6 with that runtime. Xcode
+          # 26.3 and 26.2 both ship the iOS 26.2 simulator, which still works.
+          PREFERRED="$IN_XCODE"
+          BEST=""
+          for candidate in "/Applications/Xcode_${PREFERRED}.app" /Applications/Xcode_26.3.app /Applications/Xcode_26.2.app; do
+            [ -d "$candidate" ] && { BEST=$candidate; break; }
+          done
+          [ -n "$BEST" ] || { echo "::error::neither Xcode $PREFERRED, 26.3 nor 26.2 is on this runner"; ls -d /Applications/Xcode*.app; exit 1; }
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          XCODE_VERSION_OUTPUT=$(xcodebuild -version)
+          VER=$(printf '%s\n' "$XCODE_VERSION_OUTPUT" | head -1 | awk '{print $2}')
+          MAJOR=${VER%%.*}
+          MINOR=$(printf '%s' "$VER" | cut -d. -f2)
+          if [ "$MAJOR" -lt 26 ] || { [ "$MAJOR" -eq 26 ] && [ "$MINOR" -lt 2 ]; }; then
+            echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"; exit 1
+          fi
+          echo "selected Xcode $VER from $BEST"
+          mkdir -p "$EVIDENCE"
+          echo "{}" > "$EVIDENCE/stages.json"
+          xcodebuild -version > "$EVIDENCE/xcode.txt"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: native-sim-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: native-sim-${{ runner.os }}-
+
+      - name: Install JS dependencies
+        timeout-minutes: 20
+        run: npm ci
+
+      - name: Build the seed rows from the public corpus
+        run: |
+          set -euo pipefail
+          node scripts/ios-sim/build-seed-messages.mjs "$RUNNER_TEMP/seed.json" --days "$IN_SEED_DAYS"
+          node -e 'const j=require(process.argv[1]);const by={};for(const r of j.rows)by[r.sender]=(by[r.sender]||0)+1;console.log(j.rows.length,"rows;",Object.keys(by).length,"senders")' "$RUNNER_TEMP/seed.json"
+
+      - name: Fingerprint native build inputs
+        id: fp
+        if: env.IN_CACHE == 'true'
+        run: |
+          set -euo pipefail
+          HASH=$(npx --yes @expo/fingerprint@0.20.13 fingerprint:generate --platform ios \
+            | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).hash)')
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "native fingerprint: $HASH"
+
+      - name: Restore cached app build
+        id: appcache
+        if: env.IN_CACHE == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: build/native-sim-app
+          # Not shared with native-sim.yml: that build is made with signing
+          # disabled and cannot reach the keychain (see the build step).
+          key: ios-sim-probe-app-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      - name: Create and boot a simulator on the requested runtime
+        id: sim
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          DEVICE="$IN_DEVICE"
+          RUNTIME=$(xcrun simctl list runtimes -j | node -e '
+            const want = process.argv[1];
+            const all = JSON.parse(require("fs").readFileSync(0, "utf8")).runtimes.filter(r => r.platform === "iOS" && r.isAvailable);
+            const hit = all.find(r => r.identifier.endsWith("iOS-" + want));
+            process.stdout.write((hit || all.sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true })).at(-1) || {}).identifier || "");
+          ' "$IN_RUNTIME")
+          [ -n "$RUNTIME" ] || { echo "::error::no available iOS simulator runtime"; xcrun simctl list runtimes; exit 1; }
+          case "$RUNTIME" in *iOS-"$IN_RUNTIME") ;; *) echo "::warning::runtime iOS $IN_RUNTIME is not installed; using $RUNTIME";; esac
+          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | node -e '
+            const want = process.argv[1];
+            const all = JSON.parse(require("fs").readFileSync(0, "utf8")).devicetypes.filter(d => /^iPhone/.test(d.name));
+            const hit = all.find(d => d.name === want);
+            process.stdout.write((hit || all.at(-1)).identifier);
+          ' "$DEVICE")
+          UDID=$(xcrun simctl create wafra-history-probe "$DEVICE_TYPE" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          { echo "device type: $DEVICE_TYPE"; echo "runtime: $RUNTIME"; xcrun simctl list devices | grep -F "$UDID"; } | tee "$EVIDENCE/device.txt"
+
+      - name: Install Maestro
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          "$HOME/.maestro/bin/maestro" --version
+
+      # Stage 1: which system apps this runtime ships. Shortcuts and Messages
+      # are the two the whole route depends on.
+      - name: "Stage 1: inventory system apps"
+        id: inventory
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -euo pipefail
+          xcrun simctl listapps "$UDID" > "$EVIDENCE/listapps.txt"
+          for app in com.apple.shortcuts com.apple.MobileSMS com.apple.mobilesafari; do
+            if grep -q "\"$app\"" "$EVIDENCE/listapps.txt"; then echo "present: $app"; else echo "::warning::missing: $app"; fi
+          done
+          grep -q '"com.apple.shortcuts"' "$EVIDENCE/listapps.txt"
+          grep -q '"com.apple.MobileSMS"' "$EVIDENCE/listapps.txt"
+          xcrun simctl launch "$UDID" com.apple.MobileSMS
+          sleep 5
+          xcrun simctl io "$UDID" screenshot "$EVIDENCE/01-messages-fresh.png"
+          xcrun simctl terminate "$UDID" com.apple.MobileSMS || true
+
+      # Stage 2: seed the store while the device is shut down so nothing
+      # holds the SQLite file, then boot again so imagent reloads it.
+      - name: "Stage 2: seed the Messages store"
+        id: seed
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -euo pipefail
+          DB="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Library/SMS/sms.db"
+          if [ ! -f "$DB" ]; then
+            # Run 1 on iOS 26.2: a fresh device has no store even after Messages
+            # ran. Record whether the runtime ships any template to seed from.
+            echo "::error::no sms.db at $DB after launching Messages once"
+            ls -la "$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data/Library" > "$EVIDENCE/device-library.txt" 2>&1 || true
+            RUNTIME_ROOT=$(xcrun simctl list runtimes -j | node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8")).runtimes.find(r=>r.identifier===process.argv[1]);process.stdout.write(r?.runtimeRoot||"")' "$(sed -n 's/^runtime: //p' "$EVIDENCE/device.txt")")
+            echo "runtime root: $RUNTIME_ROOT" | tee "$EVIDENCE/sms-template-search.txt"
+            [ -n "$RUNTIME_ROOT" ] && find "$RUNTIME_ROOT" \( -name 'sms.db' -o -name '*.sqlite' -path '*SMS*' -o -name 'Messages*.db' \) 2>/dev/null >> "$EVIDENCE/sms-template-search.txt" || true
+            exit 1
+          fi
+          xcrun simctl shutdown "$UDID"
+          sqlite3 "$DB" .schema > "$EVIDENCE/sms-schema.sql"
+          sqlite3 "$DB" 'select count(*) from message' | sed 's/^/message rows before: /'
+          cp "$DB" "$RUNNER_TEMP/sms.before.db"
+          python3 scripts/ios-sim/seed-sms-db.py "$DB" "$RUNNER_TEMP/seed.json" --report "$EVIDENCE/seed-report.json"
+          rm -f "$DB-wal" "$DB-shm"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          sleep 5
+          xcrun simctl launch "$UDID" com.apple.MobileSMS
+          sleep 8
+          xcrun simctl io "$UDID" screenshot "$EVIDENCE/02-messages-seeded.png"
+          export OUT="$EVIDENCE/02-messages"; mkdir -p "$OUT"
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/messages-list.yaml || true
+          maestro --device "$UDID" hierarchy > "$OUT/messages-hierarchy.json" 2>/dev/null || true
+          xcrun simctl terminate "$UDID" com.apple.MobileSMS || true
+          if grep -q -E '"(ADCB|EmiratesNBD|BankAlerts|FAB)"' "$OUT/messages-hierarchy.json"; then
+            echo "seeded conversations are visible in Messages"
+            echo "visible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Messages does not list the seeded conversations; the store write was not read (see docs/ios-simulator-history-probe.md)"
+            echo "visible=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      # Stage 2b: the iOS 26.2 simulator's Messages keeps its store in memory
+      # and (run 3) starts with an empty list, so the fallback composes a new
+      # conversation and sends the seed bodies into it. Slow (one flow per
+      # message), so only a bounded number of rows go this way.
+      - name: "Stage 2b: send seed rows through the Messages UI"
+        id: seedui
+        if: steps.seed.outcome == 'failure' && env.IN_UI_FALLBACK_ROWS != '0'
+        continue-on-error: true
+        timeout-minutes: 30
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          LIMIT: ${{ env.IN_UI_FALLBACK_ROWS }}
+          RECIPIENT: "888"
+        run: |
+          set -euo pipefail
+          export OUT="$EVIDENCE/02b-messages-ui"; mkdir -p "$OUT"
+          SENT=0; FAILED=0
+          while IFS= read -r body; do
+            [ "$SENT" -lt "$LIMIT" ] || break
+            SENT=$((SENT + 1))
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/send-via-messages.yaml \
+              -e RECIPIENT="$RECIPIENT" -e BODY="$body" -e SEQ="$SENT" > "$OUT/send-$SENT.log" 2>&1 \
+              || { FAILED=$((FAILED + 1)); echo "send $SENT failed (see send-$SENT.log)"; }
+          done < <(node -e '
+            const j = require(process.argv[1]);
+            for (const r of j.rows) console.log(r.body.replace(/\s+/g, " ").trim());
+          ' "$RUNNER_TEMP/seed.json")
+          echo "sent $SENT bodies to $RECIPIENT, $FAILED flows failed"
+          printf '{"sent":%d,"failed":%d,"recipient":"%s"}\n' "$SENT" "$FAILED" "$RECIPIENT" > "$OUT/sent.json"
+          # What the list shows afterwards; the conversation must exist.
+          xcrun simctl launch "$UDID" com.apple.MobileSMS; sleep 4
+          xcrun simctl io "$UDID" screenshot "$OUT/after.png"
+          maestro --device "$UDID" hierarchy > "$OUT/after-hierarchy.json" 2>/dev/null || true
+          node -e '
+            const h = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const out = [];
+            (function walk(n, d) { const t = n?.attributes?.text || ""; if (t.trim()) out.push(" ".repeat(d) + t.trim()); (n.children || []).forEach(c => walk(c, d + 1)); })(h, 0);
+            require("fs").writeFileSync(process.argv[2], out.join("\n") + "\n");
+          ' "$OUT/after-hierarchy.json" "$OUT/after-texts.txt"
+          cat "$OUT/after-texts.txt"
+          xcrun simctl terminate "$UDID" com.apple.MobileSMS || true
+          grep -q "$RECIPIENT" "$OUT/after-texts.txt" || { echo "::error::no conversation with $RECIPIENT after sending"; exit 1; }
+          [ "$FAILED" -lt "$SENT" ] || { echo "::error::every send flow failed"; exit 1; }
+
+      - name: Build app
+        timeout-minutes: 60
+        if: steps.appcache.outputs.cache-hit != 'true'
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -euo pipefail
+          npx expo prebuild --platform ios --no-install
+          npx pod-install ios
+          WORKSPACE=$(find ios -maxdepth 1 -name '*.xcworkspace' | head -1)
+          [ -n "$WORKSPACE" ] || { echo "expo prebuild produced no .xcworkspace"; exit 1; }
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          # No CODE_SIGNING_ALLOWED=NO here: it strips the entitlements from a
+          # simulator build, SecureStore then fails with errSecMissingEntitlement,
+          # and Wafra opens on "Your ledger could not be opened" (run 1 of this
+          # probe). Simulator builds need no certificate; ad-hoc signing keeps
+          # the keychain-access-groups entitlement in place.
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphonesimulator \
+            -destination "id=$UDID" -derivedDataPath build/ios -quiet build
+          APP=$(find build/ios/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "No .app produced"; exit 1; }
+          rm -rf build/native-sim-app && mkdir -p build/native-sim-app && cp -R "$APP" build/native-sim-app/
+
+      - name: Save app build to cache
+        if: env.IN_CACHE == 'true' && steps.appcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/native-sim-app
+          key: ios-sim-probe-app-${{ runner.os }}-${{ steps.fp.outputs.hash }}
+
+      - name: "Stage 3: install and launch Wafra"
+        id: app
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          CACHE_HIT: ${{ steps.appcache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          APP=$(find build/native-sim-app -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "No .app to install"; exit 1; }
+          if [ "$CACHE_HIT" = "true" ]; then
+            # The fingerprint ignores app JS and EXPO_PUBLIC values; re-embed
+            # the bundle so this run's history URL is the one the app reads.
+            npx expo export:embed --platform ios --dev false --bundle-output "$APP/main.jsbundle" --assets-dest "$APP"
+          fi
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          codesign -d --entitlements :- "$APP" > "$EVIDENCE/app-entitlements.plist" 2>&1 || true
+          xcrun simctl install "$UDID" "$APP"
+          LAUNCHED_AT=$(date '+%Y-%m-%d %H:%M:%S')
+          xcrun simctl launch "$UDID" "$BUNDLE_ID"
+          sleep 10
+          xcrun simctl io "$UDID" screenshot "$EVIDENCE/03-wafra-launch.png"
+          export OUT="$EVIDENCE/03-wafra"; mkdir -p "$OUT"
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/wafra-launch.yaml || true
+          xcrun simctl spawn "$UDID" log show --start "$LAUNCHED_AT" \
+            --predicate 'process == "Wafra" OR (subsystem == "com.apple.securityd" AND eventMessage CONTAINS "Wafra") OR eventMessage CONTAINS "app.wafra.ios"' \
+            --style compact > "$OUT/launch-log.txt" 2>&1 || true
+          grep -c . "$OUT/launch-log.txt" || true
+          echo "bundle=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: "Stage 4: install the signed History shortcut"
+        id: install
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          SHORTCUT_URL: ${{ env.IN_SHORTCUT_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shortcuts"
+          FILE="$RUNNER_TEMP/shortcuts/$SHORTCUT_NAME.shortcut"
+          curl -fsSL --retry 3 -o "$FILE" "$SHORTCUT_URL"
+          shasum -a 256 "$FILE" | tee "$EVIDENCE/shortcut-sha256.txt"
+          MAGIC=$(LC_ALL=C dd if="$FILE" bs=1 count=4 status=none)
+          [ "$MAGIC" = "AEA1" ] || { echo "::error::$SHORTCUT_URL is not an Apple-signed shortcut"; exit 1; }
+          # Run 1: import-shortcut refused a loopback http URL ("The shortcut
+          # URL provided was invalid"). The release asset is public https, and
+          # the simulator has internet, so both routes use it directly.
+          export OUT="$EVIDENCE/04-install" SHORTCUT_HTTP_URL="$SHORTCUT_URL"
+          mkdir -p "$OUT"
+
+          installed() {
+            # $1 = evidence tag, $2 = installed name. open-shortcut resolves by
+            # installed name; a missing name leaves Shortcuts on its library
+            # with a "Could not find the shortcut" sheet, which itself contains
+            # the name (run 1 false-matched it).
+            xcrun simctl openurl "$UDID" "shortcuts://open-shortcut?name=$2" || return 1
+            sleep 4
+            xcrun simctl io "$UDID" screenshot "$OUT/open-check-$1.png"
+            maestro --device "$UDID" hierarchy > "$OUT/open-check-$1.json" 2>/dev/null || true
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/dismiss-dialogs.yaml >/dev/null 2>&1 || true
+            grep -q "$2" "$OUT/open-check-$1.json" && ! grep -q "Could not find the shortcut" "$OUT/open-check-$1.json"
+          }
+          record() { echo "route=$1" >> "$GITHUB_OUTPUT"; echo "installed_name=$2" >> "$GITHUB_OUTPUT"; printf '{"route":"%s","name":"%s"}\n' "$1" "$2" > "$OUT/installed.json"; }
+
+          # Route A: the import URL scheme with the public https URL.
+          xcrun simctl openurl "$UDID" "shortcuts://import-shortcut?url=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SHORTCUT_URL")&name=$SHORTCUT_NAME" || true
+          sleep 8
+          xcrun simctl io "$UDID" screenshot "$OUT/route-a.png"
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
+          if installed a "$SHORTCUT_NAME"; then echo "installed via import URL"; record import-url "$SHORTCUT_NAME"; exit 0; fi
+
+          # Route B: Safari download, the path the app's own help text describes.
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut-via-safari.yaml -e SHORTCUT_HTTP_URL="$SHORTCUT_URL" || true
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
+          if installed b "$SHORTCUT_NAME"; then echo "installed via Safari download"; record safari "$SHORTCUT_NAME"; exit 0; fi
+
+          # Route C: an iCloud share link of an older verified record. Apple's
+          # own install path; it shows whether Shortcuts on this simulator can
+          # take a Wafra history graph at all, not whether the release asset
+          # can be installed.
+          if [ -n "$IN_ICLOUD_FALLBACK_URL" ]; then
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut-via-icloud.yaml -e ICLOUD_URL="$IN_ICLOUD_FALLBACK_URL" || true
+            bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/install-shortcut.yaml || true
+            if installed c "$IN_ICLOUD_FALLBACK_NAME"; then echo "::warning::installed the iCloud fallback record $IN_ICLOUD_FALLBACK_NAME, not the release asset"; record icloud-fallback "$IN_ICLOUD_FALLBACK_NAME"; exit 0; fi
+          fi
+          echo "::error::the shortcut is not installed after every route"
+          exit 1
+
+      - name: "Stage 5: run the History shortcut against the seeded store"
+        id: run
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          INSTALLED_NAME: ${{ steps.install.outputs.installed_name }}
+        run: |
+          set -euo pipefail
+          export OUT="$EVIDENCE/05-run"; mkdir -p "$OUT"
+          RUN_NAME="${INSTALLED_NAME:-$SHORTCUT_NAME}"
+          echo "running $RUN_NAME"
+          START=$(date '+%Y-%m-%d %H:%M:%S')
+          echo "$START (runner local time)" > "$OUT/started-at.txt"
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/run-history.yaml -e SHORTCUT_NAME="$RUN_NAME" -e ROUNDS="$IN_ROUNDS" || true
+          xcrun simctl io "$UDID" screenshot "$OUT/final.png"
+          # What Shortcuts and the app's intents logged while it ran.
+          xcrun simctl spawn "$UDID" log show --start "$START" \
+            --predicate 'process == "shortcuts" OR process == "Wafra" OR subsystem CONTAINS "wafra" OR subsystem CONTAINS "com.apple.shortcuts" OR subsystem CONTAINS "WorkflowKit"' \
+            --style compact > "$OUT/unified-log.txt" 2>&1 || true
+          wc -l "$OUT/unified-log.txt"
+
+      - name: "Stage 6: what Wafra shows and stored"
+        id: result
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          BUNDLE_ID: ${{ steps.app.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          export OUT="$EVIDENCE/06-wafra"; mkdir -p "$OUT"
+          bash scripts/ios-sim/maestro-test.sh scripts/ios-sim/flows/wafra-history.yaml || true
+          xcrun simctl io "$UDID" screenshot "$OUT/final.png"
+          CONTAINER=$(xcrun simctl get_app_container "$UDID" "${BUNDLE_ID:-app.wafra.ios}" data)
+          echo "app container: $CONTAINER"
+          STORE="$CONTAINER/Library/Application Support/WafraPagedHistory"
+          if [ -d "$STORE" ]; then
+            find "$STORE" -type f -exec ls -la {} \; | tee "$OUT/paged-store-files.txt"
+            # Manifests and cursors only; staged row payloads stay on the runner.
+            find "$STORE" -type f \( -name '*.json' -o -name 'head*' -o -name 'cursor*' \) -size -64k -exec sh -c 'echo "== $1"; cat "$1"; echo' _ {} \; > "$OUT/paged-store-manifests.txt" || true
+          else
+            echo "no WafraPagedHistory directory in the app container" | tee "$OUT/paged-store-files.txt"
+            ls -la "$CONTAINER/Library/Application Support" 2>/dev/null || true
+          fi
+
+      - name: Summarize stages
+        if: always()
+        env:
+          S1: ${{ steps.inventory.outcome }}
+          S2: ${{ steps.seed.outcome }}
+          S2B: ${{ steps.seedui.outcome }}
+          S3: ${{ steps.app.outcome }}
+          S4: ${{ steps.install.outcome }}
+          S4R: ${{ steps.install.outputs.route }}
+          S4N: ${{ steps.install.outputs.installed_name }}
+          S5: ${{ steps.run.outcome }}
+          S6: ${{ steps.result.outcome }}
+        run: |
+          {
+            echo "## iOS simulator history probe"
+            echo
+            echo "| Stage | Outcome |"
+            echo "| --- | --- |"
+            echo "| 1 Shortcuts + Messages present in the runtime | $S1 |"
+            echo "| 2 Messages store seeded from the public corpus and visible in Messages | $S2 |"
+            echo "| 2b Seed rows sent through the Messages UI instead | ${S2B:-not needed} |"
+            echo "| 3 Wafra built, installed and launched | $S3 |"
+            echo "| 4 History shortcut installed | $S4 ${S4R:+(via $S4R: $S4N)} |"
+            echo "| 5 Shortcut ran against the seeded store | $S5 |"
+            echo "| 6 Wafra progress and staged store captured | $S6 |"
+            echo
+            echo "Stage outcomes say a step finished, not that the import worked: read the screenshots and the paged-store files in the artifact."
+            echo
+            echo "Nothing here is physical-iPhone evidence. See docs/ios-beta-readiness.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '{"inventory":"%s","seed":"%s","seed_ui":"%s","app":"%s","install":"%s","install_route":"%s","run":"%s","result":"%s"}\n' \
+            "$S1" "$S2" "$S2B" "$S3" "$S4" "$S4R" "$S5" "$S6" > "$EVIDENCE/stages.json"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-history-probe-${{ github.sha }}
+          path: ios-sim-evidence
+          retention-days: 14
+          if-no-files-found: warn

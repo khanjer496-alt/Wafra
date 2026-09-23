@@ -1,0 +1,21 @@
+# Opens Wafra's history section after the shortcut ran and records the
+# saved-progress state and the review screen.
+appId: app.wafra.ios
+---
+- openLink: wafra://ios-setup?section=history
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- takeScreenshot: wafra-history-0
+- tapOn:
+    text: "Refresh progress"
+    optional: true
+- takeScreenshot: wafra-history-1
+- tapOn:
+    text: "Review transactions"
+    optional: true
+- takeScreenshot: wafra-history-2
+- openLink: wafra://ios-paging-beta
+- takeScreenshot: wafra-paging-beta
