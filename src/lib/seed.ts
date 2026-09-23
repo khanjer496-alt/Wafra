@@ -449,10 +449,15 @@ export function generateSeedCardDues(now: Date, transactions: Transaction[]): Ca
       // number as the bank's, including in a push notification.
       minDueEstimated: true,
       dueDate: w.dueISO,
+      // The demo knows exactly when each statement closed, so it says so rather
+      // than leaving allocation to approximate the day from the deadline. The
+      // demo's deadline falls 21 days after closing and the approximation
+      // assumes 25, which would put four days of each cycle inside the next.
+      statementDate: w.toISO,
       // Left at zero even on settled statements: cards.ts pours the recorded
       // payments across the statements itself, and pre-filling paidFils makes
-      // a statement look already covered, so its own payment spills forward
-      // and settles the OPEN one — the demo's single card due, gone.
+      // a statement look already covered — so its own payment finds nothing to
+      // pay, and the statement it really settled reads as unpaid.
       paidFils: 0,
       ...(w.dueISO < todayISO ? { settledAt: w.paidISO } : {}),
     });

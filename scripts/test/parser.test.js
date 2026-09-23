@@ -38,6 +38,19 @@ function t(name, msg, expect, options) {
       // the user simply misses the payment — worth asserting inline.
       if (expect.minDueFils !== undefined && p.minDueFils !== expect.minDueFils) errs.push(`minDueFils ${p.minDueFils} != ${expect.minDueFils}`);
       if (expect.dueDay !== undefined && p.dueDay !== expect.dueDay) errs.push(`dueDay ${p.dueDay} != ${expect.dueDay}`);
+      // The day the bank CLOSED the statement, which is NOT its deadline —
+      // `date` is the deadline. Payment allocation reads this one to keep the
+      // previous cycle's payment off this cycle's bill, so reading a deadline
+      // into it settles a bill nobody paid. Expect `null` to assert the message
+      // states none: the `!== undefined` gate above cannot express an absent
+      // field any other way, and a silently skipped assertion is worse here
+      // than no assertion at all.
+      if (expect.statementDate !== undefined) {
+        const wantStatementDate = expect.statementDate === null ? undefined : expect.statementDate;
+        if (p.statementDate !== wantStatementDate) {
+          errs.push(`statementDate ${p.statementDate} != ${wantStatementDate}`);
+        }
+      }
       // WHICH LEG of a card settlement this is. One payment sends two SMS, and
       // importing both as money arriving on the card settles the statement
       // twice. On iOS the relay drops the body before the row is sealed, so
@@ -5513,6 +5526,56 @@ t('the real mini statement reads total and minimum abbreviated amount labels',
 t('reordering mini statement figures cannot promote the minimum into the total',
   'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/06/26. Min Amt Due AED 203.10, Total Amt Due AED 4061.96, Due Date 23/07/26.',
   { kind: 'cardStatement', amountFils: 406196, minDueFils: 20310, date: '2026-07-23' });
+
+// ── The statement date is read, and is never mistaken for the deadline ──
+//
+// `date` is the deadline; `statementDate` is the day the bank closed the
+// statement. Payment allocation needs the second one to keep last cycle's
+// payment off this cycle's bill, and reading the deadline into it would open
+// that window after the money was already owed.
+t('the mini statement reports its statement date as well as its deadline',
+  'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/08/26. Total Amt Due AED 2469.92, Due Date 22/09/26. Min Amt Due AED 513.62',
+  { kind: 'cardStatement', amountFils: 246992, minDueFils: 51362, date: '2026-09-22',
+    statementDate: '2026-08-28' });
+t('an ISO statement date is not read day-first',
+  'Credit Card ending 8575 statement date 2026-08-28. Total Amt Due AED 2469.92, Due Date 22/09/26.',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: '2026-08-28' });
+t('a named-month statement date is read',
+  'Credit Card ending 8575. Stmt date 28Aug26. Total Amt Due AED 2469.92, Due Date 22/09/26.',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: '2026-08-28' });
+t('a statement dated in words is read',
+  'Your Credit Card ending 3749 statement dated 01 Aug 2026. Total amount due AED 5,645.07. Due date is 26Aug26',
+  { kind: 'cardStatement', date: '2026-08-26', statementDate: '2026-08-01' });
+// The real FAB shape puts the card between the two words, so the label has to
+// reach across it — and reaching is exactly what could let it pick up "Due
+// date" instead. It may not cross a "due", which is what the next case checks.
+t('a FAB statement names its date through the card it belongs to',
+  'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26',
+  { kind: 'cardStatement', date: '2026-08-26', statementDate: '2026-08-01' });
+// "Generated on" is the same day under a verb, and this cycle is 16 days rather
+// than the 25 the allocator would otherwise assume.
+t('a generated-on date is the statement date, and still not the deadline',
+  'Your Credit Card ending 4821 statement is generated on 20/12/2026. Total due AED 3,240.00, minimum due AED 162.00. Payment due on 05/01/2027.',
+  { kind: 'cardStatement', date: '2027-01-05', statementDate: '2026-12-20' });
+// The deadline's own label must not be read as the statement date, whichever
+// order the two appear in. Reading the deadline here would open the allocation
+// window after the money was already owed.
+t('a due date is never read as the statement date',
+  'Credit Card ending 8575: Due Date 22/09/26. Total Amt Due AED 2469.92. Min Amt Due AED 513.62',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
+// A label followed by a RANGE states a period, not a closing day. Taking its
+// start opened the payment window a full cycle early and re-admitted the
+// previous cycle's payment — through a date the row appears to state, which
+// beats the approximation and so is worse than reading nothing.
+t('a statement date range states a period, not a closing day',
+  'Credit Card ending 8575. Statement Date: 01/08/26 - 31/08/26. Total Amt Due AED 100.00, Due Date 22/09/26',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
+t('...and the same in words',
+  'Credit Card ending 8575. Statement dated 01 Aug 2026 to 31 Aug 2026. Total Amt Due AED 100.00, Due Date 22/09/26',
+  { kind: 'cardStatement', date: '2026-09-22', statementDate: null });
+t('a card statement announcing only its deadline states no statement date',
+  'Your Credit Card statement for card ending 1234 is ready. Total amount due AED 714.74, minimum due AED 100.00. Due date 15/10/2026.',
+  { kind: 'cardStatement', date: '2026-10-15', statementDate: null });
 const generatedStatement = 'Your Credit Card ending 4821 statement is generated on 20/12/2026. Total due AED 3,240.00, minimum due AED 162.00. ';
 for (const deadline of ['Payment due on 05/01/2027.', 'Payment due date 05/01/2027.', 'Payment due date is 05Jan27.']) {
   t(`a stated deadline beats the generation date: ${deadline}`,

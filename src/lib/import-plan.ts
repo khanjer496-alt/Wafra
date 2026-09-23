@@ -1183,7 +1183,20 @@ function buildImportPlanInMarket(
       // v47 could retain a contradictory minimum above this exact statement's
       // total. Re-offer the corrected unknown minimum so the merge can repair
       // it without resetting payment evidence or weakening a valid minimum.
-      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate && !removesContradictoryMinimum) continue;
+      // A statement date the stored row lacks is new evidence about the same
+      // obligation, and without re-offering it a card imported before the
+      // parser could read one never gains it. The deadline-derived fallback
+      // only rescues cards whose cycle happens to match the approximation, so
+      // every other already-affected user had no repair path at all. Idempotent:
+      // once the row carries the date, this stops matching.
+      const addsStatementDate =
+        existingDue !== undefined &&
+        p.statementDate !== undefined &&
+        existingDue.statementDate !== p.statementDate;
+      if (
+        existingDue && !improvesMinimum && !removesWrongMarketEstimate &&
+        !removesContradictoryMinimum && !addsStatementDate
+      ) continue;
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.
@@ -1198,6 +1211,10 @@ function buildImportPlanInMarket(
           p.minDueFils ?? (p.currency === 'AED' ? estimatedMinimumFils(p.amountFils) : 0),
         minDueEstimated: p.minDueFils === null ? true : undefined,
         dueDate: p.date,
+        // What the bank said it closed this statement on, when it said so. The
+        // allocator reads it to keep the previous cycle's payment off this
+        // statement; see `computePaymentAllocations`.
+        ...(p.statementDate ? { statementDate: p.statementDate } : {}),
         paidFils: 0,
       });
       continue;
