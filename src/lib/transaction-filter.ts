@@ -22,11 +22,15 @@ type TransactionFilterOptions = {
   live: Set<string>;
   internal: Set<string>;
   corroborating: Set<string>;
+  /** Confirmed transfer records have a separate browsing surface. Their
+   * existing financial contribution still belongs in the matching total. */
+  separateTransferIds?: ReadonlySet<string>;
 };
 type TransactionFilterProjection = {
   filtered: Transaction[];
   totalShown: number;
   excluded: { transfers: number; movements: number; hidden: number };
+  separatedTransfers: { count: number; incomeFils: number; expenseFils: number };
   days: { date: string; totalFils: number; data: Transaction[] }[];
 };
 
@@ -108,6 +112,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   else if (filters.datePreset === 'custom') { dateFrom = filters.dateFrom; dateTo = filters.dateTo; }
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
   let totalShown = 0; let transfers = 0; let movements = 0; let hidden = 0;
+  const separatedTransfers = { count: 0, incomeFils: 0, expenseFils: 0 };
   const ordered = index.ordered(filters.sort);
   const ascending = filters.sort === 'oldest';
   const canStopAtDateBoundary = ascending || (filters.sort === 'newest' && index.newestDateOrdered);
@@ -137,23 +142,29 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (filters.minFils && row.amountFils < filters.minFils) continue;
     if (query && !search.includes(query)) continue;
     if (options.corroborating.has(row.id)) continue;
-    filtered.push(row);
     const counts = countsInTotals(row, options.live, options.internal);
+    const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
+    const contribution = row.type === 'expense' ? -part : part;
+    totalShown += contribution;
+    if (options.separateTransferIds?.has(row.id)) {
+      separatedTransfers.count++;
+      if (row.type === 'income') separatedTransfers.incomeFils += part;
+      else separatedTransfers.expenseFils += part;
+      continue;
+    }
+    filtered.push(row);
     if (!counts) {
       if (!options.live.has(row.accountId)) hidden++;
       else if (isMoneyMovementOnly(row)) movements++;
       else transfers++;
     }
-    const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
-    const contribution = row.type === 'expense' ? -part : part;
-    totalShown += contribution;
     if (filters.sort !== 'largest') {
       let day = byDay.get(row.date);
       if (!day) { day = { date: row.date, totalFils: 0, data: [] }; byDay.set(row.date, day); }
       day.data.push(row); day.totalFils += contribution;
     }
   }
-  const result = { filtered, totalShown, excluded: { transfers, movements, hidden }, days: [...byDay.values()] };
+  const result = { filtered, totalShown, excluded: { transfers, movements, hidden }, separatedTransfers, days: [...byDay.values()] };
   index.remember(filters, options, result);
   return result;
 }

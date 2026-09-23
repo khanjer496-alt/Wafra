@@ -95,7 +95,7 @@ function harness(options = {}) {
     '@/lib/notifications': { syncPaymentReminders: async () => events.push(['reminders']) },
     '@/lib/reminders': { reminderScheduleInputsChanged: (before, after) => before !== after },
     '@/lib/period': { periodLabel: () => language === 'ar' ? 'سبتمبر 2026' : 'September 2026' },
-    '@/lib/period-context': { usePeriod: () => ({ period: { month: 9, year: 2026 } }) },
+    '@/lib/period-context': { usePeriod: () => ({ period: { mode: 'month', key: '2026-09' } }) },
     '@/lib/purchases': { isProActive: () => options.pro ?? true },
     '@/lib/onboarding': { normalizePreferredName: (value) => typeof value === 'string' && value.trim() ? value.trim() : null },
     '@/lib/store': { useStore: () => ({ state, getStateSnapshot: () => state, applyFxUpdates() {},
@@ -139,6 +139,8 @@ function harness(options = {}) {
   dependencies['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   dependencies['@/lib/transfer-reconciliation'] = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), dependencies);
   dependencies['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), dependencies);
+  dependencies['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), dependencies);
+  dependencies['@/lib/period'].inPeriod = require('../build/period.js').inPeriod;
   dependencies['@/components/transfer-review-notice'] = load(path.join(root, 'src/components/transfer-review-notice.tsx'), dependencies);
   dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);

@@ -22,6 +22,7 @@ export const DetailsSheet = ({
 }: DetailsSheetProps) => {
   const lines: StringKey[] = section === 'future'
     ? ['iosMessageHelpLocal', 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
+      'iosMessagePermissionBody', 'iosMessagePermissionLocked',
       'iosMessageHelpProof', 'iosMessageSenderUnavailable']
     : ['iosMessageHelpReadable', 'iosMessageHelpCoverage', 'historyReadyCompact',
       'iosMessagePastTiming', 'iosMessageHistoryKeepOpen',

@@ -443,6 +443,14 @@ export default function IosSetupScreen() {
     });
   }, [runOperation, send, updateProgress]);
 
+  const checkFutureShortcut = useCallback(() => {
+    void runOperation(async () => {
+      await setCaptureOptOut(false);
+      await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      await send({ type: 'check-shortcut' });
+    }, t('capturePreferenceFailed'));
+  }, [runOperation, send, setCaptureOptOut, updateProgress]);
+
   const openAutomation = useCallback(() => {
     void runOperation(async () => {
       await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
@@ -802,8 +810,7 @@ export default function IosSetupScreen() {
   const historyRunning = historySetup.handoffStartedAt !== null;
   const historyComplete = progress.historyStatus === 'complete';
   const historyDeferred = progress.historyStatus === 'skipped' && progress.historySkippedForNow === true;
-  const showingAutomation = futureStep === 'create-automation' ||
-    futureStep === 'prove-shortcut' || showAutomationGuide;
+  const showingAutomation = futureStep === 'create-automation' || showAutomationGuide;
 
   const openHelp = () => {
     setPrivacyExpanded(false);
@@ -834,6 +841,7 @@ export default function IosSetupScreen() {
       return { label: 'iosLocalInstallShortcut', onPress: installFutureShortcut, disabled: !setup.shortcutAvailable };
     }
     if (futureStep === 'confirm-shortcut') return { label: 'iosLocalAlreadyAdded', onPress: confirmFutureShortcut };
+    if (futureStep === 'prove-shortcut') return { label: 'iosMessageRunPermissionCheck', onPress: checkFutureShortcut };
     if (futureStep === 'ready' && !showAutomationGuide) {
       return { label: 'iosMessageSkipHistory', onPress: confirmSkipHistory };
     }
@@ -851,6 +859,7 @@ export default function IosSetupScreen() {
   if (progress.activeSection === 'future') {
     if (setup.supported && setup.shortcutAvailable) {
       helpActions.push({ label: t('iosMessageAddAgain'), onPress: installFutureShortcut });
+      helpActions.push({ label: t('iosMessageRunPermissionCheck'), onPress: checkFutureShortcut });
     }
     if (futureStep === 'ready') {
       helpActions.push({ label: t('iosMessageReviewAutomation'), onPress: () => setShowAutomationGuide(true) });
@@ -929,8 +938,14 @@ export default function IosSetupScreen() {
                 ) : showingAutomation ? (
                   <>
                     <AutomationGuide />
-                    <ThemedText type="meta" themeColor="textSecondary">{journeyCopy.senderHelp}</ThemedText>
                     <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
+                  </>
+                ) : futureStep === 'prove-shortcut' ? (
+                  <>
+                    <ThemedText type="smallBold">{t('iosMessagePermissionTitle')}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionBody')}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionLocked')}</ThemedText>
+                    <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />
                   </>
                 ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
                   <>

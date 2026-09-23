@@ -14,6 +14,7 @@ import { useStore } from '@/lib/store';
 import { beginIosHistoryHandoffForOrigin, iosHistoryReturnOriginFromParam,
   iosHistorySetupStorageCoordinator, iosSupportsMessageHistory } from '@/lib/ios-history-setup';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { beginIosStatementHandoff } from '@/lib/ios-statement-handoff';
 import { PAGED_HISTORY_INSTALL_KEY, PAGED_HISTORY_INSTALL_URL, pagedHistoryCopy, pagedHistoryEnabled,
   pagedHistoryRunUrl, parsePagedHistoryProgress, type PagedHistoryProgress } from '@/lib/ios-paged-setup';
 
@@ -43,9 +44,9 @@ function PagedHistoryScreen() {
       if (!native?.getPagedStatus || !native.discardSession) throw new Error('missing_paged_receiver');
       const [raw, confirmed, setup] = await Promise.all([native.getPagedStatus(), AsyncStorage.getItem(PAGED_HISTORY_INSTALL_KEY), loadIosMessageSetupProgress()]);
       const next = parsePagedHistoryProgress(raw);
-      if (current()) { setRestoredOnboarding(setup.returnToOnboarding); setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(blockedOnReturn ? w.paused : null); }
+      if (current()) { setRestoredOnboarding(setup.returnToOnboarding); setProgress(next); setInstalled(confirmed === 'true'); setReady(true); setError(blockedOnReturn ? next ? w.paused : w.notStarted : null); }
     } catch { if (current()) { setProgress(null); setReady(false); setError(w.error); } }
-  }, [blockedOnReturn, getStateGeneration, w.error, w.paused]);
+  }, [blockedOnReturn, getStateGeneration, w.error, w.paused, w.notStarted]);
   useEffect(() => {
     const epoch = sequence;
     alive.current = true; void refresh();
@@ -130,6 +131,12 @@ function PagedHistoryScreen() {
         </View>}
         {error && <ThemedText accessibilityRole="alert">{error}</ThemedText>}
         <Button label={label} disabled={busy || !ready} onPress={canRunShortcut || progress?.status === 'complete' ? start : install} wrapLabel />
+        {progress?.status !== 'complete' && <View style={{ gap: Spacing.two }}>
+          <ThemedText type="small" themeColor="textSecondary">{w.statementHelp}</ThemedText>
+          <Button label={w.statement} variant="outline" disabled={busy}
+            onPress={() => router.push({ pathname: '/statement-import', params: onboarding
+              ? { fromOnboarding: '1', statementSession: beginIosStatementHandoff() } : {} })} wrapLabel />
+        </View>}
         {blockedOnReturn && <Button label={w.back} variant="ghost" disabled={busy} onPress={leave} wrapLabel />}
         <Button label={w.refresh} variant="outline" disabled={busy} onPress={() => { void refresh(); }} wrapLabel />
         {(installed || adding || progress) && <Button label={w.again} variant="ghost" disabled={busy} onPress={install} wrapLabel />}

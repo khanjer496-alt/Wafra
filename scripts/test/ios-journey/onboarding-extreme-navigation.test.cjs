@@ -110,7 +110,11 @@ async function gate(options = {}) {
     beginHistoryImport: () => call('beginHistoryImport'),
   };
   const animation = { duration: () => animation, delay: () => animation };
+  const statementHandoff = load(path.join(root, 'src/lib/ios-statement-handoff.ts'), {
+    'expo-crypto': { randomUUID: () => 'explicit-ios-statement-handoff' },
+  });
   const dependencies = {
+    '@/lib/ios-statement-handoff': statementHandoff,
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Platform: { OS: options.platform ?? 'ios', Version: '26.6', select: values => values.ios ?? values.default }, I18nManager: { isRTL: language === 'ar' }, View: 'View', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable',
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
@@ -198,7 +202,7 @@ async function gate(options = {}) {
     return matches[0].props;
   };
   render(); await flush();
-  return { events, routes, services, input, render, flush, control, t: translate.t,
+  return { events, routes, services, input, render, flush, control, t: translate.t, statementHandoff,
     advance: milliseconds => flush(milliseconds),
     get clock() { return { now: clockNow, pending: timers.size }; }, get pendingTimers() { return timers.size; },
     get state() { return ledger; }, get durable() { return durable; }, get tree() { return tree; },
@@ -322,6 +326,19 @@ test('navigating from setup to paged history does not bounce to setup or reset o
   assert.deepEqual(h.routes, [], 'Opening the paged child route must not issue router.replace to setup');
   assert.equal(h.input.pathname, '/ios-paging-beta');
   assert.ok(h.nodes().some(node => node.type === 'Navigator'));
+});
+
+test('history recovery can open statements through an explicit live handoff without completing onboarding', async () => {
+  const h = await gate({ pathname: '/ios-paging-beta', profile: profile('capture'), pendingSetup: true });
+  const token = h.statementHandoff.beginIosStatementHandoff();
+  await h.route('/statement-import', { fromOnboarding: '1', statementSession: token });
+  assert.ok(h.nodes().some(node => node.type === 'Navigator'));
+  assert.deepEqual(h.routes, []);
+  assert.equal(h.state.onboarded, false);
+  await h.route('/ios-paging-beta');
+  assert.equal(h.statementHandoff.matchesIosStatementHandoff(token), false);
+  const cold = await gate({ pathname: '/statement-import', params: { fromOnboarding: '1', statementSession: token } });
+  assert.ok(!cold.nodes().some(node => node.type === 'Navigator'));
 });
 
 test('Android deep links cannot bypass onboarding via iOS setup routes', async () => {

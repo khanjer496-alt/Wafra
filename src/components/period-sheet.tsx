@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button, Chip } from '@/components/ui/controls';
-import { Radius, Spacing } from '@/constants/theme';
-import { useLanguage } from '@/hooks/use-language';
+import { Icon } from '@/components/ui/icon';
+import { TextField } from '@/components/ui/text-field';
+import { Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { monthKey, monthLabel, shiftMonthKey, toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -23,7 +25,7 @@ interface PeriodSheetProps {
 /** The reporting period every screen reads from: presets, month grid, range. */
 export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: PeriodSheetProps) {
   const theme = useTheme();
-  const language = useLanguage();
+  const largeText = useLargeTextLayout();
   const { period: sharedPeriod, setPeriod } = usePeriod();
   const period = selectedPeriod ?? sharedPeriod;
 
@@ -72,22 +74,29 @@ export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: Perio
       </View>
 
       <View style={styles.gridHeader}>
-        <ThemedText
-          type="micro"
-          themeColor="textTertiary"
+        <Pressable
           accessibilityRole="button"
-          onPress={() => setGridYear(gridYear - 1)}>
-          ‹ {gridYear - 1}
-        </ThemedText>
-        <ThemedText type="micro">{gridYear}</ThemedText>
-        <ThemedText
-          type="micro"
-          themeColor="textTertiary"
+          accessibilityLabel={`${gridYear - 1}`}
+          onPress={() => setGridYear(gridYear - 1)}
+          style={({ pressed }) => [styles.yearButton, pressed && { backgroundColor: theme.backgroundSelected }]}>
+          <Icon name="chevron-left" size={18} color={theme.textSecondary} />
+          {!largeText && <ThemedText type="small" themeColor="textSecondary">{gridYear - 1}</ThemedText>}
+        </Pressable>
+        <ThemedText type="smallBold" accessibilityRole="header">{gridYear}</ThemedText>
+        <Pressable
           accessibilityRole="button"
+          accessibilityLabel={`${gridYear + 1}`}
+          accessibilityState={{ disabled: gridYear >= thisYear }}
+          disabled={gridYear >= thisYear}
           onPress={() => gridYear < thisYear && setGridYear(gridYear + 1)}
-          style={{ opacity: gridYear >= thisYear ? 0.3 : 1 }}>
-          {gridYear + 1} ›
-        </ThemedText>
+          style={({ pressed }) => [
+            styles.yearButton,
+            gridYear >= thisYear && styles.disabled,
+            pressed && { backgroundColor: theme.backgroundSelected },
+          ]}>
+          {!largeText && <ThemedText type="small" themeColor="textSecondary">{gridYear + 1}</ThemedText>}
+          <Icon name="chevron-right" size={18} color={theme.textSecondary} />
+        </Pressable>
       </View>
 
       <View style={styles.monthGrid}>
@@ -96,7 +105,7 @@ export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: Perio
           const future = key > nowKey;
           const active = period.mode === 'month' && period.key === key;
           return (
-            <View key={key} style={[styles.monthCell, { opacity: future ? 0.3 : 1 }]}>
+            <View key={key} style={[styles.monthCell, largeText && styles.monthCellLarge, { opacity: future ? 0.3 : 1 }]}>
               <Chip
                 label={label}
                 active={active}
@@ -111,31 +120,26 @@ export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: Perio
         <ThemedText type="micro" themeColor="textTertiary">
           {t('customRange')}
         </ThemedText>
-        <View style={styles.rangeRow}>
+        <View style={[styles.rangeRow, largeText && styles.rangeRowLarge]}>
           {(
             [
               [t('fromLabel'), t('fromDate'), t('fromDatePlaceholder'), fromText, setFromText],
               [t('toLabel'), t('toDate'), t('toDatePlaceholder'), toText, setToText],
             ] as const
           ).map(([label, accessibilityLabel, placeholder, value, set]) => (
-            <TextInput
-              key={label}
-              accessibilityLabel={accessibilityLabel}
-              value={value}
-              onChangeText={set}
-              placeholder={placeholder}
-              placeholderTextColor={theme.textTertiary}
-              selectionColor={theme.primary}
-              style={[
-                styles.input,
-                {
-                  backgroundColor: theme.backgroundElement,
-                  borderColor: theme.controlBorder,
-                  color: value && !dateValid(value) ? theme.expense : theme.text,
-                  textAlign: language === 'ar' ? 'right' : 'left',
-                },
-              ]}
-            />
+            <View key={label} style={styles.rangeField}>
+              <TextField
+                label={label}
+                accessibilityLabel={accessibilityLabel}
+                value={value}
+                onChangeText={set}
+                placeholder={placeholder}
+                invalid={!!value && !dateValid(value)}
+                autoCorrect={false}
+                autoCapitalize="none"
+                style={styles.dateInput}
+              />
+            </View>
           ))}
         </View>
         <Button
@@ -159,6 +163,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  yearButton: {
+    minWidth: 48,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.one,
+  },
+  disabled: { opacity: 0.3 },
   monthGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -167,6 +181,7 @@ const styles = StyleSheet.create({
   monthCell: {
     width: '22%',
   },
+  monthCellLarge: { width: '46%' },
   range: {
     gap: Spacing.two + 2,
   },
@@ -174,14 +189,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two,
   },
-  input: {
-    flex: 1,
-    minWidth: 0,
-    borderRadius: Radius.control,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.three - 4,
-    paddingVertical: Spacing.three - 5,
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
+  rangeRowLarge: { flexDirection: 'column' },
+  rangeField: { flex: 1, minWidth: 0 },
+  dateInput: { fontVariant: ['tabular-nums'] },
 });

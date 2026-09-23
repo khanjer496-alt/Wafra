@@ -107,17 +107,17 @@ export function ReferenceHomeSummary(p: Props) {
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 12 }, grow: { flex: 1, minWidth: 0, gap: 4 },
+  root: { gap: 8 }, grow: { flex: 1, minWidth: 0, gap: 4 },
   wordmark: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 14 },
   dateLine: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerAction: { minWidth: 48, minHeight: 48, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
-  summary: { gap: 8, paddingBottom: 8 },
+  summary: { gap: 6 },
   summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   period: { minHeight: 44, paddingHorizontal: 12, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  spending: { minHeight: 88, justifyContent: 'center', alignItems: 'flex-start', gap: 6, paddingBottom: 12 },
+  spending: { minHeight: 76, justifyContent: 'center', alignItems: 'flex-start', gap: 6, paddingBottom: 8 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 12 },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 8 },
   metric: { flexGrow: 1, flexShrink: 1, flexBasis: '42%', minWidth: 120, minHeight: 48, gap: 6 },
   metricStacked: { flexBasis: 'auto', alignSelf: 'stretch' },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },

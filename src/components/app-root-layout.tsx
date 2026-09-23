@@ -216,6 +216,7 @@ export default function RootLayout() {
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="transfers" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="recap" options={{ animation: 'fade' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />

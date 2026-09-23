@@ -1,4 +1,5 @@
 import { useLanguage } from '@/hooks/use-language';
+import { clearIosStatementHandoff, matchesIosStatementHandoff } from '@/lib/ios-statement-handoff';
 import * as Crypto from 'expo-crypto';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -296,8 +297,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const isOnboardingStatementRoute =
     Platform.OS !== 'web' &&
     pathname === '/statement-import' &&
-    statementImportSession.current !== null &&
-    params.statementSession === statementImportSession.current;
+    ((statementImportSession.current !== null &&
+      params.statementSession === statementImportSession.current) ||
+      (Platform.OS === 'ios' && matchesIosStatementHandoff(params.statementSession)));
   const previewMode = state.onboarded && params.onboarding === 'preview';
   const previewStarted = useRef(false);
 
@@ -364,7 +366,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (pathname !== '/statement-import') statementImportSession.current = null;
+    if (pathname !== '/statement-import') {
+      statementImportSession.current = null;
+      clearIosStatementHandoff();
+    }
   }, [pathname]);
 
   const beginStepTransition = (): boolean => {

@@ -73,6 +73,7 @@ export type IosSetupIntent =
   | { type: 'refresh-status' }
   | { type: 'install-shortcut' }
   | { type: 'shortcut-added' }
+  | { type: 'check-shortcut' }
   | { type: 'open-automation' }
   | { type: 'automation-added' }
   | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
@@ -192,7 +193,8 @@ export const resolveIosFutureSetupStep = (
       ? 'add-shortcut'
       : 'confirm-shortcut';
   }
-  if (!progress.futureAutomationConfirmed) return 'create-automation';
+  // Resolve first-run app permissions while Shortcuts is in the foreground.
+  // Otherwise the first background trigger may fail before it can ask.
   return 'prove-shortcut';
 };
 
@@ -387,7 +389,13 @@ export function createIosCaptureSetup({
     }
   });
 
-  const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
+  const checkShortcut = (skipProven = false): Promise<void> => joinOpening(async (generation) => {
+    if (skipProven) {
+      await refreshStatus();
+      if (disposed || generation !== operationGeneration) return;
+      if (model.failure === 'load') return;
+      if (model.readiness !== 'not-added') return;
+    }
     if (!isSupportedIosMessageAutomationTrigger(UNFILTERED_MESSAGE_TRIGGER)) {
       publish({ failure: 'shortcut-run' });
       return;
@@ -486,11 +494,14 @@ export function createIosCaptureSetup({
         case 'shortcut-added':
           publish({ stage: 'automation', failure: null });
           return;
+        case 'check-shortcut':
+          await checkShortcut();
+          return;
         case 'open-automation':
           await openAutomation();
           return;
         case 'automation-added':
-          await confirmAutomation();
+          await checkShortcut(true);
           return;
         case 'shortcut-callback':
           await refreshStatus(false);

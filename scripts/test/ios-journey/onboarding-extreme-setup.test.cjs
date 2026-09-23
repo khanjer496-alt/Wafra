@@ -317,13 +317,13 @@ test('native capture unavailable on entry recovers through Retry without claimin
 test('failed Shortcuts scheme probe on future proof offers App Store and never enables capture', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true },
     controls: { beforeCanOpen: async () => { throw Error('scheme unavailable'); } } });
-  await s.press('iosLocalAutomationAdded');
+  await s.press('iosMessageRunPermissionCheck');
   assert.ok(s.text().includes(s.copy.t('iosShortcutsMissing')));
   assert.equal(s.nativeStatus.enabled, false);
   assert.deepEqual(s.urls, []);
   assert.ok(s.button('iosInstallShortcuts'));
   s.controls.beforeCanOpen = undefined;
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   assert.equal(s.nativeStatus.enabled, true);
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.equal(s.onboarded, false);
@@ -392,11 +392,11 @@ test('history double start and returning from Shortcuts never start a second ext
 
 test('proof callback success cannot fabricate first SMS and error callback gets actionable feedback', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true } });
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   await s.callback('success');
   assert.equal(s.saved().futureStatus, 'in-progress');
   assert.equal(s.nativeStatus.firstCapturedAt, null);
-  assert.ok(s.button('iosMessageRetryCheck'));
+  assert.ok(s.button('iosMessageRunPermissionCheck'));
   await s.callback('error');
   assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
@@ -407,13 +407,13 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
 
 test('canceled proof and unknown callbacks preserve retry without inventing capture or completing onboarding', async t => {
   const s = await screen(t, { progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true } });
-  await s.press('iosMessageRetryCheck');
+  await s.press('iosMessageRunPermissionCheck');
   for (const callback of ['cancel', 'unknown', '', 'success']) {
     await s.callback(callback); await s.foreground(2);
     assert.equal(s.saved().futureStatus, 'in-progress');
     assert.equal(s.nativeStatus.firstCapturedAt, null);
     assert.equal(s.onboarded, false);
-    assert.ok(s.button('iosMessageRetryCheck'));
+    assert.ok(s.button('iosMessageRunPermissionCheck'));
   }
 });
 

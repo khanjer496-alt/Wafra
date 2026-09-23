@@ -40,7 +40,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
           borderColor: theme.controlBorder,
         },
       ]}>
-      <ThemedText type="micro" themeColor="textSecondary">
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.label}>
         {periodLabel(period)}
       </ThemedText>
       <Icon name="chevron-down" size={12} color={theme.textTertiary} />
@@ -80,7 +80,7 @@ export function LinkPill({ label, onPress }: { label: string; onPress: () => voi
           borderColor: theme.primaryBorder,
         },
       ]}>
-      <ThemedText type="micro" themeColor="primary">
+      <ThemedText type="meta" themeColor="primary" style={styles.label}>
         {label}
       </ThemedText>
       <Icon name="chevron-right" size={12} color={theme.primary} />
@@ -123,6 +123,7 @@ export function SectionHeader({
 }
 
 const styles = StyleSheet.create({
+  label: { flexShrink: 1 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',

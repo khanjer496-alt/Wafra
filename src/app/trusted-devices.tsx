@@ -9,7 +9,6 @@ import {
   RefreshControl,
   Share,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -20,6 +19,7 @@ import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Section, SectionHeader } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import { TextField } from '@/components/ui/text-field';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -663,33 +663,26 @@ export default function TrustedDevicesScreen() {
         <ThemedText type="default" themeColor="textSecondary">
           {t('trustedJoinSheetBody', language)}
         </ThemedText>
-        <View style={styles.field}>
-          <ThemedText type="micro" themeColor="textTertiary">{t('trustedDeviceName', language)}</ThemedText>
-          <TextInput
-            value={joinName}
-            onChangeText={setJoinName}
-            maxLength={60}
-            autoCapitalize="words"
-            accessibilityLabel={t('trustedDeviceName', language)}
-            placeholder={suggestedName}
-            placeholderTextColor={theme.textTertiary}
-            style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
-          />
-        </View>
-        <View style={styles.field}>
-          <ThemedText type="micro" themeColor="textTertiary">{t('trustedInviteCode', language)}</ThemedText>
-          <TextInput
-            value={joinCode}
-            onChangeText={setJoinCode}
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel={t('trustedInviteCode', language)}
-            placeholder={t('trustedInvitePlaceholder', language)}
-            placeholderTextColor={theme.textTertiary}
-            style={[styles.input, styles.codeInput, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
-          />
-        </View>
+        <TextField
+          label={t('trustedDeviceName', language)}
+          value={joinName}
+          onChangeText={setJoinName}
+          maxLength={60}
+          autoCapitalize="words"
+          accessibilityLabel={t('trustedDeviceName', language)}
+          placeholder={suggestedName}
+        />
+        <TextField
+          label={t('trustedInviteCode', language)}
+          value={joinCode}
+          onChangeText={setJoinCode}
+          multiline
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel={t('trustedInviteCode', language)}
+          placeholder={t('trustedInvitePlaceholder', language)}
+          style={styles.codeInput}
+        />
         {noticeBlock}
         <Button
           label={busy ? t('trustedJoining', language) : t('trustedJoinAction', language)}
@@ -717,14 +710,13 @@ export default function TrustedDevicesScreen() {
             </View>
             {canManageSelected && (
               <View style={styles.field}>
-                <ThemedText type="micro" themeColor="textTertiary">{t('trustedDeviceName', language)}</ThemedText>
-                <TextInput
+                <TextField
+                  label={t('trustedDeviceName', language)}
                   value={rename}
                   onChangeText={setRename}
                   maxLength={60}
                   autoCapitalize="words"
                   accessibilityLabel={t('trustedDeviceName', language)}
-                  style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
                 />
                 <Button
                   label={t('save', language)}
@@ -834,7 +826,6 @@ const styles = StyleSheet.create({
   timer: { borderWidth: 1, borderRadius: Radius.chip, paddingHorizontal: Spacing.two, paddingVertical: 6 },
   dangerSection: { gap: Spacing.two },
   field: { gap: Spacing.two },
-  input: { minHeight: 50, borderWidth: 1, borderRadius: Radius.control, paddingHorizontal: Spacing.three, fontSize: 15, textAlign: 'auto' },
   codeInput: {
     minHeight: 96,
     paddingTop: Spacing.three,
@@ -842,7 +833,7 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     writingDirection: 'ltr',
     fontFamily: 'GeistMono-Regular',
-    fontSize: 12,
+    fontSize: 14,
   },
   selectedHero: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   selectedIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },

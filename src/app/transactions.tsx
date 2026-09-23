@@ -33,6 +33,9 @@ import {
   UNASSIGNED_INCOME_ACCOUNT_ID,
 } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
+import { getTransferActivity } from '@/lib/transfer-activity';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
@@ -63,6 +66,7 @@ export default function TransactionsScreen() {
   // Give the search field the full width before its placeholder gets clipped.
   const narrowSearch = width / Math.max(fontScale, 1) < 360;
   const language = useLanguage();
+  const transferWords = transferActivityCopy(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback(
     (key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language),
@@ -182,6 +186,8 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
+  const separateTransferIds = useMemo(() => new Set(getTransferActivity(state.transactions, state.accounts,
+    reconcileTransfers(state.transactions, state.accounts)).map(item => item.transaction.id)), [state.transactions, state.accounts]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -210,16 +216,17 @@ export default function TransactionsScreen() {
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal, corroborating }),
-  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating]);
+    live: liveAccounts, internal, corroborating, separateTransferIds }),
+  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
-  const { filtered, totalShown, excluded } = projection;
+  const { filtered, totalShown, excluded, separatedTransfers } = projection;
+  const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;
   // A single ordinary row already displays its amount. Keep a separate total
   // only when it conveys different information (for example a transfer excluded
   // from totals or a category filter showing part of a split purchase).
   const singleRow = filtered.length === 1 ? filtered[0] : null;
-  const showResultTotal = filtered.length > 1 ||
+  const showResultTotal = transferContributes || filtered.length > 1 ||
     (singleRow !== null && Math.abs(totalShown) !== singleRow.amountFils);
   const resultsPending = appliedFilters !== filters || appliedQuery !== query;
   const sections = useMemo<DaySection[]>(() => appliedFilters.sort === 'largest'
@@ -321,7 +328,7 @@ export default function TransactionsScreen() {
             {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
               {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {tr('transactionNetTotal')}
+                  {transferContributes ? transferWords.netIncluding : tr('transactionNetTotal')}
                 </ThemedText>
               <ThemedText
                 type="smallBold"
@@ -343,6 +350,21 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>}
+              {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
+                <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>
+                {transferContributes && <>
+                  <View style={styles.summaryValue}>
+                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferIncome}</ThemedText>
+                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.incomeFils, { decimals: true })}</ThemedText>
+                  </View>
+                  <View style={styles.summaryValue}>
+                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferSpending}</ThemedText>
+                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.expenseFils, { decimals: true })}</ThemedText>
+                  </View>
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.countsNote}</ThemedText>
+                </>}
+              </View>}
               {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
                 <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
               {excluded.transfers > 0
@@ -394,16 +416,17 @@ export default function TransactionsScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="search" size={24} color={theme.textSecondary} strokeWidth={1.7} />
+                <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                {tr('nothingMatches')}
+                {separatedTransfers.count > 0 ? transferWords.separated(separatedTransfers.count) : tr('nothingMatches')}
               </ThemedText>
             </View>
           }
         />
   ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
-    filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow]);
+    filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
+    separatedTransfers, transferContributes, transferWords]);
 
   return (
     <>
@@ -466,6 +489,12 @@ export default function TransactionsScreen() {
                   />
                 </Pressable>
               </View>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
+            style={styles.transferLink} testID="transactions-transfers-link">
+            <Icon name="repeat" size={17} color={theme.primary} />
+            <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
+            <Icon name="chevron-right" size={16} color={theme.primary} />
+          </Pressable>
           {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
         </View>
         {transactionResults}
@@ -481,6 +510,8 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
+  transferNotice: { gap: Spacing.one },
+  transferLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start' },
   // Screen sections have a gap; virtualized header/row/footer cells must not.
   listContent: { gap: 0 },
   searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },

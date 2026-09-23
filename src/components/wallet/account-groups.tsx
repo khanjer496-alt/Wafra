@@ -3,7 +3,7 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { AccountTile } from '@/components/ui/tile';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -26,9 +26,9 @@ export function AccountGroups({ rows, onOpen, onManage }: {
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
-  const groups: { key: 'bank' | 'credit' | 'debit' | 'cash'; icon: IconName; rows: AccountDisplayRow[] }[] = [
-    { key: 'bank', icon: 'bank', rows: [] }, { key: 'credit', icon: 'wallet', rows: [] },
-    { key: 'debit', icon: 'wallet', rows: [] }, { key: 'cash', icon: 'cash', rows: [] },
+  const groups: { key: 'bank' | 'credit' | 'debit' | 'cash'; rows: AccountDisplayRow[] }[] = [
+    { key: 'bank', rows: [] }, { key: 'credit', rows: [] },
+    { key: 'debit', rows: [] }, { key: 'cash', rows: [] },
   ];
   for (const row of rows) {
     const a = row.account;
@@ -40,10 +40,7 @@ export function AccountGroups({ rows, onOpen, onManage }: {
     {groups.filter((group) => group.rows.length > 0).map((group) => <View key={group.key}
       style={[styles.group, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <View style={[styles.groupHeader, { borderColor: theme.cardBorder }]}>
-        <View style={[styles.groupIcon, { backgroundColor: 'transparent' }]}>
-          <Icon name={group.icon} size={18} color={theme.textSecondary} />
-        </View>
-        <ThemedText type="smallBold" style={styles.grow}>{w[group.key]}</ThemedText>
+        <ThemedText type="micro" themeColor="textSecondary" accessibilityRole="header" style={styles.grow}>{w[group.key]}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
       </View>
       {group.rows.map((row, i) => <View key={row.account.id} style={[styles.rowWrapper,
@@ -71,20 +68,13 @@ export function AccountGroups({ rows, onOpen, onManage }: {
       </View>)}
     </View>)}
     {rows.length === 0 && <ThemedText type="small" themeColor="textSecondary">{w.empty}</ThemedText>}
-    <View style={[styles.note, { backgroundColor: 'transparent' }]}>
-      <Icon name="wallet" size={24} color={theme.gold} />
-      <View style={styles.grow}><ThemedText type="smallBold">{w.sourceNote}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{w.sourceBody}</ThemedText></View>
-    </View>
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 16 }, group: { overflow: 'hidden' },
-  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
-  groupIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  rowWrapper: { flexDirection: 'row', alignItems: 'center' }, row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
+  root: { gap: 12 }, group: { overflow: 'hidden' },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
+  rowWrapper: { flexDirection: 'row', alignItems: 'center' }, row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 64, paddingVertical: 10 },
   content: { flex: 1, minWidth: 0, gap: 4 }, line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0, gap: 4 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
   manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginEnd: -8 },
-  freshness: { fontSize: 12, lineHeight: 18 }, note: { paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

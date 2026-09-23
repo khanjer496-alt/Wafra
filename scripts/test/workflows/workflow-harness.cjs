@@ -126,6 +126,7 @@ function createWorkflowHarness(options={}) {
    for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
   }
 
+  if(screen==='onboarding')h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;
   const module=load(path.join(root,file),d,{process:{env:{EXPO_PUBLIC_WAFRA_E2E_DEMO:'1'}},__DEV__:false});
   return screen==='onboarding'?module.OnboardingGate({children:null,...props}):module.default(props);

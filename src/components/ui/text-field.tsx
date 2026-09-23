@@ -89,15 +89,17 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>((props, ref
 
   return (
     <View style={styles.field}>
-      <ThemedText type="meta" nativeID={labelId}>
+      <ThemedText type="small" themeColor={hasError ? 'expense' : focused ? 'primary' : 'textSecondary'} nativeID={labelId}>
         {label}
       </ThemedText>
       <View
         style={[
           styles.inputFrame,
+          inputProps.multiline && styles.multilineFrame,
           {
-            backgroundColor: focused ? theme.backgroundSelected : theme.backgroundElement,
-            borderColor: hasError ? theme.expense : theme.controlBorder,
+            backgroundColor: theme.backgroundElement,
+            borderColor: hasError ? theme.expense : focused ? theme.primary : theme.controlBorder,
+            opacity: inputProps.editable === false ? 0.6 : 1,
           },
         ]}>
         {leading}
@@ -118,6 +120,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>((props, ref
           selectionColor={selectionColor}
           style={[
             styles.input,
+            inputProps.multiline && styles.multilineInput,
             {
               color: theme.text,
               fontFamily: language === 'ar' ? Fonts.arabic : Fonts.sans,
@@ -154,7 +157,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>((props, ref
 TextField.displayName = 'TextField';
 
 const styles = StyleSheet.create({
-  field: { gap: Spacing.one },
+  field: { gap: Spacing.two },
   inputFrame: {
     minHeight: 52,
     flexDirection: 'row',
@@ -170,6 +173,8 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     fontSize: 17,
   },
+  multilineFrame: { alignItems: 'flex-start' },
+  multilineInput: { minHeight: 112, textAlignVertical: 'top', paddingVertical: Spacing.three },
   numeric: {
     // Stable-width digits without making finance fields look like source code.
     fontVariant: ['tabular-nums'],

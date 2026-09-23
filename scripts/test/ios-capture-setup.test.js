@@ -4116,12 +4116,12 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: false,
       futureStatus: 'skipped',
     }, 'not-added'), 'add-shortcut');
-  eq('setup restoration: confirmed Shortcut progress resumes at Apple automation',
+  eq('setup restoration: confirmed Shortcut checks permissions before Apple automation',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,
       futureAutomationConfirmed: false,
       futureStatus: 'in-progress',
-    }, 'not-added'), 'create-automation');
+    }, 'not-added'), 'prove-shortcut');
   eq('setup restoration: self-confirmed automation without native proof stays retryable',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,

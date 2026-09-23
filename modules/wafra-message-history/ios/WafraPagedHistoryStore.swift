@@ -506,13 +506,14 @@ public final class WafraPagedHistoryStore {
   /// Column framing: the Shortcut builds one string per field for the whole
   /// page with list-wide Apple actions instead of a per-message loop. The
   /// columns are rebuilt into the line frame that `stage` already validates,
-  /// so every cursor, journal, retry and record rule applies unchanged. All
-  /// four columns must line up exactly with the page count; a body containing
-  /// the sentinel or a dropped nil property therefore refuses the page as
-  /// `frame-columns` rather than committing misaligned records. That includes
-  /// the sender column: the sender is the bank identity downstream, and a page
-  /// of alerts with no sender would import "successfully" as unattributable
-  /// rows, so the producer's per-message fallback handles such a page instead.
+  /// so every cursor, journal, retry and record rule applies unchanged. GUID,
+  /// body and date columns must line up exactly with the page count; a body
+  /// containing the sentinel or a dropped nil property refuses the page as
+  /// `frame-columns` rather than committing misaligned records. An entirely
+  /// empty sender string represents an unavailable Sender property for the
+  /// whole page, matching the per-message fallback's empty senders. Any
+  /// nonempty sender column must still line up exactly: partial values are
+  /// never padded, discarded or used to infer another message's bank identity.
   public func stageColumns(sessionId: String, authorizationSecret: String, revision: Int, found: Int,
                            guids: String, bodies: String, senders: String, dates: String) throws -> String {
     // Bound each column by what `found` records may legitimately carry before
@@ -530,7 +531,9 @@ public final class WafraPagedHistoryStore {
     }
     let guidColumn = column(guids)
     let bodyColumn = column(bodies)
-    let senderColumn = column(senders)
+    let senderColumn = senders.isEmpty
+      ? Array(repeating: Substring(""), count: found)
+      : column(senders)
     let dateColumn = column(dates)
     guard guidColumn.count == found, bodyColumn.count == found,
           senderColumn.count == found, dateColumn.count == found else {
