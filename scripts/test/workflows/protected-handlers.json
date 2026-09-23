@@ -128,12 +128,12 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "installFutureShortcut",
-      "sha256": "af0a8b10525b2c36cccc1d441e79ebe9313aa9887d65482ab1fc8e81a374cbbf"
+      "sha256": "6f207a34482080964aac754c80e4d79fb10a0bdbe402a3ecd7cc7a171462bbcb"
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "confirmFutureShortcut",
-      "sha256": "43c387b54b6e6652a6d1525f8a21a7f7d1c7a8d94b4595e8cc30bcfc01fcddd8"
+      "sha256": "cddd74372360dfadf84844e53cad80ebf23e34e240facadfc50e96d4135ee4e6"
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -166,7 +166,7 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "5a2dca85ea50273c7ee3707f065fbac0a7919caa6b65c779d940f6f4bbbe4313",
+      "sha256": "67518baec2d80604b4ade4ecc61d1d4a322f9476bb9908a1998de72f4a40a596",
       "reviewedChange": "2026-09-23: Independently reviewed readiness check now resolves the selected SMS or notification capture source. Durability, retries, analytics and navigation are unchanged; notification setup and onboarding journey regressions cover both modes. Prior review: 2026-09-19: Stop rewriting the completion profile field by field. The prior note here was about preserving `intention` the same way, and the same omission then silently erased the alert-delivery and country answers, because the reducer replaces the whole profile — so a writer that forgets a field deletes it. onboardingProfileAtStage spreads what is already there, which makes every future field survive by default. The exit destination now resolves through finishDestination(), so a bank that leaves no history to read lands on /statement-import instead of Home; iPhone setup has no completion screen, so this exit is where that offer can exist. Durable completion order and the dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-setup, onboarding-extreme-navigation and the setup UX tests."
     },
     {

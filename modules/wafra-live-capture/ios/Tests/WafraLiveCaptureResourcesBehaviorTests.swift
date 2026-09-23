@@ -1,6 +1,7 @@
 import Foundation
 
 private let englishValues = [
+  "live.setup_v3.title": "Record Wafra Capture v3 setup proof",
   "live.notification.title": "Capture bank notification",
   "live.notification.text.parameter": "Notification text",
   "live.setup_proof.title": "Record Wafra capture setup proof",
@@ -17,6 +18,7 @@ private let englishValues = [
 ]
 
 private let arabicValues = [
+  "live.setup_v3.title": "تسجيل إثبات إعداد التقاط وفرة الإصدار 3",
   "live.notification.title": "التقاط إشعار بنكي",
   "live.notification.text.parameter": "نص الإشعار",
   "live.setup_proof.title": "تسجيل إثبات إعداد الالتقاط في وفرة",
@@ -99,6 +101,15 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
     let shortcutBytes = shortcutURL.flatMap { try? Data(contentsOf: $0) }
     check("bundled notification Shortcut is the signed AEA asset",
       shortcutBytes?.count == 22747 && shortcutBytes?.prefix(4) == Data("AEA1".utf8))
+
+    for (name, byteCount) in [("Wafra Capture v3", 26756), ("Wafra History v8", 46286)] {
+      let assetURL = WafraLiveCaptureResources.bundle().url(forResource: name, withExtension: "shortcut")
+      check("resource bundle resolves the exact \(name) Shortcut file",
+        assetURL?.isFileURL == true && assetURL?.lastPathComponent == "\(name).shortcut")
+      let assetBytes = assetURL.flatMap { try? Data(contentsOf: $0) }
+      check("bundled \(name) is the signed candidate AEA asset",
+        assetBytes?.count == byteCount && assetBytes?.prefix(4) == Data("AEA1".utf8))
+    }
 
     for key in englishValues.keys.sorted() {
       let english = resolve(key, localization: "en")

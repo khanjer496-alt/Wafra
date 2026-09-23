@@ -147,6 +147,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/hooks/use-language': { useLanguage: () => 'en' },
       '@/components/ios-message-setup/setup-journey': { IosSetupJourney: 'IosSetupJourney' },
       '@/lib/ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),
+      '@/lib/ios-shortcut-setup-copy': execute('src/lib/ios-shortcut-setup-copy.ts'),
       '@/lib/i18n': execute('src/lib/i18n.ts'),
       '@/lib/ios-capture-setup': { ...controller, createIosCaptureSetup: (options) => controller.createIosCaptureSetup({
         ...options, dependencies: { shortcutUrl: 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef' },

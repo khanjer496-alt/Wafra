@@ -1185,7 +1185,8 @@ export function useAutoImport(
       // listener below drains both the old pending queue and recovered rows.
       // Silent foreground scans never launch Shortcuts, so resume cannot loop.
       if (interactive && Platform.OS === 'ios') {
-        return Linking.openURL(iosLocalCaptureCatchupUrl())
+        return loadIosMessageSetupProgress().then(progress => Linking.openURL(iosLocalCaptureCatchupUrl(
+          !!iosNative?.getMessageShortcutURL && progress.futureShortcutVersion === 3 && progress.futureShortcutConfirmed)))
           .then(() => undefined)
           .catch(() => startAutoImport(true).then(() => undefined));
       }
@@ -1224,7 +1225,7 @@ export function useAutoImport(
         return undefined;
       });
     },
-    [showLiveCaptureFeedback, startAutoImport, toast],
+    [showLiveCaptureFeedback, startAutoImport, toast, iosNative],
   );
 
   const runAndroidNotificationDrain = useCallback(async (liveEvent = false): Promise<void> => {

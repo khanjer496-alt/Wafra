@@ -278,9 +278,9 @@ const forbiddenScreenPatterns = [
 ok('iOS local setup: obsolete relay and sender-picker work is absent',
   forbiddenScreenPatterns.every((pattern) => !pattern.test(screen)),
   forbiddenScreenPatterns.filter((pattern) => pattern.test(screen)).map(String).join(', '));
-ok('iOS local setup: controller has only local native and Linking dependencies',
+ok('iOS local setup: controller has only local native, Linking and fixed-file sharing dependencies',
   !/relay|clipboard|notification|background|CaptureExecutor|ledger|leavePrivateMode/i.test(
-    (controller.match(/\bimport[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []).join('\n')) &&
+    (controller.match(/\bimport(?!\s*\()[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []).join('\n')) &&
     /getNativeModule/.test(controller) &&
     /getCaptureStatus/.test(controller) &&
     /setCaptureEnabled/.test(controller));

@@ -126,6 +126,31 @@ extension RecordWafraCaptureSetupProofIntent {
   static var supportedModes: IntentModes { .background }
 }
 
+@available(iOS 16.0, *)
+struct RecordWafraCaptureV3SetupProofIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.setup_v3.title",
+    table: "WafraIntents",
+    bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  func perform() async throws -> some IntentResult {
+    do {
+      try WafraLiveCaptureStore.shared.recordSetupProof(version: 3, at: Date())
+      return .result()
+    } catch {
+      throw WafraLiveCaptureIntentError.setupProofFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension RecordWafraCaptureV3SetupProofIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
 #if DEBUG
 @available(iOS 16.0, *)
 struct ProbeWafraAutomationInputIntent: AppIntent {

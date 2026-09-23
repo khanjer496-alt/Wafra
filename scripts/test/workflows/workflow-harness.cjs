@@ -120,6 +120,7 @@ function createWorkflowHarness(options={}) {
    // services remain substituted; UI and completion logic are never mocked.
    d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');
    h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
    d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
    h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');

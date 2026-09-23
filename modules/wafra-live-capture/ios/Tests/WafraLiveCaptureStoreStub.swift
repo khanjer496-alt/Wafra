@@ -124,11 +124,18 @@ public enum WafraLiveCaptureResources {
   public static var requestedExtension: String?
   public static let shortcutURL = URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Notifications v1.shortcut")
 
+  public static let shortcutURLs = [
+    "Wafra Notifications v1": shortcutURL,
+    "Wafra Capture v3": URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Capture v3.shortcut"),
+    "Wafra History v8": URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra History v8.shortcut"),
+  ]
+
   public struct ResourceBundle {
     public func url(forResource name: String?, withExtension ext: String?) -> URL? {
       WafraLiveCaptureResources.requestedName = name
       WafraLiveCaptureResources.requestedExtension = ext
-      return WafraLiveCaptureResources.shortcutAvailable ? WafraLiveCaptureResources.shortcutURL : nil
+      guard WafraLiveCaptureResources.shortcutAvailable, let name, ext == "shortcut" else { return nil }
+      return WafraLiveCaptureResources.shortcutURLs[name]
     }
   }
 

@@ -25,6 +25,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
+import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { knownBankOptions } from '@/lib/known-banks';
 import {
   completeIosMessageOnboardingAttempt,
@@ -117,6 +118,7 @@ export default function IosSetupScreen() {
   const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut, setKnownBanks } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
+  const shortcutCopy = iosShortcutSetupCopy(language);
   const onboardingInsight = onboardingInsightKeys(state.onboardingProfile?.focus ?? null);
   // The History Shortcut returns through `wafra://ios-setup?section=history`,
   // which cannot carry the onboarding query, and a deep link into the mounted
@@ -134,7 +136,6 @@ export default function IosSetupScreen() {
   const historyInstallUrl = historyShortcutInstallUrl();
   const historySupported = Platform.OS === 'ios' &&
     iosSupportsMessageHistory(Platform.Version);
-  const pagedEnabled = historySupported && pagedHistoryEnabled();
   const pagingCopy = pagedHistoryCopy[language === 'ar' ? 'ar' : 'en'];
   const controllerRef = useRef<ReturnType<typeof createIosCaptureSetup> | null>(null);
   const screenActive = useRef(true);
@@ -143,9 +144,10 @@ export default function IosSetupScreen() {
   const consumedShortcutCallback = useRef<string | null>(null);
   const previousReadiness = useRef(INITIAL_IOS_SETUP_MODEL.readiness);
   const [rawSetup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
+  const pagedEnabled = historySupported && pagedHistoryEnabled(rawSetup.bundledHistorySupported === true);
   const [progress, setProgress] = useState(INITIAL_PROGRESS);
   const notificationMode = progress.futureCaptureSource === 'notification';
-  const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(progress.futureCaptureSource, rawSetup) };
+  const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(progress.futureCaptureSource, rawSetup, progress.futureShortcutVersion) };
   const offersNotifications = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version);
   const [progressLoaded, setProgressLoaded] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
@@ -179,8 +181,10 @@ export default function IosSetupScreen() {
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
-  const futureConfigured = futureSetupConfigured(setup.readiness, progress.futureAutomationConfirmed);
-  const setupComplete = progressLoaded && !setup.loading &&
+  const activeMessageCheckFailed = !notificationMode && progress.activeSection === 'future' &&
+    (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
+  const futureConfigured = !activeMessageCheckFailed && futureSetupConfigured(setup.readiness, progress.futureAutomationConfirmed);
+  const setupComplete = !activeMessageCheckFailed && progressLoaded && !setup.loading &&
     canFinishIosMessageSetup(progress, setup.readiness);
 
   useEffect(() => {
@@ -443,17 +447,22 @@ export default function IosSetupScreen() {
 
   const installFutureShortcut = useCallback(() => {
     void runOperation(async () => {
-      await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      if (setup.shortcutVersion === 3) await updateProgress({ type: 'future-shortcut-install-started', version: 3 });
+      else await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
       await send({ type: 'install-shortcut' });
     });
-  }, [runOperation, send, updateProgress]);
+  }, [runOperation, send, updateProgress, setup.shortcutVersion]);
 
   const confirmFutureShortcut = useCallback(() => {
     void runOperation(async () => {
-      await updateProgress({ type: 'future-shortcut-confirmed' });
+      await updateProgress({ type: 'future-shortcut-confirmed', ...(setup.shortcutVersion ? { version: setup.shortcutVersion } : {}) });
       await send({ type: 'shortcut-added' });
+      if (setup.shortcutVersion === 3) {
+        await setCaptureOptOut(false);
+        await send({ type: 'check-shortcut' });
+      }
     });
-  }, [runOperation, send, updateProgress]);
+  }, [runOperation, send, updateProgress, setup.shortcutVersion, setCaptureOptOut]);
 
   const checkFutureShortcut = useCallback(() => {
     void runOperation(async () => {
@@ -596,7 +605,7 @@ export default function IosSetupScreen() {
       // cannot enable capture or replace the owner's automation confirmation.
       await send({ type: 'refresh-status' });
       const current = await loadIosMessageSetupProgress();
-      const readiness = resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel());
+      const readiness = resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel(), current.futureShortcutVersion);
       if (!futureSetupConfigured(readiness, current.futureAutomationConfirmed)) {
         if (screenActive.current) setLocalError(t('iosMessageFutureBeforeSkip'));
         return;
@@ -687,7 +696,7 @@ export default function IosSetupScreen() {
       const current = await loadIosMessageSetupProgress();
       if (screenActive.current) setProgress(current);
       if (!canFinishIosMessageSetup(current,
-        resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel()))) return;
+        resolveIosSelectedReadiness(current.futureCaptureSource, controllerRef.current?.getModel(), current.futureShortcutVersion))) return;
       if (fromOnboarding) {
         const onboardingFocus = state.onboardingProfile?.focus ?? null;
         const onboardingTracking = state.onboardingProfile?.tracking ?? null;
@@ -824,18 +833,21 @@ export default function IosSetupScreen() {
     });
   }, [busy, exitToRoot, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
 
-  const futureStep = setup.failure === 'shortcut-install' &&
+  const failedMessageCheck = !notificationMode && (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
+  const futureStep = failedMessageCheck ? 'prove-shortcut' : setup.failure === 'shortcut-install' &&
     !progress.futureShortcutConfirmed
     ? 'add-shortcut'
-    : resolveIosFutureSetupStep(progress, setup.readiness);
+    : resolveIosFutureSetupStep(progress, setup.readiness, notificationMode ? undefined : setup.shortcutVersion);
   const futureStatus = !setup.loading && !futureConfigured && progress.futureStatus === 'complete'
     ? 'in-progress' : progress.futureStatus;
   const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
+  const shortcutCheckFailed = progress.activeSection === 'future' && failedMessageCheck;
+  const shortcutName = setup.shortcutName ?? IOS_LOCAL_CAPTURE_SHORTCUT_NAME;
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
   const historyRunning = historySetup.handoffStartedAt !== null;
   const historyComplete = progress.historyStatus === 'complete';
   const historyDeferred = progress.historyStatus === 'skipped' && progress.historySkippedForNow === true;
-  const showingAutomation = futureStep === 'create-automation' || showAutomationGuide;
+  const showingAutomation = !failedMessageCheck && (futureStep === 'create-automation' || showAutomationGuide);
 
   const openHelp = () => {
     setPrivacyExpanded(false);
@@ -975,29 +987,46 @@ export default function IosSetupScreen() {
                   <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
                 ) : showingAutomation ? (
                   <>
-                    <AutomationGuide />
+                    <ThemedText type="smallBold">{shortcutCopy.automate}</ThemedText>
+                    <AutomationGuide shortcutName={shortcutName} />
+                    <ThemedText type="small" themeColor="textSecondary">{shortcutCopy.existing}</ThemedText>
                     <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
+                    <Button label={shortcutCopy.editExisting} variant="ghost"
+                      onPress={() => void runOperation(() => send({ type: 'open-automation', existing: true }))} disabled={busy} wrapLabel />
                   </>
                 ) : futureStep === 'prove-shortcut' ? (
                   <>
-                    <ThemedText type="smallBold">{t('iosMessagePermissionTitle')}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionBody')}</ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessagePermissionLocked')}</ThemedText>
-                    <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />
+                    <ThemedText type="smallBold">{shortcutCopy.check}</ThemedText>
+                    <ThemedText type="small">{shortcutCopy.checkBody}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">{`${shortcutCopy.name}: ${shortcutName}`}</ThemedText>
+                    {shortcutCheckFailed ? <View testID="ios-shortcut-check-recovery" style={{ gap: Spacing.two }}>
+                      <ThemedText accessibilityRole="alert" type="smallBold">{shortcutCopy.failed}</ThemedText>
+                      <ThemedText type="small">{shortcutCopy.repairBody}</ThemedText>
+                      <Button label={shortcutCopy.repair} onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />
+                      <Button label={shortcutCopy.retry} variant="outline" onPress={checkFutureShortcut} disabled={busy} wrapLabel />
+                    </View> : <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />}
+                    <ThemedText type="meta" themeColor="textSecondary">{shortcutCopy.checkNote}</ThemedText>
+                    <Button label={shortcutCopy.permissions} variant="ghost" onPress={openHelp} disabled={busy} wrapLabel />
                   </>
                 ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
                   <>
+                    <ThemedText type="smallBold">{shortcutCopy.add}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">{`${shortcutCopy.name}: ${shortcutName}`}</ThemedText>
+                    {setup.shortcutVersion === 3 && <ThemedText type="small">{shortcutCopy.bundled}</ThemedText>}
                     <ThemedText type="small" themeColor="textSecondary">
                       {tf(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
                         : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp',
-                      { shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME })}
+                      { shortcut: shortcutName })}
                     </ThemedText>
                     <Button
-                      label={t(futureStep === 'add-shortcut' ? 'iosLocalInstallShortcut' : 'iosLocalAlreadyAdded')}
+                      label={futureStep === 'confirm-shortcut' && setup.shortcutVersion === 3 ? shortcutCopy.addedCheck
+                        : t(futureStep === 'add-shortcut' ? 'iosLocalInstallShortcut' : 'iosLocalAlreadyAdded')}
                       onPress={futureStep === 'add-shortcut' ? installFutureShortcut : confirmFutureShortcut}
                       disabled={busy || (futureStep === 'add-shortcut' && !setup.shortcutAvailable)}
                       wrapLabel
                     />
+                    {futureStep === 'confirm-shortcut' && <Button label={t('iosMessageAddAgain')} variant="ghost"
+                      onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />}
                   </>
                 ) : null}
                 {!notificationMode && showingAutomation && (
@@ -1122,7 +1151,7 @@ export default function IosSetupScreen() {
               </ThemedText>
             </Block>
           )}
-          {error && (
+          {error && !shortcutCheckFailed && (
             <View accessibilityLiveRegion="polite">
               <Block tone="expense">
                 <ThemedText type="small" selectable>{error}</ThemedText>

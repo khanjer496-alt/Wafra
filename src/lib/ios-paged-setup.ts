@@ -14,6 +14,13 @@ const VERIFIED_PAGED_RECORDS: Readonly<Record<string, string>> = {
 const configuredHistoryUrl = (): string | undefined => process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_SHORTCUT_NAME: string =
   VERIFIED_PAGED_RECORDS[configuredHistoryUrl() ?? ''] ?? 'Wafra-History-v2-typed-date.signed';
+export const BUNDLED_HISTORY_SHORTCUT_NAME = 'Wafra History v8';
+export const BUNDLED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v8';
+export const PAGED_HISTORY_BLOCK_KEY = 'wafra/ios-paged-page-block/v1';
+export const historyPageKey = (progress: PagedHistoryProgress | null): string | null =>
+  progress?.status === 'continue' ? `${progress.sessionId}:${progress.checked}` : null;
+export const isHistoryPageBlocked = (stored: string | null, progress: PagedHistoryProgress | null): boolean =>
+  stored !== null && stored === historyPageKey(progress);
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v4';
 const VERIFIED_HISTORY_SHORTCUT_URL: string = configuredHistoryUrl() && VERIFIED_PAGED_RECORDS[configuredHistoryUrl()!]
   ? configuredHistoryUrl()!
@@ -28,10 +35,10 @@ const installsVerifiedPagedRecord = (): boolean =>
   process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === VERIFIED_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_INSTALL_URL: string | null =
   installsVerifiedPagedRecord() ? VERIFIED_HISTORY_SHORTCUT_URL : null;
-export const pagedHistoryEnabled = (): boolean =>
-  process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
-export const pagedHistoryRunUrl = (): string =>
-  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta?blocked=1')}`;
+export const pagedHistoryEnabled = (bundled = false): boolean =>
+  bundled || process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
+export const pagedHistoryRunUrl = (bundled = false): string =>
+  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(bundled ? BUNDLED_HISTORY_SHORTCUT_NAME : PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta?blocked=1')}`;
 
 export interface PagedHistoryProgress {
   sessionId: string;
@@ -61,6 +68,10 @@ export function parsePagedHistoryProgress(raw: string | null, now = Date.now()):
 
 export const pagedHistoryCopy = {
   en: {
+    bundleHelp: 'Choose Shortcuts in the share sheet, then Add Shortcut. Keep the name Wafra History v8. Your saved pages stay in Wafra.',
+    pageBlocked: 'Messages returned conflicting dates for this page. Your saved pages are safe. Repeating the same import may stop here again.',
+    retryPage: 'Try this page once more',
+    retryHelp: 'Retry after updating the Shortcut or fixing an Apple permission error. You can also use a bank statement or return to setup.',
     statement: 'Import a bank statement',
     statementHelp: 'For a large inbox, use a bank statement PDF or CSV to bring in past transactions without waiting for Messages. You will review the import options before selecting a file.',
     notStarted: 'Apple Shortcuts stopped before any history was saved. If Find Messages reports an error, try importing a bank statement below. You can retry Messages later.',
@@ -80,6 +91,10 @@ export const pagedHistoryCopy = {
     back: 'Back to setup', again: 'Add Shortcut again', unavailable: 'Update Wafra to import past messages.',
   },
   ar: {
+    bundleHelp: 'اختر «الاختصارات» من قائمة المشاركة، ثم أضف الاختصار. أبقِ الاسم Wafra History v8. تبقى الصفحات المحفوظة في وفرة.',
+    pageBlocked: 'أعادت الرسائل تواريخ متعارضة لهذه الصفحة. صفحاتك المحفوظة آمنة. قد تتوقف إعادة الاستيراد عند الموضع نفسه.',
+    retryPage: 'إعادة محاولة هذه الصفحة مرة واحدة',
+    retryHelp: 'أعد المحاولة بعد تحديث الاختصار أو إصلاح خطأ أذونات Apple. يمكنك أيضاً استخدام كشف بنكي أو العودة إلى الإعداد.',
     statement: 'استيراد كشف حساب بنكي',
     statementHelp: 'إذا كان صندوق الرسائل كبيراً، استخدم كشف حساب PDF أو CSV لإضافة العمليات السابقة دون انتظار الرسائل. ستراجع خيارات الاستيراد قبل اختيار الملف.',
     notStarted: 'توقفت اختصارات Apple قبل حفظ أي سجل. إذا ظهر خطأ في «البحث عن الرسائل»، جرّب استيراد كشف حساب أدناه. يمكنك إعادة محاولة الرسائل لاحقاً.',

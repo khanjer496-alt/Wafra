@@ -81,6 +81,8 @@ async function screen(t, options = {}) {
   };
   const native = {
     notificationCaptureSupported: options.notificationCaptureSupported === true,
+    ...(options.bundled ? { getMessageShortcutURL: async () => 'file:///app/Wafra%20Capture%20v3.shortcut' } : {}),
+    ...(options.bundledHistory ? { getHistoryShortcutURL: async () => 'file:///app/Wafra%20History%20v8.shortcut' } : {}),
     async getCaptureStatus() { await controls.beforeStatus?.(); return { ...nativeStatus }; },
     async setCaptureEnabled(value) { await controls.beforeEnable?.(value); nativeStatus.enabled = value; receipts.push(['enabled', value]); },
     async getCompletedSession() { return null; },
@@ -106,6 +108,7 @@ async function screen(t, options = {}) {
   });
   const protocol = source('src/lib/ios-local-capture-protocol.ts');
   const capture = source('src/lib/ios-capture-setup.ts', {
+    'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async url => urls.push(url) },
     'react-native': platform, '@/lib/ios-local-capture-protocol': protocol,
     './ios-capture-health': source('src/lib/ios-capture-health.ts'),
     '@/lib/capture': { getIosCaptureNativeModule: () => controls.nativeAvailable ? native : null,
@@ -159,6 +162,7 @@ async function screen(t, options = {}) {
     '@/hooks/use-language': { useLanguage: () => options.language ?? 'en' },
     '@/lib/ios-local-capture-protocol': protocol, '@/lib/ios-capture-setup': capture,
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
+    '@/lib/ios-shortcut-setup-copy': source('src/lib/ios-shortcut-setup-copy.ts'),
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
     // Real module, with only the two surfaces this harness pins overridden —
@@ -443,11 +447,16 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.ok(s.button('iosMessageRunPermissionCheck'));
   await s.callback('error');
-  assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
+  assert.ok(s.text().includes('The Shortcut did not complete the check.'),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
   await s.foreground(2);
-  assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
+  assert.ok(s.text().includes('The Shortcut did not complete the check.'),
     'Foreground notifications after the callback must not erase the failure before the user retries.');
+  const repair = s.all().find(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut');
+  assert.ok(repair, 'repair must be on the failed step, not buried in Help');
+  repair.props.onPress(); await s.flush();
+  assert.ok(s.urls.some(url => url.startsWith('https://www.icloud.com/shortcuts/')));
+  assert.equal(s.nativeStatus.firstCapturedAt, null);
 });
 
 test('canceled proof and unknown callbacks preserve retry without inventing capture or completing onboarding', async t => {
@@ -652,4 +661,34 @@ test('retrying an action failure preserves the section selected after the initia
   await s.press('iosMessageRetrySetup');
   assert.equal(s.saved().activeSection, 'future',
     'Only failed initialization should replay the requested section; ordinary retry retains the current step.');
+});
+
+test('replacing v2 requires v3 installation and a v3 native check before automation', async t => {
+  const s = await screen(t, { bundled: true, progress: ready, nativeStatus: { ...proven, firstCapturedAt: Date.now() } });
+  assert.ok(s.button('iosLocalInstallShortcut'));
+  await s.press('iosLocalInstallShortcut');
+  assert.equal(s.urls[0], 'file:///app/Wafra%20Capture%20v3.shortcut');
+  s.all().find(n => n.type === 'Button' && n.props.label === 'I added it — check the connection').props.onPress(); await s.flush();
+  assert.ok(s.button('iosMessageRunPermissionCheck'));
+  assert.equal(s.saved().futureAutomationConfirmed, false);
+  assert.equal(s.urls.length, 2, 'confirmation starts the explicit connection check');
+  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra Capture v3');
+  await s.callback('success');
+  assert.ok(s.button('iosMessageRunPermissionCheck'), 'old v2 receipt cannot prove the v3 run');
+  s.nativeStatus.setupProofVersion = 3; await s.callback('success');
+  assert.ok(s.button('iosLocalOpenAutomation'));
+  assert.equal(s.saved().futureShortcutVersion, 3);
+  assert.equal(s.saved().historyStatus, 'skipped');
+  assert.equal(s.onboarded, false);
+});
+
+test('a failed check overrides an already-open automation review guide', async t => {
+  const s = await screen(t, { progress: ready, nativeStatus: proven });
+  await s.help('iosMessageReviewAutomation');
+  assert.ok(s.all().some(n => n.type === 'AutomationGuide'));
+  await s.help('iosMessageRunPermissionCheck');
+  await s.callback('error');
+  assert.equal(s.all().some(n => n.type === 'AutomationGuide'), false);
+  assert.ok(s.all().some(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut'));
+  assert.match(s.text(), /did not complete the check/);
 });

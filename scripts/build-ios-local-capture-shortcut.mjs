@@ -386,6 +386,48 @@ const createLocalCaptureShortcut = () => {
   };
 };
 
+export const IOS_LOCAL_CAPTURE_V3_SHORTCUT_NAME = "Wafra Capture v3";
+
+// A separate, unpublished candidate. Apple's Get Type returns localized
+// display names, so obtain the comparison value from a known Text action on
+// the same device. Both the setup-control branch and ordinary text capture
+// must compare against that value. Keep the published v2 graph unchanged.
+const createLocalCaptureV3Shortcut = () => {
+  const shortcut = createLocalCaptureShortcut();
+  const referenceText = "C17E0000-0000-4000-8000-000000000201";
+  const referenceType = "C17E0000-0000-4000-8000-000000000202";
+  for (const action of shortcut.WFWorkflowActions) {
+    const parameters = action.WFWorkflowActionParameters;
+    if (action.WFWorkflowActionIdentifier === `${APP_BUNDLE_ID}.${SETUP_INTENT}`) {
+      // A successful old graph must not satisfy the v3 installation check.
+      const intent = "RecordWafraCaptureV3SetupProofIntent";
+      action.WFWorkflowActionIdentifier = `${APP_BUNDLE_ID}.${intent}`;
+      parameters.AppIntentDescriptor = appIntentDescriptor(intent);
+    }
+    if (parameters.WFConditionalActionString === "Text") {
+      parameters.WFConditionalActionString = outputTextToken(referenceType, "Type");
+    }
+  }
+  shortcut.WFWorkflowActions.unshift(
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
+      WFWorkflowActionParameters: {
+        UUID: referenceText,
+        WFTextActionText: "Wafra",
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.getitemtype",
+      WFWorkflowActionParameters: {
+        UUID: referenceType,
+        WFInput: actionOutput(referenceText, "Text"),
+      },
+    },
+  );
+  shortcut.WFWorkflowName = IOS_LOCAL_CAPTURE_V3_SHORTCUT_NAME;
+  return shortcut;
+};
+
 const containsNull = (value) =>
   value === null ||
   (Array.isArray(value)
@@ -394,7 +436,7 @@ const containsNull = (value) =>
       ? Object.values(value).some(containsNull)
       : false);
 
-export const verifyLocalCaptureShortcutGraph = (candidate) => {
+const verifyCaptureShortcutGraph = (candidate, expected) => {
   const fail = (detail) => {
     throw new Error(`artifact is not the exact Wafra Local Capture graph: ${detail}`);
   };
@@ -421,11 +463,17 @@ export const verifyLocalCaptureShortcutGraph = (candidate) => {
   if (/https?:\/\/|Bearer\s|Authorization/i.test(serialized)) {
     fail("network endpoint or credential literal is present");
   }
-  if (!isDeepStrictEqual(candidate, createLocalCaptureShortcut())) {
+  if (!isDeepStrictEqual(candidate, expected)) {
     fail("semantic graph or dataflow changed");
   }
   return true;
 };
+
+export const verifyLocalCaptureShortcutGraph = (candidate) =>
+  verifyCaptureShortcutGraph(candidate, createLocalCaptureShortcut());
+
+export const verifyLocalCaptureV3ShortcutGraph = (candidate) =>
+  verifyCaptureShortcutGraph(candidate, createLocalCaptureV3Shortcut());
 
 export const buildLocalCaptureShortcut = () => {
   const shortcut = createLocalCaptureShortcut();
@@ -433,12 +481,20 @@ export const buildLocalCaptureShortcut = () => {
   return shortcut;
 };
 
+export const buildLocalCaptureV3Shortcut = () => {
+  const shortcut = createLocalCaptureV3Shortcut();
+  verifyLocalCaptureV3ShortcutGraph(shortcut);
+  return shortcut;
+};
+
 const isMain =
   process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isMain) {
-  const outputPath = resolve(process.argv[2] ?? "WafraLocalCapture.json");
-  const shortcut = buildLocalCaptureShortcut();
+  const v3 = process.argv.includes("--v3");
+  const outputPath = resolve(process.argv.slice(2).find(arg => arg !== "--v3")
+    ?? (v3 ? "WafraCaptureV3.json" : "WafraLocalCapture.json"));
+  const shortcut = v3 ? buildLocalCaptureV3Shortcut() : buildLocalCaptureShortcut();
   await writeFile(outputPath, `${JSON.stringify(shortcut, null, 2)}\n`, "utf8");
   console.log(outputPath);
 }

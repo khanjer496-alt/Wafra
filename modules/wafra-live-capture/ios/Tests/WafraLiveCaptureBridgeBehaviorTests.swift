@@ -45,13 +45,15 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the thirteen public functions",
+    check("bridge registers exactly the fifteen public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
         "eraseAll",
         "getAutomationInputProbeAt",
         "getCaptureStatus",
+        "getHistoryShortcutURL",
+        "getMessageShortcutURL",
         "getNotificationShortcutURL",
         "listPendingRecords",
         "listPendingRecordsIncludingNotifications",
@@ -76,6 +78,26 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("asset lookup never touches the protected financial queue",
       WafraLiveCaptureStore.shared.calls == storeCallsBeforeMissingAsset)
     WafraLiveCaptureResources.shortcutAvailable = true
+
+    for (method, resourceName) in [
+      ("getMessageShortcutURL", "Wafra Capture v3"),
+      ("getHistoryShortcutURL", "Wafra History v8"),
+    ] {
+      let callsBeforeAssetLookup = WafraLiveCaptureStore.shared.calls
+      let assetURI = try invoke(method, as: String.self)
+      check("\(method) returns only its fixed bundled local file",
+        assetURI == WafraLiveCaptureResources.shortcutURLs[resourceName]?.absoluteString
+          && URL(string: assetURI)?.isFileURL == true)
+      check("\(method) asks for the exact versioned resource and shortcut extension",
+        WafraLiveCaptureResources.requestedName == resourceName
+          && WafraLiveCaptureResources.requestedExtension == "shortcut")
+      WafraLiveCaptureResources.shortcutAvailable = false
+      check("\(method) rejects a missing bundled asset without a fabricated path",
+        rejects(method, []))
+      WafraLiveCaptureResources.shortcutAvailable = true
+      check("\(method) does not read or mutate financial capture state",
+        WafraLiveCaptureStore.shared.calls == callsBeforeAssetLookup)
+    }
 
     let localLeaseApplied = try invoke(
       "setLocalCaptureEntitlementLease",

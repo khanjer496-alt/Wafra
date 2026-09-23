@@ -10,6 +10,7 @@ import {
 } from '@/lib/capture';
 import {
   IOS_LOCAL_CAPTURE_SHORTCUT_URL,
+  IOS_BUNDLED_CAPTURE_SHORTCUT_NAME,
   iosLocalCaptureTestUrl,
   normalizeIosLocalCaptureShortcutUrl,
 } from '@/lib/ios-local-capture-protocol';
@@ -69,6 +70,9 @@ export interface IosSetupModel {
   /** Separate proof: an SMS Shortcut check cannot prove notification input. */
   notificationReadiness?: IosSetupReadiness;
   notificationSupported?: boolean;
+  shortcutName?: string;
+  shortcutVersion?: 3;
+  bundledHistorySupported?: boolean;
 }
 
 export type IosSetupIntent =
@@ -77,7 +81,7 @@ export type IosSetupIntent =
   | { type: 'install-shortcut' }
   | { type: 'shortcut-added' }
   | { type: 'check-shortcut' }
-  | { type: 'open-automation' }
+  | { type: 'open-automation'; existing?: boolean }
   | { type: 'automation-added' }
   | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
   | { type: 'go-to-stage'; stage: IosSetupStage }
@@ -96,11 +100,12 @@ export interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
-    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported'
+    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL'
   > | null;
   shortcutUrl: string | null;
   canOpenUrl(url: string): Promise<boolean>;
   openUrl(url: string): Promise<void>;
+  shareShortcut(url: string): Promise<void>;
   subscribeCaptureStatus?(listener: () => void): () => void;
 }
 
@@ -144,7 +149,8 @@ export function resolveIosNotificationReadiness(status: Pick<WafraLiveCaptureSta
 }
 
 export function resolveIosSelectedReadiness(source: unknown, model: Pick<IosSetupModel,
-  'readiness' | 'notificationReadiness'> | null | undefined): IosSetupReadiness {
+  'readiness' | 'notificationReadiness' | 'shortcutVersion'> | null | undefined, installedVersion?: number): IosSetupReadiness {
+  if (source !== 'notification' && model?.shortcutVersion && installedVersion !== model.shortcutVersion) return 'not-added';
   return source === 'notification' ? model?.notificationReadiness ?? 'not-added' : model?.readiness ?? 'not-added';
 }
 
@@ -169,15 +175,22 @@ const defaultDependencies = (): IosSetupDependencies => ({
   openUrl: async (url) => {
     await Linking.openURL(url);
   },
+  shareShortcut: async (url) => {
+    const sharing = await import('expo-sharing');
+    if (!await sharing.isAvailableAsync()) throw new Error('shortcut_sharing_unavailable');
+    await sharing.shareAsync(url, { UTI: 'com.apple.shortcut' });
+  },
   subscribeCaptureStatus: subscribeIosCaptureStatusRefresh,
 });
 
 export function resolveIosSetupReadiness(
   status: Pick<WafraLiveCaptureStatus, 'enabled' | 'setupProofVersion' | 'firstCapturedAt'>,
+  requiredProofVersion = 1,
 ): IosSetupReadiness {
   if (status.enabled !== true) return 'not-added';
+  if (requiredProofVersion === 3 && status.setupProofVersion !== 3) return 'not-added';
   if (isCaptureTimestamp(status.firstCapturedAt)) return 'first-alert-captured';
-  if (status.setupProofVersion === 1) return 'shortcut-proven';
+  if (status.setupProofVersion === requiredProofVersion) return 'shortcut-proven';
   return 'not-added';
 }
 
@@ -203,9 +216,13 @@ export const resolveIosFutureSetupStep = (
     futureShortcutConfirmed: boolean;
     futureAutomationConfirmed: boolean;
     futureStatus: string;
+    futureShortcutVersion?: number;
   },
   readiness: IosSetupReadiness,
+  requiredVersion?: 3,
 ): IosFutureSetupStep => {
+  if (requiredVersion && progress.futureShortcutVersion !== requiredVersion) return 'add-shortcut';
+  if (requiredVersion && !progress.futureShortcutConfirmed) return 'confirm-shortcut';
   // Running the no-input Shortcut proves the local action, not the personal
   // Message automation. Keep its instructions until the user confirms them.
   if (readiness !== 'not-added') {
@@ -300,13 +317,15 @@ export function createIosCaptureSetup({
     try {
       const status = await native.getCaptureStatus();
       if (disposed) return;
-      const readiness = resolveIosSetupReadiness(status);
+      const readiness = resolveIosSetupReadiness(status, native.getMessageShortcutURL ? 3 : 1);
       const notificationSupported = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version) &&
         native.notificationCaptureSupported === true;
       publish({
         loading: false,
         supported: true,
-        shortcutAvailable: shortcutUrl !== null,
+        shortcutAvailable: shortcutUrl !== null || typeof native.getMessageShortcutURL === 'function',
+        ...(native.getMessageShortcutURL ? { shortcutName: IOS_BUNDLED_CAPTURE_SHORTCUT_NAME, shortcutVersion: 3 as const } : {}),
+        ...(native.getHistoryShortcutURL ? { bundledHistorySupported: true } : {}),
         readiness,
         captureHealth: readIosCaptureHealth(status),
         notificationSupported,
@@ -376,6 +395,19 @@ export function createIosCaptureSetup({
   };
 
   const installShortcut = (): Promise<void> => joinOpening(async (generation) => {
+    const native = dependencies.getNativeModule();
+    if (native?.getMessageShortcutURL) {
+      try {
+        const local = await native.getMessageShortcutURL();
+        if (disposed || generation !== operationGeneration) return;
+        if (!local.startsWith('file:') || !local.endsWith('.shortcut')) throw new Error('invalid_shortcut_asset');
+        await dependencies.shareShortcut(local);
+        if (!disposed && generation === operationGeneration) publish({ stage: 'shortcut', failure: null });
+      } catch {
+        if (!disposed && generation === operationGeneration) publish({ failure: 'shortcut-install' });
+      }
+      return;
+    }
     const url = shortcutUrl;
     if (!url) {
       publish({ failure: 'shortcut-install' });
@@ -397,7 +429,7 @@ export function createIosCaptureSetup({
     }
   });
 
-  const openAutomation = (): Promise<void> => joinOpening(async (generation) => {
+  const openAutomation = (existing = false): Promise<void> => joinOpening(async (generation) => {
     if (!(await canUseShortcuts(generation))) {
       if (!disposed && generation === operationGeneration) {
         publish({ failure: 'shortcuts-missing' });
@@ -410,7 +442,7 @@ export function createIosCaptureSetup({
     // no way to pre-fill a trigger or create the automation itself. Fall back
     // to plainly opening Shortcuts if the route is refused.
     try {
-      await dependencies.openUrl(IOS_CREATE_AUTOMATION_URL);
+      await dependencies.openUrl(existing ? 'shortcuts://' : IOS_CREATE_AUTOMATION_URL);
     } catch {
       try {
         await dependencies.openUrl('shortcuts://');
@@ -449,7 +481,7 @@ export function createIosCaptureSetup({
     try {
       await native.setCaptureEnabled(true);
       if (disposed || generation !== operationGeneration) return;
-      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding));
+      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding, !!native.getMessageShortcutURL));
     } catch {
       if (!disposed && generation === operationGeneration) {
         publish({ failure: 'shortcut-run' });
@@ -531,7 +563,7 @@ export function createIosCaptureSetup({
           await checkShortcut();
           return;
         case 'open-automation':
-          await openAutomation();
+          await openAutomation(intent.existing);
           return;
         case 'automation-added':
           await checkShortcut(true);

@@ -18,3 +18,4 @@
 "live.notification.text.parameter" = "Notification text";
 "live.notification.invalid" = "No usable notification text reached Wafra. In Shortcuts, pass the notification message as text to Notification text, then try again.";
 "live.notification.error" = "Wafra could not save this notification. Open Wafra to check Capture status, then try again.";
+"live.setup_v3.title" = "Record Wafra Capture v3 setup proof";

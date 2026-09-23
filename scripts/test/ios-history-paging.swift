@@ -575,6 +575,92 @@ struct PagedHistoryTests {
         revision: s["revision"] as! Int, guid: "old-5", body: "x", sender: "TEST", instant: windowSource[125].date)
       _ = try commitTyped(fresh, s, found: 1)
     }
+    // Replay the photographed failure using synthetic GUIDs/bodies only.
+    // Build the checkpoint through real commits rather than forging head.json:
+    // one equal-second boundary withholds two rows on page one, then 25 pages
+    // commit 50 each, reaching exactly 1,299 checked at revision 26.
+    let photoBefore = iso.date(from: "2024-09-25T13:33:29.000Z")!
+    let photoBadDate = iso.date(from: "2024-09-25T13:34:44.113Z")!
+    let photoOldest = iso.date(from: "2022-11-29T11:07:42.214Z")!
+    let photoBase = photoBefore.addingTimeInterval(1_297.8)
+    var photoRows: [Row] = []
+    for index in 0..<1_400 {
+      let seconds = Double(index > 49 ? index - 1 : index)
+      let body = index < 3 ? "" : "Synthetic screenshot regression \(index)"
+      photoRows.append(Row(guid: "photo-synthetic-\(index)",
+        date: photoBase.addingTimeInterval(-seconds), body: body))
+    }
+    photoRows.append(Row(guid: "photo-synthetic-oldest", date: photoOldest, body: "Synthetic anchor"))
+    func photoFixture(_ name: String) throws -> (WafraPagedHistoryStore, [String: Any]) {
+      let fixture = make(name)
+      var cursor = try begin(fixture, photoRows)
+      for _ in 0..<26 { cursor = try send(fixture, cursor, page(photoRows, cursor)) }
+      try check("photo fixture reaches revision 26 with exact saved counts",
+        cursor["revision"] as! Int == 26 && cursor["checked"] as! Int == 1_299 &&
+        cursor["accepted"] as! Int == 1_296 && cursor["skipped"] as! Int == 3)
+      try check("photo fixture reaches the exact photographed query bounds",
+        cursor["before"] as! String == "2024-09-25T13:33:29.000Z" &&
+        cursor["after"] as! String == "2024-06-27T13:33:29.000Z")
+      return (fixture, cursor)
+    }
+    func journalSnapshot(_ name: String) throws -> [String: Data] {
+      let directory = root.appendingPathComponent("\(name)/active")
+      let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+      return try Dictionary(uniqueKeysWithValues: files.filter {
+        $0.lastPathComponent == "head.json" || $0.lastPathComponent.hasPrefix("page-")
+      }.map { ($0.lastPathComponent, try Data(contentsOf: $0)) })
+    }
+    let (photoStore, photoState) = try photoFixture("photo-recovered")
+    let photoPage = page(photoRows, photoState)
+    let photoJournal = try journalSnapshot("photo-recovered")
+    let photoStatus = try photoStore.status()
+    let separator = String(WafraPagedHistoryStore.columnSeparator)
+    let photoReason = try rangeDetail("photo column date beyond the cursor") {
+      _ = try photoStore.stageColumns(sessionId: photoState["sessionId"] as! String,
+        authorizationSecret: photoState["authorizationSecret"] as! String, revision: 26, found: 51,
+        guids: photoPage.map(\.guid).joined(separator: separator),
+        bodies: photoPage.map(\.body).joined(separator: separator),
+        senders: Array(repeating: "TEST", count: 51).joined(separator: separator),
+        dates: photoPage.enumerated().map { stamp($0.offset == 0 ? photoBadDate : $0.element.date) }.joined(separator: separator))
+    }
+    try check("photo refusal reports the exact timestamp, cursor, anchor and revision",
+      photoReason.contains("row 1/51 at 2024-09-25T13:34:44.113Z is not before the cursor") &&
+      photoReason.contains("before=2024-09-25T13:33:29.000Z") &&
+      photoReason.contains("after=2024-06-27T13:33:29.000Z") &&
+      photoReason.contains("oldest=2022-11-29T11:07:42.214Z revision=26"))
+    try check("a refused column page preserves every committed journal byte and saved count",
+      try journalSnapshot("photo-recovered") == photoJournal && photoStore.status() == photoStatus)
+    for row in photoPage {
+      _ = try photoStore.stageRow(sessionId: photoState["sessionId"] as! String,
+        authorizationSecret: photoState["authorizationSecret"] as! String, revision: 26,
+        guid: row.guid, body: row.body, sender: "TEST", instant: row.date)
+    }
+    let photoRecovered = try commitTyped(photoStore, photoState, found: 51)
+    try check("same-page typed dates recover once without resetting previously saved rows",
+      photoRecovered["revision"] as! Int == 27 && photoRecovered["checked"] as! Int == 1_349 &&
+      photoRecovered["accepted"] as! Int == 1_346 && photoRecovered["skipped"] as! Int == 3)
+    let recoveredJournal = try journalSnapshot("photo-recovered")
+    try check("successful typed recovery leaves all 26 earlier page files byte-identical",
+      photoJournal.filter { $0.key.hasPrefix("page-") }.allSatisfy { recoveredJournal[$0.key] == $0.value })
+    let photoReplay = try commitTyped(photoStore, photoState, found: 51)
+    try check("lost typed acknowledgement cannot commit the recovered page twice",
+      photoReplay["revision"] as! Int == 27 && photoReplay["checked"] as! Int == 1_349)
+
+    let (persistentStore, persistentState) = try photoFixture("photo-persistent")
+    let persistentJournal = try journalSnapshot("photo-persistent")
+    let persistentStatus = try persistentStore.status()
+    for (index, row) in photoPage.enumerated() {
+      _ = try persistentStore.stageRow(sessionId: persistentState["sessionId"] as! String,
+        authorizationSecret: persistentState["authorizationSecret"] as! String, revision: 26,
+        guid: row.guid, body: row.body, sender: "TEST", instant: index == 0 ? photoBadDate : row.date)
+    }
+    for _ in 0..<2 {
+      _ = try rangeDetail("persistent typed date violation") {
+        _ = try commitTyped(persistentStore, persistentState, found: 51)
+      }
+      try check("persistent typed refusal retains all saved pages, cursor and counts",
+        try journalSnapshot("photo-persistent") == persistentJournal && persistentStore.status() == persistentStatus)
+    }
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")
   }
 }

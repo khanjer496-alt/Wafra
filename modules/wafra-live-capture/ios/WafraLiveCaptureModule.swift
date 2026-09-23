@@ -6,6 +6,8 @@ private enum WafraLiveCaptureBridgeError: Error {
   case invalidTimestamp
   case invalidEntitlementLease
   case notificationShortcutUnavailable
+  case messageShortcutUnavailable
+  case historyShortcutUnavailable
 }
 
 private struct WafraLiveCaptureStatusRecord: Record {
@@ -178,6 +180,30 @@ public class WafraLiveCaptureModule: Module {
         forResource: "Wafra Notifications v1", withExtension: "shortcut"
       ), url.isFileURL else {
         throw WafraLiveCaptureBridgeError.notificationShortcutUnavailable
+      }
+      return url.absoluteString
+    }
+
+    AsyncFunction("getMessageShortcutURL") { () -> String in
+      guard #available(iOS 16.0, *) else {
+        throw WafraLiveCaptureBridgeError.messageShortcutUnavailable
+      }
+      guard let url = WafraLiveCaptureResources.bundle().url(
+        forResource: "Wafra Capture v3", withExtension: "shortcut"
+      ), url.isFileURL else {
+        throw WafraLiveCaptureBridgeError.messageShortcutUnavailable
+      }
+      return url.absoluteString
+    }
+
+    AsyncFunction("getHistoryShortcutURL") { () -> String in
+      guard #available(iOS 16.0, *) else {
+        throw WafraLiveCaptureBridgeError.historyShortcutUnavailable
+      }
+      guard let url = WafraLiveCaptureResources.bundle().url(
+        forResource: "Wafra History v8", withExtension: "shortcut"
+      ), url.isFileURL else {
+        throw WafraLiveCaptureBridgeError.historyShortcutUnavailable
       }
       return url.absoluteString
     }

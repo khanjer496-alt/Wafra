@@ -45,6 +45,10 @@ export interface WafraLiveCaptureNativeModule {
   getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
   /** Fixed bundled setup Shortcut only. Absent on older binaries; no financial data. */
   getNotificationShortcutURL?(): Promise<string>;
+  /** Fixed bundled message setup Shortcut. Optional for older native binaries. */
+  getMessageShortcutURL?(): Promise<string>;
+  /** Fixed bundled history import Shortcut. Optional for older native binaries. */
+  getHistoryShortcutURL?(): Promise<string>;
   getAutomationInputProbeAt(): Promise<number | null>;
   acknowledgeCaptureWarning(warningId: string): Promise<boolean>;
   recordFirstCapturedAt(observedAt: number): Promise<void>;

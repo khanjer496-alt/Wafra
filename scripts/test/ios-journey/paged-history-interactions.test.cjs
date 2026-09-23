@@ -8,8 +8,9 @@ const historyInstallUrl = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
-async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false } = {}) {
+async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false, pageFailure = false, bundled = false } = {}) {
   const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [];
+  const shared = [];
   const listeners = []; let cursor = 0, generation = 1, nativeReads = 0;
   const values = new Map(); if (legacyInstalled) values.set('wafra/ios-paged-shortcut-confirmed/v1', 'true');
   const slot = fn => slots[cursor++] ?? (slots[cursor - 1] = fn());
@@ -27,14 +28,14 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
   const api = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1', EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: installUrl,
   } } });
-  if (installed) values.set(api.PAGED_HISTORY_INSTALL_KEY, 'true');
+  if (installed) values.set(bundled ? api.BUNDLED_HISTORY_INSTALL_KEY : api.PAGED_HISTORY_INSTALL_KEY, 'true');
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Platform: { OS: 'ios', Version: '26.6' }, View: 'View', ScrollView: 'ScrollView',
       AppState: { addEventListener: (_kind, fn) => { listeners.push(fn); return { remove() {} }; } },
       Linking: { canOpenURL: async () => available, openURL: async value => urls.push(value) } },
-    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ push: v => routes.push(v), replace: v => routes.push(v), dismissTo: v => routes.push(v), canGoBack: () => true }),
-      useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings', blocked: blocked ? '1' : undefined }) },
+    'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ setParams: patch => routes.push({ params: patch }), push: v => routes.push(v), replace: v => routes.push(v), dismissTo: v => routes.push(v), canGoBack: () => true }),
+      useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings', blocked: blocked ? '1' : undefined, reason: pageFailure ? 'page-validation' : undefined }) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '@react-native-async-storage/async-storage': { getItem: async k => values.get(k) ?? null, setItem: async (k, v) => values.set(k, v) },
     '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'Header' },
@@ -51,6 +52,8 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
       iosHistorySetupStorageCoordinator: { run: fn => fn() } },
     '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async value => changes.push(value),
       loadIosMessageSetupProgress: async () => ({ returnToOnboarding: restoredOnboarding }) },
+    'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async url => shared.push(url) },
+    '../../modules/wafra-live-capture': { __esModule: true, default: bundled ? { getHistoryShortcutURL: async () => 'file:///app/Wafra%20History%20v8.shortcut' } : null },
     '../../modules/wafra-message-history': { __esModule: true, default: native },
   };
   const component = load(path.join(root, 'src/app/ios-paging-beta.tsx'), deps).default;
@@ -58,7 +61,7 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); return tree; };
   const flush = async () => { for (let i = 0; i < 6; i++) { await new Promise(resolve => setImmediate(resolve)); render(); } };
   render(); await flush();
-  return { onboarding: () => walk(tree).find(n => n.type === 'SetupShell').props.onboarding, flush, urls, routes, changes, handoffs, discards, values, get nativeReads() { return nativeReads; },
+  return { onboarding: () => walk(tree).find(n => n.type === 'SetupShell').props.onboarding, flush, urls, shared, routes, changes, handoffs, discards, values, get nativeReads() { return nativeReads; },
     button(label) { const found = walk(tree).filter(n => n.type === 'Button' && n.props.label === label); assert.equal(found.length, 1, label); return found[0].props; },
     confirm() { return walk(tree).find(n => n.type === 'Confirm').props; },
     setProgress(value) { progress = value; }, replaceLedger() { generation++; },
@@ -157,4 +160,28 @@ test('return without route origin restores first-run appearance; Settings retain
   assert.equal(resumed.onboarding(), true);
   const settings = await screen({ fromOnboarding: false });
   assert.equal(settings.onboarding(), false);
+});
+
+test('bundled history install keeps saved pages and runs the exact v8 name', async () => {
+  const s = await screen({ bundled: true, legacyInstalled: true, progress: session() });
+  assert.deepEqual(s.urls, []);
+  s.button('Add the history Shortcut').onPress(); await s.flush();
+  assert.deepEqual(s.shared, ['file:///app/Wafra%20History%20v8.shortcut']);
+  assert.deepEqual(s.discards, []); assert.deepEqual(s.handoffs, []);
+  s.button('I added it — start import').onPress(); await s.flush();
+  assert.equal(new URL(s.urls[0]).searchParams.get('name'), 'Wafra History v8');
+});
+test('a rejected page remains visibly blocked after foreground refresh, without an unchanged Resume action', async () => {
+  const s = await screen({ bundled: true, installed: true, blocked: true, pageFailure: true, progress: session() });
+  assert.match(s.text(), /conflicting dates/);
+  assert.throws(() => s.button('Resume saved import'));
+  assert.deepEqual(s.urls, []); assert.deepEqual(s.discards, []); assert.deepEqual(s.handoffs, []);
+  await s.foreground();
+  assert.match(s.text(), /conflicting dates/);
+  s.button('Try this page once more').onPress(); await s.flush();
+  assert.equal(s.urls.length, 1); assert.equal(s.handoffs.length, 1);
+  await s.foreground(); assert.throws(() => s.button('Resume saved import'));
+  assert.equal(s.urls.length, 1, 'refresh must not relaunch the refused page');
+  s.setProgress({ ...session(), checked: 100, accepted: 94 }); await s.foreground();
+  assert.ok(s.button('Resume saved import'));
 });
