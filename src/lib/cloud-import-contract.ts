@@ -74,6 +74,7 @@ export type CloudImportErrorCode =
   | 'pdf_password_required'
   | 'pdf_password_incorrect'
   | 'unsupported_statement_format'
+  | 'statement_does_not_reconcile'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -84,6 +85,13 @@ export class CloudImportError extends Error {
   constructor(
     readonly code: CloudImportErrorCode,
     readonly status?: number,
+    /**
+     * The layout fingerprint a Worker returns with
+     * `unsupported_statement_format`: token CLASSES and known column labels
+     * only, never the statement's contents. Carried so a diagnostic report can
+     * include why a file read nothing; no screen renders it yet.
+     */
+    readonly layout?: unknown,
   ) {
     super(code);
     this.name = 'CloudImportError';
@@ -249,6 +257,7 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'pdf_password_required',
   'pdf_password_incorrect',
   'unsupported_statement_format',
+  'statement_does_not_reconcile',
   'rate_limited',
   'queue_full',
   'email_not_configured',
@@ -257,9 +266,10 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
 /** Convert HTTP status + safe JSON error code into a finite UI state. */
 export function pdfImportError(status: number, value: unknown): CloudImportError {
   if (status === 401) return new CloudImportError('unauthorized', status);
-  const code = object(value)?.error;
+  const body = object(value);
+  const code = body?.error;
   if (typeof code === 'string' && KNOWN_ERRORS.has(code as CloudImportErrorCode)) {
-    return new CloudImportError(code as CloudImportErrorCode, status);
+    return new CloudImportError(code as CloudImportErrorCode, status, body?.layout);
   }
   if (status === 429) return new CloudImportError('rate_limited', status);
   if (status >= 500) return new CloudImportError('service', status);

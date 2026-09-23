@@ -7,6 +7,7 @@ const {
   parseStatementCsv,
   parseStatementLines,
   parseStatementText,
+  statementLayoutFingerprint,
 } = require('../.test-build/imports.cjs');
 
 let passed = 0;
@@ -998,6 +999,347 @@ function wideTextPdf(lines) {
     tooLong = error instanceof Error ? error.message : '';
   }
   ok('an oversized text PDF is a distinct limit error, not a scanned-PDF error', tooLong === 'pdf_too_long');
+
+
+  // ── The rows have to ADD UP to what the statement says about itself ──
+  //
+  // Recognising a layout and reading it correctly are not the same thing, and
+  // nothing here could previously tell them apart: a reading that took the
+  // wrong figure, or every direction the wrong way round, produced a full set
+  // of plausible transactions and no complaint. The statement states its own
+  // opening and closing balance, so the arithmetic between them is a proof.
+  const cardLedger = (closing) => [
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    '10-Aug-26 11-Aug-26 SHOP TWO DUBAI AE 50.00 50.00',
+    '11-Aug-26 12-Aug-26 REFUND 30.00 CR 30.00CR',
+    'Total Outstanding', closing,
+  ].join('\n');
+  // 1,000.00 + 100.00 + 50.00 - 30.00 = 1,120.00 owed.
+  const proven = parseStatementLines(cardLedger('AED 1,120.00'), 'AED');
+  ok('a card statement whose rows reach its stated closing balance is proven',
+    proven.rows.length === 3 && proven.reconciliation.verdict === 'proven' &&
+      proven.reconciliation.openingMinor === 100000 && proven.reconciliation.closingMinor === 112000,
+    JSON.stringify([proven.rows.length, proven.reconciliation]));
+  const contradicted = parseStatementLines(cardLedger('AED 9,999.00'), 'AED');
+  ok('one that does not is contradicted, with the gap stated',
+    contradicted.reconciliation.verdict === 'contradicted' &&
+      contradicted.reconciliation.differenceMinor === -887900,
+    JSON.stringify(contradicted.reconciliation));
+  // An account balance runs the other way: a purchase LOWERS it. Getting that
+  // backwards misses by twice the traffic rather than closing, so the sign
+  // convention is itself under test here.
+  const account = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    '02/07/2026 REFUND - 250.00 5,150.00',
+    'Closing Balance 5,150.00',
+  ].join('\n'), 'AED');
+  ok('an account statement reconciles on the opposite sign convention',
+    account.rows.length === 2 && account.reconciliation.verdict === 'proven',
+    JSON.stringify([account.rows.length, account.reconciliation]));
+  // Proof is only ever added, never used to cast doubt on what it cannot check.
+  const noAnchors = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a statement stating no balances is unknown, not contradicted',
+    noAnchors.rows.length === 1 && noAnchors.reconciliation.verdict === 'unknown',
+    JSON.stringify(noAnchors.reconciliation));
+  // A partial read is missing transactions by definition, so it cannot close.
+  // Calling that a contradiction would report every partial import as wrong.
+  const partial = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    '02/07/2026 BOTH POPULATED 10.00 20.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a read with rejected rows is unknown rather than contradicted',
+    partial.rejectedRows === 1 && partial.reconciliation.verdict === 'unknown',
+    JSON.stringify([partial.rejectedRows, partial.reconciliation]));
+  // The label has to be a label. "Total Outstanding" heads the summary box of a
+  // real statement AND appears five times in its small print; anchoring to a
+  // sentence would contradict a parse that was right.
+  const prosePitfall = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    'Total Outstanding', 'AED 1,100.00',
+    '11. Overlimit Amount is the amount by which the Total Outstanding on Statement Date exceeds 50,000.00',
+  ].join('\n'), 'AED');
+  ok('a balance label inside a sentence is not an anchor',
+    prosePitfall.reconciliation.verdict === 'proven',
+    JSON.stringify(prosePitfall.reconciliation));
+
+  // ── Six ways reconciliation could accuse a correct parse ──
+  //
+  // Found by review, not by a statement. Every one of these reports
+  // `contradicted` against a reading that was right, which is worse than not
+  // checking: it is documented as only ever ADDING proof.
+  const owedLedger = (closingLines) => [
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP DUBAI AE 100.00 100.00',
+    ...closingLines,
+  ].join('\n');
+  // `1,100.00 DR` ends in a direction, so the line read as no figure at all and
+  // the lookahead ran on to take the minimum payment underneath as the closing
+  // balance - off by the whole statement.
+  const trailingMarker = parseStatementLines(
+    owedLedger(['Total Outstanding 1,100.00 DR', 'Minimum Payment', '50.00']), 'AED');
+  ok('a balance with a trailing DR is read, not skipped for the figure below it',
+    trailingMarker.reconciliation.verdict === 'proven' &&
+      trailingMarker.reconciliation.closingMinor === 110000,
+    JSON.stringify(trailingMarker.reconciliation));
+  // An overpaid card is in CREDIT: it owes minus two hundred, not plus. Read as
+  // positive it missed by twice the balance.
+  const overpaid = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 REFUND 1,200.00 CR 1,200.00CR',
+    'Total Outstanding', '200.00CR',
+  ].join('\n'), 'AED');
+  ok('an overpaid card reads its CR balance as money it does not owe',
+    overpaid.reconciliation.verdict === 'proven' &&
+      overpaid.reconciliation.closingMinor === -20000,
+    JSON.stringify(overpaid.reconciliation));
+  // A summary box stacks labels then values, so a lookahead that stopped only
+  // at its OWN label walked into the other balance and read opening as closing.
+  const stackedBox = parseStatementLines(
+    owedLedger(['Total Outstanding', '1,100.00']), 'AED');
+  ok('a stacked summary box does not read the opening balance as the closing one',
+    stackedBox.reconciliation.verdict === 'proven' &&
+      stackedBox.reconciliation.openingMinor === 100000 &&
+      stackedBox.reconciliation.closingMinor === 110000,
+    JSON.stringify(stackedBox.reconciliation));
+  // Both labels, THEN both values. Pairing labels to values across a block like
+  // this is guesswork either way, so the honest answer is to decline it.
+  const bothLabelsFirst = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance', 'Total Outstanding', '1,000.00', '1,100.00',
+    '09-Aug-26 11-Aug-26 SHOP DUBAI AE 100.00 100.00',
+  ].join('\n'), 'AED');
+  ok('labels stacked above their values are declined, not contradicted',
+    bothLabelsFirst.reconciliation.verdict === 'unknown',
+    JSON.stringify(bothLabelsFirst.reconciliation));
+  // A row whose description wrapped is invisible in a table this parser does
+  // not coalesce: never read, never rejected. Here the closing balance happens
+  // to match the arithmetic of the ONE row that was read (5,000 - 100 = 4,900),
+  // so without the missing-row guard this reports `proven` — a false proof on
+  // an incomplete import, which is worse than reporting nothing at all.
+  const wrappedTooFar = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    '02/07/2026 VERY LONG PAYEE NAME THAT WRAPPED',
+    '250.00 - 4,650.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a row lost to wrapping makes the verdict unknown, never proven',
+    wrappedTooFar.rows.length === 1 && wrappedTooFar.rejectedRows === 0 &&
+      wrappedTooFar.reconciliation.verdict === 'unknown',
+    JSON.stringify([wrappedTooFar.rows.length, wrappedTooFar.rejectedRows, wrappedTooFar.reconciliation]));
+  // The small print comes FIRST here, which is the order that matters: a label
+  // inside a sentence sits above the summary box on plenty of statements, and a
+  // reconciliation that anchored to it would read the overlimit threshold as
+  // the closing balance and contradict a parse that was right.
+  const proseAbove = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    '11. Overlimit Amount is the amount by which the Total Outstanding on Statement Date exceeds 50,000.00',
+    'Opening Balance 1,000.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    'Total Outstanding', 'AED 1,100.00',
+  ].join('\n'), 'AED');
+  ok('a balance label in a sentence ABOVE the real one is still not an anchor',
+    proseAbove.reconciliation.verdict === 'proven' &&
+      proseAbove.reconciliation.closingMinor === 110000,
+    JSON.stringify(proseAbove.reconciliation));
+
+  // ── A failing statement can be diagnosed without handling anyone's money ──
+  //
+  // A file that reads zero rows tells the user nothing actionable and tells
+  // nobody upstream which layout defeated it. The fingerprint carries the SHAPE
+  // so a fixture can be written from it - and carries nothing else. This case
+  // is built to break that promise: a name, an employer, a city, an account
+  // number, merchant names and real-looking amounts, all in the places a
+  // statement really puts them.
+  const privacyProbe = [
+    'Northbank Gulf Limited',
+    'Credit Card Statement',
+    'MS SAMPLE CARDHOLDER',
+    'EXAMPLE TRADING FZ LLC',
+    'DUBAI',
+    'UNITED ARAB EMIRATES',
+    'Credit Card Number',
+    '4000 0000 0000 0002',
+    'Credit Limit 50,000.00',
+    'Minimum Amount Due 500.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 1,500.00',
+    '09-Aug-26 11-Aug-26 NFC - (X-PAY)-EXAMPLE PHARMACY 123 BR',
+    'DUBAI AE',
+    '88.50 88.50',
+    '10-Aug-26 11-Aug-26 REBATE 21.40 CR 21.40CR',
+    'Total Outstanding AED 1,567.10',
+  ].join('\n');
+  const print = statementLayoutFingerprint(privacyProbe, 'AED');
+  const serialized = JSON.stringify(print);
+  const mustNotLeak = [
+    'SAMPLE', 'CARDHOLDER', 'EXAMPLE', 'TRADING', 'PHARMACY', 'REBATE', 'X-PAY',
+    '4000', '0000', '0002', '1,500.00', '1500.00', '1,567.10',
+    '88.50', '21.40', '50,000', '500.00',
+  ];
+  const leaked = mustNotLeak.filter((needle) => serialized.toUpperCase().includes(needle.toUpperCase()));
+  ok('a fingerprint carries no name, employer, account number, merchant or amount',
+    leaked.length === 0, `leaked ${JSON.stringify(leaked)} in ${serialized}`);
+  // Nothing that could be a value survives as digits either.
+  ok('a fingerprint carries no digits at all outside its counts',
+    print.headers.every((header) => !/\d/.test(header)) &&
+      print.shapes.every((entry) => !/\d/.test(entry.shape)),
+    JSON.stringify([print.headers, print.shapes]));
+  // ...and the address block is counted rather than named.
+  ok('header-shaped lines that do not name a column are counted, not reported',
+    print.otherHeaderLines >= 3 &&
+      print.headers.every((header) => !/sample|cardholder|example|dubai|emirates/i.test(header)),
+    JSON.stringify([print.headers, print.otherHeaderLines]));
+
+  // The probe above misses a whole class: a name that CONTAINS a column word.
+  // `GULF PAYMENTS SERVICES LLC` carries "payments", is four words, and would go
+  // into the report verbatim. A column label ends in its noun; a trading name
+  // ends in what it is.
+  const tradingNames = statementLayoutFingerprint([
+    'Credit Card Statement',
+    'GULF PAYMENTS SERVICES LLC',
+    'NORTHBANK SETTLEMENTS PJSC',
+    'EXAMPLE BALANCE ADVISORS LTD',
+    'Transaction Date', 'Original Amount', 'Total Amount',
+  ].join('\n'), 'AED');
+  ok('a trading name containing a column word is still not a column label',
+    tradingNames.headers.every((header) => !/gulf|northbank|advisors|llc|pjsc|ltd/i.test(header)) &&
+      tradingNames.headers.includes('original amount') &&
+      tradingNames.headers.includes('total amount'),
+    JSON.stringify(tradingNames.headers));
+
+  // What it DOES carry is enough to rebuild the table from.
+  ok('a fingerprint names the column vocabulary the table used',
+    print.headers.includes('original amount') && print.headers.includes('total amount'),
+    JSON.stringify(print.headers));
+  // Two shapes for two rows: the three-line wrapped one rejoined into a single
+  // row ending in its pair of figures, and the credit with its glued marker.
+  // Both lead with DATE DATE, which is the shape SAYING this table carries a
+  // posting-date column - the parser reads past it rather than removing it.
+  ok('a fingerprint reports the row shapes, wrapped rows already rejoined',
+    print.shapes.length === 2 &&
+      print.shapes.every((entry) => entry.shape.startsWith('DATE DATE ')) &&
+      print.shapes.some((entry) => /MONEY MONEY$/.test(entry.shape)) &&
+      // One token carrying both, which is how extraction emits `21.40CR`.
+      print.shapes.some((entry) => /MONEY\+DIR$/.test(entry.shape)),
+    JSON.stringify(print.shapes));
+  ok('a fingerprint reports what the parser proved about the layout',
+    print.cardStatement === true && print.cardTotalAmountTable === true &&
+      print.dateLedLines === 2 && print.moneyLines === 2,
+    JSON.stringify(print));
+  // A file the parser read is not diagnosed: there is nothing to diagnose, and
+  // building the shape costs a pass over every line.
+  const readablePdf = await extractPdfStatementRows(wideTextPdf([
+    '01/07/2026 CARREFOUR MARKET 40.00 DR',
+  ]));
+  ok('a statement that read rows carries no layout fingerprint',
+    readablePdf.rows.length === 1 && readablePdf.layout === null,
+    JSON.stringify([readablePdf.rows.length, readablePdf.layout]));
+
+
+  // ── The header list is a CLOSED set, not a filtered one ──
+  //
+  // Two heuristics leaked before this. "Contains a column word" emitted an
+  // employer (`GULF PAYMENTS SERVICES LLC` carries "payments"). "Ends in a
+  // column noun" emitted a person: `ALICE CREDIT` and `MOHAMMED TOTAL` are a
+  // name followed by a column noun and pass that test exactly as a real header
+  // does. No test over free text can separate the two, because the strings are
+  // the same shape — so nothing is reported that was not already a constant in
+  // the parser.
+  const leakProbes = [
+    'ALICE CREDIT', 'MOHAMMED TOTAL', 'ACME PAYMENTS', 'GULF PAYMENTS SERVICES LLC',
+    'EXAMPLE BALANCE ADVISORS LTD', 'NORTHBANK SETTLEMENTS PJSC', 'MS SAMPLE CARDHOLDER',
+  ];
+  const leakedNames = leakProbes.filter((probe) => {
+    const print = statementLayoutFingerprint([
+      'Credit Card Statement', probe, 'Transaction Date', 'Original Amount', 'Total Amount',
+    ].join('\n'), 'AED');
+    return print.headers.includes(probe.toLowerCase());
+  });
+  ok('a name or company ending in a column noun is never reported as a header',
+    leakedNames.length === 0, `leaked ${JSON.stringify(leakedNames)}`);
+  // ...and the real labels beside them still are, so the diagnostic keeps working.
+  const alongside = statementLayoutFingerprint([
+    'Credit Card Statement', 'ALICE CREDIT', 'MS SAMPLE CARDHOLDER',
+    'Transaction Date', 'Posting Date', 'Original Amount', 'Total Amount',
+  ].join('\n'), 'AED');
+  ok('the known labels beside a name are still reported, and the rest counted',
+    alongside.headers.includes('transaction date') &&
+      alongside.headers.includes('original amount') &&
+      alongside.headers.includes('total amount') &&
+      alongside.otherHeaderLines >= 2,
+    JSON.stringify([alongside.headers, alongside.otherHeaderLines]));
+
+  // ── A stated ZERO balance is a balance ──
+  //
+  // `0.00` is a placeholder in a transaction cell — an empty debit or credit
+  // column prints exactly that — but a fully paid card and a newly opened
+  // account both legitimately state zero. Rejecting it left such a statement
+  // `unknown` even when its rows reached the stated figure exactly.
+  const fromZero = parseStatementLines([
+    'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 0.00',
+    'Transaction Date', 'Posting Date', 'Transaction Details',
+    'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+    'Opening Balance 0.00',
+    '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+    'Total Outstanding', '100.00',
+  ].join('\n'), 'AED');
+  ok('a statement opening at zero reconciles instead of reading as unstated',
+    fromZero.reconciliation.verdict === 'proven' && fromZero.reconciliation.openingMinor === 0,
+    JSON.stringify(fromZero.reconciliation));
+  // A bare dash really is an empty cell and must stay unreadable as an anchor.
+  const dashed = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance -',
+    '01/07/2026 GROCERY 100.00 - 4,900.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('an empty-cell dash is not a zero balance',
+    dashed.reconciliation.verdict === 'unknown', JSON.stringify(dashed.reconciliation));
+
+  // ── A date-led summary row is ambiguous, so decline rather than accuse ──
+  //
+  // `01/07/2026 NEW BALANCE 100.00 - 4,900.00` reads as a summary line, so it is
+  // neither accepted nor rejected and the sum is short by a transaction that may
+  // well be real. Reporting that as the parse contradicting itself accuses a
+  // reading that did nothing wrong.
+  const datedSummary = parseStatementLines([
+    'Statement of Account', 'Date Description Debit Credit Balance',
+    'Opening Balance 5,000.00',
+    '01/07/2026 NEW BALANCE 100.00 - 4,900.00',
+    'Closing Balance 4,900.00',
+  ].join('\n'), 'AED');
+  ok('a date-led summary row makes the verdict unknown, never contradicted',
+    datedSummary.reconciliation.verdict === 'unknown',
+    JSON.stringify([datedSummary.rows.length, datedSummary.rejectedRows, datedSummary.reconciliation]));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

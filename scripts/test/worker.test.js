@@ -1945,6 +1945,51 @@ const CARD_PAYMENT_DEBIT =
         token: me.ingestToken, headers: { 'content-type': 'application/pdf' }, body: '%PDF-1.4',
       })).status === 401);
 
+    // A parse that provably does not add up must not reach the ledger. These two
+    // statements differ ONLY in the closing balance they state: the first adds
+    // up, the second cannot. Reconciliation was previously computed and then
+    // ignored here, so the wrong-figure parse it exists to catch was imported
+    // and reported as complete coverage.
+    const reconciling = (closing) => tinyPdf([
+      'Credit Card Statement', 'Credit Limit 50,000.00', 'Minimum Amount Due 500.00',
+      'Transaction Date', 'Posting Date', 'Transaction Details',
+      'Original Amount', '(+) VAT', 'Total Amount', '(AED)',
+      'Opening Balance 1,000.00',
+      '09-Aug-26 11-Aug-26 SHOP ONE DUBAI AE 100.00 100.00',
+      'Total Outstanding', closing,
+    ]);
+    const proven = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' },
+      body: reconciling('AED 1,100.00'),
+    });
+    ok('pdf: a statement whose rows reach its stated closing balance still imports',
+      proven.status === 202 && (await proven.json()).acceptedRows === 1);
+    const contradicted = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' },
+      body: reconciling('AED 9,999.00'),
+    });
+    const contradictedBody = contradicted.status === 422 ? await contradicted.json() : {};
+    ok('pdf: one that does not is refused, and nothing is queued',
+      contradicted.status === 422 &&
+      contradictedBody.error === 'statement_does_not_reconcile' &&
+      contradictedBody.differenceMinor === -889900,
+      JSON.stringify([contradicted.status, contradictedBody]));
+
+    // The layout of a file that read NOTHING is returned so the failure can be
+    // diagnosed, and it may carry only token classes and column labels this
+    // parser already knows — never anything out of the statement.
+    const unsupported = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['MS SAMPLE CARDHOLDER', 'ACME PAYMENTS', 'Opening Balance 1,500.00']),
+    });
+    const unsupportedBody = unsupported.status === 422 ? await unsupported.json() : {};
+    ok('pdf: an unreadable layout is reported as shapes, with no cardholder text',
+      unsupported.status === 422 &&
+      unsupportedBody.error === 'unsupported_statement_format' &&
+      !!unsupportedBody.layout &&
+      !/SAMPLE|CARDHOLDER|ACME|1,500/i.test(JSON.stringify(unsupportedBody.layout)),
+      JSON.stringify(unsupportedBody));
+
     ok('csv: an unsupported media type is refused before parsing',
       (await call(env, 'POST', '/v1/import/csv', {
         token: me.adminToken,

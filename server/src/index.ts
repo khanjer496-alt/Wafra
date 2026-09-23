@@ -2034,12 +2034,34 @@ export default {
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
       if (extracted.rows.length === 0) {
+        // The layout, never the contents. Every token that could carry a
+        // merchant, an amount, a balance, a card number or a name is reported
+        // as its class only, so a bank whose table defeats this parser can be
+        // diagnosed and fixed without anyone having to send in a statement.
+        // See statementLayoutFingerprint.
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
+          ...(extracted.layout ? { layout: extracted.layout } : {}),
         }, 422);
       }
       if (extracted.totalRows > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
+      // A parse that provably does not add up must not reach the ledger.
+      // `contradicted` means the rows this read produced cannot get from the
+      // statement's own stated opening balance to its own stated closing one —
+      // so at least one figure or one direction is wrong, and importing it would
+      // write money the statement does not contain. Computing that verdict and
+      // then queueing the rows anyway made the check worthless: the corruption
+      // was detected and admitted in the same breath. Every softer verdict
+      // (`proven`, `unknown`) still imports exactly as before.
+      if (extracted.reconciliation.verdict === 'contradicted') {
+        return json({
+          error: 'statement_does_not_reconcile',
+          openingMinor: extracted.reconciliation.openingMinor,
+          closingMinor: extracted.reconciliation.closingMinor,
+          differenceMinor: extracted.reconciliation.differenceMinor,
+        }, 422);
+      }
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());

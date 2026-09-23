@@ -50,6 +50,7 @@ export const SUPPLEMENT_COPY = {
     errUnreadable: 'Wafra could not read this PDF. Scanned/image-only PDFs are not supported yet.',
     errPdfTooLong: 'This PDF holds more text than one import can read. Split it into shorter statements and retry.',
     errFormat: 'This statement lacks supported date, description, and explicit debit/credit fields, so Wafra will not guess.',
+    errReconcile: "This statement's rows do not add up to the opening and closing balances it states, so Wafra will not import it. Nothing was added.",
     errRate: 'Too many imports were requested. Wait a moment and retry.',
     errUnexpected: 'The import service returned an unexpected response. Nothing was filed.',
     // Progress, not failure. The filing step below can take a moment on a
@@ -114,6 +115,7 @@ export const SUPPLEMENT_COPY = {
     errUnreadable: 'تعذّرت قراءة ملف PDF. ملفات PDF المصورة فقط غير مدعومة حالياً.',
     errPdfTooLong: 'يحتوي ملف PDF على نص أكثر مما يمكن قراءته في استيراد واحد. قسّمه إلى كشوف أقصر وحاول مجدداً.',
     errFormat: 'يفتقد الكشف حقول التاريخ والوصف واتجاه مدين/دائن المدعومة، لذلك لن يخمن وفرة.',
+    errReconcile: 'صفوف هذا الكشف لا تتوافق مع الرصيد الافتتاحي والختامي المذكورين فيه، لذلك لن تستورده وفرة. لم يُضف أي شيء.',
     errRate: 'طُلبت واردات كثيرة. انتظر قليلاً ثم حاول مجدداً.',
     errUnexpected: 'أعادت خدمة الاستيراد استجابة غير متوقعة. لم تُسجّل أي عملية.',
     acceptedFiling: 'تم استلام {accepted} صفاً · جارٍ حفظها على هذا الهاتف…',
