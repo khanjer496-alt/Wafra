@@ -91,7 +91,7 @@ function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
   const uri = domain ? verifiedLogoUrl(domain) : null;
   const showImage = !!uri && !failed;
   const radius = Math.round(size * 0.32);
-  const ground = showImage && loaded ? '#FFFFFF' : color ?? night.backgroundSelected;
+  const ground = color ?? night.backgroundSelected;
   return <View style={[styles.logo, { width: size, height: size, borderRadius: radius, backgroundColor: ground }]} accessible={false}>
     {!(showImage && loaded) && (fallbackIcon
       ? <Icon name={fallbackIcon} size={Math.round(size * 0.46)} color={color ? '#FFFFFF' : night.primary} />
