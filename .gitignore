@@ -66,3 +66,13 @@ server/.test-build/
 # arrives as branches, never as files here.
 .claude/worktrees/
 .variate/
+
+# The Midscene AI acceptance suite has its own toolchain (Playwright + a model
+# client), its own web export, and writes an HTML report per run. The API key
+# it needs is a secret and never belongs in the repository.
+scripts/midscene/node_modules/
+scripts/midscene/.env.local
+scripts/midscene/midscene_run/
+scripts/midscene/test-results/
+midscene_run/
+/dist-midscene/

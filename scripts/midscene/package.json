@@ -1,0 +1,17 @@
+{
+  "name": "wafra-midscene",
+  "private": true,
+  "description": "AI-driven UI test harness for Wafra, built on Midscene + Playwright.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@midscene/web": "1.13.0",
+    "@playwright/test": "1.62.0",
+    "@types/node": "^26.6.2",
+    "playwright": "1.62.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.2"
+  }
+}

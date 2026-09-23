@@ -23,6 +23,7 @@
     "artifacts",
     "node_modules",
     ".postdelegate-launch-work",
-    "scripts/test/build"
+    "scripts/test/build",
+    "scripts/midscene"
   ]
 }
