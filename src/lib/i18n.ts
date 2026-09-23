@@ -3220,6 +3220,8 @@ const S = {
   incomeExample: { en: 'e.g. July salary', ar: 'مثال: راتب يوليو' },
 
   reportingPeriodTitle: { en: 'Reporting period', ar: 'فترة التقرير' },
+  periodPreviousYear: { en: 'Previous year, {year}', ar: 'السنة السابقة، {year}' },
+  periodNextYear: { en: 'Next year, {year}', ar: 'السنة التالية، {year}' },
   lastSevenDays: { en: 'Last 7 days', ar: 'آخر ٧ أيام' },
   lastThirtyDays: { en: 'Last 30 days', ar: 'آخر ٣٠ يوماً' },
   lastNinetyDays: { en: 'Last 90 days', ar: 'آخر ٩٠ يوماً' },

@@ -28,7 +28,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
-import { isRTL } from '@/lib/i18n';
+import { alignEnd, isRTL } from '@/lib/i18n';
 import { recapCopy as copy } from '@/lib/recap-copy';
 import type { RecapSnapshot } from '@/lib/recap';
 
@@ -358,7 +358,7 @@ function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot;
 
 function FinalFact({ label, value }: { label: string; value: string }) {
   return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
-    <ThemedText type="smallBold" tabular style={styles.finalValue}>{value}</ThemedText></View>;
+    <ThemedText type="smallBold" tabular style={[styles.finalValue, { textAlign: alignEnd() }]}>{value}</ThemedText></View>;
 }
 
 export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; onClose: () => void }) {
@@ -516,7 +516,7 @@ const styles = StyleSheet.create({
   yearBar: { width: '68%', maxWidth: 18, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   finalBoard: { borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 4 },
   finalFact: { minHeight: 58, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
-  finalValue: { flexShrink: 1, textAlign: 'right' },
+  finalValue: { flexShrink: 1 },
   rule: { height: StyleSheet.hairlineWidth, width: '100%' },
   doneButton: { minHeight: 52, borderRadius: Radius.control, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three },
   ledgerMargin: { position: 'absolute', top: 0, bottom: 0, left: 9, width: StyleSheet.hairlineWidth, opacity: 0.12 },
