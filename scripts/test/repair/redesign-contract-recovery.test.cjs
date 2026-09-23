@@ -17,7 +17,10 @@ for(const theme of ['light','dark']) {
   for(const focused of [false,true]) {
    const h=createHarness({theme,states:{0:focused}});
    const tree=h.deps['@/components/ui/text-field'].TextField({label:'Amount',value:'12.50',numeric:true,onChangeText(){}},null);
-   const frames=walk(tree).filter(n=>style(n).borderColor===h.theme.controlBorder);
+   // A focused field announces focus with the primary accent instead of the
+   // neutral control boundary; both must still meet the 3:1 non-text floor.
+   const border=focused?h.theme.primary:h.theme.controlBorder;
+   const frames=walk(tree).filter(n=>style(n).borderColor===border);
    assert.equal(frames.length,1);assert.ok(contrast(style(frames[0]).borderColor,style(frames[0]).backgroundColor)>=3);
   }
  });

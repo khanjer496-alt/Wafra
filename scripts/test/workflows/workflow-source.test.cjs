@@ -24,6 +24,11 @@ test('workflow consumers have real imports for their current localized presentat
   }else if(file.endsWith('/ios-setup.tsx')){
    for(const name of ['SetupHeader','SetupShell','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
+  }else if(file.endsWith('/import-sms.tsx')){
+   // The import screen's ScreenHeader already names it; a second hero heading
+   // above the step indicator repeated the title. Keep the localized steps.
+   for(const name of ['ImportSteps','ScreenHeader','SetupHeader'])assert.ok(names.has(name),`${file}: ${name} import`);
+   assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'Import has one heading before its source steps');
   }else{
    assert.ok(names.has('workflowCopy'),`${file}: copy import`);
    if(file.endsWith('/settings.tsx')){
@@ -34,6 +39,11 @@ test('workflow consumers have real imports for their current localized presentat
    }else if(file.endsWith('/review-alerts.tsx')){
     assert.ok(!names.has('WorkflowHero'),'Review alerts has one compact intro instead of a repeated hero');
     assert.match(fs.readFileSync(path.join(root,file),'utf8'),/testID="review-alerts-intro"/);
+   }else if(file.endsWith('/pro.tsx')){
+    // The native header already carries "Wafra Pro"; the intro stays localized
+    // through workflowCopy without a second hero heading.
+    assert.ok(!names.has('WorkflowHero'),'Pro has one heading followed by its localized intro');
+    assert.match(fs.readFileSync(path.join(root,file),'utf8'),/\{words\.proBody\}/);
    }else assert.ok(names.has('WorkflowHero'),`${file}: surface import`);
   }
  }

@@ -55,6 +55,9 @@ function harness() {
     '@/components/ui/merchant-avatar': { MerchantAvatar: 'MerchantAvatar' },
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
     '@/components/ui/controls': { Button: 'Button' },
+    // SpendingOverview's period chip reads the period context; the denomination
+    // contract here is about money, so keep the chip as an opaque boundary.
+    '@/components/ui/period-pill': { PeriodPill: 'PeriodPill' },
     '@/lib/categories': { categoryLabel: category => category },
     '@/lib/reference-presentation': local('reference-presentation'),
     '@/lib/runtime-performance': { measureRuntimeOperation: (_tag, work) => work() },
