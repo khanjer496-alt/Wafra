@@ -104,3 +104,17 @@ Existing-source integration is coordinated with the main task. It owns current
 parser/healing/store/UI changes, full combined checks and final native builds.
 This task owns only `categories.ts`, its test, the new category module and its
 dedicated test/documentation. No commit or push is performed independently.
+
+## On-device AI suggestions (advisory)
+
+The Improve categories screen may show one suggested category for an
+unresolved merchant (`src/lib/on-device-category.ts`, see
+[On-device AI](on-device-ai.md)). `categorizeMerchant` answers first: a user
+merchant rule, or a vocabulary/activity match, is shown as "Suggested from the
+merchant name" and the model is never asked. Only when that stays unresolved
+does the platform model see the merchant name (long digit runs masked) and pick
+one expense category id, or `unsure`. `other` and income categories are never
+suggestions. Nothing is written until the user taps the suggestion, which uses
+the same `setMerchantOverride(merchant, category, true)` path as the chips.
+Bank bill nicknames (payment purposes) never receive a name-based suggestion.
+Tests: `scripts/test/repair/on-device-category.test.cjs`.
