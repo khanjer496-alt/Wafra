@@ -15,7 +15,7 @@ import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/l
 import { REVIEW_ALERT_CAP, isIosNotificationReview } from '@/lib/alert-review-tray';
 import { formatCaptureReceipt, isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { iosSupportsNotificationAutomation, resolveIosNotificationReadiness } from '@/lib/ios-capture-setup';
-import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource } from '@/lib/ios-message-onboarding';
 import { IOS_NOTIFICATION_SETUP_TEXT, iosNotificationCopy, iosNotificationCheckUrl } from '@/lib/ios-notification-copy';
 import { useStore } from '@/lib/store';
 
@@ -57,7 +57,7 @@ export default function IosNotificationSetup() {
       if (current()) {
         setAvailable(true); setStatus(next); setError(null);
         setBundled(typeof native.getNotificationShortcutURL === 'function');
-        setConfirmed(progress.futureCaptureSource === 'notification' && progress.futureAutomationConfirmed);
+        setConfirmed(progressForSource(progress, 'notification').futureAutomationConfirmed);
       }
     } catch { if (current()) { setStatus(null); setAvailable(false); setError(w.error); } }
     finally { if (current()) setLoading(false); }
@@ -91,7 +91,6 @@ export default function IosNotificationSetup() {
     if (!current()) return;
     await native.setCaptureEnabled(true);
     if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'notification' });
     const next = await native.getCaptureStatus();
     if (current()) { setStatus(next); setAvailable(true); }
   });
@@ -102,9 +101,9 @@ export default function IosNotificationSetup() {
     if (!current()) return;
     setStatus(next);
     if (resolveIosNotificationReadiness(next) === 'not-added') { setError(w.waitingCheck); return; }
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'notification' });
-    if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-automation-confirmed' });
+    // Only a confirmed automation switches the recorded source; the previous
+    // source's progress is parked, not erased.
+    await dispatchIosMessageSetup({ type: 'future-automation-confirmed', source: 'notification', at: Date.now() });
     if (current()) { setConfirmed(true); back(); }
   });
   const open = () => void run(async current => {

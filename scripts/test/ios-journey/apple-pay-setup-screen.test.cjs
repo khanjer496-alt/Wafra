@@ -11,14 +11,14 @@ const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
   './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
 });
 
-async function screen({ version = '17.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false } = {}) {
+async function screen({ version = '17.0', nativePresent = true, capability = true, enabled = false, entitled = true, proof = null, received = null, bundled = true, installed = false, saved = null } = {}) {
   const slots = [], effects = [], events = [], urls = [], shares = [], routes = [], listeners = [];
   let cursor = 0, generation = 1, holdNext;
   const generationFn = () => generation;
   let status = { enabled, entitled, pending: 0, dropped: 0, corrupt: false, applePayPending: 0,
     setupProofVersion: 3, firstCapturedAt: Date.now(), applePaySetupProofAt: proof,
     firstApplePayReceivedAt: received, lastApplePayReceivedAt: received };
-  let progress = { version: 1, activeSection: 'future', futureCaptureSource: 'apple-pay', futureShortcutConfirmed: installed,
+  let progress = saved ?? { version: 1, activeSection: 'future', futureCaptureSource: 'apple-pay', futureShortcutConfirmed: installed,
     futureAutomationConfirmed: false, futureStatus: 'in-progress', historyShortcutConfirmed: false, historyStatus: 'not-started', returnToOnboarding: true };
   const slot = create => slots[cursor++] ?? (slots[cursor - 1] = create());
   const react = {
@@ -46,7 +46,7 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
     '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
     '@/lib/capture': { getIosCaptureNativeModule: () => nativePresent ? native : null, subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/ios-capture-health': health, '@/lib/ios-apple-pay-setup': helper,
-    '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => { events.push(event); progress = progressApi.reduceIosMessageSetup(progress, event); }, loadIosMessageSetupProgress: async () => progress },
+    '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => { events.push(event); progress = progressApi.reduceIosMessageSetup(progress, event); }, loadIosMessageSetupProgress: async () => progress, progressForSource: progressApi.progressForSource },
     '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded: false }, getStateGeneration: generationFn,
       setCaptureOptOut: async value => events.push(`opt-out:${value}`) }) },
   }).default;
@@ -54,7 +54,7 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
   const flush = async () => { for (let i = 0; i < 6; i++) { await new Promise(r => setImmediate(r)); render(); } };
   render(); await flush();
-  return { events, urls, shares, routes, flush,
+  return { events, urls, shares, routes, flush, saved: () => progress,
     text: () => walk(tree).filter(n => n.type === 'Text').map(n => n.props.children).join(' '),
     button: label => walk(tree).find(n => n.type === 'Button' && n.props.label === label)?.props,
     async foreground(patch = {}) { status = { ...status, ...patch }; for (const fn of listeners) fn('active'); await flush(); },
@@ -127,4 +127,23 @@ test('helper rejects foreign files and keeps receipts distinct from setup checks
   for (const value of ['https://example.com/a.shortcut', 'file:///private/finance.json', 'file:///private/Wafra Apple Pay v1.shortcut']) assert.equal(helper.isBundledApplePayShortcutUri(value), false);
   const projected = helper.resolveApplePaySetupState({ enabled: true, entitled: true, firstApplePayReceivedAt: Date.now() });
   assert.equal(projected.received, true); assert.equal(projected.checked, false); assert.equal(projected.canConfirm, false);
+});
+
+test('setting up Apple Pay keeps a finished SMS setup recorded until Apple Pay is itself confirmed', async () => {
+  const sms = { version: 1, activeSection: 'future', futureShortcutConfirmed: true, futureShortcutVersion: 3,
+    futureAutomationConfirmed: true, futureStatus: 'complete', historyShortcutConfirmed: false, historyStatus: 'not-started', returnToOnboarding: false };
+  const h = await screen({ saved: sms });
+  h.button('Enable capture on this iPhone').onPress(); await h.flush();
+  h.button('Add Apple Pay Shortcut').onPress(); await h.flush();
+  h.button('I added the Shortcut').onPress(); await h.flush();
+  assert.equal(h.events.some(e => e.type === 'future-source-changed'), false);
+  assert.equal(h.saved().futureCaptureSource, undefined, 'Home still reports the SMS setup');
+  assert.deepEqual([h.saved().futureShortcutConfirmed, h.saved().futureShortcutVersion, h.saved().futureAutomationConfirmed, h.saved().futureStatus],
+    [true, 3, true, 'complete']);
+  assert.match(h.text(), /Shortcut installation confirmed by you/, 'Apple Pay reads its own parked progress');
+  await h.foreground({ applePaySetupProofAt: Date.now() });
+  h.button('I saved the Apple Pay automation').onPress(); await h.flush();
+  assert.equal(h.saved().futureCaptureSource, 'apple-pay');
+  assert.equal(h.saved().futureAutomationConfirmed, true);
+  assert.equal(h.saved().parkedSources.message.automationConfirmed, true, 'SMS progress is parked, not erased');
 });

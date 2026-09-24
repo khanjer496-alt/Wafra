@@ -52,12 +52,16 @@ for(const language of ['en','ar']) {
  test(`${language}: setup checklist exposes status and a usable hit target`,()=>{
   const h=createHarness({language});const C=h.local('@/components/ios-message-setup/checklist-row').ChecklistRow;
   for(const status of ['not-started','in-progress','complete','skipped']) {
-   const tree=C({title:'Fixture',status,expanded:true,step:1,onPress:()=>h.events.push(['open']),children:null});
+   const tree=C({title:'Fixture',status,expanded:true,onPress:()=>h.events.push(['open']),children:null});
    const b=walk(tree).find(n=>n.props.onPress);assert.ok(style(b).minHeight>=44);
-   assert.ok(b.props.accessibilityLabel.includes(b.props.accessibilityValue.text));assert.equal(b.props.accessibilityState.expanded,true);
+   // VoiceOver reads the status once, as the value; the label carries title and detail only.
+   assert.ok(b.props.accessibilityValue.text.length>0);assert.equal(b.props.accessibilityLabel,'Fixture');
+   assert.equal(b.props.accessibilityState.expanded,true);
    b.props.onPress();
   }
   assert.equal(h.events.length,4);
+  const deferred=walk(C({title:'Fixture',status:'skipped',statusLabel:'Skipped',expanded:false,onPress(){}})).find(n=>n.props.onPress);
+  assert.equal(deferred.props.accessibilityValue.text,'Skipped');
  });
  test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
   // Name personalization plus focus/tracking/intention now sit ahead of
