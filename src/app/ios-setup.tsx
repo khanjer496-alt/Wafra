@@ -1042,7 +1042,9 @@ export default function IosSetupScreen() {
           <SetupHeader
             onboarding={onboardingPresentation}
             title={historyMode ? t('iosPastSmsTitle') : shortcutCopy.liveTitle}
-            subtitle={historyMode ? t('iosPastSmsDetail') : shortcutCopy.liveSubtitle}
+            // The numbered steps carry the guide; a subtitle on every screen
+            // would repeat what the step before it already said.
+            subtitle={historyMode ? t('iosPastSmsDetail') : undefined}
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
             actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
           />

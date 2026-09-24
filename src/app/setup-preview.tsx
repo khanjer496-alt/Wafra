@@ -161,7 +161,7 @@ function GuidePreview({ state, onboarding }: { state: string; onboarding: boolea
       <ThemedView style={[styles.root, onboarding && styles.clear]}>
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           <ScrollView contentContainerStyle={styles.content}>
-            <SetupHeader onboarding={onboarding} title={copy.liveTitle} subtitle={copy.liveSubtitle}
+            <SetupHeader onboarding={onboarding} title={copy.liveTitle}
               back={{ label: t('back'), onPress: noop }}
               actions={[{ label: t('iosMessageLearnMore'), onPress: noop }]} />
             <View style={styles.guide}>

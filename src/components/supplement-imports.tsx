@@ -667,7 +667,8 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
 
   return (
     <View style={styles.root}>
-      <ThemedText type="default" themeColor="textSecondary">{copy.intro}</ThemedText>
+      {/* First-run setup already said this one step earlier. */}
+      {!onboarding && <ThemedText type="default" themeColor="textSecondary">{copy.intro}</ThemedText>}
 
       {locked ? (
         <Block>

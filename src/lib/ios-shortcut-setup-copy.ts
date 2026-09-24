@@ -32,7 +32,6 @@ const copy = {
     statusSkipped: 'Skipped',
     // Guided flow.
     liveTitle: 'Catch new transactions',
-    liveSubtitle: 'A Shortcut sends new bank texts to Wafra.',
     stepOf: 'Step {step} of {total}',
     screenOf: 'Screen {screen} of {total}',
     stepAdd: 'Add', stepTest: 'Test', stepAutomate: 'Automate',
@@ -40,7 +39,7 @@ const copy = {
     confirmBody: 'Tap below and Wafra tests the shortcut.',
     testPassed: 'Test passed',
     next: 'Next',
-    previous: 'Previous step',
+    previous: 'Previous',
     allSteps: 'Show all steps',
     inShortcuts: 'In Shortcuts',
     guide: [
@@ -81,7 +80,6 @@ const copy = {
     otherWaysBody: 'اختياري. يبقى إعداد الرسائل كما هو.',
     statusSkipped: 'تم التخطي',
     liveTitle: 'التقط العمليات الجديدة',
-    liveSubtitle: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة.',
     stepOf: 'الخطوة {step} من {total}',
     screenOf: 'الشاشة {screen} من {total}',
     stepAdd: 'إضافة', stepTest: 'اختبار', stepAutomate: 'أتمتة',
@@ -89,7 +87,7 @@ const copy = {
     confirmBody: 'اضغط أدناه وسيختبر وفرة الاختصار.',
     testPassed: 'نجح الاختبار',
     next: 'التالي',
-    previous: 'الخطوة السابقة',
+    previous: 'السابق',
     allSteps: 'عرض كل الخطوات',
     inShortcuts: 'في الاختصارات',
     guide: [
