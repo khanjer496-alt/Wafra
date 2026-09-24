@@ -2819,6 +2819,7 @@ const S = {
   iosNotificationChooseSms: { en: 'Show SMS setup', ar: 'عرض إعداد الرسائل' },
   reviewAlertPossibleNotificationReplay: { en: 'Possible repeat notification. Compare it with your saved transactions before adding.', ar: 'قد يكون هذا إشعاراً مكرراً. قارنه بمعاملاتك المحفوظة قبل إضافته.' },
   reviewAlertNotificationSource: { en: 'Notification capture', ar: 'التقاط الإشعارات' },
+  reviewAlertPossibleApplePayDuplicate: { en: 'Possible Apple Pay duplicate. A matching Apple Pay purchase is already in your transactions.', ar: 'قد تكون عملية Apple Pay مكررة. توجد عملية Apple Pay مطابقة في معاملاتك بالفعل.' },
   reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsCurrencySkipped: { en: 'Skipped because they use another currency: {count}. This ledger records one currency.', ar: 'تم تخطيها لأنها بعملة أخرى: {count}. هذا السجل يعتمد عملة واحدة.' },

@@ -106,6 +106,9 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
         {item.attentionReason === 'possible-notification-replay' && (
           <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
         )}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(key)}</ThemedText>
         {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
         {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact[0])}</ThemedText> : null}
@@ -168,6 +171,9 @@ function AlertRow({
       <View style={styles.alertCopy}>
         {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(family.label)}</ThemedText>
         <ThemedText type="title" tabular style={styles.amount}>
           {amount}
