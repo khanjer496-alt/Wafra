@@ -4,11 +4,22 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { getLocales, useLocales } from 'expo-localization';
+
+import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
+import {
+  createSelection,
+  createStoreHandle,
+  shallowEqual,
+  type PublishingStoreHandle,
+  type StoreHandle,
+} from '@/lib/store-selection';
 
 import {
   markCardsDistinct,
@@ -1750,6 +1761,8 @@ interface StoreValue {
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+/** Stable for the provider's lifetime: consumers subscribe instead of re-rendering on every value. */
+const StoreHandleContext = createContext<StoreHandle<StoreValue> | null>(null);
 const PrivateModeContext = createContext(false);
 
 export interface ImportReceipt {
@@ -1985,17 +1998,20 @@ function createAppLedgerPersistence(): LedgerPersistence {
  * not re-render keep their previous figures until they next do.
  */
 let appliedMoneyLocaleKey: string | null = null;
-function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0]): void {
+function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0]): string {
   const next = deviceMoneyLocale(locale);
   const key = JSON.stringify(next);
-  if (key === appliedMoneyLocaleKey) return;
+  if (key === appliedMoneyLocaleKey) return key;
   appliedMoneyLocaleKey = key;
   setDisplayMoneyLocale(next);
+  return key;
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const locales = useLocales();
-  applyDeviceMoneyLocale(locales[0]);
+  // Published through MoneyLocaleProvider so compiled Money figures, which
+  // are memoized on their props, re-format when the device settings change.
+  const moneyLocaleKey = applyDeviceMoneyLocale(locales[0]);
   const systemLanguage = resolveUiLanguage('system', locales);
   const persistenceRef = useRef<LedgerPersistence | null>(null);
   if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();
@@ -3210,17 +3226,91 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
+  const handleRef = useRef<PublishingStoreHandle<StoreValue> | null>(null);
+  if (!handleRef.current) handleRef.current = createStoreHandle(value);
+  const handle = handleRef.current;
+  // Recorded during render so a selector rendering in this same pass reads
+  // the value its useStore() siblings see; subscribers that did not render
+  // are told after commit, before paint. This assumes a provider render is
+  // committed, which holds while store dispatches stay out of startTransition.
+  handle.set(value);
+  useLayoutEffect(() => {
+    handle.notify();
+  }, [handle, value]);
+
   return (
-    <PrivateModeContext.Provider value={state.privateMode}>
-      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
-    </PrivateModeContext.Provider>
+    <MoneyLocaleProvider localeKey={moneyLocaleKey}>
+      <PrivateModeContext.Provider value={state.privateMode}>
+        <StoreHandleContext.Provider value={handle}>
+          <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+        </StoreHandleContext.Provider>
+      </PrivateModeContext.Provider>
+    </MoneyLocaleProvider>
   );
 }
 
+/**
+ * The whole store. Re-renders on EVERY change, including import progress and
+ * scan timestamps. Screens should prefer useStoreSelector/useStoreActions.
+ */
 export function useStore(): StoreValue {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error('useStore must be used within StoreProvider');
   return ctx;
+}
+
+function useStoreHandle(): StoreHandle<StoreValue> {
+  const handle = useContext(StoreHandleContext);
+  if (!handle) throw new Error('useStore must be used within StoreProvider');
+  return handle;
+}
+
+/**
+ * Subscribe to part of the store. The component re-renders only when the
+ * selection changes; by default one level deep, so
+ * `s => ({ transactions: s.state.transactions, accounts: s.state.accounts })`
+ * ignores progress, timestamps and every other field.
+ */
+export function useStoreSelector<T>(
+  selector: (store: StoreValue) => T,
+  equal: (a: T, b: T) => boolean = shallowEqual,
+): T {
+  const handle = useStoreHandle();
+  const selectRef = useRef<ReturnType<typeof createSelection<StoreValue, T>> | null>(null);
+  if (!selectRef.current) selectRef.current = createSelection<StoreValue, T>(equal);
+  const select = selectRef.current;
+  const snapshot = () => select(handle.get(), selector);
+  return useSyncExternalStore(handle.subscribe, snapshot, snapshot);
+}
+
+type StoreFunctionKeys = {
+  [K in keyof StoreValue]: StoreValue[K] extends (...args: never[]) => unknown ? K : never;
+}[keyof StoreValue];
+export type StoreActions = Pick<StoreValue, StoreFunctionKeys>;
+
+const storeActions = new WeakMap<StoreHandle<StoreValue>, StoreActions>();
+
+/**
+ * Every store action (and getStateSnapshot/getStateGeneration) with an
+ * identity that never changes. Each call forwards to the provider's current
+ * implementation, so it behaves exactly as the useStore() member would, and
+ * holding it subscribes to nothing.
+ */
+export function useStoreActions(): StoreActions {
+  const handle = useStoreHandle();
+  let actions = storeActions.get(handle);
+  if (!actions) {
+    const forwarded: Record<string, unknown> = {};
+    const current = handle.get() as unknown as Record<string, unknown>;
+    for (const key of Object.keys(current)) {
+      if (typeof current[key] !== 'function') continue;
+      forwarded[key] = (...args: unknown[]) =>
+        (handle.get() as unknown as Record<string, (...a: unknown[]) => unknown>)[key](...args);
+    }
+    actions = forwarded as unknown as StoreActions;
+    storeActions.set(handle, actions);
+  }
+  return actions;
 }
 
 /** Narrow subscription for list-row artwork; unrelated ledger updates do not rerender every avatar. */

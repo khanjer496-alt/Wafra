@@ -28,7 +28,35 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
   vm.runInNewContext(result.outputText, {
     exports, module,
     require: (name) => {
+      // Screens subscribe through narrow selectors now. A harness store stub
+      // that models only `useStore()` still drives them: each selector reads
+      // the same (possibly per-render replaced) store the stub returns.
+      if (name === '@/lib/store' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useStore === 'function' &&
+          typeof dependencies[name].useStoreSelector !== 'function') {
+        const stub = dependencies[name];
+        return {
+          ...stub,
+          useStoreSelector: (selector) => selector(stub.useStore()),
+          useStoreActions: () => stub.useStore(),
+        };
+      }
+      // Money reads the device-locale key beside the ledger denomination.
+      // Stubs of that hook module predate it; outside a provider it is ''.
+      if (name === '@/hooks/use-ledger-money' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useMoneyLocaleKey !== 'function') {
+        return { ...dependencies[name], useMoneyLocaleKey: () => '' };
+      }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Pure selection helpers used by screens; always the real source.
+      if (name === '@/lib/store-selection') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
+      }
+      // The pull-to-refresh scan control is an opaque child boundary for
+      // screen harnesses, like the other capture surfaces.
+      if (name === '@/components/capture-refresh-control') {
+        return { CaptureRefreshControl: (props) => ({ type: 'RefreshControl', props, key: undefined }) };
+      }
       // UI/parser repair harnesses isolate their own subject and intentionally
       // do not execute foreground scheduling. The scheduling suite supplies an
       // explicit counted stub; unrelated harnesses get an inert boundary so a

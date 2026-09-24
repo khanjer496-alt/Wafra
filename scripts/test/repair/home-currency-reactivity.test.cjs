@@ -114,7 +114,14 @@ function harness() {
   const props = { theme: { expense: 'red', income: 'green', text: 'black' }, language: 'en', largeText: false,
     greeting: 'Hello', dateLabel: 'Today', periodLabel: 'September', incomeFils: 0, expenseFils: 828, netFils: -828,
     onPeriod: noop, onAdd: noop, onSettings: noop, onIncome: noop, onSpending: noop };
-  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, props, markets, money, i18n };
+  // What StoreProvider publishes after applying the device conventions.
+  const setMoneyLocale = (input) => {
+    money.setDisplayMoneyLocale(input);
+    const provider = denomination.MoneyLocaleProvider({ localeKey: JSON.stringify(input), children: null });
+    contexts.find(context => context.value === '' || context.isMoneyLocale).value = provider.props.value;
+    contexts.find(context => context.value === provider.props.value).isMoneyLocale = true;
+  };
+  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, setMoneyLocale, props, markets, money, i18n };
 }
 function nodes(tree, output = []) {
   if (Array.isArray(tree)) tree.forEach(node => nodes(node, output));
@@ -215,4 +222,21 @@ test('the application provides denomination inside the existing reactive store b
   assert.match(source, /const moneySpec = state\.ledgerMoney \?\? ledgerMoneySpec\(marketCurrencyCode\(state\.marketId\)\)/);
   assert.match(source, /<LedgerMoneyProvider moneySpec=\{moneySpec\}>[\s\S]*?\{children\}[\s\S]*?<\/LedgerMoneyProvider>/);
   assert.match(source, /key=\{language\}/);
+});
+
+test('compiled Money re-formats identical props when the device number conventions change', () => {
+  const h = harness(); h.markets.setLedgerCurrency('EUR', 2); h.i18n.setLanguage('en');
+  h.setDenomination(h.money.ledgerMoneySpec('EUR'));
+  const props = { fils: 123456 };
+  try {
+    h.setMoneyLocale({ locale: 'en-US', decimalSeparator: '.', groupSeparator: ',' });
+    assert.match(strings(h.renderMoney(props)), /1,234\.56/);
+    // Same element props, same compiled memo cache: only the published key changed.
+    h.setMoneyLocale({ locale: 'de-DE', decimalSeparator: ',', groupSeparator: '.' });
+    const german = h.renderMoney(props);
+    assert.match(strings(german), /1\.234,56/, 'a memoized figure must not keep the previous device format');
+    assert.match(german.props.accessibilityLabel, /1\.234,56/);
+  } finally {
+    h.money.setDisplayMoneyLocale(null);
+  }
 });
