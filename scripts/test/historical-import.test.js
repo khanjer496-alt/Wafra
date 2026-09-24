@@ -688,6 +688,75 @@ async function coordinatorTests() {
       result);
   }
 
+  {
+    // A History import may carry more than fifty money reviews. None may be
+    // trimmed away uncounted: every one reaches lane admission, which keeps
+    // the newest fifty and leaves a counted 'evicted' tombstone for the rest.
+    markets.setLedgerCurrency(null);
+    markets.setActiveMarket('AE');
+    const latest = Date.parse('2026-08-09T11:00:00.000Z');
+    const saRecords = Array.from({ length: 60 }, (_, index) => record({
+      id: (index + 0x100).toString(16).padStart(64, '0'),
+      sender: 'ALRAJHI',
+      receivedAt: new Date(latest - (index + 1) * 60_000).toISOString(),
+      text: 'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234. Available balance SAR 2,500.00.',
+    }));
+    const native = new FakeHistoryNative({
+      descriptor: completed({ chunkIndices: [0, 1, 2], found: 61, attempted: 61, accepted: 61 }),
+      chunks: {
+        0: [record({ id: 'ee'.repeat(32), sender: 'ENBD', receivedAt: new Date(latest).toISOString() })],
+        1: saRecords.slice(0, 50),
+        2: saRecords.slice(50),
+      },
+    });
+    const result = await loadIosHistorySession({ sessionId: SESSION_ID, native, overrides: {}, now: NOW });
+    ok('a History import keeps every money review candidate instead of trimming to fifty',
+      result.reviewCandidates.length === 60 && result.summary.reviewed === 60 &&
+        result.reviewCandidates.every((item) => item.market === 'SA'),
+      { reviewed: result.summary.reviewed, candidates: result.reviewCandidates.length });
+    const tray = require('./build/alert-review-tray.js');
+    let state = tray.emptyAlertReviewTray();
+    const admitted = await persistIosHistoryReviewCandidates(result.reviewCandidates, (items) => {
+      let count = 0;
+      for (const item of items) {
+        const next = tray.admitPreparedReviewAlert(state, item, NOW.getTime());
+        state = next.state;
+        if (next.outcome === 'admitted') count += 1;
+      }
+      return { admitted: count, durable: Promise.resolve() };
+    });
+    ok('History money reviews beyond the lane leave a durable, counted tombstone',
+      admitted === 60 && state.pending.length === 50 &&
+        tray.recentlyLostReviewCount(state, NOW.getTime(), 'evicted') === 10,
+      { admitted, pending: state.pending.length, tombstones: state.tombstones.length });
+  }
+
+  {
+    const { boundHistoryReviewCandidates } = require('./build/ios-history-import.js');
+    const at = NOW.getTime();
+    const info = (index) => ({ kind: 'universal', id: `info_${index}`, sourceKey: `info_source_${index}`,
+      observedAt: at + index, expiresAt: at + index + 1, channel: 'inbox', parserVersion: 1,
+      event: { family: 'balance', status: 'informational' } });
+    const money = (index) => ({ kind: 'universal', id: `money_${index}`, sourceKey: `money_source_${index}`,
+      observedAt: at + index, expiresAt: at + index + 1, channel: 'inbox', parserVersion: 1,
+      event: { family: 'purchase', status: 'posted' } });
+    const mostlyInfo = [...Array.from({ length: 55 }, (_, index) => info(index)),
+      ...Array.from({ length: 3 }, (_, index) => money(100 + index))];
+    const boundedInfo = typeof boundHistoryReviewCandidates === 'function'
+      ? boundHistoryReviewCandidates(mostlyInfo) : [];
+    ok('History trims only informational review candidates, oldest first, to the lane size',
+      boundedInfo.length === 50 && boundedInfo.filter((item) => item.id.startsWith('money_')).length === 3 &&
+        !boundedInfo.some((item) => item.id === 'info_0') && boundedInfo.some((item) => item.id === 'info_54'),
+      boundedInfo.map((item) => item.id));
+    const mostlyMoney = [...Array.from({ length: 5 }, (_, index) => info(index)),
+      ...Array.from({ length: 60 }, (_, index) => money(100 + index))];
+    const boundedMoney = typeof boundHistoryReviewCandidates === 'function'
+      ? boundHistoryReviewCandidates(mostlyMoney) : [];
+    ok('History never trims a money review candidate before lane admission',
+      boundedMoney.length === 60 && boundedMoney.every((item) => item.id.startsWith('money_')),
+      boundedMoney.length);
+  }
+
   for (const invalidSessionId of [
     '../escape',
     'short',

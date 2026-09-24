@@ -1,5 +1,5 @@
 import type { CategoryId } from '@/lib/types';
-import { REVIEW_ALERT_CAP, type ReviewEntry } from '@/lib/alert-review-tray';
+import { REVIEW_ALERT_CAP, isMoneyMovementReview, type ReviewEntry } from '@/lib/alert-review-tray';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { MAX_HISTORICAL_RECORDS, parseHistoricalMessageRecords } from '@/lib/historical-import';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
@@ -68,6 +68,27 @@ export interface LoadedIosHistorySession {
 export interface IosHistoryReviewStageReceipt {
   admitted: number;
   durable: Promise<void>;
+}
+
+/**
+ * Bound a History import's review candidates (sorted oldest first) to the
+ * Review lane size by trimming informational candidates only, oldest first.
+ * Possible money movements are never trimmed here: lane admission keeps the
+ * newest fifty and leaves a durable, counted `evicted` tombstone for each one
+ * it cannot keep, so none can vanish uncounted.
+ */
+export function boundHistoryReviewCandidates(candidates: readonly ReviewEntry[]): ReviewEntry[] {
+  let overflow = candidates.length - REVIEW_ALERT_CAP;
+  if (overflow <= 0) return [...candidates];
+  const trimmed = new Set<ReviewEntry>();
+  for (const item of candidates) {
+    if (overflow <= 0) break;
+    if (!isMoneyMovementReview(item)) {
+      trimmed.add(item);
+      overflow -= 1;
+    }
+  }
+  return candidates.filter((item) => !trimmed.has(item));
 }
 
 /** Persist source-free review rows before their protected Message source can be discarded. */
@@ -230,9 +251,10 @@ export async function loadIosHistorySession(input: {
     }
     parsed.sort((left, right) => (left.smsTs ?? 0) - (right.smsTs ?? 0));
     reviewCandidates.sort((left, right) => left.observedAt - right.observedAt);
-    if (reviewCandidates.length > REVIEW_ALERT_CAP) {
-      reviewCandidates.splice(0, reviewCandidates.length - REVIEW_ALERT_CAP);
-    }
+    const boundedReviews = boundHistoryReviewCandidates(reviewCandidates);
+    // Replace in place without spreading: a paged session can be very large.
+    reviewCandidates.length = 0;
+    for (const item of boundedReviews) reviewCandidates.push(item);
     declined.sort((left, right) => left.smsTs - right.smsTs);
     return {
       sessionId: input.sessionId,
