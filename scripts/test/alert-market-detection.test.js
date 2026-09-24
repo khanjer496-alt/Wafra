@@ -59,6 +59,75 @@ ok('currency plus market-specific rail resolves India without a region hint',
   indiaNoRegion.decision === 'single' && indiaNoRegion.market === 'IN',
   JSON.stringify(indiaNoRegion));
 
+for (const [market, source] of [
+  ['CA', 'Interac e-Transfer CAD 20.00 was credited to your account.'],
+  ['AU', 'Osko AUD 20.00 was credited to your account.'],
+  ['BR', 'Pix BRL 20,00 creditado na sua conta.'],
+  ['MX', 'SPEI MXN 20.00 abonado en tu cuenta.'],
+  ['SG', 'PayNow SGD 20.00 was credited to your account.'],
+]) {
+  const route = routeAlertMarket({ source });
+  ok(`${market}: unique currency plus local rail resolves without locale guessing`,
+    route.decision === 'single' && route.market === market, JSON.stringify(route));
+}
+
+// A domestic rail without that market's own currency, or a second-wave
+// currency without a rail/institution, never invents a route.
+for (const source of [
+  'PayNow USD 20.00 was credited to your account.',
+  'Card purchase CAD 20.00 completed at SAMPLE SHOP.',
+  'Card purchase SGD 20.00 completed at SAMPLE SHOP.',
+]) {
+  const route = routeAlertMarket({ source });
+  ok(`second-wave evidence alone stays unresolved: ${source}`,
+    route.decision !== 'single', JSON.stringify(route));
+}
+
+// Multinational brands shared with a supported market need country-qualified
+// evidence; otherwise a US/Spanish alert could be read in a second-wave market.
+for (const [source, sender, expected] of [
+  ['TD Bank: Card purchase USD 20.00 at SAMPLE completed', 'TDBANK', null],
+  ['BMO: Card purchase USD 20.00 at SAMPLE completed', 'BMO', null],
+  ['BBVA compra con tarjeta EUR 14,20 en EJEMPLO cargado.', 'BBVA', 'ES'],
+  ['BBVA México compra con tarjeta MXN 14.20 en EJEMPLO.', 'BBVAMEXICO', 'MX'],
+  ['Scotiabank: compra MXN 200.00 en TIENDA.', '', null],
+  ['TD Canada Trust: CAD 20.00 debited from your account.', 'TDCANADATRUST', 'CA'],
+  ['DBS Bank India: INR 500.00 debited from a/c XX12 via UPI to SWIGGY', 'AD-DBSBNK-S', 'IN'],
+]) {
+  const route = routeAlertMarket({ source, sender });
+  ok(`shared brand routing stays country-qualified: ${source}`,
+    expected === null
+      ? !['CA', 'AU', 'BR', 'MX', 'SG'].includes(route.market)
+      : route.decision === 'single' && route.market === expected,
+    JSON.stringify(route));
+}
+
+// First-wave routes are unchanged by the new currencies/rails.
+for (const [source, sender, market] of [
+  ['Chase Bank: Card purchase USD 18.50 at TARGET completed', 'CHASE', 'US'],
+  ['UPI payment of INR 500.00 successful', '', 'IN'],
+  ['EUR 24,90 wurde mit Ihrer Karte bezahlt und vom Konto abgebucht', '', 'DE'],
+]) {
+  const route = routeAlertMarket({ source, sender });
+  ok(`first-wave route unchanged: ${market}`,
+    route.decision === 'single' && route.market === market, JSON.stringify(route));
+}
+ok('a UAE alert quoting a CAD merchant name keeps its Gulf sender route',
+  routeAlertMarket({ source: 'AED 250.00 spent at CAD 3 TRADING LLC with Credit Card 1234', sender: 'ADCB' }).market === 'AE');
+
+// A bare `$` is dollar evidence only inside the market it was routed to.
+{
+  const ca = inspectUniversalAlert({ source: 'RBC: Card purchase $20.00 at SAMPLE SHOP was charged.', sender: 'RBC' });
+  const us = inspectUniversalAlert({ source: 'Chase Bank: Card purchase $20.00 at SAMPLE SHOP was charged.', sender: 'CHASE' });
+  const mx = inspectUniversalAlert({ source: 'Banorte: compra $1,250.00 SUPERMERCADO. Tarjeta terminación 1234.', sender: 'BANORTE' });
+  const primary = (inspection) => inspection.review?.draft.candidates[inspection.review.primaryCandidateIndex ?? -1];
+  ok('$ in a Canada-routed alert is CAD', primary(ca)?.currency === 'CAD' && primary(ca)?.minorUnits === '2000', JSON.stringify(primary(ca)));
+  ok('$ in a US-routed alert is still USD', primary(us)?.currency === 'USD' && primary(us)?.minorUnits === '2000', JSON.stringify(primary(us)));
+  ok('$ in a Mexico-routed alert is MXN', primary(mx)?.currency === 'MXN' && primary(mx)?.minorUnits === '125000', JSON.stringify(primary(mx)));
+  const unrouted = routeAlertMarket({ source: 'Card purchase $20.00 at SAMPLE SHOP was charged.', regionHint: 'en-CA' });
+  ok('a bare $ with only a Canadian region hint never routes', unrouted.decision !== 'single', JSON.stringify(unrouted));
+}
+
 const regionOnly = routeAlertMarket({
   source: 'Welcome to your new account',
   regionHint: 'GB',

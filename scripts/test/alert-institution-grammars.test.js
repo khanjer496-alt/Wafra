@@ -40,6 +40,12 @@ const firstWave = [
   ['OM', 'BANKMUSCAT', 'بنك مسقط: تم الخصم ر.ع ٣٫٤٥٦ لشراء بالبطاقة.', 'bank-muscat', 'card-activity'],
   ['EG', 'CIBEGYPT', 'البنك التجاري الدولي: تم الخصم ج.م ٤٥٫٦٧ لشراء بالبطاقة.', 'cib-egypt', 'card-activity'],
   ['JO', 'HBTF', 'بنك الإسكان: تم الخصم د.أ ٥٫٦٧٨ لشراء بالبطاقة.', 'housing-bank-jordan', 'card-activity'],
+  ['CA', 'RBC', 'Royal Bank of Canada card purchase CAD 14.20 at SAMPLE SHOP.', 'royal-bank-of-canada', 'card-activity'],
+  ['CA', 'TDCANADATRUST', 'TD Canada Trust card purchase CAD 14.20 at SAMPLE SHOP.', 'td-canada-trust', 'card-activity'],
+  ['AU', 'COMMBANK', 'Commonwealth Bank card purchase AUD 14.20 at SAMPLE SHOP.', 'commonwealth-bank-australia', 'card-activity'],
+  ['BR', 'ITAU', 'Itaú: compra com cartão BRL 14,20 debitada em LOJA TESTE.', 'itau-brasil', 'card-activity'],
+  ['MX', 'BBVAMEXICO', 'BBVA México compra con tarjeta MXN 14.20 en EJEMPLO.', 'bbva-mexico', 'card-activity'],
+  ['SG', 'DBSSG', 'DBS Bank card purchase SGD 14.20 at SAMPLE SHOP.', 'dbs-singapore', 'card-activity'],
 ];
 
 for (const [market, sender, source, institution, template] of firstWave) {
@@ -49,6 +55,25 @@ for (const [market, sender, source, institution, template] of firstWave) {
       result.template?.template === template && result.candidates[0]?.evidence.includes('sender') &&
       result.candidates[0]?.evidence.includes('body') &&
       result.candidates[0]?.grammar.status === 'experimental', JSON.stringify(result));
+}
+
+{
+  // "BBVA México" is Mexican issuer evidence, never Spanish body evidence;
+  // plain BBVA keeps its first-wave Spanish identity.
+  const mexicanBody = inspectAlertInstitutionGrammar('BBVA México compra con tarjeta MXN 14.20.', 'ES');
+  const spanishBody = inspectAlertInstitutionGrammar('BBVA compra con tarjeta EUR 14,20.', 'ES');
+  ok('BBVA México does not claim the Spanish BBVA grammar',
+    mexicanBody.decision === 'unknown' && spanishBody.institution === 'bbva-es',
+    JSON.stringify({ mexicanBody, spanishBody }));
+  // Brands shared with the US are country-qualified in Canada.
+  for (const source of ['TD Bank card purchase USD 9.00.', 'BMO card purchase USD 9.00.']) {
+    const result = inspectAlertInstitutionGrammar(source, 'CA');
+    ok(`a US-shared brand without its Canadian qualifier is not Canadian evidence: ${source}`,
+      result.decision === 'unknown', JSON.stringify(result));
+  }
+  ok('generic two-letter senders are not second-wave issuer identities',
+    inspectAlertInstitutionGrammar('Compra BRL 10,00.', 'BR', 'BB').decision === 'unknown' &&
+      inspectAlertInstitutionGrammar('Compra BRL 10,00.', 'BR', 'NU').decision === 'unknown');
 }
 
 {

@@ -78,7 +78,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import universal-categorization \
          ledger-money backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
-         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
+         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \

@@ -36,15 +36,38 @@ export interface MarketAlertContext {
 
 export type MoneyCandidateRole = 'transaction' | 'balance' | 'limit' | 'due' | 'fee' | 'unknown';
 
-const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|sicherheitscode|c[óo]digo de seguridad|codice di sicurezza|beveiligingscode|approve (?:this )?(?:payment|purchase)|fraud check)\b|code de s[ée]curit[ée]|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
-const FAILED = /\b(?:declined|failed|unsuccessful|rejected|not approved|insufficient funds|returned unpaid)\b|مرفوض(?:ة)?|فشل(?:ت)?|تعذر|असफल|अस्वीकृत/i;
+const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|sicherheitscode|c[óo]digo de (?:seguridad|verifica[cç][aã]o|verificaci[oó]n)|codice di sicurezza|beveiligingscode|approve (?:this )?(?:payment|purchase)|fraud (?:check|alert)|did you (?:make|recogni[sz]e|authori[sz]e) (?:this|the) (?:\w+ ){0,3}(?:purchase|transaction|charge|payment)|reconoces (?:esta|este|la|el) (?:compra|cargo|transacci[oó]n|operaci[oó]n)|reconhece (?:esta|essa|a|o) (?:compra|transa[cç][aã]o|opera[cç][aã]o))\b|code de s[ée]curit[ée]|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
+const FAILED = /\b(?:declined|failed|unsuccessful|rejected|not approved|insufficient funds|returned unpaid|recusad[oa]|rechazad[oa]|declinad[oa]|no aprobad[oa]|no autorizad[oa]|no procede|no aplicad[oa])\b|\bn[aã]o\s+(?:aprovad[oa]|autorizad[oa])\b|مرفوض(?:ة)?|فشل(?:ت)?|تعذر|असफल|अस्वीकृत/i;
 const NEGATED_POSTING = [
   /(?:(?:\bne\s+|n['’])(?:[\p{L}\p{M}'’-]+\s+){0,4}pas\s+(?:[\p{L}\p{M}'’-]+\s+){0,2}|\bnon\s+)(?:payé|payée|paye|payee|débité|débitée|debite|debitee|crédité|créditée|credite|creditee|remboursé|remboursée|effectué|effectuée)(?=$|[^\p{L}\p{N}])/iu,
   /\bno\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagad[oa]s?|cargad[oa]s?|abonad[oa]s?|reembolsad[oa]s?)(?=$|[^\p{L}\p{N}])/iu,
   /\bnon\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagat[oa]|addebitat[oa]|accreditat[oa]|rimborsat[oa])(?=$|[^\p{L}\p{N}])/iu,
   /\bnicht\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:bezahlt|abgebucht|belastet|gutgeschrieben|erstattet)(?=$|[^\p{L}\p{N}])/iu,
   /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
+  /(?:^|[^\p{L}\p{N}])n[aã]o\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pag[oa]|debitad[oa]|creditad[oa]|cobrad[oa]|reembolsad[oa]|conclu[ií]d[oa])(?=$|[^\p{L}\p{N}])/iu,
+  /\b(?:not|never)\s+(?:(?:yet|been|be)\s+){0,2}(?:received|credited|debited|deposited|charged|paid)\b/iu,
 ] as const;
+/** "nothing was charged" / "no funds were debited" negate, not prove, settlement. */
+const NEGATED_SETTLEMENT = /\b(?:nothing|no\s+(?:funds|amount|money|charges?|payment))\s+(?:(?:was|were|has|have)\s+)?(?:(?:yet|been)\s+){0,2}(?:debited|credited|charged|paid|transferred|deposited)\b/iu;
+/**
+ * Lifecycle controls, all fail-closed: each can only move an alert AWAY from a
+ * completed posting, never towards one.
+ *
+ * Pending/authorization-hold alerts (English, Portuguese, Spanish) say money
+ * may move later. Bare "authorized" is deliberately absent: many issuers use
+ * it for an ordinary completed card purchase.
+ */
+const PENDING_OR_AUTHORIZED = /\b(?:pending(?:\s+(?:acceptance|review|authori[sz]ation|approval|processing|transaction|confirmation))?|awaiting\s+(?:acceptance|review|authori[sz]ation|approval|processing|confirmation)|authori[sz]ation\s+(?:only|hold|pending)|pre-?authori[sz]ation(?!\s+(?:debit|payment))|on\s+hold|being\s+(?:processed|authori[sz]ed|reviewed)|requires?\s+(?:your\s+)?(?:approval|authori[sz]ation|confirmation)|limit\s+(?:changed|set|updated|increased|reduced))\b|(?:^|[^\p{L}\p{N}])(?:pendente|pendiente|em\s+processamento|em\s+an[aá]lise|en\s+proceso|en\s+revisi[oó]n|aguardando\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|aguarda\s+(?:aprova[cç][aã]o|confirma[cç][aã]o|autoriza[cç][aã]o)|pendiente\s+de\s+(?:autorizaci[oó]n|aprobaci[oó]n)|requiere\s+(?:tu\s+|su\s+)?(?:autorizaci[oó]n|aprobaci[oó]n|confirmaci[oó]n)|por\s+autorizar|retenid[oa]|bloquead[oa]|pr[eé]-?autoriza[cç][aã]o|preautorizaci[oó]n)(?=$|[^\p{L}\p{N}])/iu;
+/**
+ * A money REQUEST can be "received", "approved" or "sent" while no money has
+ * moved (Interac Request Money, PayTo agreements, Pix/SPEI payment requests).
+ */
+const REQUEST_LIFECYCLE = /\b(?:(?:interac\s+e-?transfer|payto(?:\s+agreement)?|transfer|payment|purchase|money)\s+request)\b(?:[^.!?]|\.(?=\d)){0,140}\b(?:received|approved|accepted|created|sent|awaiting\s+approval|awaiting\s+confirmation)\b|(?:^|[^\p{L}\p{N}])(?:solicita[cç][aã]o\s+de\s+(?:pagamento|transfer[eê]ncia|pix)|pedido\s+de\s+(?:pagamento|pix)|solicitud\s+de\s+(?:pago|transferencia|cobro|dinero))(?=$|[^\p{L}\p{N}])/iu;
+/**
+ * Only an explicit completed-settlement statement may override the pending
+ * and request controls above. A future "will be debited from" does not.
+ */
+const EXPLICIT_SETTLEMENT = /\b(?:was|has\s+been|have\s+been|were|successfully)\s+(?:debited|credited|charged|paid|transferred|deposited)\b|(?:^|[^\p{L}\p{N}])(?:foi\s+(?:debitad[oa]|creditad[oa]|pag[oa])|fue\s+(?:cargad[oa]|abonad[oa]|pagad[oa])|ha\s+sido\s+(?:cargad[oa]|abonad[oa]|pagad[oa]))(?=$|[^\p{L}\p{N}])/iu;
 const FUTURE = /\b(?:will be (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
 const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
 const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
@@ -121,6 +144,9 @@ const moneyCandidateRole = (
   if (FEE.test(nearby)) return 'fee';
   if (DEBIT.test(nearby) || CREDIT.test(nearby) || PURCHASE.test(nearby) ||
     CASH.test(nearby) || REFUND.test(nearby) ||
+    findTerm(nearby, pack.purchaseTerms ?? []) ||
+    findTerm(nearby, pack.refundTerms ?? []) ||
+    findTerm(nearby, pack.cashTerms ?? []) ||
     findTerm(nearby, pack.postedTerms ?? []) ||
     findTerm(nearby, pack.debitTerms ?? []) ||
     findTerm(nearby, pack.creditTerms ?? [])) return 'transaction';
@@ -151,6 +177,11 @@ const postingStatus = (
   if (STATEMENT.test(text)) return 'informational';
   const hasTransactionEvidence = POSTED.test(text) || Boolean(findTerm(text, postedTerms));
   if (FUTURE.test(text) || findTerm(text, futureTerms)) return 'future';
+  // A request that was "received"/"approved" moved no money; neither did a
+  // pending or held authorization. Only explicit completed settlement wins.
+  const settled = EXPLICIT_SETTLEMENT.test(text) && !NEGATED_SETTLEMENT.test(text);
+  if (REQUEST_LIFECYCLE.test(text) && !settled) return 'informational';
+  if (PENDING_OR_AUTHORIZED.test(text) && !settled) return 'future';
   if (BALANCE.test(text) && !hasTransactionEvidence) return 'informational';
   return hasTransactionEvidence ? 'posted' : 'unknown';
 };
@@ -220,13 +251,14 @@ export const inspectMarketAlert = (
   if (AUTHENTICATION.test(classificationText)) family = 'authentication';
   else if (status === 'informational' && STATEMENT.test(classificationText)) family = 'statement';
   else if (status === 'informational' && BALANCE.test(classificationText)) family = 'balance';
-  else if (REFUND.test(classificationText)) family = 'refund';
-  else if (CASH.test(classificationText)) family = 'cash-withdrawal';
-  else if (FEE.test(classificationText) || eventEvidence.fee) family = 'fee';
+  else if (REFUND.test(classificationText) || findTerm(classificationText, pack.refundTerms ?? [])) family = 'refund';
+  else if (CASH.test(classificationText) || findTerm(classificationText, pack.cashTerms ?? [])) family = 'cash-withdrawal';
+  else if (FEE.test(classificationText) || eventEvidence.fee ||
+    findTerm(classificationText, pack.feeTerms ?? [])) family = 'fee';
   else if (status === 'posted' && utility) family = 'utility';
   else if (status === 'posted' && recurring) family = 'recurring-payment';
   else if (status === 'posted' && transfer) family = 'transfer';
-  else if (PURCHASE.test(classificationText)) family = 'purchase';
+  else if (PURCHASE.test(classificationText) || findTerm(classificationText, pack.purchaseTerms ?? [])) family = 'purchase';
 
   const reasons = [
     ...semanticDraft.reasons,
