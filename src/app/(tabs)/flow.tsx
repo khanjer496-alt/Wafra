@@ -26,14 +26,14 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
-import { categoryLabel } from '@/lib/categories';
-import { formatAED, formatCompactAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { categoryLabel, isFixedCommitment } from '@/lib/categories';
+import { formatAED, formatCompactAED, ledgerTypicalMinor, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
 import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
+import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, previousPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
@@ -187,7 +187,7 @@ export default function FlowScreen() {
   }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
   const activity = sortedActivity;
   const calendarDays = useMemo(() => view === 'activity' && period.mode === 'month'
-    ? dailySpendForMonth(state.transactions, period.key, live, internal) : [],
+    ? dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => !isTransferCandidate(transaction)) : [],
   [view, period, state.transactions, live, internal]);
   const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {
@@ -209,8 +209,12 @@ export default function FlowScreen() {
     const comparable = comparablePreviousPeriod(period, new Date(), state.transactions);
     return { months: [...buckets.values()],
       merchants: topMerchants(state.transactions, period, 8, live, internal),
-      movers: categoryMovers(state.transactions, period, 6, live, internal),
+      // Fixed costs leave the rows as well as the headline, so the two never disagree.
+      movers: categoryMovers(state.transactions, period, 10, live, internal)
+        .filter((mover) => !isFixedCommitment(mover.category)).slice(0, 6),
       comparison: comparableSpend(state.transactions, period, live, internal),
+      previousName: (() => { const previous = previousPeriod(period); return previous ? periodLabel(previous) : null; })(),
+      partial: isCurrentMonth(period, new Date()),
       weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
       comparisonLabel: comparable ? periodLabel(comparable) : null };
   }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
@@ -279,7 +283,8 @@ export default function FlowScreen() {
               onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
           </View>
         </View>
-        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
+        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)} currentName={periodLabel(period)}
+          noiseFloorFils={ledgerTypicalMinor(50)}
           onMonth={(monthKey) => {
             if (monthKey === key) return;
             setTrendWindowEndKey((anchor) => anchor ?? trendWindowAnchorKey);

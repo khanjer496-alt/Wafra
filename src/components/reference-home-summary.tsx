@@ -42,26 +42,25 @@ function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
   const countLabel = today.todayCount === 0 ? w.noPaymentsToday
     : `${today.todayCount} ${today.todayCount === 1 ? w.payment : w.payments}`;
   const budget = today.budget;
-  const over = budget !== null && budget.leftFils < 0;
-  const daysWord = budget && budget.daysLeft === 1 ? w.dayLeft : w.daysLeft;
   // Never a second copy of the period total shown just below.
   const average = today.average;
   const showRight = budget !== null || average !== null;
-  const rightLabel = budget ? (over ? w.overBudget : w.leftToSpend) : w.dailyAverage;
-  const rightFils = budget ? Math.abs(budget.leftFils) : average?.fils ?? 0;
+  const rightLabel = budget ? w.leftToSpend : w.dailyAverage;
+  const rightFils = budget ? budget.leftFils : average?.fils ?? 0;
   const rightMeta = budget
-    ? (over ? `${budget.daysLeft} ${daysWord}` : `${money(budget.perDayFils)} ${w.perDay} · ${budget.daysLeft} ${daysWord}`)
-    : `${w.over} ${average?.days ?? 0} ${average?.days === 1 ? w.day : w.days}`;
+    ? [`${money(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft)].join(' · ')
+    : `${w.overDays(average?.days ?? 0)}, ${w.excludingFixed}`;
+  const rightWarning = budget !== null && budget.overCount > 0;
   const max = Math.max(1, ...today.week.map(day => day.fils));
   const weekSpoken = `${w.weekTotal} ${money(today.weekFils)}. ` +
     today.week.map(day => `${w.weekday(day.weekday)} ${money(day.fils)}`).join(', ');
   return <View style={styles.todayBlock} testID="home-today">
     <View style={[styles.pair, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
       <Pressable accessibilityRole="button" onPress={p.onToday} testID="home-today-total"
-        accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`}
+        accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`} accessibilityHint={w.opensActivity}
         style={[styles.pairCell, p.largeText && styles.metricStacked]}>
         <ThemedText type="small" themeColor="textSecondary">{w.today}</ThemedText>
-        <Money fils={today.todayFils} moneySpec={p.moneySpec} type="title" />
+        <Money fils={today.todayFils} moneySpec={p.moneySpec} type="heading" />
         <ThemedText type="meta" themeColor="textSecondary">{countLabel}</ThemedText>
       </Pressable>
       {showRight ? <View accessible accessibilityRole="text" testID="home-left-to-spend"
@@ -69,8 +68,8 @@ function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
         style={[styles.pairCell, !p.largeText && { borderStartWidth: StyleSheet.hairlineWidth, borderColor: p.theme.cardBorder, paddingStart: 16 },
           p.largeText && styles.metricStacked]}>
         <ThemedText type="small" themeColor="textSecondary">{rightLabel}</ThemedText>
-        <Money fils={rightFils} moneySpec={p.moneySpec} type="title" color={over ? p.theme.expense : undefined} />
-        <ThemedText type="meta" themeColor="textSecondary">{rightMeta}</ThemedText>
+        <Money fils={rightFils} moneySpec={p.moneySpec} type="heading" />
+        <ThemedText type="meta" themeColor={rightWarning ? 'warning' : 'textSecondary'}>{rightMeta}</ThemedText>
       </View> : null}
     </View>
     <View style={styles.weekHead}>
@@ -82,7 +81,7 @@ function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
         <View style={styles.barTrack}>
           <View style={[styles.bar, {
             height: day.fils > 0 ? Math.max(4, Math.round((day.fils / max) * 72)) : 2,
-            backgroundColor: day.today ? p.theme.primary : p.theme.track,
+            backgroundColor: day.today ? p.theme.primary : p.theme.controlBorder,
           }]} />
         </View>
         <ThemedText type="micro" themeColor={day.today ? 'primary' : 'textSecondary'}>{w.weekday(day.weekday)}</ThemedText>

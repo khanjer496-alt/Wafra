@@ -930,8 +930,28 @@ ok('analytics: dining moved down vs June', mv.some(m => m.category === 'dining' 
     { id: 'rent', type: 'expense', amountFils: 550000, category: 'rent', accountId: 'a', title: 'Landlord', date: '2026-07-01' }], '2026-07');
   ok('calendar: every day of the month is present', days.length === 31 && days[0].dateISO === '2026-07-01' && days[30].dateISO === '2026-07-31');
   ok('calendar: spending lands on its own day', days[3].fils === 50000 && days[4].fils === 20000 && days[10].fils === 30000);
-  ok('calendar: rent is left out and transfers never count', days[0].fils === 0);
+  ok('calendar: rent is kept apart and transfers never count', days[0].fils === 0 && days[0].fixedFils === 550000);
   ok('calendar: February has its own length', an.dailySpendForMonth([], '2027-02').length === 28);
+  const listed = an.dailySpendForMonth(aTx, '2026-07', undefined, undefined, t => t.id !== '2');
+  ok('calendar: follows the same row filter as the list', listed[10].fils === 0 && listed[3].fils === 50000);
+  const fmt = require('./build/format');
+  fmt.setMonthStartDay(25);
+  try {
+    const salary = an.dailySpendForMonth([
+      { id: 'a', type: 'expense', amountFils: 100, category: 'dining', accountId: 'a', title: 'A', date: '2026-07-24' },
+      { id: 'b', type: 'expense', amountFils: 200, category: 'dining', accountId: 'a', title: 'B', date: '2026-07-25' },
+      { id: 'c', type: 'expense', amountFils: 300, category: 'dining', accountId: 'a', title: 'C', date: '2026-08-24' },
+    ], '2026-07');
+    ok('calendar: a salary month runs 25th to 24th across two calendar months',
+      salary[0].dateISO === '2026-07-25' && salary.at(-1).dateISO === '2026-08-24' && salary.length === 31 &&
+      salary[0].fils === 200 && salary.at(-1).fils === 300 && salary.reduce((n, d) => n + d.fils, 0) === 500);
+    const cs = an.comparableSpend([
+      { id: 'n', type: 'expense', amountFils: 700, category: 'dining', accountId: 'a', title: 'N', date: '2026-07-27' },
+      { id: 'p', type: 'expense', amountFils: 400, category: 'dining', accountId: 'a', title: 'P', date: '2026-06-27' },
+      { id: 'x', type: 'expense', amountFils: 900, category: 'dining', accountId: 'a', title: 'X', date: '2026-07-10' },
+    ], '2026-07', undefined, undefined, new Date('2026-07-28T12:00:00Z'));
+    ok('compare: salary months compare the same elapsed days', cs.currentFils === 700 && cs.previousFils === 400);
+  } finally { fmt.setMonthStartDay(1); }
 }
 const dw = an.dayOfWeekSpend(aTx, '2026-07');
 ok('analytics: transfers excluded from weekday spend', dw.reduce((a, b) => a + b, 0) === 100000);

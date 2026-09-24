@@ -136,13 +136,21 @@ export function comparableSpend(
  * weekday chart, fixed commitments are left out: a rent payment on the 1st is
  * a calendar fact, not a habit, and would otherwise flatten every other day.
  */
-export interface DailySpend { dateISO: string; fils: number }
+export interface DailySpend {
+  dateISO: string;
+  /** Everyday spending, fixed commitments left out. Drives the shading. */
+  fils: number;
+  /** Rent and other fixed commitments that day, so a rent-only day is not "nothing spent". */
+  fixedFils: number;
+}
 
 export function dailySpendForMonth(
   transactions: Transaction[],
   key: string,
   live?: Set<string>,
   internal?: Set<string>,
+  /** The same row filter the activity list below the calendar applies. */
+  include: (transaction: Transaction) => boolean = () => true,
 ): DailySpend[] {
   const startISO = monthStartISO(key);
   const endISO = monthEndISO(key);
@@ -154,15 +162,17 @@ export function dailySpendForMonth(
     const iso = day.toISOString().slice(0, 10);
     if (iso > endISO) break;
     index.set(iso, days.length);
-    days.push({ dateISO: iso, fils: 0 });
+    days.push({ dateISO: iso, fils: 0, fixedFils: 0 });
   }
   for (const t of transactions) {
     if (t.date < startISO || t.date > endISO) continue;
-    if (!isSpending(t, live, internal)) continue;
-    let everyday = 0;
-    for (const a of allocationsOf(t)) if (!isFixedCommitment(a.category)) everyday += a.amountFils;
+    if (!isSpending(t, live, internal) || !include(t)) continue;
     const at = index.get(t.date);
-    if (at !== undefined) days[at]!.fils += everyday;
+    if (at === undefined) continue;
+    for (const a of allocationsOf(t)) {
+      if (isFixedCommitment(a.category)) days[at]!.fixedFils += a.amountFils;
+      else days[at]!.fils += a.amountFils;
+    }
   }
   return days;
 }

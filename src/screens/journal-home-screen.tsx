@@ -35,6 +35,7 @@ import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
 import { summarizeHomeToday } from '@/lib/home-today';
 import { allocationsOf } from '@/lib/splits';
+import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
@@ -281,15 +282,16 @@ export default function JournalHomeScreen() {
       now,
       isSpending: (transaction) => isSpending(transaction, live, internal),
       inBudgetPeriod: (dateISO) => budgetMonth !== null && inPeriod(dateISO, period),
+      budgetPeriodStartISO: budgetMonth ? monthStartISO(budgetMonth) : null,
       budgetPeriodEndISO: budgetMonth ? monthEndISO(budgetMonth) : null,
       allocations: allocationsOf,
-      periodExpenseFils: dashboard.hero.expenseFils,
+      isFixedCommitment,
       averageWindow: period.mode === 'month' ? { startISO: monthStartISO(period.key), endISO: monthEndISO(period.key) }
         : period.mode === 'range' ? { startISO: period.from, endISO: period.to } : null,
     });
     // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, dashboard.hero.expenseFils, period, projectionDay]);
+  }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {

@@ -52,7 +52,8 @@ function createHarness(options = {}) {
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
     periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):'This year',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
-    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null};
+    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,
+    previousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,isCurrentMonth:p=>typeof p==='object'&&p.mode==='month'&&p.key==='2026-09'};
   const accounts=[
     {id:'enbd',name:'Emirates NBD',kind:'bank',bankName:'Emirates NBD',last4:'4821',openingFils:0,snapshotKind:'balance',snapshotFils:2500000,snapshotTs:1788681600000,color:'#166CA2'},
     {id:'adcb',name:'ADCB',kind:'bank',bankName:'ADCB',last4:'8310',openingFils:0,snapshotKind:'balance',snapshotFils:1700000,snapshotTs:1788681600000,color:'#BD364C'},
@@ -120,6 +121,7 @@ function createHarness(options = {}) {
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
   local('@/lib/home-today','src/lib/home-today.ts');
+  local('@/lib/account-freshness','src/lib/account-freshness.ts');
   local('@/lib/home-widgets','src/lib/home-widgets.ts');
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');

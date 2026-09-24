@@ -48,6 +48,13 @@ type Props = {
   comparisonLabel: string | null;
   /** Everyday spending in both comparable windows; null when there is nothing to compare. */
   comparison?: ComparableSpend | null;
+  /** Short names for the two sides, e.g. "Sep 2026" and "Aug 2026". */
+  currentName?: string;
+  previousName?: string | null;
+  /** The current period is still running, so the comparison stops at the same day. */
+  partial?: boolean;
+  /** Changes smaller than this are "about the same", matching the rows' noise floor. */
+  noiseFloorFils?: number;
   onMonth: (key: string) => void;
   onMerchant: (name: string) => void;
   onCategory: (id: CategoryId) => void;
@@ -211,9 +218,11 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="heading">{w.change}</ThemedText>
       {p.comparison && p.comparisonLabel ? (() => {
         const c = p.comparison;
-        const same = Math.abs(c.deltaFils) < Math.max(1, c.previousFils) * 0.02;
-        const lead = same ? `${w.spentSame} ${p.comparisonLabel}`
-          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${p.comparisonLabel} ${w.byThisDay}.`;
+        const other = p.previousName ?? p.comparisonLabel;
+        const same = Math.abs(c.deltaFils) < Math.max(p.noiseFloorFils ?? 1, c.previousFils * 0.02);
+        const when = p.partial ? ` ${w.byThisDay}` : '';
+        const lead = same ? `${w.spentSame} ${other}${when}.`
+          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${other}${when}.`;
         return <View accessible accessibilityRole="text" accessibilityLabel={`${lead} ${w.fixedLeftOut}`} style={styles.compareLead}>
           <ThemedText type="subtitle" themeColor={same ? 'text' : c.deltaFils < 0 ? 'income' : 'expense'}>{lead}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">{w.fixedLeftOut}</ThemedText>
@@ -233,11 +242,11 @@ export function SpendingTrends(p: Props) {
                 <ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>
                   {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
               </View>
-              {[[p.periodLabel, m.currentFils, theme.text], [p.comparisonLabel ?? '', m.previousFils, theme.track]].map(([label, fils, color]) =>
-                <View key={String(label)} style={styles.compareBarRow}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{String(label)}</ThemedText>
-                  <View style={styles.compareTrack}><View style={{ height: 8, borderRadius: 4, width: `${Number(fils) / scale * 100}%`, backgroundColor: String(color) }} /></View>
-                  <Money fils={Number(fils)} type="meta" />
+              {([[p.currentName ?? p.periodLabel, m.currentFils, theme.text], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, theme.controlBorder]] as const).map(([label, fils, color], index) =>
+                <View key={index} style={styles.compareBarRow}>
+                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{label}</ThemedText>
+                  <View style={styles.compareTrack}><View style={{ height: 8, borderRadius: 4, width: `${fils / scale * 100}%`, backgroundColor: color }} /></View>
+                  <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
                 </View>)}
             </Pressable>;
           })}
@@ -294,8 +303,10 @@ const styles = StyleSheet.create({
   compareRow: { paddingVertical: 12, gap: 6 },
   compareTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   compareBarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  compareBarLabel: { width: 84 },
+  compareBarLabel: { width: 72 },
   compareTrack: { flex: 1, minWidth: 40 },
+  // Fixed width so both bars in a row share one pixel scale, whatever the amounts.
+  compareAmount: { width: 88, alignItems: 'flex-end' },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
   weekday: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, weekdayName: { width: 42 }, weekdayTrack: { flex: 1, minWidth: 40, height: 6, borderRadius: 3 },
 });

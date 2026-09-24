@@ -10,10 +10,12 @@ import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
 
 const copy = {
-  en: { weekdays: ['M', 'T', 'W', 'T', 'F', 'S', 'S'], darker: 'Darker means more spent. Rent and fixed costs are left out.',
-    noSpend: (n: number) => `${n} no-spend ${n === 1 ? 'day' : 'days'}`, showing: 'Showing', all: 'Show all days', nothing: 'nothing spent' },
-  ar: { weekdays: ['ن', 'ث', 'ر', 'خ', 'ج', 'س', 'ح'], darker: 'اللون الأغمق يعني إنفاقاً أكبر. الإيجار والتكاليف الثابتة غير محسوبة.',
-    noSpend: (n: number) => `${n} أيام بلا إنفاق`, showing: 'عرض', all: 'عرض كل الأيام', nothing: 'لا إنفاق' },
+  en: { weekdays: ['M', 'T', 'W', 'T', 'F', 'S', 'S'], darker: 'Stronger colour means more everyday spending. Rent and fixed costs are left out.',
+    noSpend: (n: number) => `${n} no-spend ${n === 1 ? 'day' : 'days'}`, showing: 'Showing', all: 'Show all days', nothing: 'nothing spent',
+    fixedOnly: 'fixed costs only' },
+  ar: { weekdays: ['ن', 'ث', 'ر', 'خ', 'ج', 'س', 'ح'], darker: 'اللون الأقوى يعني إنفاقاً يومياً أكبر. الإيجار والتكاليف الثابتة غير محسوبة.',
+    noSpend: (n: number) => n === 1 ? 'يوم واحد بلا إنفاق' : n === 2 ? 'يومان بلا إنفاق' : n <= 10 ? `${n} أيام بلا إنفاق` : `${n} يوماً بلا إنفاق`,
+    showing: 'عرض', all: 'عرض كل الأيام', nothing: 'لا إنفاق', fixedOnly: 'تكاليف ثابتة فقط' },
 } as const;
 
 type Props = {
@@ -35,7 +37,8 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
 
   const lived = days.filter((day) => day.dateISO <= todayISO);
   const max = Math.max(1, ...lived.map((day) => day.fils));
-  const noSpend = lived.filter((day) => day.fils === 0).length;
+  // A rent-only day is not a no-spend day: the list below still shows the payment.
+  const noSpend = lived.filter((day) => day.fils === 0 && day.fixedFils === 0).length;
   // Monday-first columns. getUTCDay: 0 = Sunday.
   const first = new Date(`${days[0]!.dateISO}T12:00:00Z`).getUTCDay();
   const lead = (first + 6) % 7;
@@ -53,12 +56,13 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
         const future = day.dateISO > todayISO;
         const t = future ? 0 : day.fils / max;
         const isSelected = selected === day.dateISO;
-        const strong = t > 0.55;
+        // Capped tint keeps the day number (theme text) at 4.5:1 or better in both themes.
         const background = future || day.fils === 0 ? 'transparent'
-          : `${theme.primary}${Math.round((0.14 + 0.76 * t) * 255).toString(16).padStart(2, '0')}`;
+          : `${theme.primary}${Math.round((0.1 + 0.35 * t) * 255).toString(16).padStart(2, '0')}`;
+        const spoken = day.fils > 0 ? moneyLabel(day.fils) : day.fixedFils > 0 ? w.fixedOnly : w.nothing;
         return <Pressable key={day.dateISO} disabled={future}
           accessibilityRole="button" accessibilityState={{ selected: isSelected, disabled: future }}
-          accessibilityLabel={`${label(day.dateISO)}, ${day.fils > 0 ? moneyLabel(day.fils) : w.nothing}`}
+          accessibilityLabel={`${label(day.dateISO)}, ${spoken}`}
           onPress={() => onSelect(isSelected ? null : day.dateISO)}
           style={[styles.cell, styles.day, {
             backgroundColor: background,
@@ -66,7 +70,8 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
             borderWidth: isSelected ? 2 : 1,
             opacity: future ? 0.4 : 1,
           }]}>
-          <ThemedText type="meta" style={{ color: strong ? theme.onPrimary : theme.text }}>{Number(day.dateISO.slice(8))}</ThemedText>
+          <ThemedText type="meta" style={{ color: theme.text }}>{Number(day.dateISO.slice(8))}</ThemedText>
+          {day.fils === 0 && day.fixedFils > 0 ? <View style={[styles.fixedDot, { backgroundColor: theme.textSecondary }]} /> : null}
         </Pressable>;
       })}
     </View>)}
@@ -84,7 +89,8 @@ const styles = StyleSheet.create({
   root: { gap: 5 },
   row: { flexDirection: 'row', gap: 5 },
   head: { flex: 1, textAlign: 'center' },
-  cell: { flex: 1, aspectRatio: 1, minHeight: 40 },
+  cell: { flex: 1, aspectRatio: 1, minHeight: 44 },
+  fixedDot: { width: 4, height: 4, borderRadius: 2, marginTop: 2 },
   day: { borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
   grow: { flex: 1, minWidth: 160 },
