@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Keyboard,
   Platform,
   Pressable,
@@ -37,7 +38,7 @@ import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { useStore } from '@/lib/store';
-import type { CategoryId, Transaction } from '@/lib/types';
+import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
 const DEFAULT_FILTERS: Filters = {
@@ -58,6 +59,42 @@ interface DaySection {
 }
 
 const transactionKey = (transaction: Transaction) => transaction.id;
+
+/**
+ * Rows the Transfers screen owns, found by a full transfer reconciliation
+ * (100–300 ms on a phone at 15k rows). Remembered per ledger so reopening the
+ * screen is instant; once the screen is showing, a ledger change recomputes
+ * after interactions settle and keeps the previous answer meanwhile, instead
+ * of freezing the list on every edit, capture or history-import page.
+ */
+let separateTransferCache: { transactions: Transaction[]; accounts: Account[]; ids: ReadonlySet<string> } | null = null;
+
+function computeSeparateTransferIds(transactions: Transaction[], accounts: Account[]): ReadonlySet<string> {
+  if (separateTransferCache?.transactions === transactions && separateTransferCache.accounts === accounts) {
+    return separateTransferCache.ids;
+  }
+  const ids = new Set(getTransferActivity(transactions, accounts, reconcileTransfers(transactions, accounts))
+    .map(item => item.transaction.id));
+  separateTransferCache = { transactions, accounts, ids };
+  return ids;
+}
+
+function useSeparateTransferIds(
+  transactions: Transaction[], accounts: Account[], importing: boolean,
+): ReadonlySet<string> {
+  const [ids, setIds] = useState(() => computeSeparateTransferIds(transactions, accounts));
+  useEffect(() => {
+    // A running history import replaces its page within moments; the page
+    // that ends the run (complete, paused or failed) triggers the recompute.
+    if (importing) return;
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) setIds(computeSeparateTransferIds(transactions, accounts));
+    });
+    return () => { cancelled = true; task.cancel(); };
+  }, [transactions, accounts, importing]);
+  return ids;
+}
 
 export default function TransactionsScreen() {
   const theme = useTheme();
@@ -186,8 +223,8 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
-  const separateTransferIds = useMemo(() => new Set(getTransferActivity(state.transactions, state.accounts,
-    reconcileTransfers(state.transactions, state.accounts)).map(item => item.transaction.id)), [state.transactions, state.accounts]);
+  const separateTransferIds = useSeparateTransferIds(state.transactions, state.accounts,
+    state.historyImport?.status === 'running');
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
