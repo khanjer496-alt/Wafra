@@ -81,6 +81,29 @@ export function WafraTile({ size = 40 }: { size?: number }) {
 /* Logos: the real brand when the CDN answers, an honest fallback otherwise */
 /* ------------------------------------------------------------------ */
 
+/**
+ * A brand colour mixed toward white until it reads on the charcoal surface
+ * (WCAG AA for these 10-14px initials), so a navy bank does not vanish.
+ */
+function lift(hex: string): string {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return night.text;
+  const value = Number.parseInt(match[1], 16);
+  const channels = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  const luminance = (rgb: number[]) => {
+    const [r, g, b] = rgb.map((c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ground = luminance([0x14, 0x12, 0x0f]);
+  for (let mix = 0; mix <= 1.0001; mix += 0.1) {
+    const rgb = channels.map((c) => Math.round(c + (255 - c) * mix));
+    if ((luminance(rgb) + 0.05) / (ground + 0.05) >= 4.5) {
+      return `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+    }
+  }
+  return night.text;
+}
+
 const initials = (name: string): string => name.split(/\s+/).filter(Boolean).slice(0, 3).map(word => word[0]!.toUpperCase()).join('');
 
 function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
@@ -91,14 +114,18 @@ function BrandLogo({ name, domain, color, fallbackIcon, size = 36 }: {
   const uri = domain ? verifiedLogoUrl(domain) : null;
   const showImage = !!uri && !failed;
   const radius = Math.round(size * 0.32);
-  const ground = color ?? night.backgroundSelected;
-  return <View style={[styles.logo, { width: size, height: size, borderRadius: radius, backgroundColor: ground }]} accessible={false}>
+  // No brand-coloured or white tile: the logo sits on the night surface. The
+  // hairline ring gives a dark mark (or the initials fallback) an edge on the
+  // charcoal ground; artwork with its own square ground is clipped round.
+  const initialsColor = color && color.toUpperCase() !== '#000000' ? lift(color) : night.text;
+  return <View style={[styles.logo, { width: size, height: size, borderRadius: radius }]} accessible={false}>
     {!(showImage && loaded) && (fallbackIcon
-      ? <Icon name={fallbackIcon} size={Math.round(size * 0.46)} color={color ? '#FFFFFF' : night.primary} />
-      : <ThemedText style={[styles.logoInitials, { fontSize: Math.max(9, Math.round(size * 0.28)) }]}>{initials(name)}</ThemedText>)}
+      ? <Icon name={fallbackIcon} size={Math.round(size * 0.46)} color={night.primary} />
+      : <ThemedText allowFontScaling={false}
+        style={[styles.logoInitials, { color: initialsColor, fontSize: Math.max(9, Math.round(size * 0.28)) }]}>{initials(name)}</ThemedText>)}
     {showImage && <Image source={{ uri }} contentFit="contain" cachePolicy="memory-disk" transition={0}
       onLoad={() => setLoaded(true)} onError={() => setFailed(true)}
-      style={[StyleSheet.absoluteFillObject, { margin: Math.round(size * 0.14) }]} accessible={false} />}
+      style={StyleSheet.absoluteFillObject} accessible={false} />}
   </View>;
 }
 
@@ -579,8 +606,11 @@ const styles = StyleSheet.create({
   kicker: { color: night.textTertiary, fontFamily: Fonts.monoMedium, letterSpacing: 0.9 },
   atmosphereWash: { position: 'absolute', top: -80, start: -40, end: -40, height: 330 },
   wafraTile: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 9, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
-  logo: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  logoInitials: { color: '#FFFFFF', fontFamily: Fonts.sansSemi, letterSpacing: 0.3 },
+  logo: {
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: night.cardBorderStrong,
+  },
+  logoInitials: { fontFamily: Fonts.sansSemi, letterSpacing: 0.3 },
 
   welcomeScene: { gap: 8 },
   posterStage: { minHeight: 204, justifyContent: 'center', gap: 6 },
