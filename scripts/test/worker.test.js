@@ -2198,6 +2198,31 @@ const CARD_PAYMENT_DEBIT =
         (await drainOpened(env, me)).length === 0,
       JSON.stringify(cardSignsBody));
 
+    // A card settlement read off a statement is a transfer onto the card, the
+    // same as the SMS about it: neither spending on the account statement nor
+    // income on the card statement.
+    const settlementPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'Statement of Account',
+        '2026-08-10 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+        '2026-08-11 CC PAYMENT 700.00 DR',
+      ]),
+    });
+    ok('statement: account-side card settlements are accepted', settlementPdf.status === 202);
+    const settlementRows = await drainOpened(env, me);
+    const settlementPlan = importOnPhone(settlementRows);
+    const { isSpending: spends } = require('./build/ledger');
+    ok('statement: a card settlement on an account statement never reaches spending',
+      settlementPlan.batch.transactions.length === 2 &&
+        settlementPlan.batch.transactions.every((t) => t.isTransfer === true && !spends(t)),
+      JSON.stringify(settlementPlan.batch.transactions.map((t) => [t.title, t.type, t.isTransfer, t.cardPaymentSide])));
+    ok('statement: the settlement naming a card lands on that card as its payment leg',
+      settlementPlan.batch.transactions.some((t) => t.type === 'income' && t.cardPaymentSide === 'debit' &&
+        t.amountFils === 150000),
+      JSON.stringify(settlementPlan.batch.transactions));
+
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.
     const email = await (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).json();

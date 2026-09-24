@@ -372,6 +372,63 @@ function statementTransferMeaning(
   };
 }
 
+/**
+ * A credit-card settlement on a statement, read the way the SMS parser reads
+ * the same event: a transfer onto the card, never spending and never income.
+ *
+ *   account side  `CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR` — money
+ *                 leaving the current account towards a card. Only the explicit
+ *                 "credit card"/"CC" wording counts: "CARD PAYMENT TO TESCO" is
+ *                 how many banks describe an ordinary POS purchase.
+ *   card side     `PAYMENT RECEIVED - THANK YOU 1,500.00 CR` — a payment credit
+ *                 on a statement already proven to be a card's.
+ *
+ * With card digits the row becomes the same `cardPayment` leg the SMS parser
+ * emits, so import-plan files it into the card and pairs it with its other
+ * leg. Without them it stays an ordinary row flagged as a transfer.
+ */
+const CARD_SETTLEMENT_EXCLUSION = /\b(?:fees?|charges?|interest|vat|commission|late|annual|penalty|cash\s*back|refund|reversal|return)\b|رسوم|فائدة|استرداد|عمولة/iu;
+const ACCOUNT_SIDE_CARD_SETTLEMENT = /\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b|\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b|سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان/iu;
+const CARD_SIDE_SETTLEMENT = /\bpayments?\b|\bpymt\b|\bthank\s+you\b|سداد|دفعة/iu;
+const MASKED_CARD_IN_DESCRIPTION = /(?:[\dXx*•]{4}[\s-]?){2,3}(\d{4})(?!\d)/;
+
+type StatementSettlement = Pick<StatementParsedRow,
+  'kind' | 'type' | 'merchant' | 'card' | 'transferHint' | 'categoryGuess' | 'categoryDeliberate'
+> & { cardPaymentSide?: 'debit' | 'receipt' };
+
+function statementCardSettlement(
+  description: string,
+  type: 'expense' | 'income',
+  cardEvidence: boolean,
+  source: ParsedSms['card'],
+): StatementSettlement | null {
+  const text = normalizeDigits(description).normalize('NFKC');
+  if (CARD_SETTLEMENT_EXCLUSION.test(text)) return null;
+  const transfer = { transferHint: true, categoryGuess: 'other' as const, categoryDeliberate: true };
+  if (!cardEvidence && type === 'expense' && ACCOUNT_SIDE_CARD_SETTLEMENT.test(text)) {
+    const masked = MASKED_CARD_IN_DESCRIPTION.exec(text);
+    const last4 = masked && /[Xx*•]/.test(masked[0]) ? masked[1] : null;
+    return last4
+      ? {
+          kind: 'cardPayment', type: 'expense', merchant: `Card •${last4} payment`,
+          card: { last4, kind: 'credit' }, cardPaymentSide: 'debit', ...transfer,
+        }
+      : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  if (cardEvidence && type === 'income' && CARD_SIDE_SETTLEMENT.test(text)) {
+    // A card statement's own number is a credit card's: debit cards receive
+    // no payments. An account-labelled number is not a card at all.
+    const last4 = source && (source.kind === 'credit' || source.kind === 'unknown') ? source.last4 : null;
+    return last4
+      ? {
+          kind: 'cardPayment', type: 'expense', merchant: `Card •${last4} payment`,
+          card: { last4, kind: 'credit' }, cardPaymentSide: 'receipt', ...transfer,
+        }
+      : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  return null;
+}
+
 function uniqueColumnInstrument(
   records: string[][],
   index: number,
@@ -735,6 +792,17 @@ export function parseStatementCsv(
       : rowAccountTail
         ? { last4: rowAccountTail, kind: 'account' }
         : null;
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, rowInstrument ?? sourceInstrument);
+    if (settlement) {
+      rows.push({
+        amountFils: minor, currency: defaultCurrency, date,
+        dueDay: null, minDueFils: null, reference,
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: record.join(delimiter),
+      });
+      continue;
+    }
     const transfer = statementTransferMeaning(
       merchant,
       type,
@@ -1410,6 +1478,18 @@ export function parseStatementLines(
       currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceFromDescription(merchant);
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, sourceInstrument);
+    if (settlement) {
+      rows.push({
+        amountFils, currency, date,
+        dueDay: null, minDueFils: null, reference,
+        ...(bankHint ? { bankHint } : {}),
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: line,
+      });
+      return;
+    }
     const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
     rows.push({
       kind: 'transaction', type, amountFils, currency,

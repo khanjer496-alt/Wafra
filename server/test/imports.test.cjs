@@ -1162,6 +1162,68 @@ function wideTextPdf(lines) {
   ok('the launch-tested SAR ledger keeps its day-first reading in PDFs',
     sarPdfAmbiguous.rows.length === 1 && sarPdfAmbiguous.rows[0].date === '2026-07-01');
 
+  // ── Card settlements on statements are transfers, never spend or income ──
+  // The same payment appears on BOTH statements: once leaving the current
+  // account and once arriving on the card. Read as an ordinary expense and an
+  // ordinary credit, one settlement became spending AND income.
+  const accountSettlement = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    '05/07/2026 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+    '06/07/2026 CC PAYMENT 700.00 DR',
+    '07/07/2026 CARD PAYMENT TO TESCO STORES 40.00 DR',
+    '08/07/2026 CREDIT CARD PAYMENT LATE FEE 100.00 DR',
+  ].join('\n'), 'AED');
+  const [toCard, unlabelledSettlement, posPurchase, lateFee] = accountSettlement.rows;
+  ok('an account-statement payment to a named card becomes that card\'s settlement debit leg',
+    toCard?.kind === 'cardPayment' && toCard.type === 'expense' && toCard.transferHint === true &&
+      toCard.card?.last4 === '4821' && toCard.card?.kind === 'credit' &&
+      toCard.cardPaymentSide === 'debit' && toCard.categoryGuess === 'other' && toCard.categoryDeliberate === true,
+    JSON.stringify(toCard));
+  ok('an account-statement card payment without card digits stays on the account as a non-spending transfer',
+    unlabelledSettlement?.kind === 'transaction' && unlabelledSettlement.type === 'expense' &&
+      unlabelledSettlement.transferHint === true && unlabelledSettlement.categoryGuess === 'other' &&
+      unlabelledSettlement.card?.last4 === '1234',
+    JSON.stringify(unlabelledSettlement));
+  ok('a card PURCHASE described as "card payment to" a shop, and a card fee, stay ordinary spending',
+    posPurchase?.transferHint === false && posPurchase.kind === 'transaction' &&
+      lateFee?.transferHint === false && lateFee.kind === 'transaction',
+    JSON.stringify([posPurchase, lateFee]));
+  const cardSettlement = parseStatementLines([
+    'Credit Card Statement',
+    'Credit Card Number 4111 XXXX XXXX 4821',
+    'Minimum Payment Due AED 50.00',
+    '05/07/2026 PAYMENT RECEIVED - THANK YOU 1,500.00 CR',
+    '06/07/2026 AMAZON REFUND 25.00 CR',
+    '07/07/2026 CARREFOUR 40.00 DR',
+  ].join('\n'), 'AED');
+  const [received, refund, purchase] = cardSettlement.rows;
+  ok('a card-statement payment credit becomes the card\'s settlement receipt leg, not income',
+    received?.kind === 'cardPayment' && received.type === 'expense' && received.transferHint === true &&
+      received.card?.last4 === '4821' && received.card?.kind === 'credit' &&
+      received.cardPaymentSide === 'receipt' && received.categoryGuess === 'other',
+    JSON.stringify(received));
+  ok('a card refund and a card purchase keep their ordinary meaning',
+    refund?.kind === 'transaction' && refund.type === 'income' && refund.transferHint === false &&
+      purchase?.kind === 'transaction' && purchase.type === 'expense',
+    JSON.stringify([refund, purchase]));
+  const anonymousCard = parseStatementLines([
+    'Credit Card Statement',
+    'Minimum Payment Due AED 50.00',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU 900.00 CR',
+  ].join('\n'), 'AED');
+  ok('a card payment on a card statement with no card digits is still a non-income transfer',
+    anonymousCard.rows[0]?.kind === 'transaction' && anonymousCard.rows[0].type === 'income' &&
+      anonymousCard.rows[0].transferHint === true && anonymousCard.rows[0].categoryGuess === 'other',
+    JSON.stringify(anonymousCard.rows[0]));
+  const csvSettlement = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '05/07/2026,CREDIT CARD PAYMENT,1500.00,',
+  ].join('\n'), 'AED');
+  ok('a CSV account-statement card payment is a non-spending transfer too',
+    csvSettlement.rows[0]?.transferHint === true && csvSettlement.rows[0].categoryGuess === 'other',
+    JSON.stringify(csvSettlement.rows[0]));
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
