@@ -664,6 +664,51 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         acknowledgedNotifications.slice(ackBeforeReview).includes('whatsapp-money-chat-0001'),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforeReview)));
   }
+
+  // Without READ_SMS an SMS app's notification can be anyone's text. A row
+  // the parser cannot resolve is treated as personal: acknowledged out of the
+  // encrypted queue in the same scan, never retained for a future parser the
+  // way an unresolved bank-app row is. A bank SMS beside it still reaches
+  // Review.
+  reactNative.PermissionsAndroid.check = async () => false;
+  for (const smsAppClass of ['messaging-review', 'financial-candidate']) {
+    const suffix = smsAppClass === 'messaging-review' ? 'mr' : 'fc';
+    const personalId = `samsung-messages-personal-${suffix}`;
+    const bankId = `samsung-messages-bank-sms-${suffix}`;
+    notificationRows = [{
+      id: personalId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Sara',
+      text: 'Can you transfer AED 500 to my account tonight?',
+      ts: NOW + 5_400,
+      sourceClass: smsAppClass,
+    }, {
+      id: bankId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'ADCB',
+      text: messagingAlert,
+      ts: NOW + 5_410,
+      sourceClass: smsAppClass,
+    }];
+    const personal = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const personalDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is neither reviewed nor kept unresolved`,
+      personal.parsed.length === 0 &&
+        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_400) &&
+        personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_410 &&
+          item.sourcePackage === undefined) &&
+        personalDiagnostics?.unresolved === 0 &&
+        personalDiagnostics?.acknowledgementPlanned === 2,
+      JSON.stringify({ reviews: personal.reviewCandidates, personalDiagnostics }));
+    const ackBeforePersonal = acknowledgedNotifications.length;
+    await personal.commit();
+    ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is acknowledged with the reviewed bank SMS`,
+      acknowledgedNotifications.slice(ackBeforePersonal).includes(personalId) &&
+        acknowledgedNotifications.slice(ackBeforePersonal).includes(bankId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
+  }
   reactNative.PermissionsAndroid.check = originalSmsCheck;
 
   notificationRows = [{

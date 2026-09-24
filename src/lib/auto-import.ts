@@ -1609,6 +1609,15 @@ export async function scanInbox(
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }
+        // Without READ_SMS an SMS app's notification can be anyone's text,
+        // and one the parser cannot resolve is treated as personal ("Can you
+        // transfer AED 500 tonight?"). It is acknowledged now, as ignored,
+        // instead of being retained in the encrypted queue for a future
+        // parser the way an unresolved bank-app row is.
+        if (!handled && messagingRow) {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          handled = true;
+        }
         if (!handled && notificationImportStats) {
           notificationImportStats.unresolved += 1;
           if (sourceClass === 'trusted-bank') notificationImportStats.unresolvedTrustedBank += 1;
