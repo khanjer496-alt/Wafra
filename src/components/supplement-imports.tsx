@@ -36,6 +36,7 @@ import {
 import { statementDateOrderForCountry } from '@/lib/country';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { displayRegion } from '@/lib/ledger-money';
 import { summarizeCoverage } from '@/lib/statement-coverage';
 import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
 import { t } from '@/lib/i18n';
@@ -120,7 +121,7 @@ export function SupplementImports() {
   const [pdfPassword, setPdfPassword] = useState('');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const coverage = useMemo(
-    () => summarizeCoverage(state.statementCoverage ?? [], language),
+    () => summarizeCoverage(state.statementCoverage ?? [], language, undefined, displayRegion()),
     [language, state.statementCoverage],
   );
 

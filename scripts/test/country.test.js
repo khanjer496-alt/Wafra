@@ -195,5 +195,31 @@ ok('the UAE and Saudi pickers are unchanged',
   ok('the date order travels as its own header', /'x-wafra-date-order'/.test(cloud));
 }
 
+/* ── Second-wave review packs share the country model's ISO codes ── */
+{
+  // A routed review-pack market is keyed by the same ISO code as the country,
+  // so the capture path's dateOrderForCountry(routedMarket) applies each
+  // country's own convention. Canada stays undecided.
+  eq('Canada-routed alerts keep ambiguous dates undecided', country.dateOrderForCountry('CA'), null);
+  for (const code of ['AU', 'BR', 'MX', 'SG']) {
+    eq(`${code}-routed alerts read numeric dates day-first`, country.dateOrderForCountry(code), 'DMY');
+  }
+  // A review pack is not a launch pack: choosing one of these countries never
+  // adds bank-registry coverage or changes the neutral parser pack.
+  for (const code of ['CA', 'AU', 'BR', 'MX', 'SG']) {
+    eq(`${code} keeps the neutral parser pack`, country.parserMarketForCountry(code), 'ZZ');
+  }
+  const mx = inspectUniversalBankEvent(
+    'Banorte: compra MXN 1,250.00 SUPERMERCADO el 03/04/2026. Tarjeta terminación 1234.',
+    { market: 'MX', sender: 'BANORTE', dateOrder: country.dateOrderForCountry('MX') ?? undefined },
+  );
+  eq('a Mexican numeric date resolves day-first', mx.transactionDate.value, '2026-04-03');
+  const ca = inspectUniversalBankEvent(
+    'Interac e-Transfer: CAD 250.00 has been deposited to your account on 03/04/2026.',
+    { market: 'CA', dateOrder: country.dateOrderForCountry('CA') ?? undefined },
+  );
+  ok('an ambiguous Canadian numeric date is never guessed', ca.transactionDate.evidence !== 'explicit');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

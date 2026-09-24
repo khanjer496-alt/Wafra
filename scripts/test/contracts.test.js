@@ -2356,14 +2356,18 @@ ok('the spoken label agrees with the sign on screen',
     'fx.ts',
     // The unproven-format policy validates the principal amount's exponent.
     'best-effort-autopost.ts',
+    // Any ISO purchase currency is read at its own exponent; outside the
+    // offline table it converts only with a dated rate or waits in Review.
+    'sms-parser.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
   // The universal extractor reads market packs to inspect alerts; template
-  // certification reads them only to refuse a market-inconsistent currency.
-  // Neither may write the ledger or reach the network.
-  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts']);
+  // certification reads them only to refuse a market-inconsistent currency;
+  // the money extractor reads only a routed pack's own transaction labels.
+  // None may write the ledger or reach the network.
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts', 'universal-money.ts']);
   const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
     marketReviewConsumers.length === marketReviewModules.size &&

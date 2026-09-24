@@ -79,7 +79,14 @@ import {
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
 import { markLaunchPhase } from '@/lib/launch-performance';
-import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
+import {
+  ledgerMoneySpec,
+  ledgerStateHasMoney,
+  migrateLegacyLedgerMoney,
+  deviceMoneyLocale,
+  setDisplayMoneyLocale,
+  type LedgerMoneySpec,
+} from '@/lib/ledger-money';
 import {
   planReviewPromotion,
   reviewPromotionFxNeed,
@@ -1964,8 +1971,31 @@ function createAppLedgerPersistence(): LedgerPersistence {
   });
 }
 
+/**
+ * Money display and typed input follow the device Region's number format
+ * (decimal and group marks, Indian grouping, unambiguous currency symbol).
+ * Applied synchronously during the provider's render so the first frame of
+ * every screen below already formats with it; the key makes the call
+ * idempotent across renders. expo-localization reports the Region's own
+ * separators (iOS Locale.current, Android DecimalFormatSymbols), which win
+ * over what the language tag implies, and its Region (`regionCode`), which
+ * reports and coverage months read through displayRegion(). useLocales
+ * re-renders this provider when the OS settings change (Android can change
+ * them without a restart), so the next render adopts them; screens that do
+ * not re-render keep their previous figures until they next do.
+ */
+let appliedMoneyLocaleKey: string | null = null;
+function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0]): void {
+  const next = deviceMoneyLocale(locale);
+  const key = JSON.stringify(next);
+  if (key === appliedMoneyLocaleKey) return;
+  appliedMoneyLocaleKey = key;
+  setDisplayMoneyLocale(next);
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const locales = useLocales();
+  applyDeviceMoneyLocale(locales[0]);
   const systemLanguage = resolveUiLanguage('system', locales);
   const persistenceRef = useRef<LedgerPersistence | null>(null);
   if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();

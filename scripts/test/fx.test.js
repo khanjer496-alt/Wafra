@@ -449,6 +449,53 @@ async function main() {
     fxRates.quoteFitsDay({ ...usdInr, date: '2026-08-29' }, '2026-09-05') &&
     !fxRates.quoteFitsDay({ ...usdInr, date: '2026-09-06' }, '2026-09-05'));
 
+  // ── Gulf parser: currencies outside the offline table are never dropped ─
+  {
+    const { parseForeignAwaitingRate } = require('./build/sms-parser.js');
+    const { inspectSourceFreeRefusedAlert } = require('./build/auto-import.js');
+    setLedgerCurrency('AED');
+    setActiveMarket('AE');
+    const cases = [
+      ['NGN', 'Purchase of NGN 15,000.00 at SHOPRITE LAGOS with your Credit Card ending 1234 on 05/09/2026.', 1500000, 2, 0.00238, 3570],
+      ['ISK', 'Purchase of ISK 4,500 at BONUS REYKJAVIK with your Credit Card ending 1234 on 05/09/2026.', 4500, 0, 0.0294, 13230],
+      ['UZS', 'Purchase of UZS 125,000.00 at KORZINKA with your Credit Card ending 1234 on 05/09/2026.', 12500000, 2, 0.00029, 3625],
+    ];
+    fxRates.clearReferenceQuoteCache();
+    for (const [code, text, minor, exponent, rate, fils] of cases) {
+      ok(`${code} on an AED ledger with no rate does not post a guessed amount`, parseSms(text) === null);
+      const waiting = parseForeignAwaitingRate(text);
+      ok(`${code} purchase waits for a rate in its own currency and exponent`,
+        waiting?.kind === 'transaction' && waiting.currency === code && waiting.amountFils === minor &&
+        waiting.fxSource === undefined && waiting.snapshotFils === null && waiting.date === '2026-09-05',
+        JSON.stringify(waiting));
+      const decision = inspectSourceFreeRefusedAlert({ source: text, sender: 'EmiratesNBD',
+        observedAt: Date.UTC(2026, 8, 5, 12), channel: 'inbox', session: { inspect: () => null },
+        skipUniversalFallback: true });
+      ok(`${code} alert becomes a Review item even when the worldwide fallback is skipped`,
+        decision.kind === 'review' && decision.candidate.event.amount.value.currency === code &&
+        decision.candidate.event.amount.value.minorUnits === String(minor) &&
+        decision.candidate.event.amount.value.exponent === exponent && decision.candidate.channel === 'inbox',
+        JSON.stringify(decision));
+      fxRates.rememberReferenceQuote('2026-09-05', { base: code, quote: 'AED', rate, date: '2026-09-04' });
+      const priced = parseSms(text);
+      ok(`${code} converts with a dated rate already known on the device`,
+        priced?.currency === 'AED' && priced.amountFils === fils && priced.fxSource === 'reference' &&
+        priced.fxRateDate === '2026-09-04' && priced.originalCurrency === code &&
+        priced.originalMinorUnits === minor && priced.originalExponent === exponent,
+        JSON.stringify(priced));
+      ok(`${code} no longer waits once it can post`, parseForeignAwaitingRate(text) === null);
+    }
+    fxRates.clearReferenceQuoteCache();
+    const thb = parseSms('Purchase of THB 1,850.00 at SIAM PARAGON with your Credit Card ending 1234 on 05/09/2026.');
+    ok('a currency in the offline table is unchanged (fallback estimate, revalued later)',
+      thb?.amountFils === 19983 && thb.fxSource === 'fallback' && thb.originalAmountMinor === 185000);
+    ok('an extended code that is also a word is not read as money',
+      parseForeignAwaitingRate('Purchase of ALL 500 at SHOP with your Credit Card ending 1234 on 05/09/2026.') === null);
+    ok('lowercase prose is not a currency',
+      parseForeignAwaitingRate('Purchase of ngn 15,000.00 at SHOP with your Credit Card ending 1234 on 05/09/2026.') === null);
+    setLedgerCurrency(null);
+  }
+
   // ── Rate loading: privacy, cache, offline ──────────────────────────────
   fxRates.clearReferenceQuoteCache();
   const requested = [];

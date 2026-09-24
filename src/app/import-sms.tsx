@@ -120,6 +120,9 @@ import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-revie
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { ledgerCurrencyCode } from '@/lib/markets';
+import { pasteSampleForLedger } from '@/lib/paste-sample';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 
@@ -131,12 +134,6 @@ interface PendingInboxResult {
 }
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
-
-const SAMPLE = `Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR MALL OF EMIRATES, DUBAI on 17/07/2026. Avl balance AED 12,345.67
-
-AED 55.00 was debited from your account for payment to SALIK RECHARGE on 16/07/2026
-
-Salary of AED 18,500.00 has been credited to your account ending 5678`;
 
 const PREVIEW_LIMIT = 60;
 const PANEL_HEIGHT = 186;
@@ -1508,8 +1505,13 @@ export default function ImportSmsScreen() {
                       variant="ghost"
                       label={t('trySample')}
                       onPress={() => {
-                        setText(SAMPLE);
-                        runParse(SAMPLE);
+                        // In the ledger's own currency: a fixed AED sample was
+                        // refused as a currency mismatch on every other ledger.
+                        const sample = pasteSampleForLedger(
+                          state.ledgerMoney ?? ledgerMoneySpec(ledgerCurrencyCode()),
+                        );
+                        setText(sample);
+                        runParse(sample);
                       }}
                     />
                   </View>

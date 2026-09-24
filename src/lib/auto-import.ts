@@ -19,6 +19,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
 import {
   nonPostingReason,
+  parseForeignAwaitingRate,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -43,7 +44,12 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
-import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
+import {
+  detectLaunchMarketFromAlert,
+  detectLaunchMarketFromSender,
+  pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
+} from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
 import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
@@ -679,6 +685,22 @@ export function inspectSourceFreeRefusedAlert(input: {
   if (!hasBankAlertMoneyHint(input.source) &&
     !hasGenericBankAlertContext(input.source, input.sender)) {
     return { kind: 'ignored', reason: 'non-financial' };
+  }
+
+  // A launch-bank purchase in a currency the offline table cannot price
+  // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
+  // rate converts it at promotion. It is never dropped, even when the
+  // worldwide fallback below is skipped or cannot read the template.
+  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const awaitingRate = launchMarket
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+        sender: input.sender, observedAt: input.observedAt,
+      }))
+    : null;
+  if (awaitingRate) {
+    const { raw: _raw, ...facts } = awaitingRate;
+    const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+    if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);

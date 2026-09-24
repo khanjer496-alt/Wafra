@@ -126,7 +126,7 @@ import {
   onboardingProfileWithAlerts,
 } from '@/lib/onboarding';
 import { ClearAllError, useStore } from '@/lib/store';
-import { ledgerStateHasMoney } from '@/lib/ledger-money';
+import { displayRegion, ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import {
@@ -865,6 +865,9 @@ export default function SettingsScreen() {
         currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),
         currencyExponent: state.ledgerMoney?.exponent ?? 2,
         language: state.language === 'ar' ? 'ar' : 'en',
+        // The device Region, not the language: an English (US) phone in the
+        // UAE keeps day-first UAE dates.
+        region: displayRegion(),
         from,
         to,
       });

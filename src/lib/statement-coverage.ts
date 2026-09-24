@@ -50,9 +50,31 @@ function nextMonth(key: string): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-export function formatCoverageMonth(key: string, language: string): string {
+/**
+ * The UI language in the device's Region: "en-DE", "ar-SA-u-nu-latn".
+ *
+ * `region` is expo-localization's device Region (ledger-money's
+ * displayRegion()), passed in by the caller — never derived from the
+ * language tag, so an English (US) phone in the UAE keeps day-first UAE
+ * dates. With no usable Region this is the launch-tested en-AE/ar-AE, exactly
+ * as before. Arabic keeps Latin digits, as everywhere else in the app.
+ * (reimbursement-report.ts carries the same rule; both stay import-free.)
+ */
+export function coverageLocale(language: string, region?: string | null): string {
+  const base = language === 'ar' ? 'ar' : 'en';
+  const code = region?.trim().toUpperCase();
+  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}-AE`;
+  const tag = `${base}-${code}${base === 'ar' ? '-u-nu-latn' : ''}`;
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}-AE`;
+  } catch {
+    return `${base}-AE`;
+  }
+}
+
+export function formatCoverageMonth(key: string, language: string, region?: string | null): string {
   const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : 'en-AE', {
+  return new Intl.DateTimeFormat(coverageLocale(language, region), {
     month: 'short', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
@@ -61,6 +83,8 @@ export function summarizeCoverage(
   entries: readonly StatementCoverageEntry[],
   language: string,
   today: Date = new Date(),
+  /** Device Region for month names; see coverageLocale. */
+  region?: string | null,
 ): CoverageSummary[] {
   const groups = new Map<string, StatementCoverageEntry[]>();
   for (const entry of entries) {
@@ -91,7 +115,7 @@ export function summarizeCoverage(
       const lastCompleteIndex = monthIndex(lastCompleteMonth);
       let cursor = monthFromIndex(Math.max(monthIndex(firstMonth), lastCompleteIndex - 11));
       for (let guard = 0; guard < 12; guard += 1) {
-        if (!covered.has(cursor)) missing.push(formatCoverageMonth(cursor, language));
+        if (!covered.has(cursor)) missing.push(formatCoverageMonth(cursor, language, region));
         if (cursor === lastCompleteMonth) break;
         cursor = nextMonth(cursor);
       }
@@ -100,9 +124,9 @@ export function summarizeCoverage(
       sourceKey,
       label: ordered[ordered.length - 1].label,
       range: firstMonth === lastImportedMonth
-        ? formatCoverageMonth(firstMonth, language)
-        : `${formatCoverageMonth(firstMonth, language)} – ${formatCoverageMonth(lastImportedMonth, language)}`,
-      throughMonth: formatCoverageMonth(lastCompleteMonth, language),
+        ? formatCoverageMonth(firstMonth, language, region)
+        : `${formatCoverageMonth(firstMonth, language, region)} – ${formatCoverageMonth(lastImportedMonth, language, region)}`,
+      throughMonth: formatCoverageMonth(lastCompleteMonth, language, region),
       sortDate: lastEndDate,
       identified,
       missing,

@@ -15,6 +15,69 @@ documentation. Most US and European institutions publish alert categories but
 not stable message bodies, so those seeds remain synthetic until consented,
 locally redacted fixtures prove an exact institution/channel/template grammar.
 
+## Second-wave market packs
+
+- Canada, Australia, Brazil, Mexico and Singapore.
+
+These packs are review-only on exactly the same terms as the first wave. They
+add domestic rails (Interac e-Transfer; NPP/Osko/PayID/PayTo/BPAY; Pix/TED;
+SPEI/CoDi/DiMo; PayNow/FAST/GIRO), ISO currency routing (CAD, AUD, BRL, MXN,
+SGD), institution identities (RBC, TD Canada Trust, BMO; CommBank, ANZ,
+Westpac, NAB; Itaú, Bradesco, Banco do Brasil, Nubank; BBVA México, Banorte,
+Santander México, Citibanamex; DBS/POSB, OCBC, UOB) and Portuguese/Spanish
+posting, failure, pending and request vocabulary.
+
+Their evidence is `scripts/test/fixtures/public-alert-evidence.js`: eleven
+second-wave rows (CA 2, AU 3, BR 1, MX 3, SG 2) reconstructed from issuer
+documentation (`standard-derived`) or a public user report with every personal
+field replaced (`community-derived`), next to 27 US rows of the same kind.
+Values and names are fictional. None of them is a consented real alert, so none
+counts toward the automatic-import gates below.
+
+Six certification rules cite these rows (ANZ Osko credit, Itaú card purchase,
+Banorte purchase, recurring charge and refund, DBS PayNow outgoing); Canada has
+none because its only documented family, Interac Request Money, never posts.
+Each rule is anchored to the whole documented template and still requires the
+semantic layer to prove the event posted. Only the ANZ Osko credit states its
+own completion ("received"). The Itaú, Banorte and DBS templates are headings
+("compra …", "cargo recurrente …", "PayNow outgoing …") with no completion
+verb, and the same headings open holds, requests, reversals, fraud questions,
+promotions and limit changes. A heading is therefore not posted evidence: those
+alerts are refused today and their rules stay inert until a template-specific
+posting adapter exists. The fixture file pins this as a fail-closed known gap.
+
+Market-specific vocabulary is scoped to its own pack. A bare `$` means CAD,
+AUD, MXN or SGD only after an alert has been routed to that market by sender,
+institution, ISO currency or a domestic rail; a US alert still reads `$` as USD
+and an unrouted `$` stays ambiguous. Spanish "compra" and Portuguese "saque"
+change only Mexican and Brazilian readings. Brands that also bank in another
+supported market need a country-qualified identity: TD and BMO are US banks
+too, BBVA and Santander are Spanish, and Scotiabank is omitted because its
+alerts do not say whether they are Canadian or Mexican; "DBS Bank India" and
+other named DBS subsidiaries are not Singapore evidence. ANZ, Westpac and DBS
+also operate in New Zealand or Hong Kong, which have no pack; a bare `$` in
+such an alert could be read as AUD/SGD. That is a known limitation, not
+coverage for those countries.
+
+Pending, authorization-hold, on-hold, approval-required, limit-change, request,
+fraud-question and declined wording (English, Portuguese and Spanish) now keeps
+an alert out of the posted state in every pack, unless the same clause states
+completed settlement ("was debited", "foi debitado", "fue cargado") that is not
+itself negated ("nothing was charged"). This is a clause-level guarantee: the
+structured universal parser reads the clause that owns the amount, so a status
+split off by a comma ("... recebido de JOAO, pendente"; equally "... received
+from JOHN, pending confirmation" in English) is not yet vetoed on its
+verified-app semantic-generalization path. That pre-existing gap affects every
+market and is tracked separately from these packs. Other known gaps are pinned in the
+fixture file: non-posted transfer/recurring rows read family `unknown`, and a
+"was canceled" Zelle alert is refused as `unknown` rather than `failed`.
+
+A routed alert reads numeric dates with its market's convention from the
+country model (`src/lib/country.ts`, keyed by the same ISO code): Australia,
+Brazil, Mexico and Singapore are day-first; Canada stays undecided, so an
+ambiguous Canadian date is never guessed. Choosing one of these countries does
+not select a launch parser pack; they keep the neutral pack.
+
 The review interface now carries market-scoped institution candidates from
 sender and body evidence for representative first-wave banks. Exact sender and
 body agreement is identified; conflicts remain ambiguous; unknown senders stay
@@ -38,8 +101,8 @@ independent consistent alerts can resolve a provisional capture market;
 duplicate copies of one alert cannot manufacture consensus.
 
 Routing is not import authorization. UAE and Saudi automatic capture continues
-through the launch parser. First-wave global routes feed only the review path
-until the corresponding bank/template rollout gates pass.
+through the launch parser. First- and second-wave global routes feed only the
+review path until the corresponding bank/template rollout gates pass.
 
 ## Private review tray
 
