@@ -77,12 +77,22 @@ function interpolate(template: string, values: Record<string, string | number>):
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
 }
 
+/** A fixed visual state for the E2E design preview only; never set in the app. */
+export interface SupplementImportsPreview {
+  summary?: ImportSummary;
+  progress?: { index: number; total: number };
+  status?: string;
+  error?: string;
+  files?: FileResult[];
+}
+
 export interface SupplementImportsProps {
   /** First-run setup: a footer to move on, with or without a statement. */
   onboarding?: { onContinue(): void };
+  preview?: SupplementImportsPreview;
 }
 
-export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
+export function SupplementImports({ onboarding, preview }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
@@ -113,13 +123,13 @@ export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [capabilities, setCapabilities] = useState<ImportCapabilities | null>(null);
-  const [busy, setBusy] = useState<Busy>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy>(preview?.progress ? 'statement' : null);
+  const [error, setError] = useState<string | null>(preview?.error ?? null);
+  const [status, setStatus] = useState<string | null>(preview?.status ?? null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
-  const [fileResults, setFileResults] = useState<FileResult[]>([]);
-  const [progress, setProgress] = useState<{ index: number; total: number } | null>(null);
-  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [fileResults, setFileResults] = useState<FileResult[]>(preview?.files ?? []);
+  const [progress, setProgress] = useState<{ index: number; total: number } | null>(preview?.progress ?? null);
+  const [summary, setSummary] = useState<ImportSummary | null>(preview?.summary ?? null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const aliveRef = useRef(true);
@@ -203,6 +213,10 @@ export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
 
   useEffect(() => {
     let live = true;
+    if (preview) {
+      setLoadingConfig(false);
+      return () => { live = false; };
+    }
     void getRelayConfig()
       .then((existing) => {
         if (!live) return;
@@ -213,7 +227,7 @@ export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
         if (live) setLoadingConfig(false);
       });
     return () => { live = false; };
-  }, [getStateSnapshot, loadCapabilities]);
+  }, [getStateSnapshot, loadCapabilities, preview]);
 
   /**
    * The secure import connection, made on the first "Choose file" tap. The
@@ -710,7 +724,7 @@ export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
               onPress={() => void chooseFile()}
               disabled={loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
-            <ThemedText type="meta" themeColor="textTertiary" style={styles.center} tabular>
+            <ThemedText type="meta" themeColor="textTertiary" style={styles.center}>
               {copy.formats}
             </ThemedText>
           </View>
