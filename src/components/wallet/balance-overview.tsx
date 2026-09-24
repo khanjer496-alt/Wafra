@@ -17,11 +17,11 @@ type BalanceOverviewProps = {
 export function BalanceOverview(p: BalanceOverviewProps) {
   return <View style={styles.root} testID="reference-account-balance">
     <View style={[styles.hero, { borderColor: p.theme.cardBorder }]} >
-      <View style={styles.heroTitle}><ThemedText type="micro" themeColor="textSecondary">{t('availableBalances')}</ThemedText>
+      <View style={styles.heroTitle}><ThemedText type="small" themeColor="textSecondary">{t('availableBalances')}</ThemedText>
 </View>
       <View style={[styles.money, p.largeText && styles.stack]} accessible
         accessibilityLabel={p.knownBalanceCount > 0 ? `${ledgerCurrencyDisplay()} ${formatAmount(p.balanceFils)}` : p.balanceCoverageText}>
-        <ThemedText type="heading" style={{ color: p.theme.text }}>{ledgerCurrencyDisplay()}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
         <ThemedText type="amount" tabular style={{ color: p.theme.text }}>{p.knownBalanceCount > 0 ? formatAmount(p.balanceFils) : '—'}</ThemedText>
       </View>
       <ThemedText type="meta" style={{ color: p.theme.textSecondary }}>{p.balanceCoverageText}</ThemedText>

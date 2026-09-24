@@ -16,7 +16,9 @@ function harness({ capable = true, modern = true, channel = 'push', optOut = fal
     '@/lib/import-plan': { buildImportPlan: () => ({ txCount: 1, dueCount: 0, healedCount: 0, newAccountCount: 0,
       declineReconciledCount: 0, declineReconciledIds: [], declineReconciliations: [], batch: { transactions: [] } }) },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({}) },
-    '@/lib/alert-review-tray': { isUniversalReviewAlert: () => false },
+    '@/lib/alert-review-tray': { ...require(path.join(root, 'scripts/test/build/alert-review-tray.js')),
+      isUniversalReviewAlert: () => false },
+    '@/lib/ledger-money': require(path.join(root, 'scripts/test/build/ledger-money.js')),
     '@/lib/local-message-record': {
       preflightLocalMessageRecord: () => ({ id: 'event-id', valid: true, market: 'AE', observedAt: receipt }),
       parseLocalMessageRecord: () => ({ kind: 'parsed', market: 'AE', milestone: 'financial', row: { smsTs: receipt, channel } }),

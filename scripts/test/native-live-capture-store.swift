@@ -191,6 +191,150 @@ struct NativeLiveCaptureStoreTests {
     }
   }
 
+  private static func testAutomationMessages() throws {
+    let automationRoot = root("automation-message")
+    defer { remove([automationRoot]) }
+    var now = fixedClock
+    let queue = store(root: automationRoot, now: { now })
+    let guidHash = String(repeating: "e", count: 64)
+    let messageDate = fixedClock.addingTimeInterval(-60)
+    let messageDateText = "2026-08-24T15:59:00"
+    let receiptText = "2026-08-24T16:00:00"
+    let pending = { try queue.listPendingRecords(limit: 50).compactMap(decoded) }
+    let newRows = { (before: Set<String>) in
+      try pending().filter { !before.contains($0["id"] as? String ?? "") }
+    }
+    let ids = { try Set(pending().compactMap { $0["id"] as? String }) }
+
+    check("disabled automation Message stays out of the queue", try queue.stageAutomationMessage(
+      sender: knownSender, body: messageBody, eventId: guidHash, observedAt: messageDate) == .disabled)
+    try grantLifetimeAndEnable(queue)
+
+    check("GUID and date present stage under SHA-256(GUID) with the Message date",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted
+      && pending().contains { $0["id"] as? String == guidHash
+        && $0["sender"] as? String == knownSender
+        && ($0["observedAt"] as? String).map { $0.hasPrefix(messageDateText) } == true })
+    check("a GUID replay with the same values is idempotent",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted && pending().count == 1)
+    check("a GUID replay under another sender stays an exact-byte conflict",
+      try queue.stageAutomationMessage(sender: nil, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .invalid && pending().count == 1)
+    check("a GUID replay with another date stays an exact-byte conflict",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate.addingTimeInterval(-1)) == .invalid)
+    try queue.acknowledgeRecords(ids: [guidHash])
+    check("an exact replay of an acknowledged GUID is accepted without requeueing",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted && pending().isEmpty)
+    check("a differing replay of an acknowledged GUID is still refused",
+      try queue.stageAutomationMessage(sender: nil, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .invalid && pending().isEmpty)
+
+    for (label, eventId, observedAt, expectedDate) in [
+      ("GUID absent, date absent", nil as String?, nil as Date?, receiptText),
+      ("GUID empty, date absent", "", nil, receiptText),
+      ("hash of an empty GUID with a date", WafraLiveCaptureStore.missingMessageIdentifier, messageDate, messageDateText),
+      ("GUID present, date absent", String(repeating: "f", count: 64), nil, receiptText),
+      ("GUID absent, date present", nil, messageDate, messageDateText),
+    ] {
+      let before = try ids()
+      let result = try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: eventId, observedAt: observedAt)
+      let added = try newRows(before)
+      check("\(label): stages once under a fresh UUID with the best available date",
+        result == .accepted && added.count == 1
+          && UUID(uuidString: added[0]["id"] as? String ?? "") != nil
+          && (added[0]["id"] as? String) != eventId
+          && added[0]["sender"] as? String == knownSender
+          && (added[0]["observedAt"] as? String).map { $0.hasPrefix(expectedDate) } == true)
+    }
+    check("a hash without its date never enters the queue under that hash",
+      try !ids().contains(String(repeating: "f", count: 64)))
+    let beforeRepeat = try ids()
+    check("each GUID-less observation is its own queue row",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: nil) == .accepted
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: nil) == .accepted
+      && newRows(beforeRepeat).count == 2)
+
+    for sender in [nil, "", "  \n"] as [String?] {
+      let before = try ids()
+      let result = try queue.stageAutomationMessage(sender: sender, body: messageBody,
+        eventId: nil, observedAt: nil)
+      let added = try newRows(before)
+      check("absent sender stages as the automation placeholder",
+        result == .accepted && added.count == 1
+          && added[0]["sender"] as? String == WafraLiveCaptureStore.automationSender)
+    }
+
+    let countBeforeSkips = try pending().count
+    let receiptsBeforeSkips = try queue.status().lastReceivedAt
+    for body in [nil, "", " \n\t"] as [String?] {
+      check("absent or blank body is ignored instead of failing the run",
+        try queue.stageAutomationMessage(sender: knownSender, body: body,
+          eventId: String(repeating: "2", count: 64), observedAt: messageDate) == .ignored)
+    }
+    let staleDate = fixedClock.addingTimeInterval(-WafraLiveCaptureStore.recordTTL - 1)
+    check("a Message dated beyond the queue lifetime is ignored",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "3", count: 64), observedAt: staleDate) == .ignored
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: staleDate) == .ignored)
+    check("a Message exactly at the queue lifetime is still admitted",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "4", count: 64),
+        observedAt: fixedClock.addingTimeInterval(-WafraLiveCaptureStore.recordTTL)) == .accepted)
+    check("skipped rows add no queue entry beyond the admitted one",
+      try pending().count == countBeforeSkips + 1)
+    check("ignored rows never advance the receipt clock",
+      try queue.status().lastReceivedAt == receiptsBeforeSkips)
+    check("a future-dated Message is still refused visibly",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "5", count: 64),
+        observedAt: fixedClock.addingTimeInterval(WafraLiveCaptureStore.maxFutureSkew + 1)) == .invalid
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody, eventId: nil,
+        observedAt: fixedClock.addingTimeInterval(WafraLiveCaptureStore.maxFutureSkew + 1)) == .invalid)
+    check("a malformed hash is still refused visibly",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: "not-a-hash", observedAt: messageDate) == .invalid)
+    check("an unsafe supplied sender is still refused",
+      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody,
+        eventId: nil, observedAt: nil) == .invalid)
+    check("the strict stage entry point still refuses an empty sender",
+      try queue.stage(sender: "", body: messageBody, eventId: eventId(91_000),
+        observedAt: fixedClock) == .invalid)
+    check("the strict stage entry point still refuses the empty-GUID hash",
+      try queue.stage(sender: knownSender, body: messageBody,
+        eventId: WafraLiveCaptureStore.missingMessageIdentifier, observedAt: fixedClock) == .invalid)
+
+    // Published Capture v2 on this binary: its live lane always sends all four
+    // fields. Real values stage exactly as before; the fields Apple withholds
+    // on iOS 26.1 (GUID -> SHA-256(""), no date) now stage instead of failing.
+    let v2Hash = String(repeating: "7", count: 64)
+    check("v2 live lane with GUID and date is unchanged",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: v2Hash, observedAt: messageDate) == .accepted
+      && ids().contains(v2Hash))
+    let beforeV2 = try ids()
+    check("v2 live lane without GUID or date now stages one UUID row",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: WafraLiveCaptureStore.missingMessageIdentifier, observedAt: nil) == .accepted
+      && newRows(beforeV2).count == 1)
+    let beforeV2Catchup = try pending().count
+    check("v2's manual no-input run (Content/Sender absent on Find Messages rows) is ignored",
+      try queue.stageAutomationMessage(sender: "", body: "", eventId: v2Hash,
+        observedAt: messageDate) == .ignored && pending().count == beforeV2Catchup)
+
+    now = fixedClock.addingTimeInterval(1)
+    let reloaded = store(root: automationRoot, now: { now })
+    check("automation rows survive a reload and remain valid stored records",
+      try !reloaded.status().corrupt && reloaded.listPendingRecords(limit: 50).count == pending().count)
+  }
+
   private static func testNotifications() throws {
     let notificationRoot = root("notifications")
     defer { remove([notificationRoot]) }
@@ -269,6 +413,80 @@ struct NativeLiveCaptureStoreTests {
     try reopened.eraseAll()
     check("erase clears notification setup proof and receipts", try reopened.status().notificationSetupProofAt == nil && reopened.status().firstNotificationReceivedAt == nil
       && reopened.status().lastNotificationReceivedAt == nil)
+  }
+
+  private static func testApplePay() throws {
+    let queueRoot = root("apple-pay")
+    let leaseRoot = root("apple-pay-expired-lease")
+    defer { remove([queueRoot, leaseRoot]) }
+    var now = fixedClock
+    let queue = store(root: queueRoot, now: { now })
+    let precise = Decimal(string: "9007199254740993.01", locale: Locale(identifier: "en_US_POSIX"))!
+    check("disabled Apple Pay admission is refused", try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .disabled)
+    expectsEntitlementRequired("disabled Apple Pay setup cannot establish proof") { try queue.recordApplePaySetupProof(at: now) }
+    try grantLifetimeAndEnable(queue)
+    try queue.recordApplePaySetupProof(at: now)
+    check("Apple Pay setup proof creates no money or SMS proof", try queue.status().applePaySetupProofAt == now.timeIntervalSince1970 && queue.status().pending == 0 && queue.status().firstApplePayReceivedAt == nil && queue.status().setupProofAt == nil && queue.status().firstCapturedAt == nil)
+    check("missing Wallet amount is ignored without any receipt", try queue.stageApplePay(amount: nil, currency: "AED", merchant: nil, eventId: eventId(95_000), observedAt: now) == .ignored && queue.status().firstApplePayReceivedAt == nil)
+    check("incomplete Wallet receipt contains no queued money", try queue.status().lastApplePayIncompleteAt == now.timeIntervalSince1970 && queue.status().applePayPending == 0)
+    for value in [Decimal.zero, Decimal(-1), Decimal.nan, Decimal(string: "1000000000000000000")!, Decimal(string: "0.000000001")!] {
+      check("invalid Wallet amount refuses admission", try queue.stageApplePay(amount: value, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    for currency in ["", "ZZZ", "aed", "AED ", "123"] {
+      check("invalid Wallet currency refuses admission", try queue.stageApplePay(amount: precise, currency: currency, merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    for merchant in [String(repeating: "a", count: 97), String(repeating: "🛒", count: 49), "Shop\u{0000}"] {
+      check("invalid Wallet merchant refuses admission", try queue.stageApplePay(amount: precise, currency: "AED", merchant: merchant, eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    check("Wallet accepts merchant names at the 96-character converter boundary", try queue.stageApplePay(amount: Decimal(1), currency: "AED", merchant: String(repeating: "a", count: 96), eventId: eventId(94_999), observedAt: now) == .accepted)
+    try queue.acknowledgeRecords(ids: [eventId(94_999)])
+    check("Wallet rejects message GUID hashes", try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: String(repeating: "a", count: 64), observedAt: now) == .invalid)
+    check("Wallet exact decimal stages durably", try queue.stageApplePay(amount: precise, currency: "AED", merchant: " Shop ", eventId: eventId(95_000), observedAt: now) == .accepted)
+    let walletRows = try queue.listPendingApplePayRecords(limit: 5)
+    let outer = decoded(walletRows[0])!
+    let payload = decoded(outer["text"] as! String)!
+    check("Wallet roundtrip retains exact decimal and only known Wallet fields", outer["source"] as? String == "apple-pay" && outer["sender"] as? String == "Wafra Apple Pay" && payload["amount"] as? String == "9007199254740993.01" && payload["currency"] as? String == "AED" && payload["merchant"] as? String == "Shop" && Set(payload.keys) == Set(["amount", "currency", "merchant"]))
+    let protected = queueRoot.appendingPathComponent("records/\(eventId(95_000)).json")
+    check("Wallet file retains native data protection", try FileManager.default.attributesOfItem(atPath: protected.path)[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
+    check("Wallet receipt is not SMS ledger proof", try queue.status().firstApplePayReceivedAt == now.timeIntervalSince1970 && queue.status().lastApplePayReceivedAt == now.timeIntervalSince1970 && queue.status().firstCapturedAt == nil && queue.status().firstNotificationReceivedAt == nil)
+    now = now.addingTimeInterval(30)
+    _ = try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: fixedClock)
+    check("Wallet replay leaves receipt unchanged", try queue.status().lastApplePayReceivedAt == fixedClock.timeIntervalSince1970)
+    for index in 1...3 { _ = try queue.stageApplePay(amount: Decimal(10), currency: "USD", merchant: nil, eventId: eventId(95_000 + index), observedAt: fixedClock) }
+    _ = try queue.stage(sender: knownSender, body: messageBody, eventId: eventId(95_100), observedAt: now)
+    _ = try queue.stageNotification(text: messageBody, eventId: eventId(95_101), observedAt: now)
+    check("Wallet-only reader excludes SMS and notifications", try queue.listPendingApplePayRecords(limit: 50).count == 4 && queue.status().applePayPending == 4)
+    let legacy = try queue.listPendingRecords(limit: 2, includeNotifications: false)
+    check("legacy SMS reader never exposes Wallet and filters before page limit", legacy.compactMap(rowId) == [eventId(95_100)])
+    let prior = try queue.listPendingRecords(limit: 2)
+    check("notification reader never exposes Wallet and filters before page limit", prior.compactMap(rowId) == [eventId(95_100), eventId(95_101)])
+    try queue.acknowledgeRecords(ids: prior.compactMap(rowId))
+    check("older JS acknowledgement leaves all Wallet records durable", try queue.status().pending == 4 && queue.listPendingRecords(limit: 50).isEmpty)
+    try queue.acknowledgeRecords(ids: [eventId(95_000)])
+    let reopened = store(root: queueRoot, now: { now })
+    check("acknowledged Wallet replay remains durable", try reopened.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: fixedClock) == .accepted && reopened.status().pending == 3)
+    try reopened.setCaptureEnabled(false)
+    let incompleteBeforeDisable = try reopened.status().lastApplePayIncompleteAt
+    check("disabled incomplete Wallet input cannot advance diagnostics", try reopened.stageApplePay(amount: nil, currency: "", merchant: nil, eventId: eventId(95_900), observedAt: now) == .disabled && reopened.status().lastApplePayIncompleteAt == incompleteBeforeDisable)
+    try reopened.setCaptureEnabled(true)
+    // A future source is not evidence of corruption. Keep it for a capable reader.
+    let futureId = eventId(95_001)
+    let futureURL = queueRoot.appendingPathComponent("records/\(futureId).json")
+    var futureRecord = try JSONSerialization.jsonObject(with: Data(contentsOf: futureURL)) as! [String: Any]
+    futureRecord["source"] = "future-wallet-source"
+    try JSONSerialization.data(withJSONObject: futureRecord, options: .sortedKeys).write(to: futureURL)
+    _ = try reopened.listPendingApplePayRecords(limit: 50)
+    try reopened.acknowledgeRecords(ids: [futureId])
+    check("unknown future native source stays pending and does not discard other records", try reopened.status().pending == 3 && !reopened.status().corrupt && FileManager.default.fileExists(atPath: futureURL.path))
+    check("Wallet rejects malformed receipt dates without adding money", try reopened.stageApplePay(amount: Decimal(10), currency: "AED", merchant: nil, eventId: eventId(95_950), observedAt: Date(timeIntervalSince1970: .nan)) == .invalid)
+    let leased = store(root: leaseRoot, now: { now })
+    _ = try leased.setLocalEntitlementLease(expiresAt: now.addingTimeInterval(1), lifetime: false)
+    try leased.setCaptureEnabled(true)
+    now = now.addingTimeInterval(2)
+    check("expired lease blocks valid and incomplete Wallet admissions", try leased.stageApplePay(amount: Decimal(10), currency: "AED", merchant: nil, eventId: eventId(95_960), observedAt: now) == .disabled && leased.stageApplePay(amount: nil, currency: "", merchant: nil, eventId: eventId(95_961), observedAt: now) == .disabled && leased.status().pending == 0 && leased.status().lastApplePayIncompleteAt == nil)
+    expectsEntitlementRequired("expired lease blocks Apple Pay setup proof") { try leased.recordApplePaySetupProof(at: now) }
+    try reopened.eraseAll()
+    check("erase clears Wallet receipts and setup proof", try reopened.status().firstApplePayReceivedAt == nil && reopened.status().lastApplePayReceivedAt == nil && reopened.status().applePaySetupProofAt == nil && reopened.status().lastApplePayIncompleteAt == nil && reopened.status().applePayPending == 0)
   }
 
   static func main() throws {
@@ -1040,9 +1258,28 @@ struct NativeLiveCaptureStoreTests {
     )
     expiryClock = expiryClock.addingTimeInterval(30 * 24 * 60 * 60)
     check("record at the 30-day boundary is retained", try expiry.purgeExpired() == 0)
+    check(
+      "a retained record at the boundary is not counted as dropped",
+      try expiry.status().dropped == 0 && expiry.status().warningId == nil
+    )
     expiryClock = expiryClock.addingTimeInterval(1)
     check("record older than 30 days expires", try expiry.purgeExpired() == 1)
     check("expired record is absent", try expiry.status().pending == 0)
+    let expiryWarning = try expiry.status()
+    check(
+      "an unacknowledged record purged by expiry increments dropped with a warning ID",
+      expiryWarning.dropped == 1 && expiryWarning.warningId != nil
+    )
+    check(
+      "a purge with nothing expired leaves the dropped warning unchanged",
+      try expiry.purgeExpired() == 0 && expiry.status().dropped == 1
+        && expiry.status().warningId == expiryWarning.warningId
+    )
+    check(
+      "the purge warning clears only through the exact warning acknowledgement",
+      try expiry.acknowledgeCaptureWarning(id: expiryWarning.warningId!)
+        && expiry.status().dropped == 0 && expiry.status().warningId == nil
+    )
     _ = try expiry.stage(
       sender: knownSender,
       body: messageBody,
@@ -1200,6 +1437,7 @@ struct NativeLiveCaptureStoreTests {
         && countCapacity.status().enabled
     )
 
+    check("capacity-refused Wallet event does not establish receipts", try countCapacity.stageApplePay(amount: Decimal(20), currency: "AED", merchant: "Shop", eventId: eventId(96_000), observedAt: fixedClock) == .capacityReached && countCapacity.status().firstApplePayReceivedAt == nil && countCapacity.status().lastApplePayReceivedAt == nil)
     check("capacity-refused notification does not establish receipts", try countCapacity.stageNotification(
       text: "notification", eventId: eventId(90_100), observedAt: fixedClock) == .capacityReached
       && countCapacity.status().firstNotificationReceivedAt == nil && countCapacity.status().lastNotificationReceivedAt == nil)
@@ -1579,7 +1817,9 @@ struct NativeLiveCaptureStoreTests {
       recordProtection == .completeUntilFirstUserAuthentication
     )
 
+    try testApplePay()
     try testNotifications()
+    try testAutomationMessages()
 
     print("\nNative live capture store: \(passed) passed, \(failed) failed")
     if failed > 0 { Foundation.exit(1) }

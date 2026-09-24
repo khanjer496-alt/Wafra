@@ -179,7 +179,7 @@ const stopAction = () => ({
 });
 
 // The app sends this nonfinancial control text only for a verified new graph.
-// Empty input still reaches catch-up; Message entities and ordinary text retain
+// Empty input still reaches the no-input lane; Message entities and ordinary text retain
 // their existing capture path. Presence is checked before asking for input type.
 const setupCheckActions = () => {
   const uuid = (number) => `C17E0000-0000-4000-8000-${String(number).padStart(12, "0")}`;
@@ -248,11 +248,11 @@ const createLocalCaptureShortcut = () => {
         AppIntentDescriptor: appIntentDescriptor(SETUP_INTENT),
       },
     },
-    // A no-input run is also Wafra's recovery lane. It intentionally rereads a
-    // bounded overlap of the newest retained Messages rather than trusting that
-    // every personal Message automation fired. StageWafraLiveMessageIntent uses
-    // SHA-256(Message.GUID), so rows already captured live are idempotent and
-    // anything genuinely missed is queued through the exact same parser path.
+    // Published v2 graph (keep byte-identical). Its no-input lane rereads the
+    // newest Messages, but reads Sender and Content, which Find Messages rows do
+    // not expose on iOS 26.1. On current binaries StageWafraLiveMessageIntent
+    // ignores a blank body, so this lane stages nothing, and the app no longer
+    // opens it for refresh. Capture v3 removes the lane entirely.
     {
       WFWorkflowActionIdentifier: FIND_MESSAGES,
       WFWorkflowActionParameters: {
@@ -386,6 +386,153 @@ const createLocalCaptureShortcut = () => {
   };
 };
 
+export const IOS_LOCAL_CAPTURE_V3_SHORTCUT_NAME = "Wafra Capture v3";
+
+// On iOS 26.1 the automation's Message input has Content and Sender but no Date,
+// and GUID is not listed (docs/ios-shortcut-spec.md). v3 checks each field Apple
+// may withhold with "has any value" instead of letting an empty field abort the
+// run, and StageWafraLiveMessageIntent treats every parameter as optional.
+//
+// v3 has no Find Messages recovery lane. Find Messages rows carry Body, GUID
+// and date but no Sender or Content (docs/test-evidence/
+// ios-sender-field-2026-09-20.md), so rereading 300 newest Messages would stage
+// every chat's text without a sender. A no-input run only records the v3 setup
+// proof and stops; explicit History import is the recovery path.
+const v3Ids = (() => {
+  const uuid = (number) => `C17E0000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+  return {
+    liveSender: uuid(311),
+    liveBody: uuid(312),
+    liveBodyGroup: uuid(313),
+    liveGuidGroup: uuid(314),
+    liveDateGroup: uuid(315),
+    liveGuid: uuid(316),
+    liveHash: uuid(317),
+    liveLowercase: uuid(318),
+    liveStage: uuid(319),
+    liveUnidentifiedStage: uuid(320),
+  };
+})();
+
+const hasAnyValue = (group, input) => ({
+  WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+  WFWorkflowActionParameters: {
+    GroupingIdentifier: group,
+    WFControlFlowMode: 0,
+    WFCondition: 100,
+    WFInput: { Type: "Variable", Variable: input },
+  },
+});
+
+const endIf = (group) => ({
+  WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
+  WFWorkflowActionParameters: { GroupingIdentifier: group, WFControlFlowMode: 2 },
+});
+
+const v3StageAction = ({ uuid, senderUUID, bodyUUID, eventIdUUID, observedAt }) => ({
+  WFWorkflowActionIdentifier: `${APP_BUNDLE_ID}.${STAGE_INTENT}`,
+  WFWorkflowActionParameters: {
+    UUID: uuid,
+    AppIntentDescriptor: appIntentDescriptor(STAGE_INTENT),
+    ...(senderUUID ? { sender: outputTextToken(senderUUID, "Sender Text") } : {}),
+    body: outputTextToken(bodyUUID, "Message Body"),
+    ...(eventIdUUID ? { eventId: outputTextToken(eventIdUUID, "Lowercase Message ID") } : {}),
+    ...(observedAt ? { observedAt } : {}),
+  },
+});
+
+// The automation's Message input. SHA-256(GUID) plus the Message's own date is
+// kept whenever Apple supplies both, so a replay is idempotent and matches the
+// History import identity exactly. Otherwise the same Sender and Content stage
+// without an identity: the app stamps a fresh queue UUID and the receipt time,
+// and the ledger's same-event rule pairs that row with any History copy.
+// Empty Content stops quietly.
+const v3LiveMessageActions = () => {
+  const x = v3Ids;
+  return [
+    textAction(x.liveSender, "Sender Text", "Sender"),
+    textAction(x.liveBody, "Message Body", "Content"),
+    hasAnyValue(x.liveBodyGroup, actionOutput(x.liveBody, "Message Body")),
+    hasAnyValue(x.liveGuidGroup, extensionInput([property("GUID")])),
+    hasAnyValue(x.liveDateGroup, extensionInput([property("date")])),
+    textAction(x.liveGuid, "Message GUID", "GUID"),
+    hashAction(x.liveHash, x.liveGuid, "Message GUID"),
+    lowercaseAction(x.liveLowercase, x.liveHash),
+    v3StageAction({
+      uuid: x.liveStage,
+      senderUUID: x.liveSender,
+      bodyUUID: x.liveBody,
+      eventIdUUID: x.liveLowercase,
+      observedAt: extensionInputTextToken([property("date")]),
+    }),
+    stopAction(),
+    endIf(x.liveDateGroup),
+    endIf(x.liveGuidGroup),
+    v3StageAction({
+      uuid: x.liveUnidentifiedStage,
+      senderUUID: x.liveSender,
+      bodyUUID: x.liveBody,
+    }),
+    endIf(x.liveBodyGroup),
+    stopAction(),
+  ];
+};
+
+// A separate, unpublished candidate. Apple's Get Type returns localized
+// display names, so obtain the comparison value from a known Text action on
+// the same device. Both the setup-control branch and ordinary text capture
+// must compare against that value. Keep the published v2 graph byte-identical;
+// its runtime behaviour on current binaries is described at its no-input lane.
+const createLocalCaptureV3Shortcut = () => {
+  const shortcut = createLocalCaptureShortcut();
+  const referenceText = "C17E0000-0000-4000-8000-000000000201";
+  const referenceType = "C17E0000-0000-4000-8000-000000000202";
+  for (const action of shortcut.WFWorkflowActions) {
+    const parameters = action.WFWorkflowActionParameters;
+    if (action.WFWorkflowActionIdentifier === `${APP_BUNDLE_ID}.${SETUP_INTENT}`) {
+      // A successful old graph must not satisfy the v3 installation check.
+      const intent = "RecordWafraCaptureV3SetupProofIntent";
+      action.WFWorkflowActionIdentifier = `${APP_BUNDLE_ID}.${intent}`;
+      parameters.AppIntentDescriptor = appIntentDescriptor(intent);
+    }
+    if (parameters.WFConditionalActionString === "Text") {
+      parameters.WFConditionalActionString = outputTextToken(referenceType, "Type");
+    }
+  }
+  shortcut.WFWorkflowActions.unshift(
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
+      WFWorkflowActionParameters: {
+        UUID: referenceText,
+        WFTextActionText: "Wafra",
+      },
+    },
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.getitemtype",
+      WFWorkflowActionParameters: {
+        UUID: referenceType,
+        WFInput: actionOutput(referenceText, "Text"),
+      },
+    },
+  );
+  const actions = shortcut.WFWorkflowActions;
+  const indexOf = (uuid) => {
+    const index = actions.findIndex((action) => action.WFWorkflowActionParameters.UUID === uuid);
+    if (index < 0) throw new Error(`v3 source action ${uuid} is missing`);
+    return index;
+  };
+  const findStart = indexOf(ids.catchupFind);
+  const repeatEnd = actions.findIndex((action, index) => index > findStart &&
+    action.WFWorkflowActionParameters.GroupingIdentifier === ids.catchupRepeatGroup &&
+    action.WFWorkflowActionParameters.WFControlFlowMode === 2);
+  if (repeatEnd < 0) throw new Error("v3 source catch-up loop is missing");
+  actions.splice(findStart, repeatEnd - findStart + 1);
+  const liveStart = indexOf(ids.senderText);
+  actions.splice(liveStart, actions.length - liveStart, ...v3LiveMessageActions());
+  shortcut.WFWorkflowName = IOS_LOCAL_CAPTURE_V3_SHORTCUT_NAME;
+  return shortcut;
+};
+
 const containsNull = (value) =>
   value === null ||
   (Array.isArray(value)
@@ -394,7 +541,7 @@ const containsNull = (value) =>
       ? Object.values(value).some(containsNull)
       : false);
 
-export const verifyLocalCaptureShortcutGraph = (candidate) => {
+const verifyCaptureShortcutGraph = (candidate, expected) => {
   const fail = (detail) => {
     throw new Error(`artifact is not the exact Wafra Local Capture graph: ${detail}`);
   };
@@ -421,11 +568,17 @@ export const verifyLocalCaptureShortcutGraph = (candidate) => {
   if (/https?:\/\/|Bearer\s|Authorization/i.test(serialized)) {
     fail("network endpoint or credential literal is present");
   }
-  if (!isDeepStrictEqual(candidate, createLocalCaptureShortcut())) {
+  if (!isDeepStrictEqual(candidate, expected)) {
     fail("semantic graph or dataflow changed");
   }
   return true;
 };
+
+export const verifyLocalCaptureShortcutGraph = (candidate) =>
+  verifyCaptureShortcutGraph(candidate, createLocalCaptureShortcut());
+
+export const verifyLocalCaptureV3ShortcutGraph = (candidate) =>
+  verifyCaptureShortcutGraph(candidate, createLocalCaptureV3Shortcut());
 
 export const buildLocalCaptureShortcut = () => {
   const shortcut = createLocalCaptureShortcut();
@@ -433,12 +586,20 @@ export const buildLocalCaptureShortcut = () => {
   return shortcut;
 };
 
+export const buildLocalCaptureV3Shortcut = () => {
+  const shortcut = createLocalCaptureV3Shortcut();
+  verifyLocalCaptureV3ShortcutGraph(shortcut);
+  return shortcut;
+};
+
 const isMain =
   process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isMain) {
-  const outputPath = resolve(process.argv[2] ?? "WafraLocalCapture.json");
-  const shortcut = buildLocalCaptureShortcut();
+  const v3 = process.argv.includes("--v3");
+  const outputPath = resolve(process.argv.slice(2).find(arg => arg !== "--v3")
+    ?? (v3 ? "WafraCaptureV3.json" : "WafraLocalCapture.json"));
+  const shortcut = v3 ? buildLocalCaptureV3Shortcut() : buildLocalCaptureShortcut();
   await writeFile(outputPath, `${JSON.stringify(shortcut, null, 2)}\n`, "utf8");
   console.log(outputPath);
 }

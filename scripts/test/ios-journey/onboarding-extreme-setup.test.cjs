@@ -81,6 +81,9 @@ async function screen(t, options = {}) {
   };
   const native = {
     notificationCaptureSupported: options.notificationCaptureSupported === true,
+    applePayCaptureSupported: options.applePayCaptureSupported === true,
+    ...(options.bundled ? { getMessageShortcutURL: async () => 'file:///app/Wafra%20Capture%20v3.shortcut' } : {}),
+    ...(options.bundledHistory ? { getHistoryShortcutURL: async () => 'file:///app/Wafra%20History%20v8.shortcut' } : {}),
     async getCaptureStatus() { await controls.beforeStatus?.(); return { ...nativeStatus }; },
     async setCaptureEnabled(value) { await controls.beforeEnable?.(value); nativeStatus.enabled = value; receipts.push(['enabled', value]); },
     async getCompletedSession() { return null; },
@@ -106,6 +109,7 @@ async function screen(t, options = {}) {
   });
   const protocol = source('src/lib/ios-local-capture-protocol.ts');
   const capture = source('src/lib/ios-capture-setup.ts', {
+    'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async url => urls.push(url) },
     'react-native': platform, '@/lib/ios-local-capture-protocol': protocol,
     './ios-capture-health': source('src/lib/ios-capture-health.ts'),
     '@/lib/capture': { getIosCaptureNativeModule: () => controls.nativeAvailable ? native : null,
@@ -159,6 +163,7 @@ async function screen(t, options = {}) {
     '@/hooks/use-language': { useLanguage: () => options.language ?? 'en' },
     '@/lib/ios-local-capture-protocol': protocol, '@/lib/ios-capture-setup': capture,
     '@/lib/ios-history-setup': history, '@/lib/ios-message-onboarding': progress,
+    '@/lib/ios-shortcut-setup-copy': source('src/lib/ios-shortcut-setup-copy.ts'),
     '@/lib/ios-setup-journey': journey, '@/lib/ios-paged-setup': source('src/lib/ios-paged-setup.ts'),
     '@/lib/growth-funnel': { GROWTH_PLACEMENTS: { onboarding: 'onboarding_main' }, trackGrowthEvent: (...args) => growth.push(args) },
     // Real module, with only the two surfaces this harness pins overridden —
@@ -212,7 +217,10 @@ async function screen(t, options = {}) {
     get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },
     text: () => all().filter(node => node.type === 'Text').flatMap(node => node.props.children).join(' '),
     async foreground(count = 1) { for (let n = 0; n < count; n++) for (const fn of listeners) fn('active'); await flush(); },
+    /** Wafra really left (e.g. to Shortcuts) and came back. */
+    async leaveAndReturn() { for (const fn of [...listeners]) fn('background'); for (const fn of [...listeners]) fn('active'); await flush(); },
     async callback(result) { params.shortcutResult = result; await flush(); },
+    async returnWith(patch) { Object.assign(params, patch); await flush(); },
     async section(section) {
       const title = copy.t(section === 'history' ? 'iosMessagePastTitle' : 'iosMessageFutureTitle');
       all().find(node => node.type === 'ChecklistRow' && node.props.title === title).props.onPress(); await flush();
@@ -318,7 +326,8 @@ test('native capture unavailable on entry recovers through Retry without claimin
 test('iOS 27 can choose notifications before answering the bank-name question', async t => {
   const s = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true });
   await s.press('iosNotificationSetupAction');
-  assert.equal(s.saved().futureCaptureSource, 'notification');
+  // Opening another source's setup is navigation only; nothing saved changes.
+  assert.equal(s.saved().futureCaptureSource, undefined);
   assert.equal(s.saved().futureAutomationConfirmed, false);
   assert.equal(s.routes.at(-1)[1].pathname, '/ios-notification-setup');
   assert.deepEqual(s.store.state.knownBanks, []);
@@ -342,9 +351,29 @@ test('SMS proof cannot finish a selected notification automation', async t => {
   assert.equal(s.button('iosMessageContinue'), undefined);
   assert.equal(s.onboarded, false);
   await s.press('iosNotificationChooseSms');
-  assert.equal(s.saved().futureCaptureSource, 'message');
-  assert.equal(s.saved().futureAutomationConfirmed, false);
+  // Viewing SMS setup neither switches nor erases the confirmed notification setup.
+  assert.equal(s.saved().futureCaptureSource, 'notification');
+  assert.equal(s.saved().futureAutomationConfirmed, true);
   assert.equal(s.saved().historyStatus, 'complete');
+  assert.ok(s.button('iosLocalOpenAutomation'));
+  // Returning from another source's screen shows the recorded source again.
+  await s.returnWith({ notificationReturn: String(Date.now()) });
+  assert.equal(s.button('iosLocalOpenAutomation'), undefined);
+  assert.ok(s.button('iosNotificationChooseSms'));
+});
+
+test('installing the SMS Shortcut while viewing it cannot rewrite the recorded notification status', async t => {
+  const s = await screen(t, { version: '27.0', notificationCaptureSupported: true,
+    nativeStatus: { enabled: true, notificationSetupProofAt: Date.now() },
+    progress: { futureCaptureSource: 'notification', futureAutomationConfirmed: true,
+      futureStatus: 'complete', historyStatus: 'complete' } });
+  await s.press('iosNotificationChooseSms');
+  const before = s.urls.length;
+  await s.press('iosLocalInstallShortcut');
+  assert.ok(s.urls.length > before, 'the SMS Shortcut install still opens');
+  assert.equal(s.saved().futureCaptureSource, 'notification');
+  assert.equal(s.saved().futureStatus, 'complete', 'viewing SMS setup must not mark the notification setup in progress');
+  assert.equal(s.saved().futureAutomationConfirmed, true);
 });
 
 test('notification help cannot open an invisible SMS guide or run its permission check', async t => {
@@ -382,7 +411,10 @@ test('older iOS or absent history bridge cannot expose an executable history run
     assert.equal(s.button('iosMessageContinue'), undefined);
     assert.equal(s.values.has(HANDOFF), false);
     assert.deepEqual(s.urls, []);
-    await s.press('iosMessageNextFuture');
+    if (options.version === '25.9') {
+      // History is impossible before iOS 26: the optional card is not shown at all.
+      assert.equal(s.all().some(node => node.type === 'ChecklistRow' && node.props.title === s.copy.t('iosMessagePastTitle')), false);
+    } else await s.press('iosMessageNextFuture');
     assert.ok(s.button('iosLocalInstallShortcut'));
   }
 });
@@ -443,11 +475,16 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.ok(s.button('iosMessageRunPermissionCheck'));
   await s.callback('error');
-  assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
+  assert.ok(s.text().includes('The Shortcut did not finish the setup check.'),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
   await s.foreground(2);
-  assert.ok(s.text().includes(s.copy.t('iosLocalShortcutRunFailed')),
+  assert.ok(s.text().includes('The Shortcut did not finish the setup check.'),
     'Foreground notifications after the callback must not erase the failure before the user retries.');
+  const repair = s.all().find(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut');
+  assert.ok(repair, 'repair must be on the failed step, not buried in Help');
+  repair.props.onPress(); await s.flush();
+  assert.ok(s.urls.some(url => url.startsWith('https://www.icloud.com/shortcuts/')));
+  assert.equal(s.nativeStatus.firstCapturedAt, null);
 });
 
 test('canceled proof and unknown callbacks preserve retry without inventing capture or completing onboarding', async t => {
@@ -455,6 +492,8 @@ test('canceled proof and unknown callbacks preserve retry without inventing capt
   await s.press('iosMessageRunPermissionCheck');
   for (const callback of ['cancel', 'unknown', '', 'success']) {
     await s.callback(callback); await s.foreground(2);
+    // A stopped check says so instead of silently showing the same step.
+    if (callback === 'cancel') assert.ok(s.text().includes('Check was stopped — run it again when ready.'));
     assert.equal(s.saved().futureStatus, 'in-progress');
     assert.equal(s.nativeStatus.firstCapturedAt, null);
     assert.equal(s.onboarded, false);
@@ -464,7 +503,7 @@ test('canceled proof and unknown callbacks preserve retry without inventing capt
 
 test('native proof, real first-alert receipt, and lost native readiness remain visibly distinct', async t => {
   const s = await screen(t, { progress: { futureAutomationConfirmed: true }, nativeStatus: proven });
-  const row = () => s.all().find(node => node.type === 'ChecklistRow' && node.props.step === 1).props;
+  const row = () => s.all().find(node => node.type === 'ChecklistRow' && node.props.title === s.copy.t('iosMessageFutureTitle')).props;
   assert.equal(row().status, 'complete');
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.notEqual(row().detail, s.copy.t('iosLocalFirstAlertCaptured'));
@@ -564,6 +603,7 @@ test('expired history with failed native lookup retains recovery and successful 
 
 test('deferral cancel and stale confirmation cannot disable capture or dispose a newer handoff', async t => {
   const s = await screen(t, { progress: { futureAutomationConfirmed: true }, nativeStatus: proven });
+  await s.section('history');
   await s.press('iosMessageSkipHistory');
   await s.confirm('iosMessageSkipHistory', true);
   assert.equal(s.saved().historySkippedForNow, undefined);
@@ -652,4 +692,136 @@ test('retrying an action failure preserves the section selected after the initia
   await s.press('iosMessageRetrySetup');
   assert.equal(s.saved().activeSection, 'future',
     'Only failed initialization should replay the requested section; ordinary retry retains the current step.');
+});
+
+const labelled = (s, label) => s.all().find(n => n.type === 'Button' && n.props.label === label)?.props;
+const futureRow = s => s.all().find(n => n.type === 'ChecklistRow' && n.props.title === s.copy.t('iosMessageFutureTitle')).props;
+
+test('a working v2 setup is shown as one upgrade card, not a broken setup, until its owner starts', async t => {
+  const s = await screen(t, { bundled: true, progress: ready, nativeStatus: { ...proven, setupProofAt: Date.now() - 60_000 } });
+  assert.ok(s.all().some(n => n.props?.testID === 'ios-capture-upgrade'));
+  assert.ok(labelled(s, 'Update Shortcut'));
+  assert.equal(s.button('iosLocalInstallShortcut'), undefined, 'no unexplained "Add the Shortcut" step');
+  assert.deepEqual([futureRow(s).status, futureRow(s).detail], ['complete', 'Working · update available']);
+  await s.foreground(2);
+  assert.equal(s.saved().futureStatus, 'complete', 'no downgraded status is written before the owner starts');
+  assert.equal(s.saved().futureAutomationConfirmed, true, 'Home keeps reporting the working setup');
+});
+
+test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing the existing automation', async t => {
+  const s = await screen(t, { bundled: true, progress: ready,
+    nativeStatus: { ...proven, setupProofAt: Date.now() - 60_000, firstCapturedAt: Date.now() - 60_000 } });
+  labelled(s, 'Update Shortcut').onPress(); await s.flush();
+  assert.equal(s.urls[0], 'file:///app/Wafra%20Capture%20v3.shortcut');
+  assert.equal(s.saved().futureAutomationConfirmed, true, 'starting the update never flips Home');
+  assert.equal(s.saved().futureAutomationRelink, true);
+  labelled(s, 'I added it — run setup check').onPress(); await s.flush();
+  assert.ok(s.button('iosMessageRunPermissionCheck'));
+  assert.equal(s.urls.length, 2, 'confirmation starts the setup check');
+  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra Capture v3');
+  await s.callback('success');
+  assert.ok(s.button('iosMessageRunPermissionCheck'), 'old v2 receipt cannot prove the v3 run');
+  s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
+  // Proven, but the old automation still runs the old Shortcut: point it at v3.
+  assert.ok(labelled(s, 'Edit an existing automation'));
+  assert.equal(s.button('iosMessageContinue'), undefined);
+  labelled(s, 'I updated the automation').onPress(); await s.flush();
+  assert.equal(s.saved().futureAutomationRelink, undefined);
+  assert.equal(s.saved().futureShortcutVersion, 3);
+  assert.ok(s.button('iosMessageContinue'));
+  assert.equal(s.onboarded, false);
+});
+
+test('reinstalling keeps the confirmed automation; a stopped check cannot reuse the older proof', async t => {
+  const provenAt = Date.now() - 60_000;
+  const s = await screen(t, { bundled: true,
+    progress: { ...ready, futureShortcutVersion: 3, futureAutomationConfirmedAt: provenAt },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: provenAt } });
+  assert.ok(s.button('iosMessageContinue'));
+  await s.help('iosMessageAddAgain');
+  assert.equal(s.saved().futureAutomationConfirmed, true, 'Home is unchanged until a new check succeeds');
+  assert.ok(Number.isSafeInteger(s.saved().futureAttemptStartedAt));
+  labelled(s, 'I added it — run setup check').onPress(); await s.flush();
+  await s.callback('cancel');
+  assert.ok(s.text().includes('Check was stopped — run it again when ready.'));
+  assert.ok(s.button('iosMessageRunPermissionCheck'), 'the older proof is not the result of this attempt');
+  assert.equal(s.button('iosMessageContinue'), undefined);
+  assert.equal(s.saved().futureAutomationConfirmed, true);
+  s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
+  assert.ok(s.button('iosMessageContinue'), 'a new successful check restores the finished setup without re-confirming');
+});
+
+test('returning from the Shortcuts share sheet runs the setup check once, without another tap', async t => {
+  const s = await screen(t, { bundled: true });
+  await s.press('iosLocalInstallShortcut');
+  assert.equal(s.urls.length, 1);
+  await s.foreground(); // The share sheet closing is not a return from Shortcuts.
+  assert.equal(s.urls.length, 1);
+  await s.leaveAndReturn();
+  assert.equal(s.urls.length, 2);
+  assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra Capture v3');
+  assert.equal(s.saved().futureShortcutConfirmed, true);
+  await s.leaveAndReturn();
+  assert.equal(s.urls.length, 2, 'the automatic check runs once per install');
+});
+
+test('automation step leads with Open Shortcuts and says honestly how the automation is verified', async t => {
+  const s = await screen(t, { bundled: true, progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3 },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 } });
+  const buttons = s.all().filter(n => n.type === 'Button');
+  const open = buttons.find(n => n.props.label === 'Open Shortcuts'), done = buttons.find(n => n.props.label === 'I set it up');
+  assert.ok(open && done);
+  assert.equal(open.props.variant, undefined, 'Open Shortcuts is the primary action');
+  assert.equal(done.props.variant, 'outline');
+  assert.ok(buttons.indexOf(open) < buttons.indexOf(done));
+  await s.press('iosLocalAutomationAdded');
+  assert.equal(futureRow(s).detail, 'Setup checked. Wafra will confirm the automation when your next message arrives.');
+  // A message from the automation after the confirmation is real evidence it fires.
+  s.nativeStatus.lastReceivedAt = s.saved().futureAutomationConfirmedAt + 5; await s.foreground();
+  assert.equal(futureRow(s).detail, 'Automation verified — a new message reached Wafra.');
+  // An Apple Pay receipt on the shared queue clock is not Message evidence.
+  s.nativeStatus.lastApplePayReceivedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
+  assert.equal(futureRow(s).detail, 'Setup checked. Wafra will confirm the automation when your next message arrives.');
+});
+
+test('a failed check overrides an already-open automation review guide', async t => {
+  const s = await screen(t, { progress: ready, nativeStatus: proven });
+  await s.help('iosMessageReviewAutomation');
+  assert.ok(s.all().some(n => n.type === 'AutomationGuide'));
+  await s.help('iosMessageRunPermissionCheck');
+  await s.callback('error');
+  assert.equal(s.all().some(n => n.type === 'AutomationGuide'), false);
+  assert.ok(s.all().some(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut'));
+  assert.match(s.text(), /did not finish the setup check/);
+});
+
+
+test('Apple Pay is a secondary option below SMS and merely opening it keeps a finished SMS setup', async t => {
+  const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true,
+    progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3, futureAutomationConfirmed: true, futureStatus: 'complete' },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 } });
+  const nodes = s.all();
+  const other = nodes.findIndex(n => n.props?.testID === 'ios-setup-other-sources');
+  assert.ok(other > nodes.findIndex(n => n.props?.testID === 'ios-message-setup-checklist'), 'other sources come after the SMS checklist');
+  const action = nodes.find(n => n.type === 'Button' && n.props.label === 'Set up Apple Pay');
+  assert.ok(action); action.props.onPress(); await s.flush();
+  assert.equal(s.saved().futureCaptureSource, undefined);
+  assert.equal(s.saved().futureShortcutConfirmed, true);
+  assert.equal(s.saved().futureAutomationConfirmed, true);
+  assert.equal(s.saved().futureShortcutVersion, 3);
+  assert.equal(s.saved().futureStatus, 'complete');
+  assert.equal(s.routes.at(-1)[1].pathname, '/ios-apple-pay-setup');
+  assert.deepEqual(s.store.state.knownBanks, []);
+  assert.equal(s.receipts.some(r => r[0] === 'enabled'), false, 'opening Apple Pay setup changes no native capture state');
+});
+test('Apple Pay onboarding requires its own proof and manual automation confirmation', async t => {
+  for (const proven of [false, true]) {
+    const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true,
+      nativeStatus: { enabled: true, setupProofVersion: 3, firstCapturedAt: Date.now(),
+        ...(proven ? { applePaySetupProofAt: Date.now() } : {}) },
+      progress: { futureCaptureSource: 'apple-pay', futureAutomationConfirmed: true, historyStatus: 'complete' } });
+    assert.equal(s.all().some(n => n.props?.testID === 'ios-message-setup-banks'), false);
+    if (proven) { await s.press('iosMessageContinue'); assert.equal(s.onboarded, true); }
+    else { assert.equal(s.button('iosMessageContinue'), undefined); assert.equal(s.onboarded, false); }
+  }
 });

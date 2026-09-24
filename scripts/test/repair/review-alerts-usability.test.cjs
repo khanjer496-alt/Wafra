@@ -50,6 +50,44 @@ for (const language of ['en', 'ar']) {
       assert.deepEqual(JSON.parse(JSON.stringify(h.events)), [['route', { pathname: '/add-transaction', params: { reviewId: item.id } }]]);
     });
   }
+  test(`${language}: a full Review explains waiting native alerts and clears when there is room`, () => {
+    const backlog = require('../build/alert-review-tray.js').reviewCaptureBacklog;
+    backlog.reset();
+    backlog.publish({ waiting: 7, currencyConflicts: 2 });
+    try {
+      const full = Array.from({ length: 50 }, (_, index) => ({ ...pending('purchase'),
+        id: 'synthetic-full-' + index, sourceKey: 'synthetic-full-source-' + index }));
+      const h = createWorkflowHarness({ language, state: { reviewTray: { pending: full, tombstones: [] } } });
+      const tf = h.deps['@/lib/i18n'].tf;
+      const tree = h.renderScreen('review-alerts');
+      assert.ok(text(byId(tree, 'review-alerts-full')).includes(tf('reviewAlertsFullWaiting', { count: 7 })));
+      assert.ok(text(byId(tree, 'review-alerts-currency')).includes(tf('reviewAlertsCurrencySkipped', { count: 2 })));
+      assert.ok(byId(tree, 'review-alerts-intro'));
+      const roomy = createWorkflowHarness({ language, state: { reviewTray: { pending: full.slice(1), tombstones: [] } } });
+      assert.equal(byId(roomy.renderScreen('review-alerts'), 'review-alerts-full'), undefined);
+    } finally {
+      backlog.reset();
+    }
+  });
+  test(`${language}: expiring rows count down and expired reviews stay visible`, () => {
+    const soon = { ...pending('purchase'), expiresAt: Date.now() + 2 * 86400000 - 1000 };
+    const later = { ...pending('balance'), expiresAt: Date.now() + 20 * 86400000 };
+    const expiredAt = Date.now() - 86400000;
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [soon, later], tombstones: [
+      { sourceKey: 'synthetic-expired', resolvedAt: expiredAt, expiresAt: expiredAt + 90 * 86400000, outcome: 'expired' },
+    ] } } });
+    const tf = h.deps['@/lib/i18n'].tf;
+    const tree = h.renderScreen('review-alerts');
+    const expiries = walk(tree).filter(node => node.props?.testID === 'review-alert-expiry');
+    assert.equal(expiries.length, 1);
+    assert.ok(text(expiries[0]).includes(tf('reviewAlertExpiresIn', { count: 2 })));
+    assert.ok(text(byId(tree, 'review-alerts-expired')).includes(tf('reviewAlertsExpiredCount', { count: 1 })));
+    const empty = createWorkflowHarness({ language, state: { reviewTray: { pending: [], tombstones: [
+      { sourceKey: 'synthetic-expired', resolvedAt: expiredAt, expiresAt: expiredAt + 90 * 86400000, outcome: 'expired' },
+    ] } } }).renderScreen('review-alerts');
+    assert.ok(byId(empty, 'review-alerts-expired'));
+    assert.equal(byId(empty, 'review-alerts-intro'), undefined);
+  });
   test(`${language}: ambiguous amounts do not become an explicit financial fact`, () => {
     const item = pending('purchase', { amount: field(money(), 'ambiguous') });
     const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } } });

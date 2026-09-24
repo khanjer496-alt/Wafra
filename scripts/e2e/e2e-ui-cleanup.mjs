@@ -23,7 +23,7 @@ try {
       ['home', '/'], ['spending', '/flow'], ['bills', '/bills'], ['accounts', '/wallet'],
       ['settings', '/settings'], ['capture-settings', '/settings?section=imports'],
       ['privacy', '/settings?section=privacy'], ['data', '/settings?section=data'],
-      ['help', '/settings?section=help'], ['transactions', '/transactions'],
+      ['help', '/settings?section=help'], ['transactions', '/transactions'], ['transfers', '/transfers'],
       ['merchant', '/merchant?name=Talabat'], ['merchants', '/merchants'],
       ['add-transaction', '/add-transaction'], ['imports', '/import-sms'],
       ['review-alerts', '/review-alerts'], ['review-transfers', '/review-transfers'],

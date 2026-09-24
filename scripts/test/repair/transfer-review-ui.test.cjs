@@ -63,7 +63,8 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
       shortDate: date => date, toISODate: () => '2026-09-09' },
-    '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint },
+    '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint,
+      isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-theme': { useTheme: () => ({ cardBorder: '#ccc', primary: '#147', textSecondary: '#555' }) },
     '@/constants/theme': { Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
@@ -282,6 +283,40 @@ test('leaving an uncertain entry unclassified does not write, dismiss, or announ
   assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
   assert.deepEqual(plain(h.state.transactions), before);
   assert.deepEqual(h.events, []);
+});
+
+test('focused low-signal transfers open a guarded review without adding generic unknowns to the default queue', async () => {
+  const tx = row('low-signal');
+  const h = createUI({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
+  const first = h.render();
+  assert.ok(byId(first, 'transfer-review-entry'), 'explicitly requested unknown record is reachable despite no pending group');
+  assert.deepEqual(h.events, [], 'opening the route cannot classify a record');
+  openEntry(h);
+  assert.equal(byLabel(h.render(), h.words.confirm).props.disabled, true);
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  assert.deepEqual(h.events, [], 'choosing ownership is only a preview');
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  assert.deepEqual(h.events[0], ['resolve', { ids: [tx.id], ownership: 'external',
+    expectedFingerprints: { [tx.id]: fingerprint(tx) }, expectedGeneration: 1 }]);
+  const general = createUI({ transactions: [tx], groupDefinitions: [] });
+  assert.equal(byId(general.render(), 'transfer-review-entry'), undefined, 'default queue remains unchanged');
+  const focused = createUI({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
+  byLabel(focused.render(), focused.words.showAll).props.onPress();
+  assert.equal(byId(focused.render(), 'transfer-review-entry'), undefined, 'Show all returns only mandatory review groups');
+});
+
+test('focused low-signal review retains stale fingerprint protection and rejects non-transfer route targets', () => {
+  const h = createUI({ transactions: [row('low-signal')], params: { transactionId: 'low-signal' }, groupDefinitions: [] });
+  openEntry(h);
+  byId(h.render(), 'transfer-choice-own').props.onPress();
+  h.state.transactions = h.state.transactions.map(tx => ({ ...tx, amountFils: 55500 }));
+  assert.equal(byLabel(h.render(), h.words.confirm).props.disabled, true);
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  assert.deepEqual(h.events, []);
+  const salary = createUI({ transactions: [row('salary', { title: 'Salary', category: 'salary' })],
+    params: { transactionId: 'salary' }, groupDefinitions: [] });
+  assert.equal(byId(salary.render(), 'transfer-review-entry'), undefined);
 });
 
 test('3,106 unresolved entries stay bounded without exposing a second transfer-history mode', () => {

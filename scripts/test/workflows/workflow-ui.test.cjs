@@ -163,7 +163,7 @@ test('unpaired trusted devices preserves privacy disclosure and makes no connect
  assert.ok(text(tree).includes(h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').devicesTitle));assert.deepEqual(h.events,[]);
 });
 for(const language of ['en','ar'])test(`iOS setup renders actual checklist without invoking permission or install: ${language}`,()=>{
- const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},2:true,3:true}}),tree=h.renderScreen('ios-setup');
+ const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},3:true,4:true}}),tree=h.renderScreen('ios-setup'); // useState 3/4: progressLoaded/historyReady (2 is the viewed capture source)
  assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'));assert.deepEqual(h.events,[]);
 });
 

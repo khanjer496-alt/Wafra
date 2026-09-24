@@ -102,8 +102,8 @@ ok('iOS message setup: Future is first, History is optional, and only the select
   screen.indexOf("title={t('iosMessageFutureTitle')}") >= 0 &&
     screen.indexOf("title={t('iosMessageFutureTitle')}") <
       screen.indexOf("title={t('iosMessagePastTitle')}") &&
-    /expanded=\{progress\.activeSection === 'future'\}/.test(screen) &&
-    /expanded=\{progress\.activeSection === 'history'\}/.test(screen) &&
+    /expanded=\{activeSection === 'future'\}/.test(screen) &&
+    /expanded=\{activeSection === 'history'\}/.test(screen) &&
     translated('iosMessageFutureTitle', 'en') === 'Automatic bank alerts' &&
     translated('iosMessagePastTitle', 'en') === 'Past messages · Optional');
 ok('iOS history explains Shortcut extraction before app review and keeps the phone-open instruction',
@@ -115,7 +115,10 @@ ok('iOS message setup: checklist rows retain 44pt targets without clipping text'
   Number(checklistRow.match(/header:\s*\{\s*minHeight:\s*(\d+)/)?.[1]) >= 44 &&
     !/numberOfLines/.test(checklistRow) &&
     /accessibilityState=\{\{ expanded \}\}/.test(checklistRow) &&
-    /accessibilityValue=\{\{ text: t\(statusKey\) \}\}/.test(checklistRow));
+    /accessibilityValue=\{\{ text: statusText \}\}/.test(checklistRow) &&
+    // Status is announced once, as the value, not again inside the label.
+    /accessibilityLabel=\{\[title, detail\]\.filter\(Boolean\)\.join\('\. '\)\}/.test(checklistRow) &&
+    /const statusText = statusLabel \?\? t\(statusKey\)/.test(checklistRow));
 eq('iOS message setup: every checklist status has localized VoiceOver copy', [
   translated('iosMessageStatusNotStarted', 'en'),
   translated('iosMessageStatusInProgress', 'en'),
@@ -278,9 +281,9 @@ const forbiddenScreenPatterns = [
 ok('iOS local setup: obsolete relay and sender-picker work is absent',
   forbiddenScreenPatterns.every((pattern) => !pattern.test(screen)),
   forbiddenScreenPatterns.filter((pattern) => pattern.test(screen)).map(String).join(', '));
-ok('iOS local setup: controller has only local native and Linking dependencies',
+ok('iOS local setup: controller has only local native, Linking and fixed-file sharing dependencies',
   !/relay|clipboard|notification|background|CaptureExecutor|ledger|leavePrivateMode/i.test(
-    (controller.match(/\bimport[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []).join('\n')) &&
+    (controller.match(/\bimport(?!\s*\()[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []).join('\n')) &&
     /getNativeModule/.test(controller) &&
     /getCaptureStatus/.test(controller) &&
     /setCaptureEnabled/.test(controller));

@@ -54,6 +54,7 @@ function harness() {
     '@/components/ui/bank-avatar': { BankAvatar: 'BankAvatar' },
     '@/components/ui/merchant-avatar': { MerchantAvatar: 'MerchantAvatar' },
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
+    '@/components/ui/period-pill': { PeriodPill: 'PeriodPill' },
     '@/components/ui/controls': { Button: 'Button' },
     '@/lib/categories': { categoryLabel: category => category },
     '@/lib/reference-presentation': local('reference-presentation'),

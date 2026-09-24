@@ -1,6 +1,15 @@
 import Foundation
 
 private let englishValues = [
+  "live.apple_pay.title": "Capture Apple Pay purchase",
+  "live.apple_pay.amount.parameter": "Wallet amount",
+  "live.apple_pay.merchant.parameter": "Merchant",
+  "live.apple_pay.invalid": "Wafra could not read this Wallet amount. Connect the Wallet Amount value and merchant to this action, then try again.",
+  "live.apple_pay.error": "Wafra could not save this Apple Pay event. Open Wafra and check Capture status.",
+  "live.apple_pay.setup.title": "Check Wafra Apple Pay setup",
+  "live.apple_pay.setup.error": "Wafra could not verify Apple Pay setup. Open Wafra and check Capture status.",
+
+  "live.setup_v3.title": "Record Wafra Capture v3 setup proof",
   "live.notification.title": "Capture bank notification",
   "live.notification.text.parameter": "Notification text",
   "live.setup_proof.title": "Record Wafra capture setup proof",
@@ -17,6 +26,15 @@ private let englishValues = [
 ]
 
 private let arabicValues = [
+  "live.apple_pay.title": "التقاط عملية Apple Pay",
+  "live.apple_pay.amount.parameter": "مبلغ المحفظة",
+  "live.apple_pay.merchant.parameter": "التاجر",
+  "live.apple_pay.invalid": "تعذّر على وفرة قراءة مبلغ المحفظة. اربط مبلغ المحفظة والتاجر بهذا الإجراء ثم حاول مرة أخرى.",
+  "live.apple_pay.error": "تعذّر على وفرة حفظ حدث Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.",
+  "live.apple_pay.setup.title": "التحقق من إعداد Apple Pay في وفرة",
+  "live.apple_pay.setup.error": "تعذّر على وفرة التحقق من إعداد Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.",
+
+  "live.setup_v3.title": "تسجيل إثبات إعداد التقاط وفرة الإصدار 3",
   "live.notification.title": "التقاط إشعار بنكي",
   "live.notification.text.parameter": "نص الإشعار",
   "live.setup_proof.title": "تسجيل إثبات إعداد الالتقاط في وفرة",
@@ -99,6 +117,15 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
     let shortcutBytes = shortcutURL.flatMap { try? Data(contentsOf: $0) }
     check("bundled notification Shortcut is the signed AEA asset",
       shortcutBytes?.count == 22747 && shortcutBytes?.prefix(4) == Data("AEA1".utf8))
+
+    for (name, byteCount) in [("Wafra Capture v3", 25515), ("Wafra History v8", 47954), ("Wafra Apple Pay v1", 22481)] {
+      let assetURL = WafraLiveCaptureResources.bundle().url(forResource: name, withExtension: "shortcut")
+      check("resource bundle resolves the exact \(name) Shortcut file",
+        assetURL?.isFileURL == true && assetURL?.lastPathComponent == "\(name).shortcut")
+      let assetBytes = assetURL.flatMap { try? Data(contentsOf: $0) }
+      check("bundled \(name) is the signed candidate AEA asset",
+        assetBytes?.count == byteCount && assetBytes?.prefix(4) == Data("AEA1".utf8))
+    }
 
     for key in englishValues.keys.sorted() {
       let english = resolve(key, localization: "en")

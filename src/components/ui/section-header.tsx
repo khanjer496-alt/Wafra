@@ -17,14 +17,13 @@ export function SectionHeader({ title, value, action, trailing }: SectionHeaderP
   return (
     <View style={styles.row}>
       <ThemedText
-        type="micro"
-        themeColor="textTertiary"
+        type="smallBold"
         accessibilityRole="header"
         style={styles.title}>
         {title}
       </ThemedText>
       {value !== undefined ? (
-        <ThemedText type="micro" themeColor="textTertiary" tabular>
+        <ThemedText type="meta" themeColor="textSecondary" tabular style={styles.value}>
           {value}
         </ThemedText>
       ) : null}
@@ -36,8 +35,9 @@ export function SectionHeader({ title, value, action, trailing }: SectionHeaderP
             tapped();
             action.onPress();
           }}
-          style={[styles.action, Platform.OS === 'android' && styles.androidAction]}>
-          <ThemedText type="micro" themeColor="primary">
+          style={({ pressed }) => [styles.action, Platform.OS === 'android' && styles.androidAction,
+            { opacity: pressed ? 0.65 : 1 }]}>
+          <ThemedText type="linkPrimary" themeColor="primary" style={styles.actionLabel}>
             {action.label}
           </ThemedText>
         </Pressable>
@@ -53,9 +53,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
+    flexWrap: 'wrap',
     marginBottom: Spacing.two,
   },
-  title: { flexShrink: 1 },
-  action: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { flexGrow: 1, flexShrink: 1 },
+  value: { flexShrink: 1, textAlign: 'right' },
+  action: { minWidth: 44, minHeight: 44, maxWidth: '100%', alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { flexShrink: 1 },
   androidAction: { minWidth: 48, minHeight: 48 },
 });

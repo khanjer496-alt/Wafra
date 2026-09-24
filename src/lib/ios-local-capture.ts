@@ -5,12 +5,21 @@ import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
-import { isUniversalReviewAlert } from '@/lib/alert-review-tray';
+import {
+  emptyAlertReviewTray,
+  isUniversalReviewAlert,
+  partitionReviewsByCapacity,
+  reviewCaptureBacklog,
+} from '@/lib/alert-review-tray';
+import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
+  currencyConflictReview,
   parseLocalMessageRecord,
+  parseLocalApplePayRecord,
   preflightLocalMessageRecord,
   type LocalMessageParseOutcome,
+  type LocalApplePayParseOutcome,
 } from '@/lib/local-message-record';
 import {
   isLocalCaptureQualificationCandidate,
@@ -23,6 +32,7 @@ import {
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 40;
+const MAX_APPLE_PAY_PAGES = 4;
 
 export interface IosLocalCaptureOutcome {
   scanned: number;
@@ -35,6 +45,17 @@ export interface IosLocalCaptureOutcome {
   retirement: 'not-needed' | 'complete' | 'retry-needed';
   /** Refused reviews remain in the native queue; retry after Review has room. */
   deferredReviews?: number;
+  /** Unsupported payloads and reviews without durable space stay native. */
+  deferredApplePay?: number;
+  /** Apple Pay reviews among deferredApplePay that wait only for Review space. */
+  deferredApplePayReviews?: number;
+  /**
+   * Declines and informational facts (statements, bill reminders) acknowledged
+   * as ignored because their own launch-market currency conflicts with the
+   * stored ledger money. Conflicting money-moving rows are never counted here:
+   * they become durable Review items instead. Never imported.
+   */
+  currencyConflicts?: number;
 }
 
 export interface IosLocalCaptureCoordinator {
@@ -84,6 +105,21 @@ const captureOptedOut = (ledger: CaptureLedgerAdapter): boolean =>
 
 const yieldBetweenPages = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
+
+const MARKET_CURRENCY = { AE: 'AED', SA: 'SAR' } as const;
+
+/**
+ * The stored accounting currency, read before any market alignment. A legacy
+ * ledger derives it from its current marketId, so it must never be re-read
+ * after setMarket. Unreadable money metadata keeps the prior behaviour.
+ */
+const storedLedgerCurrency = (state: AppState): string | null => {
+  try {
+    return migrateLegacyLedgerMoney(state)?.currency ?? null;
+  } catch {
+    return null;
+  }
+};
 
 const planHasChanges = (plan: ImportPlan): boolean =>
   plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0 ||
@@ -292,6 +328,10 @@ export function createIosLocalCaptureCoordinator(
       ignored: 0,
       invalid: 0,
     };
+    // Record identities, so a deferred record re-listed by a later page is
+    // counted once.
+    const deferredReviewRecords = new Set<string>();
+    const currencyConflictRecords = new Set<string>();
     const stopped = (firstCapturedAt: number | null): IosLocalCaptureOutcome => ({
       ...totals,
       firstCapturedAt,
@@ -308,11 +348,14 @@ export function createIosLocalCaptureCoordinator(
       ? initialStatus.firstCapturedAt : null;
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
 
+    // Older JS must never see a new source it would reject and acknowledge.
+    // New binaries expose notification rows only through this opt-in API.
+    // When held notification reviews fill a whole page, the Message-only
+    // reader continues behind them so SMS capture is never starved by Review.
+    let includeNotifications = input.native.notificationCaptureSupported === true &&
+      !!input.native.listPendingRecordsIncludingNotifications;
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-      // Older JS must never see a new source it would reject and acknowledge.
-      // New binaries expose notification rows only through this opt-in API.
-      const serializedPage = input.native.notificationCaptureSupported === true &&
-        input.native.listPendingRecordsIncludingNotifications
+      const serializedPage = includeNotifications && input.native.listPendingRecordsIncludingNotifications
         ? await input.native.listPendingRecordsIncludingNotifications(PAGE_SIZE)
         : await input.native.listPendingRecords(PAGE_SIZE);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
@@ -340,14 +383,25 @@ export function createIosLocalCaptureCoordinator(
         completePage.filter((record) => record.preflight.valid)
           .flatMap((record) => record.preflight.market ?? []),
       );
-      const ledgerMarket = input.ledger.getState().marketId;
+      const ledgerState = input.ledger.getState();
+      const ledgerMarket = ledgerState.marketId;
       const currentMarket = ledgerMarket === 'AE' || ledgerMarket === 'SA'
         ? ledgerMarket
         : null;
-      const pageMarket = currentMarket && markets.has(currentMarket)
+      // A ledger that already holds money has a fixed currency. A market
+      // whose currency conflicts can never import here, so it must neither
+      // select the page ahead of a compatible market nor move marketId.
+      const ledgerCurrency = storedLedgerCurrency(ledgerState);
+      const conflictsWithLedger = (market: 'AE' | 'SA'): boolean =>
+        ledgerCurrency !== null && MARKET_CURRENCY[market] !== ledgerCurrency;
+      const validMarkets = completePage.flatMap((record) =>
+        record.preflight.valid && record.preflight.market ? [record.preflight.market] : []);
+      const pageMarket = currentMarket && markets.has(currentMarket) && !conflictsWithLedger(currentMarket)
         ? currentMarket
-        : completePage.find((record) =>
-            record.preflight.valid && record.preflight.market)?.preflight.market ?? null;
+        : validMarkets.find((market) => !conflictsWithLedger(market)) ?? validMarkets[0] ?? null;
+      // Only conflicting markets remain on this page. Reviews still reach the
+      // tray; automatic rows and declines are acknowledged as ignored below.
+      const pageCurrencyConflict = pageMarket !== null && conflictsWithLedger(pageMarket);
       const page = completePage.filter((record) =>
         !record.preflight.valid || record.preflight.market === pageMarket || record.preflight.market === null);
       for (const record of completePage) {
@@ -376,7 +430,11 @@ export function createIosLocalCaptureCoordinator(
         let serialized = record.serialized;
         let outcome: LocalMessageParseOutcome = { kind: 'invalid', milestone: 'none' };
         try {
-          if (record.preflight.valid) {
+          if (record.preflight.source === 'apple-pay') {
+            // Defensive handling if a native reader ever mixes lanes: an
+            // unknown/refused Wallet payload must never become invalid-ACK.
+            outcome = parseLocalApplePayRecord(serialized, now);
+          } else if (record.preflight.valid) {
             outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
           }
         } finally {
@@ -387,6 +445,38 @@ export function createIosLocalCaptureCoordinator(
           serializedPage[record.sourceIndex] = '';
         }
         outcomes.push(outcome);
+      }
+
+      // Records whose OWN market conflicts with the stored ledger currency.
+      // Converted before replay seeding, planning, and milestones: such a row
+      // must not import, reconcile a decline, or prove the Message automation.
+      // A money-moving row becomes a durable Review item (shown with its own
+      // currency, refused at promotion) and is acknowledged only once that
+      // item is retained. A decline or informational fact moves no money and
+      // is acknowledged as ignored with the visible count. A record without
+      // its own market is never converted.
+      const currencyConflictReviewIds = new Set<string>();
+      if (pageCurrencyConflict) {
+        for (let index = 0; index < outcomes.length; index += 1) {
+          const outcome = outcomes[index];
+          if (outcome.kind !== 'parsed' && outcome.kind !== 'declined') continue;
+          const ownMarket = page[index].preflight.market;
+          if (ownMarket === null || outcome.market !== ownMarket || !conflictsWithLedger(ownMarket)) continue;
+          const recordId = page[index].preflight.id;
+          const review = outcome.kind === 'parsed' ? currencyConflictReview(outcome, recordId) : null;
+          if (review) {
+            currencyConflictReviewIds.add(recordId);
+            outcomes[index] = review;
+            continue;
+          }
+          if (outcome.kind === 'parsed' && (outcome.row.kind === 'transaction' || outcome.row.kind === 'cardPayment')) {
+            // A money row that cannot be described for Review stays queued.
+            outcomes[index] = { kind: 'held', market: null, milestone: 'none' };
+            continue;
+          }
+          currencyConflictRecords.add(recordId);
+          outcomes[index] = { kind: 'ignored', market: outcome.market, milestone: 'none' };
+        }
       }
 
       // Seed every authoritative SMS before comparing notifications, regardless
@@ -411,7 +501,8 @@ export function createIosLocalCaptureCoordinator(
         outcome.kind === 'parsed' ? [outcome.row] : []);
       // A reviewable fact is not permission to select a ledger currency.
       // Align only an actual automatic-import page, after source text is gone.
-      if (parsed.length > 0 && pageMarket) {
+      let restoreMarket: 'AE' | 'SA' | null = null;
+      if (parsed.length > 0 && pageMarket && !pageCurrencyConflict) {
         const current = input.ledger.getState();
         if (!current.hydrated) throw sourceFreePageError('Local capture ledger is not hydrated');
         if (current.marketId !== pageMarket) {
@@ -423,6 +514,7 @@ export function createIosLocalCaptureCoordinator(
             throw sourceFreePageError('Local capture ledger currency did not change');
           }
           requireLedgerGeneration(input.ledger, pageGeneration);
+          restoreMarket = current.marketId === 'AE' || current.marketId === 'SA' ? current.marketId : null;
         }
       }
       const declineCandidates = outcomes.flatMap((outcome, index) =>
@@ -448,12 +540,27 @@ export function createIosLocalCaptureCoordinator(
               },
             }]
           : []);
-      const reviews = reviewCandidates.map((candidate) => candidate.item);
-      const unqualifiedReviews = outcomes.flatMap((outcome) =>
+      const allUnqualifiedReviews = outcomes.flatMap((outcome) =>
         outcome.kind === 'review' && (outcome.milestone !== 'review-candidate' || isUniversalReviewAlert(outcome.item))
           ? [outcome.item] : []);
+      // Legacy-lane admission evicts the oldest review once fifty are pending.
+      // This caller can leave its record queued, so refuse instead of evicting
+      // an already acknowledged review; the deferred record stays native.
+      const { deferred: capacityDeferred } = partitionReviewsByCapacity(
+        input.ledger.getState().reviewTray ?? emptyAlertReviewTray(),
+        [...reviewCandidates.map((candidate) => candidate.item), ...allUnqualifiedReviews],
+        now.getTime(),
+      );
+      const capacityDeferredItems = new Set(capacityDeferred);
+      const capacityDeferredIds = new Set(outcomes.flatMap((outcome, index) =>
+        outcome.kind === 'review' && capacityDeferredItems.has(outcome.item)
+          ? [page[index].preflight.id] : []));
+      const reviews = reviewCandidates
+        .filter((candidate) => !capacityDeferredItems.has(candidate.item))
+        .map((candidate) => candidate.item);
+      const unqualifiedReviews = allUnqualifiedReviews.filter((item) => !capacityDeferredItems.has(item));
       const reviewQualifications: LocalCaptureReviewQualificationCandidate[] =
-        reviewCandidates.map((candidate) => ({
+        reviewCandidates.filter((candidate) => !capacityDeferredItems.has(candidate.item)).map((candidate) => ({
           reviewId: candidate.item.id,
           qualification: candidate.qualification,
         }));
@@ -515,31 +622,43 @@ export function createIosLocalCaptureCoordinator(
         allDeclineQualifications,
         now.getTime(),
       );
-      const plan = buildImportPlan(
-        parsed,
-        stateAtPlan,
-        stateAtPlan.lastScanTs,
-        now,
-        declined,
-      );
-      if (!Number.isInteger(plan.declineReconciledCount) ||
-        plan.declineReconciledCount < 0 ||
-        plan.declineReconciledCount > declined.length) {
-        throw sourceFreePageError('Local capture decline receipt was refused');
+      let plan: ImportPlan;
+      let reconciledDeclineMappings: LocalCaptureDeclineQualificationMapping[];
+      try {
+        plan = buildImportPlan(
+          parsed,
+          stateAtPlan,
+          stateAtPlan.lastScanTs,
+          now,
+          declined,
+        );
+        if (!Number.isInteger(plan.declineReconciledCount) ||
+          plan.declineReconciledCount < 0 ||
+          plan.declineReconciledCount > declined.length) {
+          throw sourceFreePageError('Local capture decline receipt was refused');
+        }
+        const reconciledDeclineIds = exactQualificationIds(
+          plan.declineReconciledIds,
+          allDeclineQualifications,
+          plan.declineReconciledCount,
+          'decline',
+        );
+        reconciledDeclineMappings = exactDeclineQualificationMappings(
+          plan.declineReconciliations,
+          allDeclineQualifications,
+          reconciledDeclineIds,
+          stateAtPlan,
+          plan,
+        );
+      } catch (error) {
+        // Nothing on this page was imported or acknowledged. Do not leave a
+        // market switch behind that the next page would treat as settled.
+        if (restoreMarket && input.ledger.setMarket &&
+          input.ledger.getState().marketId === pageMarket) {
+          input.ledger.setMarket(restoreMarket);
+        }
+        throw error;
       }
-      const reconciledDeclineIds = exactQualificationIds(
-        plan.declineReconciledIds,
-        allDeclineQualifications,
-        plan.declineReconciledCount,
-        'decline',
-      );
-      const reconciledDeclineMappings = exactDeclineQualificationMappings(
-        plan.declineReconciliations,
-        allDeclineQualifications,
-        reconciledDeclineIds,
-        stateAtPlan,
-        plan,
-      );
       const reconciledDeclineQualifications = reconciledDeclineMappings.map(
         (mapping) => mapping.qualification,
       );
@@ -614,7 +733,13 @@ export function createIosLocalCaptureCoordinator(
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       const reviewTray = input.ledger.getState().reviewTray;
       const deferredReviewIds = new Set(outcomes.flatMap((outcome, index) => {
-        if (outcome.kind !== 'review' || outcome.item.channel !== 'push') return [];
+        if (outcome.kind === 'held') return [page[index].preflight.id];
+        if (capacityDeferredIds.has(page[index].preflight.id)) return [page[index].preflight.id];
+        if (outcome.kind !== 'review') return [];
+        // Notification reviews and currency-conflict money rows are ACKed only
+        // behind their retained Review item (pending or a live tombstone).
+        if (outcome.item.channel !== 'push' &&
+          !currencyConflictReviewIds.has(page[index].preflight.id)) return [];
         const item = outcome.item;
         const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
@@ -624,14 +749,116 @@ export function createIosLocalCaptureCoordinator(
       if (acknowledgedIds.length > 0) await input.native.acknowledgeRecords(acknowledgedIds);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       if (deferredReviewIds.size > 0) {
-        totals.ignored = Math.max(0, totals.ignored - deferredReviewIds.size);
-        return { ...stopped(firstCapturedAt), deferredReviews: deferredReviewIds.size };
+        // Staged-but-refused reviews were counted as ignored above; reviews
+        // deferred before staging never were.
+        const stagedDeferred = outcomes.filter((outcome, index) =>
+          outcome.kind === 'review' && deferredReviewIds.has(page[index].preflight.id) &&
+          !capacityDeferredIds.has(page[index].preflight.id)).length;
+        totals.ignored = Math.max(0, totals.ignored - stagedDeferred);
+        outcomes.forEach((outcome, index) => {
+          if (outcome.kind === 'review' && deferredReviewIds.has(page[index].preflight.id)) {
+            deferredReviewRecords.add(page[index].preflight.id);
+          }
+        });
+        if (acknowledgedIds.length === 0) {
+          // Held records fill this whole page. Continue behind notification
+          // rows with the Message-only reader; if Messages themselves wait for
+          // Review space, stop and give the Wallet lane its turn.
+          if (!includeNotifications) break;
+          includeNotifications = false;
+        }
       }
       if (pageIndex + 1 < MAX_PAGES) await yieldBetweenPages();
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
     }
 
+    if (deferredReviewRecords.size > 0) totals.deferredReviews = deferredReviewRecords.size;
+    if (currencyConflictRecords.size > 0) totals.currencyConflicts = currencyConflictRecords.size;
+    if (input.native.applePayCaptureSupported === true && input.native.listPendingApplePayRecords) {
+      const heldIds = new Set<string>();
+      const waitingReviewIds = new Set<string>();
+      const seenIds = new Set<string>();
+      let unreadableHeld = 0;
+      for (let pageIndex = 0; pageIndex < MAX_APPLE_PAY_PAGES; pageIndex += 1) {
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        const generation = readLedgerGeneration(input.ledger);
+        const serializedPage = await input.native.listPendingApplePayRecords(PAGE_SIZE);
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        if (serializedPage.length === 0) break;
+        if (serializedPage.length > PAGE_SIZE) throw sourceFreePageError('Apple Pay page exceeds the native limit');
+        const now = new Date();
+        const page: { id: string | null; outcome: LocalApplePayParseOutcome }[] = [];
+        for (let index = 0; index < serializedPage.length; index += 1) {
+          let serialized = serializedPage[index];
+          try {
+            const preflight = preflightLocalMessageRecord(serialized, now);
+            page.push({ id: preflight?.id ?? null, outcome: parseLocalApplePayRecord(serialized, now) });
+          } finally {
+            serialized = '';
+            serializedPage[index] = '';
+          }
+        }
+        const pageIds = page.flatMap(record => record.id ? [record.id] : []);
+        if (new Set(pageIds).size !== pageIds.length) throw sourceFreePageError('Apple Pay page contains a duplicate record identity');
+        const unreadable = page.filter(record => record.id === null).length;
+        totals.scanned += Math.max(0, unreadable - unreadableHeld);
+        unreadableHeld = unreadable;
+        for (const id of pageIds) {
+          if (!seenIds.has(id)) totals.scanned += 1;
+          seenIds.add(id);
+        }
+        const reviews = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
+        if (!input.ledger.getState().hydrated) throw sourceFreePageError('Apple Pay ledger is not hydrated');
+        if (reviews.length > 0) {
+          if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          const receipt = input.ledger.stageReviewAlerts(reviews);
+          await receipt.durable;
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          requireLedgerGeneration(input.ledger, generation);
+          if (!Number.isInteger(receipt.admitted) || receipt.admitted < 0 || receipt.admitted > reviews.length) {
+            throw sourceFreePageError('Apple Pay review receipt was refused');
+          }
+          totals.reviews += receipt.admitted;
+        }
+        // Also protect duplicate/tombstoned receipts with a durable barrier.
+        // No financial planner, market selector or SMS milestone runs here.
+        await input.ledger.ensureDurable();
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        const state = input.ledger.getState();
+        const ack: string[] = [];
+        for (const record of page) {
+          if (!record.id) continue;
+          const item = record.outcome.kind === 'review' ? record.outcome.item : null;
+          const retained = item && (
+            state.reviewTray?.pending.some(entry => entry.id === item.id && entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
+            state.reviewTray?.tombstones.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime())
+          );
+          if (retained) { ack.push(record.id); heldIds.delete(record.id); waitingReviewIds.delete(record.id); }
+          else {
+            heldIds.add(record.id);
+            if (item) waitingReviewIds.add(record.id);
+          }
+        }
+        totals.deferredApplePay = heldIds.size + unreadableHeld;
+        if (waitingReviewIds.size > 0) totals.deferredApplePayReviews = waitingReviewIds.size;
+        else delete totals.deferredApplePayReviews;
+        if (ack.length === 0) break;
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        await input.native.acknowledgeRecords(ack);
+        if (pageIndex + 1 < MAX_APPLE_PAY_PAGES) await yieldBetweenPages();
+      }
+    }
+
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+    // Presentation only: the records themselves remain in the native queue.
+    reviewCaptureBacklog.publish({
+      waiting: (totals.deferredReviews ?? 0) + (totals.deferredApplePayReviews ?? 0),
+      currencyConflicts: totals.currencyConflicts ?? 0,
+    });
     const retirement = await retryRetirementIfNeeded();
     return { ...totals, firstCapturedAt, retirement };
   };

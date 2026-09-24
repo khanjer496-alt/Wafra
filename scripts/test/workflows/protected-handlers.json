@@ -128,22 +128,26 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "installFutureShortcut",
-      "sha256": "af0a8b10525b2c36cccc1d441e79ebe9313aa9887d65482ab1fc8e81a374cbbf"
+      "sha256": "e23d6b367dc4954ab672b0d594406e8dccbb40ec7b1e8d0c4bd699834455b76a",
+      "reviewedChange": "2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "confirmFutureShortcut",
-      "sha256": "43c387b54b6e6652a6d1525f8a21a7f7d1c7a8d94b4595e8cc30bcfc01fcddd8"
+      "sha256": "617270f119f0b9ec9fa56fa87c7a0068608bbc92f468f5e7dab974db6d2c1b9f",
+      "reviewedChange": "2026-09-24: Confirmation is scoped to the Message source and, for v3, records the setup-check start time before opening the check so an older native proof cannot answer it. Disarms the automatic check. Covered by onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "openAutomation",
-      "sha256": "19a15ea42bcbbd31694c6b20c9bb501dba5281d9134a684f5dd9d3afc15f6c31"
+      "sha256": "33ce2467deed07a10ca7a7820edde1821d4f8ac3d6533f6120ac09117ecb644c",
+      "reviewedChange": "2026-09-24: Only writes the in-progress status when the viewed source is the recorded source, so viewing SMS setup cannot rewrite another source's status. Open order unchanged. Covered by ios-setup-ux.test.js."
     },
     {
       "file": "src/app/ios-setup.tsx",
       "name": "confirmAutomation",
-      "sha256": "0fadcb14ad1442f0a2ba23cebbd8e78ff02ee52fec0facaf90246ee8f5d92509"
+      "sha256": "96b30b51ed4f52578f268773cf64bf9d28a1fe791f6c6361d535281684bf70ae",
+      "reviewedChange": "2026-09-24: Confirmation is Message-scoped and timestamped (used only to show a later message as verification). Confirming Message automation makes Message the recorded source, parking any other source's progress instead of erasing it. Covered by notification-setup.test.cjs and onboarding-extreme-setup.test.cjs."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -166,8 +170,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "finish",
-      "sha256": "5a2dca85ea50273c7ee3707f065fbac0a7919caa6b65c779d940f6f4bbbe4313",
-      "reviewedChange": "2026-09-23: Independently reviewed readiness check now resolves the selected SMS or notification capture source. Durability, retries, analytics and navigation are unchanged; notification setup and onboarding journey regressions cover both modes. Prior review: 2026-09-19: Stop rewriting the completion profile field by field. The prior note here was about preserving `intention` the same way, and the same omission then silently erased the alert-delivery and country answers, because the reducer replaces the whole profile — so a writer that forgets a field deletes it. onboardingProfileAtStage spreads what is already there, which makes every future field survive by default. The exit destination now resolves through finishDestination(), so a bank that leaves no history to read lands on /statement-import instead of Home; iPhone setup has no completion screen, so this exit is where that offer can exist. Durable completion order and the dismissAll + navigate behavior are unchanged. Covered by onboarding-extreme-setup, onboarding-extreme-navigation and the setup UX tests."
+      "sha256": "c56b5cfbc6d66c3c2f4c4e1a13a31b90e842677cec17bd1c4fa9958d8b6677c0",
+      "reviewedChange": "2026-09-24: Finishing requires only the recorded source's new-alert setup (attempt-aware readiness plus confirmed, re-pointed automation); past-message history is optional and no longer needs an explicit skip. Durable onboarding completion unchanged. Covered by ios-setup-recovery.helpers.js."
     },
     {
       "file": "src/app/ios-setup.tsx",
@@ -256,8 +260,8 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "save",
-      "sha256": "419342ccc429d3606d2b44f67a25becbdf075f3105acf67f9dd8462c709b57d9",
-      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write."
+      "sha256": "dc577d494a98eeb23b21fd237a5c66a43405f49f7eb382cba949d63d78d2eb62",
+      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast. 2026-09-24: the choice now opens for any review refused as 'possible-duplicate' (including a bank alert matching a recorded Apple Pay row) only when the state generation, route and review source binding are unchanged, and records the exact submitted promotion input so the sheet's explicit, confirmed 'Add as a separate purchase' can re-submit it once with a separatePurchase bound to that review's source; a stale refusal keeps the generic failure toast and nothing is written on the refusal path."
     },
     {
       "file": "src/app/add-transaction.tsx",

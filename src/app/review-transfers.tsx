@@ -23,6 +23,7 @@ import { indexTransferHistory, projectTransferHistory, transferAccountLabel, tra
 import type { Transaction } from '@/lib/types';
 
 type Group = ReturnType<typeof reconcileTransfers>['groups'][number];
+const unresolvedStatuses = new Set<Group['status']>(['ownership-unknown', 'ambiguous', 'likely-own', 'likely-card-repayment']);
 type Words = ReturnType<typeof transferReviewCopy>;
 type Ownership = 'own' | 'external' | null;
 type Summary = {
@@ -101,8 +102,12 @@ export default function ReviewTransfersScreen() {
   const words = transferReviewCopy(language);
   const toast = useToast();
   const { state, resolveTransfers, getStateGeneration, getStateSnapshot, ensureDurable } = useStore();
-  const [filter, setFilter] = useState<'pending' | 'reviewed'>(() =>
-    transactionId && !reconcileTransfers(state.transactions, state.accounts).pendingIds.has(transactionId) ? 'reviewed' : 'pending');
+  const [filter, setFilter] = useState<'pending' | 'reviewed'>(() => {
+    if (!transactionId) return 'pending';
+    const current = reconcileTransfers(state.transactions, state.accounts);
+    const assessment = current.byId.get(transactionId);
+    return current.pendingIds.has(transactionId) || (assessment && unresolvedStatuses.has(assessment.status)) ? 'pending' : 'reviewed';
+  });
   const [showAll, setShowAll] = useState(false);
   // This screen is an exception handler, not a second transaction-history
   // browser. Show every unresolved item and keep ordinary/confirmed transfers
@@ -130,11 +135,24 @@ export default function ReviewTransfersScreen() {
   }, [state.accounts, state.transactions, words]);
   const focusedId = showAll ? undefined : transactionId;
   const todayISO = toISODate(new Date());
+  // A person can explicitly review an uncertain transfer even when it has too
+  // little evidence to warrant a mandatory task. This local display group does
+  // not add it to the queue or classify it; opening the entry uses the existing
+  // fingerprinted preview and confirmation flow below.
+  const focusedPendingGroup = useMemo<Group | null>(() => {
+    if (!focusedId || reconciliation.pendingIds.has(focusedId)) return null;
+    const row = transactionsById.get(focusedId);
+    const assessment = reconciliation.byId.get(focusedId);
+    if (!row || !assessment || !unresolvedStatuses.has(assessment.status) || !isTransferCandidate(row)) return null;
+    return { id: `focused:${row.id}`, transactionIds: [row.id], accountId: row.accountId, direction: row.type,
+      status: assessment.status, counterparty: row.transferEvidence?.counterparty,
+      counterpartyName: row.transferEvidence?.counterpartyName, bulkEligible: false };
+  }, [focusedId, reconciliation, transactionsById]);
   const candidates = useMemo<Group[]>(() => filter === 'pending'
-    ? reconciliation.groups.flatMap((group) => {
+    ? [...reconciliation.groups.flatMap((group) => {
         const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id));
         return transactionIds.length > 0 ? [{ ...group, transactionIds }] : [];
-      })
+      }), ...(focusedPendingGroup ? [focusedPendingGroup] : [])]
     : state.transactions
       .filter((row) => {
         if (row.transferDecision) return true;
@@ -149,7 +167,7 @@ export default function ReviewTransfersScreen() {
         status: reconciliation.byId.get(row.id)?.status ?? (row.transferDecision?.ownership === 'own' ? 'confirmed-own' : 'confirmed-external'),
         counterparty: row.transferEvidence?.counterparty, bulkEligible: false,
         counterpartyName: row.transferEvidence?.counterpartyName,
-      })), [filter, reconciliation, state.transactions]);
+      })), [filter, reconciliation, state.transactions, focusedPendingGroup]);
   const candidateTransactionCount = useMemo(
     () => candidates.reduce((count, group) => count + group.transactionIds.length, 0),
     [candidates],

@@ -15,6 +15,11 @@ public struct WafraLiveCaptureStatus {
   public let notificationSetupProofAt: TimeInterval?
   public let firstNotificationReceivedAt: TimeInterval?
   public let lastNotificationReceivedAt: TimeInterval?
+  public let applePayPending: Int
+  public let lastApplePayIncompleteAt: TimeInterval?
+  public let applePaySetupProofAt: TimeInterval?
+  public let firstApplePayReceivedAt: TimeInterval?
+  public let lastApplePayReceivedAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
@@ -25,6 +30,7 @@ public final class WafraLiveCaptureStore {
   public private(set) var calls: [String] = []
   public private(set) var listLimits: [Int] = []
   public private(set) var listIncludesNotifications: [Bool] = []
+  public private(set) var listIncludesApplePay: [Bool] = []
   public private(set) var firstCapturedDates: [Date] = []
   public private(set) var localLeaseCalls: [(Date?, Bool)] = []
   public private(set) var storeLeaseCalls: [(Date?, Bool, Date)] = []
@@ -44,13 +50,19 @@ public final class WafraLiveCaptureStore {
     lastHandledAt: 1244.75,
     notificationSetupProofAt: 1245.125,
     firstNotificationReceivedAt: 1250.25,
-    lastNotificationReceivedAt: 1300.5
+    lastNotificationReceivedAt: 1300.5,
+    applePayPending: 3,
+    lastApplePayIncompleteAt: 1390.5,
+    applePaySetupProofAt: 1400.25,
+    firstApplePayReceivedAt: 1410.5,
+    lastApplePayReceivedAt: 1420.75
   )
 
   public func reset() {
     calls = []
     listLimits = []
     listIncludesNotifications = []
+    listIncludesApplePay = []
     firstCapturedDates = []
     localLeaseCalls = []
     storeLeaseCalls = []
@@ -76,11 +88,18 @@ public final class WafraLiveCaptureStore {
     calls.append("setCaptureEnabled:\(enabled)")
   }
 
-  public func listPendingRecords(limit: Int, includeNotifications: Bool = true) throws -> [String] {
+  public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false) throws -> [String] {
     calls.append("listPendingRecords")
     listLimits.append(limit)
     listIncludesNotifications.append(includeNotifications)
+    listIncludesApplePay.append(includeApplePay)
     return ["pending:\(limit)"]
+  }
+
+  public func listPendingApplePayRecords(limit: Int) throws -> [String] {
+    calls.append("listPendingApplePayRecords")
+    listLimits.append(limit)
+    return ["apple-pay:\(limit)"]
   }
 
   public func acknowledgeRecords(ids: [String]) throws {
@@ -124,11 +143,19 @@ public enum WafraLiveCaptureResources {
   public static var requestedExtension: String?
   public static let shortcutURL = URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Notifications v1.shortcut")
 
+  public static let shortcutURLs = [
+    "Wafra Notifications v1": shortcutURL,
+    "Wafra Apple Pay v1": URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Apple Pay v1.shortcut"),
+    "Wafra Capture v3": URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra Capture v3.shortcut"),
+    "Wafra History v8": URL(fileURLWithPath: "/tmp/WafraLiveCaptureResources.bundle/Wafra History v8.shortcut"),
+  ]
+
   public struct ResourceBundle {
     public func url(forResource name: String?, withExtension ext: String?) -> URL? {
       WafraLiveCaptureResources.requestedName = name
       WafraLiveCaptureResources.requestedExtension = ext
-      return WafraLiveCaptureResources.shortcutAvailable ? WafraLiveCaptureResources.shortcutURL : nil
+      guard WafraLiveCaptureResources.shortcutAvailable, let name, ext == "shortcut" else { return nil }
+      return WafraLiveCaptureResources.shortcutURLs[name]
     }
   }
 

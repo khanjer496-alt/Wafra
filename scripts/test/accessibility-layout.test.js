@@ -232,7 +232,7 @@ ok('shared charts consume the semantic data-visualization palette',
 ok('Bills uses one scaffold scroller with an inline typed header',
   /const billsHeader: ScreenHeaderProps = \{/.test(bills) &&
     /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/.test(bills) &&
-    (bills.match(/<ScrollView/g) ?? []).length === 1 &&
+    (bills.match(/<ScrollView/g) ?? []).length === 0 &&
     /testID="subscription-history-scroll"/.test(bills));
 ok('Bills uses canonical labelled control and selection semantics',
  /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));

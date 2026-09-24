@@ -134,11 +134,15 @@ public final class WafraPagedHistoryStore {
     // persisted. The normal GUID remains preferred whenever Apple supplies it.
     // An oversized body contributes its transport form so the identity stays
     // deterministic without holding the decoded text.
+    // The identity hashes the instant as canonical UTC milliseconds: the
+    // column path receives Shortcuts' local-offset text while the typed-row
+    // path receives a Date, and both must derive the same identity for the
+    // same Message or a page overlap can never be matched (missing-overlap).
     let bodyIdentity = body ?? (fields.count == 4 ? String(fields[1]) : "")
-    let stableGuid = guid.isEmpty
-      ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(sender)\u{0}\(bodyIdentity)".utf8)))"
-      : guid
     let instant = try date(dateText, diagnostic: true)
+    let stableGuid = guid.isEmpty
+      ? Self.fallbackIdentity(instant: instant, sender: sender, body: bodyIdentity)
+      : guid
     let ref = try reference(guid: stableGuid, instant: instant)
     guard let body else { return PreparedRow(reference: ref, record: nil) }
     let record = WafraMessageHistoryImporter.preparedRecord(guid: stableGuid, body: body,
@@ -178,6 +182,12 @@ public final class WafraPagedHistoryStore {
     guard hash(blob.payload) == blob.digest else { throw Failure.corrupt }
     return try JSONDecoder().decode(Entry.self, from: blob.payload)
   }
+  /// Deterministic local identity for a Message whose GUID MessageEntity left
+  /// blank. Shared by the column and typed-row paths.
+  static func fallbackIdentity(instant: Date, sender: String, body: String) -> String {
+    let dateText = utc(Int64((instant.timeIntervalSince1970 * 1_000).rounded()))
+    return "wafra-fallback-\(hash(Data("\(dateText)\u{0}\(sender)\u{0}\(body)".utf8)))"
+  }
   private static func utc(_ ms: Int64) -> String {
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1_000))
@@ -214,7 +224,7 @@ public final class WafraPagedHistoryStore {
   private static func validSession(_ id: String) -> Bool {
     id.range(of: "\\APAGED-[A-F0-9-]{36}\\z", options: .regularExpression) != nil
   }
-  private func response(_ head: Head, token: String? = nil) throws -> String {
+  private func response(_ head: Head, token: String? = nil, refusal: String? = nil) throws -> String {
     let accepted = head.pages.reduce(0) { $0 + $1.accepted }
     var object: [String: Any] = [
       "sessionId": head.sessionId, "revision": head.checkpoint.revision,
@@ -226,6 +236,7 @@ public final class WafraPagedHistoryStore {
       "expiresAtMs": head.expiresAt.timeIntervalSince1970 * 1_000,
     ]
     if let token { object["authorizationSecret"] = token }
+    if let refusal { object["refusal"] = refusal }
     // Exclusive lower bound of the next Messages query; absent once complete.
     if let windowStart = head.checkpoint.windowStart { object["after"] = Self.utc(windowStart) }
     let bytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -252,12 +263,26 @@ public final class WafraPagedHistoryStore {
     return try locked { directory in
       // Every run starts its page from an empty row buffer.
       try clearRowBuffers(directory)
-      var head: Head
+      var saved: Head?
       if FileManager.default.fileExists(atPath: directory.appendingPathComponent("head.json").path) {
-        head = try load(directory)
-        guard head.checkpoint.oldest == oldest else { throw Failure.sourceChanged }
+        // An expired session was erased by `load`; start a fresh one instead
+        // of failing this run and only succeeding on the next.
+        do { saved = try load(directory) } catch Failure.expired { try protect(directory) }
+      }
+      var head: Head
+      if var existing = saved {
+        let marker = directory.appendingPathComponent(Self.sourceChangedFile)
+        guard existing.checkpoint.oldest == oldest else {
+          // The oldest anchor is gone (Keep Messages rolled it off, or it was
+          // deleted), so this session can never resume. Remember that so the
+          // app can explain it and offer to start over instead of Resume.
+          try write(Data(Failure.sourceChanged.rawValue.utf8), to: marker)
+          throw Failure.sourceChanged
+        }
+        if FileManager.default.fileExists(atPath: marker.path) { try FileManager.default.removeItem(at: marker) }
         // Sessions saved before windows existed resume with a window.
-        if head.checkpoint.windowStart == nil { head.checkpoint = WafraHistoryCursor.windowed(head.checkpoint) }
+        if existing.checkpoint.windowStart == nil { existing.checkpoint = WafraHistoryCursor.windowed(existing.checkpoint) }
+        head = existing
       } else {
         let created = now()
         head = Head(sessionId: "PAGED-\(UUID().uuidString)", createdAt: created,
@@ -323,7 +348,7 @@ public final class WafraPagedHistoryStore {
     let senderIdentity = sender.utf8.count <= 1_024 ? sender : ""
     let bodyIdentity = body.utf8.count <= 16 * 1_024 ? body : Data(body.utf8).base64EncodedString()
     let stableGuid = guid.isEmpty
-      ? "wafra-fallback-\(Self.hash(Data("\(dateText)\u{0}\(senderIdentity)\u{0}\(bodyIdentity)".utf8)))"
+      ? Self.fallbackIdentity(instant: instant, sender: senderIdentity, body: bodyIdentity)
       : guid
     let encodedGuid = Data(stableGuid.utf8).base64EncodedString()
     let line = [encodedGuid, Data(body.utf8).base64EncodedString(),
@@ -548,10 +573,20 @@ public final class WafraPagedHistoryStore {
                      revision: revision, found: found, frame: lines.joined(separator: "\n"))
   }
 
+  /// Records that the saved oldest anchor no longer matches Messages.
+  static let sourceChangedFile = "source-changed.txt"
+  /// `nil` when there is no session, including one that just expired (it is
+  /// erased by `load`), so the app offers a fresh start rather than an error.
+  /// A session whose Begin found the source changed carries
+  /// `"refusal": "source-changed"`.
   public func status() throws -> String? {
     try locked { directory in
       guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("head.json").path) else { return nil }
-      return try response(load(directory))
+      let head: Head
+      do { head = try load(directory) } catch Failure.expired { return nil }
+      let sourceChanged = FileManager.default.fileExists(
+        atPath: directory.appendingPathComponent(Self.sourceChangedFile).path)
+      return try response(head, refusal: sourceChanged ? Failure.sourceChanged.rawValue : nil)
     }
   }
   /// Recovery exposes only a source-free descriptor for this durable session.

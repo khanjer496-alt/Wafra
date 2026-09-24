@@ -58,7 +58,10 @@ function createWorkflowHarness(options={}) {
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal',
-  isIosNotificationReview:require('../build/alert-review-tray.js').isIosNotificationReview};
+  isIosApplePayReview:require('../build/alert-review-tray.js').isIosApplePayReview,
+  isIosNotificationReview:require('../build/alert-review-tray.js').isIosNotificationReview,
+  ...Object.fromEntries(['recentlyExpiredReviewCount','reviewCaptureBacklog','reviewExpiresInDays','reviewTrayCapacity']
+   .map(name=>[name,require('../build/alert-review-tray.js')[name]]))};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
@@ -120,9 +123,14 @@ function createWorkflowHarness(options={}) {
    // services remain substituted; UI and completion logic are never mocked.
    d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');
    h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
    d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
    h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
+   // The actual pure per-source progress projections; storage stays recorded.
+   const progressModule=load(path.join(root,'src/lib/ios-message-onboarding.ts'),{'@react-native-async-storage/async-storage':{},
+    './ios-setup-journey':load(path.join(root,'src/lib/ios-setup-journey.ts')),'./ios-history-setup':{isIosHistoryShortcutInstalled:async()=>false}});
+   Object.assign(d['@/lib/ios-message-onboarding'],{progressForSource:progressModule.progressForSource,recordedIosCaptureSource:progressModule.recordedIosCaptureSource});
    Object.assign(d['@/lib/ios-history-setup'],{historyShortcutInstallUrl:()=>null,iosSupportsMessageHistory:()=>true});
    for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
   }

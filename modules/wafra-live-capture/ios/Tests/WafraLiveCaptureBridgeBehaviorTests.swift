@@ -42,17 +42,22 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     WafraLiveCaptureStore.shared.reset()
     WafraLiveCaptureModule().definition()
 
+    check("bridge advertises Apple Pay structured intake capability", TestEventRegistry.constants["applePayCaptureSupported"] as? Bool == true)
     check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the thirteen public functions",
+    check("bridge registers exactly the seventeen public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
         "eraseAll",
+        "getApplePayShortcutURL",
         "getAutomationInputProbeAt",
         "getCaptureStatus",
+        "getHistoryShortcutURL",
+        "getMessageShortcutURL",
         "getNotificationShortcutURL",
+        "listPendingApplePayRecords",
         "listPendingRecords",
         "listPendingRecordsIncludingNotifications",
         "purgeExpired",
@@ -76,6 +81,27 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("asset lookup never touches the protected financial queue",
       WafraLiveCaptureStore.shared.calls == storeCallsBeforeMissingAsset)
     WafraLiveCaptureResources.shortcutAvailable = true
+
+    for (method, resourceName) in [
+      ("getApplePayShortcutURL", "Wafra Apple Pay v1"),
+      ("getMessageShortcutURL", "Wafra Capture v3"),
+      ("getHistoryShortcutURL", "Wafra History v8"),
+    ] {
+      let callsBeforeAssetLookup = WafraLiveCaptureStore.shared.calls
+      let assetURI = try invoke(method, as: String.self)
+      check("\(method) returns only its fixed bundled local file",
+        assetURI == WafraLiveCaptureResources.shortcutURLs[resourceName]?.absoluteString
+          && URL(string: assetURI)?.isFileURL == true)
+      check("\(method) asks for the exact versioned resource and shortcut extension",
+        WafraLiveCaptureResources.requestedName == resourceName
+          && WafraLiveCaptureResources.requestedExtension == "shortcut")
+      WafraLiveCaptureResources.shortcutAvailable = false
+      check("\(method) rejects a missing bundled asset without a fabricated path",
+        rejects(method, []))
+      WafraLiveCaptureResources.shortcutAvailable = true
+      check("\(method) does not read or mutate financial capture state",
+        WafraLiveCaptureStore.shared.calls == callsBeforeAssetLookup)
+    }
 
     let localLeaseApplied = try invoke(
       "setLocalCaptureEntitlementLease",
@@ -172,6 +198,12 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("status converts last notification receipt seconds to milliseconds",
       recordField(status, "lastNotificationReceivedAt", as: Double.self) == 1_300_500)
 
+    check("status maps pending Wallet rows separately", recordField(status, "applePayPending", as: Int.self) == 3)
+    check("status converts Wallet incomplete receipt to milliseconds", recordField(status, "lastApplePayIncompleteAt", as: Double.self) == 1_390_500)
+    check("status converts Wallet setup proof to milliseconds", recordField(status, "applePaySetupProofAt", as: Double.self) == 1_400_250)
+    check("status converts first Wallet receipt to milliseconds", recordField(status, "firstApplePayReceivedAt", as: Double.self) == 1_410_500)
+    check("status converts last Wallet receipt to milliseconds", recordField(status, "lastApplePayReceivedAt", as: Double.self) == 1_420_750)
+
     let automationInputProbeAt = try invoke("getAutomationInputProbeAt", as: Double.self)
     check("automation-input probe time converts seconds to milliseconds exactly",
       automationInputProbeAt == 246_750)
@@ -229,6 +261,18 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     }
     check("invalid notification limits never reach the store",
       WafraLiveCaptureStore.shared.listLimits.count == notificationCallsBeforeInvalidInput)
+
+    check("legacy and notification bridge readers never opt into Wallet data", WafraLiveCaptureStore.shared.listIncludesApplePay.allSatisfy { !$0 })
+    let walletRows = try invoke("listPendingApplePayRecords", [7.0], as: [String].self)
+    check("Wallet-only bridge calls the dedicated reader", walletRows == ["apple-pay:7"] && WafraLiveCaptureStore.shared.calls.last == "listPendingApplePayRecords")
+    _ = try TestAsyncFunctionRegistry.invoke("listPendingApplePayRecords", [0.0])
+    _ = try TestAsyncFunctionRegistry.invoke("listPendingApplePayRecords", [50.0])
+    check("Wallet-only reader accepts both validated boundaries", Array(WafraLiveCaptureStore.shared.listLimits.suffix(3)) == [7, 0, 50])
+    let walletCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.listLimits.count
+    for (index, limit) in invalidLimits.enumerated() {
+      check("Wallet-only reader rejects invalid limit case \(index + 1)", rejects("listPendingApplePayRecords", [limit]))
+    }
+    check("invalid Wallet limits never reach protected store", WafraLiveCaptureStore.shared.listLimits.count == walletCallsBeforeInvalidInput)
 
     let timestampCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.firstCapturedDates.count
     let invalidTimestamps = [Double.nan, Double.infinity, -Double.infinity]

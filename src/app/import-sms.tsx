@@ -20,8 +20,7 @@
  * `requiresPro` in lib/purchases.ts. The full inbox scan is still Pro, on the
  * platform that has one.
  */
-import { WorkflowHero, ImportSteps } from '@/components/workflows/workflow-surfaces';
-import { workflowCopy } from '@/components/workflows/workflow-copy';
+import { ImportSteps } from '@/components/workflows/workflow-surfaces';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -111,7 +110,7 @@ import {
   loadIosMessageSetupProgress,
   type IosMessageSetupStatus,
 } from '@/lib/ios-message-onboarding';
-import { pagedHistoryEnabled } from '@/lib/ios-paged-setup';
+import { BUNDLED_HISTORY_SHORTCUT_NAME, pagedHistoryEnabled } from '@/lib/ios-paged-setup';
 import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
@@ -172,6 +171,14 @@ async function historyNativeModule() {
   // Kept out of the module graph on Android at runtime: this Expo module has
   // an Apple implementation only, exactly like Find Message itself.
   return (await import('../../modules/wafra-message-history')).default;
+}
+
+/** The installed History Shortcut name: the bundled v8 file when this build ships it. */
+async function historyShortcutName(): Promise<string> {
+  try {
+    const capture = (await import('../../modules/wafra-live-capture')).default;
+    return typeof capture?.getHistoryShortcutURL === 'function' ? BUNDLED_HISTORY_SHORTCUT_NAME : IOS_HISTORY_SHORTCUT_NAME;
+  } catch { return IOS_HISTORY_SHORTCUT_NAME; }
 }
 
 /**
@@ -1062,9 +1069,11 @@ export default function ImportSmsScreen() {
       setHistoryCommitState('idle');
       try {
         if (!validIosHistorySessionId(history)) {
+          const shortcut = await historyShortcutName();
+          if (!active) return;
           setNotice({
             title: t('historyImportInvalid'),
-            body: tf('historyImportInvalidBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME }),
+            body: tf('historyImportInvalidBody', { shortcut }),
           });
           return;
         }
@@ -1080,6 +1089,7 @@ export default function ImportSmsScreen() {
         if (!active) return;
         coordinatorLoaded = true;
         await persistIosHistoryReviewCandidates(result.reviewCandidates, stageReviewAlerts);
+        const shortcutName = result.summary.found === 0 ? await historyShortcutName() : '';
         if (!active) return;
         setHistoryResult(result);
         const nextPlan = withoutExistingBillReminders(
@@ -1119,7 +1129,7 @@ export default function ImportSmsScreen() {
                   : t('upToDate'),
             body:
               result.summary.found === 0
-                ? tf('historyImportMissingBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME })
+                ? tf('historyImportMissingBody', { shortcut: shortcutName })
                 : result.summary.parsed + result.summary.reviewed + result.summary.declined === 0
                   ? t('historyNoSupportedCompact')
                   : result.summary.reviewed > 0
@@ -1183,8 +1193,6 @@ export default function ImportSmsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, historyAttempt, state.hydrated, state.merchantOverrides]);
 
-  const words = workflowCopy(state.language);
-
   const previewRows = useMemo(
     () => (plan?.batch.transactions ?? []).slice(0, PREVIEW_LIMIT),
     [plan],
@@ -1247,7 +1255,6 @@ export default function ImportSmsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {!history && <>
-            {!scanning && <WorkflowHero title={words.importTitle} body={words.importBody} icon="download" />}
             <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
           </>}
           {Platform.OS === 'ios' && (

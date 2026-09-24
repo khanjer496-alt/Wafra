@@ -442,7 +442,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (!state.onboarded && (
       isOnboardingStatementRoute ||
       (Platform.OS === 'ios' &&
-        (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/ios-notification-setup' || pathname === '/import-sms'))
+        (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/ios-notification-setup' || pathname === '/ios-apple-pay-setup' || pathname === '/import-sms'))
     )) {
       resumeHandled.current = false;
       setResumeReady(true);
@@ -536,7 +536,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const isIosSetupRoute = Platform.OS === 'ios' && (
     pathname === '/ios-setup' ||
     pathname === '/ios-paging-beta' ||
-    pathname === '/ios-notification-setup' ||
+    pathname === '/ios-notification-setup' || pathname === '/ios-apple-pay-setup' ||
     pathname === '/import-sms'
   );
   const showOverlay =

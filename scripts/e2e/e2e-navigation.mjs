@@ -577,9 +577,22 @@ for (const [name, enter] of [
   await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
   const caption = page.getByText(/^\d+ transactions?(?: ·|$)/).last();
   await caption.waitFor({ state: 'visible' });
-  const summary = await caption.evaluate(node => node.parentElement.textContent);
-  ok('Home income reconciles to its income-filtered ledger, including cents',
-    /\+\s*AED/.test(summary) && minor(summary) === income);
+  // The list states a net total only when it differs from a single row
+  // (transfers now sit in their own history, so one income row is common).
+  // Without it, the regular rows themselves are the income-filtered ledger.
+  const netTotal = page.getByTestId('transactions-net-total');
+  let listed;
+  if (await netTotal.count()) {
+    const summary = await netTotal.textContent();
+    listed = /\+\s*AED/.test(summary) ? minor(summary) : NaN;
+  } else {
+    const rows = await page.locator('[aria-label$=" AED"]').evaluateAll(nodes => nodes
+      .map(node => node.getAttribute('aria-label').match(/, plus ([\d,]+(?:\.\d{1,2})?) AED$/))
+      .filter(Boolean).map(match => match[1]));
+    listed = rows.length === Number((await caption.textContent()).match(/^\d+/)[0])
+      ? rows.reduce((sum, value) => sum + minor(`AED ${value}`), 0) : NaN;
+  }
+  ok('Home income reconciles to its income-filtered ledger, including cents', listed === income);
 }
 
 /**

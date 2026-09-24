@@ -24,6 +24,10 @@ test('workflow consumers have real imports for their current localized presentat
   }else if(file.endsWith('/ios-setup.tsx')){
    for(const name of ['SetupHeader','SetupShell','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
+  }else if(file.endsWith('/import-sms.tsx')){
+   // 2026-09-23 screen polish: imports drop the repeated hero heading and lead with their step indicator.
+   assert.ok(names.has('ImportSteps'),`${file}: step indicator import`);
+   assert.ok(!names.has('WorkflowHero'),'Imports do not repeat the screen heading in a hero');
   }else{
    assert.ok(names.has('workflowCopy'),`${file}: copy import`);
    if(file.endsWith('/settings.tsx')){
@@ -34,6 +38,8 @@ test('workflow consumers have real imports for their current localized presentat
    }else if(file.endsWith('/review-alerts.tsx')){
     assert.ok(!names.has('WorkflowHero'),'Review alerts has one compact intro instead of a repeated hero');
     assert.match(fs.readFileSync(path.join(root,file),'utf8'),/testID="review-alerts-intro"/);
+   }else if(file.endsWith('/pro.tsx')){
+    assert.ok(!names.has('WorkflowHero'),'Pro does not repeat its page heading in a hero');
    }else assert.ok(names.has('WorkflowHero'),`${file}: surface import`);
   }
  }

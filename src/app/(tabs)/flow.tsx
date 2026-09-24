@@ -15,6 +15,7 @@ import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
+import { PeriodPill } from '@/components/ui/period-pill';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
@@ -38,6 +39,8 @@ import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 type ViewMode = 'categories' | 'activity' | 'trends';
 const validView = (value: unknown): value is ViewMode => ['categories', 'activity', 'trends'].includes(String(value));
@@ -51,6 +54,7 @@ export default function FlowScreen() {
   const { state } = useStore(); const { period, setPeriod } = usePeriod();
   const { refreshing, onRefresh } = usePullToRefresh();
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
+  const transferWords = transferActivityCopy(language);
   const [view, setView] = useState<ViewMode>(validView(params.view) ? params.view : 'categories');
   const [filter, setFilter] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
@@ -73,6 +77,9 @@ export default function FlowScreen() {
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
+  const hasTransferSpending = useMemo(() => view === 'activity' && state.transactions.some(transaction =>
+    isTransferCandidate(transaction) && isSpending(transaction, live, internal) && inPeriod(transaction.date, period)),
+  [view, state.transactions, live, internal, period]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
@@ -156,7 +163,7 @@ export default function FlowScreen() {
         continue;
       }
       seenInPeriod = true;
-      if (!isSpending(tx, live, internal)) continue;
+      if (isTransferCandidate(tx) || !isSpending(tx, live, internal)) continue;
       if (needle) {
         const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
         if (!haystack.includes(needle)) continue;
@@ -231,8 +238,14 @@ export default function FlowScreen() {
         </Pressable>
       )}
       {view === 'activity' && <View style={styles.activity} testID="spending-activity">
-        <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
+        <View style={styles.trendsToolbar}>
+          <PeriodPill onPress={() => setPeriodOpen(true)} />
+        </View>
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
+        {hasTransferSpending && <View style={styles.transferNote}>
+          <ThemedText type="meta" themeColor="textSecondary">{transferWords.activityCountsNote}</ThemedText>
+          <Button label={transferWords.viewAll} variant="ghost" icon="repeat" onPress={() => router.push('/transfers')} />
+        </View>}
         <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
           {activity.slice(0, ACTIVITY_PREVIEW_LIMIT).map((tx) => <TransactionRow key={tx.id} transaction={tx}
             account={accountById.get(tx.accountId)} onPress={setEntry} internal={internal.has(tx.id)} />)}
@@ -242,8 +255,7 @@ export default function FlowScreen() {
       </View>}
       {view === 'trends' && analysis && <>
         <View style={styles.trendsToolbar}>
-          <Button label={periodLabel(period)} variant="ghost" icon="calendar" style={styles.trendsToolbarButton}
-            onPress={() => setPeriodOpen(true)} />
+          <PeriodPill onPress={() => setPeriodOpen(true)} />
           <View testID="spending-ask-wafra" style={styles.trendsToolbarAction}>
             <Button label={w.explain} variant="ghost" icon="spark" style={styles.trendsToolbarButton}
               onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
@@ -374,6 +386,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   foreignCopy: { flex: 1, minWidth: 0, gap: 2 },
   activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
+  transferNote: { gap: 4 },
   empty: { paddingVertical: 24 },
   categoryHeaderIcon: { width: 40, height: 40, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   categoryDetail: { gap: 14 },

@@ -13,6 +13,7 @@ import {
   bodyPrint,
   compatibleCaptureInstrument,
   duplicateGuard,
+  isApplePayWalletRow,
   mergeCaptureInstrument,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
@@ -88,6 +89,12 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   sourceEventId?: string;
   /** iOS queue observation receipt; independent of exact bank-event identity. */
   notificationObservationId?: string;
+  /**
+   * iOS live-queue UUID of a Message staged without Apple's GUID. Not an
+   * event identity: it marks one delivered Message so dedupe consumes it
+   * one-to-one and never merges two live observations with each other.
+   */
+  messageObservationId?: string;
 };
 
 /**
@@ -159,6 +166,14 @@ export class ImportMoneyError extends Error {
  * messages as read that were never actually compared against anything, and
  * a message is only ever offered once.
  */
+const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A GUID-less iOS live Message: one delivered Message without history identity. */
+function liveMessageObservation(p: ScannedSms): boolean {
+  return p.channel !== 'push' && p.sourceEventId === undefined && p.captureSource === undefined &&
+    typeof p.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(p.messageObservationId);
+}
+
 function emptyPlan(): ImportPlan {
   return {
     batch: {
@@ -384,6 +399,8 @@ function buildImportPlanInMarket(
       const index = new Map<string, Transaction[]>();
       for (const row of state.transactions) {
         if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true || !Number.isFinite(row.ts)) continue;
+        // Wallet rows bind only through applePayWalletPriorFor's strict rule.
+        if (isApplePayWalletRow(row)) continue;
         const key = editedPushKey(row.date, row.amountFils, row.type);
         const rows = index.get(key);
         if (rows) rows.push(row);
@@ -403,6 +420,52 @@ function buildImportPlanInMarket(
       bestDistance = distance;
     }
     return best;
+  };
+  /**
+   * The one reviewed Apple Pay (Wallet) row a later bank SMS describes.
+   *
+   * Wallet's observation UUID cannot identify the bank's message, so this is
+   * the only path that may attach an SMS to a Wallet review decision. Every
+   * fact must be proven and unambiguous: an outgoing card purchase with an
+   * explicit card kind and issuer, exactly one compatible stored card that
+   * explicitly matches both and is the account the user chose, the same
+   * normalized merchant and amount within two minutes, and exactly one
+   * unbound Wallet row satisfying all of it. Anything less stays a separate
+   * purchase; a visible duplicate is recoverable, a swallowed charge is not.
+   * The binding moves identity only; the user's title, account, category
+   * and date are preserved by promoteMatchedHistory for edited rows.
+   */
+  const boundWalletRows = new Set<string>();
+  let walletRowsCache: Transaction[] | null = null;
+  const normalizedMerchant = (value: string | undefined): string =>
+    (value ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+  const applePayWalletPriorFor = (p: ScannedSms): Transaction | undefined => {
+    if (p.channel === 'push' || p.type !== 'expense' || !Number.isFinite(p.smsTs) || p.transferHint) return undefined;
+    if (!p.card || (p.card.kind !== 'credit' && p.card.kind !== 'debit')) return undefined;
+    walletRowsCache ??= matchableTransactions().filter(isApplePayWalletRow);
+    if (walletRowsCache.length === 0) return undefined;
+    const instrument = captureInstrumentOf(p);
+    const merchant = normalizedMerchant(p.merchant);
+    if (!instrument?.bankIdentity || !merchant) return undefined;
+    const cardKind = p.card.kind;
+    // Count every stored card this suffix could still be; only an explicit
+    // different kind or issuer rules one out.
+    const compatibleCards = state.accounts.filter((account) =>
+      account.kind === 'card' && account.last4 === instrument.last4 &&
+      (account.cardType === undefined || account.cardType === cardKind) &&
+      (account.bankName === undefined || bankIdentityForName(account.bankName) === instrument.bankIdentity));
+    if (compatibleCards.length !== 1) return undefined;
+    const card = compatibleCards[0];
+    if (card.cardType !== cardKind || card.bankName === undefined) return undefined;
+    const matches = walletRowsCache.filter((row) =>
+      !boundWalletRows.has(row.id) &&
+      row.type === 'expense' &&
+      row.accountId === card.id &&
+      row.amountFils === p.amountFils &&
+      normalizedMerchant(row.title) === merchant &&
+      Number.isFinite(row.ts) && Math.abs(row.ts! - p.smsTs!) <= 120_000 &&
+      compatibleCaptureInstrument(row.captureInstrument, instrument));
+    return matches.length === 1 ? matches[0] : undefined;
   };
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
@@ -474,7 +537,7 @@ function buildImportPlanInMarket(
     const result = new Map<number, Transaction[]>();
     if (hasLocalSourceEvidence) {
       for (const t of state.transactions) {
-        if (!sourceIdentityMatchable(t) || t.source !== 'sms') continue;
+        if (!sourceIdentityMatchable(t) || t.source !== 'sms' || isApplePayWalletRow(t)) continue;
         const ts = rowTimestamp(t);
         if (ts === undefined) continue;
         const bucket = result.get(ts);
@@ -1324,6 +1387,7 @@ function buildImportPlanInMarket(
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
       captureSource: p.captureSource,
+      ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
@@ -1490,6 +1554,18 @@ function buildImportPlanInMarket(
       duplicate.add(candidate);
       continue;
     }
+    // Wallet binding is the last identity claim, after every exact, stable,
+    // source-correction, protected-push, duplicate and supersede path above
+    // has declined this message: one SMS may explain at most one stored row.
+    // The resolved card must be the Wallet row's own account, so its balance
+    // snapshot above belongs to the same confident resolution.
+    const walletPrior = smsKey && resolution.confident ? applePayWalletPriorFor(p) : undefined;
+    if (walletPrior && smsKey && walletPrior.accountId === accountId) {
+      boundWalletRows.add(walletPrior.id);
+      duplicate.add(candidate);
+      promoteMatchedHistory(walletPrior.id, smsKey, p);
+      continue;
+    }
     duplicate.add(candidate);
     // Low-confidence rows keep their source text so the user can report
     // unrecognized bank formats from Settings → Improve accuracy.
@@ -1525,6 +1601,7 @@ function buildImportPlanInMarket(
         typeof p.notificationObservationId === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)
         ? { notificationObservationId: p.notificationObservationId } : {}),
+      ...(liveMessageObservation(p) ? { messageObservationId: p.messageObservationId } : {}),
       captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),

@@ -14,6 +14,17 @@ const VERIFIED_PAGED_RECORDS: Readonly<Record<string, string>> = {
 const configuredHistoryUrl = (): string | undefined => process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_SHORTCUT_NAME: string =
   VERIFIED_PAGED_RECORDS[configuredHistoryUrl() ?? ''] ?? 'Wafra-History-v2-typed-date.signed';
+export const BUNDLED_HISTORY_SHORTCUT_NAME = 'Wafra History v8';
+export const BUNDLED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v8';
+export const PAGED_HISTORY_BLOCK_KEY = 'wafra/ios-paged-page-block/v1';
+// The key names the exact refused page: an empty-window commit advances the
+// revision without changing `checked`, and must not stay blocked.
+export const historyPageKey = (progress: PagedHistoryProgress | null): string | null =>
+  progress?.status !== 'continue' ? null
+    : progress.revision === undefined ? `${progress.sessionId}:${progress.checked}`
+      : `${progress.sessionId}:r${progress.revision}:${progress.checked}`;
+export const isHistoryPageBlocked = (stored: string | null, progress: PagedHistoryProgress | null): boolean =>
+  stored !== null && stored === historyPageKey(progress);
 export const PAGED_HISTORY_INSTALL_KEY = 'wafra/ios-paged-shortcut-confirmed/v4';
 const VERIFIED_HISTORY_SHORTCUT_URL: string = configuredHistoryUrl() && VERIFIED_PAGED_RECORDS[configuredHistoryUrl()!]
   ? configuredHistoryUrl()!
@@ -28,10 +39,10 @@ const installsVerifiedPagedRecord = (): boolean =>
   process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL === VERIFIED_HISTORY_SHORTCUT_URL;
 export const PAGED_HISTORY_INSTALL_URL: string | null =
   installsVerifiedPagedRecord() ? VERIFIED_HISTORY_SHORTCUT_URL : null;
-export const pagedHistoryEnabled = (): boolean =>
-  process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
-export const pagedHistoryRunUrl = (): string =>
-  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta?blocked=1')}`;
+export const pagedHistoryEnabled = (bundled = false): boolean =>
+  bundled || process.env.EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA === '1' || installsVerifiedPagedRecord();
+export const pagedHistoryRunUrl = (bundled = false): string =>
+  `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(bundled ? BUNDLED_HISTORY_SHORTCUT_NAME : PAGED_HISTORY_SHORTCUT_NAME)}&x-cancel=${encodeURIComponent('wafra://ios-paging-beta')}&x-error=${encodeURIComponent('wafra://ios-paging-beta?blocked=1')}`;
 
 export interface PagedHistoryProgress {
   sessionId: string;
@@ -41,6 +52,10 @@ export interface PagedHistoryProgress {
   skipped: number;
   createdAtMs: number;
   expiresAtMs: number;
+  /** Page revision of the saved cursor, when the native store reports it. */
+  revision?: number;
+  /** Begin found the saved oldest Message gone; this session cannot resume. */
+  sourceChanged?: true;
 }
 export function parsePagedHistoryProgress(raw: string | null, now = Date.now()): PagedHistoryProgress | null {
   if (raw === null) return null;
@@ -54,13 +69,24 @@ export function parsePagedHistoryProgress(raw: string | null, now = Date.now()):
     Number(row.accepted) + Number(row.skipped) !== row.checked ||
     typeof row.createdAtMs !== 'number' || !Number.isFinite(row.createdAtMs) || row.createdAtMs <= 0 || row.createdAtMs > now + 60_000 ||
     typeof row.expiresAtMs !== 'number' || !Number.isFinite(row.expiresAtMs) ||
-    Math.abs(row.expiresAtMs - row.createdAtMs - 86_400_000) > 1 || row.expiresAtMs <= now) throw new Error('invalid_paged_status');
+    Math.abs(row.expiresAtMs - row.createdAtMs - 86_400_000) > 1 ||
+    (row.revision !== undefined && (!Number.isSafeInteger(row.revision) || Number(row.revision) < 0 || Number(row.revision) > 1_000_000)) ||
+    (row.refusal !== undefined && row.refusal !== 'source-changed')) throw new Error('invalid_paged_status');
+  // An expired session is no session: Start is offered and the native Begin
+  // replaces it. It is never shown as resumable progress.
+  if (row.expiresAtMs <= now) return null;
   return { sessionId: row.sessionId, status: row.status, checked: Number(row.checked), accepted: Number(row.accepted),
-    skipped: Number(row.skipped), createdAtMs: row.createdAtMs, expiresAtMs: row.expiresAtMs };
+    skipped: Number(row.skipped), createdAtMs: row.createdAtMs, expiresAtMs: row.expiresAtMs,
+    ...(row.revision !== undefined ? { revision: Number(row.revision) } : {}),
+    ...(row.refusal === 'source-changed' && row.status === 'continue' ? { sourceChanged: true as const } : {}) };
 }
 
 export const pagedHistoryCopy = {
   en: {
+    bundleHelp: 'Choose Shortcuts in the share sheet, then Add Shortcut. Keep the name Wafra History v8. Your saved pages stay in Wafra.',
+    pageBlocked: 'Messages returned conflicting dates for this page. Your saved pages are safe. Repeating the same import may stop here again.',
+    retryPage: 'Try this page once more',
+    retryHelp: 'Retry after updating the Shortcut or fixing an Apple permission error. You can also use a bank statement or return to setup.',
     statement: 'Import a bank statement',
     statementHelp: 'For a large inbox, use a bank statement PDF or CSV to bring in past transactions without waiting for Messages. You will review the import options before selecting a file.',
     notStarted: 'Apple Shortcuts stopped before any history was saved. If Find Messages reports an error, try importing a bank statement below. You can retry Messages later.',
@@ -78,8 +104,20 @@ export const pagedHistoryCopy = {
     missing: 'Shortcuts is not available. Install Apple Shortcuts, then return here.', failed: 'The action could not finish. Your saved ledger is unchanged.',
     beta: 'Requires iOS 26 or later. Large message histories can take a while. If the import stops, return here to check your progress and continue.',
     back: 'Back to setup', again: 'Add Shortcut again', unavailable: 'Update Wafra to import past messages.',
+    sourceChanged: 'Your Messages changed since this import started, so it cannot continue. Start over to import your history again.',
+    startOver: 'Start over',
+    retryChanged: 'Try resuming once more',
+    startOverBody: 'This removes the unfinished import and its saved position. Your existing transactions are unchanged.',
+    unreadable: 'The temporary import still could not be read after refreshing. Erase it to start again. Your existing transactions are unchanged.',
+    erase: 'Erase temporary import',
+    eraseTitle: 'Erase the temporary import?',
+    eraseBody: 'This removes only the unfinished message import stored on this iPhone. Your existing transactions are unchanged.',
   },
   ar: {
+    bundleHelp: 'اختر «الاختصارات» من قائمة المشاركة، ثم أضف الاختصار. أبقِ الاسم Wafra History v8. تبقى الصفحات المحفوظة في وفرة.',
+    pageBlocked: 'أعادت الرسائل تواريخ متعارضة لهذه الصفحة. صفحاتك المحفوظة آمنة. قد تتوقف إعادة الاستيراد عند الموضع نفسه.',
+    retryPage: 'إعادة محاولة هذه الصفحة مرة واحدة',
+    retryHelp: 'أعد المحاولة بعد تحديث الاختصار أو إصلاح خطأ أذونات Apple. يمكنك أيضاً استخدام كشف بنكي أو العودة إلى الإعداد.',
     statement: 'استيراد كشف حساب بنكي',
     statementHelp: 'إذا كان صندوق الرسائل كبيراً، استخدم كشف حساب PDF أو CSV لإضافة العمليات السابقة دون انتظار الرسائل. ستراجع خيارات الاستيراد قبل اختيار الملف.',
     notStarted: 'توقفت اختصارات Apple قبل حفظ أي سجل. إذا ظهر خطأ في «البحث عن الرسائل»، جرّب استيراد كشف حساب أدناه. يمكنك إعادة محاولة الرسائل لاحقاً.',
@@ -97,5 +135,13 @@ export const pagedHistoryCopy = {
     missing: 'تطبيق الاختصارات غير متاح. ثبّت اختصارات آبل ثم عد إلى هنا.', failed: 'لم تكتمل الخطوة. لم يتغير سجلك المحفوظ.',
     beta: 'يتطلب iOS 26 أو أحدث. قد يستغرق سجل الرسائل الكبير بعض الوقت. إذا توقف الاستيراد، عد إلى هنا للتحقق من تقدمك والمتابعة.',
     back: 'العودة للإعداد', again: 'إضافة الاختصار مجدداً', unavailable: 'حدّث وفرة لاستيراد الرسائل السابقة.',
+    sourceChanged: 'تغيّرت رسائلك منذ بدء هذا الاستيراد، لذا لا يمكن متابعته. ابدأ من جديد لاستيراد سجلك مرة أخرى.',
+    startOver: 'البدء من جديد',
+    retryChanged: 'محاولة المتابعة مرة أخرى',
+    startOverBody: 'يحذف هذا الاستيراد غير المكتمل وموضعه المحفوظ. لا تتغير عملياتك المسجلة.',
+    unreadable: 'ما زالت قراءة الاستيراد المؤقت متعذّرة بعد التحديث. احذفه للبدء من جديد. لا تتغير عملياتك المسجلة.',
+    erase: 'مسح الاستيراد المؤقت',
+    eraseTitle: 'مسح الاستيراد المؤقت؟',
+    eraseBody: 'يحذف هذا فقط استيراد الرسائل غير المكتمل المحفوظ على هذا الآيفون. لا تتغير عملياتك المسجلة.',
   },
 };

@@ -18,6 +18,7 @@ public enum WafraLiveStageResult: String, Codable {
 public enum WafraLiveCaptureSource: String, Codable {
   case message
   case notification
+  case applePay = "apple-pay"
 }
 
 public struct WafraLiveCaptureStatus: Codable {
@@ -38,6 +39,12 @@ public struct WafraLiveCaptureStatus: Codable {
   /// Notification queue admission only, not permission, bank identity or ledger proof.
   public let firstNotificationReceivedAt: TimeInterval?
   public let lastNotificationReceivedAt: TimeInterval?
+  /// Wallet queue receipts only; no payment settlement or purchase-date claim.
+  public let applePayPending: Int
+  public let lastApplePayIncompleteAt: TimeInterval?
+  public let applePaySetupProofAt: TimeInterval?
+  public let firstApplePayReceivedAt: TimeInterval?
+  public let lastApplePayReceivedAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
@@ -46,6 +53,11 @@ public final class WafraLiveCaptureStore {
   public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
 
   public static let notificationSetupProbeText = "Wafra notification setup check"
+
+  public static let maxApplePayMerchantCharacters = 96
+  // NSLocale spelling: the Locale static needs iOS 16, the app deploys to 15.1.
+  private static let applePayCurrencies = Set(NSLocale.commonISOCurrencyCodes)
+  private static let applePayDecimalPattern = try! NSRegularExpression(pattern: "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,8})?$")
 
   public static let maxBodyBytes = 16 * 1024
   public static let maxSenderCharacters = 80
@@ -83,9 +95,16 @@ public final class WafraLiveCaptureStore {
     let source: WafraLiveCaptureSource
   }
 
+  private struct ApplePayPayload: Codable {
+    let amount: String
+    let currency: String
+    let merchant: String
+  }
+
   private struct RecordSummary: Codable {
     let observedAt: TimeInterval
     let bytes: Int
+    let source: String?
   }
 
   private struct AcknowledgedSummary: Codable {
@@ -115,6 +134,10 @@ public final class WafraLiveCaptureStore {
     var notificationSetupProofAt: TimeInterval?
     var firstNotificationReceivedAt: TimeInterval?
     var lastNotificationReceivedAt: TimeInterval?
+    var lastApplePayIncompleteAt: TimeInterval?
+    var applePaySetupProofAt: TimeInterval?
+    var firstApplePayReceivedAt: TimeInterval?
+    var lastApplePayReceivedAt: TimeInterval?
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
@@ -123,6 +146,7 @@ public final class WafraLiveCaptureStore {
       case setupProofVersion, setupProofAt, automationInputProbeAt, firstCapturedAt
       case lastReceivedAt, lastHandledAt
       case notificationSetupProofAt, firstNotificationReceivedAt, lastNotificationReceivedAt
+      case lastApplePayIncompleteAt, applePaySetupProofAt, firstApplePayReceivedAt, lastApplePayReceivedAt
     }
 
     init() {}
@@ -180,6 +204,14 @@ public final class WafraLiveCaptureStore {
       firstNotificationReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .firstNotificationReceivedAt))
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
       lastNotificationReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastNotificationReceivedAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      lastApplePayIncompleteAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastApplePayIncompleteAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      applePaySetupProofAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .applePaySetupProofAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      firstApplePayReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .firstApplePayReceivedAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      lastApplePayReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastApplePayReceivedAt))
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     }
 
@@ -247,12 +279,12 @@ public final class WafraLiveCaptureStore {
       // Do not reject this ID in manifest validation: older queues may contain it.
       // Only new admission must refuse the digest of a missing Message GUID.
       guard
-        eventId != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        eventId != Self.missingMessageIdentifier,
         let id = canonicalEventId(eventId),
         validAdmissionDate(observedAt, now: receiptTime),
         validSender(sender),
         validBody(body),
-        source != .notification || (UUID(uuidString: id) != nil && sender == "Wafra Notification" && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        validSourcePayload(source: source, id: id, sender: sender, body: body)
       else { return .invalid }
 
       let observedAtString = Self.iso8601(observedAt)
@@ -269,6 +301,7 @@ public final class WafraLiveCaptureStore {
 
       if let existing = manifest.records[id] {
         let file = recordURL(id: id, in: root)
+        if let data = try? Data(contentsOf: file), Self.unsupportedSource(data) { return .invalid }
         guard
           let existingData = try? Data(contentsOf: file),
           existingData.count == existing.bytes,
@@ -302,11 +335,17 @@ public final class WafraLiveCaptureStore {
       try data.write(to: file, options: Self.writeOptions)
       manifest.records[id] = RecordSummary(
         observedAt: serializedDate.timeIntervalSince1970,
-        bytes: data.count
+        bytes: data.count,
+        source: source.rawValue
       )
       // Publish receipt and queued event in the same durable manifest write.
       // Duplicate/replayed, invalid, disabled and capacity-refused calls never advance it.
       manifest.lastReceivedAt = max(manifest.lastReceivedAt ?? 0, receiptTime.timeIntervalSince1970)
+      if source == .applePay {
+        let receivedAt = receiptTime.timeIntervalSince1970
+        manifest.firstApplePayReceivedAt = manifest.firstApplePayReceivedAt ?? receivedAt
+        manifest.lastApplePayReceivedAt = max(manifest.lastApplePayReceivedAt ?? 0, receivedAt)
+      }
       if source == .notification {
         let receivedAt = receiptTime.timeIntervalSince1970
         manifest.firstNotificationReceivedAt = manifest.firstNotificationReceivedAt ?? receivedAt
@@ -328,6 +367,62 @@ public final class WafraLiveCaptureStore {
     return result
   }
 
+  /// Sender recorded when the automation exposes none. It names no bank, so the
+  /// shared parser falls back to the one bank the body names (the same contract
+  /// the plain-text automation fallback already uses).
+  public static let automationSender = "Wafra Automation"
+  /// SHA-256 of the empty string: what hashing an absent Message GUID produces.
+  public static let missingMessageIdentifier =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+  /// Message staging for the Capture Shortcuts' Message automation, where Apple
+  /// may withhold fields. On iOS 26.1 the automation's Message input exposes
+  /// Content and Sender but no Date, and GUID is not listed. Nothing Apple
+  /// withholds may turn a real alert into a failed run:
+  /// - an absent or blank body has nothing to parse and is ignored;
+  /// - an absent or blank sender is recorded as `automationSender`;
+  /// - a supplied date older than `recordTTL` is ignored rather than refused;
+  /// - SHA-256(GUID) is kept only together with the Message's own date, so a
+  ///   replay is byte-identical and idempotent (replays stay exact-byte: a
+  ///   differing replay is still `.invalid`). Without a usable GUID hash a
+  ///   fresh UUID identifies this one queue observation, dated by the supplied
+  ///   Message date when there is one, otherwise by the receipt time. The JS
+  ///   parser gives such a UUID row no history identity (`sourceEventId`), so
+  ///   the ledger keys it `s{time}-{amount}` and its same-event rule can merge
+  ///   it with the History import copy of the same Message;
+  /// - a future date beyond `maxFutureSkew` or a malformed hash stays `.invalid`.
+  /// Fully supplied, current values stage exactly as `stage` does, which keeps
+  /// the published Capture v2 graph's successful inputs unchanged.
+  public func stageAutomationMessage(
+    sender: String?,
+    body: String?,
+    eventId: String?,
+    observedAt: Date?
+  ) throws -> WafraLiveStageResult {
+    guard let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return .ignored
+    }
+    if let observedAt {
+      let age = clock().timeIntervalSince1970 - observedAt.timeIntervalSince1970
+      if age.isFinite, age > Self.recordTTL { return .ignored }
+    }
+    let resolvedSender: String
+    if let sender, !sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      resolvedSender = sender
+    } else {
+      resolvedSender = Self.automationSender
+    }
+    if let eventId, !eventId.isEmpty, eventId != Self.missingMessageIdentifier, let observedAt {
+      return try stage(sender: resolvedSender, body: body, eventId: eventId, observedAt: observedAt)
+    }
+    return try stage(
+      sender: resolvedSender,
+      body: body,
+      eventId: UUID().uuidString,
+      observedAt: observedAt ?? clock()
+    )
+  }
+
   /// Shortcuts supplies notification text explicitly. No notification access is requested here.
   public func stageNotification(
     text: String,
@@ -336,6 +431,36 @@ public final class WafraLiveCaptureStore {
   ) throws -> WafraLiveStageResult {
     try stage(sender: "Wafra Notification", body: text, eventId: eventId,
       observedAt: observedAt, source: .notification)
+  }
+
+  /// Wallet exposes an amount and merchant, not card ownership, settlement or purchase date.
+  public func stageApplePay(
+    amount: Decimal?, currency: String, merchant: String?, eventId: String, observedAt: Date
+  ) throws -> WafraLiveStageResult {
+    guard var amount, !amount.isNaN, amount > 0 else { return try recordIncompleteApplePay() }
+    let payload = ApplePayPayload(
+      amount: NSDecimalString(&amount, Locale(identifier: "en_US_POSIX")),
+      currency: currency,
+      merchant: (merchant ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    )
+    guard validApplePayPayload(payload) else { return try recordIncompleteApplePay() }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    let body = String(decoding: try encoder.encode(payload), as: UTF8.self)
+    return try stage(sender: "Wafra Apple Pay", body: body, eventId: eventId,
+      observedAt: observedAt, source: .applePay)
+  }
+
+  private func recordIncompleteApplePay() throws -> WafraLiveStageResult {
+    try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      let now = clock()
+      guard manifest.enabled, isEntitled(manifest, at: now) else { return .disabled }
+      guard validEntitlementTimestamp(now.timeIntervalSince1970) else { return .invalid }
+      manifest.lastApplePayIncompleteAt = max(manifest.lastApplePayIncompleteAt ?? 0, now.timeIntervalSince1970)
+      try writeManifest(manifest, in: root)
+      return .ignored
+    }
   }
 
   public func setCaptureEnabled(_ enabled: Bool) throws {
@@ -425,7 +550,7 @@ public final class WafraLiveCaptureStore {
     }
   }
 
-  public func listPendingRecords(limit: Int, includeNotifications: Bool = true) throws -> [String] {
+  public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false, applePayOnly: Bool = false) throws -> [String] {
     try withExclusiveLock { root in
       var manifest = try loadManifest(in: root)
       _ = try purgeExpiredUnlocked(manifest: &manifest, in: root, now: clock())
@@ -446,6 +571,7 @@ public final class WafraLiveCaptureStore {
       for (id, summary) in snapshot {
         guard rows.count < boundedLimit else { break }
         let file = recordURL(id: id, in: root)
+        if let data = try? Data(contentsOf: file), Self.unsupportedSource(data) { continue }
         guard
           let data = try? Data(contentsOf: file),
           data.count == summary.bytes,
@@ -457,11 +583,19 @@ public final class WafraLiveCaptureStore {
         }
         // Legacy JS decoders discard unknown sources. Filter before applying the
         // page limit so retained notifications cannot starve later SMS records.
-        if !includeNotifications && record.source == .notification { continue }
+        switch record.source {
+        case .message: if applePayOnly { continue }
+        case .notification: if applePayOnly || !includeNotifications { continue }
+        case .applePay: if !includeApplePay { continue }
+        }
         rows.append(String(decoding: data, as: UTF8.self))
       }
       return rows
     }
+  }
+
+  public func listPendingApplePayRecords(limit: Int) throws -> [String] {
+    try listPendingRecords(limit: limit, includeNotifications: false, includeApplePay: true, applePayOnly: true)
   }
 
   public func acknowledgeRecords(ids: [String]) throws {
@@ -490,6 +624,7 @@ public final class WafraLiveCaptureStore {
       for id in Set(canonicalIds) {
         guard let summary = manifest.records[id] else { continue }
         let file = recordURL(id: id, in: root)
+        if let data = try? Data(contentsOf: file), Self.unsupportedSource(data) { continue }
         guard
           let data = try? Data(contentsOf: file),
           data.count == summary.bytes,
@@ -561,7 +696,12 @@ public final class WafraLiveCaptureStore {
         lastHandledAt: manifest.lastHandledAt,
         notificationSetupProofAt: manifest.notificationSetupProofAt,
         firstNotificationReceivedAt: manifest.firstNotificationReceivedAt,
-        lastNotificationReceivedAt: manifest.lastNotificationReceivedAt
+        lastNotificationReceivedAt: manifest.lastNotificationReceivedAt,
+        applePayPending: manifest.records.values.filter { $0.source == WafraLiveCaptureSource.applePay.rawValue }.count,
+        lastApplePayIncompleteAt: manifest.lastApplePayIncompleteAt,
+        applePaySetupProofAt: manifest.applePaySetupProofAt,
+        firstApplePayReceivedAt: manifest.firstApplePayReceivedAt,
+        lastApplePayReceivedAt: manifest.lastApplePayReceivedAt
       )
     }
   }
@@ -576,6 +716,18 @@ public final class WafraLiveCaptureStore {
         throw StoreError.entitlementRequired
       }
       manifest.notificationSetupProofAt = at.timeIntervalSince1970
+      try writeManifest(manifest, in: root)
+    }
+  }
+
+  public func recordApplePaySetupProof(at: Date) throws {
+    try withExclusiveLock { root in
+      guard validEntitlementTimestamp(at.timeIntervalSince1970) else { throw StoreError.invalidSetupProof }
+      var manifest = try loadManifest(in: root)
+      guard manifest.enabled, isEntitled(manifest, at: clock()) else {
+        throw StoreError.entitlementRequired
+      }
+      manifest.applePaySetupProofAt = at.timeIntervalSince1970
       try writeManifest(manifest, in: root)
     }
   }
@@ -816,6 +968,14 @@ public final class WafraLiveCaptureStore {
       }
     }
     for id in expired { manifest.records.removeValue(forKey: id) }
+    // An unacknowledged record that ages out was never recorded or reviewed.
+    // Count it as a loss so the existing queue warning surfaces, instead of
+    // letting a Review-blocked record disappear silently.
+    if !expired.isEmpty {
+      let (sum, overflow) = manifest.dropped.addingReportingOverflow(expired.count)
+      manifest.dropped = overflow ? Int.max : sum
+      rotateWarning(in: &manifest)
+    }
     try writeManifest(manifest, in: root)
     return expired.count
   }
@@ -875,13 +1035,53 @@ public final class WafraLiveCaptureStore {
     guard
       record.v == 1,
       record.id == id,
-      record.source != .notification || (UUID(uuidString: id) != nil && record.sender == "Wafra Notification" && !record.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+      summary.source == nil || summary.source == record.source.rawValue,
+      validSourcePayload(source: record.source, id: id, sender: record.sender, body: record.text),
       validSender(record.sender),
       validBody(record.text),
       let date = Self.parseISO8601(record.observedAt),
       date.timeIntervalSince1970 == summary.observedAt
     else { return false }
     return true
+  }
+
+  private func validSourcePayload(source: WafraLiveCaptureSource, id: String, sender: String, body: String) -> Bool {
+    switch source {
+    case .message: return true
+    case .notification:
+      return UUID(uuidString: id) != nil && sender == "Wafra Notification"
+        && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    case .applePay:
+      guard UUID(uuidString: id) != nil, sender == "Wafra Apple Pay",
+        let data = body.data(using: .utf8),
+        let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        Set(fields.keys) == Set(["amount", "currency", "merchant"]),
+        let payload = try? JSONDecoder().decode(ApplePayPayload.self, from: data)
+      else { return false }
+      return validApplePayPayload(payload)
+    }
+  }
+
+  private func validApplePayPayload(_ payload: ApplePayPayload) -> Bool {
+    guard payload.amount.utf8.count <= 27,
+      Self.applePayDecimalPattern.firstMatch(in: payload.amount, range: NSRange(payload.amount.startIndex..., in: payload.amount)) != nil,
+      let amount = Decimal(string: payload.amount, locale: Locale(identifier: "en_US_POSIX")),
+      !amount.isNaN, amount > 0, Self.applePayCurrencies.contains(payload.currency),
+      payload.currency.utf8.count == 3,
+      payload.merchant.utf16.count <= Self.maxApplePayMerchantCharacters,
+      payload.merchant.utf8.count <= 640,
+      payload.merchant == payload.merchant.trimmingCharacters(in: .whitespacesAndNewlines),
+      payload.merchant.rangeOfCharacter(from: .controlCharacters) == nil
+    else { return false }
+    var canonical = amount
+    return NSDecimalString(&canonical, Locale(identifier: "en_US_POSIX")) == payload.amount
+  }
+
+  /// Future native sources must be left pending for a binary that understands them.
+  private static func unsupportedSource(_ data: Data) -> Bool {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let source = object["source"] as? String else { return false }
+    return WafraLiveCaptureSource(rawValue: source) == nil
   }
 
   private func canonicalEventId(_ value: String) -> String? {

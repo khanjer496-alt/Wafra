@@ -6,6 +6,7 @@ import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { CategoryDonut, useCategoricalPalette, type DonutSlice } from '@/components/ui/charts';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
+import { PeriodPill } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { Button } from '@/components/ui/controls';
 import { useLanguage } from '@/hooks/use-language';
@@ -61,8 +62,9 @@ type Props = {
 /** Categories and their limits are ONE list. No repeated category chart below it. */
 export function SpendingOverview(p: Props) {
   const theme = useTheme(); const language = useLanguage(); const large = useLargeTextLayout();
-  const { width } = useWindowDimensions();
-  const donutSize = Math.round(Math.min(184, Math.max(164, width * 0.46)));
+  const { width, fontScale } = useWindowDimensions();
+  const compactSummary = !large && width / Math.max(fontScale, 1) >= 360;
+  const donutSize = compactSummary ? 164 : Math.round(Math.min(184, Math.max(164, width * 0.46)));
   const donutThickness = donutSize <= 170 ? 15 : 16;
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
@@ -119,48 +121,34 @@ export function SpendingOverview(p: Props) {
   const centerAmount = selectedSlice?.value ?? p.totalFils;
   const centerShare = selectedSlice && p.totalFils > 0 ? selectedSlice.value / p.totalFils : null;
   const currency = moneySpec?.currency ?? ledgerCurrencyDisplay();
-  const compactAmount = useMemo(() => {
-    const exponent = moneySpec?.exponent ?? 2;
-    const major = Math.abs(centerAmount) / (10 ** exponent);
-    // Four/five-digit totals still fit comfortably in the hole and are more
-    // useful shown exactly. Compact only the genuinely wide figures that caused
-    // the original overflow (hundreds of thousands and above).
-    if (major < 100_000) return moneySpec
-      ? formatMinorUnits(Math.round(Math.abs(centerAmount)), moneySpec)
-      : formatAED(Math.abs(centerAmount)).replace(/^\S+\s+/, '');
-    const unit = major >= 1_000_000_000 ? 1_000_000_000 : major >= 1_000_000 ? 1_000_000 : 1000;
-    const suffix = unit === 1_000_000_000 ? 'B' : unit === 1_000_000 ? 'M' : 'k';
-    const scaled = major / unit;
-    const maximumFractionDigits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
-    return `${new Intl.NumberFormat(language === 'ar' ? 'ar-AE' : 'en', {
-      maximumFractionDigits,
-      minimumFractionDigits: 0,
-    }).format(scaled)}${suffix}`;
-  }, [centerAmount, language, moneySpec]);
+  const exactAmount = moneySpec
+    ? formatMinorUnits(Math.round(Math.abs(centerAmount)), moneySpec)
+    : formatAED(Math.abs(centerAmount)).replace(/^\S+\s+/, '');
+  // Keep ordinary totals readable in the hole; wider figures and enlarged
+  // text use the full summary width so no financial digits are abbreviated.
+  const amountOutsideDonut = exactAmount.length > 9 || fontScale >= 1.3;
   return <View style={styles.root} testID="spending-categories">
     <View style={styles.hero}>
-      <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
+      <View style={styles.period}>
         <ThemedText type="smallBold">{w.spent}</ThemedText>
-        <View style={styles.periodRight}><ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
-          <Icon name="chevron-down" size={15} color={theme.textSecondary} /></View>
-      </Pressable>
+        <PeriodPill onPress={p.onPeriod} />
+      </View>
+      <View style={[styles.summary, compactSummary && styles.summaryCompact]}>
       <View style={styles.donutWrap}>
         <CategoryDonut
           slices={slices}
           size={donutSize}
           thickness={donutThickness}
           centerLabel={selectedSlice?.label ?? w.spent}
-          centerValue={<View accessible accessibilityRole="text"
-            accessibilityLabel={`${currency} ${moneySpec
-              ? formatMinorUnits(Math.round(Math.abs(centerAmount)), moneySpec)
-              : formatAED(Math.abs(centerAmount)).replace(/^\S+\s+/, '')}`}
+          centerValue={amountOutsideDonut ? undefined : <View accessible accessibilityRole="text"
+            accessibilityLabel={`${currency} ${exactAmount}`}
             style={styles.centerMoney}>
             <ThemedText type="micro" themeColor="textSecondary">{currency}</ThemedText>
-            <ThemedText type="subtitle" tabular numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
-              {compactAmount}
+            <ThemedText type="smallBold" tabular style={styles.centerAmount}>
+              {exactAmount}
             </ThemedText>
           </View>}
-          centerMeta={centerShare === null ? p.periodLabel : `${spendingShareLabel(centerShare, language)} ${w.share}`}
+          centerMeta={centerShare === null ? undefined : `${spendingShareLabel(centerShare, language)} ${w.share}`}
           accessibilityLabel={selectedSlice
             ? `${selectedSlice.label}. ${moneyLabel(centerAmount)}. ${spendingShareLabel(centerShare ?? 0, language)} ${w.share}`
             : `${w.spent}. ${moneyLabel(centerAmount)}. ${p.periodLabel}`}
@@ -174,17 +162,21 @@ export function SpendingOverview(p: Props) {
           }}
         />
       </View>
-      {legendItems.length > 0 && <View style={styles.legend} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {legendItems.length > 0 && <View style={[styles.legend, compactSummary && styles.legendCompact]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {legendItems.map((item) => <View key={item.key} style={styles.legendItem}>
           <View style={styles.legendIdentity}>
             {item.category !== null
               ? <CategoryAvatar category={item.category} size={18} color={item.color} />
               : <Icon name="receipt" size={16} color={item.color} strokeWidth={2} />}
-            <ThemedText type="meta" numberOfLines={1} style={styles.legendLabel}>{item.label}</ThemedText>
+            <ThemedText type="meta" style={styles.legendLabel}>{item.label}</ThemedText>
           </View>
           <ThemedText type="meta" tabular themeColor="textSecondary">{spendingShareLabel(item.share, language)}</ThemedText>
         </View>)}
       </View>}
+      </View>
+      {amountOutsideDonut && <ThemedText type="subtitle" tabular style={styles.exactAmount}>
+        {currency} {exactAmount}
+      </ThemedText>}
       <ThemedText type="meta" themeColor="textSecondary" style={styles.heroNote}>{w.shareNote}</ThemedText>
     </View>
 
@@ -255,15 +247,19 @@ export function SpendingOverview(p: Props) {
 const styles = StyleSheet.create({
   root: { gap: 10 },
   hero: { paddingVertical: 4, gap: 8, alignItems: 'stretch' },
+  summary: { gap: 12 },
+  summaryCompact: { flexDirection: 'row', alignItems: 'center' },
+  legendCompact: { flex: 1, minWidth: 0, paddingHorizontal: 0 },
   donutWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: 0 },
-  centerMoney: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 5, maxWidth: '100%' },
+  centerMoney: { alignItems: 'center', justifyContent: 'center', gap: 2, maxWidth: '100%' },
+  centerAmount: { fontSize: 18, lineHeight: 24, textAlign: 'center' },
+  exactAmount: { textAlign: 'center', flexShrink: 1 },
   heroNote: { textAlign: 'center' },
   legend: { gap: 5, paddingHorizontal: 6 },
-  legendItem: { minHeight: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  legendItem: { minHeight: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
   legendIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7 },
   legendLabel: { flexShrink: 1, minWidth: 0 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
-  periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
   categories: { gap: 0 }, category: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 0, borderTopWidth: 1 },

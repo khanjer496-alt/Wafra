@@ -95,7 +95,7 @@ assert.match(field, /accessibilityHint=\{resolvedHint\}/);
 assert.match(field, /'aria-labelledby': resolvedWebLabelledBy/);
 assert.match(field, /'aria-describedby': activeDescription \? descriptionId : undefined/);
 assert.match(field, /const hasError = invalid \|\| !!errorText/);
-assert.match(field, /borderColor: hasError \? theme\.expense : theme\.controlBorder/);
+assert.match(field, /borderColor: hasError \? theme\.expense : focused \? theme\.primary : theme\.controlBorder/);
 assert.match(field, /'aria-invalid': hasError/);
 assert.match(field, /Platform\.OS === 'web' \? webAriaProps : \{\}/);
 

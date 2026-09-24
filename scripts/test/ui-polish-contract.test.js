@@ -226,7 +226,9 @@ const task5Segments = read('src/components/bills/bills-segment-control.tsx');
 assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
 assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
-assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 1, 'Bills keeps only its bounded subscription-history scroller');
+assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 0, 'Bills history shares the BottomSheet scroller');
+assert.match(task5Bills, /detailData\.txs\.slice\(0, 36\)/);
+assert.match(task5Bills, /<MerchantSpendingLink merchant=\{detail\.title\}/);
 assert.match(task5Bills, /testID="subscription-history-scroll"/);
 assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
 assert.match(task5Segments,/role="tablist"/);
@@ -495,7 +497,7 @@ for (const seam of [
   'renameTrustedDevice(', 'revokeTrustedDevice(', 'deleteTrustedVault(',
   'trustedDeviceInviteLink(', 'openShortcutsApp', 'shortcutCleanupApplies(',
 ]) assert.ok(task8Trusted.includes(seam), `Trusted Devices lost ${seam}`);
-assert.equal((task8Trusted.match(/<TextInput/g) ?? []).length, 3, 'Trusted Devices keeps its three security-sensitive sheet inputs');
+assert.equal((task8Trusted.match(/<TextField/g) ?? []).length, 3, 'Trusted Devices keeps its three labelled security-sensitive sheet inputs');
 assert.equal((task8Trusted.match(/<BottomSheet/g) ?? []).length, 2, 'Trusted Devices keeps both stateful sheets');
 assert.ok((task8Trusted.match(/<ConfirmSheet/g) ?? []).length >= 3, 'Trusted Devices keeps removal, vault, and recovery confirmations');
 

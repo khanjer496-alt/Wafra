@@ -22,6 +22,20 @@ import type { CaptureInstrument, CaptureSource, Transaction, TransactionType } f
  * third is the same event. Hence three.
  */
 
+/**
+ * A ledger row promoted from an Apple Pay (Wallet) review.
+ *
+ * Wallet's observation UUID is not the bank's message identity, and the row's
+ * title/account/date are explicit user decisions. Such a row may only ever be
+ * matched by its exact receipt identity; import-plan binds it to a later bank
+ * SMS under its own strict one-to-one rule. Generic title, cross-channel,
+ * statement and hydration heuristics must never pair or delete it.
+ */
+export const APPLE_PAY_REVIEW_SOURCE_KEY = /^apple_pay_review_source_[a-f0-9]{32}$/;
+export function isApplePayWalletRow(t: Pick<Transaction, 'source' | 'smsKey'>): boolean {
+  return t.source === 'sms' && typeof t.smsKey === 'string' && APPLE_PAY_REVIEW_SOURCE_KEY.test(t.smsKey);
+}
+
 /** Message text reduced to what two captures of the same SMS must agree on. */
 export function bodyPrint(body: string): string {
   return body.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -138,6 +152,11 @@ export interface DuplicateCandidate {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Set only for rows already in the ledger, so a later SMS can replace them. */
   id?: string;
+  /**
+   * One GUID-less iOS live Message (queue-UUID observation). Never merged with
+   * another live observation; bound to at most one History copy.
+   */
+  liveObservation?: boolean;
 }
 
 export interface DuplicateGuard {
@@ -246,6 +265,8 @@ interface SeenOccurrence {
   id?: string;
   /** A retained Apple Message has an exact, opaque GUID-derived identity. */
   historyIdentity: boolean;
+  /** One GUID-less iOS live Message; see DuplicateCandidate.liveObservation. */
+  liveObservation: boolean;
   /** A row with no event clock explains one later capture, not all of them. */
   consumed: boolean;
   captureInstrument?: CaptureInstrument;
@@ -306,6 +327,18 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
   );
 }
 
+const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A stored GUID-less iOS live Message that has not yet bound a History identity. */
+function hasMessageObservationId(t: Transaction): boolean {
+  return t.source === 'sms' && t.viaPush !== true &&
+    typeof t.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(t.messageObservationId);
+}
+
+function isLiveMessageObservationRow(t: Transaction): boolean {
+  return hasMessageObservationId(t) && t.smsKey?.startsWith('h') !== true;
+}
+
 export function duplicateGuard(
   existing: Transaction[],
   sourceIdentityAlreadyValidated = false,
@@ -318,18 +351,64 @@ export function duplicateGuard(
   const seen = new Map<string, SeenOccurrence[]>();
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
-  const note = (key: string, ts: number | null, type: TransactionType, smsKey?: string, id?: string, captureInstrument?: CaptureInstrument) => {
+  /** User-renamed, still-unbound live observations, for the title-free bind. */
+  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence }[] = [];
+  const note = (
+    key: string, ts: number | null, type: TransactionType, amountFils: number, smsKey?: string,
+    id?: string, captureInstrument?: CaptureInstrument,
+    flags: { liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean } = {},
+  ) => {
     const at = seen.get(key);
-    const occurrence = { ts, id, type, captureInstrument, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
+    const historyIdentity = smsKey?.startsWith('h') === true;
+    const occurrence: SeenOccurrence = {
+      ts, id, type, captureInstrument, historyIdentity,
+      liveObservation: flags.liveObservation === true && !historyIdentity,
+      // A History row promoted from a live observation has already explained
+      // its live copy; it can never absorb another live Message.
+      consumed: historyIdentity && flags.boundLiveCopy === true,
+    };
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
+    if (occurrence.liveObservation && flags.renamed === true) {
+      renamedLiveObservations.push({ amountFils, occurrence });
+    }
   };
-  for (const t of existing) {
+  /**
+   * Bind one incoming History Message to one GUID-less live Message the user
+   * renamed. An unedited live row parses to the History copy's own title and
+   * pairs through the title rule; a renamed one cannot, and its s-key carries
+   * the receipt time rather than the Message's own. Match by money,
+   * direction, instrument and the same-event window, nearest first; the
+   * occurrence is consumed so it explains exactly one History copy. Never the
+   * reverse direction: a new live Message is not bound to History by money
+   * alone, since a different merchant at the same amount is a real purchase.
+   */
+  const titleFreeObservationMatch = (c: DuplicateCandidate, mine: number | null): SeenOccurrence | undefined => {
+    if (c.smsKey?.startsWith('h') !== true || mine === null) return undefined;
+    let best: SeenOccurrence | undefined;
+    for (const { amountFils, occurrence } of renamedLiveObservations) {
+      if (occurrence.consumed || occurrence.ts === null || amountFils !== c.amountFils ||
+        occurrence.type !== c.type) continue;
+      if (!compatibleCaptureInstrument(occurrence.captureInstrument, c.captureInstrument)) continue;
+      const distance = Math.abs(occurrence.ts - mine);
+      if (distance > SAME_EVENT_MS) continue;
+      if (!best || distance < Math.abs(best.ts! - mine)) best = occurrence;
+    }
+    return best;
+  };
+  // Wallet rows keep only their exact receipt identity (noteExact below).
+  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t));
+  for (const t of heuristicRows) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
-    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.smsKey, t.id, t.captureInstrument);
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.amountFils, t.smsKey, t.id,
+      t.captureInstrument, {
+        liveObservation: isLiveMessageObservationRow(t),
+        renamed: t.userEdited === true || t.titleEdited === true,
+        boundLiveCopy: hasMessageObservationId(t),
+      });
   }
   // Delivery clocks can collide across cards; retain every candidate per key.
   const exactRows = new Map<string, DuplicateCandidate[]>();
@@ -409,7 +488,7 @@ export function duplicateGuard(
     if (rows) rows.push({ consumedSides: new Set() });
     else manualPayments.set(key, [{ consumedSides: new Set() }]);
   };
-  for (const t of existing) {
+  for (const t of heuristicRows) {
     if (t.source === 'sms') {
       noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
@@ -535,10 +614,16 @@ export function duplicateGuard(
           // second. Exact re-imports were already caught by seenSms above.
           // Continue comparing against Android/live captures so importing
           // history after enabling live capture still removes overlap.
+          // Likewise two GUID-less live observations are two delivered
+          // Messages: the native queue stages each Message once.
+          const incomingLive = c.liveObservation === true && !c.smsKey?.startsWith('h');
           const comparable = at.filter((row) =>
             row.type === c.type &&
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
-            !(c.smsKey?.startsWith('h') && row.historyIdentity));
+            !(c.smsKey?.startsWith('h') && row.historyIdentity) &&
+            !(incomingLive && row.liveObservation));
+          const oneToOne = (occurrence: SeenOccurrence) => c.smsKey?.startsWith('h') === true ||
+            incomingLive || occurrence.historyIdentity || occurrence.liveObservation;
           // Same day, same amount, same name. That is one event captured twice
           // UNLESS both sides carry a timestamp and those are far enough apart
           // to be two separate visits. Without this the second identical charge
@@ -547,8 +632,7 @@ export function duplicateGuard(
           if (mine === null && comparable.length > 0) return true;
           const timed = comparable.find(
             (occurrence) =>
-              (!(c.smsKey?.startsWith('h') || occurrence.historyIdentity) ||
-                !occurrence.consumed) &&
+              (!oneToOne(occurrence) || !occurrence.consumed) &&
               occurrence.ts !== null &&
               Math.abs(occurrence.ts - mine!) <= SAME_EVENT_MS,
           );
@@ -556,7 +640,7 @@ export function duplicateGuard(
             // Exact history/live overlap is one-to-one. Without consuming the
             // live occurrence it silences every distinct historical Message
             // the bank happened to timestamp in the same two-minute window.
-            if (c.smsKey?.startsWith('h') || timed.historyIdentity) timed.consumed = true;
+            if (oneToOne(timed)) timed.consumed = true;
             lastMatchedId = timed.id ?? null;
             return true;
           }
@@ -571,6 +655,12 @@ export function duplicateGuard(
             lastMatchedId = timeless.id ?? null;
             return true;
           }
+        }
+        const observation = titleFreeObservationMatch(c, mine);
+        if (observation) {
+          observation.consumed = true;
+          lastMatchedId = observation.id ?? null;
+          return true;
         }
       }
       const statementMatch = statementPairMatch(c);
@@ -660,7 +750,8 @@ export function duplicateGuard(
     add(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
-      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.smsKey, c.id, c.captureInstrument);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.amountFils, c.smsKey, c.id,
+        c.captureInstrument, { liveObservation: c.liveObservation === true });
       noteExact(c);
       noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
         ts,
@@ -802,6 +893,9 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // amount/time heuristics cannot delete a decision or attach it to a
       // different event. Two independently reviewed rows require user review.
       if (row.transferDecision || prior.transferDecision) return false;
+      // Likewise a Wallet review decision: only exact receipt identity (above)
+      // may fold it. Import binds a proven SMS counterpart explicitly.
+      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior)) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
@@ -815,6 +909,13 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         row.smsKey?.startsWith('h') &&
         prior.smsKey?.startsWith('h') &&
         rowSource !== priorSource
+      ) return false;
+      // Two GUID-less iOS live Messages are two delivered Messages; the
+      // native queue stages each once, so heuristics must never fold them.
+      if (
+        isLiveMessageObservationRow(row) &&
+        isLiveMessageObservationRow(prior) &&
+        row.messageObservationId!.toLowerCase() !== prior.messageObservationId!.toLowerCase()
       ) return false;
       if (
         row.date !== prior.date ||

@@ -2,12 +2,161 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import {
+  RECOVERY_SHORTCUT_NAME, buildRecoveryHistoryShortcut, verifyRecoveryHistoryShortcut,
   BOUNDARY_SAFE_SHORTCUT_NAME, buildBoundarySafeHistoryShortcut, verifyBoundarySafeHistoryShortcut,
   COLUMN_SEPARATOR, FAST_SHORTCUT_NAME, ROW_SHORTCUT_NAME, WINDOWED_SHORTCUT_NAME, buildColumnarHistoryShortcut, buildFastHistoryShortcut, buildPagedHistoryShortcut, buildRowHistoryShortcut, buildWindowedHistoryShortcut,
   verifyColumnarHistoryShortcut, verifyFastHistoryShortcut, verifyPagedHistoryShortcut, verifyRowHistoryShortcut, verifyWindowedHistoryShortcut,
 } from '../build-ios-paged-history-shortcut.mjs';
 import { buildQueryProbe } from '../build-ios-history-query-probe.mjs';
 import { buildColumnFrameProbe } from '../build-ios-column-frame-check.mjs';
+
+// Interpret only the emitted post-column branch with synthetic App Intent
+// replies. Apple queries/serialization are outside this host regression.
+function replayColumnRecovery(graph, reason, typedReply) {
+  const actions = graph.WFWorkflowActions;
+  const request = JSON.stringify({ sessionId: 'synthetic-session', revision: 26, status: 'continue', authorizationSecret: 'synthetic' });
+  const page = Array.from({ length: 51 }, (_, i) => ({ GUID: `id-${i}`, Body: `body-${i}`, Sender: 'TEST', date: 1000 - i }));
+  const variables = new Map([['Request', request], ['Page', page], ['Frame Mode', 'columns'],
+    ['Columns Result', JSON.stringify({ status: 'blocked', reason })]]);
+  const outputs = new Map();
+  const calls = []; const urls = []; let stopped = false;
+  const resolveValue = value => {
+    if (!value || typeof value !== 'object') return value;
+    if (value.WFSerializationType === 'WFTextTokenAttachment') return resolveValue(value.Value);
+    if (value.WFSerializationType === 'WFTextTokenString') {
+      if (value.Value.string === '\ufffc') return resolveValue(value.Value.attachmentsByRange['{0, 1}']);
+      return value.Value.string;
+    }
+    if (value.Variable) return resolveValue(value.Variable);
+    let result = value.Type === 'Variable' ? variables.get(value.VariableName) : outputs.get(value.OutputUUID);
+    for (const aggrandizement of value.Aggrandizements ?? []) {
+      if (aggrandizement.Type === 'WFPropertyVariableAggrandizement') result = result[aggrandizement.PropertyName];
+    }
+    return result;
+  };
+  const first = actions.findIndex(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.detect.dictionary'
+    && action.WFWorkflowActionParameters.WFInput.Value.VariableName === 'Columns Result');
+  const end = actions.findIndex((action, index) => index > first && action.WFWorkflowActionIdentifier === 'is.workflow.actions.repeat.count'
+    && action.WFWorkflowActionParameters.WFControlFlowMode === 2);
+  const rowCommit = actions.slice(first, end).find(action => action.WFWorkflowActionIdentifier === 'app.wafra.ios.CommitWafraPagedPageIntent');
+  outputs.set(rowCommit.WFWorkflowActionParameters.found.Value.OutputUUID, page.length);
+  const run = (from, until) => {
+    for (let i = from; i < until && !stopped; i++) {
+      const action = actions[i]; const p = action.WFWorkflowActionParameters; const id = action.WFWorkflowActionIdentifier;
+      if (p.WFControlFlowMode === 2) continue;
+      if (id === 'is.workflow.actions.conditional' || id === 'is.workflow.actions.repeat.each') {
+        const close = actions.findIndex((candidate, index) => index > i
+          && candidate.WFWorkflowActionParameters.GroupingIdentifier === p.GroupingIdentifier
+          && candidate.WFWorkflowActionParameters.WFControlFlowMode === 2);
+        assert.ok(close > i && close < end);
+        if (id === 'is.workflow.actions.repeat.each') {
+          const items = resolveValue(p.WFInput);
+          assert.equal(items, page, 'fallback reuses the fetched page');
+          for (let n = 0; n < items.length; n++) {
+            variables.set('Repeat Index 2', n + 1); run(i + 1, close);
+          }
+        } else {
+          const subject = resolveValue(p.WFInput);
+          const expected = p.WFConditionalActionString ?? p.WFNumberValue;
+          assert.ok([4, 5, 99].includes(p.WFCondition));
+          const matches = p.WFCondition === 99 ? String(subject).includes(expected) : p.WFCondition === 4 ? subject === expected : subject !== expected;
+          if (matches) run(i + 1, close);
+        }
+        i = close; continue;
+      }
+      let result;
+      if (id === 'is.workflow.actions.detect.dictionary') result = JSON.parse(resolveValue(p.WFInput));
+      else if (id === 'is.workflow.actions.getvalueforkey') result = resolveValue(p.WFInput)[p.WFDictionaryKey];
+      else if (id === 'is.workflow.actions.gettext') result = resolveValue(p.WFTextActionText);
+      else if (id === 'is.workflow.actions.setvariable') variables.set(p.WFVariableName, resolveValue(p.WFInput));
+      else if (id === 'is.workflow.actions.getitemfromlist') result = resolveValue(p.WFInput)[resolveValue(p.WFItemIndex) - 1];
+      else if (id.startsWith('app.wafra.ios.')) {
+        assert.equal(resolveValue(p.request), request, 'same request/revision/capability is used for every retry call');
+        calls.push({ id, guid: resolveValue(p.guid), date: resolveValue(p.date), found: resolveValue(p.found) });
+        result = id.endsWith('CommitWafraPagedPageIntent') ? JSON.stringify(typedReply) : '{"status":"staged"}';
+      } else if (id === 'is.workflow.actions.list') result = [];
+      else if (id === 'is.workflow.actions.url') result = resolveValue(p.WFURLActionURL);
+      else if (id === 'is.workflow.actions.openurl') urls.push(resolveValue(p.WFInput));
+      else if (id === 'is.workflow.actions.exit') stopped = true;
+      else assert.ok(['is.workflow.actions.nothing', 'is.workflow.actions.alert'].includes(id), `unexpected recovery action ${id}`);
+      outputs.set(p.UUID, result);
+    }
+  };
+  run(first, end);
+  return { calls, urls, stopped, request: variables.get('Request') };
+}
+
+test('a column cursor refusal retries the same 51 messages through typed dates exactly once', () => {
+  for (const reason of ['wrong-date-range; row 1/51 is not before the cursor', 'wrong-date-range; row 2/51 is out of order', 'missing-overlap']) {
+    const result = replayColumnRecovery(buildRecoveryHistoryShortcut(), reason, { status: 'continue', revision: 27 });
+    assert.equal(result.calls.length, 52);
+    assert.deepEqual(result.calls.slice(0, 51).map(call => call.guid), Array.from({ length: 51 }, (_, i) => `id-${i}`));
+    assert.deepEqual(result.calls.slice(0, 51).map(call => call.date), Array.from({ length: 51 }, (_, i) => 1000 - i));
+    assert.equal(result.calls[51].found, 51);
+    assert.deepEqual(JSON.parse(result.request), { status: 'continue', revision: 27 });
+    assert.equal(result.stopped, false);
+  }
+});
+
+test('a persistent typed-page refusal exits once to source-free recovery instead of another query', () => {
+  const result = replayColumnRecovery(buildRecoveryHistoryShortcut(), 'missing-overlap', {
+    status: 'blocked', reason: 'wrong-date-range; row 1/51 at 2024-09-25T13:34:44.113Z',
+  });
+  assert.equal(result.calls.length, 52);
+  assert.equal(result.stopped, true);
+  assert.deepEqual(result.urls, ['wafra://ios-paging-beta?blocked=1&reason=page-validation']);
+});
+
+test('only a genuine date or overlap refusal of the typed commit opens the page-validation block', () => {
+  const graph = buildRecoveryHistoryShortcut();
+  for (const [columnReason, commitReason] of [
+    ['missing-overlap', 'missing-overlap'],
+    ['wrong-date-range; row 2/51 is out of order', 'wrong-date-range; row 2/51 is out of order after 2024-09-25T13:34:44.113Z'],
+    ['frame-columns', 'invalid-input-rows staged=50 found=51 last-row=invalid-input-date'],
+    ['invalid-input-date bytes=19 scalars=19 spaces=1 nonascii=0', 'wrong-date-range'],
+  ]) {
+    const result = replayColumnRecovery(graph, columnReason, { status: 'blocked', reason: commitReason });
+    assert.equal(result.stopped, true, commitReason);
+    assert.deepEqual(result.urls, ['wafra://ios-paging-beta?blocked=1&reason=page-validation'], commitReason);
+  }
+});
+
+test('a non-date typed commit refusal keeps the blocked Request for the ordinary paused/resume route', () => {
+  const graph = buildRecoveryHistoryShortcut();
+  for (const [label, columnReason, commitReason] of [
+    ['framing fallback then capacity', 'frame-columns', 'staging-full'],
+    ['framing fallback then invalid-input fallback then corrupt staging', 'invalid-input', 'corrupt-staging'],
+    ['date retry then unauthorized', 'missing-overlap', 'unauthorized'],
+    ['date retry then stale request', 'wrong-date-range; row 1/51 is not before the cursor', 'stale-request'],
+    ['date retry then source changed', 'missing-overlap', 'source-changed'],
+    ['phone locked while committing', 'frame-columns', 'storage-or-device-interruption'],
+    ['phone locked while staging rows', 'invalid-input-lines fragments=3', 'invalid-input-rows staged=12 found=51 last-row=storage-or-device-interruption'],
+    ['row buffer refused without a date cause', 'frame-columns', 'invalid-input-rows staged=50 found=51 last-row=unauthorized'],
+  ]) {
+    const result = replayColumnRecovery(graph, columnReason, { status: 'blocked', reason: commitReason });
+    assert.equal(result.calls.length, 52, label);
+    assert.equal(result.stopped, false, label);
+    assert.deepEqual(result.urls, [], label);
+    assert.deepEqual(JSON.parse(result.request), { status: 'blocked', reason: commitReason }, label);
+  }
+  // The loop head then shows the ordinary blocked alert and opens setup.
+  const actions = graph.WFWorkflowActions;
+  const opened = actions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url').map(a => a.WFWorkflowActionParameters.WFURLActionURL);
+  assert.equal(opened.filter(url => url === 'wafra://ios-paging-beta?blocked=1&reason=page-validation').length, 1);
+  assert.ok(opened.includes('wafra://ios-setup?section=history'));
+});
+
+test('v8 never retries authorization, storage, stale-request or capacity failures as date repairs', () => {
+  const graph = buildRecoveryHistoryShortcut();
+  assert.equal(graph.WFWorkflowName, RECOVERY_SHORTCUT_NAME);
+  assert.equal(verifyRecoveryHistoryShortcut(graph), true);
+  assert.throws(() => verifyBoundarySafeHistoryShortcut(graph));
+  for (const reason of ['unauthorized', 'stale-request', 'staging-full', 'storage-or-device-interruption']) {
+    const result = replayColumnRecovery(graph, reason, { status: 'continue', revision: 27 });
+    assert.equal(result.calls.length, 0, reason);
+    assert.deepEqual(JSON.parse(result.request), { status: 'blocked', reason });
+  }
+});
 
 // Evaluate the generator's actual date actions and strict query predicates.
 // This checks our query contract, not Apple's on-device Messages implementation.
@@ -55,7 +204,7 @@ test('oldest anchor includes messages on either side of every strict age-band bo
   }
 });
 
-test('v7 is a separate candidate; existing v2-v6 artifact graphs remain byte-identical', () => {
+test('v7 remains separate and existing v2-v7 artifact graphs stay byte-identical', () => {
   const candidate = buildBoundarySafeHistoryShortcut();
   assert.equal(candidate.WFWorkflowName, BOUNDARY_SAFE_SHORTCUT_NAME);
   assert.equal(verifyBoundarySafeHistoryShortcut(candidate), true);
@@ -67,6 +216,7 @@ test('v7 is a separate candidate; existing v2-v6 artifact graphs remain byte-ide
     [buildRowHistoryShortcut, 'e606e26b88d7bf570994e1c7fee836bbe2a047c316b55816a4b16e68d0154223'],
     [buildFastHistoryShortcut, 'afad094ade5c1df80020e26a4082439a6e2b36bc2a474ced9924676f5db784d1'],
     [buildWindowedHistoryShortcut, '647abdf525f00938ad49eb226dcad53b08d37e0164b10558f893509c6d14f67c'],
+    [buildBoundarySafeHistoryShortcut, 'fea7e02fea31d84819c92f7d3ee33820b801a4b81c767e2824d6ceb0a50a3019'],
   ]) {
     assert.equal(createHash('sha256').update(JSON.stringify(build())).digest('hex'), digest, build.name);
   }
@@ -367,7 +517,7 @@ test('a published plist may reorder dictionary keys without changing its action 
   assert.equal(verifyPagedHistoryShortcut(reorder(buildPagedHistoryShortcut())), true);
 });
 test('every generated action reference resolves and all action IDs are unique', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildRecoveryHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     const ids = graph.WFWorkflowActions.map(a => a.WFWorkflowActionParameters.UUID);
     assert.equal(new Set(ids).size, ids.length);
     walk(graph, value => {
@@ -376,7 +526,7 @@ test('every generated action reference resolves and all action IDs are unique', 
   }
 });
 test('all scalar text variable ranges actually cover the placeholder', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildRecoveryHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) walk(graph, value => {
     if (value.WFSerializationType !== 'WFTextTokenString') return;
     for (const range of Object.keys(value.Value.attachmentsByRange || {})) {
       const match = /^\{(\d+), (\d+)\}$/.exec(range);
@@ -386,7 +536,7 @@ test('all scalar text variable ranges actually cover the placeholder', () => {
   });
 });
 test('conditional subjects are explicitly typed for Shortcuts on-device comparisons', () => {
-  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions, ...buildWindowedHistoryShortcut().WFWorkflowActions, ...buildBoundarySafeHistoryShortcut().WFWorkflowActions]
+  const actions = [...buildPagedHistoryShortcut().WFWorkflowActions, ...buildColumnarHistoryShortcut().WFWorkflowActions, ...buildRowHistoryShortcut().WFWorkflowActions, ...buildFastHistoryShortcut().WFWorkflowActions, ...buildWindowedHistoryShortcut().WFWorkflowActions, ...buildBoundarySafeHistoryShortcut().WFWorkflowActions, ...buildRecoveryHistoryShortcut().WFWorkflowActions]
     .filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional' &&
       action.WFWorkflowActionParameters.WFControlFlowMode === 0);
   assert.ok(actions.length > 0);
@@ -404,7 +554,7 @@ test('conditional subjects are explicitly typed for Shortcuts on-device comparis
 });
 
 test('repeat and conditional blocks are nested and closed correctly', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildRecoveryHistoryShortcut()]) {
   const stack = [];
   for (const action of graph.WFWorkflowActions) {
     const p = action.WFWorkflowActionParameters;
@@ -467,7 +617,7 @@ test('empty pages and the safety work budget cannot be advertised as completion'
   assert.equal(graph.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url' && JSON.stringify(a).includes('import-sms')).length, 1);
 });
 test('no raw source leaves through files, network, clipboard, mail, or messages', () => {
-  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
+  for (const graph of [buildPagedHistoryShortcut(), buildColumnarHistoryShortcut(), buildRowHistoryShortcut(), buildFastHistoryShortcut(), buildWindowedHistoryShortcut(), buildBoundarySafeHistoryShortcut(), buildRecoveryHistoryShortcut(), buildQueryProbe(), buildColumnFrameProbe()]) {
     assert.doesNotMatch(JSON.stringify(graph), /https?:/);
     // Inspect executable identifiers, not explanatory comments such as
     // "no clipboard". The exact-graph validator independently pins parameters.

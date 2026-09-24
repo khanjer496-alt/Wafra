@@ -4,6 +4,8 @@ import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 import type { UniversalMoney, UniversalInstrument } from '@/lib/universal-types';
 import { categorySupportsType } from '@/lib/categories';
 import { ledgerMoneySpec, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { transactionTime } from '@/lib/format';
+import { isApplePayWalletRow } from '@/lib/dedupe';
 import {
   isUniversalReviewAlert,
   prepareUniversalReviewAlert,
@@ -25,6 +27,16 @@ export interface PromoteReviewAlertInput {
   accountId: string;
   date: string;
   betweenOwnAccounts: boolean;
+  /**
+   * The user's explicit, confirmed answer to a 'possible-duplicate' refusal:
+   * this review is a separate purchase. Bound to the exact pending source the
+   * user was shown; it never overrides exact source identity ('duplicate').
+   */
+  separatePurchase?: {
+    confirmed: true;
+    expectedSourceKey: string;
+    expectedObservedAt: number;
+  };
   universal?: {
     confirmed: true;
     postingStatus: 'posted';
@@ -45,7 +57,8 @@ export type ReviewPromotionFailure = UniversalImportRefusal | 'source-changed'
   | 'instrument-mismatch'
   | 'invalid-category'
   | 'invalid-title'
-  | 'invalid-date';
+  | 'invalid-date'
+  | 'possible-duplicate';
 
 export type ReviewPromotionPlan =
   | {
@@ -63,6 +76,54 @@ export type ReviewPromotionPlan =
       learnedNotificationPackage?: string;
     }
   | { outcome: 'refused'; reason: ReviewPromotionFailure };
+
+const APPLE_PAY_REVIEW_SOURCE = /^apple_pay_review_source_[a-f0-9]{32}$/;
+/** Bank SMS/notification delivery can lag the Wallet observation by minutes. */
+const APPLE_PAY_BANK_OVERLAP_MS = 10 * 60_000;
+/** Two Wallet observations are separate events unless merchant and clock agree. */
+const APPLE_PAY_WALLET_OVERLAP_MS = 120_000;
+
+const normalizeMerchant = (value: string): string =>
+  value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+
+/**
+ * Whether promoting this review could count one Apple Pay purchase twice.
+ *
+ * Only ever ASKS the user (the review stays pending); it never merges, so it
+ * may be broad. Wallet merchant text rarely equals the bank's descriptor and
+ * the bank alert can arrive minutes later, so a Wallet review against a bank
+ * row, and any bank review against a Wallet row, compares account, amount,
+ * expense direction and a ten-minute clock only. Two Wallet observations
+ * carry distinct receipts, so they keep the strict merchant and two-minute
+ * rule. Rows without an event clock are not comparable.
+ */
+const possibleApplePayDuplicate = (
+  transactions: readonly Transaction[],
+  candidate: {
+    type: TransactionType;
+    accountId: string;
+    amountFils: number;
+    observedAt: number;
+    /** Present only when the review being promoted is itself an Apple Pay capture. */
+    walletMerchants: readonly string[] | null;
+  },
+): boolean => {
+  if (candidate.type !== 'expense' || !Number.isFinite(candidate.observedAt)) return false;
+  const merchants = candidate.walletMerchants
+    ? new Set(candidate.walletMerchants.map(normalizeMerchant).filter(Boolean))
+    : null;
+  return transactions.some((existing) => {
+    if (existing.type !== 'expense' || existing.accountId !== candidate.accountId ||
+      existing.amountFils !== candidate.amountFils) return false;
+    const timestamp = transactionTime(existing)?.getTime();
+    if (timestamp === undefined || !Number.isFinite(timestamp)) return false;
+    const distance = Math.abs(timestamp - candidate.observedAt);
+    const existingWallet = isApplePayWalletRow(existing);
+    if (!merchants) return existingWallet && distance <= APPLE_PAY_BANK_OVERLAP_MS;
+    if (!existingWallet) return distance <= APPLE_PAY_BANK_OVERLAP_MS;
+    return distance <= APPLE_PAY_WALLET_OVERLAP_MS && merchants.has(normalizeMerchant(existing.title));
+  });
+};
 
 const validDate = (value: string): boolean => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -156,6 +217,12 @@ export const planReviewPromotion = (
   if (!item) return { outcome: 'refused', reason: 'not-found' };
   if (!captureSourceTimeMatches(item.sourceKey, item.observedAt)) return { outcome: 'refused', reason: 'source-changed' };
   if (item.expiresAt <= now) return { outcome: 'refused', reason: 'expired' };
+  const separate = input.separatePurchase;
+  if (separate && (separate.confirmed !== true || separate.expectedSourceKey !== item.sourceKey ||
+    separate.expectedObservedAt !== item.observedAt)) {
+    return { outcome: 'refused', reason: 'source-changed' };
+  }
+  const separatePurchaseConfirmed = separate !== undefined;
   const learnedNotificationPackage = item.channel === 'push' &&
     item.sourceClass === 'financial-candidate' &&
     typeof item.sourcePackage === 'string' &&
@@ -202,6 +269,18 @@ export const planReviewPromotion = (
     if (planned.batch.transactions.length !== 1 || !transaction || !money) {
       return { outcome: 'refused', reason: 'invalid-event' };
     }
+    // Apple Pay's observation UUID cannot identify the bank's SMS for the
+    // same purchase. Check the authoritative ledger after money/account
+    // validation, and retain the review until the user resolves the overlap.
+    // No automatic merge is authorized here. The only override is the user's
+    // explicit, confirmed "Add as a separate purchase" for this exact pending
+    // source (separatePurchase), which adds one row and resolves the review.
+    const walletReview = item.channel === 'push' && APPLE_PAY_REVIEW_SOURCE.test(item.sourceKey);
+    if (!separatePurchaseConfirmed && possibleApplePayDuplicate(state.transactions, {
+      type: transaction.type, accountId: transaction.accountId, amountFils: transaction.amountFils,
+      observedAt: item.observedAt,
+      walletMerchants: walletReview ? [transaction.title, event.merchant.value ?? ''] : null,
+    })) return { outcome: 'refused', reason: 'possible-duplicate' };
     return {
       outcome: 'added', ledgerMoney: money,
       transaction: { ...transaction, id: transactionId,
@@ -256,8 +335,12 @@ export const planReviewPromotion = (
     };
   }
 
-  const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);
   const amountFils = Number(amount);
+  if (!separatePurchaseConfirmed && possibleApplePayDuplicate(state.transactions, {
+    type: input.type, accountId: account.id, amountFils, observedAt: item.observedAt, walletMerchants: null,
+  })) return { outcome: 'refused', reason: 'possible-duplicate' };
+
+  const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);
   return {
     outcome: 'added',
     ledgerMoney: state.ledgerMoney ?? expectedMoney,

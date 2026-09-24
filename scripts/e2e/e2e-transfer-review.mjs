@@ -167,11 +167,14 @@ try {
     try {
       await home(page, [200000, 10000, 190000], 4);
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
-      // Transfer review is contextual now: open a pending transfer's details,
-      // then take its explicit review action. Wallet intentionally has no
-      // permanent Transfers section between the balance hero and accounts.
+      // Transfer review is contextual: open a pending transfer's details, then
+      // take its explicit review action. Transfer records live in their own
+      // history (docs/design/transfers.md), not among regular transactions.
       await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
-      await click(page.getByRole('button', { name: /^Outgoing transfer,/ }).first());
+      assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
+        'transfer records are not regular transaction rows');
+      await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      await click(page.getByTestId('transfer-record-unknown-out').getByRole('button').first());
       await fits(page.getByTestId('entry-transfer-review'));
       await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);

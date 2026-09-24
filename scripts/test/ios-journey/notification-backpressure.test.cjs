@@ -83,6 +83,7 @@ test('both review quotas survive actual ledger JSON persistence and backup valid
 });
 test('a full Review tray retains overflow in the native queue until space is available', async () => {
   let queue = Array.from({ length: 51 }, (_, i) => String(i));
+  let messageReads = 0;
   const acknowledged = [];
   const state = { hydrated: true, marketId: 'AE', captureOptOut: false, transactions: [], accounts: [], lastScanTs: 0,
     reviewTray: tray.emptyAlertReviewTray(), localCaptureQualifications: [] };
@@ -93,6 +94,7 @@ test('a full Review tray retains overflow in the native queue until space is ava
       declineReconciledCount: 0, declineReconciledIds: [], declineReconciliations: [], batch: {} }) },
     '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({}) },
     '@/lib/alert-review-tray': tray,
+    '@/lib/ledger-money': compiled('ledger-money'),
     '@/lib/local-message-record': {
       preflightLocalMessageRecord: text => ({ id: text, valid: true, market: 'AE', observedAt: now }),
       parseLocalMessageRecord: text => ({ kind: 'review', item: entry(Number(text)), market: 'AE', milestone: 'none' }),
@@ -100,7 +102,9 @@ test('a full Review tray retains overflow in the native queue until space is ava
     '@/lib/types': { normalizeLocalCaptureQualifications: () => [], isLocalCaptureQualificationCandidate: () => true },
   }, { setTimeout });
   const native = { notificationCaptureSupported: true, purgeExpired: async () => 0,
-    listPendingRecords: async () => { throw Error('legacy reader'); },
+    // Message-only reader: used only after held notification reviews fill a
+    // whole page, so later SMS keep draining. This queue has no Messages.
+    listPendingRecords: async () => { messageReads += 1; return []; },
     listPendingRecordsIncludingNotifications: async limit => queue.slice(0, limit),
     getCaptureStatus: async () => ({ firstCapturedAt: null }),
     acknowledgeRecords: async ids => { acknowledged.push(...ids); queue = queue.filter(id => !ids.includes(id)); },
@@ -119,6 +123,7 @@ test('a full Review tray retains overflow in the native queue until space is ava
   assert.equal(first.ignored, 0);
   assert.deepEqual(queue, ['50']);
   assert.equal(acknowledged.includes('50'), false);
+  assert.equal(messageReads, 1, 'a fully held page continues behind notifications, once');
   assert.equal(state.reviewTray.pending[0].id, entry(0).id);
   state.reviewTray = tray.resolveReviewAlert(state.reviewTray, entry(0).id, 'dismissed', now);
   const second = await coordinator.drain();
