@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChecklistRow } from '@/components/ios-message-setup/checklist-row';
 import { AutomationGuide } from '@/components/ios-message-setup/automation-guide';
+import { SetupResult, SetupStep, StepProgress } from '@/components/ios-message-setup/setup-step';
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -30,7 +31,9 @@ import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
   INITIAL_IOS_SETUP_MODEL,
+  iosCaptureGuideStage,
   iosMessageAutomationVerified,
+  iosOneToggleCaptureAvailable,
   iosSupportsNotificationAutomation,
   isIosLegacyCaptureUpgrade,
   resolveIosSelectedReadiness,
@@ -68,8 +71,6 @@ import {
 } from '@/lib/ios-message-onboarding';
 import { GROWTH_PLACEMENTS, trackGrowthEvent } from '@/lib/growth-funnel';
 import {
-  onboardingHistoryGap,
-  onboardingInsightKeys,
   onboardingLandingPath,
   onboardingProfileAtStage,
 } from '@/lib/onboarding';
@@ -141,7 +142,6 @@ export default function IosSetupScreen() {
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
   const shortcutCopy = iosShortcutSetupCopy(language);
-  const onboardingInsight = onboardingInsightKeys(state.onboardingProfile?.focus ?? null);
   // The History Shortcut returns through `wafra://ios-setup?section=history`,
   // which cannot carry the onboarding query, and a deep link into the mounted
   // route replaces its params. First-run state is durable in the store, so
@@ -209,9 +209,13 @@ export default function IosSetupScreen() {
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
-  // Past messages need iOS 26. Where that is impossible the optional card is
-  // not shown at all, and the saved section cannot hide the only row.
-  const historyVisible = historySupported;
+  const [guideScreen, setGuideScreen] = useState(0);
+  const [allStepsVisible, setAllStepsVisible] = useState(false);
+  // Past SMS import is experimental on iPhone: statements bring in the past.
+  // It is reached only from Settings → Advanced (`section=history`) or to
+  // finish a handoff that is already running. It needs iOS 26 either way.
+  const historyVisible = historySupported &&
+    (requestedSection === 'history' || historySetup.handoffStartedAt !== null);
   const activeSection = historyVisible ? progress.activeSection : 'future';
   const activeMessageCheckFailed = messageMode && activeSection === 'future' &&
     (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
@@ -342,22 +346,19 @@ export default function IosSetupScreen() {
   // screen that flickers. Pop to the existing root and switch tabs there. A
   // cold deep-link launch with nothing beneath this screen keeps the replace.
   /**
-   * Where setup lets go of the user.
+   * Where setup lets go of the user: the view they chose.
    *
-   * Normally the view they chose. But an iPhone has no completion screen in
-   * the gate — setup exits straight into the app — so the statement offer that
-   * Android shows there has nowhere to appear. For a bank that leaves no
-   * history to read, this exit IS the offer: it finishes the sentence the
-   * alert question started rather than dropping them on Home having been told
-   * their past is missing and then shown nothing about it. One tap backs out.
+   * The iPhone first run now offers bank statements (the past) BEFORE live
+   * capture (the future), so setup no longer ends on the statement importer
+   * for a bank that leaves no history to read — that offer was already made
+   * one step earlier, and repeating it here read as the app forgetting.
    */
-  const finishDestination = useCallback(() => (
-    onboardingHistoryGap(state.onboardingProfile?.alerts)
-      ? '/statement-import' as const
-      : onboardingLandingPath(state.onboardingProfile?.focus ?? null)
-  ), [state.onboardingProfile?.alerts, state.onboardingProfile?.focus]);
+  const finishDestination = useCallback(
+    () => onboardingLandingPath(state.onboardingProfile?.focus ?? null),
+    [state.onboardingProfile?.focus],
+  );
 
-  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath> | '/statement-import') => {
+  const exitToRoot = useCallback((href: ReturnType<typeof onboardingLandingPath>) => {
     if (router.canGoBack()) {
       router.dismissAll();
       router.navigate(href);
@@ -913,9 +914,6 @@ export default function IosSetupScreen() {
     !futureProgress.futureShortcutConfirmed
     ? 'add-shortcut'
     : resolveIosFutureSetupStep(futureProgress, setup.readiness, messageMode ? setup.shortcutVersion : undefined);
-  const futureStatus = legacyUpgrade ? 'complete'
-    : !setup.loading && !futureConfigured && futureProgress.futureStatus === 'complete'
-      ? 'in-progress' : futureProgress.futureStatus;
   autoCheckAction.current = messageMode && futureStep === 'confirm-shortcut' && setup.shortcutVersion === 3
     ? confirmFutureShortcut : null;
   const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
@@ -925,13 +923,12 @@ export default function IosSetupScreen() {
   const historyRunning = historySetup.handoffStartedAt !== null;
   const historyComplete = progress.historyStatus === 'complete';
   const historyDeferred = progress.historyStatus === 'skipped' && progress.historySkippedForNow === true;
-  const futureDetail = legacyUpgrade ? shortcutCopy.upgradeDetail
-    : setup.readiness === 'first-alert-captured' ? futureReadyLabel
-      : !futureConfigured ? undefined
-        : !messageMode ? journeyCopy.waiting
-          : automationVerified ? shortcutCopy.verifiedAutomation : shortcutCopy.waitingAutomation;
   const openExistingAutomation = () => void runOperation(() => send({ type: 'open-automation', existing: true }));
   const showingAutomation = !failedMessageCheck && (futureStep === 'create-automation' || showAutomationGuide);
+  // Each visit to the automation walkthrough starts at its first screen.
+  useEffect(() => {
+    if (!showingAutomation) setGuideScreen(0);
+  }, [showingAutomation]);
 
   const openHelp = () => {
     setPrivacyExpanded(false);
@@ -1004,6 +1001,20 @@ export default function IosSetupScreen() {
   }
 
   const onboardingPresentation = fromOnboarding || progress.returnToOnboarding;
+  const stage = iosCaptureGuideStage(futureStep);
+  const guideShown = Math.min(guideScreen, shortcutCopy.guide.length - 1);
+  const guide = shortcutCopy.guide[guideShown];
+  const fillShortcut = (value: string) => value.replace('{shortcut}', shortcutName);
+  const stepLabels = [shortcutCopy.stepAdd, shortcutCopy.stepTest, shortcutCopy.stepAutomate];
+  // Placeholder for the iOS 27 one-toggle path. Off until its Shortcut ships.
+  const oneTogglePath = messageMode && iosOneToggleCaptureAvailable(Platform.Version);
+  const historyMode = historyVisible && activeSection === 'history';
+  const firstAlertSeen = setup.readiness === 'first-alert-captured';
+  const guideVisible = !historyMode && progressLoaded && !setup.loading;
+  const showStepProgress = guideVisible && messageMode && setup.supported && setup.failure !== 'load' &&
+    !legacyUpgrade && !automationRelink && !oneTogglePath && stage !== 'done';
+  const nextGuideScreen = () => setGuideScreen((value) => Math.min(value + 1, shortcutCopy.guide.length - 1));
+  const previousGuideScreen = () => setGuideScreen((value) => Math.max(value - 1, 0));
   return (
     <SetupShell onboarding={onboardingPresentation}>
     <ThemedView style={[styles.root, onboardingPresentation && { backgroundColor: 'transparent' }]}>
@@ -1016,120 +1027,22 @@ export default function IosSetupScreen() {
           showsVerticalScrollIndicator={false}>
           <SetupHeader
             onboarding={onboardingPresentation}
-            title={t('iosMessageSetupHeading')}
-            subtitle={t('iosMessageSetupSubtitle')}
+            title={historyMode ? t('iosPastSmsTitle') : shortcutCopy.liveTitle}
+            subtitle={historyMode ? t('iosPastSmsDetail') : shortcutCopy.liveSubtitle}
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
             actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
           />
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
-          ) : (
+          ) : historyMode ? (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
               <ChecklistRow
-                title={t('iosMessageFutureTitle')}
-                detail={futureDetail}
-                status={futureStatus}
-                expanded={activeSection === 'future'}
-                onPress={() => selectSection('future')}>
-                {applePayMode ? (
-                  <>
-                    <ThemedText type="small" themeColor="textSecondary">{applePaySummary}</ThemedText>
-                    <Button label={applePayLabel} onPress={openApplePaySetup} disabled={busy} wrapLabel />
-                    <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
-                  </>
-                ) : notificationMode ? (
-                  <>
-                    <ThemedText type="small" themeColor="textSecondary">{t('iosNotificationSetupSummary')}</ThemedText>
-                    <Button label={t('iosNotificationSetupAction')} onPress={openNotificationSetup} disabled={busy} wrapLabel />
-                    <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
-                  </>
-                ) : !setup.supported ? (
-                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUnsupported')}</ThemedText>
-                ) : setup.failure === 'load' ? (
-                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
-                ) : legacyUpgrade && !showAutomationGuide ? (
-                  <View testID="ios-capture-upgrade" style={{ gap: Spacing.two }}>
-                    <ThemedText type="smallBold">{shortcutCopy.upgradeTitle}</ThemedText>
-                    <ThemedText type="small">{shortcutCopy.upgradeBody}</ThemedText>
-                    <Button label={shortcutCopy.upgradeAction} onPress={installFutureShortcut}
-                      disabled={busy || !setup.shortcutAvailable} wrapLabel />
-                  </View>
-                ) : showingAutomation ? (
-                  <>
-                    <ThemedText type="smallBold">{automationRelink ? shortcutCopy.relinkTitle : shortcutCopy.automate}</ThemedText>
-                    {automationRelink ? (
-                      <ThemedText type="small">{shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}</ThemedText>
-                    ) : (
-                      <>
-                        <AutomationGuide shortcutName={shortcutName} />
-                        <ThemedText type="small" themeColor="textSecondary">{shortcutCopy.existing}</ThemedText>
-                      </>
-                    )}
-                    {/* Opening Shortcuts is the next step; the confirmation comes after it. */}
-                    <Button label={automationRelink ? shortcutCopy.editExisting : t('iosLocalOpenAutomation')}
-                      onPress={automationRelink ? openExistingAutomation : openAutomation} disabled={busy} wrapLabel />
-                    <Button label={automationRelink ? shortcutCopy.relinkConfirm : t('iosLocalAutomationAdded')}
-                      variant="outline" onPress={confirmAutomation} disabled={busy} wrapLabel />
-                    {!automationRelink && <Button label={shortcutCopy.editExisting} variant="ghost"
-                      onPress={openExistingAutomation} disabled={busy} wrapLabel />}
-                  </>
-                ) : futureStep === 'prove-shortcut' ? (
-                  <>
-                    <ThemedText type="smallBold">{shortcutCopy.check}</ThemedText>
-                    <ThemedText type="small">{shortcutCopy.checkBody}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">{`${shortcutCopy.name}: ${shortcutName}`}</ThemedText>
-                    {checkStopped && !shortcutCheckFailed && (
-                      <View accessibilityLiveRegion="polite">
-                        <ThemedText testID="ios-shortcut-check-stopped" accessibilityRole="alert" type="smallBold">{shortcutCopy.stopped}</ThemedText>
-                      </View>
-                    )}
-                    {shortcutCheckFailed ? <View testID="ios-shortcut-check-recovery" style={{ gap: Spacing.two }}>
-                      <ThemedText accessibilityRole="alert" type="smallBold">{shortcutCopy.failed}</ThemedText>
-                      <ThemedText type="small">{shortcutCopy.repairBody}</ThemedText>
-                      <Button label={shortcutCopy.repair} onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />
-                      <Button label={shortcutCopy.retry} variant="outline" onPress={checkFutureShortcut} disabled={busy} wrapLabel />
-                    </View> : <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />}
-                    <ThemedText type="meta" themeColor="textSecondary">{shortcutCopy.checkNote}</ThemedText>
-                    <Button label={shortcutCopy.permissions} variant="ghost" onPress={openHelp} disabled={busy} wrapLabel />
-                  </>
-                ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
-                  <>
-                    <ThemedText type="smallBold">{shortcutCopy.add}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">{`${shortcutCopy.name}: ${shortcutName}`}</ThemedText>
-                    {setup.shortcutVersion === 3 && <ThemedText type="small">{shortcutCopy.bundled}</ThemedText>}
-                    {setup.shortcutVersion === 3 && futureStep === 'confirm-shortcut' &&
-                      <ThemedText type="meta" themeColor="textSecondary">{shortcutCopy.autoCheck}</ThemedText>}
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {tf(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
-                        : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp',
-                      { shortcut: shortcutName })}
-                    </ThemedText>
-                    <Button
-                      label={futureStep === 'confirm-shortcut' && setup.shortcutVersion === 3 ? shortcutCopy.addedCheck
-                        : t(futureStep === 'add-shortcut' ? 'iosLocalInstallShortcut' : 'iosLocalAlreadyAdded')}
-                      onPress={futureStep === 'add-shortcut' ? installFutureShortcut : confirmFutureShortcut}
-                      disabled={busy || (futureStep === 'add-shortcut' && !setup.shortcutAvailable)}
-                      wrapLabel
-                    />
-                    {futureStep === 'confirm-shortcut' && <Button label={t('iosMessageAddAgain')} variant="ghost"
-                      onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />}
-                  </>
-                ) : null}
-                {historyVisible && futureConfigured && !historyComplete && !historyDeferred && !showAutomationGuide && (
-                  <>
-                    <ThemedText type="small" themeColor="textSecondary">{t('iosMessageFutureReadyChoice')}</ThemedText>
-                    <Button label={t('iosMessageNextHistory')} variant="ghost"
-                      onPress={() => selectSection('history')} disabled={busy} wrapLabel />
-                  </>
-                )}
-              </ChecklistRow>
-              {historyVisible && <ChecklistRow
                 title={t('iosMessagePastTitle')}
                 detail={historyComplete ? t('iosMessageHistoryDone')
                   : historyDeferred ? t('iosMessageHistoryDeferred') : undefined}
                 status={progress.historyStatus}
                 statusLabel={historyDeferred ? shortcutCopy.statusSkipped : undefined}
-                expanded={activeSection === 'history'}
+                expanded
                 onPress={() => selectSection('history')}>
                 {historyDeferred ? (
                   <>
@@ -1217,10 +1130,138 @@ export default function IosSetupScreen() {
                       onPress={confirmSkipHistory} disabled={busy || !futureConfigured} wrapLabel />
                   </>
                 )}
-              </ChecklistRow>}
+                {historyComplete && !futureConfigured && <Button label={t('iosMessageNextFuture')} variant="ghost"
+                  onPress={() => selectSection('future')} disabled={busy} wrapLabel />}
+              </ChecklistRow>
+            </View>
+          ) : (
+            <View testID="ios-message-setup-guide" style={styles.guide}>
+              {showStepProgress && (
+                <StepProgress current={typeof stage === 'number' ? stage : 4} labels={stepLabels} template={shortcutCopy.stepOf} />
+              )}
+              {applePayMode ? (
+                <SetupStep badge="1" title={applePayLabel} body={applePaySummary}
+                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.waiting } : null}>
+                  <Button label={applePayLabel} onPress={openApplePaySetup} disabled={busy} wrapLabel />
+                  <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
+                </SetupStep>
+              ) : notificationMode ? (
+                <SetupStep badge="1" title={t('iosNotificationSetupAction')} body={t('iosNotificationSetupSummary')}
+                  result={futureConfigured ? { tone: 'pass', title: journeyCopy.waiting } : null}>
+                  <Button label={t('iosNotificationSetupAction')} onPress={openNotificationSetup} disabled={busy} wrapLabel />
+                  <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
+                </SetupStep>
+              ) : !setup.supported ? (
+                <SetupResult tone="info" title={t('iosLocalUnsupported')} />
+              ) : setup.failure === 'load' ? (
+                <SetupResult tone="fail" title={t('iosLocalUpdateRequired')} />
+              ) : oneTogglePath ? (
+                // iOS 27 hook: stays unreachable until the one-toggle Shortcut
+                // is authored on a physical iOS 27 iPhone and bundled.
+                <SetupStep testID="ios-one-toggle-capture" badge="1" title={shortcutCopy.oneToggleTitle}
+                  body={shortcutCopy.oneToggleBody} />
+              ) : legacyUpgrade && !showAutomationGuide ? (
+                <SetupStep testID="ios-capture-upgrade" badge="1" title={shortcutCopy.upgradeTitle}
+                  body={shortcutCopy.upgradeBody} result={{ tone: 'pass', title: shortcutCopy.upgradeDetail }}>
+                  <Button label={shortcutCopy.upgradeAction} onPress={installFutureShortcut}
+                    disabled={busy || !setup.shortcutAvailable} wrapLabel />
+                </SetupStep>
+              ) : showingAutomation && automationRelink ? (
+                <SetupStep badge="3" title={shortcutCopy.relinkTitle}
+                  body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}>
+                  <Button label={shortcutCopy.editExisting} onPress={openExistingAutomation} disabled={busy} wrapLabel />
+                  <Button label={shortcutCopy.relinkConfirm} variant="outline" onPress={confirmAutomation}
+                    disabled={busy} wrapLabel />
+                </SetupStep>
+              ) : showingAutomation ? (
+                <>
+                  <SetupStep testID="ios-automation-guide-step" badge={`3.${guideShown + 1}`} title={guide.title}
+                    body={fillShortcut(guide.body)} chips={guide.chips.map(fillShortcut)}
+                    chipsPrefix={shortcutCopy.inShortcuts}>
+                    {guideShown === 0 ? (
+                      <>
+                        {/* Opening Shortcuts is the next step; the confirmation comes last. */}
+                        <Button label={t('iosLocalOpenAutomation')} onPress={() => {
+                          nextGuideScreen();
+                          openAutomation();
+                        }} disabled={busy} wrapLabel />
+                        <Button label={shortcutCopy.next} variant="ghost" onPress={nextGuideScreen} disabled={busy} wrapLabel />
+                      </>
+                    ) : guideShown < shortcutCopy.guide.length - 1 ? (
+                      <>
+                        <Button label={shortcutCopy.next} onPress={nextGuideScreen} disabled={busy} wrapLabel />
+                        <Button label={shortcutCopy.previous} variant="ghost" onPress={previousGuideScreen} disabled={busy} wrapLabel />
+                      </>
+                    ) : (
+                      <>
+                        <Button label={t('iosLocalAutomationAdded')} onPress={confirmAutomation} disabled={busy} wrapLabel />
+                        <Button label={shortcutCopy.previous} variant="ghost" onPress={previousGuideScreen} disabled={busy} wrapLabel />
+                      </>
+                    )}
+                  </SetupStep>
+                  <Button label={allStepsVisible ? t('close') : shortcutCopy.allSteps} variant="ghost"
+                    onPress={() => setAllStepsVisible((value) => !value)} disabled={busy} wrapLabel />
+                  {allStepsVisible && (
+                    <View style={styles.allSteps}>
+                      <AutomationGuide shortcutName={shortcutName} />
+                      <ThemedText type="meta" themeColor="textSecondary">{shortcutCopy.existing}</ThemedText>
+                      <Button label={shortcutCopy.editExisting} variant="ghost" onPress={openExistingAutomation}
+                        disabled={busy} wrapLabel />
+                    </View>
+                  )}
+                </>
+              ) : futureStep === 'prove-shortcut' ? (
+                <SetupStep testID="ios-shortcut-check-step" badge="2" title={shortcutCopy.check} body={shortcutCopy.checkBody}
+                  result={shortcutCheckFailed
+                    ? { tone: 'fail', title: shortcutCopy.failed, body: shortcutCopy.repairBody }
+                    : checkStopped ? { tone: 'info', title: shortcutCopy.stopped } : null}>
+                  {shortcutCheckFailed ? (
+                    <View testID="ios-shortcut-check-recovery" style={styles.actions}>
+                      <Button label={shortcutCopy.repair} onPress={installFutureShortcut}
+                        disabled={busy || !setup.shortcutAvailable} wrapLabel />
+                      <Button label={shortcutCopy.retry} variant="outline" onPress={checkFutureShortcut} disabled={busy} wrapLabel />
+                    </View>
+                  ) : (
+                    <Button label={t('iosMessageRunPermissionCheck')} onPress={checkFutureShortcut} disabled={busy} wrapLabel />
+                  )}
+                </SetupStep>
+              ) : futureStep === 'add-shortcut' ? (
+                <SetupStep testID="ios-add-shortcut-step" badge="1" title={shortcutCopy.add}
+                  body={!setup.shortcutAvailable ? tf('iosLocalShortcutUnavailable', { shortcut: shortcutName })
+                    : setup.shortcutVersion === 3 ? shortcutCopy.bundled
+                      : tf('iosMessageFutureInstallHelp', { shortcut: shortcutName })}
+                  chips={setup.shortcutAvailable && setup.shortcutVersion === 3 ? shortcutCopy.bundledChips : undefined}>
+                  <Button label={t('iosLocalInstallShortcut')} onPress={installFutureShortcut}
+                    disabled={busy || !setup.shortcutAvailable} wrapLabel />
+                </SetupStep>
+              ) : futureStep === 'confirm-shortcut' ? (
+                <SetupStep testID="ios-confirm-shortcut-step" badge="1" title={shortcutCopy.confirmTitle}
+                  body={setup.shortcutVersion === 3 ? shortcutCopy.confirmBody
+                    : tf('iosMessageFutureReturnHelp', { shortcut: shortcutName })}>
+                  <Button label={setup.shortcutVersion === 3 ? shortcutCopy.addedCheck : t('iosLocalAlreadyAdded')}
+                    onPress={confirmFutureShortcut} disabled={busy} wrapLabel />
+                  <Button label={t('iosMessageAddAgain')} variant="ghost"
+                    onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />
+                </SetupStep>
+              ) : futureStep === 'ready' ? (
+                <SetupStep testID="ios-capture-ready" badge="✓" title={shortcutCopy.doneTitle}
+                  body={firstAlertSeen || automationVerified ? shortcutCopy.doneVerifiedBody : shortcutCopy.doneBody}
+                  result={{
+                    tone: 'pass',
+                    title: firstAlertSeen ? futureReadyLabel
+                      : automationVerified ? shortcutCopy.verifiedAutomation : shortcutCopy.testPassed,
+                    body: firstAlertSeen || automationVerified ? undefined : shortcutCopy.waitingAutomation,
+                  }} />
+              ) : null}
+              {checkStopped && !shortcutCheckFailed && futureStep !== 'prove-shortcut' && (
+                <View accessibilityLiveRegion="polite">
+                  <ThemedText testID="ios-shortcut-check-stopped" accessibilityRole="alert" type="smallBold">{shortcutCopy.stopped}</ThemedText>
+                </View>
+              )}
             </View>
           )}
-          {progressLoaded && !setup.loading && ((setup.applePaySupported && !applePayMode) ||
+          {/* Optional sources live here, outside first-run setup. */}
+          {guideVisible && !fromOnboarding && ((setup.applePaySupported && !applePayMode) ||
             (offersNotifications && !notificationMode)) && (
             <View testID="ios-setup-other-sources" style={styles.otherWays}>
               <ThemedText type="smallBold">{shortcutCopy.otherWays}</ThemedText>
@@ -1233,15 +1274,6 @@ export default function IosSetupScreen() {
                   disabled={busy} wrapLabel />
               )}
             </View>
-          )}
-          {fromOnboarding && setupComplete && (
-            <Block style={styles.completionReveal}>
-              <ThemedText type="smallBold">{t('onboardCompleteAutomaticTitle')}</ThemedText>
-              <ThemedText type="small">{t(onboardingInsight.title)}</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">
-                {t(onboardingInsight.body)}
-              </ThemedText>
-            </Block>
           )}
           {error && !shortcutCheckFailed && (
             <View accessibilityLiveRegion="polite">
@@ -1286,15 +1318,6 @@ export default function IosSetupScreen() {
         {showFooterAction && (
           <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
             <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
-            {fromOnboarding && !setupComplete && (
-              <Button
-                label={t('iosMessageContinueManual')}
-                variant="ghost"
-                onPress={continueWithoutAutomaticCapture}
-                disabled={busy || !progressLoaded}
-                wrapLabel
-              />
-            )}
           </View>
         )}
         {fromOnboarding && !showFooterAction && progressLoaded && (
@@ -1350,9 +1373,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
+  guide: { gap: Spacing.three },
+  allSteps: { gap: Spacing.two },
+  actions: { gap: Spacing.two },
   hints: { marginTop: Spacing.one },
   progress: { gap: Spacing.one },
-  completionReveal: { gap: Spacing.one },
   otherWays: { gap: Spacing.two, marginTop: Spacing.two },
   footer: {
     width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',

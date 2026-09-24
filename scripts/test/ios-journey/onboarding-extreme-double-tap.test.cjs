@@ -55,18 +55,28 @@ test('rapid alternating Next and Back cannot undo a transition before its screen
   await h.press('continueWord'); stage(h, 'alerts');
 });
 
-test('Preview second tap cannot start automatic or manual capture on the next screen', async t => {
+test('Preview second tap cannot open statements, skip them, or start capture on the next screens', async t => {
   const h = await open(t, { profile: profile('preview') });
   await h.press('onboardConnectMyMoney'); stage(h, 'capture');
   await h.advance(30);
-  assert.equal(h.control('onboardAutomaticChoiceIos').disabled, true);
-  assert.equal(h.control('onboardManualChoiceIos').disabled, true);
-  h.control('onboardAutomaticChoiceIos').onPress();
-  h.control('onboardManualChoiceIos').onPress(); await h.flush();
+  assert.equal(h.control('onboardPastAction').disabled, true);
+  assert.equal(h.control('onboardLater').disabled, true);
+  h.control('onboardPastAction').onPress();
+  h.control('onboardLater').onPress(); await h.flush();
   assert.deepEqual(writes(h), []);
   assert.deepEqual(h.routes, []);
+  assert.equal(h.input.pathname, '/');
   await h.advance(320);
-  await h.press('onboardAutomaticChoiceIos');
+  // Later is itself a transition: its second tap cannot also start capture.
+  await h.press('onboardLater');
+  await h.advance(30);
+  assert.equal(h.control('onboardLiveAction').disabled, true);
+  assert.equal(h.control('onboardNotNow').disabled, true);
+  h.control('onboardLiveAction').onPress();
+  h.control('onboardNotNow').onPress(); await h.flush();
+  assert.deepEqual(writes(h), []);
+  await h.advance(320);
+  await h.press('onboardLiveAction');
   assert.deepEqual(writes(h).map(event => event[1]), [false]);
   assert.deepEqual(h.routes, [['push', '/ios-setup?fromOnboarding=1']]);
 });

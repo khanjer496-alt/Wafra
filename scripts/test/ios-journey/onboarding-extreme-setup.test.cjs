@@ -10,6 +10,8 @@ const ORIGIN = 'wafra/ios-history-return-origin/v1';
 const INSTALLED = 'wafra/ios-history-shortcut-installed/v2';
 const LIVE_URL = 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef';
 const HISTORY_URL = 'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789';
+// Guided iPhone setup copy (one sentence per step; errors name one action).
+const iosEn = load(path.join(root, 'src/lib/ios-shortcut-setup-copy.ts')).iosShortcutSetupCopy('en');
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -53,6 +55,7 @@ async function screen(t, options = {}) {
   } } };
   const source = (file, deps = {}) => load(path.join(root, file), deps, environment);
   const copy = source('src/lib/i18n.ts');
+  const iosCopy = source('src/lib/ios-shortcut-setup-copy.ts').iosShortcutSetupCopy(options.language ?? 'en');
   copy.setLanguage(options.language ?? 'en');
   const values = options.values ?? new Map();
   if (options.progress) values.set(PROGRESS, JSON.stringify({
@@ -153,6 +156,7 @@ async function screen(t, options = {}) {
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
     '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
+    '@/components/ios-message-setup/setup-step': { SetupStep: 'SetupStep', SetupResult: 'SetupResult', StepProgress: 'StepProgress' },
     '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },
     '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
     '@/components/themed-view': { ThemedView: 'ThemedView' },
@@ -215,15 +219,34 @@ async function screen(t, options = {}) {
     growth, announcements, store, copy, dispose, history, progress,
     saved: () => JSON.parse(values.get(PROGRESS)),
     get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },
-    text: () => all().filter(node => node.type === 'Text').flatMap(node => node.props.children).join(' '),
+    // Visible words: text nodes plus the guided step and result cards' own
+    // title/body props (those components are presentational boundaries here).
+    text: () => all().flatMap(node => node.type === 'Text' ? [node.props.children].flat()
+      : ['SetupStep', 'SetupResult'].includes(node.type)
+        ? [node.props.title, node.props.body, node.props.result?.title, node.props.result?.body]
+        : []).filter(value => value !== undefined && value !== null).join(' '),
     async foreground(count = 1) { for (let n = 0; n < count; n++) for (const fn of listeners) fn('active'); await flush(); },
     /** Wafra really left (e.g. to Shortcuts) and came back. */
     async leaveAndReturn() { for (const fn of [...listeners]) fn('background'); for (const fn of [...listeners]) fn('active'); await flush(); },
     async callback(result) { params.shortcutResult = result; await flush(); },
     async returnWith(patch) { Object.assign(params, patch); await flush(); },
+    /**
+     * Past SMS import is reached only as Settings → Advanced does it: the
+     * route's `section=history`. The guide itself has no History row.
+     */
     async section(section) {
-      const title = copy.t(section === 'history' ? 'iosMessagePastTitle' : 'iosMessageFutureTitle');
-      all().find(node => node.type === 'ChecklistRow' && node.props.title === title).props.onPress(); await flush();
+      if (section === 'history') { params.section = 'history'; await flush(); return; }
+      const next = button('iosMessageNextFuture');
+      if (next) { next.onPress(); await flush(); }
+    },
+    /** Walk the one-screen-per-step automation guide to its confirmation. */
+    async automate() {
+      for (let n = 0; n < 4 && !button('iosLocalAutomationAdded'); n++) {
+        const next = all().find(node => node.type === 'Button' && node.props.label === iosCopy.next);
+        assert.ok(next, `Visible Next on the automation guide: ${all().filter(n => n.type === 'Button').map(n => n.props.label)}`);
+        next.props.onPress(); await flush();
+      }
+      await press('iosLocalAutomationAdded');
     },
     async help(key) { await press('iosMessageLearnMore'); await press(key); },
     async confirm(key, cancel = false) {
@@ -323,12 +346,18 @@ test('native capture unavailable on entry recovers through Retry without claimin
   assert.equal(s.nativeStatus.enabled, false);
 });
 
-test('iOS 27 can choose notifications before answering the bank-name question', async t => {
-  const s = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true });
+test('iOS 27 bank-app notifications stay out of first-run setup and open from Settings', async t => {
+  const first = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true });
+  assert.equal(first.button('iosNotificationSetupAction'), undefined, 'optional sources are not part of onboarding');
+  first.dispose();
+  const s = await screen(t, { version: '27.0', knownBanks: [], notificationCaptureSupported: true,
+    params: { fromOnboarding: '0' } });
   await s.press('iosNotificationSetupAction');
-  // Opening another source's setup is navigation only; nothing saved changes.
-  assert.equal(s.saved().futureCaptureSource, undefined);
-  assert.equal(s.saved().futureAutomationConfirmed, false);
+  // Opening another source's setup is navigation only; nothing saved changes
+  // (from Settings there may be no saved setup progress at all).
+  const saved = s.values.has(PROGRESS) ? s.saved() : {};
+  assert.equal(saved.futureCaptureSource, undefined);
+  assert.notEqual(saved.futureAutomationConfirmed, true);
   assert.equal(s.routes.at(-1)[1].pathname, '/ios-notification-setup');
   assert.deepEqual(s.store.state.knownBanks, []);
   assert.equal(s.nativeStatus.enabled, false);
@@ -475,12 +504,13 @@ test('proof callback success cannot fabricate first SMS and error callback gets 
   assert.equal(s.nativeStatus.firstCapturedAt, null);
   assert.ok(s.button('iosMessageRunPermissionCheck'));
   await s.callback('error');
-  assert.ok(s.text().includes('The Shortcut did not finish the setup check.'),
+  assert.ok(s.text().includes(iosEn.failed),
     'Apple x-error return must explain that the Shortcut failed instead of silently showing the same guide.');
   await s.foreground(2);
-  assert.ok(s.text().includes('The Shortcut did not finish the setup check.'),
+  assert.ok(s.text().includes(iosEn.failed),
     'Foreground notifications after the callback must not erase the failure before the user retries.');
-  const repair = s.all().find(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut');
+  assert.ok(s.all().some(n => n.type === 'SetupStep' && n.props.result?.tone === 'fail'), 'the Test step shows a fail result');
+  const repair = s.all().find(n => n.type === 'Button' && n.props.label === iosEn.repair);
   assert.ok(repair, 'repair must be on the failed step, not buried in Help');
   repair.props.onPress(); await s.flush();
   assert.ok(s.urls.some(url => url.startsWith('https://www.icloud.com/shortcuts/')));
@@ -493,7 +523,7 @@ test('canceled proof and unknown callbacks preserve retry without inventing capt
   for (const callback of ['cancel', 'unknown', '', 'success']) {
     await s.callback(callback); await s.foreground(2);
     // A stopped check says so instead of silently showing the same step.
-    if (callback === 'cancel') assert.ok(s.text().includes('Check was stopped — run it again when ready.'));
+    if (callback === 'cancel') assert.ok(s.text().includes(iosEn.stopped));
     assert.equal(s.saved().futureStatus, 'in-progress');
     assert.equal(s.nativeStatus.firstCapturedAt, null);
     assert.equal(s.onboarded, false);
@@ -503,16 +533,17 @@ test('canceled proof and unknown callbacks preserve retry without inventing capt
 
 test('native proof, real first-alert receipt, and lost native readiness remain visibly distinct', async t => {
   const s = await screen(t, { progress: { futureAutomationConfirmed: true }, nativeStatus: proven });
-  const row = () => s.all().find(node => node.type === 'ChecklistRow' && node.props.title === s.copy.t('iosMessageFutureTitle')).props;
-  assert.equal(row().status, 'complete');
+  // The done card's result names the evidence it has: a local test, or a real alert.
+  const done = () => s.all().find(node => node.type === 'SetupStep' && node.props.testID === 'ios-capture-ready')?.props;
+  assert.equal(done().result.tone, 'pass');
   assert.equal(s.nativeStatus.firstCapturedAt, null);
-  assert.notEqual(row().detail, s.copy.t('iosLocalFirstAlertCaptured'));
+  assert.equal(done().result.title, iosEn.testPassed);
   s.nativeStatus.firstCapturedAt = Date.now(); await s.foreground();
-  assert.equal(row().detail, s.copy.t('iosLocalFirstAlertCaptured'));
+  assert.equal(done().result.title, s.copy.t('iosLocalFirstAlertCaptured'));
   assert.ok(s.announcements.includes(s.copy.t('iosLocalFirstAlertCaptured')));
   s.controls.beforeStatus = async () => { throw Error('native unavailable'); };
   await s.foreground();
-  assert.notEqual(row().status, 'complete');
+  assert.equal(done(), undefined, 'lost native readiness is not shown as done');
   assert.ok(s.text().includes(s.copy.t('iosLocalUpdateRequired')));
   assert.equal(s.button('iosMessageContinue'), undefined);
 });
@@ -695,14 +726,15 @@ test('retrying an action failure preserves the section selected after the initia
 });
 
 const labelled = (s, label) => s.all().find(n => n.type === 'Button' && n.props.label === label)?.props;
-const futureRow = s => s.all().find(n => n.type === 'ChecklistRow' && n.props.title === s.copy.t('iosMessageFutureTitle')).props;
+const step = (s, testID) => s.all().find(n => n.type === 'SetupStep' && n.props.testID === testID)?.props;
 
 test('a working v2 setup is shown as one upgrade card, not a broken setup, until its owner starts', async t => {
   const s = await screen(t, { bundled: true, progress: ready, nativeStatus: { ...proven, setupProofAt: Date.now() - 60_000 } });
   assert.ok(s.all().some(n => n.props?.testID === 'ios-capture-upgrade'));
-  assert.ok(labelled(s, 'Update Shortcut'));
+  assert.ok(labelled(s, iosEn.upgradeAction));
   assert.equal(s.button('iosLocalInstallShortcut'), undefined, 'no unexplained "Add the Shortcut" step');
-  assert.deepEqual([futureRow(s).status, futureRow(s).detail], ['complete', 'Working · update available']);
+  assert.deepEqual([step(s, 'ios-capture-upgrade').result.tone, step(s, 'ios-capture-upgrade').result.title],
+    ['pass', 'Working · update available']);
   await s.foreground(2);
   assert.equal(s.saved().futureStatus, 'complete', 'no downgraded status is written before the owner starts');
   assert.equal(s.saved().futureAutomationConfirmed, true, 'Home keeps reporting the working setup');
@@ -711,11 +743,11 @@ test('a working v2 setup is shown as one upgrade card, not a broken setup, until
 test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing the existing automation', async t => {
   const s = await screen(t, { bundled: true, progress: ready,
     nativeStatus: { ...proven, setupProofAt: Date.now() - 60_000, firstCapturedAt: Date.now() - 60_000 } });
-  labelled(s, 'Update Shortcut').onPress(); await s.flush();
+  labelled(s, iosEn.upgradeAction).onPress(); await s.flush();
   assert.equal(s.urls[0], 'file:///app/Wafra%20Capture%20v3.shortcut');
   assert.equal(s.saved().futureAutomationConfirmed, true, 'starting the update never flips Home');
   assert.equal(s.saved().futureAutomationRelink, true);
-  labelled(s, 'I added it — run setup check').onPress(); await s.flush();
+  labelled(s, iosEn.addedCheck).onPress(); await s.flush();
   assert.ok(s.button('iosMessageRunPermissionCheck'));
   assert.equal(s.urls.length, 2, 'confirmation starts the setup check');
   assert.equal(new URL(s.urls[1]).searchParams.get('name'), 'Wafra Capture v3');
@@ -723,7 +755,7 @@ test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing th
   assert.ok(s.button('iosMessageRunPermissionCheck'), 'old v2 receipt cannot prove the v3 run');
   s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
   // Proven, but the old automation still runs the old Shortcut: point it at v3.
-  assert.ok(labelled(s, 'Edit an existing automation'));
+  assert.ok(labelled(s, iosEn.editExisting));
   assert.equal(s.button('iosMessageContinue'), undefined);
   labelled(s, 'I updated the automation').onPress(); await s.flush();
   assert.equal(s.saved().futureAutomationRelink, undefined);
@@ -741,9 +773,9 @@ test('reinstalling keeps the confirmed automation; a stopped check cannot reuse 
   await s.help('iosMessageAddAgain');
   assert.equal(s.saved().futureAutomationConfirmed, true, 'Home is unchanged until a new check succeeds');
   assert.ok(Number.isSafeInteger(s.saved().futureAttemptStartedAt));
-  labelled(s, 'I added it — run setup check').onPress(); await s.flush();
+  labelled(s, iosEn.addedCheck).onPress(); await s.flush();
   await s.callback('cancel');
-  assert.ok(s.text().includes('Check was stopped — run it again when ready.'));
+  assert.ok(s.text().includes(iosEn.stopped));
   assert.ok(s.button('iosMessageRunPermissionCheck'), 'the older proof is not the result of this attempt');
   assert.equal(s.button('iosMessageContinue'), undefined);
   assert.equal(s.saved().futureAutomationConfirmed, true);
@@ -765,44 +797,59 @@ test('returning from the Shortcuts share sheet runs the setup check once, withou
   assert.equal(s.urls.length, 2, 'the automatic check runs once per install');
 });
 
-test('automation step leads with Open Shortcuts and says honestly how the automation is verified', async t => {
+test('automation guide is one Apple screen per step, leads with Open Shortcuts, and is honest about verification', async t => {
   const s = await screen(t, { bundled: true, progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3 },
     nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 } });
+  const progress = s.all().find(n => n.type === 'StepProgress');
+  assert.equal(progress.props.current, 3, 'the guide shows step 3 of 3 (Automate)');
+  const first = step(s, 'ios-automation-guide-step');
+  assert.deepEqual([first.badge, first.title, first.chips.join(' › ')], ['3.1', 'Open Shortcuts', 'Automation › +']);
   const buttons = s.all().filter(n => n.type === 'Button');
-  const open = buttons.find(n => n.props.label === 'Open Shortcuts'), done = buttons.find(n => n.props.label === 'I set it up');
-  assert.ok(open && done);
+  const open = buttons.find(n => n.props.label === 'Open Shortcuts');
+  assert.ok(open);
   assert.equal(open.props.variant, undefined, 'Open Shortcuts is the primary action');
-  assert.equal(done.props.variant, 'outline');
-  assert.ok(buttons.indexOf(open) < buttons.indexOf(done));
+  assert.equal(s.button('iosLocalAutomationAdded'), undefined, 'confirmation comes after the last Apple screen');
+  // Opening Shortcuts moves the guide on to the next Apple screen.
+  open.props.onPress(); await s.flush();
+  assert.ok(s.urls.includes('shortcuts://create-automation'));
+  const screens = [step(s, 'ios-automation-guide-step')];
+  while (!s.button('iosLocalAutomationAdded')) {
+    labelled(s, iosEn.next).onPress(); await s.flush();
+    screens.push(step(s, 'ios-automation-guide-step'));
+  }
+  assert.deepEqual(screens.map(item => item.title), ['Choose Message', 'Type one space', 'Run Immediately', 'Pick the shortcut']);
+  assert.equal(screens.at(-1).chips.join(' › '), 'Wafra Capture v3 › Done', 'the exact Shortcut name is shown to pick');
   await s.press('iosLocalAutomationAdded');
-  assert.equal(futureRow(s).detail, 'Setup checked. Wafra will confirm the automation when your next message arrives.');
+  const done = () => step(s, 'ios-capture-ready');
+  assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
   // A message from the automation after the confirmation is real evidence it fires.
   s.nativeStatus.lastReceivedAt = s.saved().futureAutomationConfirmedAt + 5; await s.foreground();
-  assert.equal(futureRow(s).detail, 'Automation verified — a new message reached Wafra.');
+  assert.equal(done().result.title, iosEn.verifiedAutomation);
   // An Apple Pay receipt on the shared queue clock is not Message evidence.
   s.nativeStatus.lastApplePayReceivedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
-  assert.equal(futureRow(s).detail, 'Setup checked. Wafra will confirm the automation when your next message arrives.');
+  assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
 });
 
 test('a failed check overrides an already-open automation review guide', async t => {
   const s = await screen(t, { progress: ready, nativeStatus: proven });
   await s.help('iosMessageReviewAutomation');
-  assert.ok(s.all().some(n => n.type === 'AutomationGuide'));
+  assert.ok(step(s, 'ios-automation-guide-step'));
   await s.help('iosMessageRunPermissionCheck');
   await s.callback('error');
-  assert.equal(s.all().some(n => n.type === 'AutomationGuide'), false);
-  assert.ok(s.all().some(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut'));
-  assert.match(s.text(), /did not finish the setup check/);
+  assert.equal(step(s, 'ios-automation-guide-step'), undefined);
+  assert.ok(s.all().some(n => n.type === 'Button' && n.props.label === iosEn.repair));
+  assert.ok(s.text().includes(iosEn.failed));
 });
 
 
 test('Apple Pay is a secondary option below SMS and merely opening it keeps a finished SMS setup', async t => {
-  const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true,
+  // Optional sources live in Settings → Capture sources, never in first-run setup.
+  const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true, params: { fromOnboarding: '0' },
     progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3, futureAutomationConfirmed: true, futureStatus: 'complete' },
     nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 } });
   const nodes = s.all();
   const other = nodes.findIndex(n => n.props?.testID === 'ios-setup-other-sources');
-  assert.ok(other > nodes.findIndex(n => n.props?.testID === 'ios-message-setup-checklist'), 'other sources come after the SMS checklist');
+  assert.ok(other > nodes.findIndex(n => n.props?.testID === 'ios-message-setup-guide'), 'other sources come after the SMS guide');
   const action = nodes.find(n => n.type === 'Button' && n.props.label === 'Set up Apple Pay');
   assert.ok(action); action.props.onPress(); await s.flush();
   assert.equal(s.saved().futureCaptureSource, undefined);

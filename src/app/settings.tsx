@@ -1535,6 +1535,16 @@ export default function SettingsScreen() {
             t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
           )}
+          {Platform.OS === 'ios' && <>
+            {/* Statements bring in the past on iPhone. Reading old texts through
+                Shortcuts stays available, but only here, as an experiment. */}
+            <SectionHeader title={t('settingsAdvancedHeader')} />
+            {linkRow(
+              t('iosPastSmsTitle'),
+              t('iosPastSmsDetail'),
+              () => router.push({ pathname: '/ios-setup', params: { section: 'history' } }),
+            )}
+          </>}
           <SectionHeader title={t('dataHeader')} />
           {linkRow(t('backupJson'), null, backupJson)}
           {isSmsCorpusExportAvailable() && (

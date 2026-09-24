@@ -250,6 +250,9 @@ function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
+/** History-card states that finish an import already under way. */
+const IOS_HISTORY_CARD_FINISHING: ReadonlySet<IosHistoryCardState> = new Set<IosHistoryCardState>(['review', 'running']);
+
 export default function ImportSmsScreen() {
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
@@ -289,7 +292,9 @@ export default function ImportSmsScreen() {
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [scanning, setScanning] = useState(false);
   const [showManual, setShowManual] = useState(
-    () => (manual === '1' && !history) || (!isSmsScanningAvailable() && Platform.OS !== 'ios'),
+    // iPhone opens on pasting: reading past texts through Shortcuts is an
+    // experiment reached from Settings → Advanced, not this screen's lead.
+    () => (manual === '1' && !history) || (!isSmsScanningAvailable() && !history),
   );
   useEffect(() => {
     // The same route can be reused while mounted. An explicit quick-paste
@@ -358,6 +363,10 @@ export default function ImportSmsScreen() {
     handoffStartedAt: historySetup.handoffStartedAt,
     historySessionId: history,
   });
+  // The iPhone history card only finishes an import already under way (a
+  // returned session to review, or a handoff still running). Starting one
+  // lives in Settings → Advanced, because statements are the supported path.
+  const showIosHistoryCard = Platform.OS === 'ios' && IOS_HISTORY_CARD_FINISHING.has(historyCardState);
 
   useEffect(() => {
     const gate = createIosHistorySnapshotGate();
@@ -1289,7 +1298,7 @@ export default function ImportSmsScreen() {
           {!history && <>
             <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
           </>}
-          {Platform.OS === 'ios' && (
+          {showIosHistoryCard && (
             <Section index={0}>
               <View
                 testID="ios-history-card"

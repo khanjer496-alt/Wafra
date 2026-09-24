@@ -30,6 +30,7 @@ class EffectHarness {
       smsReady: false, notificationReady: false, awaitingNotification: false };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
     this.notificationDecisionMade = { current: false };
+    this.resumeAtLive = { current: false };
     this.routes = []; this.reads = 0; this.loader = async () => ({ returnToOnboarding: false });
     this.router = { replace: path => this.routes.push(path) };
   }
@@ -38,6 +39,7 @@ class EffectHarness {
     const context = { ...this.input, Platform: { OS: 'ios' }, router: this.router,
       resumeHandled: this.resumeHandled, previouslyOnboarded: this.previouslyOnboarded,
       notificationDecisionMade: this.notificationDecisionMade,
+      resumeAtLive: this.resumeAtLive,
       DEFAULT_ONBOARDING_PLAN, onboardingResumeDestination,
       setFocus: value => { this.ui.focus = value; },
       setTracking: value => { this.ui.tracking = value; },
@@ -116,6 +118,18 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   canceled.render(); canceled.render({ pathname: '/import-sms' });
   release({ returnToOnboarding: true }); await flush();
   assert.deepEqual(canceled.routes, []); assert.equal(canceled.resumeHandled.current, false); ok('canceled root read cannot redirect over manual import');
+  // iPhone setup: returning from Messages setup (or the statement importer)
+  // lands on new-transaction capture, the step after statements, not on the
+  // statement offer again. A cold launch at the same stage shows statements.
+  const captureProfile = { v: 1, stage: 'capture', focus: 'bills', tracking: null, startedAt: 7 };
+  const back = new EffectHarness();
+  back.render({ pathname: '/ios-setup', state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: captureProfile } });
+  back.render({ pathname: '/' }); await flush();
+  assert.equal(back.ui.step, 'live'); assert.deepEqual(back.routes, []); assert.equal(back.resumeAtLive.current, false);
+  const cold = new EffectHarness();
+  cold.render({ state: { hydrated: true, onboarded: false, onboardingPlan: null, onboardingProfile: captureProfile } }); await flush();
+  assert.equal(cold.ui.step, 'capture');
+  ok('returning from iPhone setup resumes at live capture; a cold launch resumes at statements');
   const recovery = new EffectHarness(); recovery.render({ hydrationFailed: true }); await flush();
   assert.equal(recovery.reads, 0); assert.equal(recovery.ui.ready, false); ok('storage recovery prevents onboarding reads');
   console.log(`${pass} lifecycle scenarios passed; actual source-extracted effect and dependency array; no device UI claim.`);

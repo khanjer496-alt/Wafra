@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
@@ -49,6 +49,13 @@ type PendingProtectedPdf = {
   file: File;
 };
 
+/** What one import added, for the three-number result summary. */
+type ImportSummary = {
+  added: number;
+  review: number;
+  skipped: number;
+};
+
 /** One line per picked file, so a batch never fails or succeeds silently. */
 type FileResult = {
   name: string;
@@ -70,7 +77,12 @@ function interpolate(template: string, values: Record<string, string | number>):
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
 }
 
-export function SupplementImports() {
+export interface SupplementImportsProps {
+  /** First-run setup: a footer to move on, with or without a statement. */
+  onboarding?: { onContinue(): void };
+}
+
+export function SupplementImports({ onboarding }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
@@ -106,6 +118,10 @@ export function SupplementImports() {
   const [status, setStatus] = useState<string | null>(null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
   const [fileResults, setFileResults] = useState<FileResult[]>([]);
+  const [progress, setProgress] = useState<{ index: number; total: number } | null>(null);
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const aliveRef = useRef(true);
   const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
   const pendingPdf = pendingPdfs[0] ?? null;
@@ -168,15 +184,18 @@ export function SupplementImports() {
     return copy.errUnexpected;
   }, [copy]);
 
-  const loadCapabilities = useCallback(async (active: RelayConfig) => {
-    if (getStateSnapshot().privateMode) return;
+  const loadCapabilities = useCallback(async (active: RelayConfig): Promise<ImportCapabilities | null> => {
+    if (getStateSnapshot().privateMode) return null;
     setBusy('capabilities');
     setError(null);
     try {
-      setCapabilities(await getImportCapabilities(active));
+      const loaded = await getImportCapabilities(active);
+      setCapabilities(loaded);
+      return loaded;
     } catch (e) {
       setCapabilities(null);
       setError(errorText(e));
+      return null;
     } finally {
       setBusy(null);
     }
@@ -196,11 +215,16 @@ export function SupplementImports() {
     return () => { live = false; };
   }, [getStateSnapshot, loadCapabilities]);
 
-  const connect = async () => {
-    if (loadingConfig || busy !== null) return;
+  /**
+   * The secure import connection, made on the first "Choose file" tap. The
+   * disclosure above that button says where files go; there is no separate
+   * connect step to read first.
+   */
+  const connect = async (): Promise<{ cfg: RelayConfig; capabilities: ImportCapabilities } | null> => {
+    if (loadingConfig || busy !== null) return null;
     if (!DEFAULT_RELAY_URL) {
       setError(copy.unavailable);
-      return;
+      return null;
     }
     setBusy('connect');
     setError(null);
@@ -209,22 +233,25 @@ export function SupplementImports() {
       const existing = await getRelayConfig();
       if (existing) {
         setCfg(existing);
-        await loadCapabilities(existing);
-        return;
+        const loaded = await loadCapabilities(existing);
+        return loaded ? { cfg: existing, capabilities: loaded } : null;
       }
       const connected = await pairDevice(DEFAULT_RELAY_URL);
       setCfg(connected);
-      await loadCapabilities(connected);
+      const loaded = await loadCapabilities(connected);
       committed();
+      return loaded ? { cfg: connected, capabilities: loaded } : null;
     } catch (e) {
       setError(errorText(e));
+      return null;
     } finally {
       setBusy(null);
     }
   };
 
-  const syncQueued = useCallback(async (): Promise<number> => {
+  const syncQueued = useCallback(async (): Promise<{ imported: number; review: number }> => {
     let imported = 0;
+    let review = 0;
     // The relay intentionally serves at most 200 rows per page. A multi-file
     // statement import can queue more than that, so one successful page must not
     // be mistaken for a completed import. Drain page-by-page, yielding between
@@ -233,9 +260,10 @@ export function SupplementImports() {
       const outcome = await captureExecutor.execute('supplemental');
       if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
       if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
-      if (outcome.kind !== 'imported' && outcome.kind !== 'up-to-date') return imported;
+      if (outcome.kind !== 'imported' && outcome.kind !== 'up-to-date') return { imported, review };
       imported += outcome.transactions;
-      if (outcome.moreQueued !== true) return imported;
+      review += outcome.reviewAlerts;
+      if (outcome.moreQueued !== true) return { imported, review };
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     throw new Error(copy.syncFailedUnknown);
@@ -302,10 +330,15 @@ export function SupplementImports() {
     try {
       // Paint the accepted state before planning/reconciling a potentially large ledger.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const imported = await syncQueued();
+      const { imported, review } = await syncQueued();
       queuedRetryNeededRef.current = false;
       queuedRetryContextRef.current = null;
       setStatus(batchSummary({ files, accepted, rejected, alreadyProcessed }, imported));
+      setSummary((current) => ({
+        added: (current?.added ?? 0) + imported,
+        review: (current?.review ?? 0) + review,
+        skipped: (current?.skipped ?? 0) + rejected,
+      }));
       committed();
       return true;
     } catch (e) {
@@ -332,12 +365,19 @@ export function SupplementImports() {
       if (!queuedRetryNeededRef.current || queuedRetryInFlightRef.current) return;
       queuedRetryInFlightRef.current = true;
       try {
-        const imported = await syncQueued();
+        const { imported, review } = await syncQueued();
         queuedRetryNeededRef.current = false;
         const context = queuedRetryContextRef.current;
         queuedRetryContextRef.current = null;
         setError(null);
-        if (context) setStatus(batchSummary(context, imported));
+        if (context) {
+          setStatus(batchSummary(context, imported));
+          setSummary((current) => ({
+            added: (current?.added ?? 0) + imported,
+            review: (current?.review ?? 0) + review,
+            skipped: (current?.skipped ?? 0) + context.rejected,
+          }));
+        }
         committed();
       } catch {
         // Keep the queued rows untouched. A later foreground transition gets
@@ -372,8 +412,8 @@ export function SupplementImports() {
     return parts.join(' ');
   };
 
-  const pickAndUpload = async () => {
-    if (!cfg || !capabilities || pendingPdfs.length > 0) return;
+  const pickAndUpload = async (cfg: RelayConfig, capabilities: ImportCapabilities) => {
+    if (pendingPdfs.length > 0) return;
     if (!state.ledgerMoney) {
       setCurrencySheetVisible(true);
       return;
@@ -383,6 +423,8 @@ export function SupplementImports() {
     setError(null);
     setStatus(null);
     setFileResults([]);
+    setSummary(null);
+    setFilesOpen(false);
     const pickedFiles: File[] = [];
     const retainedUris = new Set<string>();
     // Declared outside the try so a failure later in the batch still hands the
@@ -436,6 +478,7 @@ export function SupplementImports() {
             const delay = nextUploadDelay(starts[format], Date.now());
             if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
             setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
+            setProgress({ index: index + 1, total });
             starts[format].push(Date.now());
             try {
               accepted = csv
@@ -521,7 +564,26 @@ export function SupplementImports() {
         }
       }
       setBusy(null);
+      setProgress(null);
     }
+  };
+
+  /** One tap: connect if needed, then open the file picker. */
+  const chooseFile = async () => {
+    if (loadingConfig || busy !== null || pendingPdfs.length > 0) return;
+    if (!state.ledgerMoney) {
+      setCurrencySheetVisible(true);
+      return;
+    }
+    let ready: { cfg: RelayConfig; capabilities: ImportCapabilities } | null =
+      cfg && capabilities ? { cfg, capabilities } : null;
+    if (!ready && cfg) {
+      const loaded = await loadCapabilities(cfg);
+      ready = loaded ? { cfg, capabilities: loaded } : null;
+    }
+    if (!ready && !cfg) ready = await connect();
+    if (!ready) return;
+    await pickAndUpload(ready.cfg, ready.capabilities);
   };
 
   const retryProtectedPdf = async () => {
@@ -578,80 +640,63 @@ export function SupplementImports() {
   const locked = state.privateMode;
   const pdfMb = capabilities ? Math.round(capabilities.pdf.maxBytes / 1048576) : 0;
   const csvMb = capabilities ? Math.round(capabilities.csv.maxBytes / 1048576) : 0;
+  const reading = busy === 'statement';
+  const failedFiles = fileResults.filter((result) => !result.ok);
+  const shownFiles = filesOpen ? fileResults : failedFiles;
+  const numbers = summary
+    ? [
+        { key: 'added', value: summary.added, label: copy.resultAdded, tone: theme.primary },
+        { key: 'review', value: summary.review, label: copy.resultReview, tone: summary.review > 0 ? theme.warning : theme.text },
+        { key: 'skipped', value: summary.skipped, label: copy.resultSkipped, tone: theme.textSecondary },
+      ]
+    : [];
 
   return (
     <View style={styles.root}>
-      <View style={styles.hero}>
-        <ThemedText type="heading">{copy.title}</ThemedText>
-        <ThemedText type="default" themeColor="textSecondary">
-          {Platform.OS === 'android' ? copy.introAndroid : copy.introIos}
-        </ThemedText>
-      </View>
+      <ThemedText type="default" themeColor="textSecondary">{copy.intro}</ThemedText>
 
       {locked ? (
         <Block>
           <View style={styles.cardHead}>
             <Icon name="lock" size={20} color={theme.warning} />
-            <ThemedText type="small">{copy.privateTitle}</ThemedText>
+            <ThemedText type="small" style={styles.cardCopy}>{copy.privateTitle}</ThemedText>
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{copy.privateBody}</ThemedText>
           <Button label={copy.reviewPrivacy} variant="outline" onPress={() => router.push('/settings?section=privacy')} />
         </Block>
-      ) : loadingConfig ? (
-        <Block><ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText></Block>
-      ) : !cfg ? (
-        <Block>
-          <View style={styles.cardHead}>
-            <Icon name="lock" size={20} color={theme.primary} />
-            <ThemedText type="small">{copy.connectTitle}</ThemedText>
-          </View>
-          <ThemedText type="meta" themeColor="textTertiary">{copy.connectBody}</ThemedText>
-          <Button
-            label={busy === 'connect' ? copy.connecting : copy.connect}
-            onPress={() => void connect()}
-            disabled={busy !== null}
-          />
-        </Block>
       ) : (
         <>
-          {busy === 'capabilities' && (
-            <ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText>
-          )}
-          {!capabilities && busy !== 'capabilities' && (
-            <Button variant="outline" label={copy.retry} onPress={() => void loadCapabilities(cfg)} disabled={busy !== null} />
+          {/* What to download, before the button that asks for it. */}
+          <View
+            testID="statement-download-hint"
+            style={[styles.hint, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+            <ThemedText type="smallBold" accessibilityRole="header">{copy.downloadTitle}</ThemedText>
+            {[copy.downloadStep, Platform.OS === 'android' ? copy.findStepAndroid : copy.findStepIos].map((line, index) => (
+              <View key={line} style={styles.hintRow} accessible accessibilityLabel={`${index + 1}. ${line}`}>
+                <View style={[styles.hintNumber, { backgroundColor: theme.primarySoft }]}>
+                  <ThemedText type="micro" themeColor="primary" tabular>{index + 1}</ThemedText>
+                </View>
+                <ThemedText type="small" style={styles.cardCopy}>{line}</ThemedText>
+              </View>
+            ))}
+          </View>
+
+          {!state.ledgerMoney && (
+            <View style={styles.currencyPrompt}>
+              <View style={styles.cardCopy}>
+                <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyBody')}</ThemedText>
+              </View>
+              <Button
+                variant="outline"
+                label={t('chooseLedgerCurrency')}
+                onPress={() => setCurrencySheetVisible(true)}
+                disabled={busy !== null}
+              />
+            </View>
           )}
 
-          <Block style={styles.importCard}>
-            <View style={styles.cardHead}>
-              <View style={[styles.iconWell, { backgroundColor: theme.primarySoft }]}>
-                <Icon name="upload" size={20} color={theme.primary} />
-              </View>
-              <View style={styles.cardCopy}>
-                <ThemedText type="small">{copy.statementTitle}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">{copy.statementBody}</ThemedText>
-              </View>
-            </View>
-            {capabilities && (
-              <ThemedText type="nano" themeColor="textTertiary" tabular>
-                {interpolate(copy.statementLimits, {
-                  pdfMb, csvMb, pages: capabilities.pdf.maxPages, rows: capabilities.pdf.maxRows,
-                })}
-              </ThemedText>
-            )}
-            {!state.ledgerMoney && (
-              <View style={styles.currencyPrompt}>
-                <View style={styles.cardCopy}>
-                  <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyBody')}</ThemedText>
-                </View>
-                <Button
-                  variant="outline"
-                  label={t('chooseLedgerCurrency')}
-                  onPress={() => setCurrencySheetVisible(true)}
-                  disabled={busy !== null}
-                />
-              </View>
-            )}
+          <View style={styles.chooser}>
             <View style={styles.disclosure}>
               <Icon name="lock" size={15} color={theme.textSecondary} />
               <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
@@ -660,36 +705,100 @@ export function SupplementImports() {
             </View>
             <Button
               icon="upload"
-              label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
-              onPress={() => void pickAndUpload()}
-              disabled={!capabilities || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
+              label={busy === 'connect' || busy === 'capabilities' ? copy.connecting
+                : reading ? copy.uploading : fileResults.length > 0 ? copy.chooseStatements : copy.chooseFile}
+              onPress={() => void chooseFile()}
+              disabled={loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
-            {fileResults.length > 0 && (
-              <View style={styles.results}>
-                <ThemedText type="smallBold">{copy.resultsTitle}</ThemedText>
-                {fileResults.map((result, index) => (
-                  <View
-                    key={`${index}:${result.name}`}
-                    style={styles.resultRow}
-                    accessible
-                    accessibilityLabel={`${result.ok ? copy.resultOkLabel : copy.resultFailedLabel}: ${result.name}. ${result.detail}`}
-                  >
-                    <Icon
-                      name={result.ok ? 'check' : 'alert'}
-                      size={15}
-                      color={result.ok ? theme.primary : theme.expense}
-                    />
-                    <View style={styles.cardCopy}>
-                      <ThemedText type="meta" numberOfLines={1}>{result.name}</ThemedText>
-                      <ThemedText type="meta" themeColor={result.ok ? 'textTertiary' : 'expense'}>
-                        {result.detail}
-                      </ThemedText>
-                    </View>
-                  </View>
-                ))}
+            <ThemedText type="meta" themeColor="textTertiary" style={styles.center} tabular>
+              {copy.formats}
+            </ThemedText>
+          </View>
+
+          {reading && (
+            <View
+              testID="statement-progress"
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel={status ?? copy.uploading}
+              accessibilityValue={progress ? { min: 0, max: progress.total, now: progress.index } : undefined}
+              style={[styles.progressCard, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+              <View style={styles.cardHead}>
+                <ActivityIndicator color={theme.primary} />
+                <ThemedText type="small" style={styles.cardCopy}>
+                  {progress ? interpolate(copy.progressLabel, progress) : copy.uploading}
+                </ThemedText>
               </View>
-            )}
-          </Block>
+              {progress && (
+                <View style={[styles.track, { backgroundColor: theme.track }]}>
+                  <View style={[styles.fill, {
+                    backgroundColor: theme.primary,
+                    width: `${Math.round((progress.index / progress.total) * 100)}%`,
+                  }]} />
+                </View>
+              )}
+              {status ? <ThemedText type="meta" themeColor="textSecondary">{status}</ThemedText> : null}
+            </View>
+          )}
+
+          {summary && !reading && (
+            <View
+              testID="statement-result-summary"
+              accessible
+              accessibilityRole="summary"
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={interpolate(copy.summaryLabel, summary)}
+              style={[styles.summary, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+              {numbers.map((item, index) => (
+                <React.Fragment key={item.key}>
+                  {index > 0 && <View style={[styles.summaryDivider, { backgroundColor: theme.cardBorder }]} />}
+                  <View style={styles.summaryCell}>
+                    <ThemedText type="title" tabular style={{ color: item.tone }}>{item.value}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary" style={styles.center}>{item.label}</ThemedText>
+                  </View>
+                </React.Fragment>
+              ))}
+            </View>
+          )}
+
+          {!reading && status && (!summary || error) ? (
+            <View style={[styles.message, { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder }]}>
+              <Icon name="check" size={17} color={theme.primary} />
+              <ThemedText type="meta" style={styles.messageText}>{status}</ThemedText>
+            </View>
+          ) : null}
+
+          {fileResults.length > 0 && !reading && (
+            <View style={styles.results}>
+              {shownFiles.map((result, index) => (
+                <View
+                  key={`${index}:${result.name}`}
+                  style={styles.resultRow}
+                  accessible
+                  accessibilityLabel={`${result.ok ? copy.resultOkLabel : copy.resultFailedLabel}: ${result.name}. ${result.detail}`}
+                >
+                  <Icon
+                    name={result.ok ? 'check' : 'alert'}
+                    size={15}
+                    color={result.ok ? theme.primary : theme.expense}
+                  />
+                  <View style={styles.cardCopy}>
+                    <ThemedText type="meta" numberOfLines={1}>{result.name}</ThemedText>
+                    <ThemedText type="meta" themeColor={result.ok ? 'textTertiary' : 'expense'}>
+                      {result.detail}
+                    </ThemedText>
+                  </View>
+                </View>
+              ))}
+              {fileResults.length > failedFiles.length && (
+                <Button
+                  variant="ghost"
+                  label={filesOpen ? copy.hideFiles : interpolate(copy.showFiles, { count: fileResults.length })}
+                  onPress={() => setFilesOpen((value) => !value)}
+                />
+              )}
+            </View>
+          )}
 
           {pendingPdf && (
             <Block style={styles.passwordCard}>
@@ -725,66 +834,90 @@ export function SupplementImports() {
             </Block>
           )}
 
-          <Block style={styles.coverageCard}>
-            <View style={styles.cardHead}>
-              <View style={[styles.iconWell, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="calendar" size={20} color={theme.text} />
-              </View>
-              <View style={styles.cardCopy}>
-                <ThemedText type="small">{copy.coverageTitle}</ThemedText>
-                {coverage.length === 0 && (
-                  <ThemedText type="meta" themeColor="textTertiary">{copy.coverageEmpty}</ThemedText>
-                )}
-              </View>
+          {error && (
+            <View
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={[styles.message, { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder }]}>
+              <Icon name="alert" size={17} color={theme.expense} />
+              <ThemedText type="meta" style={[styles.messageText, { color: theme.expense }]}>{error}</ThemedText>
             </View>
-            {coverage.map((item) => {
-              const shownMissing = item.missing.slice(0, 4);
-              const more = item.missing.length - shownMissing.length;
-              return (
-                <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
-                  <View style={styles.coverageHead}>
-                    <ThemedText type="smallBold" style={styles.coverageLabel}>
-                      {item.sourceKey === 'bank-statements' ? copy.coverageUnidentifiedLabel : item.label}
-                    </ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
-                  </View>
-                  {/* A statement that names no account cannot prove there are no gaps. */}
-                  <ThemedText type="meta" themeColor={item.identified && item.missing.length ? 'expense' : 'textTertiary'}>
-                    {!item.identified
-                      ? copy.coverageUnknown
-                      : item.missing.length
-                        ? interpolate(copy.coverageMissing, {
-                            months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
-                          })
-                        : interpolate(copy.coverageComplete, { month: item.throughMonth })}
-                  </ThemedText>
+          )}
+          {cfg && !capabilities && busy === null && !loadingConfig && error && (
+            <Button variant="outline" label={copy.retry} onPress={() => void loadCapabilities(cfg)} />
+          )}
+
+          {coverage.length > 0 && (
+            <Block style={styles.coverageCard}>
+              <View style={styles.cardHead}>
+                <View style={[styles.iconWell, { backgroundColor: theme.backgroundSelected }]}>
+                  <Icon name="calendar" size={20} color={theme.text} />
                 </View>
-              );
-            })}
-          </Block>
+                <ThemedText type="small" style={styles.cardCopy}>{copy.coverageTitle}</ThemedText>
+              </View>
+              {coverage.map((item) => {
+                const shownMissing = item.missing.slice(0, 4);
+                const more = item.missing.length - shownMissing.length;
+                return (
+                  <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
+                    <View style={styles.coverageHead}>
+                      <ThemedText type="smallBold" style={styles.coverageLabel}>
+                        {item.sourceKey === 'bank-statements' ? copy.coverageUnidentifiedLabel : item.label}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
+                    </View>
+                    {/* A statement that names no account cannot prove there are no gaps. */}
+                    <ThemedText type="meta" themeColor={item.identified && item.missing.length ? 'expense' : 'textTertiary'}>
+                      {!item.identified
+                        ? copy.coverageUnknown
+                        : item.missing.length
+                          ? interpolate(copy.coverageMissing, {
+                              months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
+                            })
+                          : interpolate(copy.coverageComplete, { month: item.throughMonth })}
+                    </ThemedText>
+                  </View>
+                );
+              })}
+            </Block>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy.howItWorks}
+            accessibilityState={{ expanded: detailsOpen }}
+            onPress={() => setDetailsOpen((value) => !value)}
+            style={({ pressed }) => [styles.howLink, { opacity: pressed ? 0.6 : 1 }]}>
+            <ThemedText type="linkPrimary">{copy.howItWorks}</ThemedText>
+            <Icon name={detailsOpen ? 'chevron-down' : 'chevron-right'} size={14} color={theme.primary} />
+          </Pressable>
+          {detailsOpen && (
+            <View style={[styles.privacy, { borderTopColor: theme.cardBorder }]} testID="statement-how-it-works">
+              <ThemedText type="small">{copy.privacyTitle}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">{copy.statementBody}</ThemedText>
+              {capabilities && (
+                <ThemedText type="nano" themeColor="textTertiary" tabular>
+                  {interpolate(copy.statementLimits, {
+                    pdfMb, csvMb, pages: capabilities.pdf.maxPages, rows: capabilities.pdf.maxRows,
+                  })}
+                </ThemedText>
+              )}
+            </View>
+          )}
         </>
       )}
 
-      {error && (
-        <View style={[styles.message, { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder }]}>
-          <Icon name="alert" size={17} color={theme.expense} />
-          <ThemedText type="meta" style={[styles.messageText, { color: theme.expense }]}>{error}</ThemedText>
+      {onboarding && (
+        <View style={styles.onboardingFooter}>
+          <Button
+            label={summary ? copy.continue : copy.later}
+            variant={summary ? 'filled' : 'ghost'}
+            onPress={onboarding.onContinue}
+            disabled={busy !== null}
+          />
         </View>
       )}
-      {status && (
-        <View style={[styles.message, { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder }]}>
-          <Icon name="check" size={17} color={theme.primary} />
-          <ThemedText type="meta" style={styles.messageText}>{status}</ThemedText>
-        </View>
-      )}
-
-      <View style={[styles.privacy, { borderTopColor: theme.cardBorder }]}>
-        <Icon name="lock" size={17} color={theme.primary} />
-        <View style={styles.cardCopy}>
-          <ThemedText type="small">{copy.privacyTitle}</ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
-        </View>
-      </View>
       <LedgerCurrencySheet
         visible={currencySheetVisible}
         value={state.ledgerMoney?.currency ?? null}
@@ -797,11 +930,43 @@ export function SupplementImports() {
 
 const styles = StyleSheet.create({
   root: { gap: Spacing.three },
-  hero: { gap: Spacing.one },
-  importCard: { gap: Spacing.three },
+  hint: {
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two + Spacing.one,
+  },
+  hintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two + Spacing.one },
+  hintNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  chooser: { gap: Spacing.two + Spacing.one, paddingVertical: Spacing.one },
+  center: { textAlign: 'center' },
   currencyPrompt: { gap: Spacing.two },
   passwordCard: { gap: Spacing.three },
   coverageCard: { gap: Spacing.two },
+  progressCard: {
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    padding: Spacing.three,
+    gap: Spacing.two + Spacing.one,
+  },
+  track: { height: 6, borderRadius: Radius.full, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: Radius.full },
+  summary: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    paddingVertical: Spacing.three,
+  },
+  summaryCell: { flex: 1, alignItems: 'center', gap: Spacing.half, paddingHorizontal: Spacing.one },
+  summaryDivider: { width: StyleSheet.hairlineWidth },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2 },
   cardCopy: { flex: 1, gap: Spacing.half },
   iconWell: {
@@ -827,11 +992,11 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
   },
   messageText: { flex: 1 },
+  howLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.one, alignSelf: 'flex-start' },
   privacy: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
     gap: Spacing.two,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.three,
   },
+  onboardingFooter: { paddingTop: Spacing.two },
 });
