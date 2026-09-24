@@ -39,30 +39,49 @@ function PagedHistoryScreen() {
   const [installed, setInstalled] = useState(false); const [adding, setAdding] = useState(false);
   const [ready, setReady] = useState(false); const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null); const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Status could not be read (corrupt staging, invalid native status). The
+  // only safe recovery is erasing the temporary import; Start stays disabled.
+  const [unreadable, setUnreadable] = useState(false); const [confirmErase, setConfirmErase] = useState(false);
+  const statusFailures = useRef(0);
   const alive = useRef(true); const sequence = useRef(0); const operation = useRef(false);
   const generation = getStateGeneration();
   const refresh = useCallback(async () => {
     if (operation.current) return;
     const seq = ++sequence.current; const ledger = getStateGeneration();
     const current = () => alive.current && seq === sequence.current && ledger === getStateGeneration();
+    let erasable = false; let statusFailed = false;
     try {
       const native = await nativeModule();
       if (!native?.getPagedStatus || !native.discardSession) throw new Error('missing_paged_receiver');
-      const [raw, confirmed, setup, storedBlock] = await Promise.all([native.getPagedStatus(), AsyncStorage.getItem(installKey), loadIosMessageSetupProgress(), AsyncStorage.getItem(PAGED_HISTORY_BLOCK_KEY)]);
-      const next = parsePagedHistoryProgress(raw);
+      erasable = typeof native.discardPagedHistory === 'function';
+      // Only a failure of the native status itself (or its validation) points
+      // at the staged data; app-storage errors never offer to erase it.
+      const status = native.getPagedStatus().then(raw => parsePagedHistoryProgress(raw))
+        .catch((cause: unknown) => { statusFailed = true; throw cause; });
+      const [next, confirmed, setup, storedBlock] = await Promise.all([status, AsyncStorage.getItem(installKey), loadIosMessageSetupProgress(), AsyncStorage.getItem(PAGED_HISTORY_BLOCK_KEY)]);
       if (!current()) return;
-      let blocked = isHistoryPageBlocked(storedBlock, next);
+      statusFailures.current = 0;
+      const changed = next?.sourceChanged === true;
+      let blocked = !changed && isHistoryPageBlocked(storedBlock, next);
       if (!pageFailure) consumedPageFailure.current = false;
-      if (pageFailure && !consumedPageFailure.current && historyPageKey(next)) {
+      if (!changed && pageFailure && !consumedPageFailure.current && historyPageKey(next)) {
         await AsyncStorage.setItem(PAGED_HISTORY_BLOCK_KEY, historyPageKey(next)!);
         if (!current()) return;
         consumedPageFailure.current = true; blocked = true;
       }
       setPageBlocked(blocked); setRestoredOnboarding(setup.returnToOnboarding); setProgress(next);
-      setInstalled(confirmed === 'true'); setReady(true);
-      setError(blocked ? w.pageBlocked : next?.status === 'complete' ? null : blockedOnReturn ? next ? w.paused : w.notStarted : null);
-    } catch { if (current()) { setProgress(null); setReady(false); setError(w.error); } }
-  }, [blockedOnReturn, pageFailure, installKey, getStateGeneration, w.error, w.paused, w.notStarted, w.pageBlocked]);
+      setInstalled(confirmed === 'true'); setReady(true); setUnreadable(false);
+      setError(changed ? w.sourceChanged : blocked ? w.pageBlocked : next?.status === 'complete' ? null : blockedOnReturn ? next ? w.paused : w.notStarted : null);
+    } catch {
+      if (!current()) return;
+      // A single failure can be transient (store busy, clock change): offer
+      // Refresh first, and Erase only when the status stays unreadable.
+      statusFailures.current = statusFailed ? statusFailures.current + 1 : 0;
+      const offerErase = erasable && statusFailures.current >= 2;
+      setProgress(null); setReady(false); setPageBlocked(false); setUnreadable(offerErase);
+      setError(offerErase ? w.unreadable : w.error);
+    }
+  }, [blockedOnReturn, pageFailure, installKey, getStateGeneration, w.error, w.paused, w.notStarted, w.pageBlocked, w.sourceChanged, w.unreadable]);
   useEffect(() => {
     const epoch = sequence;
     alive.current = true; void refresh();
@@ -95,7 +114,7 @@ function PagedHistoryScreen() {
     }
     if (current()) setAdding(true);
   });
-  const start = (retryPage = false) => void run(async () => {
+  const start = (retryPage = false, retryChanged = false) => void run(async () => {
     const ledger = getStateGeneration();
     const stillCurrent = () => alive.current && ledger === getStateGeneration();
     if (!await Linking.canOpenURL('shortcuts://')) { setError(w.missing); return; }
@@ -105,6 +124,9 @@ function PagedHistoryScreen() {
     // an old render's cursor or overwrite an existing completed-source marker.
     const latest = parsePagedHistoryProgress(await native.getPagedStatus());
     if (!stillCurrent()) return;
+    // Resuming a session whose oldest Message is gone fails again unless the
+    // mismatch was transient; that retry must be an explicit owner choice.
+    if (latest?.sourceChanged && !retryChanged) { setProgress(latest); setError(w.sourceChanged); return; }
     const blocked = isHistoryPageBlocked(await AsyncStorage.getItem(PAGED_HISTORY_BLOCK_KEY), latest);
     if (!stillCurrent()) return;
     if (blocked && !retryPage) { setPageBlocked(true); setError(w.pageBlocked); return; }
@@ -129,8 +151,18 @@ function PagedHistoryScreen() {
       // The confirmation applies to exactly the session shown to the owner.
       if (!alive.current || ledger !== getStateGeneration() || !latest || latest.sessionId !== progress?.sessionId) throw new Error('history_session_changed');
       await native.discardSession(latest.sessionId);
-      if (alive.current) setProgress(null);
+      if (alive.current) { setProgress(null); setError(null); }
     });
+  };
+  const erase = () => {
+    setConfirmErase(false);
+    let erased = false;
+    void run(async () => {
+      const native = await nativeModule();
+      if (!native?.discardPagedHistory) throw new Error('missing_paged_receiver');
+      await native.discardPagedHistory();
+      erased = true; statusFailures.current = 0;
+    }).then(() => { if (erased) void refresh(); });
   };
   const leave = () => void run(async () => {
     const setup = await loadIosMessageSetupProgress();
@@ -142,6 +174,7 @@ function PagedHistoryScreen() {
     else router.replace(destination);
   });
   const canRunShortcut = installed || adding;
+  const sourceChanged = progress?.sourceChanged === true;
   const label = progress?.status === 'complete' ? w.review
     : !canRunShortcut ? w.install : adding && !installed ? w.installed
       : progress ? w.resume : w.start;
@@ -156,10 +189,13 @@ function PagedHistoryScreen() {
         {progress && <View testID="paged-history-progress" accessibilityLiveRegion="polite" style={{ gap: Spacing.two }}>
           <ThemedText type="heading">{progress.checked.toLocaleString()} · {w.counts}</ThemedText>
           <ThemedText>{progress.accepted.toLocaleString()} {w.accepted} · {progress.skipped.toLocaleString()} {w.skipped}</ThemedText>
-          <ThemedText>{progress.status === 'complete' ? w.completed : pageBlocked ? w.pageBlocked : w.pending}</ThemedText>
+          {!sourceChanged && <ThemedText>{progress.status === 'complete' ? w.completed : pageBlocked ? w.pageBlocked : w.pending}</ThemedText>}
         </View>}
         {error && !pageBlocked && <ThemedText accessibilityRole="alert">{error}</ThemedText>}
-        {!pageBlocked && <Button label={label} disabled={busy || !ready} onPress={canRunShortcut || progress?.status === 'complete' ? () => start() : install} wrapLabel />}
+        {sourceChanged && <Button label={w.startOver} disabled={busy} onPress={() => setConfirmDiscard(true)} wrapLabel />}
+        {sourceChanged && canRunShortcut && <Button label={w.retryChanged} variant="outline" disabled={busy || !ready} onPress={() => start(false, true)} wrapLabel />}
+        {unreadable && <Button label={w.erase} disabled={busy} onPress={() => setConfirmErase(true)} wrapLabel />}
+        {!pageBlocked && !sourceChanged && !unreadable && <Button label={label} disabled={busy || !ready} onPress={canRunShortcut || progress?.status === 'complete' ? () => start() : install} wrapLabel />}
         {pageBlocked && <View testID="history-page-recovery" style={{ gap: Spacing.two }}>
           <ThemedText type="small">{w.retryHelp}</ThemedText>
           {!installed && <Button label={w.install} onPress={install} disabled={busy || !ready} wrapLabel />}
@@ -174,12 +210,14 @@ function PagedHistoryScreen() {
         {(blockedOnReturn || pageBlocked) && <Button label={w.back} variant="ghost" disabled={busy} onPress={leave} wrapLabel />}
         <Button label={w.refresh} variant="outline" disabled={busy} onPress={() => { void refresh(); }} wrapLabel />
         {(installed || adding || progress) && <Button label={w.again} variant="ghost" disabled={busy} onPress={install} wrapLabel />}
-        {progress && <Button label={w.remove} variant="ghost" disabled={busy} onPress={() => setConfirmDiscard(true)} wrapLabel />}
+        {progress && !sourceChanged && <Button label={w.remove} variant="ghost" disabled={busy} onPress={() => setConfirmDiscard(true)} wrapLabel />}
         <ThemedText type="meta" themeColor="textSecondary">{w.beta}</ThemedText>
       </View>
     </ScrollView>
     <ConfirmSheet visible={confirmDiscard} onClose={() => setConfirmDiscard(false)} question={w.discardTitle}
-      body={w.discardBody} confirmLabel={w.confirm} onConfirm={discard} />
+      body={sourceChanged ? w.startOverBody : w.discardBody} confirmLabel={sourceChanged ? w.startOver : w.confirm} onConfirm={discard} />
+    <ConfirmSheet visible={confirmErase} onClose={() => setConfirmErase(false)} question={w.eraseTitle}
+      body={w.eraseBody} confirmLabel={w.erase} onConfirm={erase} />
   </SafeAreaView></SetupShell>;
 }
 export default function IosPagingBeta() {

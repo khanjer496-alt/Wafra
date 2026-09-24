@@ -8,8 +8,8 @@ const historyInstallUrl = 'https://www.icloud.com/shortcuts/bc30c7ae89d6494c9ef0
 const walk = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(walk) : [node, ...walk(node.props?.children)];
 const session = () => ({ sessionId: 'PAGED-11111111-2222-4333-8444-555555555555', status: 'continue', checked: 50,
   accepted: 44, skipped: 6, createdAtMs: Date.now() - 5000, expiresAtMs: Date.now() - 5000 + 86400000 });
-async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false, pageFailure = false, bundled = false } = {}) {
-  const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [];
+async function screen({ progress = null, installed = false, legacyInstalled = false, language = 'en', fromOnboarding = true, restoredOnboarding = fromOnboarding, available = true, installUrl = historyInstallUrl, blocked = false, pageFailure = false, bundled = false, failing = false, storageFails = false } = {}) {
+  const slots = [], effects = [], urls = [], routes = [], changes = [], handoffs = [], discards = [], erased = [];
   const shared = [];
   const listeners = []; let cursor = 0, generation = 1, nativeReads = 0;
   const values = new Map(); if (legacyInstalled) values.set('wafra/ios-paged-shortcut-confirmed/v1', 'true');
@@ -22,8 +22,9 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
   };
   const jsx = (type, props) => typeof type === 'function' ? type(props ?? {}) : ({ type, props: props ?? {} });
   let pending = null;
-  const native = { getPagedStatus: async () => { nativeReads++; if (pending) await pending; return progress === null ? null : JSON.stringify(progress); },
-    discardSession: async id => { discards.push(id); progress = null; } };
+  const native = { getPagedStatus: async () => { nativeReads++; if (pending) await pending; if (failing) throw new Error('corrupt-staging'); return progress === null ? null : JSON.stringify(progress); },
+    discardSession: async id => { discards.push(id); progress = null; },
+    discardPagedHistory: async () => { erased.push(true); failing = false; progress = null; } };
   const store = { state: { hydrated: true, onboarded: true }, getStateGeneration: () => generation };
   const api = load(path.join(root, 'src/lib/ios-paged-setup.ts'), {}, { process: { env: {
     EXPO_PUBLIC_WAFRA_PAGED_HISTORY_BETA: '1', EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: installUrl,
@@ -37,7 +38,7 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
     'expo-router': { Redirect: 'Redirect', Stack: { Screen: 'Screen' }, useRouter: () => ({ setParams: patch => routes.push({ params: patch }), push: v => routes.push(v), replace: v => routes.push(v), dismissTo: v => routes.push(v), canGoBack: () => true }),
       useLocalSearchParams: () => ({ origin: fromOnboarding ? 'onboarding' : 'settings', blocked: blocked ? '1' : undefined, reason: pageFailure ? 'page-validation' : undefined }) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '@react-native-async-storage/async-storage': { getItem: async k => values.get(k) ?? null, setItem: async (k, v) => values.set(k, v) },
+    '@react-native-async-storage/async-storage': { getItem: async k => { if (storageFails) throw new Error('storage'); return values.get(k) ?? null; }, setItem: async (k, v) => values.set(k, v) },
     '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'Header' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/confirm-sheet': { ConfirmSheet: 'Confirm' },
     '@/components/ui/controls': { Button: 'Button' }, '@/components/ui/screen-header': { ScreenHeader: 'Header' },
@@ -61,7 +62,9 @@ async function screen({ progress = null, installed = false, legacyInstalled = fa
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); return tree; };
   const flush = async () => { for (let i = 0; i < 6; i++) { await new Promise(resolve => setImmediate(resolve)); render(); } };
   render(); await flush();
-  return { onboarding: () => walk(tree).find(n => n.type === 'SetupShell').props.onboarding, flush, urls, shared, routes, changes, handoffs, discards, values, get nativeReads() { return nativeReads; },
+  return { onboarding: () => walk(tree).find(n => n.type === 'SetupShell').props.onboarding, flush, urls, shared, routes, changes, handoffs, discards, erased, values, get nativeReads() { return nativeReads; },
+    confirms() { return walk(tree).filter(n => n.type === 'Confirm').map(n => n.props); },
+    hasButton(label) { return walk(tree).some(n => n.type === 'Button' && n.props.label === label); },
     button(label) { const found = walk(tree).filter(n => n.type === 'Button' && n.props.label === label); assert.equal(found.length, 1, label); return found[0].props; },
     confirm() { return walk(tree).find(n => n.type === 'Confirm').props; },
     setProgress(value) { progress = value; }, replaceLedger() { generation++; },
@@ -184,4 +187,70 @@ test('a rejected page remains visibly blocked after foreground refresh, without 
   assert.equal(s.urls.length, 1, 'refresh must not relaunch the refused page');
   s.setProgress({ ...session(), checked: 100, accepted: 94 }); await s.foreground();
   assert.ok(s.button('Resume saved import'));
+});
+test('a source-changed session cannot be resumed; start over discards exactly that session', async () => {
+  const changed = { ...session(), revision: 3, refusal: 'source-changed' };
+  const s = await screen({ bundled: true, installed: true, blocked: true, progress: changed });
+  assert.match(s.text(), /Your Messages changed since this import started/);
+  assert.equal(s.hasButton('Resume saved import'), false);
+  assert.equal(s.hasButton('Discard temporary import'), false);
+  assert.equal(s.hasButton('Try this page once more'), false);
+  s.button('Start over').onPress(); await s.flush();
+  const sheet = s.confirms()[0];
+  assert.equal(sheet.visible, true); assert.equal(sheet.confirmLabel, 'Start over');
+  assert.match(sheet.body, /unfinished import/);
+  assert.deepEqual(s.urls, []); assert.deepEqual(s.handoffs, []);
+  sheet.onConfirm(); await s.flush();
+  assert.deepEqual(s.discards, [changed.sessionId]);
+  assert.ok(s.button('Start history import'));
+  assert.doesNotMatch(s.text(), /Your Messages changed/);
+});
+test('a page-validation return never blocks a source-changed session', async () => {
+  const s = await screen({ bundled: true, installed: true, blocked: true, pageFailure: true,
+    progress: { ...session(), refusal: 'source-changed' } });
+  assert.equal(s.hasButton('Try this page once more'), false);
+  assert.ok(s.button('Start over'));
+  assert.equal(s.values.has('wafra/ios-paged-page-block/v1'), false);
+});
+test('a source-changed session keeps an explicit one-time resume retry', async () => {
+  const s = await screen({ bundled: true, installed: true, progress: { ...session(), refusal: 'source-changed' } });
+  s.button('Try resuming once more').onPress(); await s.flush();
+  assert.equal(s.urls.length, 1); assert.equal(new URL(s.urls[0]).searchParams.get('name'), 'Wafra History v8');
+  assert.deepEqual(s.discards, []);
+});
+test('one status failure offers Refresh only; app-storage failures never offer to erase staging', async () => {
+  const s = await screen({ bundled: true, installed: true, failing: true });
+  assert.equal(s.hasButton('Erase temporary import'), false);
+  assert.match(s.text(), /Progress is unavailable/);
+  const storage = await screen({ bundled: true, installed: true, progress: session(), storageFails: true });
+  await storage.foreground(); await storage.foreground();
+  assert.match(storage.text(), /Progress is unavailable/);
+  assert.equal(storage.hasButton('Erase temporary import'), false);
+});
+test('unreadable temporary staging offers an explicit erase and then a fresh start', async () => {
+  const s = await screen({ bundled: true, installed: true, failing: true });
+  await s.foreground();
+  assert.match(s.text(), /still could not be read/);
+  assert.equal(s.hasButton('Start history import'), false);
+  assert.equal(s.hasButton('Resume saved import'), false);
+  s.button('Erase temporary import').onPress(); await s.flush();
+  assert.deepEqual(s.erased, [], 'erasing requires confirmation');
+  const sheet = s.confirms()[1];
+  assert.equal(sheet.visible, true); assert.equal(sheet.confirmLabel, 'Erase temporary import');
+  sheet.onConfirm(); await s.flush();
+  assert.deepEqual(s.erased, [true]);
+  assert.ok(s.button('Start history import'));
+  assert.equal(s.hasButton('Erase temporary import'), false);
+});
+test('a page block clears when the saved revision advances without new checked messages', async () => {
+  const s = await screen({ bundled: true, installed: true, blocked: true, pageFailure: true, progress: { ...session(), revision: 5 } });
+  assert.match(s.text(), /conflicting dates/);
+  s.setProgress({ ...session(), revision: 6 }); await s.foreground();
+  assert.ok(s.button('Resume saved import'));
+});
+test('an expired session reads as no session, so Start is enabled', async () => {
+  const createdAtMs = Date.now() - 86_400_000 - 5000;
+  const s = await screen({ bundled: true, installed: true, progress: { ...session(), createdAtMs, expiresAtMs: createdAtMs + 86_400_000 } });
+  assert.equal(s.button('Start history import').disabled, false);
+  assert.equal(s.hasButton('Erase temporary import'), false);
 });
