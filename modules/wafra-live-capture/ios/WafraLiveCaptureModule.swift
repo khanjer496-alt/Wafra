@@ -3,6 +3,7 @@ import Foundation
 
 private enum WafraLiveCaptureBridgeError: Error {
   case invalidLimit
+  case invalidExclusion
   case invalidTimestamp
   case invalidEntitlementLease
   case applePayShortcutUnavailable
@@ -164,6 +165,21 @@ public class WafraLiveCaptureModule: Module {
     AsyncFunction("listPendingRecords") { (limit: Double) -> [String] in
       let nativeLimit = try bridgeLimit(limit)
       return try WafraLiveCaptureStore.shared.listPendingRecords(limit: nativeLimit, includeNotifications: false)
+    }
+
+    // Paging reader for drains that hold records (reviews waiting for Review
+    // space). Includes notifications like the notification-aware reader and
+    // skips the named held records so newer records are still reached.
+    AsyncFunction("listPendingRecordsExcluding") { (limit: Double, excludeIds: [String]) -> [String] in
+      let nativeLimit = try bridgeLimit(limit)
+      guard excludeIds.count <= WafraLiveCaptureStore.maxExcludedRecords else {
+        throw WafraLiveCaptureBridgeError.invalidExclusion
+      }
+      return try WafraLiveCaptureStore.shared.listPendingRecords(
+        limit: nativeLimit,
+        includeNotifications: true,
+        excluding: excludeIds
+      )
     }
 
     AsyncFunction("listPendingRecordsIncludingNotifications") { (limit: Double) -> [String] in

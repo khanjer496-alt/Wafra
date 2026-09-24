@@ -12,7 +12,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/lib/capture';
-import { REVIEW_ALERT_CAP, isIosNotificationReview } from '@/lib/alert-review-tray';
+import { REVIEW_ALERT_CAP, isCurrencyConflictReview, isIosNotificationReview } from '@/lib/alert-review-tray';
 import { formatCaptureReceipt, isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { iosSupportsNotificationAutomation, resolveIosNotificationReadiness } from '@/lib/ios-capture-setup';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource } from '@/lib/ios-message-onboarding';
@@ -144,7 +144,7 @@ export default function IosNotificationSetup() {
         {!supported ? <ThemedText>{w.unsupported}</ThemedText> : !available ? <ThemedText>{loading ? w.checking : error ?? w.update}</ThemedText> : <>
           <ThemedText>{w.intro}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{w.noBankQuestion}</ThemedText>
-          {(state.reviewTray?.pending.filter(isIosNotificationReview).length ?? 0) >= REVIEW_ALERT_CAP && <>
+          {(state.reviewTray?.pending.filter((item) => isIosNotificationReview(item) && !isCurrencyConflictReview(item)).length ?? 0) >= REVIEW_ALERT_CAP && <>
             <ThemedText accessibilityRole="alert">{onboarding ? w.reviewFullOnboarding : w.reviewFull}</ThemedText>
             {!onboarding && <Button label={w.reviewAction} onPress={() => router.push('/review-alerts')} disabled={busy} wrapLabel />}
           </>}

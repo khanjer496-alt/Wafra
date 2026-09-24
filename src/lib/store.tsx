@@ -80,13 +80,13 @@ import {
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
 import {
-  admitPreparedReviewAlert,
+  admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   resolveReviewAlert as resolveAlertReviewItem,
   type ReviewEntry,
   isUniversalReviewAlert,
-  type ReviewTombstone,
+  type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
@@ -1555,7 +1555,7 @@ interface StoreValue {
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
   ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
-  dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
+  dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
@@ -2327,18 +2327,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
     const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
-    let reviewTray = rebound.reviewTray;
+    // One prune for the whole batch: History staging can carry thousands.
+    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now);
+    const reviewTray = batch.state;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
-    for (const item of items) {
-      const result = admitPreparedReviewAlert(reviewTray, item, now);
-      reviewTray = result.state;
-      if (result.outcome === 'admitted') {
-        admitted += 1;
-        const qualification = qualificationByReviewId.get(item.id);
-        if (qualification) admittedQualifications.push(qualification);
-      }
-    }
+    items.forEach((item, index) => {
+      if (batch.outcomes[index] !== 'admitted') return;
+      admitted += 1;
+      const qualification = qualificationByReviewId.get(item.id);
+      if (qualification) admittedQualifications.push(qualification);
+    });
     if (admitted === 0 && !rebound.changed) {
       return { admitted, qualificationIds: [], durable: ensureDurable() };
     }
@@ -2375,7 +2374,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const dismissReviewAlert = useCallback(async (
     id: string,
-    outcome: ReviewTombstone['outcome'],
+    outcome: ReviewResolutionOutcome,
   ): Promise<void> => {
     const reviewTray = resolveAlertReviewItem(
       authoritativeState.current.reviewTray,

@@ -88,6 +88,25 @@ for (const language of ['en', 'ar']) {
     assert.ok(byId(empty, 'review-alerts-expired'));
     assert.equal(byId(empty, 'review-alerts-intro'), undefined);
   });
+  test(`${language}: alerts Review could not keep stay visible as counts`, () => {
+    const at = Date.now() - 3600000;
+    const tombstone = (key, outcome) => ({ sourceKey: key, resolvedAt: at, expiresAt: at + 90 * 86400000, outcome });
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [], tombstones: [
+      tombstone('synthetic-evicted-1', 'evicted'), tombstone('synthetic-evicted-2', 'evicted'),
+      tombstone('synthetic-foreign-1', 'currency-evicted'),
+      tombstone('synthetic-dismissed', 'dismissed'),
+    ] } } });
+    const tf = h.deps['@/lib/i18n'].tf;
+    const tree = h.renderScreen('review-alerts');
+    assert.ok(text(byId(tree, 'review-alerts-evicted')).includes(tf('reviewAlertsEvictedCount', { count: 2 })));
+    assert.ok(text(byId(tree, 'review-alerts-currency-evicted')).includes(tf('reviewAlertsCurrencyEvictedCount', { count: 1 })));
+    assert.notEqual(tf('reviewAlertsEvictedCount', { count: 2 }), 'reviewAlertsEvictedCount');
+    const quiet = createWorkflowHarness({ language, state: { reviewTray: { pending: [], tombstones: [
+      tombstone('synthetic-dismissed', 'dismissed'),
+    ] } } }).renderScreen('review-alerts');
+    assert.equal(byId(quiet, 'review-alerts-evicted'), undefined);
+    assert.equal(byId(quiet, 'review-alerts-currency-evicted'), undefined);
+  });
   test(`${language}: ambiguous amounts do not become an explicit financial fact`, () => {
     const item = pending('purchase', { amount: field(money(), 'ambiguous') });
     const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } } });
