@@ -300,10 +300,54 @@ test('manual selection survives a cold restart without forcing the questionnaire
   // Allow the store's normal debounced persistence to have saved this profile.
   const saved = clone(h.state); h.unmount();
   const restarted = await gate({ ledger: saved });
-  assert.ok(restarted.text().includes(restarted.t('onboardCompleteManualTitle')) ||
-    restarted.text().includes(restarted.t('onboardPastTitle')),
-  'A saved manual choice must resume completion or capture choices, not restart Welcome');
+  // iPhone: back at the live-capture choice that led to completion, not the
+  // statement step and not Welcome.
+  at(restarted, 'live');
   assert.equal(restarted.state.captureOptOut, true); assert.equal(restarted.state.onboarded, false);
+});
+
+// 2026-09-25: the iPhone statement step and live capture share the persisted
+// `capture` stage. Leaving statements (Later, or opening the importer) is
+// recorded, so a relaunch resumes at live capture instead of replaying the
+// statement offer; stepping Back to statements clears it again.
+test('Later on statements survives a relaunch and resumes at live capture', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await toLive(h);
+  assert.equal(h.state.onboardingProfile.stage, 'capture');
+  const saved = clone(h.state); h.unmount();
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+  assert.equal(restarted.state.onboarded, false);
+  // Back to statements is also remembered across a relaunch.
+  await restarted.press('onboardBack'); at(restarted, 'capture');
+  const again = clone(restarted.state); restarted.unmount();
+  const cold = await gate({ ledger: again });
+  at(cold, 'capture');
+});
+
+test('opening the statement importer counts as passing statements after a relaunch', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await h.press('onboardPastAction');
+  assert.equal(h.input.pathname, '/statement-import');
+  const saved = clone(h.state); h.unmount();
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+});
+
+test('Not now on live capture survives a relaunch without replaying statements', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await toLive(h); await h.press('onboardNotNow');
+  assert.equal(h.state.onboardingProfile.stage, 'complete');
+  const saved = clone(h.state); h.unmount();
+  // The completion outcome is not durable (a failed Shortcut cleanup also
+  // saves `complete`), so a relaunch returns to the choice that led to it —
+  // live capture, never the statement step — without claiming success.
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+  assert.ok(!restarted.text().includes(restarted.t('onboardPastTitle')));
+  assert.equal(restarted.state.captureOptOut, true); assert.equal(restarted.state.onboarded, false);
+  await restarted.press('onboardNotNow');
+  assert.ok(restarted.text().includes(restarted.t('onboardCompleteManualTitle')), 'one tap finishes again');
 });
 
 test('welcome animates in without Reduce Motion and still exposes the market scene and start control', async () => {

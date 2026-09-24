@@ -106,6 +106,13 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   // step existed restores without it, and must keep restoring without it.
   eq('backup validation still accepts a profile with no alert-delivery answer',
     backupValidation.isValidBackupState(profileState), true);
+  // iPhone statement-step marker: optional boolean, so a relaunch resumes at live capture.
+  eq('backup validation accepts the iPhone statement-step marker',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, stage: 'capture', statementStepDone: true } }), true);
+  eq('backup validation rejects a malformed statement-step marker',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, statementStepDone: 'yes' } }), false);
   for (const alerts of ['sms', 'notifications', 'neither', 'unsure', null]) {
     eq(`backup validation accepts the alert-delivery answer (${alerts})`,
       backupValidation.isValidBackupState({ ...profileState,

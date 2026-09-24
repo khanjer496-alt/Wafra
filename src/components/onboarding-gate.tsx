@@ -407,6 +407,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     nextIntention: OnboardingIntention | null = intention,
     nextAlerts: OnboardingAlertDelivery | null = alerts,
     nextCountry: string | null = country,
+    // iPhone: the statement step is behind the user, so a relaunch at the
+    // `capture` stage resumes at live capture. Every other write clears it.
+    statementStepDone = false,
   ) => {
     if (previewMode) return;
     setOnboardingProfile({
@@ -417,9 +420,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       intention: nextIntention,
       alerts: nextAlerts,
       country: nextCountry,
+      ...(statementStepDone ? { statementStepDone: true } : {}),
       startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
     });
   };
+  const saveLiveStep = () =>
+    saveJourney('capture', focus, tracking, intention, alerts, country, Platform.OS === 'ios');
 
   useEffect(() => {
     if (!state.hydrated || state.onboarded || hydrationFailed || startedEventSent.current) return;
@@ -518,7 +524,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           setStep('welcome');
         } else {
           const resumed: Step = destination === 'privacy' ? 'preview' : destination;
-          setStep(resumed === 'capture' && resumeAtLive.current ? 'live' : resumed);
+          // iPhone: statements and live capture share the `capture` stage. Land
+          // on live when coming back from a setup route, when the statement
+          // step was passed before a relaunch, or when a saved completion (its
+          // outcome is not durable) is resumed: live is the choice that led to it.
+          const liveNext = Platform.OS === 'ios' && (resumeAtLive.current ||
+            state.onboardingProfile?.statementStepDone === true ||
+            state.onboardingProfile?.stage === 'complete');
+          setStep(resumed === 'capture' && liveNext ? 'live' : resumed);
         }
         resumeAtLive.current = false;
         setResumeReady(true);
@@ -913,7 +926,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const openStatementImport = () => {
     if (Platform.OS === 'web' || !beginStepTransition()) return;
-    saveJourney('capture');
+    // Opening the importer moves past the statement step: after a relaunch the
+    // next step is live capture (Back from there still reaches statements).
+    saveLiveStep();
     const session = Crypto.randomUUID();
     statementImportSession.current = session;
     router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
@@ -1029,7 +1044,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (!beginStepTransition()) return;
     if (activeStep === 'complete') {
       setStep(Platform.OS === 'ios' ? 'live' : 'capture');
-      saveJourney('capture');
+      saveLiveStep();
       if (params.onboarding && !previewMode) router.setParams({ onboarding: undefined });
     } else if (activeStep === 'live') {
       setStep('capture');
@@ -1525,7 +1540,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         label: t('onboardLater'),
                         onPress: () => {
                           if (!beginStepTransition()) return;
-                          saveJourney('capture');
+                          saveLiveStep();
                           setStep('live');
                         },
                         disabled: setupBusy || transitioning,

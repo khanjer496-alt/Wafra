@@ -75,6 +75,7 @@ function actions(options = {}) {
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
     saveJourney(stage) { record('journey', stage); },
+    saveLiveStep() { record('journey', 'capture'); record('statement-step-done'); },
     beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
@@ -409,6 +410,8 @@ for (const platform of ['ios', 'android']) {
       '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
     ]]);
     assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
+    // Opening the importer marks the statement step done for a relaunch.
+    assert.equal(calls(h, 'statement-step-done').length, 1);
     assert.equal(h.ledger.captureOptOut, true);
     assert.equal(calls(h, 'capture-write-start').length, 0);
     assert.equal(calls(h, 'requestSmsPermission').length, 0);

@@ -308,8 +308,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "e97625ec8d2de1ce0913653c9411d9b2907fa37b3ad5388bab506a5825561129",
-      "reviewedChange": "2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
+      "sha256": "c3930dcb352e657715a8b9858a7a5ea0ccd2a0c37cf6a2cab071a7c8d39dbd4f",
+      "reviewedChange": "2026-09-25 (b): Back from completion to live capture on iPhone records that the statement step is behind the user (saveLiveStep, a no-op flag on Android), so a relaunch resumes at live capture. 2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
