@@ -1965,7 +1965,8 @@ struct WafraBankSenderRegistryTests {
     const trayModule = requireBuild('@/lib/alert-review-tray');
     const AED_MONEY = { schemaVersion: 2, currency: 'AED', exponent: 2 };
     // Occupancy only: admission never re-validates entries already in the tray.
-    const BASE_REVIEW_FILLER = { kind: 'universal', parserVersion: 1 };
+    // Registered reviews always describe a possible money movement.
+    const BASE_REVIEW_FILLER = { kind: 'registered', parserVersion: 1 };
 
     {
       // H1: a real stored AED ledgerMoney with a full page of Saudi rows at
@@ -2105,6 +2106,50 @@ struct WafraBankSenderRegistryTests {
         outcome.deferredReviews === 50 && notificationIds.every((id) => !native.acknowledged.includes(id)) &&
           native.pending().length === 50 && trayModule.reviewCaptureBacklog.get().waiting === 50,
         JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get() }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Orchestrator rule: informational reviews keep the evicting policy and
+      // never block capture, however many arrive.
+      trayModule.reviewCaptureBacklog.reset();
+      const balanceIds = Array.from({ length: 60 }, () => nextId());
+      const purchaseId = nextId();
+      const native = nativeQueue([
+        ...balanceIds.map((id, index) => envelope({
+          id, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = admittingLedger([]);
+      const outcome = await coordinator(native, ledger).drain();
+      const legacy = ledger.getState().reviewTray.pending;
+      ok('sixty balance alerts never block a later purchase SMS',
+        outcome.imported === 1 && native.acknowledged.includes(purchaseId) &&
+          native.pending().length === 0 && !outcome.deferredReviews,
+        JSON.stringify({ outcome, pending: native.pending().length }));
+      ok('the informational lane keeps its newest fifty by eviction',
+        legacy.length === 50 && legacy.every((item) => item.kind === 'universal') &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0, JSON.stringify(legacy.length));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A lane full of possible money movements drops a new informational
+      // review instead of waiting or evicting a money movement.
+      const balanceId = nextId();
+      const native = nativeQueue([envelope({
+        id: balanceId, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(60_000),
+      })]);
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a new informational review cannot block or displace fifty pending money reviews',
+        native.acknowledged.includes(balanceId) && native.pending().length === 0 &&
+          !outcome.deferredReviews &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)) &&
+          ledger.getState().reviewTray.pending.length === 50,
+        JSON.stringify({ outcome, pending: ledger.getState().reviewTray.pending.length }));
       trayModule.reviewCaptureBacklog.reset();
     }
 
@@ -2802,11 +2847,11 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
-      // Non-reviewable rows: the page bound is independent of Review space,
-      // which applies its own backpressure (covered separately below).
+      // Informational balance reviews never wait for Review space, so the
+      // page bound alone stops this drain.
       const rows = Array.from({ length: 2050 }, (_, index) => envelope({
         id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-        text: 'Get 20% off at CARREFOUR when you use your card.',
+        text: 'Your available balance is AED 5,000.00.',
       }));
       const native = nativeQueue(rows);
       const ledger = ledgerAdapter();

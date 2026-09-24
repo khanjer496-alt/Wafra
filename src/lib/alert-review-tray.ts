@@ -216,6 +216,43 @@ const expiryTombstones = (
   return added.sort((a, b) => a.resolvedAt - b.resolvedAt);
 };
 
+const MONEY_MOVEMENT_FAMILIES: readonly string[] = [
+  'purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'unknown',
+];
+
+/**
+ * Whether a review could still become a ledger transaction. Registered
+ * reviews are admitted only for money-moving families. A universal review
+ * uses the same test as the Review screen's "ordinary posting": balance,
+ * statement, bill, card-payment and non-posted events are informational.
+ */
+export const isMoneyMovementReview = (item: ReviewEntry): boolean => {
+  if (!isUniversalReviewAlert(item)) return true;
+  const event = item.event as Partial<UniversalBankEvent> | undefined;
+  return !!event && MONEY_MOVEMENT_FAMILIES.includes(event.family as string) &&
+    (event.status === 'posted' || event.status === 'unknown');
+};
+
+/**
+ * Keep the newest fifty legacy reviews, but when the lane overflows, evict
+ * informational entries (oldest first) before any possible money movement.
+ * Input is sorted oldest first.
+ */
+const trimLegacyLane = (legacy: ReviewEntry[]): ReviewEntry[] => {
+  let overflow = legacy.length - REVIEW_ALERT_CAP;
+  if (overflow <= 0) return legacy;
+  const evicted = new Set<ReviewEntry>();
+  for (const item of legacy) {
+    if (overflow === 0) break;
+    if (!isMoneyMovementReview(item)) { evicted.add(item); overflow -= 1; }
+  }
+  for (const item of legacy) {
+    if (overflow === 0) break;
+    if (!evicted.has(item)) { evicted.add(item); overflow -= 1; }
+  }
+  return legacy.filter((item) => !evicted.has(item));
+};
+
 export const pruneAlertReviewTray = (
   state: AlertReviewTrayState,
   now: number,
@@ -227,7 +264,7 @@ export const pruneAlertReviewTray = (
   // acknowledged notification, nor start refusing their own records without
   // a retry path. Canonical writes never exceed fifty notification entries.
   const notifications = fresh.filter(isProtectedIosCaptureReview).slice(0, REVIEW_ALERT_CAP);
-  const legacy = fresh.filter(item => !isProtectedIosCaptureReview(item)).slice(-REVIEW_ALERT_CAP);
+  const legacy = trimLegacyLane(fresh.filter(item => !isProtectedIosCaptureReview(item)));
   return {
   schemaVersion: 1,
   pending: [...notifications, ...legacy].sort((a, b) => a.observedAt - b.observedAt),
@@ -412,12 +449,13 @@ export const reviewTrayCapacity = (
 };
 
 /**
- * Backpressure for a caller that can leave its source queued. The legacy lane
- * otherwise admits by evicting its oldest review, which would silently lose an
- * already-acknowledged record. Items that would evict are returned as
- * `deferred`; duplicates and refusals pass through so the caller keeps its
- * existing acknowledgement semantics for them. Protected iOS reviews already
- * refuse at capacity inside admission and always pass through here.
+ * Backpressure for a caller that can leave its source queued. A full legacy
+ * lane admits by evicting, informational entries first. A possible money
+ * movement whose admission would evict another money movement (or itself) is
+ * returned as `deferred` so its record stays queued. Informational reviews
+ * never wait: they keep the evicting policy and cannot block capture.
+ * Duplicates and refusals pass through with their existing acknowledgement
+ * semantics. Protected iOS reviews refuse at capacity inside admission.
  */
 export const partitionReviewsByCapacity = <T extends ReviewEntry>(
   current: AlertReviewTrayState,
@@ -432,11 +470,15 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
       admit.push(item);
       continue;
     }
-    const legacyCount = state.pending.filter((entry) => !isProtectedIosCaptureReview(entry)).length;
     const result = admitPreparedReviewAlert(state, item, now);
-    if (result.outcome === 'admitted' && legacyCount >= REVIEW_ALERT_CAP) {
-      deferred.push(item);
-      continue;
+    if (result.outcome === 'admitted' && isMoneyMovementReview(item)) {
+      const kept = new Set(result.state.pending.map((entry) => entry.id));
+      const losesMoneyMovement = !kept.has(item.id) || state.pending.some((entry) =>
+        !isProtectedIosCaptureReview(entry) && isMoneyMovementReview(entry) && !kept.has(entry.id));
+      if (losesMoneyMovement) {
+        deferred.push(item);
+        continue;
+      }
     }
     state = result.state;
     admit.push(item);

@@ -365,6 +365,31 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
       tray.reviewTrayCapacity(roomy, NOW + 1000).legacyFull === false &&
       tray.reviewTrayCapacity({ pending: [] }, NOW).protectedFull === false);
 
+  const informational = (index) => ({ kind: 'universal',
+    id: `info_review_id_${String(index).padStart(8, '0')}`,
+    sourceKey: `info_review_source_${String(index).padStart(8, '0')}`,
+    observedAt: NOW + index, expiresAt: NOW + index + REVIEW_ALERT_TTL_MS, channel: 'inbox',
+    parserVersion: 1, event: { family: 'balance', status: 'informational' } });
+  ok('money movement is registered or an ordinary posted/unknown universal family',
+    tray.isMoneyMovementReview(stored) &&
+      !tray.isMoneyMovementReview(informational(1)) &&
+      tray.isMoneyMovementReview({ ...informational(1), event: { family: 'purchase', status: 'posted' } }) &&
+      !tray.isMoneyMovementReview({ ...informational(1), event: { family: 'purchase', status: 'future' } }) &&
+      !tray.isMoneyMovementReview({ ...informational(1), event: undefined }));
+  const mixed = pruneAlertReviewTray({ ...emptyAlertReviewTray(), pending: [
+    informational(900), ...Array.from({ length: 50 }, (_, index) => legacyFiller(index)),
+  ] }, NOW + 1000);
+  ok('legacy overflow evicts an informational review before an older money movement',
+    mixed.pending.length === 50 && !mixed.pending.some((item) => item.id === informational(900).id) &&
+      mixed.pending.some((item) => item.id === legacyFiller(0).id));
+  ok('a new informational review never waits, even behind fifty money movements',
+    tray.partitionReviewsByCapacity(fullLegacy, [informational(700)], NOW + 1000).deferred.length === 0);
+  const infoFull = { ...emptyAlertReviewTray(),
+    pending: Array.from({ length: 50 }, (_, index) => informational(index)) };
+  const overInfo = tray.partitionReviewsByCapacity(infoFull, [incoming], NOW + 1000);
+  ok('a money movement is admitted by evicting an informational review instead of waiting',
+    overInfo.deferred.length === 0 && overInfo.admit[0] === incoming);
+
   // H3(c): source-free presentation facts for the Review banner.
   tray.reviewCaptureBacklog.reset();
   let notified = 0;
