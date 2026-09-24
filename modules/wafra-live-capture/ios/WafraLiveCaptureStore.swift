@@ -55,7 +55,8 @@ public final class WafraLiveCaptureStore {
   public static let notificationSetupProbeText = "Wafra notification setup check"
 
   public static let maxApplePayMerchantCharacters = 96
-  private static let applePayCurrencies = Set(Locale.commonISOCurrencyCodes)
+  // NSLocale spelling: the Locale static needs iOS 16, the app deploys to 15.1.
+  private static let applePayCurrencies = Set(NSLocale.commonISOCurrencyCodes)
   private static let applePayDecimalPattern = try! NSRegularExpression(pattern: "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,8})?$")
 
   public static let maxBodyBytes = 16 * 1024
