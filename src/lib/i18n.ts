@@ -1401,6 +1401,7 @@ const S = {
   },
   retainedBankMessage: { en: 'Bank message', ar: 'رسالة البنك' },
   bankSmsSource: { en: 'Bank SMS', ar: 'رسالة بنكية' },
+  bankNotificationSource: { en: 'Bank notification', ar: 'إشعار بنكي' },
   noExpensesToExport: {
     en: 'There are no expenses in that period.',
     ar: 'لا توجد مصروفات في هذه الفترة.',

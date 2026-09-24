@@ -67,6 +67,21 @@ for (const language of ['en', 'ar']) {
       assert.ok(h.events.some(e => e[0] === 'state' && e[1] === 7 && e[2] === true));
       assert.equal(h.events.some(e => e[0] === 'deleteTransaction'), false);
     });
+    test(`${language}/${largeText}: details name the capture channel a row actually came from`, () => {
+      // A notification capture is persisted as `source: 'sms'` with `viaPush`,
+      // so reading `source` alone labelled every bank-app alert "Bank SMS".
+      // Users whose bank sends notifications only were then sent hunting for
+      // a message that does not exist when a charge looked wrong.
+      const h = createHarness({ language, largeText });
+      const t = h.deps['@/lib/i18n'].t;
+      const base = h.state.transactions[1];
+      const pushed = text(h.renderDetail({ ...base, source: 'sms', viaPush: true }));
+      const texted = text(h.renderDetail({ ...base, source: 'sms', viaPush: undefined }));
+      assert.ok(pushed.includes(t('bankNotificationSource')));
+      assert.equal(pushed.includes(t('bankSmsSource')), false);
+      assert.ok(texted.includes(t('bankSmsSource')));
+      assert.equal(texted.includes(t('bankNotificationSource')), false);
+    });
     test(`${language}/${largeText}: edit mode pins save/cancel and preserves exact amount`, () => {
       const h = createHarness({ language, largeText, states: {
         0: true, 1: 'Fixture groceries', 2: '12.50', 3: 'shopping', 4: 'enbd', 5: '2026-09-06', 6: false,
