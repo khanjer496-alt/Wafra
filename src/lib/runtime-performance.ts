@@ -346,10 +346,22 @@ export function startRuntimePerformanceMonitor(): () => void {
     void initializeBreadcrumbPersistence();
     active = AppState.currentState === 'active';
     resetExpectedAt();
-    timer = setInterval(sample, SAMPLE_INTERVAL_MS);
+    // Sample only while foregrounded. A background tick did nothing but reset
+    // `expectedAt`, which the lifecycle handler below already does, yet it
+    // still woke the JS thread every second for as long as a headless capture
+    // or history job kept the process alive.
+    const syncSampler = () => {
+      if (active && !timer) timer = setInterval(sample, SAMPLE_INTERVAL_MS);
+      else if (!active && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    syncSampler();
     subscription = AppState.addEventListener('change', (next) => {
       active = next === 'active';
       resetExpectedAt();
+      syncSampler();
       if (next !== 'active') persistBreadcrumbSoon(true);
     });
   }
