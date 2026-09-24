@@ -50,12 +50,13 @@ export interface CaptureMarketInference {
 
 const UNIVERSAL_MARKETS: readonly UniversalMarket[] = [
   'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+  'CA', 'AU', 'BR', 'MX', 'SG',
 ];
 const ALL_MARKETS: readonly DetectedMarket[] = ['AE', 'SA', ...UNIVERSAL_MARKETS];
 const MARKET_CURRENCY: Record<DetectedMarket, string> = {
   AE: 'AED', SA: 'SAR', US: 'USD', GB: 'GBP', FR: 'EUR', DE: 'EUR', ES: 'EUR',
   IT: 'EUR', NL: 'EUR', IN: 'INR', QA: 'QAR', KW: 'KWD', BH: 'BHD', OM: 'OMR',
-  EG: 'EGP', JO: 'JOD',
+  EG: 'EGP', JO: 'JOD', CA: 'CAD', AU: 'AUD', BR: 'BRL', MX: 'MXN', SG: 'SGD',
 };
 const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   IN: /\b(?:upi|imps|neft|rtgs|aeps|nach)\b|₹|रु(?:पये)?/iu,
@@ -68,6 +69,13 @@ const GRAMMAR_MARKERS: Partial<Record<DetectedMarket, RegExp>> = {
   NL: /\b(?:afgeschreven|bijgeschreven|incasso)\b/iu,
   KW: /\bknet\b/iu,
   EG: /\bmeeza\b|ميزة/iu,
+  // Domestic instant-payment rails. Each is only grammar evidence: it routes
+  // an alert alone only together with that market's own ISO currency.
+  CA: /\binterac\s+e-?transfer\b/iu,
+  AU: /\b(?:npp|osko|payid|payto|bpay)\b/iu,
+  BR: /\b(?:pix|transfer[eê]ncia\s+ted)\b/iu,
+  MX: /\b(?:spei|codi|dimo)\b/iu,
+  SG: /\b(?:paynow|fast\s+transfer|sgqr)\b/iu,
 };
 
 const regionMarket = (hint?: string | null): DetectedMarket | null => {
@@ -81,7 +89,7 @@ const regionMarket = (hint?: string | null): DetectedMarket | null => {
 
 const currencyMarkets = (source: string): Set<DetectedMarket> => {
   const codes = new Set(
-    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD)\b/g) ?? [],
+    source.slice(0, 4096).toUpperCase().match(/\b(?:AED|SAR|USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD)\b/g) ?? [],
   );
   const markets = new Set<DetectedMarket>();
   for (const market of ALL_MARKETS) {
@@ -174,8 +182,14 @@ export const routeAlertMarket = (input: AlertMarketRoutingInput): AlertMarketRou
   }
 
   const grammar = withKind('grammar');
-  if (grammar.length === 1 && grammar[0].evidence.includes('currency')) {
-    return { decision: 'single', market: grammar[0].market, candidates, reasons: [] };
+  const grammarWithCurrency = grammar.filter((candidate) => candidate.evidence.includes('currency'));
+  // Generic language vocabulary can overlap countries (Spanish "abonado" is
+  // ES grammar, but a Mexican SPEI alert uses it too). When exactly one
+  // grammar candidate is also backed by its own market's ISO currency, that
+  // combined evidence wins. A shared currency such as EUR still yields
+  // several currency-backed candidates and stays ambiguous.
+  if (grammarWithCurrency.length === 1) {
+    return { decision: 'single', market: grammarWithCurrency[0].market, candidates, reasons: [] };
   }
   if (candidates.length > 0) {
     return { decision: 'ambiguous', market: null, candidates, reasons: ['insufficient-market-evidence'] };
