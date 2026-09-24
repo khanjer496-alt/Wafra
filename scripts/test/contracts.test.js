@@ -950,7 +950,7 @@ function ktSources(dir) {
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)، ثم تم'/.test(copy) &&
-      /أكملت الإعداد/.test(copy) &&
+      /iosLocalAutomationAdded:[\s\S]{0,80}ar: 'فعّلتها'/.test(copy) &&
       /جهات الاتصال فقط/.test(copy) &&
       /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&

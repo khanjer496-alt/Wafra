@@ -302,14 +302,14 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "d68aba11ab8331681c322450419aa59ed796645b6da1e30167bac5c70b07743a",
-      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
+      "sha256": "8f95198864cac7091c23e8c9510cd16ec0cbd52622bff7f80637d61f30877cc4",
+      "reviewedChange": "2026-09-25: iOS manual onboarding revokes the relay only when a Shortcut carries it (isLegacyShortcutCaptureActive). The statement step now precedes live capture and pairs a relay for uploads alone; revoking that relay stranded queued statement rows and warned about a Shortcut that was never installed. Strict read failure still reports uncertain cleanup. 2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; durable manual completion behavior is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "63a06ae42c18c5d622ec15a89afb5c108eb348ae351b0d7d23cb9b64887f366f",
-      "reviewedChange": "2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey. The alert-delivery question is inserted between Tracking and Intention and steps back through both; returning from Focus still reopens the in-Welcome name personalization without adding a progress step, and completion callback cleanup is unchanged."
+      "sha256": "c3930dcb352e657715a8b9858a7a5ea0ccd2a0c37cf6a2cab071a7c8d39dbd4f",
+      "reviewedChange": "2026-09-25 (b): Back from completion to live capture on iPhone records that the statement step is behind the user (saveLiveStep, a no-op flag on Android), so a relaunch resumes at live capture. 2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",

@@ -179,6 +179,12 @@ async function gate(options = {}) {
     load(path.join(root, 'src/components/country-picker-sheet.tsx'), dependencies);
   dependencies['@/components/onboarding/country-confirm'] =
     load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
+  // The iPhone statement step's decorative scene renders from real source too.
+  dependencies['./alive-scenes'] = dependencies['@/components/onboarding/alive-scenes'];
+  dependencies['@/components/onboarding/statement-scene'] =
+    load(path.join(root, 'src/components/onboarding/statement-scene.tsx'), dependencies);
+  dependencies['@/components/onboarding/setup-intro-step'] =
+    load(path.join(root, 'src/components/onboarding/setup-intro-step.tsx'), dependencies);
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
@@ -232,9 +238,13 @@ module.exports = { gate, profile };
 if (require.main === module) {
 const stageHeading = { welcome: 'onboardHeadline', focus: 'onboardFocusTitle', tracking: 'onboardTrackingTitle',
   alerts: 'onboardAlertsTitle', intention: 'onboardIntentionTitle', preview: 'onboardPersonalizedTitle',
-  capture: 'onboardCaptureTitleIos' };
+  capture: 'onboardPastTitle' };
+// The iPhone "Catch new transactions" step shares the persisted capture stage.
+const screenHeading = { ...stageHeading, live: 'onboardLiveTitle' };
 const normalizeVisible = value => String(value).replace(/\s+/g, ' ').trim();
-const at = (h, stage) => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t(stageHeading[stage]))), `Expected ${stage}; ${h.text()}`);
+const at = (h, stage) => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t(screenHeading[stage]))), `Expected ${stage}; ${h.text()}`);
+/** From the statement step to new-transaction capture, as "Later" does. */
+const toLive = async h => { await h.press('onboardLater'); at(h, 'live'); };
 const atName = h => assert.ok(normalizeVisible(h.text()).includes(normalizeVisible(h.t('onboardNameTitle'))), `Expected name personalization; ${h.text()}`);
 const calls = (h, name) => h.events.filter(event => event[0] === name);
 
@@ -285,15 +295,59 @@ test('legacy saved privacy stage resumes at the integrated preview', async () =>
 
 test('manual selection survives a cold restart without forcing the questionnaire again', async () => {
   const h = await gate({ profile: profile('capture') });
-  await h.press('onboardManualChoiceIos');
+  await toLive(h); await h.press('onboardNotNow');
   assert.equal(h.state.onboardingProfile.stage, 'complete');
   // Allow the store's normal debounced persistence to have saved this profile.
   const saved = clone(h.state); h.unmount();
   const restarted = await gate({ ledger: saved });
-  assert.ok(restarted.text().includes(restarted.t('onboardCompleteManualTitle')) ||
-    restarted.text().includes(restarted.t('onboardCaptureTitleIos')),
-  'A saved manual choice must resume completion or capture choices, not restart Welcome');
+  // iPhone: back at the live-capture choice that led to completion, not the
+  // statement step and not Welcome.
+  at(restarted, 'live');
   assert.equal(restarted.state.captureOptOut, true); assert.equal(restarted.state.onboarded, false);
+});
+
+// 2026-09-25: the iPhone statement step and live capture share the persisted
+// `capture` stage. Leaving statements (Later, or opening the importer) is
+// recorded, so a relaunch resumes at live capture instead of replaying the
+// statement offer; stepping Back to statements clears it again.
+test('Later on statements survives a relaunch and resumes at live capture', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await toLive(h);
+  assert.equal(h.state.onboardingProfile.stage, 'capture');
+  const saved = clone(h.state); h.unmount();
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+  assert.equal(restarted.state.onboarded, false);
+  // Back to statements is also remembered across a relaunch.
+  await restarted.press('onboardBack'); at(restarted, 'capture');
+  const again = clone(restarted.state); restarted.unmount();
+  const cold = await gate({ ledger: again });
+  at(cold, 'capture');
+});
+
+test('opening the statement importer counts as passing statements after a relaunch', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await h.press('onboardPastAction');
+  assert.equal(h.input.pathname, '/statement-import');
+  const saved = clone(h.state); h.unmount();
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+});
+
+test('Not now on live capture survives a relaunch without replaying statements', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await toLive(h); await h.press('onboardNotNow');
+  assert.equal(h.state.onboardingProfile.stage, 'complete');
+  const saved = clone(h.state); h.unmount();
+  // The completion outcome is not durable (a failed Shortcut cleanup also
+  // saves `complete`), so a relaunch returns to the choice that led to it —
+  // live capture, never the statement step — without claiming success.
+  const restarted = await gate({ ledger: saved });
+  at(restarted, 'live');
+  assert.ok(!restarted.text().includes(restarted.t('onboardPastTitle')));
+  assert.equal(restarted.state.captureOptOut, true); assert.equal(restarted.state.onboarded, false);
+  await restarted.press('onboardNotNow');
+  assert.ok(restarted.text().includes(restarted.t('onboardCompleteManualTitle')), 'one tap finishes again');
 });
 
 test('welcome animates in without Reduce Motion and still exposes the market scene and start control', async () => {
@@ -308,14 +362,27 @@ test('welcome animates in without Reduce Motion and still exposes the market sce
   assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
 });
 
-test('setup Back returns to capture and preserves the selected first landing view', async () => {
+test('setup Back returns to new-transaction capture and preserves the selected first landing view', async () => {
   const h = await gate({ profile: profile('capture', 'bills') });
-  await h.press('onboardAutomaticChoiceIos'); assert.equal(h.input.pathname, '/ios-setup');
+  await toLive(h);
+  await h.press('onboardLiveAction'); assert.equal(h.input.pathname, '/ios-setup');
   h.input.pendingSetup = true; await h.route('/ios-setup', { fromOnboarding: '1' });
-  h.input.pendingSetup = false; await h.route('/'); at(h, 'capture');
+  h.input.pendingSetup = false; await h.route('/'); at(h, 'live');
   assert.equal(h.state.onboardingProfile.focus, 'bills');
-  // Since the personalized reveal, capture returns straight to the preview; privacy is folded into capture.
+  // Live capture steps back to the statement step, then to the preview.
+  await h.press('onboardBack'); at(h, 'capture');
   await h.press('onboardBack'); at(h, 'preview');
+});
+
+test('statement step: Add a statement opens the authorized importer and returning lands on live capture', async () => {
+  const h = await gate({ profile: profile('capture') });
+  await h.press('onboardPastAction');
+  assert.equal(h.input.pathname, '/statement-import');
+  assert.equal(h.input.params.fromOnboarding, '1');
+  assert.ok(h.nodes().some(node => node.type === 'Navigator'), 'the importer owns the screen');
+  await h.route('/'); at(h, 'live');
+  assert.equal(h.state.onboarded, false);
+  assert.equal(calls(h, 'setCaptureOptOut').length, 0);
 });
 
 for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta', '/ios-notification-setup', '/ios-apple-pay-setup']) {
@@ -382,7 +449,8 @@ test('failed ledger hydration stays in recovery even on the paged setup route', 
 test('rapid alternating capture/manual taps cannot race the durable opt-in', async () => {
   const write = deferred();
   const h = await gate({ profile: profile('capture'), optOut: true, services: { setCaptureOptOut: () => write.promise } });
-  const automatic = h.control('onboardAutomaticChoiceIos'), manual = h.control('onboardManualChoiceIos');
+  await toLive(h);
+  const automatic = h.control('onboardLiveAction'), manual = h.control('onboardNotNow');
   automatic.onPress(); manual.onPress(); automatic.onPress(); manual.onPress(); await h.flush();
   assert.deepEqual(calls(h, 'setCaptureOptOut').map(v => v[1]), [false]);
   assert.equal(h.control('onboardBack').disabled, true); assert.deepEqual(h.routes, []);
@@ -394,31 +462,33 @@ test('rapid alternating capture/manual taps cannot race the durable opt-in', asy
 test('rapid alternating manual/capture taps cannot reverse explicit opt-out', async () => {
   const write = deferred();
   const h = await gate({ profile: profile('capture'), services: { setCaptureOptOut: () => write.promise } });
-  const automatic = h.control('onboardAutomaticChoiceIos'), manual = h.control('onboardManualChoiceIos');
+  await toLive(h);
+  const automatic = h.control('onboardLiveAction'), manual = h.control('onboardNotNow');
   manual.onPress(); automatic.onPress(); manual.onPress(); automatic.onPress(); await h.flush();
   assert.deepEqual(calls(h, 'setCaptureOptOut').map(v => v[1]), [true]);
   assert.equal(h.control('onboardBack').disabled, true);
   write.resolve(); await h.flush();
   assert.deepEqual(h.routes, []); assert.equal(h.state.captureOptOut, true);
   assert.ok(h.text().includes(h.t('onboardCompleteManualTitle')));
-  await h.press('onboardBack'); at(h, 'capture'); assert.equal(h.state.captureOptOut, true);
+  await h.press('onboardBack'); at(h, 'live'); assert.equal(h.state.captureOptOut, true);
   delete h.services.setCaptureOptOut;
-  await h.press('onboardAutomaticChoiceIos'); assert.equal(h.state.captureOptOut, false);
+  await h.press('onboardLiveAction'); assert.equal(h.state.captureOptOut, false);
 });
 
 test('capture preference failure offers retry/manual and does not claim successful setup', async () => {
   const h = await gate({ profile: profile('capture'), services: { setCaptureOptOut: async () => { throw new Error('synthetic write failure'); } } });
-  await h.press('onboardAutomaticChoiceIos');
+  await toLive(h);
+  await h.press('onboardLiveAction');
   assert.ok(h.text().includes(h.t('onboardCompleteNeedsAttentionTitle'))); assert.deepEqual(h.routes, []);
   assert.equal(h.state.onboarded, false);
-  await h.press('onboardRetrySetup'); at(h, 'capture');
+  await h.press('onboardRetrySetup'); at(h, 'live');
   delete h.services.setCaptureOptOut;
-  await h.press('onboardManualChoiceIos'); assert.equal(h.state.captureOptOut, true);
+  await h.press('onboardNotNow'); assert.equal(h.state.captureOptOut, true);
 });
 
 test('manual completion cannot leave on a failed profile/ledger save; Retry preserves Add first entry intent', async () => {
   const h = await gate({ profile: profile('capture'), services: { ensureDurable: async () => { throw new Error('synthetic profile save failure'); } } });
-  await h.press('onboardManualChoiceIos');
+  await toLive(h); await h.press('onboardNotNow');
   const finish = h.control('onboardAddFirstEntry'); finish.onPress(); finish.onPress(); await h.flush();
   // iOS asks about notifications once before the durable completion write.
   await h.press('onboardNotificationsNotNow');
@@ -436,7 +506,7 @@ test('manual completion cannot leave on a failed profile/ledger save; Retry pres
 for (const [focus, label, destination] of [['spending', 'onboardOpenSpending', '/flow'], ['bills', 'onboardOpenBills', '/bills'], ['cashflow', 'onboardOpenHome', '/']]) {
   test(`manual finish opens the selected ${focus} view only after durable completion`, async () => {
     const save = deferred(); const h = await gate({ profile: profile('capture', focus), services: { ensureDurable: () => save.promise } });
-    await h.press('onboardManualChoiceIos'); h.control(label).onPress(); await h.flush();
+    await toLive(h); await h.press('onboardNotNow'); h.control(label).onPress(); await h.flush();
     await h.press('onboardNotificationsNotNow');
     assert.deepEqual(h.routes, []); assert.equal(calls(h, 'committed').length, 0);
     save.resolve(); await h.flush();
@@ -444,14 +514,18 @@ for (const [focus, label, destination] of [['spending', 'onboardOpenSpending', '
   });
 }
 
-test('privacy Help dismisses back to the same capture choices without writing consent', async () => {
-  const h = await gate({ profile: profile('capture') });
-  await h.press('onboardCaptureLearnMoreAction');
-  const sheet = walk(h.tree).find(node => node.type === 'BottomSheet'); assert.equal(sheet.props.visible, true);
-  sheet.props.onClose(); await h.flush(); at(h, 'capture');
-  assert.equal(walk(h.tree).find(node => node.type === 'BottomSheet').props.visible, false);
-  assert.equal(calls(h, 'setCaptureOptOut').length, 0); assert.deepEqual(h.routes, []);
-});
+for (const screen of ['capture', 'live']) {
+  test(`How it works on the ${screen} step dismisses back to the same step without writing consent`, async () => {
+    const h = await gate({ profile: profile('capture') });
+    if (screen === 'live') await toLive(h);
+    await h.press('onboardHowItWorks');
+    const sheet = walk(h.tree).find(node => node.type === 'BottomSheet'); assert.equal(sheet.props.visible, true);
+    assert.equal(sheet.props.title, h.t(screen === 'capture' ? 'onboardPastHowTitle' : 'onboardCaptureLearnMoreTitle'));
+    sheet.props.onClose(); await h.flush(); at(h, screen);
+    assert.equal(walk(h.tree).find(node => node.type === 'BottomSheet').props.visible, false);
+    assert.equal(calls(h, 'setCaptureOptOut').length, 0); assert.deepEqual(h.routes, []);
+  });
+}
 
 test('repeated taps on synchronous Next controls cannot skip unanswered questions', async () => {
   const h = await gate();
@@ -513,7 +587,8 @@ test('a completion callback reaches completion without replaying the saved setup
   const h = await gate({ profile: profile('capture'), pendingSetup: true, params: { onboarding: 'complete' } });
   assert.ok(h.text().includes(h.t('onboardCompleteAutomaticTitle')));
   assert.deepEqual(h.routes, []); assert.equal(h.state.onboarded, false);
-  await h.press('onboardBack'); at(h, 'capture');
+  // Completion steps back to the step that led to it: new-transaction capture.
+  await h.press('onboardBack'); at(h, 'live');
   assert.equal(h.input.params.onboarding, undefined);
   assert.equal(h.state.onboardingProfile.stage, 'capture');
 });
@@ -538,7 +613,7 @@ test('ordinary profile save failure cannot be turned into a successful final com
   await h.choose(0);
   await h.setFailure({ operation: 'write', message: 'synthetic profile persistence failure' });
   await h.press('continueWord'); await h.press('onboardConnectMyMoney');
-  await h.press('onboardManualChoiceIos');
+  await toLive(h); await h.press('onboardNotNow');
   assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
   assert.equal(calls(h, 'committed').length, 0);
   assert.ok(h.text().includes(h.t('onboardCompleteNeedsAttentionTitle')));

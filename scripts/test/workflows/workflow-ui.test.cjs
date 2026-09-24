@@ -162,9 +162,14 @@ test('unpaired trusted devices preserves privacy disclosure and makes no connect
  const h=createWorkflowHarness({state:{privateMode:true},states:{2:false}}),tree=h.renderScreen('trusted-devices');
  assert.ok(text(tree).includes(h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').devicesTitle));assert.deepEqual(h.events,[]);
 });
-for(const language of ['en','ar'])test(`iOS setup renders actual checklist without invoking permission or install: ${language}`,()=>{
+for(const language of ['en','ar'])test(`iOS setup renders the actual guided steps without invoking permission or install: ${language}`,()=>{
  const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},3:true,4:true}}),tree=h.renderScreen('ios-setup'); // useState 3/4: progressLoaded/historyReady (2 is the viewed capture source)
- assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'));assert.deepEqual(h.events,[]);
+ // The guide (not the old two-row checklist) with Step 1 of 3 and the Add step.
+ assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-guide'));
+ assert.ok(walk(tree).some(n=>n.props?.testID==='setup-step-progress'));
+ assert.ok(walk(tree).some(n=>n.props?.testID==='ios-add-shortcut-step'));
+ assert.equal(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'),false,'past SMS stays out of setup');
+ assert.deepEqual(h.events,[]);
 });
 
 for (const language of ['en', 'ar']) test(language + ': notification controls remain grouped independently from imports and privacy', () => {

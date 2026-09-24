@@ -466,6 +466,13 @@ export interface OnboardingProfile {
    * Absent means nobody has said, and the device locale is still the guess.
    */
   country?: string | null;
+  /**
+   * iPhone only: the statement step ("Bring in your past spending") is behind
+   * the user — they chose Later or opened the importer. That step and live
+   * capture share the `capture` stage, so without this a relaunch replayed
+   * the statement offer. Absent on older ledgers and on every other platform.
+   */
+  statementStepDone?: boolean;
   startedAt: number;
 }
 

@@ -1,0 +1,347 @@
+{
+  "base": "http://localhost:8137",
+  "generatedAt": "2026-09-24T22:03:00.014Z",
+  "scope": "Chromium, web E2E export, /setup-preview fixed states; 2x CSS text stress. No device, Dynamic Type, Shortcuts, or Messages proof.",
+  "results": [
+    {
+      "name": "03-statement-progress-en-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "03-statement-progress-en-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-en-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-en-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-en-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-en-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-en-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-en-light-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "01-past-statements-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "01-past-statements-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "02-statement-import-onboarding-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "02-statement-import-onboarding-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "03-statement-progress-en-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "03-statement-progress-en-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-en-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-en-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-en-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-en-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "06-live-capture-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "06-live-capture-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "07-guide-1-add-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "07-guide-1-add-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 2
+    },
+    {
+      "name": "08-guide-2-test-failed-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "08-guide-2-test-failed-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 2
+    },
+    {
+      "name": "09-guide-3-1-open-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "09-guide-3-1-open-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 2
+    },
+    {
+      "name": "10-guide-3-3-space-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "10-guide-3-3-space-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 2
+    },
+    {
+      "name": "11-guide-3-5-pick-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "11-guide-3-5-pick-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 2
+    },
+    {
+      "name": "12-guide-done-en-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "12-guide-done-en-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "13-guide-settings-en-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-en-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "03-statement-progress-ar-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "03-statement-progress-ar-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-ar-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-ar-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-ar-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-ar-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-ar-light",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-ar-light-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "01-past-statements-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "01-past-statements-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "02-statement-import-onboarding-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "02-statement-import-onboarding-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "03-statement-progress-ar-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "03-statement-progress-ar-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-ar-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "04-statement-result-ar-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-ar-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "05-statement-error-ar-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "06-live-capture-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "06-live-capture-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "07-guide-1-add-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "07-guide-1-add-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "08-guide-2-test-failed-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "08-guide-2-test-failed-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "09-guide-3-1-open-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "09-guide-3-1-open-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "10-guide-3-3-space-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "10-guide-3-3-space-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "11-guide-3-5-pick-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "11-guide-3-5-pick-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "12-guide-done-ar-night",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "12-guide-done-ar-night-se-2x",
+      "passed": true,
+      "overflowNodes": 1
+    },
+    {
+      "name": "13-guide-settings-ar-dark",
+      "passed": true,
+      "overflowNodes": 0
+    },
+    {
+      "name": "13-guide-settings-ar-dark-se-2x",
+      "passed": true,
+      "overflowNodes": 0
+    }
+  ]
+}

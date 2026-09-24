@@ -4658,6 +4658,24 @@ struct WafraBankSenderRegistryTests {
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
 
+  // 2026-09-25 guided setup: numbered steps are presentation over the same
+  // step resolution; the local test still comes before the automation.
+  eq('guided setup: each resolved step maps to Add → Test → Automate → done',
+    ['add-shortcut', 'confirm-shortcut', 'prove-shortcut', 'create-automation', 'ready']
+      .map((step) => setupModule.iosCaptureGuideStage(step)),
+    [1, 1, 2, 3, 'done']);
+  eq('guided setup: the automation walkthrough is one Apple screen per step',
+    setupModule.IOS_AUTOMATION_GUIDE_SCREENS, 5);
+  eq('iOS 27 one-toggle hook: off in this build on every iOS version (no bundled Shortcut yet)',
+    ['26.4', '27', '27.1', 28].map((version) => setupModule.iosOneToggleCaptureAvailable(version)),
+    [false, false, false, false]);
+  eq('iOS 27 one-toggle hook: once the Shortcut ships, only iOS 27 or later qualifies',
+    ['16.7', '26.9', '27', '27.0.1', 28, 'x', ''].map((version) =>
+      setupModule.iosOneToggleCaptureAvailable(version, true)),
+    [false, false, true, true, true, false, false]);
+  eq('iOS 27 one-toggle hook: the shipping flag stays off until the Shortcut file exists',
+    setupModule.IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED, false);
+
   eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
     setupModule.isSupportedIosMessageAutomationTrigger({
       selectedSenderCount: 0,

@@ -75,6 +75,7 @@ function actions(options = {}) {
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
     saveJourney(stage) { record('journey', stage); },
+    saveLiveStep() { record('journey', 'capture'); record('statement-step-done'); },
     beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
@@ -121,6 +122,10 @@ function actions(options = {}) {
     ensureDurable: service('ensureDurable'),
     getRelayConfigStrict: service('getRelayConfigStrict', options.relay ?? null),
     unpairDevice: service('unpairDevice'),
+    // Real predicate: only a relay provisioned for a Shortcut carries an
+    // automation generation and can forward alerts on its own.
+    isLegacyShortcutCaptureActive: config => config != null && config.shortcutCaptureRetiredAt === undefined &&
+      typeof config.automationGeneration === 'string' && /^[A-Za-z0-9_-]{40,128}$/.test(config.automationGeneration),
     disableRelayBackgroundSync: service('disableRelayBackgroundSync'),
     dispatchIosMessageSetup: service('dispatchIosMessageSetup'),
     isSmsScanningAvailable: () => options.scanAvailable ?? true,
@@ -212,8 +217,10 @@ test('manual choice reports a failed opt-out write without claiming setup succes
   remainsEmpty(h);
 });
 
+const SHORTCUT_GENERATION = 'g'.repeat(43);
+
 test('iOS manual fallback revokes a previously paired relay before clearing setup return', async () => {
-  const relay = { id: 'synthetic-relay', ingestToken: 'synthetic-token' };
+  const relay = { id: 'synthetic-relay', ingestToken: 'synthetic-token', automationGeneration: SHORTCUT_GENERATION };
   const h = actions({ platform: 'ios', relay });
   await h.continueManually();
   assert.equal(h.ui.outcome, 'manual');
@@ -228,7 +235,7 @@ test('iOS manual fallback revokes a previously paired relay before clearing setu
 
 for (const service of ['getRelayConfigStrict', 'unpairDevice']) {
   test(`iOS manual fallback keeps failure visible when ${service} fails`, async () => {
-    const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay' }, [service]: fails });
+    const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay', automationGeneration: SHORTCUT_GENERATION }, [service]: fails });
     await h.continueManually();
     assert.equal(h.ledger.captureOptOut, true, 'The immediate local stop remains active');
     assert.equal(h.ui.outcome, 'failed');
@@ -250,8 +257,24 @@ test('iOS manual fallback with no relay does not pretend it revoked one', async 
   assert.equal(calls(h, 'dispatchIosMessageSetup').length, 1);
 });
 
+// 2026-09-25: iPhone setup offers statements before live capture. A relay
+// paired only to upload a statement carries no Shortcut; "Not now" must not
+// revoke it (queued statement rows would be stranded) or claim a Shortcut.
+test('iOS manual fallback keeps a statement-only relay and claims no Shortcut cleanup', async () => {
+  const relay = { id: 'synthetic-statement-relay', ingestToken: 'synthetic-token' };
+  const h = actions({ platform: 'ios', relay });
+  await h.continueManually();
+  assert.equal(h.ui.outcome, 'manual');
+  assert.equal(h.ui.cleanup, null);
+  assert.equal(calls(h, 'unpairDevice').length, 0);
+  assert.equal(calls(h, 'dispatchIosMessageSetup').length, 1);
+  const retired = actions({ platform: 'ios', relay: { ...relay, automationGeneration: SHORTCUT_GENERATION, shortcutCaptureRetiredAt: 1 } });
+  await retired.continueManually();
+  assert.equal(calls(retired, 'unpairDevice').length, 0, 'a retired Shortcut identity needs no revocation');
+});
+
 test('best-effort background unregister failure does not undo successful iOS relay revocation', async () => {
-  const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay' }, disableRelayBackgroundSync: fails });
+  const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay', automationGeneration: SHORTCUT_GENERATION }, disableRelayBackgroundSync: fails });
   await h.continueManually();
   assert.equal(h.ui.outcome, 'manual');
   assert.equal(h.ui.cleanup, 'revoked');
@@ -387,6 +410,8 @@ for (const platform of ['ios', 'android']) {
       '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
     ]]);
     assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
+    // Opening the importer marks the statement step done for a relaunch.
+    assert.equal(calls(h, 'statement-step-done').length, 1);
     assert.equal(h.ledger.captureOptOut, true);
     assert.equal(calls(h, 'capture-write-start').length, 0);
     assert.equal(calls(h, 'requestSmsPermission').length, 0);
