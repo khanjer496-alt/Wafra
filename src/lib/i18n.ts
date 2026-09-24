@@ -764,6 +764,8 @@ const S = {
   otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
   showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
+  /** Paged long lists (Categorise, Improve accuracy); {count} is the next page, not the total. */
+  showMoreRows: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
   accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
   inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
