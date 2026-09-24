@@ -752,7 +752,9 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
                   }]} />
                 </View>
               )}
-              {status ? <ThemedText type="meta" themeColor="textSecondary">{status}</ThemedText> : null}
+              {/* The bar already says "2 of 3"; the status line adds only waits and filing. */}
+              {status && status !== interpolate(copy.uploadingProgress, progress ?? { index: 0, total: 0 })
+                ? <ThemedText type="meta" themeColor="textSecondary">{status}</ThemedText> : null}
             </View>
           )}
 
