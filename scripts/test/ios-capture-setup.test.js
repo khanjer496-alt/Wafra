@@ -1799,7 +1799,9 @@ struct WafraBankSenderRegistryTests {
               pending: [...state.reviewTray.pending, ...admittedItems],
             },
             localCaptureQualifications: mergeQualifications(
-              state.localCaptureQualifications, qualifications, NOW,
+              // The store merges at the real clock, as the coordinator's
+              // expiry check does; the fixed NOW expired on 2026-09-24.
+              state.localCaptureQualifications, qualifications, Date.now(),
             ),
           };
           return {
@@ -1829,7 +1831,9 @@ struct WafraBankSenderRegistryTests {
             ],
             lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
             localCaptureQualifications: mergeQualifications(
-              state.localCaptureQualifications, qualifications, NOW,
+              // The store merges at the real clock, as the coordinator's
+              // expiry check does; the fixed NOW expired on 2026-09-24.
+              state.localCaptureQualifications, qualifications, Date.now(),
             ),
           };
           return {
