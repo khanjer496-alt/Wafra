@@ -365,6 +365,28 @@ const S = {
   genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
   genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
   genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
+  foreignReviewConversionNote: {
+    en: 'Added in {ledger}: the card’s own {ledger} amount when the alert states it, otherwise a dated reference rate. The original amount is kept.',
+    ar: 'تُضاف بعملة {ledger}: بمبلغ البطاقة بعملة {ledger} إن ذكره التنبيه، وإلا بسعر مرجعي مؤرّخ. ويُحفظ المبلغ الأصلي.',
+  },
+  fxRateUnavailable: {
+    en: 'No exchange rate for that day yet. Nothing was added. Try again when you are online.',
+    ar: 'لا يتوفر سعر صرف لذلك اليوم بعد. لم تتم إضافة شيء. حاول مجدداً عند الاتصال بالإنترنت.',
+  },
+  amountInCurrency: { en: 'Amount in {currency}', ar: 'المبلغ بعملة {currency}' },
+  spendCurrencyTitle: { en: 'Currency paid', ar: 'عملة الدفع' },
+  spendCurrencyHint: {
+    en: 'Paid in another currency? Choose it here.',
+    ar: 'دفعت بعملة أخرى؟ اخترها هنا.',
+  },
+  spendCurrencyBody: {
+    en: 'Choose the currency on the receipt. Wafra records it in {ledger} with the dated public reference rate for that day and keeps the original amount. Only the two currency codes and the date are sent to get the rate.',
+    ar: 'اختر العملة المذكورة في الإيصال. يسجلها وفرة بعملة {ledger} بسعر مرجعي عام لذلك اليوم ويحتفظ بالمبلغ الأصلي. لا يُرسل للحصول على السعر إلا رمزا العملتين والتاريخ.',
+  },
+  foreignManualNote: {
+    en: 'Saved in {ledger} at the reference rate for this day; the {currency} amount is kept.',
+    ar: 'يُحفظ بعملة {ledger} بالسعر المرجعي لهذا اليوم، مع الاحتفاظ بالمبلغ بعملة {currency}.',
+  },
   genericSourceChanged: { en: 'This alert changed or expired. Reopen it to review.', ar: 'تغير هذا التنبيه أو انتهت صلاحيته. افتحه مجدداً للمراجعة.' },
   reviewAlertsTitle: { en: 'Bank alerts needing help', ar: 'تنبيهات بنكية تحتاج مساعدتك' },
   reviewAlertsHomeCount: {
@@ -2828,8 +2850,8 @@ const S = {
   reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
-  reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50; this ledger records one currency.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً، وهذا السجل يعتمد عملة واحدة.' },
-  reviewAlertsCurrencySkipped: { en: 'Skipped because they use another currency: {count}. This ledger records one currency.', ar: 'تم تخطيها لأنها بعملة أخرى: {count}. هذا السجل يعتمد عملة واحدة.' },
+  reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+  reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
   reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
   iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
   iosNotificationHelpStatus: { en: 'The permission check and your confirmation are separate from a real notification receipt. Check notification setup to see whether any text has arrived.', ar: 'فحص الأذونات وتأكيدك منفصلان عن استلام إشعار حقيقي. افحص إعداد الإشعارات لمعرفة ما إذا وصل نص فعلاً.' },

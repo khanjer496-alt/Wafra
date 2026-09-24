@@ -171,6 +171,8 @@ function createHarness(options = {}) {
   local('@/components/tab-bar');
   function loadDetail() {
     deps['@/lib/fx'].formatOriginalCurrency=(f,c)=>c+' '+amount(f);
+    // Reading a stored original is pure; use the shipping reader.
+    deps['@/lib/fx'].originalMoneyOf=require('../build/fx.js').originalMoneyOf;
     deps['@/lib/sms-parser']={overrideFitsDirection:()=>false};
     deps['@/lib/uncategorised']={overrideAppliesTo:()=>false};
     deps['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};

@@ -516,6 +516,9 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
     '@/lib/types': require('./build/types'),
     '@/lib/review-promotion': require('./build/review-promotion'),
+    // Real quote cache; the store only reaches its network loader when a
+    // foreign review is promoted, which this harness does not do.
+    '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },

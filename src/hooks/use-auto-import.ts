@@ -69,6 +69,7 @@ import {
 import {
   getSharedIosLocalCaptureCoordinator,
 } from '@/lib/ios-local-capture';
+import { cachedReferenceQuote, loadReferenceQuote } from '@/lib/fx-rates';
 import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
@@ -618,8 +619,15 @@ export function useAutoImport(
       native: iosNative,
       ledger: captureLedger,
       retireShortcutCapture: retireLegacyShortcutCapture,
+      // Private Mode makes no request: only a rate already known converts.
+      fxQuote: (base, quote, date) => {
+        const current = getStateSnapshot();
+        return current.privateMode
+          ? Promise.resolve(cachedReferenceQuote(base, quote, date, current.transactions))
+          : loadReferenceQuote(base, quote, date, { transactions: current.transactions });
+      },
     });
-  }, [captureLedger, iosNative]);
+  }, [captureLedger, getStateSnapshot, iosNative]);
   const iosCycleDependencies = useMemo<IosLocalCaptureCycleDependencies | null>(() => {
     if (!iosNative || !iosCoordinator) return null;
     return {

@@ -101,6 +101,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // the capture path get the real compiled module, never a stub that could
       // drift from what ships. Shadow evaluation is observational only and
       // native-only, so it is inert here unless a harness supplies its own.
+      // Reference-rate conversion is pure money arithmetic plus an in-memory
+      // quote cache; its network loader only runs when a caller invokes it.
+      // Harnesses get the real compiled modules so conversion cannot drift.
+      if (name === '@/lib/fx') {
+        return require('../build/fx.js');
+      }
+      if (name === '@/lib/fx-rates') {
+        return require('../build/fx-rates.js');
+      }
       if (name === '@/lib/universal-parser') {
         return require('../build/universal-parser.js');
       }

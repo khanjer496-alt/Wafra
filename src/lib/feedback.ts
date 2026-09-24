@@ -494,6 +494,7 @@ function redactLedger(
     raw: t.raw ? messageShape(aliases, t.raw) : undefined,
     amountFils: keepFigures ? t.amountFils : 0,
     originalAmountMinor: keepFigures ? t.originalAmountMinor : undefined,
+    originalMinorUnits: keepFigures ? t.originalMinorUnits : undefined,
   }));
 
   const cardDues: CardDue[] = ledger.cardDues.map((d) => ({

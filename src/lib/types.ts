@@ -111,17 +111,30 @@ export interface Transaction {
   type: TransactionType;
   /** Amount in fils, always positive. */
   amountFils: number;
-  /** Original bank-alert amount when the charge was denominated outside AED. */
+  /**
+   * Original amount when the charge was denominated outside the ledger
+   * currency, ALWAYS as two-decimal minor units (major × 100) whatever the
+   * currency — the legacy representation. Omitted on new rows whose exact
+   * amount it cannot hold (KWD 12.345). Read through fx.ts originalMoneyOf.
+   */
   originalAmountMinor?: number;
-  /** ISO 4217 code for `originalAmountMinor` (for example USD or EUR). */
+  /** ISO 4217 code of the original amount (for example USD or EUR). */
   originalCurrency?: string;
-  /** AED units per one unit of the original currency. */
+  /** Exact original amount in `originalExponent` minor units (JPY 1500 = 1500). */
+  originalMinorUnits?: number;
+  /**
+   * ISO exponent of `originalMinorUnits`. Its absence marks a legacy row whose
+   * only original figure is the two-decimal `originalAmountMinor`.
+   */
+  originalExponent?: 0 | 2 | 3;
+  /** Ledger-currency units per one unit of the original currency. */
   fxRate?: number;
   /** Effective date of a fetched reference rate. */
   fxRateDate?: string;
   /**
-   * `bank`: the alert included its own AED equivalent; `reference`: a dated
-   * public rate was fetched; `fallback`: parser used its offline approximation.
+   * `bank`: the alert stated the charged ledger-currency amount itself;
+   * `reference`: a dated public rate was fetched; `fallback`: parser used its
+   * offline approximation (AED/SAR parser only, revalued later).
    */
   fxSource?: 'bank' | 'reference' | 'fallback';
   category: CategoryId;

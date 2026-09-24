@@ -27,6 +27,8 @@ import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
+import type { FxQuote, MinorExponent } from '@/lib/fx';
+import { convertWithReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
@@ -237,6 +239,77 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
   return {
     id: `local_review_id_${opaque}`,
     sourceKey: `local_review_source_${opaque}`,
+  };
+}
+
+/** The pair and day a currency-conflict purchase needs converted, or null. */
+export function currencyConflictFxNeed(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  ledgerCurrency: string,
+): { base: string; quote: string; date: string } | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' || row.currency === ledgerCurrency) return null;
+  // A local figure the parser derived from its OFFLINE table ("USD 20.00" with
+  // no AED stated) is an estimate, not the debit. Converting it again would
+  // post an invented rate under a reference label; it stays in Review.
+  if (row.fxSource === 'fallback') return null;
+  const date = row.date ?? (row.smsTs !== undefined && Number.isFinite(row.smsTs)
+    ? toISODate(new Date(row.smsTs)) : null);
+  return date ? { base: row.currency, quote: ledgerCurrency, date } : null;
+}
+
+/**
+ * CONVERT, DON'T REFUSE: a launch-market purchase on a ledger kept in another
+ * currency ("AED 73.45 at CARREFOUR" on a USD ledger).
+ *
+ * The amount that left the account is the one the alert states in its own
+ * currency, so that is the original recorded on the row, converted with the
+ * dated provider quote the caller obtained (`fxSource: 'reference'`, rate and
+ * effective date kept). The parser's own foreign annotation (a USD figure the
+ * AED card charged for) is replaced, because the AED debit is what moved.
+ * A row whose AED figure came from the parser's offline table is never
+ * converted: that figure is an estimate, not the debit.
+ * Account snapshots stated in the alert's currency describe a different money
+ * and are dropped rather than relabelled. Only ordinary transactions convert;
+ * card payments, statements and bills keep their existing handling. Without a
+ * valid quote this returns null and the caller keeps the Review item.
+ */
+export function convertCurrencyConflictRow(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  ledger: { currency: string; exponent: MinorExponent },
+  quote: FxQuote | null | undefined,
+): Extract<LocalMessageParseOutcome, { kind: 'parsed' }> | null {
+  const need = currencyConflictFxNeed(outcome, ledger.currency);
+  if (!need || !quoteFitsDay(quote, need.date)) return null;
+  const { row } = outcome;
+  // The Gulf parser's local figures are two-decimal fils by construction.
+  const conversion = convertWithReferenceQuote(
+    { currency: row.currency, minorUnits: row.amountFils, exponent: 2 },
+    ledger.currency,
+    ledger.exponent,
+    quote,
+  );
+  if (!conversion) return null;
+  const {
+    originalAmountMinor: _legacy,
+    originalCurrency: _currency,
+    originalMinorUnits: _minor,
+    originalExponent: _exponent,
+    fxRate: _rate,
+    fxRateDate: _rateDate,
+    fxSource: _source,
+    ...rest
+  } = row;
+  return {
+    ...outcome,
+    row: {
+      ...rest,
+      ...conversion.fields,
+      amountFils: conversion.amountFils,
+      currency: ledger.currency,
+      snapshotFils: null,
+      snapshotKind: null,
+    },
   };
 }
 

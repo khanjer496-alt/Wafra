@@ -1732,12 +1732,18 @@ export function isParsedRelayRow(
   ) return false;
   if ((row.snapshotFils === null) !== (row.snapshotKind === null)) return false;
 
-  const fxFields = [row.originalAmountMinor, row.originalCurrency, row.fxRate, row.fxSource];
+  const fxFields = [row.originalAmountMinor, row.originalMinorUnits, row.originalExponent,
+    row.originalCurrency, row.fxRate, row.fxSource];
   const hasFx = fxFields.some((field) => field !== undefined);
+  // A three-decimal original (KWD 12.345) has no exact legacy two-decimal
+  // figure, so newer parsers send only the exponent-correct pair for it.
+  const hasLegacyOriginal = row.originalAmountMinor !== undefined;
+  const hasExactOriginal = row.originalMinorUnits !== undefined || row.originalExponent !== undefined;
   if (
     hasFx &&
-    (!Number.isSafeInteger(row.originalAmountMinor) ||
-      (row.originalAmountMinor as number) <= 0 ||
+    ((!hasLegacyOriginal && !hasExactOriginal) ||
+      (hasLegacyOriginal && (!Number.isSafeInteger(row.originalAmountMinor) ||
+        (row.originalAmountMinor as number) <= 0)) ||
       typeof row.originalCurrency !== 'string' ||
       !/^[A-Z]{3}$/.test(row.originalCurrency) ||
       typeof row.fxRate !== 'number' ||
@@ -1745,6 +1751,15 @@ export function isParsedRelayRow(
       row.fxRate <= 0 ||
       (row.fxSource !== 'bank' && row.fxSource !== 'fallback'))
   ) return false;
+  // Exponent-correct originals (newer parsers) arrive as a pair and must
+  // agree with the legacy two-decimal figure when both are present.
+  if (row.originalMinorUnits !== undefined || row.originalExponent !== undefined) {
+    if (!hasFx || !Number.isSafeInteger(row.originalMinorUnits) || (row.originalMinorUnits as number) <= 0 ||
+      (row.originalExponent !== 0 && row.originalExponent !== 2 && row.originalExponent !== 3)) return false;
+    if (row.originalAmountMinor !== undefined &&
+      (row.originalMinorUnits as number) * 100 !==
+        (row.originalAmountMinor as number) * 10 ** (row.originalExponent as number)) return false;
+  }
 
   if (
     row.receivedAt !== undefined &&

@@ -21,7 +21,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
-import { formatOriginalCurrency } from '@/lib/fx';
+import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
@@ -227,6 +227,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     transaction.source === 'sms'
       ? transaction.viaPush ? t('bankNotificationSource') : t('bankSmsSource')
       : t('addedByHand');
+  const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
       ? tf('bankQuotedRate', { currency: ledgerCurrencyCode() })
@@ -464,8 +465,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 label: t('transactionDateLabel'),
                 value: <ThemedText type="small">{stamp}</ThemedText>,
               },
-              ...(transaction.originalCurrency &&
-              transaction.originalAmountMinor !== undefined &&
+              ...(originalMoney &&
               transaction.fxRate !== undefined
                 ? [
                     {
@@ -473,9 +473,10 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       value: (
                         <ThemedText type="small" tabular>
                           {formatOriginalCurrency(
-                            transaction.originalAmountMinor,
-                            transaction.originalCurrency,
+                            originalMoney.minorUnits,
+                            originalMoney.currency,
                             state.language === 'ar' ? 'ar' : 'en',
+                            originalMoney.exponent,
                           )}
                         </ThemedText>
                       ),
@@ -485,9 +486,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       value: (
                         <ThemedText type="small" themeColor="textSecondary">
                           {tf('fxRateValue', {
-                            from: transaction.originalCurrency,
+                            from: originalMoney.currency,
                             to: ledgerCurrencyCode(),
-                            rate: transaction.fxRate.toFixed(4),
+                            rate: transaction.fxRate >= 0.01 ? transaction.fxRate.toFixed(4) : String(Number(transaction.fxRate.toPrecision(4))),
                             source: fxSourceLabel,
                           })}
                         </ThemedText>

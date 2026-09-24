@@ -462,7 +462,7 @@ assert.ok(currencyHierarchy.length > 0,
 assert.match(task8Currency, /const showSearch = chargeCount >= 12/);
 assert.match(task8Currency, /<TextField[\s\S]*?label=\{t\('searchForeignSpending', language\)\}[\s\S]*?value=\{query\}[\s\S]*?onChangeText=\{setQuery\}/);
 assert.match(task8Currency, /leading=\{<Icon name="search"/);
-assert.match(task8Currency, /formatOriginalCurrency\([\s\S]*?item\.originalAmountMinor![\s\S]*?formatAED\(item\.amountFils/,
+assert.match(task8Currency, /originalMoneyOf\(item\)[\s\S]*?formatOriginalCurrency\(originalMoney\.minorUnits[\s\S]*?formatAED\(item\.amountFils/,
   'Foreign rows keep original and ledger amounts together');
 assert.doesNotMatch(task8Currency, /FadeInDown|Animated\.View/,
   'data-heavy foreign spending should not delay Android readability with entrance animation');
