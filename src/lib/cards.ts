@@ -84,6 +84,13 @@ interface CardInputs {
   cardDues: CardDue[];
 }
 
+/**
+ * Everything card math reads. Screens can pass a narrow store selection
+ * instead of the whole AppState, so progress and settings updates do not
+ * re-render them.
+ */
+export type CardState = Pick<AppState, 'accounts' | 'transactions' | 'cardDues'>;
+
 function sameInputs(a: CardInputs, b: CardInputs): boolean {
   return (
     a.accounts === b.accounts &&
@@ -205,7 +212,7 @@ export function mergeImportedCardDues(
  * Confirmed links are remapped before accounting runs, so a surviving account
  * id is the only safe member. Similar bank metadata is never proof of identity.
  */
-function cardAccountIds(state: AppState, accountId: string): Set<string> {
+function cardAccountIds(state: CardState, accountId: string): Set<string> {
   const keyOf = cardIdentity(state.accounts);
   const key = keyOf(accountId);
   const ids = new Set<string>([accountId]);
@@ -276,7 +283,7 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
   );
 }
 
-function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
+function cardPaymentsOf(state: CardState, ids: Set<string>): Transaction[] {
   // The full-ledger filter + sort, memoised per card. `allocatePayments` runs
   // once per statement and `openDues` runs it for all of them, so on a ledger
   // with several statements per card this is the same walk repeated. The key
@@ -357,7 +364,7 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
  * statements, so cash-flow reporting consumes that same answer rather than
  * inventing a second dedupe policy.
  */
-export function cardPaymentRows(state: AppState): Transaction[] {
+export function cardPaymentRows(state: CardState): Transaction[] {
   const creditIds = new Set(
     state.accounts.filter((account) => account.cardType === 'credit').map((account) => account.id),
   );
@@ -1020,7 +1027,7 @@ interface Allocation {
  *    marked it.
  */
 function computePaymentAllocations(
-  state: AppState,
+  state: CardState,
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
@@ -1082,7 +1089,7 @@ function computePaymentAllocations(
 }
 
 function allocatePayments(
-  state: AppState,
+  state: CardState,
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
@@ -1122,7 +1129,7 @@ function allocatePayments(
  * plus payments made to its resolved card account. Confirmed links have
  * already remapped every ledger reference onto that one account id.
  */
-export function duePaidFils(state: AppState, due: CardDue): number {
+export function duePaidFils(state: CardState, due: CardDue): number {
   return allocatePayments(state, due.accountId, due).get(due.id)?.paidFils ?? due.paidFils;
 }
 
@@ -1143,7 +1150,7 @@ export function duePaidFils(state: AppState, due: CardDue): number {
  * this statement. A payment that spilled across two statements appears against
  * both, because it really did pay into both.
  */
-export function duePayments(state: AppState, due: CardDue): Transaction[] {
+export function duePayments(state: CardState, due: CardDue): Transaction[] {
   const rows = allocatePayments(state, due.accountId, due).get(due.id)?.payments ?? [];
   return rows.slice().sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -1155,7 +1162,7 @@ function shiftISO(iso: string, days: number): string {
 }
 
 export function dueWithStatus(
-  state: AppState,
+  state: CardState,
   due: CardDue,
   today: Date,
   /** Set by openDues, which knows how long this has been the current one. */
@@ -1219,7 +1226,7 @@ const STALE_OVERDUE_DAYS = 30;
  * whatever went unpaid before it. Two open statements on one card was the app
  * charging the user twice for the same money.
  */
-export function openDues(state: AppState, today: Date): DueWithStatus[] {
+export function openDues(state: CardState, today: Date): DueWithStatus[] {
   const day = toISODate(today);
   if (openDuesCache && openDuesCache.day === day && sameInputs(openDuesCache, state)) {
     // A copy, not the cached array. Callers sort and splice their own lists,
@@ -1241,7 +1248,7 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
 
 /** Most recent settled statement per live credit card, for Bills history. */
 export function recentlySettledDues(
-  state: AppState,
+  state: CardState,
   today: Date,
   withinDays = 75,
 ): DueWithStatus[] {
@@ -1276,7 +1283,7 @@ export function recentlySettledDues(
   return value.slice();
 }
 
-function computeOpenDues(state: AppState, today: Date): DueWithStatus[] {
+function computeOpenDues(state: CardState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
@@ -1385,7 +1392,7 @@ export interface CardStatementView {
   billable: boolean;
 }
 
-export function cardStatementView(state: AppState, accountId: string): CardStatementView {
+export function cardStatementView(state: CardState, accountId: string): CardStatementView {
   const keyOf = cardIdentity(state.accounts);
   const cardKey = keyOf(accountId);
 
@@ -1447,7 +1454,7 @@ export function cardStatementView(state: AppState, accountId: string): CardState
  * ISO date of the last known activity on an account: newest transaction or
  * the bank's latest snapshot SMS, whichever is later. Null = no history.
  */
-export function accountLastActivityISO(state: AppState, accountId: string): string | null {
+export function accountLastActivityISO(state: CardState, accountId: string): string | null {
   // One pass over the ledger builds the answer for EVERY account, because the
   // caller that matters asks for all of them: Wallet filters its card list
   // through `isInactiveAccount`, which lands here once per card. Per-account
@@ -1479,7 +1486,7 @@ export const DORMANT_AFTER_DAYS = 90;
  * identify themselves by never texting again. Accounts with no history at all
  * (freshly added by hand) are left alone.
  */
-export function isInactiveAccount(state: AppState, account: Account, today: Date): boolean {
+export function isInactiveAccount(state: CardState, account: Account, today: Date): boolean {
   if (account.archived) return true;
   const last = accountLastActivityISO(state, account.id);
   if (!last) return false;
@@ -1543,7 +1550,7 @@ export interface ReissueSuggestion {
   candidateIds: string[];
 }
 
-export function reissueSuggestions(state: AppState, today: Date): ReissueSuggestion[] {
+export function reissueSuggestions(state: CardState, today: Date): ReissueSuggestion[] {
   const todayISO = toISODate(today);
   if (
     reissueCache?.transactions === state.transactions &&
@@ -1633,7 +1640,7 @@ export interface CardFigure {
   fils: number | null;
 }
 
-export function cardFigure(state: AppState, account: Account, today: Date): CardFigure {
+export function cardFigure(state: CardState, account: Account, today: Date): CardFigure {
   if (account.cardType === 'credit') {
     // An open statement is the most useful answer: it is what the bank will
     // take, on a date, and the app knows how much of it is already paid.

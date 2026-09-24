@@ -70,7 +70,8 @@ import {
   getSharedIosLocalCaptureCoordinator,
 } from '@/lib/ios-local-capture';
 import { cachedReferenceQuote, loadReferenceQuote } from '@/lib/fx-rates';
-import { useStore } from '@/lib/store';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
@@ -565,12 +566,26 @@ export type AutoImport = {
  * visits deliberately does not need to, because the throttle and the in-flight
  * join make a second watcher redundant rather than harmful.
  */
+const NOT_WATCHED_TRANSACTIONS: AppState['transactions'] = [];
+
 export function useAutoImport(
   watchForeground = false,
   watchStatus = watchForeground,
 ): AutoImport {
+  // Only the fields this hook reads. Everything else, import progress
+  // included, is read through getStateSnapshot(), so callers (Home, the
+  // pull-to-refresh control) no longer re-render on every store change.
+  const state = useStoreSelector(({ state: s }) => ({
+    hydrated: s.hydrated, onboarded: s.onboarded, captureOptOut: s.captureOptOut,
+    androidCaptureSources: s.androidCaptureSources, historyImport: historyStatusOnly(s.historyImport),
+    pro: s.pro, founderPro: s.founderPro, trialStartTs: s.trialStartTs,
+    // Read only by the effects that return early unless watchForeground (a
+    // constant per caller), so other callers do not follow every import page.
+    lastScanTs: watchForeground ? s.lastScanTs : 0,
+    dailySummary: watchForeground ? s.dailySummary : false,
+    transactions: watchForeground ? s.transactions : NOT_WATCHED_TRANSACTIONS,
+  }));
   const {
-    state,
     getStateSnapshot,
     getStateGeneration,
     importBatch,
@@ -580,7 +595,7 @@ export function useAutoImport(
     setMarket,
     recordIosCaptureWarning,
     clearIosCaptureWarning,
-  } = useStore();
+  } = useStoreActions();
   const previousHistoryIncomplete = useRef(historyImportIncomplete(state.historyImport));
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,

@@ -4121,8 +4121,10 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => mountedHookModule.useAutoImport(false, true));
@@ -4343,8 +4345,10 @@ struct WafraBankSenderRegistryTests {
           return { getSharedIosLocalCaptureCoordinator: () => null };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => ({

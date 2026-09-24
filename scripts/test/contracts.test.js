@@ -1075,11 +1075,16 @@ function ktSources(dir) {
   ok('Home rechecks Android permission as soon as onboarding enables capture',
     /\[\s*entitlementActive,[\s\S]{0,80}refreshCaptureStatus,[\s\S]{0,80}sharedAccessUnavailable,[\s\S]{0,80}state\.captureOptOut,[\s\S]{0,80}state\.hydrated,[\s\S]{0,80}state\.onboarded,[\s\S]{0,80}watchStatus,?\s*\]/
       .test(hook));
+  // The scan hook reads the whole store, so it lives in its own control and
+  // only that control re-renders on store updates, not the tab.
+  const refreshControl = read('src/components/capture-refresh-control.tsx');
+  ok('the capture refresh control runs the pull-to-refresh scan',
+    /usePullToRefresh\(\)/.test(refreshControl) &&
+      /<RefreshControl \{\.\.\.props\} refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(refreshControl));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
-      /usePullToRefresh\(\)/.test(src) &&
-        /<RefreshControl refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(src));
+      /refreshControl=\{\s*<CaptureRefreshControl /.test(src) && !/usePullToRefresh\(\)/.test(src));
   }
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status

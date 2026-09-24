@@ -8,11 +8,21 @@ export function spendingShare(spentFils: number, totalFils: number): number {
   return Math.min(1, spentFils / totalFils);
 }
 
+// One formatter per UI locale. Building an Intl.NumberFormat is far costlier
+// than using one, and this runs once per category row on every Spending render.
+const shareFormats = new Map<string, Intl.NumberFormat>();
+function shareFormat(locale: 'ar-AE' | 'en'): Intl.NumberFormat {
+  let format = shareFormats.get(locale);
+  if (!format) {
+    format = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 });
+    shareFormats.set(locale, format);
+  }
+  return format;
+}
+
 export function spendingShareLabel(share: number, language: string): string {
   const value = Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 0;
-  const format = new Intl.NumberFormat(language === 'ar' ? 'ar-AE' : 'en', {
-    style: 'percent', maximumFractionDigits: 1,
-  });
+  const format = shareFormat(language === 'ar' ? 'ar-AE' : 'en');
   return value > 0 && value < 0.001
     ? `${language === 'ar' ? 'أقل من ' : '<'}${format.format(0.001)}`
     : format.format(value);
