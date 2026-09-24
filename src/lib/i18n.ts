@@ -435,6 +435,21 @@ const S = {
     en: 'Could not add this alert. Check its currency, account and date.',
     ar: 'تعذّرت إضافة هذا التنبيه. تحقق من العملة والحساب والتاريخ.',
   },
+  reviewAlertMatchesApplePay: {
+    en: 'A matching Apple Pay purchase is already in your transactions. Choose Already recorded if this alert is the same purchase. If you made two separate purchases, you can add it as a separate purchase.',
+    ar: 'توجد عملية Apple Pay مطابقة في معاملاتك بالفعل. اختر مسجلة بالفعل إذا كان هذا التنبيه للعملية نفسها. إذا أجريت عمليتين منفصلتين، يمكنك إضافته كعملية منفصلة.',
+  },
+  duplicateAddSeparate: { en: 'Add as a separate purchase', ar: 'إضافة كعملية منفصلة' },
+  duplicateSeparateConfirmTitle: { en: 'Add a second transaction?', ar: 'إضافة معاملة ثانية؟' },
+  duplicateSeparateConfirmBody: {
+    en: 'This adds a second transaction for the same amount, next to the matching one already recorded. Only continue if these were two separate purchases.',
+    ar: 'سيؤدي هذا إلى إضافة معاملة ثانية بالمبلغ نفسه، إلى جانب المعاملة المطابقة المسجلة بالفعل. تابع فقط إذا كانت هاتان عمليتين منفصلتين.',
+  },
+  duplicateSeparateConfirm: { en: 'Add second transaction', ar: 'إضافة المعاملة الثانية' },
+  duplicateSeparateFailed: {
+    en: 'The purchase could not be saved. Check your transactions before trying again.',
+    ar: 'تعذر حفظ العملية. تحقق من معاملاتك قبل المحاولة مرة أخرى.',
+  },
   reviewAlertChooseCategory: {
     en: 'Choose the category before adding this alert.',
     ar: 'اختر التصنيف قبل إضافة هذا التنبيه.',

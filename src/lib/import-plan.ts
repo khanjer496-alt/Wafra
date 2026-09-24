@@ -1376,13 +1376,6 @@ function buildImportPlanInMarket(
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
-    const walletPrior = exactPrior || !smsKey ? undefined : applePayWalletPriorFor(p);
-    if (walletPrior && smsKey) {
-      boundWalletRows.add(walletPrior.id);
-      guard().add({ ...captureCandidate, accountId: walletPrior.accountId });
-      promoteMatchedHistory(walletPrior.id, smsKey, p);
-      continue;
-    }
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
       protectedEditedPushConsumed.add(protectedEditedPush.id);
@@ -1544,6 +1537,18 @@ function buildImportPlanInMarket(
       // all — AED 25 of spending gone, with no duplicate to hint at it.
       duplicate.consume(supersededId);
       duplicate.add(candidate);
+      continue;
+    }
+    // Wallet binding is the last identity claim, after every exact, stable,
+    // source-correction, protected-push, duplicate and supersede path above
+    // has declined this message: one SMS may explain at most one stored row.
+    // The resolved card must be the Wallet row's own account, so its balance
+    // snapshot above belongs to the same confident resolution.
+    const walletPrior = smsKey && resolution.confident ? applePayWalletPriorFor(p) : undefined;
+    if (walletPrior && smsKey && walletPrior.accountId === accountId) {
+      boundWalletRows.add(walletPrior.id);
+      duplicate.add(candidate);
+      promoteMatchedHistory(walletPrior.id, smsKey, p);
       continue;
     }
     duplicate.add(candidate);

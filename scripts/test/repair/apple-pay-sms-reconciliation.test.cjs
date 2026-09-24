@@ -97,3 +97,59 @@ test('a bound Wallet row cannot swallow the next equal purchase and ambiguous Wa
   const ambiguous = state(wallet(), { transactions: [wallet(), wallet({ id: 'other-wallet', smsKey: 'apple_pay_review_source_' + '2'.repeat(32), ts: at + 500 })] });
   assert.equal(plan(first, ambiguous).txCount, 1, 'two possible receipts cannot authorize choosing one');
 });
+
+test('realistic bank descriptors and late SMS never merge automatically into a Wallet row', () => {
+  // Automatic binding writes without asking, so it stays exact. Wallet-side
+  // promotion asks the user about these pairs instead (ios-apple-pay-promotion).
+  for (const patch of [{ merchant: 'CARREFOUR MOE DXB' }, { smsTs: at + 5 * 60_000 }]) {
+    const result = plan(sms(patch));
+    assert.equal(result.txCount, 1, JSON.stringify(patch));
+    assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), JSON.stringify(patch));
+  }
+});
+
+test('a parser correction of an existing SMS row heals that row instead of binding the Wallet row', () => {
+  const body = 'Your ADIB credit card 4417 was used for AED 250.00 at CARREFOUR';
+  const legacy = { id: 'legacy-sms', source: 'sms', smsKey: `s${at + 1000}-24000`, ts: at + 1000, date,
+    amountFils: 24000, type: 'expense', title: 'CARREFOUR', category: 'groceries', accountId: 'chosen-card', raw: body };
+  const before = state(wallet(), { transactions: [wallet(), legacy] });
+  const result = plan(sms({ raw: body }), before);
+  assert.equal(result.txCount, 0);
+  assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), 'one SMS must not explain two rows');
+  assert.ok(result.batch.updates.some(x => x.id === 'legacy-sms'));
+});
+
+test('a same-batch bank push copy and its SMS count the Wallet purchase once in either order', () => {
+  for (const rows of [[sms({ channel: 'push', smsTs: at + 500 }), sms()],
+    [sms(), sms({ channel: 'push', smsTs: at + 1500 })]]) {
+    const result = buildImportPlan(rows, state(), 0, new Date(at + 60_000));
+    assert.equal(result.txCount, 0, 'the push is the SMS copy and the SMS binds the Wallet row');
+    assert.equal(result.batch.updates.filter(x => x.id === 'wallet-confirmed').length, 1);
+  }
+});
+
+test('an SMS the generic duplicate guard already attributes to a stored bank row is not reused for the Wallet row', () => {
+  const stored = { id: 'stored-push', source: 'sms', viaPush: true, smsKey: `s${at + 500}-25000`, ts: at + 500, date,
+    amountFils: 25000, type: 'expense', title: 'CARREFOUR', category: 'groceries', accountId: 'chosen-card',
+    captureInstrument: { last4: '4417', kind: 'credit', bankIdentity: 'adib' } };
+  const result = plan(sms(), state(wallet(), { transactions: [wallet(), stored] }));
+  assert.equal(result.txCount, 0);
+  assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), 'one SMS must not explain two rows');
+});
+
+test('a non-confident account resolution never binds; the SMS stays a visible separate row', () => {
+  // A sole known-bank default makes a second card match this suffix for the
+  // resolver (which then refuses to choose) while the Wallet rule still sees
+  // exactly one ADIB card. The resolution gate, not the Wallet rule, decides.
+  const defaulted = { id: 'default-card', name: 'ENBD card', kind: 'card', cardType: 'credit', last4: '4417', bankName: 'Emirates NBD' };
+  const result = plan(sms(), state(wallet(), { knownBanks: ['Emirates NBD'], accounts: [...state().accounts, defaulted] }));
+  assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'));
+  assert.equal(result.txCount, 1);
+  assert.notEqual(result.batch.transactions[0].accountId, 'chosen-card');
+});
+
+test('binding still records the bank-quoted balance snapshot for the confidently resolved card', () => {
+  const result = plan(sms({ snapshotFils: 1_000_000, snapshotKind: 'limit' }));
+  assert.ok(result.batch.updates.some(x => x.id === 'wallet-confirmed'));
+  assert.equal(JSON.stringify(result.batch.snapshots['chosen-card']), JSON.stringify({ fils: 1_000_000, kind: 'limit', ts: at + 1000 }));
+});

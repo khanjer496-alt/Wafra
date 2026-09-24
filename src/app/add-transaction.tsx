@@ -27,8 +27,8 @@ import { committed } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
-import { reviewTemplateRuleFor } from '@/lib/review-promotion';
-import { isUniversalReviewAlert, type ReviewAlert, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
+import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting, reviewMoneyChoices } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
@@ -42,7 +42,7 @@ type WebGroupAriaProps = {
 };
 
 
-const isApplePaySource = (item: UniversalReviewAlert): boolean =>
+const isApplePaySource = (item: ReviewEntry): boolean =>
   item.channel === 'push' && /^apple_pay_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
 
 function validReviewDate(value: string): boolean {
@@ -166,8 +166,14 @@ export default function AddTransactionScreen() {
   const [confirmingInformationDismiss, setConfirmingInformationDismiss] = useState(false);
   const [informationItem] = useState<UniversalReviewAlert | null>(() => genericItem && !ordinaryPosting ? genericItem : null);
   const [informationDismissFailed, setInformationDismissFailed] = useState(false);
-  const [duplicateReview, setDuplicateReview] = useState<{ item: UniversalReviewAlert; generation: number } | null>(null);
+  const [duplicateReview, setDuplicateReview] = useState<{
+    item: ReviewEntry; generation: number; input: PromoteReviewAlertInput;
+  } | null>(null);
   const [duplicateDismissFailed, setDuplicateDismissFailed] = useState(false);
+  const [confirmingSeparate, setConfirmingSeparate] = useState(false);
+  const [separateFailed, setSeparateFailed] = useState(false);
+  const separateAttempted = useRef(false);
+  const separateInFlight = useRef(false);
   const duplicateDismissAttempted = useRef(false);
   const duplicateDismissInFlight = useRef(false);
   const informationDismissInFlight = useRef(false);
@@ -238,32 +244,39 @@ export default function AddTransactionScreen() {
     if (reviewItem) {
       const saveGeneration = getStateGeneration();
       setSaving(true);
+      const input: PromoteReviewAlertInput = {
+        reviewId: reviewItem.id,
+        type,
+        title: title.trim() || reviewTitle,
+        category,
+        accountId,
+        date: reviewDate,
+        betweenOwnAccounts,
+        ...(genericItem && selectedMoney && reviewBinding.current ? { universal: {
+          confirmed: true as const, postingStatus: 'posted' as const, amount: selectedMoney,
+          expectedSourceKey: reviewBinding.current.sourceKey,
+          expectedObservedAt: reviewBinding.current.observedAt,
+          ...(selectedInstrument ? { instrument: selectedInstrument } : {}),
+        } } : {}),
+      };
       try {
-        await promoteReviewAlert({
-          reviewId: reviewItem.id,
-          type,
-          title: title.trim() || reviewTitle,
-          category,
-          accountId,
-          date: reviewDate,
-          betweenOwnAccounts,
-          ...(genericItem && selectedMoney && reviewBinding.current ? { universal: {
-            confirmed: true as const, postingStatus: 'posted' as const, amount: selectedMoney,
-            expectedSourceKey: reviewBinding.current.sourceKey,
-            expectedObservedAt: reviewBinding.current.observedAt,
-            ...(selectedInstrument ? { instrument: selectedInstrument } : {}),
-          } } : {}),
-        });
+        await promoteReviewAlert(input);
         toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
         router.back();
       } catch (error) {
+        // Any review the ledger refuses as a possible Apple Pay duplicate
+        // (Wallet vs bank row, or bank alert vs Wallet row) opens the explicit
+        // choice, bound to this exact item, generation and submitted input.
         if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'ReviewPromotionError' &&
-          'reason' in error && error.reason === 'possible-duplicate' && genericItem &&
-          isApplePaySource(genericItem) && getStateGeneration() === saveGeneration &&
-          informationRouteId.current === genericItem.id) {
+          'reason' in error && error.reason === 'possible-duplicate' && getStateGeneration() === saveGeneration &&
+          informationRouteId.current === reviewItem.id && reviewBinding.current?.sourceKey === reviewItem.sourceKey &&
+          reviewBinding.current?.observedAt === reviewItem.observedAt) {
           duplicateDismissAttempted.current = false;
+          separateAttempted.current = false;
           setDuplicateDismissFailed(false);
-          setDuplicateReview({ item: genericItem, generation: saveGeneration });
+          setSeparateFailed(false);
+          setConfirmingSeparate(false);
+          setDuplicateReview({ item: reviewItem, generation: saveGeneration, input });
         } else {
           toast.show(tUi('reviewAlertAddFailed'), { tone: 'error' });
         }
@@ -323,26 +336,44 @@ export default function AddTransactionScreen() {
   // A failed durable write must never expose an empty add form.
   if (duplicateReview && reviewId === duplicateReview.item.id) {
     const captured = duplicateReview.item;
+    const capturedWallet = isApplePaySource(captured);
+    const capturedEvent = isUniversalReviewAlert(captured) ? captured.event : null;
+    const samePending = () => {
+      const current = getStateSnapshot().reviewTray.pending.find(item => item.id === captured.id);
+      return !!current && isUniversalReviewAlert(current) === isUniversalReviewAlert(captured) &&
+        current.sourceKey === captured.sourceKey && current.observedAt === captured.observedAt &&
+        current.expiresAt > Date.now();
+    };
+    const boundToThisReview = () => informationRouteId.current === captured.id &&
+      getStateGeneration() === duplicateReview.generation && captured.expiresAt > Date.now();
     const canResolveDuplicate = () => {
-      if (informationRouteId.current !== captured.id || getStateGeneration() !== duplicateReview.generation ||
-        captured.expiresAt <= Date.now()) return false;
+      if (!boundToThisReview() || separateAttempted.current) return false;
       const tray = getStateSnapshot().reviewTray;
-      const current = tray.pending.find(item => item.id === captured.id);
-      if (current) return isUniversalReviewAlert(current) && current.sourceKey === captured.sourceKey &&
-        current.observedAt === captured.observedAt && current.expiresAt > Date.now();
+      if (tray.pending.some(item => item.id === captured.id)) return samePending();
       // Only this already-confirmed attempt can retry its own failed write.
       return duplicateDismissAttempted.current && tray.tombstones.some(item =>
         item.sourceKey === captured.sourceKey && item.outcome === 'duplicate');
     };
+    // The separate-purchase override writes at most once: only after the
+    // user's explicit confirmation, never after an "Already recorded" attempt,
+    // never retried, and only for the same pending source in the same ledger
+    // generation the user was shown.
+    const canAddSeparate = () => boundToThisReview() && !duplicateDismissAttempted.current &&
+      !separateAttempted.current && samePending();
     const valid = canResolveDuplicate();
+    const separateAvailable = canAddSeparate();
     const stillPending = getStateSnapshot().reviewTray.pending.some(item =>
       item.id === captured.id && item.sourceKey === captured.sourceKey && item.observedAt === captured.observedAt);
-    const canKeep = !saving && (!duplicateDismissAttempted.current || stillPending || !valid);
-    const keepInReview = () => { if (canKeep && !duplicateDismissInFlight.current) router.back(); };
+    const canKeep = !saving &&
+      ((!duplicateDismissAttempted.current && !separateAttempted.current) || stillPending || !valid);
+    const keepInReview = () => {
+      if (canKeep && !duplicateDismissInFlight.current && !separateInFlight.current) router.back();
+    };
     const resolveDuplicate = async () => {
-      if (duplicateDismissInFlight.current || !canResolveDuplicate()) return;
+      if (duplicateDismissInFlight.current || separateInFlight.current || !canResolveDuplicate()) return;
       duplicateDismissInFlight.current = true;
       duplicateDismissAttempted.current = true;
+      setConfirmingSeparate(false);
       setDuplicateDismissFailed(false);
       setSaving(true);
       try {
@@ -355,7 +386,46 @@ export default function AddTransactionScreen() {
         if (informationDismissActive.current) setSaving(false);
       }
     };
-    const actions = <View style={{ gap: Spacing.two }}>
+    const addSeparate = async () => {
+      if (separateInFlight.current || duplicateDismissInFlight.current || !canAddSeparate()) return;
+      separateInFlight.current = true;
+      separateAttempted.current = true;
+      setSaving(true);
+      try {
+        await promoteReviewAlert({ ...duplicateReview.input, reviewId: captured.id,
+          separatePurchase: { confirmed: true, expectedSourceKey: captured.sourceKey,
+            expectedObservedAt: captured.observedAt } });
+        if (informationDismissActive.current && informationRouteId.current === captured.id &&
+          getStateGeneration() === duplicateReview.generation) {
+          toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
+          router.back();
+        }
+      } catch {
+        if (informationDismissActive.current) setSeparateFailed(true);
+      } finally {
+        separateInFlight.current = false;
+        if (informationDismissActive.current) {
+          setConfirmingSeparate(false);
+          setSaving(false);
+        }
+      }
+    };
+    const confirming = confirmingSeparate && separateAvailable;
+    const actions = confirming ? <View style={{ gap: Spacing.two }}>
+      <Pressable testID="apple-pay-confirm-separate" accessibilityRole="button"
+        accessibilityLabel={tUi('duplicateSeparateConfirm')} disabled={saving}
+        accessibilityState={{ disabled: saving, busy: saving }} onPress={() => void addSeparate()}
+        style={[styles.saveBtn, { backgroundColor: theme.primary }]}>
+        <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{saving ? tUi('savingSecurely')
+          : tUi('duplicateSeparateConfirm')}</ThemedText>
+      </Pressable>
+      <Pressable testID="apple-pay-cancel-separate" accessibilityRole="button" accessibilityLabel={tUi('cancel')}
+        disabled={saving} accessibilityState={{ disabled: saving }}
+        onPress={() => { if (!separateInFlight.current) setConfirmingSeparate(false); }}
+        style={[styles.saveBtn, { opacity: saving ? 0.4 : 1 }]}>
+        <ThemedText type="smallBold">{tUi('cancel')}</ThemedText>
+      </Pressable>
+    </View> : <View style={{ gap: Spacing.two }}>
       <Pressable testID="apple-pay-already-recorded" accessibilityRole="button"
         accessibilityLabel={duplicateDismissFailed ? tUi('applePayReviewRetry') : tUi('applePayReviewRecorded')}
         disabled={saving || !valid} accessibilityState={{ disabled: saving || !valid, busy: saving }}
@@ -363,24 +433,38 @@ export default function AddTransactionScreen() {
         <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{saving ? tUi('savingSecurely')
           : duplicateDismissFailed ? tUi('applePayReviewRetry') : tUi('applePayReviewRecorded')}</ThemedText>
       </Pressable>
+      <Pressable testID="apple-pay-add-separate" accessibilityRole="button"
+        accessibilityLabel={tUi('duplicateAddSeparate')} disabled={saving || !separateAvailable}
+        accessibilityState={{ disabled: saving || !separateAvailable }}
+        onPress={() => { if (canAddSeparate()) setConfirmingSeparate(true); }}
+        style={[styles.saveBtn, { opacity: saving || !separateAvailable ? 0.4 : 1 }]}>
+        <ThemedText type="smallBold">{tUi('duplicateAddSeparate')}</ThemedText>
+      </Pressable>
       <Pressable testID="apple-pay-keep-review" accessibilityRole="button" disabled={!canKeep}
         accessibilityState={{ disabled: !canKeep }} onPress={keepInReview}
         style={[styles.saveBtn, { opacity: canKeep ? 1 : 0.4 }]}>
         <ThemedText type="smallBold">{valid ? tUi('applePayReviewKeep') : tUi('close')}</ThemedText>
       </Pressable>
     </View>;
+    const sheetTitle = capturedWallet ? tUi('applePayReviewTitle') : tUi('reviewAlertAddTitle');
+    const merchant = capturedEvent?.merchant.value;
     return <>
       <ScreenScaffold testID="apple-pay-duplicate-review" headerMode="inline" contentStyle={styles.content}
-        header={{ title: tUi('applePayReviewTitle'), back: { label: tUi('back'), onPress: keepInReview, disabled: !canKeep } }}>
-        {valid ? <UniversalReviewFacts event={captured.event} includeAmount /> : null}
+        header={{ title: sheetTitle, back: { label: tUi('back'), onPress: keepInReview, disabled: !canKeep } }}>
+        {valid && capturedEvent ? <UniversalReviewFacts event={capturedEvent} includeAmount /> : null}
       </ScreenScaffold>
-      <BottomSheet visible onClose={keepInReview} title={tUi('applePayReviewTitle')} footer={actions}>
+      <BottomSheet visible onClose={keepInReview} title={sheetTitle} footer={actions}>
         <View style={{ gap: Spacing.three }}>
-          <ThemedText type="subtitle" accessibilityRole="header">{tUi('applePayReviewQuestion')}</ThemedText>
-          <ThemedText type="small">{tUi('applePayReviewBody')}</ThemedText>
-          {valid && captured.event.merchant.value ? <ThemedText type="smallBold">{captured.event.merchant.value}</ThemedText> : null}
-          {!valid || duplicateDismissFailed ? <ThemedText testID="apple-pay-duplicate-save-error" accessibilityRole="alert" themeColor="expense">
+          <ThemedText type="subtitle" accessibilityRole="header">{confirming
+            ? tUi('duplicateSeparateConfirmTitle') : tUi('applePayReviewQuestion')}</ThemedText>
+          <ThemedText type="small">{confirming ? tUi('duplicateSeparateConfirmBody')
+            : capturedWallet ? tUi('applePayReviewBody') : tUi('reviewAlertMatchesApplePay')}</ThemedText>
+          {valid && merchant ? <ThemedText type="smallBold">{merchant}</ThemedText> : null}
+          {!valid || duplicateDismissFailed ? <ThemedText testID="apple-pay-duplicate-save-error"
+            accessibilityRole="alert" themeColor="expense">
             {valid ? tUi('applePayReviewFailed') : tUi('genericSourceChanged')}</ThemedText> : null}
+          {separateFailed ? <ThemedText testID="apple-pay-separate-save-error" accessibilityRole="alert"
+            themeColor="expense">{tUi('duplicateSeparateFailed')}</ThemedText> : null}
         </View>
       </BottomSheet>
     </>;
