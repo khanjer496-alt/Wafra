@@ -169,6 +169,13 @@ export interface Transaction {
    * time and merchant wording are intentionally coarser than a live capture.
    */
   captureSource?: CaptureSource;
+  /**
+   * Opaque relay id of the statement upload a PDF/CSV row came from (32 hex,
+   * random per upload, carries no content). Two rows of one upload are never
+   * duplicates of each other; rows of different uploads are matched
+   * one-to-one by day, amount, direction and account.
+   */
+  statementImportId?: string;
   captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current

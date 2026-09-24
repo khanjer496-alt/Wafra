@@ -45,6 +45,13 @@ export interface PdfImportAccepted {
   totalRows: number;
   pages: number;
   coverage: StatementImportCoverage | null;
+  /** Of rejectedRows: card rows with a bare sign the statement never explains. */
+  cardSignRowsSkipped: number;
+  /**
+   * The relay had already processed this exact file within its replay window
+   * and queued nothing new. Says nothing about the ledger itself.
+   */
+  alreadyProcessed: boolean;
 }
 
 export interface CsvImportAccepted {
@@ -52,6 +59,13 @@ export interface CsvImportAccepted {
   rejectedRows: number;
   totalRows: number;
   coverage: StatementImportCoverage | null;
+  /** Of rejectedRows: card rows with a bare sign the statement never explains. */
+  cardSignRowsSkipped: number;
+  /**
+   * The relay had already processed this exact file within its replay window
+   * and queued nothing new. Says nothing about the ledger itself.
+   */
+  alreadyProcessed: boolean;
 }
 
 export interface EmailForwardingCredential {
@@ -74,6 +88,8 @@ export type CloudImportErrorCode =
   | 'pdf_password_required'
   | 'pdf_password_incorrect'
   | 'unsupported_statement_format'
+  | 'ambiguous_card_signs'
+  | 'ambiguous_dates'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -199,7 +215,25 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   // Defensive compatibility: an older relay may send a min/max range even when
   // it also admits skipped rows. Do not persist that range as complete locally.
   const coverage = rejectedRows === 0 ? parsedCoverage : null;
-  return { acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage };
+  const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, rejectedRows);
+  const alreadyProcessed = optionalFlag(body.alreadyProcessed);
+  if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
+  return {
+    acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage, cardSignRowsSkipped,
+    alreadyProcessed,
+  };
+}
+
+/** Optional boolean: absent from an older relay reads false; anything else is refused. */
+function optionalFlag(value: unknown): boolean | null {
+  if (value === undefined) return false;
+  return typeof value === 'boolean' ? value : null;
+}
+
+/** Optional (older relays omit it) and never more than the rows skipped. */
+function cardSignSkips(value: unknown, rejectedRows: number): number | null {
+  if (value === undefined) return 0;
+  return nonNegativeInt(value) && value <= rejectedRows ? value : null;
 }
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
@@ -212,11 +246,16 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
   ) return null;
   const coverage = parseStatementCoverage(body.coverage);
   if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
+  const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, body.rejectedRows);
+  const alreadyProcessed = optionalFlag(body.alreadyProcessed);
+  if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
   return {
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
     coverage,
+    cardSignRowsSkipped,
+    alreadyProcessed,
   };
 }
 
@@ -249,6 +288,8 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'pdf_password_required',
   'pdf_password_incorrect',
   'unsupported_statement_format',
+  'ambiguous_card_signs',
+  'ambiguous_dates',
   'rate_limited',
   'queue_full',
   'email_not_configured',

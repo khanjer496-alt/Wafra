@@ -174,7 +174,9 @@ function wideTextPdf(lines) {
   for (const [currency, amount, minor] of globalCsv) {
     const parsedGlobal = parseStatementCsv([
       'Date,Description,Debit,Credit,Currency',
-      `01/07/2026,GLOBAL SHOP,${amount},,${currency}`,
+      // 13/07: these assert minor units, not dates — an ambiguous date is
+      // refused outside day-first ledgers (see the date-order tests below).
+      `13/07/2026,GLOBAL SHOP,${amount},,${currency}`,
     ].join('\n'), currency);
     ok(`global CSV keeps ${currency} in its exact ISO minor units`,
       parsedGlobal.rows.length === 1 && parsedGlobal.rejectedRows === 0 &&
@@ -183,11 +185,11 @@ function wideTextPdf(lines) {
   }
   const badJpyPrecision = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
-    '01/07/2026,GLOBAL SHOP,24.50,,JPY',
+    '13/07/2026,GLOBAL SHOP,24.50,,JPY',
   ].join('\n'), 'JPY');
   const badKwdPrecision = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
-    '01/07/2026,GLOBAL SHOP,12.3456,,KWD',
+    '13/07/2026,GLOBAL SHOP,12.3456,,KWD',
   ].join('\n'), 'KWD');
   ok('global CSV rejects fractional precision that the ledger currency cannot represent',
     badJpyPrecision.rows.length === 0 && badJpyPrecision.rejectedRows === 1 &&
@@ -413,8 +415,8 @@ function wideTextPdf(lines) {
   ok('Saudi statement rows retain SAR and reject explicit AED rows',
     saRows.length === 1 && saRows[0].currency === 'SAR' && saRows[0].amountFils === 4500 &&
       saRows[0].categoryGuess === 'groceries' && saRows[0].categoryDeliberate === true);
-  const jpyRows = parseStatementText('01/07/2026 TOKYO STORE JPY 2400 DR', 'JPY');
-  const kwdRows = parseStatementText('01/07/2026 KUWAIT STORE KWD 12.345 DR', 'KWD');
+  const jpyRows = parseStatementText('13/07/2026 TOKYO STORE JPY 2400 DR', 'JPY');
+  const kwdRows = parseStatementText('13/07/2026 KUWAIT STORE KWD 12.345 DR', 'KWD');
   ok('global text/PDF rows honor zero- and three-decimal ledger currencies',
     jpyRows.length === 1 && jpyRows[0].currency === 'JPY' && jpyRows[0].amountFils === 2400 &&
       kwdRows.length === 1 && kwdRows[0].currency === 'KWD' && kwdRows[0].amountFils === 12345,
@@ -998,6 +1000,277 @@ function wideTextPdf(lines) {
     tooLong = error instanceof Error ? error.message : '';
   }
   ok('an oversized text PDF is a distinct limit error, not a scanned-PDF error', tooLong === 'pdf_too_long');
+
+  // ── Card statements: bare signs are not a direction on their own ──
+  // An account statement prints money OUT with a minus. Card statements do the
+  // opposite as often as not: charges are plain and a payment or refund is the
+  // one carrying the minus. Reading "PAYMENT RECEIVED -500.00" on a card
+  // statement with the account convention filed the user's card payment as a
+  // 500 charge.
+  const cardHeader = [
+    'Credit Card Statement',
+    'Statement Date 31/07/2026',
+    'Minimum Payment Due AED 50.00',
+    'Credit Limit AED 20,000.00',
+  ];
+  const cardUnlabelled = parseStatementLines([
+    ...cardHeader,
+    '01/07/2026 NOON.COM DUBAI 68.93',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU -500.00',
+    '06/07/2026 AMAZON REFUND (25.00)',
+  ].join('\n'), 'AED');
+  ok('a card statement without a sign legend refuses minus/parenthesised rows instead of filing them as charges',
+    cardUnlabelled.rows.length === 1 && cardUnlabelled.rows[0].type === 'expense' &&
+      cardUnlabelled.rows[0].amountFils === 6893 &&
+      !cardUnlabelled.rows.some((row) => /PAYMENT|REFUND/.test(row.merchant)) &&
+      cardUnlabelled.rejectedRows === 2 && cardUnlabelled.ambiguousCardSignRows === 2,
+    JSON.stringify(cardUnlabelled));
+  const cardMinusCredit = parseStatementLines([
+    ...cardHeader,
+    'A minus sign (-) denotes a credit to your card account.',
+    '01/07/2026 NOON.COM DUBAI 68.93',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU -500.00',
+    '06/07/2026 AMAZON REFUND (25.00)',
+  ].join('\n'), 'AED');
+  ok('a card statement that states minus means credit reads payments and refunds as credits',
+    cardMinusCredit.rows.length === 3 && cardMinusCredit.rejectedRows === 0 &&
+      cardMinusCredit.rows[1].type === 'income' && cardMinusCredit.rows[1].amountFils === 50000 &&
+      cardMinusCredit.rows[2].type === 'income' && cardMinusCredit.rows[2].amountFils === 2500 &&
+      cardMinusCredit.rows[0].type === 'expense',
+    JSON.stringify(cardMinusCredit.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  const cardExplicitCr = parseStatementLines([
+    ...cardHeader,
+    '05/07/2026 PAYMENT RECEIVED THANK YOU 500.00 CR',
+    '06/07/2026 CARREFOUR 40.00 DR',
+  ].join('\n'), 'AED');
+  ok('explicit CR/DR labels still decide card statement rows',
+    cardExplicitCr.rows.length === 2 && cardExplicitCr.rows[0].type === 'income' &&
+      cardExplicitCr.rows[1].type === 'expense');
+  const cardOnlySigned = parseStatementLines([
+    ...cardHeader,
+    '05/07/2026 PAYMENT RECEIVED -500.00',
+    '06/07/2026 CARREFOUR 40.00-',
+  ].join('\n'), 'AED');
+  ok('a card statement whose every row is a bare signed figure reports the sign refusal',
+    cardOnlySigned.rows.length === 0 && cardOnlySigned.ambiguousCardSignRows === 2);
+  const accountStillSigned = parseStatementLines([
+    'Statement of Account',
+    '05/07/2026 CARREFOUR -40.00',
+    '06/07/2026 SALARY +1,000.00',
+  ].join('\n'), 'AED');
+  ok('account statements keep the minus-is-debit reading',
+    accountStillSigned.rows.length === 2 && accountStillSigned.rows[0].type === 'expense' &&
+      accountStillSigned.rows[1].type === 'income' && accountStillSigned.ambiguousCardSignRows === 0);
+  // A card statement's running figure is what is OWED: it rises on a charge.
+  // The account-statement balance chain reads a rise as money in.
+  const cardBalanceChain = parseStatementLines([
+    ...cardHeader,
+    'Date Description Amount Balance',
+    '01/07/2026 FIRST ROW 100.00 100.00',
+    '02/07/2026 CARREFOUR MARKET 40.00 140.00',
+    '03/07/2026 DEWA BILL 350.00 490.00',
+    '04/07/2026 TALABAT 60.50 550.50',
+    '05/07/2026 NOON 39.50 590.00',
+    '06/07/2026 SPINNEYS 10.00 600.00',
+  ].join('\n'), 'AED');
+  ok('a card statement running balance is never read with the account-statement direction',
+    !cardBalanceChain.rows.some((row) => row.type === 'income'),
+    JSON.stringify(cardBalanceChain.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+
+  const cardCsvSigned = parseStatementCsv([
+    'Credit Card Statement',
+    'Card Number,XXXX-XXXX-XXXX-4821',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,68.93',
+    '05/07/2026,PAYMENT RECEIVED,-500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV with one signed amount column and no legend is refused, not read as account signs',
+    cardCsvSigned.rows.length === 0 && cardCsvSigned.ambiguousCardSignRows === 2,
+    JSON.stringify(cardCsvSigned));
+  const cardCsvLegend = parseStatementCsv([
+    'Credit Card Statement',
+    'Negative amounts indicate payments and credits',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,68.93',
+    '05/07/2026,PAYMENT RECEIVED,-500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV that states negative means credit reads charges positive and payments negative',
+    cardCsvLegend.rows.length === 2 && cardCsvLegend.rows[0].type === 'expense' &&
+      cardCsvLegend.rows[1].type === 'income' && cardCsvLegend.rows[1].amountFils === 50000,
+    JSON.stringify(cardCsvLegend.rows.map((row) => [row.merchant, row.type])));
+  const cardCsvChargesNegative = parseStatementCsv([
+    'Credit Card Statement',
+    'Charges are shown as negative amounts',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,-68.93',
+    '05/07/2026,PAYMENT RECEIVED,500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV that states charges are negative reads the account-style convention',
+    cardCsvChargesNegative.rows.length === 2 && cardCsvChargesNegative.rows[0].type === 'expense' &&
+      cardCsvChargesNegative.rows[1].type === 'income',
+    JSON.stringify(cardCsvChargesNegative));
+  const cardCsvDirected = parseStatementCsv([
+    'Credit Card Statement',
+    'Date,Description,Amount,Dr Cr',
+    '01/07/2026,NOON.COM,68.93,DR',
+    '05/07/2026,PAYMENT RECEIVED,500.00,CR',
+  ].join('\n'), 'AED');
+  ok('a card CSV with an explicit direction column is unaffected',
+    cardCsvDirected.rows.length === 2 && cardCsvDirected.rows[1].type === 'income');
+
+  // ── Numeric dates that could be either day or month ──
+  // 01/07/2026 is 1 July in Dubai and January 7 in New York. With no row in
+  // the file above 12 to settle it, only a ledger whose market reads day-first
+  // (the launch-tested AED and SAR) may assume it; anything else refuses.
+  const usdAmbiguous = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,GLOBAL SHOP,24.90,',
+    '02/07/2026,OTHER SHOP,10.00,',
+  ].join('\n'), 'USD');
+  ok('a non-day-first ledger refuses a CSV whose every numeric date is ambiguous',
+    usdAmbiguous.rows.length === 0 && usdAmbiguous.rejectedRows === 2 &&
+      usdAmbiguous.ambiguousDateRows === 2, JSON.stringify(usdAmbiguous));
+  const usdSettled = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,GLOBAL SHOP,24.90,',
+    '01/13/2026,OTHER SHOP,10.00,',
+  ].join('\n'), 'USD');
+  ok('one row above 12 settles the order for the whole file',
+    usdSettled.rows.length === 2 && usdSettled.rows[0].date === '2026-01-07' &&
+      usdSettled.ambiguousDateRows === 0, JSON.stringify(usdSettled.rows.map((row) => row.date)));
+  const aedAmbiguous = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,CARREFOUR,24.90,',
+  ].join('\n'), 'AED');
+  ok('the launch-tested AED ledger keeps its day-first reading',
+    aedAmbiguous.rows.length === 1 && aedAmbiguous.rows[0].date === '2026-07-01');
+  const usdIso = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '2026-07-01,GLOBAL SHOP,24.90,',
+    '05/05/2026,SAME BOTH WAYS,1.00,',
+  ].join('\n'), 'USD');
+  ok('ISO dates and day-equals-month dates are never ambiguous',
+    usdIso.rows.length === 2 && usdIso.ambiguousDateRows === 0);
+  const usdPdfAmbiguous = parseStatementLines([
+    '01/07/2026 GLOBAL SHOP 24.90 DR',
+    '02/07/2026 OTHER SHOP 10.00 DR',
+  ].join('\n'), 'USD');
+  ok('PDF rows with only ambiguous dates are refused and counted, not guessed',
+    usdPdfAmbiguous.rows.length === 0 && usdPdfAmbiguous.rejectedRows === 2 &&
+      usdPdfAmbiguous.ambiguousDateRows === 2, JSON.stringify(usdPdfAmbiguous));
+  const sarPdfAmbiguous = parseStatementLines('01/07/2026 PANDA 24.90 DR', 'SAR');
+  ok('the launch-tested SAR ledger keeps its day-first reading in PDFs',
+    sarPdfAmbiguous.rows.length === 1 && sarPdfAmbiguous.rows[0].date === '2026-07-01');
+
+  // ── Card settlements on statements are transfers, never spend or income ──
+  // The same payment appears on BOTH statements: once leaving the current
+  // account and once arriving on the card. Read as an ordinary expense and an
+  // ordinary credit, one settlement became spending AND income.
+  const accountSettlement = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    '05/07/2026 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+    '06/07/2026 CC PAYMENT 700.00 DR',
+    '07/07/2026 CARD PAYMENT TO TESCO STORES 40.00 DR',
+    '08/07/2026 CREDIT CARD PAYMENT LATE FEE 100.00 DR',
+  ].join('\n'), 'AED');
+  const [toCard, unlabelledSettlement, posPurchase, lateFee] = accountSettlement.rows;
+  ok('an account-statement payment to a named card is a non-spending transfer on the paying account',
+    toCard?.kind === 'transaction' && toCard.type === 'expense' && toCard.transferHint === true &&
+      toCard.card?.last4 === '1234' && toCard.categoryGuess === 'other' && toCard.categoryDeliberate === true,
+    JSON.stringify(toCard));
+  ok('an account-statement card payment without card digits stays on the account as a non-spending transfer',
+    unlabelledSettlement?.kind === 'transaction' && unlabelledSettlement.type === 'expense' &&
+      unlabelledSettlement.transferHint === true && unlabelledSettlement.categoryGuess === 'other' &&
+      unlabelledSettlement.card?.last4 === '1234',
+    JSON.stringify(unlabelledSettlement));
+  ok('a card PURCHASE described as "card payment to" a shop, and a card fee, stay ordinary spending',
+    posPurchase?.transferHint === false && posPurchase.kind === 'transaction' &&
+      lateFee?.transferHint === false && lateFee.kind === 'transaction',
+    JSON.stringify([posPurchase, lateFee]));
+  const cardSettlement = parseStatementLines([
+    'Credit Card Statement',
+    'Credit Card Number 4111 XXXX XXXX 4821',
+    'Minimum Payment Due AED 50.00',
+    '05/07/2026 PAYMENT RECEIVED - THANK YOU 1,500.00 CR',
+    '06/07/2026 AMAZON REFUND 25.00 CR',
+    '07/07/2026 CARREFOUR 40.00 DR',
+  ].join('\n'), 'AED');
+  const [received, refund, purchase] = cardSettlement.rows;
+  ok('a card-statement payment credit becomes the card\'s settlement receipt leg, not income',
+    received?.kind === 'cardPayment' && received.type === 'expense' && received.transferHint === true &&
+      received.card?.last4 === '4821' && received.card?.kind === 'credit' &&
+      received.cardPaymentSide === 'receipt' && received.categoryGuess === 'other',
+    JSON.stringify(received));
+  ok('a card refund and a card purchase keep their ordinary meaning',
+    refund?.kind === 'transaction' && refund.type === 'income' && refund.transferHint === false &&
+      purchase?.kind === 'transaction' && purchase.type === 'expense',
+    JSON.stringify([refund, purchase]));
+  const anonymousCard = parseStatementLines([
+    'Credit Card Statement',
+    'Minimum Payment Due AED 50.00',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU 900.00 CR',
+  ].join('\n'), 'AED');
+  ok('a card payment on a card statement with no card digits is still a non-income transfer',
+    anonymousCard.rows[0]?.kind === 'transaction' && anonymousCard.rows[0].type === 'income' &&
+      anonymousCard.rows[0].transferHint === true && anonymousCard.rows[0].categoryGuess === 'other',
+    JSON.stringify(anonymousCard.rows[0]));
+  const csvSettlement = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '05/07/2026,CREDIT CARD PAYMENT,1500.00,',
+  ].join('\n'), 'AED');
+  ok('a CSV account-statement card payment is a non-spending transfer too',
+    csvSettlement.rows[0]?.transferHint === true && csvSettlement.rows[0].categoryGuess === 'other',
+    JSON.stringify(csvSettlement.rows[0]));
+
+  // ── Review follow-ups: one weak marker is not a card statement ──
+  const creditLimitAccount = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    'Available Credit Limit AED 5,000.00',
+    'Date Description Debit Credit Balance',
+    '01/07/2026 OPENING 100.00 - 9,900.00',
+    '02/07/2026 SALARY PAYMENT JULY - 18,500.00 28,400.00',
+    '03/07/2026 IPP PAYMENT FROM AHMED - 250.00 28,650.00',
+  ].join('\n'), 'AED');
+  ok('an account statement mentioning a credit limit keeps salary and incoming payments as income',
+    creditLimitAccount.rows.length === 3 &&
+      creditLimitAccount.rows.filter((row) => row.type === 'income').every((row) =>
+        row.kind === 'transaction' && row.transferHint === false && row.merchant !== 'Card payment'),
+    JSON.stringify(creditLimitAccount.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const creditLimitSigned = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    'Available Credit Limit AED 5,000.00',
+    '05/07/2026 CARREFOUR -40.00',
+  ].join('\n'), 'AED');
+  ok('an account-labelled statement with one card-ish marker keeps the account sign convention',
+    creditLimitSigned.rows.length === 1 && creditLimitSigned.rows[0].type === 'expense' &&
+      creditLimitSigned.ambiguousCardSignRows === 0, JSON.stringify(creditLimitSigned));
+  const walletRefund = parseStatementLines([
+    ...cardHeader,
+    'Credit Card Number 4111 XXXX XXXX 4821',
+    '05/07/2026 AMAZON PAYMENTS AE 120.00 CR',
+  ].join('\n'), 'AED');
+  ok('a merchant credit from a payments company on a card statement is not a card settlement',
+    walletRefund.rows[0]?.kind === 'transaction' && walletRefund.rows[0].transferHint === false,
+    JSON.stringify(walletRefund.rows[0]));
+  const balanceProse = parseStatementLines([
+    ...cardHeader,
+    'A negative amount indicates a credit balance on your account.',
+    '05/07/2026 NOON -68.93',
+  ].join('\n'), 'AED');
+  ok('legend wording about the BALANCE is not a sign legend for rows',
+    balanceProse.rows.length === 0 && balanceProse.ambiguousCardSignRows === 1, JSON.stringify(balanceProse));
+  const accountLeg = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    '05/07/2026 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+  ].join('\n'), 'AED');
+  ok('an account-side card settlement stays on the paying account as a non-spending transfer',
+    accountLeg.rows[0]?.kind === 'transaction' && accountLeg.rows[0].type === 'expense' &&
+      accountLeg.rows[0].transferHint === true && accountLeg.rows[0].card?.last4 === '1234',
+    JSON.stringify(accountLeg.rows[0]));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -61,6 +61,7 @@ const transaction: Check = (value) => {
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     viaPush: boolean, captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
+    statementImportId: (v) => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v),
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
