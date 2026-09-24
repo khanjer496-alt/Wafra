@@ -121,15 +121,16 @@ class BankNotificationListenerService : NotificationListenerService() {
       // running history, so an update re-posts every older alert with it.
       // Choosing the longest of them re-captured an old charge whenever it
       // happened to be worded longer than the new one. They are read only as
-      // a fallback when no single-posting field carries an amount, and only
-      // the one entry NotificationTextSurfaces.newest() can identify — never
-      // historic messages, which are context by definition.
+      // a fallback when no single-posting field carries an amount, and then
+      // through NotificationTextSurfaces.history(): the one entry it can
+      // identify as the posting, or — only when it cannot tell — main's
+      // candidates (see the fallback below).
       val conversationSurfaces = conversationTexts(
         extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES),
         extras.get(Notification.EXTRA_MESSAGES),
         extras.get(Notification.EXTRA_HISTORIC_MESSAGES),
       )
-      val newestConversationText = newestConversationText(
+      val history = conversationHistory(
         extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES),
         extras.get(Notification.EXTRA_MESSAGES),
       )
@@ -152,15 +153,36 @@ class BankNotificationListenerService : NotificationListenerService() {
       }
       // Every package gets this fallback: an unknown app's row still needs the
       // money gate below and a verified parse, and is Review-first otherwise.
-      if (newestConversationText != null &&
-          textCandidates.none { MONEY_RE.containsMatchIn(it) }) {
-        recordAdmission("conversationFallback", adcb)
-        addText(newestConversationText)
+      if (textCandidates.none { MONEY_RE.containsMatchIn(it) }) {
+        when (history) {
+          is NotificationTextSurfaces.History.Newest -> {
+            recordAdmission("conversationFallback", adcb)
+            addText(history.text)
+          }
+          NotificationTextSurfaces.History.Ambiguous -> {
+            // Two or more entries carry an amount and nothing says which one
+            // is this posting (untimed InboxStyle lines, or a tie at the
+            // newest timestamp) — e.g. an in-place update whose collapsed
+            // text is only "2 new transactions". Dropping the notification
+            // lost the new charge, so read the history exactly as origin/main
+            // did: every line and message is an ordinary candidate and the
+            // longest amount-bearing one wins below. It can pick an older
+            // charge, as main could; the queue's re-post guard and the app's
+            // duplicate checks still apply, and an unknown app stays
+            // Review-first.
+            recordAdmission("conversationAmbiguous", adcb)
+            addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))
+            addText(extras.get(Notification.EXTRA_MESSAGES))
+            addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))
+          }
+          NotificationTextSurfaces.History.Silent -> Unit
+        }
       }
       // ColorOS can expose several populated standard fields for the same
       // notification. ADCB's first non-blank field is not necessarily the
       // visible charge body. Prefer BIG_TEXT then TEXT when they carry a money
-      // amount; otherwise the longest bounded field that does; otherwise
+      // amount; otherwise the longest bounded field that does (main's rule,
+      // which the ambiguous-history fallback above relies on); otherwise
       // retain the old first-nonblank fallback.
       val nonBlankTextCandidates = textCandidates.filter { it.isNotBlank() }
       val moneyCandidate = preferredCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }
@@ -489,9 +511,9 @@ class BankNotificationListenerService : NotificationListenerService() {
     ): List<String> =
       textLines(lines) + messages(current).map { it.text } + messages(historic).map { it.text }
 
-    /** The one entry that describes the posting that triggered this update. */
-    private fun newestConversationText(lines: Array<out CharSequence?>?, current: Any?): String? =
-      NotificationTextSurfaces.newest(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }
+    /** Which entry, if any, describes the posting that triggered this update. */
+    private fun conversationHistory(lines: Array<out CharSequence?>?, current: Any?): NotificationTextSurfaces.History =
+      NotificationTextSurfaces.history(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }
 
     private fun looksLikeTextExtraKey(key: String): Boolean {
       val normalized = key.lowercase()

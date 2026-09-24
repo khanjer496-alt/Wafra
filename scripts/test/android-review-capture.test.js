@@ -102,13 +102,13 @@ ok('re-post suppression requires an explicit transaction clock',
     notificationStore.includes('if (eventIdentity != null && isRecentRepost(recentContent(prefs), eventIdentity))') &&
     notificationStore.includes('kotlin.math.abs(it.ts - candidate.ts) <= REPOST_WINDOW_MS'),
   JSON.stringify({ notificationStore: notificationStore.length }));
-ok('a summary is skipped only beside a visible child, and history is never read as the posting',
+ok('a summary is skipped only beside a visible child, and history is read as the posting only when unambiguous',
   // A summary restates its children, and InboxStyle/MessagingStyle history
   // re-posts every older alert with each update; choosing the longest entry
   // re-captured an old charge. A summary with no visible child is captured.
   // History is a fallback for every package, used only when no other field
-  // carries an amount, and only through NotificationTextSurfaces.newest(),
-  // whose decisions run as Kotlin in kotlin-regex.test.js.
+  // carries an amount, and through NotificationTextSurfaces.history(), whose
+  // decisions run as Kotlin in kotlin-regex.test.js.
   /flags and Notification\.FLAG_GROUP_SUMMARY\) != 0 &&\s*summaryHasVisibleChild\(sbn\)\) \{\s*recordAdmission\("groupSummary", adcb\)\s*return/
     .test(notificationListener) &&
     notificationListener.includes('NotificationTextSurfaces.summaryHasVisibleChild(') &&
@@ -118,20 +118,45 @@ ok('a summary is skipped only beside a visible child, and history is never read 
       notificationListener.indexOf('addText(extras.getCharSequence(Notification.EXTRA_TEXT))') &&
     notificationListener.includes(
       'preferredCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }') &&
-    !/addText\(extras\.(?:get|getCharSequenceArray)\(Notification\.EXTRA_(?:TEXT_LINES|MESSAGES|HISTORIC_MESSAGES)\)\)/
-      .test(notificationListener) &&
     notificationListener.includes('.filter { key -> !CONVERSATION_EXTRA_KEYS.contains(key) }') &&
-    (notificationListener.match(/addText\(newestConversationText\)/g) ?? []).length === 1 &&
-    // Outside the curated-bank block: review-first apps get the fallback too.
-    notificationListener.indexOf('addText(newestConversationText)') >
-      notificationListener.indexOf('.forEach { key -> addText(extras.get(key)) }\n      }') &&
-    /newestConversationText != null &&\s*textCandidates\.none \{ MONEY_RE\.containsMatchIn\(it\) \}/
-      .test(notificationListener) &&
     notificationListener.includes(
-      'NotificationTextSurfaces.newest(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }') &&
+      'NotificationTextSurfaces.history(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }') &&
     // History still reaches the OTP/security filter.
     notificationListener.includes('(listOf(title) + nonBlankTextCandidates + conversationSurfaces)'),
   JSON.stringify({ notificationListener: notificationListener.length }));
+{
+  // The history fallback, for every package, only when no single-posting
+  // field carries an amount. An unambiguous newest entry is the posting. When
+  // two or more entries carry an amount and nothing says which is new, the
+  // notification is NOT dropped (that lost a real charge): the lines and
+  // messages become ordinary candidates exactly as on origin/main, and the
+  // longest amount-bearing one wins. Nowhere else is history a candidate.
+  const gate = 'if (textCandidates.none { MONEY_RE.containsMatchIn(it) }) {\n        when (history) {';
+  const gateAt = notificationListener.indexOf(gate);
+  const newestAt = notificationListener.indexOf('is NotificationTextSurfaces.History.Newest ->', gateAt);
+  const ambiguousAt = notificationListener.indexOf('NotificationTextSurfaces.History.Ambiguous ->', gateAt);
+  const silentAt = notificationListener.indexOf('NotificationTextSurfaces.History.Silent -> Unit', gateAt);
+  const newestBranch = notificationListener.slice(newestAt, ambiguousAt);
+  const ambiguousBranch = notificationListener.slice(ambiguousAt, silentAt);
+  const directHistory = /addText\(extras\.(?:get|getCharSequenceArray)\(Notification\.EXTRA_(?:TEXT_LINES|MESSAGES|HISTORIC_MESSAGES)\)\)/g;
+  ok('an ambiguous history falls back to main\'s candidates instead of dropping the alert',
+    gateAt >= 0 && newestAt > gateAt && ambiguousAt > newestAt && silentAt > ambiguousAt &&
+      // Outside the curated-bank block: review-first apps get it too.
+      gateAt > notificationListener.indexOf('.forEach { key -> addText(extras.get(key)) }\n      }') &&
+      /recordAdmission\("conversationFallback", adcb\)\s*addText\(history\.text\)/.test(newestBranch) &&
+      ambiguousBranch.includes('recordAdmission("conversationAmbiguous", adcb)') &&
+      ambiguousBranch.includes('addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))') &&
+      ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_MESSAGES))') &&
+      ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))') &&
+      (notificationListener.match(directHistory) ?? []).length === 3 &&
+      (ambiguousBranch.match(directHistory) ?? []).length === 3 &&
+      (notificationListener.match(/addText\(history\.text\)/g) ?? []).length === 1 &&
+      // Longest amount-bearing candidate wins when no preferred field has one.
+      /preferredCandidates\.firstOrNull \{ MONEY_RE\.containsMatchIn\(it\) \}\s*\?: nonBlankTextCandidates\s*\.filter \{ MONEY_RE\.containsMatchIn\(it\) \}\s*\.maxByOrNull \{ it\.length \}/
+        .test(notificationListener) &&
+      notificationListener.indexOf('val moneyCandidate =') > silentAt,
+    JSON.stringify({ gateAt, newestAt, ambiguousAt, silentAt }));
+}
 {
   const start = notificationStore.indexOf('fun admissionBlockReason(');
   const end = notificationStore.indexOf('@Synchronized', start);

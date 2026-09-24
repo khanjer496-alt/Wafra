@@ -281,6 +281,20 @@ if (!kotlinc) {
     [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'second AED 2.00'],
     [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'null'],
     [`NotificationTextSurfaces.newest(emptyList(), emptyList(), amt)`, 'null'],
+    // What the history says, so an ambiguous one is never silently dropped:
+    // two or more amount-bearing entries with nothing to say which is new
+    // (untimed lines, or a tie at the newest timestamp) are Ambiguous, and
+    // the listener then reads them as origin/main did instead of dropping.
+    [`NotificationTextSurfaces.history(listOf("old AED 900.00", "new AED 5.00"), emptyList(), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(listOf("Your statement is ready", "new AED 5.00"), emptyList(), amt)`, 'Newest(text=new AED 5.00)'],
+    [`NotificationTextSurfaces.history(listOf("Your statement is ready"), emptyList(), amt)`, 'Silent'],
+    [`NotificationTextSurfaces.history(listOf("same AED 1.00", "same AED 1.00"), emptyList(), amt)`, 'Newest(text=same AED 1.00)'],
+    [`NotificationTextSurfaces.history(listOf("line AED 1.00"), listOf(NotificationTextSurfaces.Message(200L, "newest AED 5.00"), NotificationTextSurfaces.Message(100L, "older and much longer AED 900.00")), amt)`, 'Newest(text=newest AED 5.00)'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "first AED 1.00"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'Newest(text=second AED 2.00)'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "bye")), amt)`, 'Silent'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(emptyList(), emptyList(), amt)`, 'Silent'],
     // A group summary is redundant only while one of its children is visible.
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "g", false)))`, 'true'],
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true)))`, 'false'],

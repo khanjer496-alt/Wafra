@@ -13,28 +13,58 @@ object NotificationTextSurfaces {
   /** One active notification, reduced to what group handling needs. */
   data class Member(val key: String, val groupKey: String?, val isSummary: Boolean)
 
+  /** What a notification's running history says about the posting that triggered it. */
+  sealed class History {
+    /** No history, or no entry that could be the posting carries an amount. */
+    object Silent : History() {
+      override fun toString() = "Silent"
+    }
+
+    /** The one entry that describes this posting. */
+    data class Newest(val text: String) : History()
+
+    /**
+     * Two or more entries carry an amount and nothing says which one is this
+     * posting. The caller must not drop the notification on this verdict.
+     */
+    object Ambiguous : History() {
+      override fun toString() = "Ambiguous"
+    }
+  }
+
   /**
-   * The single history entry that describes the posting, or null.
-   *
    * InboxStyle lines and MessagingStyle messages are a running history: an
    * app that updates one notification re-posts every older alert alongside
    * the new one, so choosing the longest entry re-captured an old charge.
    *
    * - Messages with a real timestamp: the newest one. If several share the
-   *   newest timestamp, only one of them that carries an amount.
+   *   newest timestamp, the one of them that carries an amount; two or more
+   *   that do are Ambiguous.
    * - Otherwise nothing says which entry is newest (InboxStyle order is the
-   *   app's choice, not Android's), so do not guess: an entry is used only
-   *   when it is the ONLY one that carries an amount.
+   *   app's choice, not Android's), so do not guess: an entry is the posting
+   *   only when it is the ONLY one that carries an amount; two or more that
+   *   do are Ambiguous.
    */
-  fun newest(lines: List<String>, messages: List<Message>, carriesAmount: (String) -> Boolean): String? {
+  fun history(lines: List<String>, messages: List<Message>, carriesAmount: (String) -> Boolean): History {
     val timed = messages.filter { it.time > 0L }
-    if (timed.isNotEmpty()) {
+    val candidates = if (timed.isNotEmpty()) {
       val latest = timed.maxOf { it.time }
-      val candidates = timed.filter { it.time == latest }.map { it.text }.distinct()
-      return candidates.singleOrNull() ?: candidates.filter(carriesAmount).singleOrNull()
+      val newest = timed.filter { it.time == latest }.map { it.text }.distinct()
+      newest.singleOrNull()?.let { return History.Newest(it) }
+      newest.filter(carriesAmount)
+    } else {
+      (lines + messages.map { it.text }).distinct().filter(carriesAmount)
     }
-    return (lines + messages.map { it.text }).distinct().filter(carriesAmount).singleOrNull()
+    return when (candidates.size) {
+      0 -> History.Silent
+      1 -> History.Newest(candidates.single())
+      else -> History.Ambiguous
+    }
   }
+
+  /** The single history entry that describes the posting, or null when [history] is not Newest. */
+  fun newest(lines: List<String>, messages: List<Message>, carriesAmount: (String) -> Boolean): String? =
+    (history(lines, messages, carriesAmount) as? History.Newest)?.text
 
   /**
    * A group summary only restates its children, each captured on its own —
