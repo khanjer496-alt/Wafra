@@ -2173,8 +2173,8 @@ const S = {
     ar: 'التقط العمليات الجديدة',
   },
   onboardLiveBody: {
-    en: 'Wafra reads your bank texts on this iPhone as they arrive.',
-    ar: 'يقرأ وفرة رسائل بنكك على هذا الآيفون فور وصولها.',
+    en: 'A Shortcut sends new bank texts to Wafra on this iPhone.',
+    ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
   },
   onboardLiveAction: {
     en: 'Set up',
@@ -2984,7 +2984,7 @@ const S = {
   iosMessageGuideSender: { en: 'Sender: leave empty · Message Contains: one space', ar: 'المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة' },
   iosMessageGuideNoFilter: { en: 'Type a single space in “Message Contains” so Next turns on. Messages containing a space run the Shortcut. Wafra keeps bank alerts and discards other messages on this iPhone.', ar: 'اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تشغّل الرسائل التي تحتوي على مسافة الاختصار، ويصفّيها وفرة على هذا الآيفون.' },
   iosMessageFutureInstallHelp: {
-    en: 'Tap Add shortcut, then add {shortcut} in Shortcuts.',
+    en: 'Tap Add Shortcut, then add {shortcut} in Shortcuts.',
     ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
   },
   iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
@@ -3033,8 +3033,8 @@ const S = {
   iosMessageStatusComplete: { en: 'Complete', ar: 'مكتمل' },
   iosMessageStatusSkipped: { en: 'Not finished', ar: 'غير مكتمل' },
   iosMessageFinishFailed: {
-    en: 'Setup didn’t save. Tap Finish setup again.',
-    ar: 'لم يُحفظ الإعداد. اضغط «إنهاء الإعداد» مجدداً.',
+    en: 'Setup didn’t save. Try again.',
+    ar: 'لم يُحفظ الإعداد. حاول مجدداً.',
   },
   iosMessageHelpLocal: { en: 'Processed on this iPhone.', ar: 'تُعالج على هذا الآيفون.' },
   iosMessageHelpReadable: { en: 'Only readable messages saved on this iPhone.', ar: 'الرسائل المحفوظة والقابلة للقراءة على هذا الآيفون فقط.' },
@@ -3106,7 +3106,7 @@ const S = {
   },
   iosMessageContinueManual: {
     en: 'Skip for now',
-    ar: 'تخطَّ الآن',
+    ar: 'تخطَّ حالياً',
   },
   iosLocalOpenAutomation: { en: 'Open Shortcuts', ar: 'فتح الاختصارات' },
   iosLocalAutomationAdded: {
@@ -3137,7 +3137,7 @@ const S = {
   iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
   iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
   iosLocalShortcutInstallFailed: {
-    en: 'Shortcuts didn’t open. Tap Add shortcut to try again.',
+    en: 'Shortcuts didn’t open. Tap Add Shortcut to try again.',
     ar: 'لم تُفتح الاختصارات. اضغط «إضافة الاختصار» للمحاولة مجدداً.',
   },
   iosLocalShortcutRunFailed: {

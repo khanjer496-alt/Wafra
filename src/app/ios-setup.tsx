@@ -111,6 +111,13 @@ const recordedSourceConfigured = (
   progress.futureAutomationConfirmed && !progress.futureAutomationRelink,
 );
 
+/**
+ * The automation walkthrough screen survives a remount (iOS may reclaim Wafra
+ * while the user is in Shortcuts), so returning does not restart at screen 1.
+ * Memory only: a cold launch starts the walkthrough again.
+ */
+let rememberedGuideScreen = 0;
+
 const historyNativeModule = async () =>
   (await import('../../modules/wafra-message-history')).default;
 
@@ -209,7 +216,14 @@ export default function IosSetupScreen() {
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
-  const [guideScreen, setGuideScreen] = useState(0);
+  const [guideScreen, setGuideScreenState] = useState(() => rememberedGuideScreen);
+  const setGuideScreen = useCallback((next: number | ((value: number) => number)) => {
+    setGuideScreenState((value) => {
+      const resolved = typeof next === 'function' ? next(value) : next;
+      rememberedGuideScreen = resolved;
+      return resolved;
+    });
+  }, []);
   const [allStepsVisible, setAllStepsVisible] = useState(false);
   // Past SMS import is experimental on iPhone: statements bring in the past.
   // It is reached only from Settings → Advanced (`section=history`) or to
@@ -927,8 +941,8 @@ export default function IosSetupScreen() {
   const showingAutomation = !failedMessageCheck && (futureStep === 'create-automation' || showAutomationGuide);
   // Each visit to the automation walkthrough starts at its first screen.
   useEffect(() => {
-    if (!showingAutomation) setGuideScreen(0);
-  }, [showingAutomation]);
+    if (!showingAutomation && !setup.loading && progressLoaded) setGuideScreen(0);
+  }, [progressLoaded, setGuideScreen, setup.loading, showingAutomation]);
 
   const openHelp = () => {
     setPrivacyExpanded(false);
@@ -1012,7 +1026,7 @@ export default function IosSetupScreen() {
   const firstAlertSeen = setup.readiness === 'first-alert-captured';
   const guideVisible = !historyMode && progressLoaded && !setup.loading;
   const showStepProgress = guideVisible && messageMode && setup.supported && setup.failure !== 'load' &&
-    !legacyUpgrade && !automationRelink && !oneTogglePath && stage !== 'done';
+    !legacyUpgrade && !automationRelink && stage !== 'done';
   const nextGuideScreen = () => setGuideScreen((value) => Math.min(value + 1, shortcutCopy.guide.length - 1));
   const previousGuideScreen = () => setGuideScreen((value) => Math.max(value - 1, 0));
   return (
@@ -1139,6 +1153,14 @@ export default function IosSetupScreen() {
               {showStepProgress && (
                 <StepProgress current={typeof stage === 'number' ? stage : 4} labels={stepLabels} template={shortcutCopy.stepOf} />
               )}
+              {oneTogglePath && (
+                // iOS 27 hook, flagged off until the one-toggle Shortcut is
+                // authored on a physical iOS 27 iPhone and bundled. When it
+                // ships, its add action goes here; the Messages guide below
+                // stays as the fallback, so this card can never strand anyone.
+                <SetupStep testID="ios-one-toggle-capture" badge="27" title={shortcutCopy.oneToggleTitle}
+                  body={shortcutCopy.oneToggleBody} />
+              )}
               {applePayMode ? (
                 <SetupStep badge="1" title={applePayLabel} body={applePaySummary}
                   result={futureConfigured ? { tone: 'pass', title: journeyCopy.waiting } : null}>
@@ -1155,11 +1177,6 @@ export default function IosSetupScreen() {
                 <SetupResult tone="info" title={t('iosLocalUnsupported')} />
               ) : setup.failure === 'load' ? (
                 <SetupResult tone="fail" title={t('iosLocalUpdateRequired')} />
-              ) : oneTogglePath ? (
-                // iOS 27 hook: stays unreachable until the one-toggle Shortcut
-                // is authored on a physical iOS 27 iPhone and bundled.
-                <SetupStep testID="ios-one-toggle-capture" badge="1" title={shortcutCopy.oneToggleTitle}
-                  body={shortcutCopy.oneToggleBody} />
               ) : legacyUpgrade && !showAutomationGuide ? (
                 <SetupStep testID="ios-capture-upgrade" badge="1" title={shortcutCopy.upgradeTitle}
                   body={shortcutCopy.upgradeBody} result={{ tone: 'pass', title: shortcutCopy.upgradeDetail }}>
@@ -1175,7 +1192,10 @@ export default function IosSetupScreen() {
                 </SetupStep>
               ) : showingAutomation ? (
                 <>
-                  <SetupStep testID="ios-automation-guide-step" badge={`3.${guideShown + 1}`} title={guide.title}
+                  <SetupStep testID="ios-automation-guide-step" badge={`3.${guideShown + 1}`}
+                    badgeLabel={shortcutCopy.screenOf.replace('{screen}', String(guideShown + 1))
+                      .replace('{total}', String(shortcutCopy.guide.length))}
+                    title={guide.title}
                     body={fillShortcut(guide.body)} chips={guide.chips.map(fillShortcut)}
                     chipsPrefix={shortcutCopy.inShortcuts}>
                     {guideShown === 0 ? (
@@ -1260,8 +1280,10 @@ export default function IosSetupScreen() {
               )}
             </View>
           )}
-          {/* Optional sources live here, outside first-run setup. */}
-          {guideVisible && !fromOnboarding && ((setup.applePaySupported && !applePayMode) ||
+          {/* Optional sources live here, outside first-run setup, unless
+              Messages capture cannot run on this iPhone at all. */}
+          {guideVisible && (!fromOnboarding || !setup.supported || setup.failure === 'load') &&
+            ((setup.applePaySupported && !applePayMode) ||
             (offersNotifications && !notificationMode)) && (
             <View testID="ios-setup-other-sources" style={styles.otherWays}>
               <ThemedText type="smallBold">{shortcutCopy.otherWays}</ThemedText>

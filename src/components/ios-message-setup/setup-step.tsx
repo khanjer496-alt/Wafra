@@ -5,7 +5,6 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { isRTL } from '@/lib/i18n';
 
 /**
  * Presentational pieces of the guided iPhone setup. They draw state they are
@@ -49,7 +48,7 @@ export function StepProgress({ current, labels, template }: StepProgressProps) {
                 : <ThemedText type="micro" themeColor={active ? 'primary' : 'textTertiary'} tabular>
                   {index + 1}
                 </ThemedText>}
-              <ThemedText type="micro" themeColor={active ? 'text' : 'textTertiary'} numberOfLines={1}
+              <ThemedText type="micro" themeColor={active ? 'text' : 'textTertiary'}
                 style={styles.progressLabel}>
                 {item}
               </ThemedText>
@@ -70,11 +69,8 @@ export function GuideChips({ labels, spokenPrefix }: { labels: readonly string[]
     <View style={styles.chips} accessible accessibilityLabel={spoken} testID="setup-guide-chips">
       {labels.map((label, index) => (
         <View key={`${index}:${label}`} style={styles.chipLine}>
-          {index > 0 && (
-            <View style={isRTL() ? styles.flip : undefined}>
-              <Icon name="chevron-right" size={14} color={theme.textTertiary} />
-            </View>
-          )}
+          {/* Icon mirrors directional chevrons for Arabic itself. */}
+          {index > 0 && <Icon name="chevron-right" size={14} color={theme.textTertiary} />}
           <View style={[styles.chip, { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder }]}>
             <ThemedText type="smallBold" style={styles.chipText}>{label}</ThemedText>
           </View>
@@ -118,8 +114,10 @@ export function SetupResult({ tone, title, body }: SetupResultProps) {
 }
 
 export interface SetupStepProps {
-  /** Short visible marker such as "1" or "3.2". Read as part of the title. */
+  /** Short visible marker such as "1" or "3.2". */
   badge: string;
+  /** What VoiceOver reads for the badge, e.g. "Screen 2 of 5". Defaults to the badge. */
+  badgeLabel?: string;
   title: string;
   body?: string;
   chips?: readonly string[];
@@ -130,7 +128,7 @@ export interface SetupStepProps {
 }
 
 /** One step, one sentence, one primary action (passed as children). */
-export function SetupStep({ badge, title, body, chips, chipsPrefix, result, testID, children }: SetupStepProps) {
+export function SetupStep({ badge, badgeLabel, title, body, chips, chipsPrefix, result, testID, children }: SetupStepProps) {
   const theme = useTheme();
   return (
     <View testID={testID ?? 'setup-step'} style={[styles.card, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
@@ -139,7 +137,8 @@ export function SetupStep({ badge, title, body, chips, chipsPrefix, result, test
           accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <ThemedText type="smallBold" themeColor="primary" tabular>{badge}</ThemedText>
         </View>
-        <ThemedText type="heading" accessibilityRole="header" style={styles.title}>{title}</ThemedText>
+        <ThemedText type="heading" accessibilityRole="header" accessibilityLabel={`${badgeLabel ?? badge}. ${title}`}
+          style={styles.title}>{title}</ThemedText>
       </View>
       {body ? <ThemedText type="default" themeColor="textSecondary">{body}</ThemedText> : null}
       {chips && chips.length > 0 ? <GuideChips labels={chips} spokenPrefix={chipsPrefix} /> : null}
@@ -164,7 +163,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + Spacing.one },
   badge: {
     minWidth: 36,
-    height: 36,
+    minHeight: 36,
     paddingHorizontal: Spacing.two,
     borderRadius: Radius.full,
     alignItems: 'center',
@@ -172,7 +171,7 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, flexShrink: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', rowGap: Spacing.two, columnGap: Spacing.one },
-  chipLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  chipLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexShrink: 1, maxWidth: '100%' },
   chip: {
     minHeight: 32,
     paddingHorizontal: Spacing.two + Spacing.one,
@@ -182,7 +181,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipText: { flexShrink: 1 },
-  flip: { transform: [{ scaleX: -1 }] },
   result: {
     flexDirection: 'row',
     alignItems: 'flex-start',

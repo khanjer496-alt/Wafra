@@ -1,7 +1,9 @@
 /** Setup guidance only; never store Apple's free-form error text or message input. */
 // One sentence per screen. The quoted Apple words (Automation, Message, Message
-// Contains, Run Immediately, Next, Done) are the labels iOS 26 Shortcuts shows
-// in each language, so the guide can be followed word for word.
+// Contains, Run Immediately, Next, Done) are the English iOS 26 Shortcuts
+// labels, verified on the owner's iPhone. The Arabic ones follow Apple's
+// Arabic UI and still need checking on an Arabic-language iPhone. "Space" is
+// our word for the one character typed, not an Apple label.
 // Every error says what happened, then the one thing to do next.
 const copy = {
   en: {
@@ -30,8 +32,9 @@ const copy = {
     statusSkipped: 'Skipped',
     // Guided flow.
     liveTitle: 'Catch new transactions',
-    liveSubtitle: 'Your bank texts go straight into Wafra.',
+    liveSubtitle: 'A Shortcut sends new bank texts to Wafra.',
     stepOf: 'Step {step} of {total}',
+    screenOf: 'Screen {screen} of {total}',
     stepAdd: 'Add', stepTest: 'Test', stepAutomate: 'Automate',
     confirmTitle: 'Back from Shortcuts?',
     confirmBody: 'Tap below and Wafra tests the shortcut.',
@@ -78,8 +81,9 @@ const copy = {
     otherWaysBody: 'اختياري. يبقى إعداد الرسائل كما هو.',
     statusSkipped: 'تم التخطي',
     liveTitle: 'التقط العمليات الجديدة',
-    liveSubtitle: 'تصل رسائل بنكك مباشرةً إلى وفرة.',
+    liveSubtitle: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة.',
     stepOf: 'الخطوة {step} من {total}',
+    screenOf: 'الشاشة {screen} من {total}',
     stepAdd: 'إضافة', stepTest: 'اختبار', stepAutomate: 'أتمتة',
     confirmTitle: 'عدت من الاختصارات؟',
     confirmBody: 'اضغط أدناه وسيختبر وفرة الاختصار.',

@@ -302,8 +302,8 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "d68aba11ab8331681c322450419aa59ed796645b6da1e30167bac5c70b07743a",
-      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
+      "sha256": "8f95198864cac7091c23e8c9510cd16ec0cbd52622bff7f80637d61f30877cc4",
+      "reviewedChange": "2026-09-25: iOS manual onboarding revokes the relay only when a Shortcut carries it (isLegacyShortcutCaptureActive). The statement step now precedes live capture and pairs a relay for uploads alone; revoking that relay stranded queued statement rows and warned about a Shortcut that was never installed. Strict read failure still reports uncertain cleanup. 2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; durable manual completion behavior is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",

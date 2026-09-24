@@ -36,6 +36,7 @@ import {
   WelcomeMoneyScene,
 } from '@/components/onboarding/alive-scenes';
 import { OnboardingCountryConfirm } from '@/components/onboarding/country-confirm';
+import { SetupIntroStep } from '@/components/onboarding/setup-intro-step';
 import { StatementScene } from '@/components/onboarding/statement-scene';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
@@ -74,7 +75,7 @@ import {
 } from '@/lib/onboarding';
 import { normalizeOnboardingCountry, onboardingBankRegion, ONBOARDING_REGION_ELSEWHERE } from '@/lib/onboarding-bank-examples';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
-import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
+import { getRelayConfigStrict, isLegacyShortcutCaptureActive, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import type {
@@ -979,9 +980,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         // app-only flag is not enough: that Shortcut would still send bank
         // alerts and the background task could still collect them. Revoke the
         // actual relay identity before calling this choice complete.
+        //
+        // Only a relay that a Shortcut carries can do that. The statement step
+        // now comes first on iPhone and pairs a relay for the upload alone;
+        // revoking that one would strand rows still queued for this phone and
+        // warn about a Shortcut that was never installed.
         try {
           const relay = await getRelayConfigStrict();
-          if (relay) {
+          if (relay && isLegacyShortcutCaptureActive(relay)) {
             // Revoke the server-side ingest token first. Removing only the
             // local wake registration would still leave the installed
             // Shortcut able to forward bank alerts over the network.
@@ -1217,8 +1223,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           {activeStep === 'welcome' ? (
             <Animated.ScrollView
               entering={reducedMotion || Platform.OS === 'android' ? undefined : FadeIn.duration(180)}
-              scrollEnabled={largeText}
               bounces={largeText}
+              alwaysBounceVertical={false}
               showsVerticalScrollIndicator={false}
               testID="onboarding-welcome"
               contentContainerStyle={styles.welcomeBody}>
@@ -1373,8 +1379,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   : Platform.OS === 'ios' && IOS_SETUP_STEPS.includes(activeStep) ? IOS_SETUP_STEPS : null} />
               <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
-                scrollEnabled={largeText}
                 bounces={largeText}
+                alwaysBounceVertical={false}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
@@ -1503,88 +1509,53 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   )}
 
                   {activeStep === 'capture' && Platform.OS === 'ios' && (
-                    <View style={styles.setupStep} testID="onboarding-ios-past">
-                      <View style={styles.captureHero}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardPastTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.setupStepBody}>{t('onboardPastBody')}</ThemedText>
-                      </View>
-                      <StatementScene reducedMotion={reducedMotion} />
-                      <View style={styles.captureActions} testID="onboarding-start-options">
-                        <Button
-                          wrapLabel
-                          icon="upload"
-                          label={t('onboardPastAction')}
-                          onPress={openStatementImport}
-                          disabled={setupBusy || transitioning}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                        <Button
-                          wrapLabel
-                          variant="ghost"
-                          label={t('onboardLater')}
-                          onPress={() => {
-                            if (!beginStepTransition()) return;
-                            saveJourney('capture');
-                            setStep('live');
-                          }}
-                          disabled={setupBusy || transitioning}
-                          labelColor={night.text}
-                        />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={t('onboardHowItWorks')}
-                          onPress={() => setLearnMoreVisible(true)}
-                          style={({ pressed }) => [styles.howLink, { opacity: pressed ? 0.6 : 1 }]}>
-                          <Icon name="lock" size={13} color={night.textTertiary} />
-                          <ThemedText style={styles.howLinkText}>{t('onboardHowItWorks')}</ThemedText>
-                        </Pressable>
-                      </View>
-                    </View>
+                    <SetupIntroStep
+                      testID="onboarding-ios-past"
+                      actionsTestID="onboarding-start-options"
+                      title={t('onboardPastTitle')}
+                      body={t('onboardPastBody')}
+                      scene={<StatementScene reducedMotion={reducedMotion} />}
+                      primary={{
+                        label: t('onboardPastAction'),
+                        icon: 'upload',
+                        onPress: openStatementImport,
+                        disabled: setupBusy || transitioning,
+                      }}
+                      secondary={{
+                        label: t('onboardLater'),
+                        onPress: () => {
+                          if (!beginStepTransition()) return;
+                          saveJourney('capture');
+                          setStep('live');
+                        },
+                        disabled: setupBusy || transitioning,
+                      }}
+                      howLabel={t('onboardHowItWorks')}
+                      onHow={() => setLearnMoreVisible(true)}
+                    />
                   )}
 
                   {activeStep === 'live' && Platform.OS === 'ios' && (
-                    <View style={styles.setupStep} testID="onboarding-ios-live">
-                      <View style={styles.captureHero}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardLiveTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.setupStepBody}>{t('onboardLiveBody')}</ThemedText>
-                      </View>
-                      <CaptureMarketScene marketId={state.marketId} country={selectedCountry} />
-                      <View style={styles.captureActions}>
-                        <Button
-                          wrapLabel
-                          icon="bolt"
-                          label={t('onboardLiveAction')}
-                          onPress={() => void runSetupAction(beginCapture)}
-                          disabled={setupBusy || transitioning}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                        <Button
-                          wrapLabel
-                          variant="ghost"
-                          label={t('onboardNotNow')}
-                          onPress={() => void runSetupAction(continueManually)}
-                          disabled={setupBusy || transitioning}
-                          labelColor={night.text}
-                        />
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={t('onboardHowItWorks')}
-                          onPress={() => setLearnMoreVisible(true)}
-                          style={({ pressed }) => [styles.howLink, { opacity: pressed ? 0.6 : 1 }]}>
-                          <Icon name="lock" size={13} color={night.textTertiary} />
-                          <ThemedText style={styles.howLinkText}>{t('onboardHowItWorks')}</ThemedText>
-                        </Pressable>
-                      </View>
-                      {setupBusy && <ThemedText style={styles.inlineNote} accessibilityLiveRegion="polite">
-                        {t('onboardSetupWorking')}
-                      </ThemedText>}
-                    </View>
+                    <SetupIntroStep
+                      testID="onboarding-ios-live"
+                      title={t('onboardLiveTitle')}
+                      body={t('onboardLiveBody')}
+                      scene={<CaptureMarketScene marketId={state.marketId} country={selectedCountry} />}
+                      primary={{
+                        label: t('onboardLiveAction'),
+                        icon: 'bolt',
+                        onPress: () => void runSetupAction(beginCapture),
+                        disabled: setupBusy || transitioning,
+                      }}
+                      secondary={{
+                        label: t('onboardNotNow'),
+                        onPress: () => void runSetupAction(continueManually),
+                        disabled: setupBusy || transitioning,
+                      }}
+                      howLabel={t('onboardHowItWorks')}
+                      onHow={() => setLearnMoreVisible(true)}
+                      note={setupBusy ? t('onboardSetupWorking') : null}
+                    />
                   )}
 
                   {activeStep === 'capture' && Platform.OS !== 'ios' && (
@@ -1971,7 +1942,7 @@ const styles = StyleSheet.create({
   nameBack: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
-  previewClose: { marginLeft: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
+  previewClose: { marginStart: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
   previewCloseText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13 },
   eyebrow: {
     paddingTop: 12,
@@ -2049,17 +2020,6 @@ const styles = StyleSheet.create({
     color: night.text,
   },
   questionBodyCopy: { color: night.textSecondary, fontSize: 13, lineHeight: 19 },
-  setupStep: { flex: 1, gap: Spacing.four },
-  setupStepBody: { color: night.textSecondary, fontSize: 16, lineHeight: 23 },
-  howLink: {
-    minHeight: 44,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: Spacing.three,
-  },
-  howLinkText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 14 },
   choiceList: { gap: Spacing.two },
   choice: {
     minHeight: 68,
@@ -2231,7 +2191,7 @@ const styles = StyleSheet.create({
   valueConnector: {
     width: 1,
     height: 12,
-    marginLeft: 19,
+    marginStart: 19,
     backgroundColor: night.cardBorderStrong,
   },
   privacyList: { gap: Spacing.two },

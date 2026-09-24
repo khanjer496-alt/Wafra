@@ -183,6 +183,8 @@ async function gate(options = {}) {
   dependencies['./alive-scenes'] = dependencies['@/components/onboarding/alive-scenes'];
   dependencies['@/components/onboarding/statement-scene'] =
     load(path.join(root, 'src/components/onboarding/statement-scene.tsx'), dependencies);
+  dependencies['@/components/onboarding/setup-intro-step'] =
+    load(path.join(root, 'src/components/onboarding/setup-intro-step.tsx'), dependencies);
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,

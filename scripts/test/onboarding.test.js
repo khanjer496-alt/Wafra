@@ -530,7 +530,7 @@ ok(
     .test(iosSource) &&
     !/\/statement-import' as const/.test(iosSource) &&
     /exitToRoot\(finishDestination\(\)\)/.test(iosSource) &&
-    /activeStep === 'capture' && Platform\.OS === 'ios'[\s\S]{0,1400}onPress=\{openStatementImport\}/.test(gateSource),
+    /activeStep === 'capture' && Platform\.OS === 'ios'[\s\S]{0,700}onPress: openStatementImport/.test(gateSource),
 );
 
 /* Settings is where an already-onboarded user finds this, so the question and
@@ -747,22 +747,28 @@ ok(
 // 2026-09-25: iPhone setup is two short steps. Past: a bank statement. New:
 // Messages capture. One sentence and one primary action each; Later / Not now
 // and a "How it works" disclosure carry everything else.
+const introStepSource = fs.readFileSync(path.join(__dirname, '../../src/components/onboarding/setup-intro-step.tsx'), 'utf8');
 ok(
   'iOS setup offers statements, then live capture, each with one primary action and details behind How it works',
-  /label=\{t\('onboardPastAction'\)\}[\s\S]{0,120}onPress=\{openStatementImport\}/.test(gateSource) &&
-    /label=\{t\('onboardLater'\)\}[\s\S]{0,200}setStep\('live'\)/.test(gateSource) &&
-    /label=\{t\('onboardLiveAction'\)\}[\s\S]{0,120}runSetupAction\(beginCapture\)/.test(gateSource) &&
-    /label=\{t\('onboardNotNow'\)\}[\s\S]{0,120}runSetupAction\(continueManually\)/.test(gateSource) &&
+  /label: t\('onboardPastAction'\),[\s\S]{0,80}onPress: openStatementImport/.test(gateSource) &&
+    /label: t\('onboardLater'\),[\s\S]{0,200}setStep\('live'\)/.test(gateSource) &&
+    /label: t\('onboardLiveAction'\),[\s\S]{0,160}runSetupAction\(beginCapture\)/.test(gateSource) &&
+    /label: t\('onboardNotNow'\),[\s\S]{0,80}runSetupAction\(continueManually\)/.test(gateSource) &&
     /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardPastHowTitle[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
-    (gateSource.match(/accessibilityLabel=\{t\('onboardHowItWorks'\)\}/g) ?? []).length === 2 &&
+    (gateSource.match(/howLabel=\{t\('onboardHowItWorks'\)\}/g) ?? []).length === 2 &&
+    // One filled primary, one ghost way past, one disclosure: nothing else.
+    (introStepSource.match(/<Button\b/g) ?? []).length === 2 &&
+    /variant="ghost"/.test(introStepSource) &&
+    /accessibilityLabel=\{howLabel\}/.test(introStepSource) &&
     !iosVisibleCopy.includes(universalSenderLabel) &&
     !iosVisibleCopy.includes(universalSenderLabelArabic),
 );
 ok(
   'forced-dark onboarding gives How it works and Later/Not now explicit visible colours',
-  /howLinkText: \{ color: night\.textSecondary/.test(gateSource) &&
-    /label=\{t\('onboardLater'\)\}[\s\S]{0,420}labelColor=\{night\.text\}/.test(gateSource) &&
-    /label=\{t\('onboardNotNow'\)\}[\s\S]{0,260}labelColor=\{night\.text\}/.test(gateSource),
+  /howText: \{ color: night\.textSecondary/.test(introStepSource) &&
+    /label=\{secondary\.label\}[\s\S]{0,160}labelColor=\{night\.text\}/.test(introStepSource) &&
+    /label=\{primary\.label\}[\s\S]{0,160}labelColor=\{night\.onPrimary\}/.test(introStepSource) &&
+    /const night = Colors\.dark;/.test(introStepSource),
 );
 ok(
   'iOS setup copy stays one short sentence per step in both languages',

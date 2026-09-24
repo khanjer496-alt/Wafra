@@ -111,6 +111,7 @@ import {
 import {
   createIosHistoryPostEraseCleanup,
   eraseIosHistorySessions,
+  iosSupportsMessageHistory,
 } from '@/lib/ios-history-setup';
 import { clearIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
@@ -1535,7 +1536,7 @@ export default function SettingsScreen() {
             t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
           )}
-          {Platform.OS === 'ios' && <>
+          {Platform.OS === 'ios' && iosSupportsMessageHistory(Platform.Version) && <>
             {/* Statements bring in the past on iPhone. Reading old texts through
                 Shortcuts stays available, but only here, as an experiment. */}
             <SectionHeader title={t('settingsAdvancedHeader')} />

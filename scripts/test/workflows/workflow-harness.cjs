@@ -43,7 +43,7 @@ function createWorkflowHarness(options={}) {
  h.local('@/lib/country-names','src/lib/country-names.ts');h.local('@/lib/country','src/lib/country.ts');
  h.local('@/components/country-picker-sheet');
  h.local('@/components/onboarding/country-confirm');
- d['./alive-scenes']=d['@/components/onboarding/alive-scenes'];h.local('@/components/onboarding/statement-scene');
+ d['./alive-scenes']=d['@/components/onboarding/alive-scenes'];h.local('@/components/onboarding/statement-scene');h.local('@/components/onboarding/setup-intro-step');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
