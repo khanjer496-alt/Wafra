@@ -255,7 +255,7 @@ interface SeenStatementPairEvent {
   consumed: boolean;
 }
 
-function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
+export function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
   return source === 'pdf' || source === 'csv';
 }
 
@@ -649,6 +649,24 @@ export function duplicateGuard(
     if (t.source === 'manual' && t.type === 'income' && t.isTransfer === true) {
       noteManualPayment(`${t.date}|${t.amountFils}|${t.accountId}`);
     }
+  }
+  // Bound Wallet rows stay out of the loose indexes above, but a bank
+  // statement row for the same purchase must still pair with them one-to-one;
+  // otherwise the statement would add the purchase a second time.
+  for (const t of existing) {
+    if (t.walletBound !== true || t.source !== 'sms') continue;
+    noteStatementPair({
+      date: t.date,
+      amountFils: t.amountFils,
+      type: t.type,
+      title: t.title,
+      accountId: t.accountId,
+      captureInstrument: t.captureInstrument,
+      captureSource: t.captureSource,
+      statementImportId: t.statementImportId,
+      id: t.id,
+      consumed: false,
+    });
   }
 
   return {

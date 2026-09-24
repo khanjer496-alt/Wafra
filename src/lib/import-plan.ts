@@ -15,6 +15,7 @@ import {
   duplicateGuard,
   fromDifferentStatementUploads,
   isApplePayWalletRow,
+  isStatementCaptureSource,
   mergeCaptureInstrument,
   statementUploadOf,
   type DuplicateCandidate,
@@ -551,6 +552,8 @@ function buildImportPlanInMarket(
     (value ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
   const applePayWalletPriorFor = (p: ScannedSms): Transaction | undefined => {
     if (p.channel === 'push' || p.type !== 'expense' || !Number.isFinite(p.smsTs) || p.transferHint) return undefined;
+    // A statement row's clock is synthetic; it pairs through the statement rules.
+    if (isStatementCaptureSource(p.captureSource)) return undefined;
     if (!p.card || (p.card.kind !== 'credit' && p.card.kind !== 'debit')) return undefined;
     walletRowsCache ??= matchableTransactions().filter(isApplePayWalletRow);
     if (walletRowsCache.length === 0) return undefined;
@@ -590,9 +593,16 @@ function buildImportPlanInMarket(
   let nearWalletRowsCache: Transaction[] | null = null;
   let reviewDecisionKeysCache: Set<string> | null = null;
   const reviewDecisionKeys = (): Set<string> => {
-    reviewDecisionKeysCache ??= new Set((state.reviewTray?.tombstones ?? [])
-      .filter((entry) => entry.expiresAt > today.getTime())
-      .map((entry) => canonicalCaptureSourceKey(entry.sourceKey)));
+    // A pending review past its expiry that no prune has turned into a
+    // tombstone yet is still the user's open decision, not a free alert.
+    reviewDecisionKeysCache ??= new Set([
+      ...(state.reviewTray?.tombstones ?? [])
+        .filter((entry) => entry.expiresAt > today.getTime())
+        .map((entry) => canonicalCaptureSourceKey(entry.sourceKey)),
+      ...(state.reviewTray?.pending ?? [])
+        .filter((entry) => entry.expiresAt <= today.getTime())
+        .map((entry) => canonicalCaptureSourceKey(entry.sourceKey)),
+    ]);
     return reviewDecisionKeysCache;
   };
   const walletNearMatchFor = (p: ScannedSms, accountId: string | null, smsKey: string): Transaction | undefined => {

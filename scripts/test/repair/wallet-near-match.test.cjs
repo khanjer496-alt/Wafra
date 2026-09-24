@@ -27,7 +27,7 @@ function current(name) {
 const { buildImportPlan } = current('import-plan');
 const { settleWalletNearMatches, walletNearMatchesRetained, stageWalletNearMatches } = current('wallet-near-match');
 const { planReviewPromotion, walletDuplicateBinding } = current('review-promotion');
-const { admitPreparedReviewAlert, emptyAlertReviewTray, resolveReviewAlert, REVIEW_ALERT_TTL_MS } = current('alert-review-tray');
+const { admitPreparedReviewAlert, emptyAlertReviewTray, pruneAlertReviewTray, resolveReviewAlert, REVIEW_ALERT_TTL_MS } = current('alert-review-tray');
 const { canonicalCaptureSourceKey } = current('capture-source-identity');
 const { reconcileCaptureDuplicates } = current('dedupe');
 const { applyHealPatch } = current('heal');
@@ -195,7 +195,10 @@ test('a decision made in Review is honoured by a rescan after the review window'
   const near = plan([row]).walletNearMatches[0];
   for (const outcome of ['duplicate', 'dismissed', 'expired']) {
     const staged = admitPreparedReviewAlert(emptyAlertReviewTray(), near.review, at + 10 * MIN).state;
-    const decided = resolveReviewAlert(staged, near.review.id, outcome, at + 11 * MIN);
+    // Expiry is recorded only by pruning (resolve refuses 'expired' by design).
+    const decided = outcome === 'expired'
+      ? pruneAlertReviewTray(staged, at + 10 * MIN + REVIEW_ALERT_TTL_MS + 86_400_000)
+      : resolveReviewAlert(staged, near.review.id, outcome, at + 11 * MIN);
     const late = new Date(at + REVIEW_ALERT_TTL_MS + 5 * 86_400_000);
     const result = plan([row], state([wallet()], { reviewTray: decided }), late);
     assert.equal(result.txCount, 0, `${outcome}: never a silent second copy`);
@@ -390,4 +393,40 @@ test('a held-back alert posted on overflow keeps its account facts and balance s
   assert.equal(refused.plan.batch.snapshots['chosen-card'].fils, 1_000_000);
   assert.equal(refused.plan.batch.bankNames['chosen-card'], 'ADIB');
   assert.equal(refused.plan.batch.cardTypes['chosen-card'], 'credit');
+});
+
+// A bound Wallet row stays out of the loose indexes, but a bank statement row
+// for the same purchase must still pair with it one-to-one.
+test('a statement row for a bound Wallet purchase is not added a second time', () => {
+  const stmt = extra => ({ kind: 'transaction', type: 'expense', amountFils: 25000, currency: 'AED', merchant: 'CARREFOUR MOE DXB',
+    date, dueDay: null, minDueFils: null, card: { last4: '4417', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'groceries', categoryDeliberate: true,
+    captureSource: 'pdf', smsTs: Date.parse(`${date}T12:00:00Z`) + 3 * MIN, statementImportId: 'f'.repeat(32), ...extra });
+  const bound = wallet({ smsKey: 'h' + 'a'.repeat(64), viaPush: false, walletBound: true,
+    captureInstrument: { last4: '4417', kind: 'credit' } });
+  for (const [label, row] of [['names the card', stmt()], ['names no account', stmt({ card: null })]]) {
+    const result = buildImportPlan([row], state([bound]), 0, new Date(at + 86_400_000));
+    assert.equal(result.txCount, 0, `statement that ${label}`);
+  }
+  // One-to-one: a second genuine statement purchase of the same amount still imports.
+  const two = buildImportPlan([stmt(), stmt({ merchant: 'CARREFOUR MOE DXB 2' })], state([bound]), 0, new Date(at + 86_400_000));
+  assert.equal(two.txCount, 1);
+});
+
+test('a statement row never strictly binds an unbound Wallet row', () => {
+  const row = { kind: 'transaction', type: 'expense', amountFils: 25000, currency: 'AED', merchant: 'Carrefour',
+    date, categoryGuess: 'groceries', card: { last4: '4417', kind: 'credit' }, bankHint: 'ADIB',
+    captureSource: 'pdf', smsTs: at + MIN, statementImportId: 'e'.repeat(32) };
+  const result = buildImportPlan([row], state(), 0, new Date(at + 86_400_000));
+  assert.ok(!result.batch.updates.some(update => update.id === 'wallet-confirmed' && update.patch?.walletBound),
+    'the Wallet row keeps its own identity');
+});
+
+test('an expired but unpruned review still counts as the user\'s open decision', () => {
+  const row = sms();
+  const near = plan([row]).walletNearMatches[0];
+  const staged = admitPreparedReviewAlert(emptyAlertReviewTray(), near.review, at + 10 * MIN).state;
+  const late = new Date(at + REVIEW_ALERT_TTL_MS + 5 * 86_400_000);
+  const result = plan([row], state([wallet()], { reviewTray: staged }), late);
+  assert.equal(result.txCount, 0, 'no silent second copy before the tray is pruned');
 });
