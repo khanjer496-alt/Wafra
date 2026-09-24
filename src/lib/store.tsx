@@ -76,6 +76,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
+  walletDuplicateBinding,
   type PromoteReviewAlertInput,
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
@@ -817,7 +818,11 @@ type Action =
   | {
       type: 'setReviewTray';
       reviewTray: AppState['reviewTray'];
-      sourceKeyUpdates?: { id: string; smsKey: string }[];
+      /**
+       * Identity-only moves. `viaPush`/`walletBound` accompany an "Already
+       * recorded" Wallet binding (see walletDuplicateBinding).
+       */
+      sourceKeyUpdates?: { id: string; smsKey: string; viaPush?: boolean; walletBound?: true }[];
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
       learnedNotificationPackage?: string;
     }
@@ -1132,7 +1137,7 @@ function reduceState(state: AppState, action: Action): AppState {
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray': {
-      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string }>();
+      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string; viaPush?: boolean; walletBound?: true }>();
       for (const update of action.sourceKeyUpdates ?? []) {
         // Match the former find(): the first update for an ID wins.
         if (!sourceKeyUpdates.has(update.id)) sourceKeyUpdates.set(update.id, update);
@@ -1147,7 +1152,12 @@ function reduceState(state: AppState, action: Action): AppState {
         trustedNotificationPackages: learned,
         ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
           const update = sourceKeyUpdates.get(transaction.id);
-          return update ? { ...transaction, smsKey: update.smsKey } : transaction;
+          return update ? {
+            ...transaction,
+            smsKey: update.smsKey,
+            ...(update.viaPush !== undefined ? { viaPush: update.viaPush } : {}),
+            ...(update.walletBound === true ? { walletBound: true as const } : {}),
+          } : transaction;
         }) } : {}),
         ...(action.localCaptureQualifications
           ? { localCaptureQualifications: action.localCaptureQualifications }
@@ -2376,13 +2386,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     id: string,
     outcome: ReviewResolutionOutcome,
   ): Promise<void> => {
+    // "Already recorded" on a possible Apple Pay duplicate also binds the bank
+    // alert's identity to its Wallet row, in the same durable write, so a
+    // rescan after the tray record expires still finds it. Identity only.
+    const binding = outcome === 'duplicate'
+      ? walletDuplicateBinding(authoritativeState.current, id)
+      : null;
     const reviewTray = resolveAlertReviewItem(
       authoritativeState.current.reviewTray,
       id,
       outcome,
       Date.now(),
     );
-    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    const next = dispatch({
+      type: 'setReviewTray',
+      reviewTray,
+      ...(binding ? { sourceKeyUpdates: [binding] } : {}),
+    });
     if (!await persist(next)) throw new Error('Encrypted review dismissal write failed');
   }, [dispatch, persist]);
 

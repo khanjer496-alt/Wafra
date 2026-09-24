@@ -71,7 +71,8 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "runScan",
-      "sha256": "e09cded1cdb1ad9ff029141cafcff03acadbdfd30416a139d3d548ef6610efed"
+      "sha256": "95dc9c47ba9017409d4aecfe440f75fe4d7fbc58dd523715076ace380493a17f",
+      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs."
     },
     {
       "file": "src/app/import-sms.tsx",
@@ -107,7 +108,8 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "applyPlan",
-      "sha256": "4e1dbe3b99228d56690d923e0c2eb5d1fd0ab12f691c3925929a6a99934ccb3b"
+      "sha256": "3bc731d9034e3211e543f3b25a854aa9f334b1f690c9a207a3d141424ac763e3",
+      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs."
     },
     {
       "file": "src/app/import-sms.tsx",
