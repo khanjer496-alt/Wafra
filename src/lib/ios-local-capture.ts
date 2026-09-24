@@ -72,6 +72,8 @@ interface CoordinatorInput {
   native: WafraLiveCaptureNativeModule;
   ledger: CaptureLedgerAdapter;
   retireShortcutCapture: () => Promise<'not-needed' | 'complete'>;
+  /** Wall clock for record expiry checks; tests pin it to their fixture date. */
+  now?: () => number;
   /**
    * Dated reference rate for a launch-market purchase on a ledger kept in
    * another currency. Resolves null when no rate is available (offline,
@@ -392,7 +394,7 @@ export function createIosLocalCaptureCoordinator(
 
       // Complete, source-free preflight precedes setMarket, parser staging,
       // ledger planning, review mutation and acknowledgement.
-      const now = new Date();
+      const now = new Date(input.now?.() ?? Date.now());
       const completePage: PageRecord[] = [];
       for (let sourceIndex = 0; sourceIndex < serializedPage.length; sourceIndex += 1) {
         const serialized = serializedPage[sourceIndex];
@@ -921,7 +923,7 @@ export function createIosLocalCaptureCoordinator(
         requireLedgerGeneration(input.ledger, generation);
         if (serializedPage.length === 0) break;
         if (serializedPage.length > PAGE_SIZE) throw sourceFreePageError('Apple Pay page exceeds the native limit');
-        const now = new Date();
+        const now = new Date(input.now?.() ?? Date.now());
         const page: { id: string | null; outcome: LocalApplePayParseOutcome }[] = [];
         for (let index = 0; index < serializedPage.length; index += 1) {
           let serialized = serializedPage[index];

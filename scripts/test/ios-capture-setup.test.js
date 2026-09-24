@@ -1843,8 +1843,15 @@ struct WafraBankSenderRegistryTests {
       };
       return value;
     };
+    // Some retry fixtures are dated 2026-08-25; those tests pin the coordinator's
+    // expiry clock so the 30-day record window never depends on the run date.
+    const FIXTURE_NOW = () => Date.parse('2026-08-25T12:00:00.000Z');
     const coordinator = (native, ledger, retireShortcutCapture = async () => 'not-needed') =>
       localCapture.createIosLocalCaptureCoordinator({ native, ledger, retireShortcutCapture });
+    const fixtureCoordinator = (native, ledger) =>
+      localCapture.createIosLocalCaptureCoordinator({
+        native, ledger, retireShortcutCapture: async () => 'not-needed', now: FIXTURE_NOW,
+      });
     const coordinatorWithPlan = (native, ledger, changePlan) => {
       const importPlan = requireBuild('@/lib/import-plan');
       const captureWithPlan = execute('src/lib/ios-local-capture.ts', (id) => {
@@ -2786,7 +2793,7 @@ struct WafraBankSenderRegistryTests {
         durableAttempts += 1;
         if (durableAttempts === 1) throw new Error('later ledger fence');
       };
-      const drain = coordinator(native, ledger);
+      const drain = fixtureCoordinator(native, ledger);
       await rejects(() => drain.drain(), /later ledger fence/);
       ok('durable review admission keeps an atomic source-free qualification after a later fence fails',
         ledger.getState().localCaptureQualifications.some((receipt) => receipt.id === id) &&
@@ -2811,14 +2818,14 @@ struct WafraBankSenderRegistryTests {
         return recordMilestone(value);
       };
       const firstLedger = ledgerAdapter();
-      await rejects(() => coordinator(native, firstLedger).drain(), /milestone disk/);
+      await rejects(() => fixtureCoordinator(native, firstLedger).drain(), /milestone disk/);
       const persistedState = JSON.parse(JSON.stringify(firstLedger.getState()));
       ok('review qualification is durable before a milestone failure',
         persistedState.localCaptureQualifications.some((receipt) => receipt.id === id) &&
           native.acknowledged.length === 0, JSON.stringify(persistedState));
       const recreatedLedger = ledgerAdapter();
       recreatedLedger.setState(persistedState);
-      const retried = await coordinator(native, recreatedLedger).drain();
+      const retried = await fixtureCoordinator(native, recreatedLedger).drain();
       ok('coordinator and ledger recreation replay the persisted review qualification',
         retried.reviews === 0 && native.milestones.length === 1 &&
           native.acknowledged[0] === id && milestoneAttempts === 2,
@@ -2909,7 +2916,7 @@ struct WafraBankSenderRegistryTests {
           ts: laterTs, smsKey: `s${laterTs}-110800`,
         }],
       });
-      const drain = coordinator(native, ledger);
+      const drain = fixtureCoordinator(native, ledger);
       await rejects(() => drain.drain(), /decline milestone disk/);
       ok('only the later reconciled decline identity is persisted atomically with removal',
         ledger.getState().transactions.length === 0 &&
