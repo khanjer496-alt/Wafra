@@ -44,8 +44,21 @@ ok(
     !landing.includes("@/components/wafra-logo"),
 );
 ok(
-  'product previews disclose sample data and prioritize the home image',
-  landing.includes('App previews · sample data') && landing.includes('fetchPriority="high"'),
+  'the hero capture illustration discloses sample data and bank-format dependence',
+  landing.includes('Illustration · sample data · automatic capture depends on your bank’s alert format') &&
+    /role="img"\s+aria-label="Illustration with sample data/.test(landing),
+);
+ok(
+  'the capture, categories and subscriptions demos exist and stay honest about scope',
+  ['id="how-it-works"', 'id="categories"', 'id="subscriptions"'].every((id) => landing.includes(id)) &&
+    content.includes('Only from a bank sender you selected in Apple Shortcuts.') &&
+    content.includes('There is no network step.') &&
+    landing.includes('transfers between your own accounts stay out of spending') &&
+    !/every bank|any bank|all banks/i.test(`${landing}\n${content}`),
+);
+ok(
+  'demo motion is CSS-only and has a reduced-motion rest state',
+  /@media \(prefers-reduced-motion: no-preference\)/.test(css) && !/<script(?! type="application\/ld\+json")/.test(landing),
 );
 ok(
   'the app tour shows the redesigned Home, category percentages and separate bill sections',
