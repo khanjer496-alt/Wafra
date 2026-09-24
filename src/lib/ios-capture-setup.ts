@@ -75,6 +75,11 @@ export interface IosSetupModel {
   shortcutName?: string;
   shortcutVersion?: 3;
   bundledHistorySupported?: boolean;
+  /** Raw native Message proof. Only compared with setup attempts, never shown as capture proof. */
+  setupProofVersion?: number | null;
+  setupProofAt?: number | null;
+  /** Latest queue receipt that did not come from Apple Pay or notification input. */
+  lastMessageReceivedAt?: number | null;
 }
 
 export type IosSetupIntent =
@@ -164,11 +169,47 @@ export function resolveIosApplePayReadiness(status: Pick<WafraLiveCaptureStatus,
     ? 'shortcut-proven' : 'not-added';
 }
 
+/**
+ * Readiness of one capture source as setup presents it. For Message capture a
+ * started install or check (`attemptStartedAt`) makes older native proof
+ * belong to an earlier attempt: only proof recorded since then counts.
+ */
 export function resolveIosSelectedReadiness(source: unknown, model: Pick<IosSetupModel,
-  'readiness' | 'notificationReadiness' | 'applePayReadiness' | 'shortcutVersion'> | null | undefined, installedVersion?: number): IosSetupReadiness {
+  'readiness' | 'notificationReadiness' | 'applePayReadiness' | 'shortcutVersion'> & Partial<Pick<IosSetupModel, 'setupProofAt'>> | null | undefined,
+installedVersion?: number, attemptStartedAt?: number): IosSetupReadiness {
   if (source === 'apple-pay') return model?.applePayReadiness ?? 'not-added';
-  if (source !== 'notification' && model?.shortcutVersion && installedVersion !== model.shortcutVersion) return 'not-added';
-  return source === 'notification' ? model?.notificationReadiness ?? 'not-added' : model?.readiness ?? 'not-added';
+  if (source === 'notification') return model?.notificationReadiness ?? 'not-added';
+  if (model?.shortcutVersion && installedVersion !== model.shortcutVersion) return 'not-added';
+  if (attemptStartedAt !== undefined &&
+    !(isCaptureTimestamp(model?.setupProofAt) && model.setupProofAt >= attemptStartedAt)) return 'not-added';
+  return model?.readiness ?? 'not-added';
+}
+
+/**
+ * A working setup from the previous bundled Shortcut (proof version 1 with a
+ * confirmed automation) on a build that ships Capture v3. It keeps capturing:
+ * show an upgrade, not a broken setup.
+ */
+export function isIosLegacyCaptureUpgrade(
+  progress: { futureShortcutVersion?: number; futureAutomationConfirmed: boolean },
+  model: Pick<IosSetupModel, 'shortcutVersion'> & Partial<Pick<IosSetupModel, 'setupProofVersion' | 'captureHealth'>>,
+): boolean {
+  return model.shortcutVersion === 3 && progress.futureShortcutVersion !== 3 &&
+    progress.futureAutomationConfirmed && model.setupProofVersion === 1 &&
+    model.captureHealth?.enabled === true;
+}
+
+/**
+ * True only when a Message reached Wafra's queue after the owner confirmed the
+ * automation: evidence the automation itself fires, not that every alert will.
+ */
+export function iosMessageAutomationVerified(
+  progress: { futureAutomationConfirmedAt?: number },
+  model: Partial<Pick<IosSetupModel, 'lastMessageReceivedAt' | 'setupProofAt'>>,
+): boolean {
+  const baseline = progress.futureAutomationConfirmedAt ?? model.setupProofAt;
+  return isCaptureTimestamp(baseline) && isCaptureTimestamp(model.lastMessageReceivedAt) &&
+    model.lastMessageReceivedAt > baseline;
 }
 
 // The guided automation. Apple's Sender picker lists Contacts only and bank
@@ -199,6 +240,13 @@ const defaultDependencies = (): IosSetupDependencies => ({
   },
   subscribeCaptureStatus: subscribeIosCaptureStatusRefresh,
 });
+
+/** The shared receipt clock covers every source; attribute it only when no other source owns it. */
+const lastMessageReceipt = (status: Partial<WafraLiveCaptureStatus>): number | null => {
+  const last = status.lastReceivedAt;
+  if (!isCaptureTimestamp(last)) return null;
+  return last === status.lastApplePayReceivedAt || last === status.lastNotificationReceivedAt ? null : last;
+};
 
 export function resolveIosSetupReadiness(
   status: Pick<WafraLiveCaptureStatus, 'enabled' | 'setupProofVersion' | 'firstCapturedAt'>,
@@ -234,6 +282,7 @@ export const resolveIosFutureSetupStep = (
     futureAutomationConfirmed: boolean;
     futureStatus: string;
     futureShortcutVersion?: number;
+    futureAutomationRelink?: boolean;
   },
   readiness: IosSetupReadiness,
   requiredVersion?: 3,
@@ -243,7 +292,7 @@ export const resolveIosFutureSetupStep = (
   // Running the no-input Shortcut proves the local action, not the personal
   // Message automation. Keep its instructions until the user confirms them.
   if (readiness !== 'not-added') {
-    return progress.futureAutomationConfirmed ? 'ready' : 'create-automation';
+    return progress.futureAutomationConfirmed && !progress.futureAutomationRelink ? 'ready' : 'create-automation';
   }
   if (!progress.futureShortcutConfirmed) {
     return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
@@ -324,6 +373,7 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        setupProofVersion: null, setupProofAt: null, lastMessageReceivedAt: null,
         stage: 'shortcut',
         opening: false,
         failure: 'load',
@@ -353,6 +403,9 @@ export function createIosCaptureSetup({
         ...(native.getHistoryShortcutURL ? { bundledHistorySupported: true } : {}),
         readiness,
         captureHealth: readIosCaptureHealth(status),
+        setupProofVersion: typeof status.setupProofVersion === 'number' ? status.setupProofVersion : null,
+        setupProofAt: isCaptureTimestamp(status.setupProofAt) ? status.setupProofAt : null,
+        lastMessageReceivedAt: lastMessageReceipt(status),
         notificationSupported,
         notificationReadiness: notificationSupported ? resolveIosNotificationReadiness(status) : 'not-added',
         stage:
@@ -368,6 +421,7 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        setupProofVersion: null, setupProofAt: null, lastMessageReceivedAt: null,
         failure: 'load',
         notificationReadiness: 'not-added',
         notificationSupported: false,

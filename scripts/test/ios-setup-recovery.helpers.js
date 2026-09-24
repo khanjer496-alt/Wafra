@@ -253,10 +253,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   };
 
   const fresh = await makeScreen({ fresh: true });
-  eq('iOS setup: a fresh start opens Future first and keeps History collapsed second',
+  eq('iOS setup: a fresh start opens Future first and keeps History collapsed second, without step numbers',
     fresh.all().filter((node) => node.type === 'ChecklistRow').map((node) =>
       [node.props.title, node.props.step, node.props.expanded]),
-    [[translated('iosMessageFutureTitle', 'en'), 1, true], [translated('iosMessagePastTitle', 'en'), 2, false]]);
+    [[translated('iosMessageFutureTitle', 'en'), undefined, true], [translated('iosMessagePastTitle', 'en'), undefined, false]]);
   eq('iOS setup: Future-first arrival neither opens Shortcuts nor fills setup or history evidence',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.saved().historySkippedForNow, fresh.nativeStatus.firstCapturedAt, fresh.urls, fresh.onboarded()],
@@ -290,19 +290,20 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   ok('iOS setup: local proof still requires the explicit automation confirmation action',
     await fresh.press('iosLocalAutomationAdded'));
   await fresh.foreground();
-  eq('iOS setup: confirmation leaves Future selected and keeps the direct manual exit visible',
+  eq('iOS setup: confirmation leaves Future selected and makes Finish the last, primary action',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.all().filter((node) => node.type === 'Button').at(-1)?.props.label],
-    ['future', true, 'not-started', translated('iosMessageContinueManual', 'en')]);
+    ['future', true, 'not-started', translated('iosMessageContinue', 'en')]);
   ok('iOS setup: History remains a secondary deliberate choice after Future confirmation',
     !!fresh.button('iosMessageNextHistory'));
-  ok('iOS setup: Future-first primary action opens the existing explicit history-deferral confirmation',
-    await fresh.press('iosMessageSkipHistory'));
-  eq('iOS setup: opening Future-only confirmation does not import, defer or finish anything',
+  eq('iOS setup: finishing never requires the destructive-sounding history skip',
+    [!!fresh.button('iosMessageSkipHistory'), fresh.all().some((node) => node.type === 'ConfirmSheet' && node.props.visible)],
+    [false, false]);
+  eq('iOS setup: offering Finish does not import, defer or finish anything by itself',
     [fresh.saved().historyStatus, fresh.saved().historySkippedForNow, fresh.onboarded()], ['not-started', undefined, false]);
-  ok('iOS setup: confirming Future-only keeps history unimported and enables the normal finish',
-    await fresh.confirmSkip() && fresh.saved().historySkippedForNow === true &&
-      fresh.saved().historyStatus === 'skipped' && !!fresh.button('iosMessageContinue'));
+  ok('iOS setup: one Finish tap completes onboarding with history left optional and unimported',
+    await fresh.press('iosMessageContinue') && fresh.onboarded() && fresh.saved().historySkippedForNow === undefined &&
+      fresh.saved().historyStatus === 'not-started' && fresh.saved().returnToOnboarding === false);
   eq('iOS setup: Future-only consent never manufactures an actual bank alert', fresh.nativeStatus.firstCapturedAt, null);
 
   const future = await makeScreen();
@@ -409,12 +410,18 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   await ready.foreground();
   ok('iOS setup: future-ready users can choose history as their next action',
     await ready.press('iosMessageNextHistory') && ready.saved().activeSection === 'history');
-  eq('iOS setup: future capture alone cannot finish onboarding before history',
-    await ready.press('iosMessageContinue'), false);
-  await ready.button('iosMessageContinue')?.props.onPress(); // Exercise the callback even if a caller bypasses disabled UI.
-  eq('iOS setup: guarded completion rejects incomplete history even when invoked directly',
-    [ready.saved().futureStatus, ready.saved().historyStatus, ready.saved().returnToOnboarding, ready.onboarded()],
-    ['complete', 'not-started', true, false]);
+  ok('iOS setup: new-alert capture alone offers Finish while history is expanded',
+    !!ready.button('iosMessageContinue'));
+  const futureOnly = await makeScreen({ progress: { futureAutomationConfirmed: true } });
+  futureOnly.nativeStatus.enabled = true;
+  futureOnly.nativeStatus.setupProofVersion = 1;
+  await futureOnly.foreground();
+  ok('iOS setup: future capture alone finishes onboarding; history is optional',
+    await futureOnly.press('iosMessageContinue'));
+  eq('iOS setup: finishing without history keeps its status truthful and records no skip',
+    [futureOnly.saved().futureStatus, futureOnly.saved().historyStatus, futureOnly.saved().historySkippedForNow,
+      futureOnly.saved().returnToOnboarding, futureOnly.onboarded()],
+    ['complete', 'not-started', undefined, false, true]);
 
   eq('iOS setup: skipping history is unavailable without configured future capture',
     await noHistoryBridge.press('iosMessageSkipHistory'), false);
@@ -473,10 +480,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   await failedSkipSave.foreground();
   await failedSkipSave.press('iosMessageSkipHistory');
   await failedSkipSave.confirmSkip();
-  eq('iOS setup: a failed skip save cannot finish setup or change capture opt-in',
+  eq('iOS setup: a failed skip save records nothing and changes no opt-in; Finish never depended on it',
     [failedSkipSave.saved().historySkippedForNow, failedSkipSave.saved().historyStatus,
       !!failedSkipSave.button('iosMessageDone'), failedSkipSave.preferenceEvents],
-    [undefined, 'not-started', false, []]);
+    [undefined, 'not-started', true, []]);
 
   const futureWithoutHistory = await makeScreen({ historyAvailable: false, params: { section: 'history' },
     progress: { futureAutomationConfirmed: true } });
@@ -561,8 +568,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   skippedHistory.nativeStatus.enabled = true;
   skippedHistory.nativeStatus.setupProofVersion = 1;
   await skippedHistory.foreground();
-  eq('iOS setup: previously skipped history does not satisfy required setup',
-    await skippedHistory.press('iosMessageContinue'), false);
+  ok('iOS setup: a declined history review does not block finishing new-alert setup',
+    await skippedHistory.press('iosMessageContinue') && skippedHistory.onboarded() &&
+      skippedHistory.saved().historyStatus === 'skipped' && skippedHistory.saved().historySkippedForNow === undefined);
 
   const bothReady = await makeScreen({ progress: { historyStatus: 'complete', futureAutomationConfirmed: true } });
   bothReady.nativeStatus.enabled = true;

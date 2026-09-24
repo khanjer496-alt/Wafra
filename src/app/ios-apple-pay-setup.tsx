@@ -12,7 +12,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/lib/capture';
 import { formatCaptureReceipt } from '@/lib/ios-capture-health';
-import { dispatchIosMessageSetup, loadIosMessageSetupProgress, type IosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource, type IosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import {
   iosApplePayCheckUrl, iosApplePayCopy, iosSupportsApplePayAutomation,
   isBundledApplePayShortcutUri, resolveApplePaySetupState,
@@ -40,7 +40,8 @@ export default function IosApplePaySetup() {
   const epoch = useRef(0);
   const operation = useRef(false);
   const generation = getStateGeneration();
-  const flow = resolveApplePaySetupState(status, progress ?? {});
+  // Apple Pay's own saved progress; another source's finished setup is untouched here.
+  const flow = resolveApplePaySetupState(status, progress ? progressForSource(progress, 'apple-pay') : {});
 
   const refresh = useCallback(async () => {
     if (operation.current || !supported) return;
@@ -100,8 +101,6 @@ export default function IosApplePaySetup() {
     await setCaptureOptOut(false);
     if (!current()) return;
     await native.setCaptureEnabled(true);
-    if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'apple-pay' });
   });
   const install = () => void run(async current => {
     const native = getIosCaptureNativeModule();
@@ -113,16 +112,12 @@ export default function IosApplePaySetup() {
     const uri = await native.getApplePayShortcutURL();
     if (!current()) return;
     if (!isBundledApplePayShortcutUri(uri)) throw new Error('invalid_apple_pay_asset');
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'apple-pay' });
-    if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-shortcut-install-started' });
+    await dispatchIosMessageSetup({ type: 'future-shortcut-install-started', source: 'apple-pay' });
     if (!current()) return;
     await Sharing.shareAsync(uri, { UTI: 'com.apple.shortcut' });
   });
-  const confirmInstalled = () => void run(async current => {
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'apple-pay' });
-    if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-shortcut-confirmed' });
+  const confirmInstalled = () => void run(async () => {
+    await dispatchIosMessageSetup({ type: 'future-shortcut-confirmed', source: 'apple-pay' });
   });
   const open = () => void run(async current => {
     try { await Linking.openURL('shortcuts://'); }
@@ -142,8 +137,9 @@ export default function IosApplePaySetup() {
     const [next, saved] = await Promise.all([native.getCaptureStatus(), loadIosMessageSetupProgress()]);
     if (!current()) return;
     setStatus(next); setProgress(saved);
-    if (!resolveApplePaySetupState(next, saved).canConfirm) { setError(w.confirmNeeded); return; }
-    await dispatchIosMessageSetup({ type: 'future-automation-confirmed' });
+    if (!resolveApplePaySetupState(next, progressForSource(saved, 'apple-pay')).canConfirm) { setError(w.confirmNeeded); return; }
+    // Only now does Apple Pay become the recorded source; message progress is parked.
+    await dispatchIosMessageSetup({ type: 'future-automation-confirmed', source: 'apple-pay', at: Date.now() });
     if (current()) back();
   });
 

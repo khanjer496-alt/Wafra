@@ -125,6 +125,10 @@ function createWorkflowHarness(options={}) {
    d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
    h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
+   // The actual pure per-source progress projections; storage stays recorded.
+   const progressModule=load(path.join(root,'src/lib/ios-message-onboarding.ts'),{'@react-native-async-storage/async-storage':{},
+    './ios-setup-journey':load(path.join(root,'src/lib/ios-setup-journey.ts')),'./ios-history-setup':{isIosHistoryShortcutInstalled:async()=>false}});
+   Object.assign(d['@/lib/ios-message-onboarding'],{progressForSource:progressModule.progressForSource,recordedIosCaptureSource:progressModule.recordedIosCaptureSource});
    Object.assign(d['@/lib/ios-history-setup'],{historyShortcutInstallUrl:()=>null,iosSupportsMessageHistory:()=>true});
    for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
   }
